@@ -74,27 +74,57 @@ impl Tool for ListDir {
     }
 
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<Value> {
+        use super::output::{OutputGuard, OutputMode, OverflowInfo};
+
         let path = input["path"].as_str().unwrap_or(".");
         let recursive = input["recursive"].as_bool().unwrap_or(false);
         let depth = if recursive { usize::MAX } else { 1 };
+        let guard = OutputGuard::from_input(&input);
 
-        let entries: Vec<String> = walkdir::WalkDir::new(path)
+        let walker = walkdir::WalkDir::new(path)
             .max_depth(depth)
             .into_iter()
             .flatten()
-            .filter(|e| e.depth() > 0)
-            .map(|e| {
-                let suffix = if e.file_type().is_dir() { "/" } else { "" };
-                format!("{}{}", e.path().display(), suffix)
-            })
-            .collect();
+            .filter(|e| e.depth() > 0);
 
-        let guard = super::output::OutputGuard::from_input(&input);
-        let (entries, overflow) =
-            guard.cap_items(entries, "Use a more specific path or set recursive=false");
+        // In exploring mode, stop collecting once we exceed max_results.
+        // We collect max_results+1 to detect overflow without walking the
+        // entire tree (we lose the exact total, which is fine for exploring).
+        let cap = match guard.mode {
+            OutputMode::Exploring => Some(guard.max_results + 1),
+            OutputMode::Focused => None,
+        };
+
+        let mut entries = Vec::new();
+        for entry in walker {
+            let suffix = if entry.file_type().is_dir() { "/" } else { "" };
+            entries.push(format!("{}{}", entry.path().display(), suffix));
+            if let Some(c) = cap {
+                if entries.len() >= c {
+                    break;
+                }
+            }
+        }
+
+        let hit_early_cap = cap.is_some() && entries.len() > guard.max_results;
+
+        let (entries, overflow) = if hit_early_cap {
+            // We collected max_results+1, truncate and report overflow
+            entries.truncate(guard.max_results);
+            let overflow = OverflowInfo {
+                shown: guard.max_results,
+                total: guard.max_results + 1, // at least this many
+                hint: "Use a more specific path or set recursive=false".to_string(),
+                next_offset: None,
+            };
+            (entries, Some(overflow))
+        } else {
+            guard.cap_items(entries, "Use a more specific path or set recursive=false")
+        };
+
         let mut result = json!({ "entries": entries });
         if let Some(ov) = overflow {
-            result["overflow"] = super::output::OutputGuard::overflow_json(&ov);
+            result["overflow"] = OutputGuard::overflow_json(&ov);
         }
         Ok(result)
     }
