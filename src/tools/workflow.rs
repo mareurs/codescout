@@ -94,10 +94,15 @@ impl Tool for Onboarding {
             })
             .await?;
 
+        // Build the onboarding instruction prompt
+        let lang_list: Vec<String> = languages.iter().cloned().collect();
+        let prompt = crate::prompts::build_onboarding_prompt(&lang_list, &top_level);
+
         Ok(json!({
-            "languages": languages.iter().cloned().collect::<Vec<_>>(),
+            "languages": lang_list,
             "top_level": top_level,
             "config_created": created_config,
+            "instructions": prompt,
         }))
     }
 }
@@ -233,6 +238,16 @@ mod tests {
         assert_eq!(result["onboarded"], true);
         assert_eq!(result["has_config"], true);
         assert_eq!(result["has_onboarding_memory"], true);
+    }
+
+    #[tokio::test]
+    async fn onboarding_returns_instruction_prompt() {
+        let (_dir, ctx) = project_ctx().await;
+        let result = Onboarding.call(json!({}), &ctx).await.unwrap();
+        let instructions = result["instructions"].as_str().unwrap();
+        assert!(instructions.contains("## What to Explore"));
+        assert!(instructions.contains("## Memories to Create"));
+        assert!(instructions.contains("rust")); // detected language
     }
 
     #[tokio::test]
