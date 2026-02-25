@@ -21,6 +21,8 @@ pub struct OverflowInfo {
     pub shown: usize,
     pub total: usize,
     pub hint: String,
+    /// In focused mode, the offset for the next page (None in exploring mode).
+    pub next_offset: Option<usize>,
 }
 
 /// Guards tool output size by capping or paginating results.
@@ -57,10 +59,12 @@ fn paginate<T>(
     let end = (start + limit).min(total);
     let page: Vec<T> = items.into_iter().skip(start).take(end - start).collect();
     let overflow = if page.len() < total {
+        let next = if end < total { Some(end) } else { None };
         Some(OverflowInfo {
             shown: page.len(),
             total,
             hint: hint.to_string(),
+            next_offset: next,
         })
     } else {
         None
@@ -114,6 +118,7 @@ impl OutputGuard {
                         shown: self.max_results,
                         total,
                         hint: hint.to_string(),
+                        next_offset: None,
                     };
                     (kept, Some(overflow))
                 }
@@ -138,6 +143,7 @@ impl OutputGuard {
                         shown: self.max_files,
                         total,
                         hint: hint.to_string(),
+                        next_offset: None,
                     };
                     (kept, Some(overflow))
                 }
@@ -148,11 +154,15 @@ impl OutputGuard {
 
     /// Serialize overflow metadata to JSON for inclusion in tool responses.
     pub fn overflow_json(info: &OverflowInfo) -> Value {
-        json!({
+        let mut obj = json!({
             "shown": info.shown,
             "total": info.total,
             "hint": info.hint
-        })
+        });
+        if let Some(next) = info.next_offset {
+            obj["next_offset"] = json!(next);
+        }
+        obj
     }
 }
 
@@ -288,15 +298,67 @@ mod tests {
     }
 
     #[test]
+    fn next_offset_in_focused_mode() {
+        // Mid-stream: next_offset = end of current page
+        let guard = OutputGuard {
+            mode: OutputMode::Focused,
+            offset: 0,
+            limit: 3,
+            ..OutputGuard::default()
+        };
+        let items: Vec<i32> = (0..10).collect();
+        let (result, overflow) = guard.cap_items(items, "next page");
+        assert_eq!(result, vec![0, 1, 2]);
+        let info = overflow.unwrap();
+        assert_eq!(info.next_offset, Some(3));
+
+        // Last page: next_offset = None
+        let guard = OutputGuard {
+            mode: OutputMode::Focused,
+            offset: 8,
+            limit: 5,
+            ..OutputGuard::default()
+        };
+        let items: Vec<i32> = (0..10).collect();
+        let (_, overflow) = guard.cap_items(items, "next page");
+        let info = overflow.unwrap();
+        assert_eq!(info.next_offset, None);
+    }
+
+    #[test]
+    fn next_offset_none_in_exploring_mode() {
+        let guard = OutputGuard {
+            max_results: 3,
+            ..OutputGuard::default()
+        };
+        let items: Vec<i32> = vec![1, 2, 3, 4, 5];
+        let (_, overflow) = guard.cap_items(items, "hint");
+        let info = overflow.unwrap();
+        assert_eq!(info.next_offset, None);
+    }
+
+    #[test]
     fn overflow_json_format() {
         let info = OverflowInfo {
             shown: 50,
             total: 1234,
             hint: "pass offset=50 for next page".to_string(),
+            next_offset: Some(50),
         };
         let j = OutputGuard::overflow_json(&info);
         assert_eq!(j["shown"], 50);
         assert_eq!(j["total"], 1234);
         assert_eq!(j["hint"], "pass offset=50 for next page");
+        assert_eq!(j["next_offset"], 50);
+
+        // Without next_offset, key is absent
+        let info_no_next = OverflowInfo {
+            shown: 200,
+            total: 500,
+            hint: "narrow query".to_string(),
+            next_offset: None,
+        };
+        let j2 = OutputGuard::overflow_json(&info_no_next);
+        assert!(j2.get("next_offset").is_none());
     }
 }
