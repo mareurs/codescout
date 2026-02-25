@@ -65,7 +65,10 @@ impl Tool for ListDir {
             "required": ["path"],
             "properties": {
                 "path": { "type": "string" },
-                "recursive": { "type": "boolean", "default": false }
+                "recursive": { "type": "boolean", "default": false },
+                "detail_level": { "type": "string", "description": "Output detail: omit for compact (default), 'full' for all entries" },
+                "offset": { "type": "integer", "description": "Skip this many entries (focused mode pagination)" },
+                "limit": { "type": "integer", "description": "Max entries per page (focused mode, default 50)" }
             }
         })
     }
@@ -86,7 +89,14 @@ impl Tool for ListDir {
             })
             .collect();
 
-        Ok(json!({ "entries": entries }))
+        let guard = super::output::OutputGuard::from_input(&input);
+        let (entries, overflow) =
+            guard.cap_items(entries, "Use a more specific path or set recursive=false");
+        let mut result = json!({ "entries": entries });
+        if let Some(ov) = overflow {
+            result["overflow"] = super::output::OutputGuard::overflow_json(&ov);
+        }
+        Ok(result)
     }
 }
 
