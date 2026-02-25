@@ -10,6 +10,7 @@
 //!   - LocalEmbedder  (candle/ort, feature "local-embed") — fully offline
 //!   - RemoteEmbedder (reqwest, feature "remote-embed")   — OpenAI-compatible API
 
+pub mod ast_chunker;
 pub mod chunker;
 pub mod index;
 pub mod schema;
