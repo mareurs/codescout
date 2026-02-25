@@ -15,20 +15,32 @@ fn is_glob(path: &str) -> bool {
     path.contains('*') || path.contains('?') || path.contains('[')
 }
 
-/// Resolve a relative path against the project root.
+/// Resolve a path for reading, with security validation.
 ///
 /// `"."` and `""` resolve to the project root directly (not `root.join(".")`)
 /// to avoid spurious `./` prefixes when stripping the root later.
-async fn resolve_path(ctx: &ToolContext, relative_path: &str) -> anyhow::Result<PathBuf> {
-    let root = ctx.agent.require_project_root().await?;
+async fn resolve_read_path(ctx: &ToolContext, relative_path: &str) -> anyhow::Result<PathBuf> {
     if relative_path == "." || relative_path.is_empty() {
-        return Ok(root);
+        return ctx.agent.require_project_root().await;
     }
-    let full = root.join(relative_path);
+    let project_root = ctx.agent.project_root().await;
+    let security = ctx.agent.security_config().await;
+    let full = crate::util::path_security::validate_read_path(
+        relative_path,
+        project_root.as_deref(),
+        &security,
+    )?;
     if !full.exists() {
         anyhow::bail!("path not found: {}", full.display());
     }
     Ok(full)
+}
+
+/// Resolve a path for writing, with security validation.
+async fn resolve_write_path(ctx: &ToolContext, relative_path: &str) -> anyhow::Result<PathBuf> {
+    let root = ctx.agent.require_project_root().await?;
+    let security = ctx.agent.security_config().await;
+    crate::util::path_security::validate_write_path(relative_path, &root, &security)
 }
 
 /// Resolve a path that may be a glob pattern, returning all matching files.
@@ -38,10 +50,7 @@ async fn resolve_glob(ctx: &ToolContext, path_or_glob: &str) -> anyhow::Result<V
     let root = ctx.agent.require_project_root().await?;
 
     if !is_glob(path_or_glob) {
-        let full = root.join(path_or_glob);
-        if !full.exists() {
-            anyhow::bail!("path not found: {}", full.display());
-        }
+        let full = resolve_read_path(ctx, path_or_glob).await?;
         return Ok(vec![full]);
     }
 
@@ -234,7 +243,7 @@ impl Tool for GetSymbolsOverview {
             return Ok(result_json);
         }
 
-        let full_path = resolve_path(ctx, rel_path).await?;
+        let full_path = resolve_read_path(ctx, rel_path).await?;
 
         if full_path.is_file() {
             let (client, lang) = get_lsp_client(ctx, &full_path).await?;
@@ -547,7 +556,7 @@ impl Tool for FindReferencingSymbols {
             .ok_or_else(|| anyhow!("missing 'name_path'"))?;
         let rel_path = get_path_param(&input, true)?.unwrap();
 
-        let full_path = resolve_path(ctx, rel_path).await?;
+        let full_path = resolve_read_path(ctx, rel_path).await?;
         let (client, lang) = get_lsp_client(ctx, &full_path).await?;
 
         // Find the symbol's position by walking document symbols
@@ -631,7 +640,7 @@ impl Tool for ReplaceSymbolBody {
             .as_str()
             .ok_or_else(|| anyhow!("missing 'new_body'"))?;
 
-        let full_path = resolve_path(ctx, rel_path).await?;
+        let full_path = resolve_write_path(ctx, rel_path).await?;
         let (client, lang) = get_lsp_client(ctx, &full_path).await?;
 
         let symbols = client.document_symbols(&full_path, &lang).await?;
@@ -686,7 +695,7 @@ impl Tool for InsertBeforeSymbol {
             .as_str()
             .ok_or_else(|| anyhow!("missing 'code'"))?;
 
-        let full_path = resolve_path(ctx, rel_path).await?;
+        let full_path = resolve_write_path(ctx, rel_path).await?;
         let (client, lang) = get_lsp_client(ctx, &full_path).await?;
 
         let symbols = client.document_symbols(&full_path, &lang).await?;
@@ -737,7 +746,7 @@ impl Tool for InsertAfterSymbol {
             .as_str()
             .ok_or_else(|| anyhow!("missing 'code'"))?;
 
-        let full_path = resolve_path(ctx, rel_path).await?;
+        let full_path = resolve_write_path(ctx, rel_path).await?;
         let (client, lang) = get_lsp_client(ctx, &full_path).await?;
 
         let symbols = client.document_symbols(&full_path, &lang).await?;
@@ -790,7 +799,7 @@ impl Tool for RenameSymbol {
             .as_str()
             .ok_or_else(|| anyhow!("missing 'new_name'"))?;
 
-        let full_path = resolve_path(ctx, rel_path).await?;
+        let full_path = resolve_write_path(ctx, rel_path).await?;
         let (client, lang) = get_lsp_client(ctx, &full_path).await?;
 
         // Find the symbol to get its position
@@ -803,7 +812,10 @@ impl Tool for RenameSymbol {
             .rename(&full_path, sym.start_line, sym.start_col, new_name, &lang)
             .await?;
 
-        // Apply workspace edit
+        // Apply workspace edit — validate every file from the LSP response
+        // as a write target before modifying it.
+        let rename_root = ctx.agent.require_project_root().await?;
+        let rename_security = ctx.agent.security_config().await;
         let mut files_changed = 0;
         let mut total_edits = 0;
 
@@ -812,6 +824,12 @@ impl Tool for RenameSymbol {
                 let Some(path) = uri_to_path(uri.as_str()) else {
                     continue;
                 };
+                let path_str = path.display().to_string();
+                crate::util::path_security::validate_write_path(
+                    &path_str,
+                    &rename_root,
+                    &rename_security,
+                )?;
                 let content = std::fs::read_to_string(&path)?;
                 let new_content = apply_text_edits(&content, edits);
                 std::fs::write(&path, new_content)?;
@@ -829,6 +847,12 @@ impl Tool for RenameSymbol {
                         let Some(path) = uri_to_path(text_edit.text_document.uri.as_str()) else {
                             continue;
                         };
+                        let path_str = path.display().to_string();
+                        crate::util::path_security::validate_write_path(
+                            &path_str,
+                            &rename_root,
+                            &rename_security,
+                        )?;
                         let content = std::fs::read_to_string(&path)?;
                         let plain_edits: Vec<lsp_types::TextEdit> = text_edit
                             .edits
@@ -852,6 +876,12 @@ impl Tool for RenameSymbol {
                     let Some(path) = uri_to_path(text_edit.text_document.uri.as_str()) else {
                         continue;
                     };
+                    let path_str = path.display().to_string();
+                    crate::util::path_security::validate_write_path(
+                        &path_str,
+                        &rename_root,
+                        &rename_security,
+                    )?;
                     let content = std::fs::read_to_string(&path)?;
                     let plain_edits: Vec<lsp_types::TextEdit> = text_edit
                         .edits

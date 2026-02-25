@@ -36,6 +36,9 @@ impl Tool for GitBlame {
             .ok_or_else(|| anyhow::anyhow!("missing 'path' parameter"))?;
         let root = ctx.agent.require_project_root().await?;
 
+        let security = ctx.agent.security_config().await;
+        crate::util::path_security::validate_read_path(file, Some(&root), &security)?;
+
         let lines = crate::git::blame::blame_file(&root, Path::new(file))?;
 
         // Optional line range filter
@@ -95,9 +98,11 @@ impl Tool for GitLog {
 
         let repo = crate::git::open_repo(&root)?;
 
-        if let Some(path) = input["path"].as_str() {
-            let commits = crate::git::file_log(&repo, Path::new(path), limit)?;
-            Ok(json!({ "commits": commits, "file": path }))
+        if let Some(path_str) = input["path"].as_str() {
+            let security = ctx.agent.security_config().await;
+            crate::util::path_security::validate_read_path(path_str, Some(&root), &security)?;
+            let commits = crate::git::file_log(&repo, Path::new(path_str), limit)?;
+            Ok(json!({ "commits": commits, "file": path_str }))
         } else {
             // Project-wide log: walk HEAD without file filtering
             let mut revwalk = repo.revwalk()?;
@@ -142,11 +147,15 @@ impl Tool for GitDiff {
         let root = ctx.agent.require_project_root().await?;
         let repo = crate::git::open_repo(&root)?;
 
-        let file = input["path"].as_str().map(Path::new);
+        let file_str = input["path"].as_str();
+        if let Some(path_str) = file_str {
+            let security = ctx.agent.security_config().await;
+            crate::util::path_security::validate_read_path(path_str, Some(&root), &security)?;
+        }
         let commit = input["commit"].as_str();
 
         let guard = super::output::OutputGuard::from_input(&input);
-        let diff_text = crate::git::diff_workdir(&repo, file, commit)?;
+        let diff_text = crate::git::diff_workdir(&repo, file_str.map(Path::new), commit)?;
 
         if guard.mode == super::output::OutputMode::Exploring && diff_text.len() > 50_000 {
             // Truncate at ~50KB, cutting at last newline to avoid mid-line breaks

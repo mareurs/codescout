@@ -31,6 +31,11 @@ enum Commands {
         /// Listen port (HTTP transport only)
         #[arg(long, default_value_t = 8090)]
         port: u16,
+
+        /// Bearer token for HTTP transport authentication.
+        /// If not provided when using HTTP transport, a token is auto-generated.
+        #[arg(long)]
+        auth_token: Option<String>,
     },
 
     /// Index the current project for semantic search
@@ -60,12 +65,13 @@ async fn main() -> Result<()> {
             transport,
             host,
             port,
+            auth_token,
         } => {
             tracing::info!(
                 "Starting code-explorer MCP server (transport={})",
                 transport
             );
-            code_explorer::server::run(project, &transport, &host, port).await?;
+            code_explorer::server::run(project, &transport, &host, port, auth_token).await?;
         }
         Commands::Index { project, force } => {
             let root = project

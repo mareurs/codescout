@@ -81,6 +81,21 @@ impl Agent {
         })
     }
 
+    /// Get optional project root (None if no project active).
+    pub async fn project_root(&self) -> Option<PathBuf> {
+        let inner = self.inner.read().await;
+        inner.active_project.as_ref().map(|p| p.root.clone())
+    }
+
+    /// Get the security config, or defaults if no project is active.
+    pub async fn security_config(&self) -> crate::util::path_security::PathSecurityConfig {
+        let inner = self.inner.read().await;
+        match &inner.active_project {
+            Some(p) => p.config.security.to_path_security_config(),
+            None => crate::util::path_security::PathSecurityConfig::default(),
+        }
+    }
+
     /// Run a closure with a read-lock on the active project.
     /// Returns an error if no project is active.
     pub async fn with_project<F, T>(&self, f: F) -> Result<T>
@@ -93,5 +108,119 @@ impl Agent {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("No active project. Use activate_project first."))?;
         f(project)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn new_without_project() {
+        let agent = Agent::new(None).await.unwrap();
+        assert!(agent.require_project_root().await.is_err());
+        assert!(agent.project_status().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn new_with_valid_project() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".code-explorer")).unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let root = agent.require_project_root().await.unwrap();
+        assert_eq!(root, dir.path());
+    }
+
+    #[tokio::test]
+    async fn activate_sets_project() {
+        let agent = Agent::new(None).await.unwrap();
+        assert!(agent.require_project_root().await.is_err());
+
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".code-explorer")).unwrap();
+        agent.activate(dir.path().to_path_buf()).await.unwrap();
+
+        let root = agent.require_project_root().await.unwrap();
+        assert_eq!(root, dir.path());
+    }
+
+    #[tokio::test]
+    async fn activate_replaces_previous_project() {
+        let dir1 = tempdir().unwrap();
+        let dir2 = tempdir().unwrap();
+        std::fs::create_dir_all(dir1.path().join(".code-explorer")).unwrap();
+        std::fs::create_dir_all(dir2.path().join(".code-explorer")).unwrap();
+
+        let agent = Agent::new(Some(dir1.path().to_path_buf())).await.unwrap();
+        assert_eq!(agent.require_project_root().await.unwrap(), dir1.path());
+
+        agent.activate(dir2.path().to_path_buf()).await.unwrap();
+        assert_eq!(agent.require_project_root().await.unwrap(), dir2.path());
+    }
+
+    #[tokio::test]
+    async fn require_project_root_error_message() {
+        let agent = Agent::new(None).await.unwrap();
+        let err = agent.require_project_root().await.unwrap_err();
+        assert!(
+            err.to_string().contains("No active project"),
+            "error should mention no active project: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn with_project_errors_when_none() {
+        let agent = Agent::new(None).await.unwrap();
+        let result = agent.with_project(|_p| Ok(42)).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn with_project_runs_closure() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".code-explorer")).unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+
+        let name = agent
+            .with_project(|p| Ok(p.config.project.name.clone()))
+            .await
+            .unwrap();
+        // Default config uses directory name
+        assert!(!name.is_empty());
+    }
+
+    #[tokio::test]
+    async fn project_status_returns_none_without_project() {
+        let agent = Agent::new(None).await.unwrap();
+        assert!(agent.project_status().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn project_status_returns_some_with_project() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".code-explorer")).unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+
+        let status = agent.project_status().await;
+        assert!(status.is_some());
+        let status = status.unwrap();
+        assert!(!status.name.is_empty());
+        assert!(status.path.contains(dir.path().to_str().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn agent_is_clone_safe() {
+        // Agent wraps Arc<RwLock<...>> so clones share state
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".code-explorer")).unwrap();
+        let agent = Agent::new(None).await.unwrap();
+        let agent2 = agent.clone();
+
+        agent.activate(dir.path().to_path_buf()).await.unwrap();
+        // Clone should see the activation
+        let root = agent2.require_project_root().await.unwrap();
+        assert_eq!(root, dir.path());
     }
 }

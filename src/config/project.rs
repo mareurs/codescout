@@ -11,6 +11,8 @@ pub struct ProjectConfig {
     pub embeddings: EmbeddingsSection,
     #[serde(default)]
     pub ignored_paths: IgnoredPathsSection,
+    #[serde(default)]
+    pub security: SecuritySection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +53,45 @@ pub struct EmbeddingsSection {
 pub struct IgnoredPathsSection {
     #[serde(default = "default_ignored_patterns")]
     pub patterns: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SecuritySection {
+    /// Additional path patterns to deny reads from (beyond built-in deny-list).
+    #[serde(default)]
+    pub denied_read_patterns: Vec<String>,
+    /// Additional directories where writes are allowed (beyond project root).
+    #[serde(default)]
+    pub extra_write_roots: Vec<String>,
+    /// Shell command mode: "unrestricted", "warn" (default), "disabled"
+    #[serde(default = "default_shell_mode")]
+    pub shell_command_mode: String,
+    /// Max bytes for shell command stdout/stderr (default 100KB)
+    #[serde(default = "default_shell_output_limit")]
+    pub shell_output_limit_bytes: usize,
+}
+
+fn default_shell_mode() -> String {
+    "warn".into()
+}
+
+fn default_shell_output_limit() -> usize {
+    100 * 1024 // 100KB
+}
+
+impl SecuritySection {
+    pub fn to_path_security_config(&self) -> crate::util::path_security::PathSecurityConfig {
+        crate::util::path_security::PathSecurityConfig {
+            denied_read_patterns: self.denied_read_patterns.clone(),
+            extra_write_roots: self
+                .extra_write_roots
+                .iter()
+                .map(std::path::PathBuf::from)
+                .collect(),
+            shell_command_mode: self.shell_command_mode.clone(),
+            shell_output_limit_bytes: self.shell_output_limit_bytes,
+        }
+    }
 }
 
 impl Default for EmbeddingsSection {
@@ -119,6 +160,7 @@ impl ProjectConfig {
             },
             embeddings: EmbeddingsSection::default(),
             ignored_paths: IgnoredPathsSection::default(),
+            security: SecuritySection::default(),
         }
     }
 

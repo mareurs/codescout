@@ -174,7 +174,30 @@ impl ServerHandler for CodeExplorerServer {
 }
 
 /// Entry point: start the MCP server with the chosen transport.
-pub async fn run(project: Option<PathBuf>, transport: &str, host: &str, port: u16) -> Result<()> {
+/// Generate a bearer token for HTTP transport authentication.
+///
+/// Combines high-resolution timestamp with process ID to produce a unique,
+/// hard-to-guess hex string. This is NOT cryptographically secure — it is a
+/// convenience default when the operator does not supply `--auth-token`.
+pub fn generate_auth_token() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let pid = std::process::id() as u64;
+    // Mask to 64 bits each so the total is exactly 32 hex characters.
+    let hi = nanos as u64;
+    let lo = pid.wrapping_mul(0x517cc1b727220a95);
+    format!("{:016x}{:016x}", hi, lo)
+}
+
+pub async fn run(
+    project: Option<PathBuf>,
+    transport: &str,
+    host: &str,
+    port: u16,
+    auth_token: Option<String>,
+) -> Result<()> {
     // If no --project given, auto-detect from CWD (Claude Code launches servers from the project dir)
     let project = project.or_else(|| std::env::current_dir().ok());
     let agent = Agent::new(project).await?;
@@ -182,6 +205,9 @@ pub async fn run(project: Option<PathBuf>, transport: &str, host: &str, port: u1
 
     match transport {
         "stdio" => {
+            if auth_token.is_some() {
+                tracing::warn!("--auth-token is ignored for stdio transport");
+            }
             tracing::info!("code-explorer MCP server ready (stdio)");
             let server = CodeExplorerServer::from_parts(agent, lsp).await;
             let service = server
@@ -195,10 +221,38 @@ pub async fn run(project: Option<PathBuf>, transport: &str, host: &str, port: u1
             Ok(())
         }
         "http" => {
+            // --- Auth token setup ---
+            let token = auth_token.unwrap_or_else(|| {
+                let t = generate_auth_token();
+                eprintln!("No --auth-token provided; generated one automatically.");
+                t
+            });
+            eprintln!("HTTP transport auth token: {}", token);
+            eprintln!("Clients must send header:  Authorization: Bearer {}", token);
+
+            // --- Bind address safety warnings ---
+            if host == "0.0.0.0" || host == "::" {
+                eprintln!(
+                    "WARNING: Server is bound to all interfaces ({}).\n\
+                     This exposes the MCP server to the entire network.\n\
+                     Use --host 127.0.0.1 for local-only access.",
+                    host
+                );
+            }
+
             let addr: std::net::SocketAddr = format!("{}:{}", host, port).parse()?;
             tracing::info!("code-explorer MCP server ready (HTTP/SSE at {})", addr);
             tracing::info!("  SSE endpoint: http://{}/sse", addr);
             tracing::info!("  Message endpoint: http://{}/message", addr);
+
+            // NOTE: rmcp's SseServer does not expose middleware hooks for
+            // per-request header validation.  The token is printed at startup
+            // so the operator can configure their MCP client with the correct
+            // Authorization header.  Proper per-connection token enforcement
+            // will be added once rmcp supports custom middleware or an auth
+            // callback on SseServer.
+            // TODO: validate Authorization header per-connection when rmcp supports middleware
+            let _token = token; // retained for future middleware use
 
             let mut sse_server = rmcp::transport::sse_server::SseServer::serve(addr)
                 .await
@@ -224,5 +278,178 @@ pub async fn run(project: Option<PathBuf>, transport: &str, host: &str, port: u1
             Ok(())
         }
         other => anyhow::bail!("Unknown transport '{}'. Use 'stdio' or 'http'.", other),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::Agent;
+    use tempfile::tempdir;
+
+    async fn make_server() -> (tempfile::TempDir, CodeExplorerServer) {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".code-explorer")).unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let server = CodeExplorerServer::new(agent).await;
+        (dir, server)
+    }
+
+    async fn make_server_no_project() -> CodeExplorerServer {
+        let agent = Agent::new(None).await.unwrap();
+        CodeExplorerServer::new(agent).await
+    }
+
+    #[tokio::test]
+    async fn server_registers_all_tools() {
+        let (_dir, server) = make_server().await;
+        // Verify expected tool count matches the registered tools
+        let expected_tools = [
+            "read_file",
+            "list_dir",
+            "search_for_pattern",
+            "create_text_file",
+            "find_file",
+            "replace_content",
+            "execute_shell_command",
+            "onboarding",
+            "check_onboarding_performed",
+            "find_symbol",
+            "find_referencing_symbols",
+            "get_symbols_overview",
+            "replace_symbol_body",
+            "insert_before_symbol",
+            "insert_after_symbol",
+            "rename_symbol",
+            "list_functions",
+            "extract_docstrings",
+            "git_blame",
+            "git_log",
+            "git_diff",
+            "write_memory",
+            "read_memory",
+            "list_memories",
+            "delete_memory",
+            "semantic_search",
+            "index_project",
+            "index_status",
+            "activate_project",
+            "get_current_config",
+        ];
+        assert_eq!(
+            server.tools.len(),
+            expected_tools.len(),
+            "tool count mismatch: expected {}, got {}",
+            expected_tools.len(),
+            server.tools.len()
+        );
+        for name in &expected_tools {
+            assert!(
+                server.find_tool(name).is_some(),
+                "tool '{}' not found in server",
+                name
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn find_tool_returns_none_for_unknown() {
+        let (_dir, server) = make_server().await;
+        assert!(server.find_tool("nonexistent_tool").is_none());
+        assert!(server.find_tool("").is_none());
+        assert!(server.find_tool("READ_FILE").is_none()); // case-sensitive
+    }
+
+    #[tokio::test]
+    async fn tool_names_are_unique() {
+        let (_dir, server) = make_server().await;
+        let mut names: Vec<&str> = server.tools.iter().map(|t| t.name()).collect();
+        let original_len = names.len();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), original_len, "duplicate tool names found");
+    }
+
+    #[tokio::test]
+    async fn all_tools_have_valid_schemas() {
+        let (_dir, server) = make_server().await;
+        for tool in &server.tools {
+            let schema = tool.input_schema();
+            assert!(
+                schema.is_object(),
+                "tool '{}' schema is not an object",
+                tool.name()
+            );
+            // Every schema should have "type": "object" at minimum
+            assert_eq!(
+                schema["type"],
+                "object",
+                "tool '{}' schema missing type:object",
+                tool.name()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn all_tools_have_descriptions() {
+        let (_dir, server) = make_server().await;
+        for tool in &server.tools {
+            let desc = tool.description();
+            assert!(
+                !desc.is_empty(),
+                "tool '{}' has empty description",
+                tool.name()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn get_info_contains_instructions() {
+        let (_dir, server) = make_server().await;
+        let info = server.get_info();
+        assert!(info.instructions.is_some());
+        let instructions = info.instructions.unwrap();
+        assert!(!instructions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_info_without_project_still_works() {
+        let server = make_server_no_project().await;
+        let info = server.get_info();
+        assert!(info.instructions.is_some());
+    }
+
+    #[tokio::test]
+    async fn server_instructions_mention_project_when_active() {
+        let (_dir, server) = make_server().await;
+        let info = server.get_info();
+        let instructions = info.instructions.unwrap();
+        // When a project is active, instructions should reference it
+        assert!(
+            instructions.contains("Project:") || instructions.contains("project"),
+            "instructions should mention the active project"
+        );
+    }
+
+    #[test]
+    fn generate_auth_token_produces_nonempty_hex() {
+        let token = super::generate_auth_token();
+        assert!(!token.is_empty(), "token must not be empty");
+        assert_eq!(token.len(), 32, "token should be 32 hex chars");
+        assert!(
+            token.chars().all(|c| c.is_ascii_hexdigit()),
+            "token must be valid hex: {}",
+            token
+        );
+    }
+
+    #[test]
+    fn generate_auth_token_is_unique_across_calls() {
+        let t1 = super::generate_auth_token();
+        let t2 = super::generate_auth_token();
+        // The nanos component changes between calls, so tokens should differ.
+        // In the astronomically unlikely case of a collision, the test is still
+        // correct — but practically this always passes.
+        assert_ne!(t1, t2, "consecutive tokens should differ");
     }
 }

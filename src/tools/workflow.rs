@@ -72,6 +72,7 @@ impl Tool for Onboarding {
                 },
                 embeddings: Default::default(),
                 ignored_paths: Default::default(),
+                security: Default::default(),
             };
             let toml_str = toml::to_string_pretty(&config)?;
             std::fs::write(&config_path, &toml_str)?;
@@ -174,6 +175,20 @@ impl Tool for ExecuteShellCommand {
             .ok_or_else(|| anyhow!("missing 'command' parameter"))?;
         let timeout_secs = input["timeout_secs"].as_u64().unwrap_or(30);
         let root = ctx.agent.require_project_root().await?;
+        let security = ctx.agent.security_config().await;
+
+        // Check shell command mode
+        match security.shell_command_mode.as_str() {
+            "disabled" => {
+                anyhow::bail!(
+                    "shell commands are disabled. Set security.shell_command_mode = \"warn\" or \"unrestricted\" in .code-explorer/project.toml"
+                );
+            }
+            "unrestricted" | "warn" | "" => {} // allowed
+            other => {
+                anyhow::bail!("unknown shell_command_mode: '{}'. Use \"warn\", \"unrestricted\", or \"disabled\"", other);
+            }
+        }
 
         let child = tokio::process::Command::new("sh")
             .arg("-c")
@@ -181,12 +196,44 @@ impl Tool for ExecuteShellCommand {
             .current_dir(&root)
             .output();
 
+        let output_limit = if security.shell_output_limit_bytes > 0 {
+            security.shell_output_limit_bytes
+        } else {
+            100 * 1024
+        };
+
         match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), child).await {
-            Ok(Ok(output)) => Ok(json!({
-                "stdout": String::from_utf8_lossy(&output.stdout),
-                "stderr": String::from_utf8_lossy(&output.stderr),
-                "exit_code": output.status.code()
-            })),
+            Ok(Ok(output)) => {
+                let raw_stdout = String::from_utf8_lossy(&output.stdout);
+                let raw_stderr = String::from_utf8_lossy(&output.stderr);
+
+                let (stdout, stdout_truncated) = truncate_output(&raw_stdout, output_limit);
+                let (stderr, stderr_truncated) = truncate_output(&raw_stderr, output_limit);
+
+                let mut result = json!({
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "exit_code": output.status.code()
+                });
+
+                if stdout_truncated {
+                    result["stdout_truncated"] = json!(true);
+                    result["stdout_total_bytes"] = json!(raw_stdout.len());
+                }
+                if stderr_truncated {
+                    result["stderr_truncated"] = json!(true);
+                    result["stderr_total_bytes"] = json!(raw_stderr.len());
+                }
+
+                // Add warning in warn mode
+                if security.shell_command_mode == "warn" || security.shell_command_mode.is_empty() {
+                    result["warning"] = json!(
+                        "Shell commands execute with full user permissions. Only use for build/test commands."
+                    );
+                }
+
+                Ok(result)
+            }
             Ok(Err(e)) => Err(anyhow!("command execution error: {}", e)),
             Err(_) => Ok(json!({
                 "timed_out": true,
@@ -195,6 +242,29 @@ impl Tool for ExecuteShellCommand {
                 "exit_code": null
             })),
         }
+    }
+}
+
+fn truncate_output(output: &str, limit: usize) -> (String, bool) {
+    if output.len() > limit {
+        let truncated = &output[..limit];
+        // Find a safe UTF-8 boundary
+        let safe_end = truncated
+            .char_indices()
+            .last()
+            .map(|(i, c)| i + c.len_utf8())
+            .unwrap_or(0);
+        (
+            format!(
+                "{}\n... (truncated, showing first {} of {} bytes)",
+                &output[..safe_end],
+                safe_end,
+                output.len()
+            ),
+            true,
+        )
+    } else {
+        (output.to_string(), false)
     }
 }
 
@@ -339,5 +409,60 @@ mod tests {
             .unwrap();
         assert_eq!(result["timed_out"], serde_json::Value::Null);
         assert!(result["stdout"].as_str().unwrap().contains("hello"));
+    }
+
+    #[tokio::test]
+    async fn execute_shell_command_output_truncated() {
+        let (_dir, ctx) = project_ctx().await;
+        // Generate output larger than default limit
+        let result = ExecuteShellCommand
+            .call(
+                json!({ "command": "seq 1 100000", "timeout_secs": 10 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        // Output should be truncated (seq 1 100000 produces ~588KB)
+        assert_eq!(
+            result["stdout_truncated"], true,
+            "large output should be truncated"
+        );
+        assert!(result["stdout_total_bytes"].as_u64().unwrap() > 100 * 1024);
+        // The truncated output should still be valid
+        assert!(result["stdout"].as_str().unwrap().contains("truncated"));
+    }
+
+    #[tokio::test]
+    async fn execute_shell_command_small_output_not_truncated() {
+        let (_dir, ctx) = project_ctx().await;
+        let result = ExecuteShellCommand
+            .call(json!({ "command": "echo hello", "timeout_secs": 5 }), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["stdout_truncated"], serde_json::Value::Null);
+        assert!(result["stdout"].as_str().unwrap().contains("hello"));
+    }
+
+    #[tokio::test]
+    async fn execute_shell_command_warn_mode_includes_warning() {
+        let (_dir, ctx) = project_ctx().await;
+        let result = ExecuteShellCommand
+            .call(json!({ "command": "echo test", "timeout_secs": 5 }), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            result["warning"].as_str().is_some(),
+            "warn mode should include warning"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_shell_command_exit_code_preserved() {
+        let (_dir, ctx) = project_ctx().await;
+        let result = ExecuteShellCommand
+            .call(json!({ "command": "exit 42", "timeout_secs": 5 }), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["exit_code"], 42);
     }
 }

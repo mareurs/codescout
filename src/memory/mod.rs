@@ -75,6 +75,11 @@ impl MemoryStore {
     fn topic_path(&self, topic: &str) -> PathBuf {
         // Sanitize: replace ".." components to prevent directory traversal.
         let safe = topic.replace("..", "__");
+        // Strip leading path separators to prevent absolute paths from replacing
+        // the base directory when passed to PathBuf::join.
+        let safe = safe.trim_start_matches('/').trim_start_matches('\\');
+        // Ensure empty topics produce a path inside memories_dir (not the dir itself).
+        let safe = if safe.is_empty() { "_empty" } else { safe };
         self.memories_dir.join(safe).with_extension("md")
     }
 }
@@ -169,5 +174,76 @@ mod tests {
         // Reading with the same (sanitized) key works
         let result = store.read("../escape").unwrap();
         assert_eq!(result, Some("evil".to_string()));
+    }
+
+    #[test]
+    fn absolute_path_topic_stays_inside_memories_dir() {
+        let (_dir, store) = make_store();
+        // An absolute path in topic should NOT escape the memories directory.
+        // PathBuf::join with an absolute path replaces the base — this tests that
+        // topic_path prevents that.
+        let evil_topic = "/etc/shadow";
+        let resolved = store.topic_path(evil_topic);
+        assert!(
+            resolved.starts_with(&store.memories_dir),
+            "absolute path topic escaped memories dir: {:?}",
+            resolved
+        );
+    }
+
+    #[test]
+    fn topic_with_null_byte_is_handled() {
+        let (_dir, store) = make_store();
+        // Null bytes in filenames can cause truncation in C-based syscalls.
+        let result = store.write("safe\0evil", "content");
+        // Should either succeed safely or return an error — not panic.
+        // The important thing is the file (if created) stays inside memories_dir.
+        if result.is_ok() {
+            let path = store.topic_path("safe\0evil");
+            assert!(path.starts_with(&store.memories_dir));
+        }
+    }
+
+    #[test]
+    fn topic_with_backslash_traversal_stays_inside() {
+        let (_dir, store) = make_store();
+        // Windows-style path traversal attempt
+        let resolved = store.topic_path("..\\..\\etc\\passwd");
+        assert!(
+            resolved.starts_with(&store.memories_dir),
+            "backslash traversal escaped memories dir: {:?}",
+            resolved
+        );
+    }
+
+    #[test]
+    fn empty_topic_does_not_panic() {
+        let (_dir, store) = make_store();
+        // Empty topic should not panic
+        let resolved = store.topic_path("");
+        assert!(resolved.starts_with(&store.memories_dir));
+    }
+
+    #[test]
+    fn deeply_nested_topic_works() {
+        let (_dir, store) = make_store();
+        store.write("a/b/c/d/e/deep-topic", "deep content").unwrap();
+        assert_eq!(
+            store.read("a/b/c/d/e/deep-topic").unwrap(),
+            Some("deep content".to_string())
+        );
+    }
+
+    #[test]
+    fn topic_with_special_chars() {
+        let (_dir, store) = make_store();
+        // Topics with special characters should work or fail gracefully
+        for topic in &["hello world", "a&b", "test=value", "name@domain"] {
+            let result = store.write(topic, "content");
+            if result.is_ok() {
+                assert_eq!(store.read(topic).unwrap(), Some("content".to_string()));
+            }
+            // Either works or returns error — no panic
+        }
     }
 }

@@ -32,13 +32,20 @@ impl Tool for ReadFile {
         })
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<Value> {
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
         use super::output::{OutputGuard, OutputMode, OverflowInfo};
 
         let path = input["path"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing path"))?;
-        let text = std::fs::read_to_string(path)?;
+        let project_root = ctx.agent.project_root().await;
+        let security = ctx.agent.security_config().await;
+        let resolved = crate::util::path_security::validate_read_path(
+            path,
+            project_root.as_deref(),
+            &security,
+        )?;
+        let text = std::fs::read_to_string(&resolved)?;
 
         // If explicit line range given, use it directly (no capping)
         if let (Some(start), Some(end)) = (input["start_line"].as_u64(), input["end_line"].as_u64())
@@ -100,15 +107,22 @@ impl Tool for ListDir {
         })
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<Value> {
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
         use super::output::{OutputGuard, OutputMode, OverflowInfo};
 
-        let path = input["path"].as_str().unwrap_or(".");
+        let raw_path = input["path"].as_str().unwrap_or(".");
+        let project_root = ctx.agent.project_root().await;
+        let security = ctx.agent.security_config().await;
+        let path = crate::util::path_security::validate_read_path(
+            raw_path,
+            project_root.as_deref(),
+            &security,
+        )?;
         let recursive = input["recursive"].as_bool().unwrap_or(false);
         let max_depth = if recursive { None } else { Some(1) };
         let guard = OutputGuard::from_input(&input);
 
-        let walker = ignore::WalkBuilder::new(path)
+        let walker = ignore::WalkBuilder::new(&path)
             .max_depth(max_depth)
             .hidden(true)
             .git_ignore(true)
@@ -189,17 +203,27 @@ impl Tool for SearchForPattern {
         })
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<Value> {
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
         let pattern = input["pattern"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing pattern"))?;
-        let search_path = input["path"].as_str().unwrap_or(".");
+        let raw_path = input["path"].as_str().unwrap_or(".");
+        let project_root = ctx.agent.project_root().await;
+        let security = ctx.agent.security_config().await;
+        let search_path = crate::util::path_security::validate_read_path(
+            raw_path,
+            project_root.as_deref(),
+            &security,
+        )?;
         let max = input["max_results"].as_u64().unwrap_or(50) as usize;
 
-        let re = regex::Regex::new(pattern)?;
+        let re = regex::RegexBuilder::new(pattern)
+            .size_limit(1 << 20)
+            .dfa_size_limit(1 << 20)
+            .build()?;
         let mut matches = vec![];
 
-        let walker = ignore::WalkBuilder::new(search_path).build();
+        let walker = ignore::WalkBuilder::new(&search_path).build();
         'outer: for entry in walker.flatten() {
             if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                 continue;
@@ -250,15 +274,20 @@ impl Tool for CreateTextFile {
         })
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<Value> {
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
         let path = input["path"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing 'path' parameter"))?;
         let content = input["content"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing 'content' parameter"))?;
-        crate::util::fs::write_utf8(std::path::Path::new(path), content)?;
-        Ok(json!({ "status": "ok", "path": path, "bytes": content.len() }))
+        let root = ctx.agent.require_project_root().await?;
+        let security = ctx.agent.security_config().await;
+        let resolved = crate::util::path_security::validate_write_path(path, &root, &security)?;
+        crate::util::fs::write_utf8(&resolved, content)?;
+        Ok(
+            json!({ "status": "ok", "path": resolved.display().to_string(), "bytes": content.len() }),
+        )
     }
 }
 
@@ -288,11 +317,18 @@ impl Tool for FindFile {
         })
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<Value> {
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
         let pattern = input["pattern"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing 'pattern' parameter"))?;
-        let search_path = input["path"].as_str().unwrap_or(".");
+        let raw_path = input["path"].as_str().unwrap_or(".");
+        let project_root = ctx.agent.project_root().await;
+        let security = ctx.agent.security_config().await;
+        let search_path = crate::util::path_security::validate_read_path(
+            raw_path,
+            project_root.as_deref(),
+            &security,
+        )?;
         let max = input["max_results"].as_u64().unwrap_or(100) as usize;
 
         let glob = globset::GlobBuilder::new(pattern)
@@ -301,14 +337,14 @@ impl Tool for FindFile {
             .compile_matcher();
 
         let mut matches = vec![];
-        let walker = ignore::WalkBuilder::new(search_path).build();
+        let walker = ignore::WalkBuilder::new(&search_path).build();
         for entry in walker.flatten() {
             if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                 continue;
             }
             let rel = entry
                 .path()
-                .strip_prefix(search_path)
+                .strip_prefix(&search_path)
                 .unwrap_or(entry.path());
             if glob.is_match(rel) {
                 matches.push(entry.path().display().to_string());
@@ -350,7 +386,7 @@ impl Tool for ReplaceContent {
         })
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<Value> {
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
         let path = input["path"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing 'path' parameter"))?;
@@ -363,10 +399,17 @@ impl Tool for ReplaceContent {
         let is_regex = input["is_regex"].as_bool().unwrap_or(false);
         let replace_all = input["replace_all"].as_bool().unwrap_or(true);
 
-        let content = std::fs::read_to_string(path)?;
+        let root = ctx.agent.require_project_root().await?;
+        let security = ctx.agent.security_config().await;
+        let resolved = crate::util::path_security::validate_write_path(path, &root, &security)?;
+
+        let content = std::fs::read_to_string(&resolved)?;
 
         let (replaced, count) = if is_regex {
-            let re = regex::Regex::new(old)?;
+            let re = regex::RegexBuilder::new(old)
+                .size_limit(1 << 20)
+                .dfa_size_limit(1 << 20)
+                .build()?;
             if replace_all {
                 let result = re.replace_all(&content, new_text);
                 let c = re.find_iter(&content).count();
@@ -383,8 +426,8 @@ impl Tool for ReplaceContent {
             (content.replacen(old, new_text, 1), c)
         };
 
-        std::fs::write(path, &replaced)?;
-        Ok(json!({ "status": "ok", "replacements": count, "path": path }))
+        std::fs::write(&resolved, &replaced)?;
+        Ok(json!({ "status": "ok", "replacements": count, "path": resolved.display().to_string() }))
     }
 }
 
@@ -402,6 +445,19 @@ mod tests {
             agent: Agent::new(None).await.unwrap(),
             lsp: Arc::new(LspManager::new()),
         }
+    }
+
+    async fn project_ctx() -> (tempfile::TempDir, ToolContext) {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".code-explorer")).unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        (
+            dir,
+            ToolContext {
+                agent,
+                lsp: Arc::new(LspManager::new()),
+            },
+        )
     }
 
     // ── ReadFile ──────────────────────────────────────────────────────────────
@@ -685,8 +741,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_text_file_writes_content() {
-        let ctx = test_ctx().await;
-        let dir = tempdir().unwrap();
+        let (dir, ctx) = project_ctx().await;
         let file = dir.path().join("new.txt");
 
         let result = CreateTextFile
@@ -707,8 +762,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_text_file_creates_parent_dirs() {
-        let ctx = test_ctx().await;
-        let dir = tempdir().unwrap();
+        let (dir, ctx) = project_ctx().await;
         let file = dir.path().join("a").join("b").join("deep.txt");
 
         CreateTextFile
@@ -833,8 +887,7 @@ mod tests {
 
     #[tokio::test]
     async fn replace_content_literal() {
-        let ctx = test_ctx().await;
-        let dir = tempdir().unwrap();
+        let (dir, ctx) = project_ctx().await;
         let file = dir.path().join("code.rs");
         std::fs::write(&file, "let x = 1;\nlet y = 2;\nlet x = 3;\n").unwrap();
 
@@ -858,8 +911,7 @@ mod tests {
 
     #[tokio::test]
     async fn replace_content_literal_first_only() {
-        let ctx = test_ctx().await;
-        let dir = tempdir().unwrap();
+        let (dir, ctx) = project_ctx().await;
         let file = dir.path().join("code.rs");
         std::fs::write(&file, "aaa bbb aaa").unwrap();
 
@@ -882,8 +934,7 @@ mod tests {
 
     #[tokio::test]
     async fn replace_content_regex() {
-        let ctx = test_ctx().await;
-        let dir = tempdir().unwrap();
+        let (dir, ctx) = project_ctx().await;
         let file = dir.path().join("data.txt");
         std::fs::write(&file, "foo123bar456baz").unwrap();
 
@@ -907,8 +958,7 @@ mod tests {
 
     #[tokio::test]
     async fn replace_content_regex_first_only() {
-        let ctx = test_ctx().await;
-        let dir = tempdir().unwrap();
+        let (dir, ctx) = project_ctx().await;
         let file = dir.path().join("data.txt");
         std::fs::write(&file, "aaa111bbb222").unwrap();
 
@@ -932,8 +982,7 @@ mod tests {
 
     #[tokio::test]
     async fn replace_content_no_match() {
-        let ctx = test_ctx().await;
-        let dir = tempdir().unwrap();
+        let (dir, ctx) = project_ctx().await;
         let file = dir.path().join("data.txt");
         std::fs::write(&file, "hello world").unwrap();
 
@@ -1018,5 +1067,337 @@ mod tests {
             ".git/ entries should be excluded, got: {:?}",
             entries
         );
+    }
+
+    // ── Security: Input Validation ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn read_file_missing_path_errors() {
+        let ctx = test_ctx().await;
+        let result = ReadFile.call(json!({}), &ctx).await;
+        assert!(result.is_err(), "read_file without path should error");
+    }
+
+    #[tokio::test]
+    async fn read_file_empty_path_errors() {
+        let ctx = test_ctx().await;
+        let result = ReadFile.call(json!({ "path": "" }), &ctx).await;
+        assert!(result.is_err(), "read_file with empty path should error");
+    }
+
+    #[tokio::test]
+    async fn create_text_file_missing_params_detailed_errors() {
+        let ctx = test_ctx().await;
+        // Missing path
+        let result = CreateTextFile
+            .call(json!({ "content": "hello" }), &ctx)
+            .await;
+        assert!(
+            result.is_err(),
+            "create_text_file without path should error"
+        );
+
+        // Missing content
+        let result = CreateTextFile
+            .call(json!({ "path": "/tmp/test.txt" }), &ctx)
+            .await;
+        assert!(
+            result.is_err(),
+            "create_text_file without content should error"
+        );
+    }
+
+    #[tokio::test]
+    async fn replace_content_missing_params_errors_security() {
+        let ctx = test_ctx().await;
+        let result = ReplaceContent.call(json!({}), &ctx).await;
+        assert!(
+            result.is_err(),
+            "replace_content without params should error"
+        );
+
+        let result = ReplaceContent
+            .call(json!({ "path": "/tmp/x", "old": "a" }), &ctx)
+            .await;
+        assert!(
+            result.is_err(),
+            "replace_content without 'new' should error"
+        );
+    }
+
+    #[tokio::test]
+    async fn search_for_pattern_missing_pattern_errors() {
+        let ctx = test_ctx().await;
+        let result = SearchForPattern.call(json!({}), &ctx).await;
+        assert!(
+            result.is_err(),
+            "search_for_pattern without pattern should error"
+        );
+    }
+
+    #[tokio::test]
+    async fn find_file_missing_pattern_errors() {
+        let ctx = test_ctx().await;
+        let result = FindFile.call(json!({}), &ctx).await;
+        assert!(result.is_err(), "find_file without pattern should error");
+    }
+
+    #[tokio::test]
+    async fn search_for_pattern_invalid_regex_errors() {
+        let ctx = test_ctx().await;
+        let result = SearchForPattern
+            .call(json!({ "pattern": "[invalid(" }), &ctx)
+            .await;
+        assert!(result.is_err(), "invalid regex should produce an error");
+    }
+
+    #[tokio::test]
+    async fn replace_content_invalid_regex_errors() {
+        let (dir, ctx) = project_ctx().await;
+        let file = dir.path().join("test.txt");
+        std::fs::write(&file, "hello").unwrap();
+
+        let result = ReplaceContent
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "old": "[invalid(",
+                    "new": "x",
+                    "is_regex": true
+                }),
+                &ctx,
+            )
+            .await;
+        assert!(result.is_err(), "invalid regex in replace should error");
+    }
+
+    #[tokio::test]
+    async fn read_file_nonexistent_errors_gracefully() {
+        let ctx = test_ctx().await;
+        let result = ReadFile
+            .call(json!({ "path": "/nonexistent/path/file.txt" }), &ctx)
+            .await;
+        assert!(result.is_err());
+        // Error should not panic, just return Err
+    }
+
+    #[tokio::test]
+    async fn replace_content_nonexistent_file_errors() {
+        let (dir, ctx) = project_ctx().await;
+        let target = dir.path().join("nonexistent.txt");
+        let result = ReplaceContent
+            .call(
+                json!({
+                    "path": target.to_str().unwrap(),
+                    "old": "a",
+                    "new": "b"
+                }),
+                &ctx,
+            )
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn replace_content_no_matches_reports_zero() {
+        let (dir, ctx) = project_ctx().await;
+        let file = dir.path().join("test.txt");
+        std::fs::write(&file, "hello world").unwrap();
+
+        let result = ReplaceContent
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "old": "xyz_not_found",
+                    "new": "replacement"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["replacements"], 0);
+        // Original content should be unchanged
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "hello world");
+    }
+
+    #[tokio::test]
+    async fn read_file_binary_content_does_not_panic() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("binary.bin");
+        std::fs::write(&file, b"\x00\x01\x02\xff\xfe").unwrap();
+
+        // Binary file read should error (not valid UTF-8), not panic
+        let result = ReadFile
+            .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+            .await;
+        assert!(result.is_err(), "binary file should fail on read_to_string");
+    }
+
+    #[tokio::test]
+    async fn list_dir_nonexistent_path_errors() {
+        let ctx = test_ctx().await;
+        let result = ListDir
+            .call(json!({ "path": "/nonexistent/directory" }), &ctx)
+            .await
+            .unwrap();
+        // WalkBuilder returns empty for nonexistent paths
+        let entries = result["entries"].as_array().unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn search_for_pattern_max_results_respected() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        // Create a file with many matching lines
+        let content = (0..100)
+            .map(|i| format!("match_{}", i))
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(dir.path().join("many.txt"), &content).unwrap();
+
+        let result = SearchForPattern
+            .call(
+                json!({
+                    "pattern": "match_",
+                    "path": dir.path().to_str().unwrap(),
+                    "max_results": 5
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let matches = result["matches"].as_array().unwrap();
+        assert_eq!(matches.len(), 5, "max_results should be respected");
+    }
+
+    // ── Security: Path Sandboxing ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn read_file_denies_ssh_key() {
+        let ctx = test_ctx().await;
+        if let Some(home) = std::env::var("HOME").ok() {
+            let ssh_path = format!("{}/.ssh/id_rsa", home);
+            let result = ReadFile.call(json!({ "path": &ssh_path }), &ctx).await;
+            assert!(result.is_err(), "read of ~/.ssh/id_rsa should be denied");
+        }
+    }
+
+    #[tokio::test]
+    async fn create_file_outside_project_rejected() {
+        let (_dir, ctx) = project_ctx().await;
+        let outside = tempdir().unwrap();
+        let target = outside.path().join("evil.rs");
+        let result = CreateTextFile
+            .call(
+                json!({
+                    "path": target.to_str().unwrap(),
+                    "content": "evil code"
+                }),
+                &ctx,
+            )
+            .await;
+        assert!(result.is_err(), "write outside project should be rejected");
+    }
+
+    #[tokio::test]
+    async fn replace_content_outside_project_rejected() {
+        let (_dir, ctx) = project_ctx().await;
+        let outside = tempdir().unwrap();
+        let target = outside.path().join("victim.txt");
+        std::fs::write(&target, "original").unwrap();
+
+        let result = ReplaceContent
+            .call(
+                json!({
+                    "path": target.to_str().unwrap(),
+                    "old": "original",
+                    "new": "hacked"
+                }),
+                &ctx,
+            )
+            .await;
+        assert!(
+            result.is_err(),
+            "replace outside project should be rejected"
+        );
+        // Verify file was not modified
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "original");
+    }
+
+    #[tokio::test]
+    async fn create_file_within_project_works() {
+        let (dir, ctx) = project_ctx().await;
+        let result = CreateTextFile
+            .call(
+                json!({
+                    "path": dir.path().join("new_file.txt").to_str().unwrap(),
+                    "content": "hello"
+                }),
+                &ctx,
+            )
+            .await;
+        assert!(result.is_ok());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("new_file.txt")).unwrap(),
+            "hello"
+        );
+    }
+
+    #[tokio::test]
+    async fn write_requires_active_project() {
+        let ctx = test_ctx().await;
+        let result = CreateTextFile
+            .call(json!({ "path": "/tmp/test.txt", "content": "hi" }), &ctx)
+            .await;
+        assert!(result.is_err(), "write without active project should error");
+    }
+
+    // ── ReDoS Prevention ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn search_for_pattern_huge_regex_rejected() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("file.txt"), "hello").unwrap();
+
+        // Build a regex that exceeds the 1MB compiled NFA size limit
+        let huge_pattern = format!("({})", "a?".repeat(100_000));
+        let result = SearchForPattern
+            .call(
+                json!({
+                    "pattern": huge_pattern,
+                    "path": dir.path().to_str().unwrap()
+                }),
+                &ctx,
+            )
+            .await;
+        assert!(
+            result.is_err(),
+            "huge regex should be rejected by size limit"
+        );
+    }
+
+    #[tokio::test]
+    async fn replace_content_huge_regex_rejected() {
+        let (dir, ctx) = project_ctx().await;
+        let file = dir.path().join("test.txt");
+        std::fs::write(&file, "hello").unwrap();
+
+        let huge_pattern = format!("({})", "a?".repeat(100_000));
+        let result = ReplaceContent
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "old": huge_pattern,
+                    "new": "x",
+                    "is_regex": true
+                }),
+                &ctx,
+            )
+            .await;
+        assert!(result.is_err(), "huge regex in replace should be rejected");
     }
 }

@@ -14,14 +14,9 @@ async fn resolve_path(input: &Value, ctx: &ToolContext) -> anyhow::Result<PathBu
     let path_str = input["path"]
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("missing 'path' parameter"))?;
-    let path = PathBuf::from(path_str);
-    if path.is_absolute() {
-        Ok(path)
-    } else {
-        // Try to resolve relative to project root
-        let root = ctx.agent.require_project_root().await?;
-        Ok(root.join(path))
-    }
+    let project_root = ctx.agent.project_root().await;
+    let security = ctx.agent.security_config().await;
+    crate::util::path_security::validate_read_path(path_str, project_root.as_deref(), &security)
 }
 
 #[async_trait::async_trait]
