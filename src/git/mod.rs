@@ -20,11 +20,7 @@ pub fn head_short_sha(repo: &git2::Repository) -> Result<String> {
 }
 
 /// List the last `limit` commits for a file path.
-pub fn file_log(
-    repo: &git2::Repository,
-    file: &Path,
-    limit: usize,
-) -> Result<Vec<CommitSummary>> {
+pub fn file_log(repo: &git2::Repository, file: &Path, limit: usize) -> Result<Vec<CommitSummary>> {
     let mut revwalk = repo.revwalk()?;
     revwalk.push_head()?;
     revwalk.set_sorting(git2::Sort::TIME)?;
@@ -38,10 +34,7 @@ pub fn file_log(
         if commit_touches_file(repo, &commit, file)? {
             commits.push(CommitSummary {
                 sha: format!("{:.8}", commit.id()),
-                message: commit
-                    .summary()
-                    .unwrap_or("<no message>")
-                    .to_string(),
+                message: commit.summary().unwrap_or("<no message>").to_string(),
                 author: commit.author().name().unwrap_or("unknown").to_string(),
                 timestamp: commit.time().seconds(),
             });
@@ -71,16 +64,8 @@ fn commit_touches_file(
     let diff = repo.diff_tree_to_tree(Some(&parent_tree), Some(&tree), None)?;
 
     for delta in diff.deltas() {
-        let touches = delta
-            .new_file()
-            .path()
-            .map(|p| p == file)
-            .unwrap_or(false)
-            || delta
-                .old_file()
-                .path()
-                .map(|p| p == file)
-                .unwrap_or(false);
+        let touches = delta.new_file().path().map(|p| p == file).unwrap_or(false)
+            || delta.old_file().path().map(|p| p == file).unwrap_or(false);
         if touches {
             return Ok(true);
         }
@@ -118,10 +103,7 @@ pub fn diff_workdir(
         opts.pathspec(f.to_string_lossy().as_ref());
     }
 
-    let diff = repo.diff_tree_to_workdir_with_index(
-        tree.as_ref(),
-        Some(&mut opts),
-    )?;
+    let diff = repo.diff_tree_to_workdir_with_index(tree.as_ref(), Some(&mut opts))?;
 
     let mut output = String::new();
     diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {

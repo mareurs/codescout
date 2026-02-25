@@ -12,7 +12,11 @@ pub fn truncate(s: &str, max_chars: usize) -> String {
 
 /// Count lines in a string (1-indexed: an empty string has 1 line).
 pub fn count_lines(s: &str) -> usize {
-    if s.is_empty() { 1 } else { s.lines().count() }
+    if s.is_empty() {
+        1
+    } else {
+        s.lines().count()
+    }
 }
 
 /// Extract a line range from text (1-indexed, inclusive). Returns empty string

@@ -46,8 +46,7 @@ impl RemoteEmbedder {
     }
 
     pub fn ollama(model: &str) -> Result<Self> {
-        let host = std::env::var("OLLAMA_HOST")
-            .unwrap_or_else(|_| "http://localhost:11434".into());
+        let host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".into());
         Ok(Self {
             client: Client::new(),
             endpoint: format!("{}/v1/embeddings", host.trim_end_matches('/')),
@@ -80,7 +79,10 @@ impl Embedder for RemoteEmbedder {
             .client
             .post(&self.endpoint)
             .header("Content-Type", "application/json")
-            .json(&EmbedRequest { model: &self.model, input: texts });
+            .json(&EmbedRequest {
+                model: &self.model,
+                input: texts,
+            });
 
         if let Some(key) = &self.api_key {
             req = req.bearer_auth(key);

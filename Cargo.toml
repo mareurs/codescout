@@ -57,10 +57,14 @@ hex = "0.4"
 lsp-types = "0.97"
 
 # AST parsing (tree-sitter)
-tree-sitter = "0.23"
+tree-sitter = "0.25"
 
 # HTTP client (remote embeddings — OpenAI-compatible APIs, Ollama, etc.)
 reqwest = { version = "0.12", features = ["json"], optional = true }
+tree-sitter-rust = "0.24.0"
+tree-sitter-python = "0.25.0"
+tree-sitter-go = "0.25.0"
+tree-sitter-typescript = "0.23.2"
 
 [features]
 default = ["remote-embed"]

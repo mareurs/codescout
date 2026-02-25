@@ -5,9 +5,9 @@
 
 ## Current State
 
-- 35 source files, 9 modules, **114 tests passing**
-- **27 tools working** (was 4): file (6), workflow (3), memory (4), git (3), config (2), semantic (3), symbol (7, LSP-backed)
-- 2 tools stubbed: AST (list_functions, extract_docstrings — need tree-sitter)
+- 35 source files, 9 modules, **131 tests passing**
+- **29 tools working** (was 4): file (6), workflow (3), memory (4), git (3), config (2), semantic (3), symbol (7, LSP-backed), AST (2, tree-sitter)
+- 0 tools stubbed — all planned tools implemented
 - LSP client: transport, lifecycle, JSON-RPC, document symbols, references, definition, rename
 - MCP server working over stdio (rmcp)
 - Core libraries: chunker, embedding index, memory store, git blame/log/diff, config, language detection
@@ -258,26 +258,28 @@ Offline symbol extraction as LSP fallback.
 ### Sprint 4.1 — Grammar Loading + Symbol Extraction
 
 **Tasks:**
-- [ ] Add grammar crates: `tree-sitter-rust`, `tree-sitter-python`, `tree-sitter-typescript`, `tree-sitter-go`
-- [ ] Implement `extract_symbols_from_source()` in `src/ast/parser.rs`
-- [ ] Extract: functions, classes, methods, structs, interfaces with name + line range
-- [ ] Add `parser: Arc<ParserPool>` to `ToolContext` (optional, lazy-init)
-- [ ] Tests: parse Rust, Python, TypeScript, Go files; verify symbol extraction
+- [x] Add grammar crates: `tree-sitter-rust`, `tree-sitter-python`, `tree-sitter-typescript`, `tree-sitter-go`
+- [x] Implement `extract_symbols_from_source()` in `src/ast/parser.rs`
+- [x] Extract: functions, classes, methods, structs, interfaces with name + line range
+- [x] Implement `extract_docstrings_from_source()` for docstring/comment extraction
+- [x] Tests: parse Rust, Python, TypeScript, Go files; verify symbol extraction
 
-**Files:** `src/ast/parser.rs`, `Cargo.toml`, `src/tools/mod.rs`
+**Files:** `src/ast/parser.rs`, `src/ast/mod.rs`, `Cargo.toml`
 **Acceptance:** can extract symbols from source without any LSP running
+**Done:** combined with Sprint 4.2 — 10 parser tests + 7 tool tests
 
 ### Sprint 4.2 — Wire to Tools + Fallback
 
 **Tasks:**
-- [ ] Wire `list_functions` tool → tree-sitter symbol extraction
-- [ ] Wire `extract_docstrings` tool → tree-sitter comment/docstring nodes
+- [x] Wire `list_functions` tool → tree-sitter symbol extraction
+- [x] Wire `extract_docstrings` tool → tree-sitter comment/docstring nodes
+- [x] Tests: tool-level tests with temp files (Rust, Python, unsupported)
 - [ ] Implement fallback logic in symbol tools: try LSP → fall back to tree-sitter
 - [ ] Update `get_symbols_overview` to use tree-sitter when LSP unavailable
-- [ ] Tests: verify fallback behavior (simulate LSP failure)
 
-**Files:** `src/tools/ast.rs`, `src/tools/symbol.rs`
-**Acceptance:** tools work with or without LSP; graceful degradation
+**Files:** `src/tools/ast.rs`, `src/ast/parser.rs`
+**Acceptance:** AST tools work offline; fallback deferred to Phase 5
+**Note:** ParserPool deferred — tree-sitter Parser is cheap to create per call. Fallback logic (LSP → tree-sitter) deferred to polish phase.
 
 ---
 

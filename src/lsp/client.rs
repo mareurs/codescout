@@ -138,7 +138,11 @@ impl LspClient {
                         if let Some(id) = msg.get("id").and_then(|v| v.as_i64()) {
                             if msg.get("method").is_some() {
                                 // Server-to-client request — log and ignore for now
-                                tracing::debug!("LSP server request (id={}): {}", id, msg["method"]);
+                                tracing::debug!(
+                                    "LSP server request (id={}): {}",
+                                    id,
+                                    msg["method"]
+                                );
                             } else {
                                 // Response to our request
                                 if let Some(sender) = pending_clone.lock().unwrap().remove(&id) {
@@ -357,7 +361,11 @@ impl LspClient {
     ///
     /// Returns the hierarchical `DocumentSymbol[]` response parsed into our
     /// `SymbolInfo` tree. Sends `didOpen` first if the file hasn't been opened.
-    pub async fn document_symbols(&self, path: &Path, language_id: &str) -> Result<Vec<super::SymbolInfo>> {
+    pub async fn document_symbols(
+        &self,
+        path: &Path,
+        language_id: &str,
+    ) -> Result<Vec<super::SymbolInfo>> {
         // Ensure the file is open in the server
         self.did_open(path, language_id).await?;
 
@@ -381,7 +389,9 @@ impl LspClient {
         let file_path = path.to_path_buf();
 
         // Try hierarchical first
-        if let Ok(symbols) = serde_json::from_value::<Vec<lsp_types::DocumentSymbol>>(result.clone()) {
+        if let Ok(symbols) =
+            serde_json::from_value::<Vec<lsp_types::DocumentSymbol>>(result.clone())
+        {
             return Ok(convert_document_symbols(&symbols, &file_path, ""));
         }
 
@@ -418,7 +428,10 @@ impl LspClient {
         let params = lsp_types::ReferenceParams {
             text_document_position: lsp_types::TextDocumentPositionParams {
                 text_document: lsp_types::TextDocumentIdentifier { uri },
-                position: lsp_types::Position { line, character: col },
+                position: lsp_types::Position {
+                    line,
+                    character: col,
+                },
             },
             context: lsp_types::ReferenceContext {
                 include_declaration: true,
@@ -451,7 +464,10 @@ impl LspClient {
         let params = lsp_types::GotoDefinitionParams {
             text_document_position_params: lsp_types::TextDocumentPositionParams {
                 text_document: lsp_types::TextDocumentIdentifier { uri },
-                position: lsp_types::Position { line, character: col },
+                position: lsp_types::Position {
+                    line,
+                    character: col,
+                },
             },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
@@ -499,7 +515,10 @@ impl LspClient {
         let params = lsp_types::RenameParams {
             text_document_position: lsp_types::TextDocumentPositionParams {
                 text_document: lsp_types::TextDocumentIdentifier { uri },
-                position: lsp_types::Position { line, character: col },
+                position: lsp_types::Position {
+                    line,
+                    character: col,
+                },
             },
             new_name: new_name.to_string(),
             work_done_progress_params: Default::default(),

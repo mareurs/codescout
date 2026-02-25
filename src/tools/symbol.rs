@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use anyhow::anyhow;
 use serde_json::{json, Value};
 
+use super::{Tool, ToolContext};
 use crate::ast;
 use crate::lsp::SymbolInfo;
-use super::{Tool, ToolContext};
 
 /// Resolve a relative path against the project root.
 async fn resolve_path(ctx: &ToolContext, relative_path: &str) -> anyhow::Result<PathBuf> {
@@ -32,7 +32,12 @@ async fn get_lsp_client(
 }
 
 /// Convert a `SymbolInfo` tree to JSON with optional body inclusion.
-fn symbol_to_json(sym: &SymbolInfo, include_body: bool, source: Option<&str>, depth: usize) -> Value {
+fn symbol_to_json(
+    sym: &SymbolInfo,
+    include_body: bool,
+    source: Option<&str>,
+    depth: usize,
+) -> Value {
     let mut obj = json!({
         "name": sym.name,
         "name_path": sym.name_path,
@@ -54,7 +59,9 @@ fn symbol_to_json(sym: &SymbolInfo, include_body: bool, source: Option<&str>, de
     }
 
     if depth > 0 && !sym.children.is_empty() {
-        obj["children"] = json!(sym.children.iter()
+        obj["children"] = json!(sym
+            .children
+            .iter()
             .map(|c| symbol_to_json(c, include_body, source, depth - 1))
             .collect::<Vec<_>>());
     }
@@ -68,7 +75,9 @@ pub struct GetSymbolsOverview;
 
 #[async_trait::async_trait]
 impl Tool for GetSymbolsOverview {
-    fn name(&self) -> &str { "get_symbols_overview" }
+    fn name(&self) -> &str {
+        "get_symbols_overview"
+    }
     fn description(&self) -> &str {
         "Return a tree of symbols (functions, classes, methods, etc.) in a file or directory. \
          Uses LSP for accurate results."
@@ -92,25 +101,31 @@ impl Tool for GetSymbolsOverview {
             let (client, lang) = get_lsp_client(ctx, &full_path).await?;
             let symbols = client.document_symbols(&full_path, &lang).await?;
             let source = std::fs::read_to_string(&full_path).ok();
-            let json_symbols: Vec<Value> = symbols.iter()
+            let json_symbols: Vec<Value> = symbols
+                .iter()
                 .map(|s| symbol_to_json(s, false, source.as_deref(), depth))
                 .collect();
             Ok(json!({ "file": rel_path, "symbols": json_symbols }))
         } else if full_path.is_dir() {
             // Aggregate symbols from all files in directory
             let mut result = vec![];
-            let walker = ignore::WalkBuilder::new(&full_path).max_depth(Some(1)).build();
+            let walker = ignore::WalkBuilder::new(&full_path)
+                .max_depth(Some(1))
+                .build();
             for entry in walker.flatten() {
                 if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                     continue;
                 }
                 let path = entry.path();
-                let Some(lang) = ast::detect_language(path) else { continue };
+                let Some(lang) = ast::detect_language(path) else {
+                    continue;
+                };
                 let root = ctx.agent.require_project_root().await?;
                 if let Ok(client) = ctx.lsp.get_or_start(lang, &root).await {
                     if let Ok(symbols) = client.document_symbols(path, lang).await {
                         let rel = path.strip_prefix(&root).unwrap_or(path);
-                        let json_symbols: Vec<Value> = symbols.iter()
+                        let json_symbols: Vec<Value> = symbols
+                            .iter()
                             .map(|s| symbol_to_json(s, false, None, depth.saturating_sub(1)))
                             .collect();
                         result.push(json!({
@@ -122,7 +137,10 @@ impl Tool for GetSymbolsOverview {
             }
             Ok(json!({ "directory": rel_path, "files": result }))
         } else {
-            Err(anyhow!("path is neither file nor directory: {}", full_path.display()))
+            Err(anyhow!(
+                "path is neither file nor directory: {}",
+                full_path.display()
+            ))
         }
     }
 }
@@ -133,7 +151,9 @@ pub struct FindSymbol;
 
 #[async_trait::async_trait]
 impl Tool for FindSymbol {
-    fn name(&self) -> &str { "find_symbol" }
+    fn name(&self) -> &str {
+        "find_symbol"
+    }
     fn description(&self) -> &str {
         "Find symbols by name pattern across the project. Returns matching symbols with location."
     }
@@ -150,7 +170,8 @@ impl Tool for FindSymbol {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let pattern = input["pattern"].as_str()
+        let pattern = input["pattern"]
+            .as_str()
             .ok_or_else(|| anyhow!("missing 'pattern' parameter"))?;
         let include_body = input["include_body"].as_bool().unwrap_or(false);
         let depth = input["depth"].as_u64().unwrap_or(0) as usize;
@@ -178,9 +199,15 @@ impl Tool for FindSymbol {
         let mut matches = vec![];
 
         for file_path in &files {
-            let Some(lang) = ast::detect_language(file_path) else { continue };
-            let Ok(client) = ctx.lsp.get_or_start(lang, &root).await else { continue };
-            let Ok(symbols) = client.document_symbols(file_path, lang).await else { continue };
+            let Some(lang) = ast::detect_language(file_path) else {
+                continue;
+            };
+            let Ok(client) = ctx.lsp.get_or_start(lang, &root).await else {
+                continue;
+            };
+            let Ok(symbols) = client.document_symbols(file_path, lang).await else {
+                continue;
+            };
 
             let source = if include_body {
                 std::fs::read_to_string(file_path).ok()
@@ -204,7 +231,14 @@ impl Tool for FindSymbol {
                 }
             }
 
-            collect_matching(&symbols, &pattern_lower, include_body, source.as_deref(), depth, &mut matches);
+            collect_matching(
+                &symbols,
+                &pattern_lower,
+                include_body,
+                source.as_deref(),
+                depth,
+                &mut matches,
+            );
         }
 
         Ok(json!({ "symbols": matches, "total": matches.len() }))
@@ -217,7 +251,9 @@ pub struct FindReferencingSymbols;
 
 #[async_trait::async_trait]
 impl Tool for FindReferencingSymbols {
-    fn name(&self) -> &str { "find_referencing_symbols" }
+    fn name(&self) -> &str {
+        "find_referencing_symbols"
+    }
     fn description(&self) -> &str {
         "Find all locations that reference the given symbol. \
          Requires the symbol's file and name_path to locate it."
@@ -233,9 +269,11 @@ impl Tool for FindReferencingSymbols {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let name_path = input["name_path"].as_str()
+        let name_path = input["name_path"]
+            .as_str()
             .ok_or_else(|| anyhow!("missing 'name_path'"))?;
-        let rel_path = input["relative_path"].as_str()
+        let rel_path = input["relative_path"]
+            .as_str()
             .ok_or_else(|| anyhow!("missing 'relative_path'"))?;
 
         let full_path = resolve_path(ctx, rel_path).await?;
@@ -247,32 +285,37 @@ impl Tool for FindReferencingSymbols {
             .ok_or_else(|| anyhow!("symbol not found: {}", name_path))?;
 
         // Get references at the symbol's position
-        let refs = client.references(&full_path, sym.start_line, sym.start_col, &lang).await?;
+        let refs = client
+            .references(&full_path, sym.start_line, sym.start_col, &lang)
+            .await?;
 
         let root = ctx.agent.require_project_root().await?;
-        let locations: Vec<Value> = refs.iter().map(|loc| {
-            let file = uri_to_path(loc.uri.as_str())
-                .and_then(|p| p.strip_prefix(&root).ok().map(|r| r.to_path_buf()))
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| loc.uri.as_str().to_string());
+        let locations: Vec<Value> = refs
+            .iter()
+            .map(|loc| {
+                let file = uri_to_path(loc.uri.as_str())
+                    .and_then(|p| p.strip_prefix(&root).ok().map(|r| r.to_path_buf()))
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| loc.uri.as_str().to_string());
 
-            // Read context lines around the reference
-            let context = uri_to_path(loc.uri.as_str())
-                .and_then(|p| std::fs::read_to_string(p).ok())
-                .map(|src| {
-                    let lines: Vec<&str> = src.lines().collect();
-                    let line = loc.range.start.line as usize;
-                    lines.get(line).unwrap_or(&"").to_string()
+                // Read context lines around the reference
+                let context = uri_to_path(loc.uri.as_str())
+                    .and_then(|p| std::fs::read_to_string(p).ok())
+                    .map(|src| {
+                        let lines: Vec<&str> = src.lines().collect();
+                        let line = loc.range.start.line as usize;
+                        lines.get(line).unwrap_or(&"").to_string()
+                    })
+                    .unwrap_or_default();
+
+                json!({
+                    "file": file,
+                    "line": loc.range.start.line + 1,
+                    "column": loc.range.start.character,
+                    "context": context,
                 })
-                .unwrap_or_default();
-
-            json!({
-                "file": file,
-                "line": loc.range.start.line + 1,
-                "column": loc.range.start.character,
-                "context": context,
             })
-        }).collect();
+            .collect();
 
         Ok(json!({ "references": locations, "total": locations.len() }))
     }
@@ -284,7 +327,9 @@ pub struct ReplaceSymbolBody;
 
 #[async_trait::async_trait]
 impl Tool for ReplaceSymbolBody {
-    fn name(&self) -> &str { "replace_symbol_body" }
+    fn name(&self) -> &str {
+        "replace_symbol_body"
+    }
     fn description(&self) -> &str {
         "Replace the entire body of a named symbol with new source code."
     }
@@ -300,11 +345,14 @@ impl Tool for ReplaceSymbolBody {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let name_path = input["name_path"].as_str()
+        let name_path = input["name_path"]
+            .as_str()
             .ok_or_else(|| anyhow!("missing 'name_path'"))?;
-        let rel_path = input["relative_path"].as_str()
+        let rel_path = input["relative_path"]
+            .as_str()
             .ok_or_else(|| anyhow!("missing 'relative_path'"))?;
-        let new_body = input["new_body"].as_str()
+        let new_body = input["new_body"]
+            .as_str()
             .ok_or_else(|| anyhow!("missing 'new_body'"))?;
 
         let full_path = resolve_path(ctx, rel_path).await?;
@@ -336,8 +384,12 @@ pub struct InsertBeforeSymbol;
 
 #[async_trait::async_trait]
 impl Tool for InsertBeforeSymbol {
-    fn name(&self) -> &str { "insert_before_symbol" }
-    fn description(&self) -> &str { "Insert code immediately before a named symbol." }
+    fn name(&self) -> &str {
+        "insert_before_symbol"
+    }
+    fn description(&self) -> &str {
+        "Insert code immediately before a named symbol."
+    }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -350,11 +402,14 @@ impl Tool for InsertBeforeSymbol {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let name_path = input["name_path"].as_str()
+        let name_path = input["name_path"]
+            .as_str()
             .ok_or_else(|| anyhow!("missing 'name_path'"))?;
-        let rel_path = input["relative_path"].as_str()
+        let rel_path = input["relative_path"]
+            .as_str()
             .ok_or_else(|| anyhow!("missing 'relative_path'"))?;
-        let code = input["code"].as_str()
+        let code = input["code"]
+            .as_str()
             .ok_or_else(|| anyhow!("missing 'code'"))?;
 
         let full_path = resolve_path(ctx, rel_path).await?;
@@ -382,8 +437,12 @@ pub struct InsertAfterSymbol;
 
 #[async_trait::async_trait]
 impl Tool for InsertAfterSymbol {
-    fn name(&self) -> &str { "insert_after_symbol" }
-    fn description(&self) -> &str { "Insert code immediately after a named symbol." }
+    fn name(&self) -> &str {
+        "insert_after_symbol"
+    }
+    fn description(&self) -> &str {
+        "Insert code immediately after a named symbol."
+    }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -396,11 +455,14 @@ impl Tool for InsertAfterSymbol {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let name_path = input["name_path"].as_str()
+        let name_path = input["name_path"]
+            .as_str()
             .ok_or_else(|| anyhow!("missing 'name_path'"))?;
-        let rel_path = input["relative_path"].as_str()
+        let rel_path = input["relative_path"]
+            .as_str()
             .ok_or_else(|| anyhow!("missing 'relative_path'"))?;
-        let code = input["code"].as_str()
+        let code = input["code"]
+            .as_str()
             .ok_or_else(|| anyhow!("missing 'code'"))?;
 
         let full_path = resolve_path(ctx, rel_path).await?;
@@ -430,8 +492,12 @@ pub struct RenameSymbol;
 
 #[async_trait::async_trait]
 impl Tool for RenameSymbol {
-    fn name(&self) -> &str { "rename_symbol" }
-    fn description(&self) -> &str { "Rename a symbol across the entire codebase using LSP." }
+    fn name(&self) -> &str {
+        "rename_symbol"
+    }
+    fn description(&self) -> &str {
+        "Rename a symbol across the entire codebase using LSP."
+    }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -444,11 +510,14 @@ impl Tool for RenameSymbol {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let name_path = input["name_path"].as_str()
+        let name_path = input["name_path"]
+            .as_str()
             .ok_or_else(|| anyhow!("missing 'name_path'"))?;
-        let rel_path = input["relative_path"].as_str()
+        let rel_path = input["relative_path"]
+            .as_str()
             .ok_or_else(|| anyhow!("missing 'relative_path'"))?;
-        let new_name = input["new_name"].as_str()
+        let new_name = input["new_name"]
+            .as_str()
             .ok_or_else(|| anyhow!("missing 'new_name'"))?;
 
         let full_path = resolve_path(ctx, rel_path).await?;
@@ -460,7 +529,9 @@ impl Tool for RenameSymbol {
             .ok_or_else(|| anyhow!("symbol not found: {}", name_path))?;
 
         // Request rename from LSP
-        let edit = client.rename(&full_path, sym.start_line, sym.start_col, new_name, &lang).await?;
+        let edit = client
+            .rename(&full_path, sym.start_line, sym.start_col, new_name, &lang)
+            .await?;
 
         // Apply workspace edit
         let mut files_changed = 0;
@@ -468,7 +539,9 @@ impl Tool for RenameSymbol {
 
         if let Some(changes) = &edit.changes {
             for (uri, edits) in changes {
-                let Some(path) = uri_to_path(uri.as_str()) else { continue };
+                let Some(path) = uri_to_path(uri.as_str()) else {
+                    continue;
+                };
                 let content = std::fs::read_to_string(&path)?;
                 let new_content = apply_text_edits(&content, edits);
                 std::fs::write(&path, new_content)?;
@@ -483,12 +556,18 @@ impl Tool for RenameSymbol {
                     // Convert TextDocumentEdits to DocumentChangeOperations for uniform handling
                     // Just process them directly instead
                     for text_edit in edits {
-                        let Some(path) = uri_to_path(text_edit.text_document.uri.as_str()) else { continue };
+                        let Some(path) = uri_to_path(text_edit.text_document.uri.as_str()) else {
+                            continue;
+                        };
                         let content = std::fs::read_to_string(&path)?;
-                        let plain_edits: Vec<lsp_types::TextEdit> = text_edit.edits.iter().map(|e| match e {
-                            lsp_types::OneOf::Left(te) => te.clone(),
-                            lsp_types::OneOf::Right(ate) => ate.text_edit.clone(),
-                        }).collect();
+                        let plain_edits: Vec<lsp_types::TextEdit> = text_edit
+                            .edits
+                            .iter()
+                            .map(|e| match e {
+                                lsp_types::OneOf::Left(te) => te.clone(),
+                                lsp_types::OneOf::Right(ate) => ate.text_edit.clone(),
+                            })
+                            .collect();
                         let new_content = apply_text_edits(&content, &plain_edits);
                         std::fs::write(&path, new_content)?;
                         files_changed += 1;
@@ -500,12 +579,18 @@ impl Tool for RenameSymbol {
             };
             for change in operations {
                 if let lsp_types::DocumentChangeOperation::Edit(text_edit) = change {
-                    let Some(path) = uri_to_path(text_edit.text_document.uri.as_str()) else { continue };
+                    let Some(path) = uri_to_path(text_edit.text_document.uri.as_str()) else {
+                        continue;
+                    };
                     let content = std::fs::read_to_string(&path)?;
-                    let plain_edits: Vec<lsp_types::TextEdit> = text_edit.edits.iter().map(|e| match e {
-                        lsp_types::OneOf::Left(te) => te.clone(),
-                        lsp_types::OneOf::Right(ate) => ate.text_edit.clone(),
-                    }).collect();
+                    let plain_edits: Vec<lsp_types::TextEdit> = text_edit
+                        .edits
+                        .iter()
+                        .map(|e| match e {
+                            lsp_types::OneOf::Left(te) => te.clone(),
+                            lsp_types::OneOf::Right(ate) => ate.text_edit.clone(),
+                        })
+                        .collect();
                     let new_content = apply_text_edits(&content, &plain_edits);
                     std::fs::write(&path, new_content)?;
                     files_changed += 1;
@@ -527,7 +612,10 @@ impl Tool for RenameSymbol {
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /// Walk the symbol tree to find a symbol by name_path (e.g. "MyStruct/my_method").
-fn find_symbol_by_name_path<'a>(symbols: &'a [SymbolInfo], name_path: &str) -> Option<&'a SymbolInfo> {
+fn find_symbol_by_name_path<'a>(
+    symbols: &'a [SymbolInfo],
+    name_path: &str,
+) -> Option<&'a SymbolInfo> {
     for sym in symbols {
         if sym.name_path == name_path || sym.name == name_path {
             return Some(sym);
@@ -557,7 +645,10 @@ fn apply_text_edits(content: &str, edits: &[lsp_types::TextEdit]) -> String {
     // Sort edits bottom-to-top so earlier edits don't shift later positions
     let mut sorted: Vec<&lsp_types::TextEdit> = edits.iter().collect();
     sorted.sort_by(|a, b| {
-        b.range.start.line.cmp(&a.range.start.line)
+        b.range
+            .start
+            .line
+            .cmp(&a.range.start.line)
             .then(b.range.start.character.cmp(&a.range.start.character))
     });
 
@@ -602,14 +693,16 @@ fn apply_text_edits(content: &str, edits: &[lsp_types::TextEdit]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::agent::Agent;
     use crate::lsp::LspManager;
     use crate::tools::ToolContext;
     use serde_json::json;
+    use std::sync::Arc;
     use tempfile::tempdir;
 
-    fn lsp() -> Arc<LspManager> { Arc::new(LspManager::new()) }
+    fn lsp() -> Arc<LspManager> {
+        Arc::new(LspManager::new())
+    }
 
     /// Create a test Cargo project and return the context.
     async fn rust_project_ctx() -> Option<(tempfile::TempDir, ToolContext)> {
@@ -630,7 +723,8 @@ name = "test-project"
 version = "0.1.0"
 edition = "2021"
 "#,
-        ).unwrap();
+        )
+        .unwrap();
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
         std::fs::create_dir_all(dir.path().join(".code-explorer")).unwrap();
         std::fs::write(
@@ -654,7 +748,8 @@ impl Point {
     }
 }
 "#,
-        ).unwrap();
+        )
+        .unwrap();
 
         let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
         Some((dir, ToolContext { agent, lsp: lsp() }))
@@ -667,20 +762,35 @@ impl Point {
             return;
         };
 
-        let result = GetSymbolsOverview.call(json!({
-            "relative_path": "src/main.rs",
-            "depth": 1
-        }), &ctx).await.unwrap();
+        let result = GetSymbolsOverview
+            .call(
+                json!({
+                    "relative_path": "src/main.rs",
+                    "depth": 1
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
 
         let symbols = result["symbols"].as_array().unwrap();
         assert!(!symbols.is_empty(), "should find at least one symbol");
 
         // Should find main, add, Point
-        let names: Vec<&str> = symbols.iter()
+        let names: Vec<&str> = symbols
+            .iter()
             .map(|s| s["name"].as_str().unwrap())
             .collect();
-        assert!(names.contains(&"main"), "should find main function, got: {:?}", names);
-        assert!(names.contains(&"add"), "should find add function, got: {:?}", names);
+        assert!(
+            names.contains(&"main"),
+            "should find main function, got: {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"add"),
+            "should find add function, got: {:?}",
+            names
+        );
 
         ctx.lsp.shutdown_all().await;
     }
@@ -692,10 +802,16 @@ impl Point {
             return;
         };
 
-        let result = FindSymbol.call(json!({
-            "pattern": "add",
-            "relative_path": "src/main.rs"
-        }), &ctx).await.unwrap();
+        let result = FindSymbol
+            .call(
+                json!({
+                    "pattern": "add",
+                    "relative_path": "src/main.rs"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
 
         let symbols = result["symbols"].as_array().unwrap();
         assert!(!symbols.is_empty(), "should find 'add' symbol");
@@ -706,10 +822,22 @@ impl Point {
 
     #[tokio::test]
     async fn tools_error_without_project() {
-        let ctx = ToolContext { agent: Agent::new(None).await.unwrap(), lsp: lsp() };
-        assert!(GetSymbolsOverview.call(json!({"relative_path": "x"}), &ctx).await.is_err());
-        assert!(FindSymbol.call(json!({"pattern": "x"}), &ctx).await.is_err());
-        assert!(FindReferencingSymbols.call(json!({"name_path": "x", "relative_path": "y"}), &ctx).await.is_err());
+        let ctx = ToolContext {
+            agent: Agent::new(None).await.unwrap(),
+            lsp: lsp(),
+        };
+        assert!(GetSymbolsOverview
+            .call(json!({"relative_path": "x"}), &ctx)
+            .await
+            .is_err());
+        assert!(FindSymbol
+            .call(json!({"pattern": "x"}), &ctx)
+            .await
+            .is_err());
+        assert!(FindReferencingSymbols
+            .call(json!({"name_path": "x", "relative_path": "y"}), &ctx)
+            .await
+            .is_err());
     }
 
     #[test]
@@ -717,8 +845,14 @@ impl Point {
         let content = "hello world\nfoo bar\nbaz\n";
         let edits = vec![lsp_types::TextEdit {
             range: lsp_types::Range {
-                start: lsp_types::Position { line: 0, character: 6 },
-                end: lsp_types::Position { line: 0, character: 11 },
+                start: lsp_types::Position {
+                    line: 0,
+                    character: 6,
+                },
+                end: lsp_types::Position {
+                    line: 0,
+                    character: 11,
+                },
             },
             new_text: "rust".to_string(),
         }];
@@ -739,13 +873,17 @@ impl Point {
             name_path: "Foo".into(),
             kind: crate::lsp::SymbolKind::Struct,
             file: PathBuf::from("test.rs"),
-            start_line: 0, end_line: 5, start_col: 0,
+            start_line: 0,
+            end_line: 5,
+            start_col: 0,
             children: vec![SymbolInfo {
                 name: "bar".into(),
                 name_path: "Foo/bar".into(),
                 kind: crate::lsp::SymbolKind::Method,
                 file: PathBuf::from("test.rs"),
-                start_line: 2, end_line: 4, start_col: 4,
+                start_line: 2,
+                end_line: 4,
+                start_col: 4,
                 children: vec![],
             }],
         }];

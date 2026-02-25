@@ -52,11 +52,21 @@ impl Default for EmbeddingsSection {
     }
 }
 
-fn default_encoding() -> String { "utf-8".into() }
-fn default_timeout() -> u64 { 60 }
-fn default_embed_model() -> String { "local:jina-embeddings-v2-base-code".into() }
-fn default_chunk_size() -> usize { 4000 }
-fn default_chunk_overlap() -> usize { 400 }
+fn default_encoding() -> String {
+    "utf-8".into()
+}
+fn default_timeout() -> u64 {
+    60
+}
+fn default_embed_model() -> String {
+    "local:jina-embeddings-v2-base-code".into()
+}
+fn default_chunk_size() -> usize {
+    4000
+}
+fn default_chunk_overlap() -> usize {
+    400
+}
 fn default_ignored_patterns() -> Vec<String> {
     vec![
         ".git".into(),

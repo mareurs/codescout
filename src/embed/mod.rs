@@ -71,5 +71,8 @@ pub async fn create_embedder(model: &str) -> Result<Box<dyn Embedder>> {
         );
     }
 
-    anyhow::bail!("Unknown model prefix in '{}'. Use 'local:', 'openai:', or 'ollama:'.", model)
+    anyhow::bail!(
+        "Unknown model prefix in '{}'. Use 'local:', 'openai:', or 'ollama:'.",
+        model
+    )
 }

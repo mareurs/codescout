@@ -29,7 +29,11 @@ impl Agent {
         let active_project = if let Some(root) = project {
             let config = ProjectConfig::load_or_default(&root)?;
             let memory = MemoryStore::open(&root)?;
-            Some(ActiveProject { root, config, memory })
+            Some(ActiveProject {
+                root,
+                config,
+                memory,
+            })
         } else {
             None
         };
@@ -44,7 +48,11 @@ impl Agent {
         let config = ProjectConfig::load_or_default(&root)?;
         let memory = MemoryStore::open(&root)?;
         let mut inner = self.inner.write().await;
-        inner.active_project = Some(ActiveProject { root, config, memory });
+        inner.active_project = Some(ActiveProject {
+            root,
+            config,
+            memory,
+        });
         Ok(())
     }
 

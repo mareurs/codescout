@@ -81,7 +81,10 @@ mod tests {
     #[test]
     fn find_ancestor_returns_none_when_absent() {
         let dir = tempdir().unwrap();
-        assert_eq!(find_ancestor_with(dir.path(), "nonexistent-xyz-marker"), None);
+        assert_eq!(
+            find_ancestor_with(dir.path(), "nonexistent-xyz-marker"),
+            None
+        );
     }
 
     #[test]
@@ -99,7 +102,10 @@ mod tests {
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::create_dir(dir.path().join(".code-explorer")).unwrap();
         // .code-explorer takes priority (first in markers list)
-        assert_eq!(detect_project_root(dir.path()), Some(dir.path().to_path_buf()));
+        assert_eq!(
+            detect_project_root(dir.path()),
+            Some(dir.path().to_path_buf())
+        );
     }
 
     #[test]

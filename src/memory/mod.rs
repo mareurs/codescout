@@ -52,10 +52,7 @@ impl MemoryStore {
                 if let Some(ext) = entry.path().extension() {
                     if ext == "md" {
                         if let Ok(rel) = entry.path().strip_prefix(&self.memories_dir) {
-                            let topic = rel
-                                .with_extension("")
-                                .to_string_lossy()
-                                .replace('\\', "/");
+                            let topic = rel.with_extension("").to_string_lossy().replace('\\', "/");
                             topics.push(topic);
                         }
                     }
@@ -97,7 +94,10 @@ mod tests {
     fn write_and_read_roundtrip() {
         let (_dir, store) = make_store();
         store.write("my-topic", "hello memory").unwrap();
-        assert_eq!(store.read("my-topic").unwrap(), Some("hello memory".to_string()));
+        assert_eq!(
+            store.read("my-topic").unwrap(),
+            Some("hello memory".to_string())
+        );
     }
 
     #[test]
@@ -140,12 +140,17 @@ mod tests {
     #[test]
     fn nested_topic_roundtrip() {
         let (_dir, store) = make_store();
-        store.write("debugging/async-patterns", "avoid blocking").unwrap();
+        store
+            .write("debugging/async-patterns", "avoid blocking")
+            .unwrap();
         assert_eq!(
             store.read("debugging/async-patterns").unwrap(),
             Some("avoid blocking".to_string())
         );
-        assert!(store.list().unwrap().contains(&"debugging/async-patterns".to_string()));
+        assert!(store
+            .list()
+            .unwrap()
+            .contains(&"debugging/async-patterns".to_string()));
     }
 
     #[test]

@@ -1,8 +1,8 @@
 //! Workflow and onboarding tools.
 
+use super::{Tool, ToolContext};
 use anyhow::anyhow;
 use serde_json::{json, Value};
-use super::{Tool, ToolContext};
 
 pub struct Onboarding;
 pub struct CheckOnboardingPerformed;
@@ -10,7 +10,9 @@ pub struct ExecuteShellCommand;
 
 #[async_trait::async_trait]
 impl Tool for Onboarding {
-    fn name(&self) -> &str { "onboarding" }
+    fn name(&self) -> &str {
+        "onboarding"
+    }
     fn description(&self) -> &str {
         "Perform initial project discovery: detect languages, list top-level structure, \
          create config. Requires an active project."
@@ -40,7 +42,11 @@ impl Tool for Onboarding {
         if let Ok(entries) = std::fs::read_dir(&root) {
             for entry in entries.flatten() {
                 let name = entry.file_name().to_string_lossy().to_string();
-                let suffix = if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) { "/" } else { "" };
+                let suffix = if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    "/"
+                } else {
+                    ""
+                };
                 top_level.push(format!("{}{}", name, suffix));
             }
         }
@@ -51,7 +57,8 @@ impl Tool for Onboarding {
         let config_path = config_dir.join("project.toml");
         let created_config = if !config_path.exists() {
             std::fs::create_dir_all(&config_dir)?;
-            let name = root.file_name()
+            let name = root
+                .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("unnamed")
                 .to_string();
@@ -74,16 +81,18 @@ impl Tool for Onboarding {
         };
 
         // Store onboarding result in memory
-        ctx.agent.with_project(|p| {
-            let summary = format!(
-                "Languages: {}\nTop-level: {}\nConfig created: {}",
-                languages.iter().cloned().collect::<Vec<_>>().join(", "),
-                top_level.join(", "),
-                created_config
-            );
-            p.memory.write("onboarding", &summary)?;
-            Ok(())
-        }).await?;
+        ctx.agent
+            .with_project(|p| {
+                let summary = format!(
+                    "Languages: {}\nTop-level: {}\nConfig created: {}",
+                    languages.iter().cloned().collect::<Vec<_>>().join(", "),
+                    top_level.join(", "),
+                    created_config
+                );
+                p.memory.write("onboarding", &summary)?;
+                Ok(())
+            })
+            .await?;
 
         Ok(json!({
             "languages": languages.iter().cloned().collect::<Vec<_>>(),
@@ -95,7 +104,9 @@ impl Tool for Onboarding {
 
 #[async_trait::async_trait]
 impl Tool for CheckOnboardingPerformed {
-    fn name(&self) -> &str { "check_onboarding_performed" }
+    fn name(&self) -> &str {
+        "check_onboarding_performed"
+    }
     fn description(&self) -> &str {
         "Check whether project onboarding has been performed for the active project."
     }
@@ -103,21 +114,25 @@ impl Tool for CheckOnboardingPerformed {
         json!({ "type": "object", "properties": {} })
     }
     async fn call(&self, _input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        ctx.agent.with_project(|p| {
-            let has_config = p.root.join(".code-explorer").join("project.toml").exists();
-            let has_memory = p.memory.read("onboarding")?.is_some();
-            Ok(json!({
-                "onboarded": has_config && has_memory,
-                "has_config": has_config,
-                "has_onboarding_memory": has_memory,
-            }))
-        }).await
+        ctx.agent
+            .with_project(|p| {
+                let has_config = p.root.join(".code-explorer").join("project.toml").exists();
+                let has_memory = p.memory.read("onboarding")?.is_some();
+                Ok(json!({
+                    "onboarded": has_config && has_memory,
+                    "has_config": has_config,
+                    "has_onboarding_memory": has_memory,
+                }))
+            })
+            .await
     }
 }
 
 #[async_trait::async_trait]
 impl Tool for ExecuteShellCommand {
-    fn name(&self) -> &str { "execute_shell_command" }
+    fn name(&self) -> &str {
+        "execute_shell_command"
+    }
     fn description(&self) -> &str {
         "Run a shell command in the active project root and return stdout/stderr."
     }
@@ -151,12 +166,14 @@ impl Tool for ExecuteShellCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::agent::Agent;
     use crate::lsp::LspManager;
+    use std::sync::Arc;
     use tempfile::tempdir;
 
-    fn lsp() -> Arc<LspManager> { Arc::new(LspManager::new()) }
+    fn lsp() -> Arc<LspManager> {
+        Arc::new(LspManager::new())
+    }
 
     async fn project_ctx() -> (tempfile::TempDir, ToolContext) {
         let dir = tempdir().unwrap();
@@ -172,8 +189,12 @@ mod tests {
     async fn onboarding_detects_languages() {
         let (_dir, ctx) = project_ctx().await;
         let result = Onboarding.call(json!({}), &ctx).await.unwrap();
-        let langs: Vec<&str> = result["languages"].as_array().unwrap()
-            .iter().map(|v| v.as_str().unwrap()).collect();
+        let langs: Vec<&str> = result["languages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
         assert!(langs.contains(&"rust"));
         assert!(langs.contains(&"python"));
     }
@@ -195,14 +216,20 @@ mod tests {
         let _ = std::fs::remove_file(dir.path().join(".code-explorer/project.toml"));
 
         // Before onboarding
-        let result = CheckOnboardingPerformed.call(json!({}), &ctx).await.unwrap();
+        let result = CheckOnboardingPerformed
+            .call(json!({}), &ctx)
+            .await
+            .unwrap();
         assert_eq!(result["onboarded"], false);
 
         // Run onboarding
         Onboarding.call(json!({}), &ctx).await.unwrap();
 
         // After onboarding
-        let result = CheckOnboardingPerformed.call(json!({}), &ctx).await.unwrap();
+        let result = CheckOnboardingPerformed
+            .call(json!({}), &ctx)
+            .await
+            .unwrap();
         assert_eq!(result["onboarded"], true);
         assert_eq!(result["has_config"], true);
         assert_eq!(result["has_onboarding_memory"], true);
@@ -210,7 +237,10 @@ mod tests {
 
     #[tokio::test]
     async fn onboarding_errors_without_project() {
-        let ctx = ToolContext { agent: Agent::new(None).await.unwrap(), lsp: lsp() };
+        let ctx = ToolContext {
+            agent: Agent::new(None).await.unwrap(),
+            lsp: lsp(),
+        };
         assert!(Onboarding.call(json!({}), &ctx).await.is_err());
     }
 }

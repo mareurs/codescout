@@ -14,7 +14,10 @@ mod tools;
 mod util;
 
 #[derive(Parser)]
-#[command(name = "code-explorer", about = "High-performance coding agent MCP server")]
+#[command(
+    name = "code-explorer",
+    about = "High-performance coding agent MCP server"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -63,8 +66,16 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Start { project, transport, host, port } => {
-            tracing::info!("Starting code-explorer MCP server (transport={})", transport);
+        Commands::Start {
+            project,
+            transport,
+            host,
+            port,
+        } => {
+            tracing::info!(
+                "Starting code-explorer MCP server (transport={})",
+                transport
+            );
             server::run(project, &transport, &host, port).await?;
         }
         Commands::Index { project, force } => {

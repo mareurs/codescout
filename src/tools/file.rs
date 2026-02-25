@@ -3,8 +3,8 @@
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use crate::util::text::extract_lines;
 use super::{Tool, ToolContext};
+use crate::util::text::extract_lines;
 
 // ── read_file ────────────────────────────────────────────────────────────────
 
@@ -12,7 +12,9 @@ pub struct ReadFile;
 
 #[async_trait::async_trait]
 impl Tool for ReadFile {
-    fn name(&self) -> &str { "read_file" }
+    fn name(&self) -> &str {
+        "read_file"
+    }
 
     fn description(&self) -> &str {
         "Read the contents of a file. Optionally restrict to a line range."
@@ -31,7 +33,9 @@ impl Tool for ReadFile {
     }
 
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<Value> {
-        let path = input["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
+        let path = input["path"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("missing path"))?;
         let text = std::fs::read_to_string(path)?;
         let content = match (input["start_line"].as_u64(), input["end_line"].as_u64()) {
             (Some(start), Some(end)) => extract_lines(&text, start as usize, end as usize),
@@ -47,7 +51,9 @@ pub struct ListDir;
 
 #[async_trait::async_trait]
 impl Tool for ListDir {
-    fn name(&self) -> &str { "list_dir" }
+    fn name(&self) -> &str {
+        "list_dir"
+    }
 
     fn description(&self) -> &str {
         "List files and directories. Pass recursive=true for a full tree."
@@ -90,7 +96,9 @@ pub struct SearchForPattern;
 
 #[async_trait::async_trait]
 impl Tool for SearchForPattern {
-    fn name(&self) -> &str { "search_for_pattern" }
+    fn name(&self) -> &str {
+        "search_for_pattern"
+    }
 
     fn description(&self) -> &str {
         "Search the codebase for a regex pattern. Returns matching lines with file and line number."
@@ -109,7 +117,9 @@ impl Tool for SearchForPattern {
     }
 
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<Value> {
-        let pattern = input["pattern"].as_str().ok_or_else(|| anyhow::anyhow!("missing pattern"))?;
+        let pattern = input["pattern"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("missing pattern"))?;
         let search_path = input["path"].as_str().unwrap_or(".");
         let max = input["max_results"].as_u64().unwrap_or(50) as usize;
 
@@ -121,7 +131,9 @@ impl Tool for SearchForPattern {
             if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                 continue;
             }
-            let Ok(text) = std::fs::read_to_string(entry.path()) else { continue };
+            let Ok(text) = std::fs::read_to_string(entry.path()) else {
+                continue;
+            };
             for (i, line) in text.lines().enumerate() {
                 if re.is_match(line) {
                     matches.push(json!({
@@ -146,7 +158,9 @@ pub struct CreateTextFile;
 
 #[async_trait::async_trait]
 impl Tool for CreateTextFile {
-    fn name(&self) -> &str { "create_text_file" }
+    fn name(&self) -> &str {
+        "create_text_file"
+    }
 
     fn description(&self) -> &str {
         "Create or overwrite a file with the given content. Creates parent directories as needed."
@@ -164,9 +178,11 @@ impl Tool for CreateTextFile {
     }
 
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<Value> {
-        let path = input["path"].as_str()
+        let path = input["path"]
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing 'path' parameter"))?;
-        let content = input["content"].as_str()
+        let content = input["content"]
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing 'content' parameter"))?;
         crate::util::fs::write_utf8(std::path::Path::new(path), content)?;
         Ok(json!({ "status": "ok", "path": path, "bytes": content.len() }))
@@ -179,7 +195,9 @@ pub struct FindFile;
 
 #[async_trait::async_trait]
 impl Tool for FindFile {
-    fn name(&self) -> &str { "find_file" }
+    fn name(&self) -> &str {
+        "find_file"
+    }
 
     fn description(&self) -> &str {
         "Find files matching a glob pattern (e.g. '**/*.rs', 'src/**/mod.rs'). Respects .gitignore."
@@ -198,7 +216,8 @@ impl Tool for FindFile {
     }
 
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<Value> {
-        let pattern = input["pattern"].as_str()
+        let pattern = input["pattern"]
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing 'pattern' parameter"))?;
         let search_path = input["path"].as_str().unwrap_or(".");
         let max = input["max_results"].as_u64().unwrap_or(100) as usize;
@@ -214,7 +233,10 @@ impl Tool for FindFile {
             if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                 continue;
             }
-            let rel = entry.path().strip_prefix(search_path).unwrap_or(entry.path());
+            let rel = entry
+                .path()
+                .strip_prefix(search_path)
+                .unwrap_or(entry.path());
             if glob.is_match(rel) {
                 matches.push(entry.path().display().to_string());
                 if matches.len() >= max {
@@ -233,7 +255,9 @@ pub struct ReplaceContent;
 
 #[async_trait::async_trait]
 impl Tool for ReplaceContent {
-    fn name(&self) -> &str { "replace_content" }
+    fn name(&self) -> &str {
+        "replace_content"
+    }
 
     fn description(&self) -> &str {
         "Find and replace text in a file. Supports regex or literal matching."
@@ -254,11 +278,14 @@ impl Tool for ReplaceContent {
     }
 
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<Value> {
-        let path = input["path"].as_str()
+        let path = input["path"]
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing 'path' parameter"))?;
-        let old = input["old"].as_str()
+        let old = input["old"]
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing 'old' parameter"))?;
-        let new_text = input["new"].as_str()
+        let new_text = input["new"]
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing 'new' parameter"))?;
         let is_regex = input["is_regex"].as_bool().unwrap_or(false);
         let replace_all = input["replace_all"].as_bool().unwrap_or(true);
@@ -291,10 +318,10 @@ impl Tool for ReplaceContent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::agent::Agent;
     use crate::lsp::LspManager;
     use serde_json::json;
+    use std::sync::Arc;
     use tempfile::tempdir;
 
     async fn test_ctx() -> ToolContext {
@@ -313,7 +340,10 @@ mod tests {
         let file = dir.path().join("hello.txt");
         std::fs::write(&file, "hello world").unwrap();
 
-        let result = ReadFile.call(json!({ "path": file.to_str().unwrap() }), &ctx).await.unwrap();
+        let result = ReadFile
+            .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
         assert_eq!(result["content"], "hello world");
     }
 
@@ -324,11 +354,17 @@ mod tests {
         let file = dir.path().join("lines.txt");
         std::fs::write(&file, "line1\nline2\nline3\nline4\nline5").unwrap();
 
-        let result = ReadFile.call(json!({
-            "path": file.to_str().unwrap(),
-            "start_line": 2,
-            "end_line": 4
-        }), &ctx).await.unwrap();
+        let result = ReadFile
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "start_line": 2,
+                    "end_line": 4
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(result["content"], "line2\nline3\nline4");
     }
@@ -336,7 +372,9 @@ mod tests {
     #[tokio::test]
     async fn read_file_missing_errors() {
         let ctx = test_ctx().await;
-        let result = ReadFile.call(json!({ "path": "/no/such/file.txt" }), &ctx).await;
+        let result = ReadFile
+            .call(json!({ "path": "/no/such/file.txt" }), &ctx)
+            .await;
         assert!(result.is_err());
     }
 
@@ -381,7 +419,10 @@ mod tests {
         std::fs::write(sub.join("deep.rs"), "").unwrap();
 
         let result = ListDir
-            .call(json!({ "path": dir.path().to_str().unwrap(), "recursive": false }), &ctx)
+            .call(
+                json!({ "path": dir.path().to_str().unwrap(), "recursive": false }),
+                &ctx,
+            )
             .await
             .unwrap();
 
@@ -404,7 +445,10 @@ mod tests {
         std::fs::write(sub.join("deep.rs"), "").unwrap();
 
         let result = ListDir
-            .call(json!({ "path": dir.path().to_str().unwrap(), "recursive": true }), &ctx)
+            .call(
+                json!({ "path": dir.path().to_str().unwrap(), "recursive": true }),
+                &ctx,
+            )
             .await
             .unwrap();
 
@@ -426,7 +470,10 @@ mod tests {
         std::fs::write(dir.path().join("code.rs"), "fn main() {}\nlet x = 42;\n").unwrap();
 
         let result = SearchForPattern
-            .call(json!({ "pattern": "fn main", "path": dir.path().to_str().unwrap() }), &ctx)
+            .call(
+                json!({ "pattern": "fn main", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
             .await
             .unwrap();
 
@@ -443,7 +490,10 @@ mod tests {
         std::fs::write(dir.path().join("code.rs"), "fn main() {}").unwrap();
 
         let result = SearchForPattern
-            .call(json!({ "pattern": "xyz_not_present", "path": dir.path().to_str().unwrap() }), &ctx)
+            .call(
+                json!({ "pattern": "xyz_not_present", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
             .await
             .unwrap();
 
@@ -454,15 +504,21 @@ mod tests {
     async fn search_respects_max_results() {
         let ctx = test_ctx().await;
         let dir = tempdir().unwrap();
-        let content = (0..20).map(|i| format!("match_{}", i)).collect::<Vec<_>>().join("\n");
+        let content = (0..20)
+            .map(|i| format!("match_{}", i))
+            .collect::<Vec<_>>()
+            .join("\n");
         std::fs::write(dir.path().join("data.txt"), &content).unwrap();
 
         let result = SearchForPattern
-            .call(json!({
-                "pattern": "match_",
-                "path": dir.path().to_str().unwrap(),
-                "max_results": 5
-            }), &ctx)
+            .call(
+                json!({
+                    "pattern": "match_",
+                    "path": dir.path().to_str().unwrap(),
+                    "max_results": 5
+                }),
+                &ctx,
+            )
             .await
             .unwrap();
 
@@ -472,7 +528,9 @@ mod tests {
     #[tokio::test]
     async fn search_invalid_regex_errors() {
         let ctx = test_ctx().await;
-        let result = SearchForPattern.call(json!({ "pattern": "[invalid" }), &ctx).await;
+        let result = SearchForPattern
+            .call(json!({ "pattern": "[invalid" }), &ctx)
+            .await;
         assert!(result.is_err());
     }
 
@@ -491,10 +549,16 @@ mod tests {
         let dir = tempdir().unwrap();
         let file = dir.path().join("new.txt");
 
-        let result = CreateTextFile.call(json!({
-            "path": file.to_str().unwrap(),
-            "content": "hello file"
-        }), &ctx).await.unwrap();
+        let result = CreateTextFile
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "content": "hello file"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(result["status"], "ok");
         assert_eq!(result["bytes"], 10);
@@ -507,10 +571,16 @@ mod tests {
         let dir = tempdir().unwrap();
         let file = dir.path().join("a").join("b").join("deep.txt");
 
-        CreateTextFile.call(json!({
-            "path": file.to_str().unwrap(),
-            "content": "nested"
-        }), &ctx).await.unwrap();
+        CreateTextFile
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "content": "nested"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "nested");
     }
@@ -519,7 +589,10 @@ mod tests {
     async fn create_text_file_missing_params_errors() {
         let ctx = test_ctx().await;
         assert!(CreateTextFile.call(json!({}), &ctx).await.is_err());
-        assert!(CreateTextFile.call(json!({ "path": "/tmp/x" }), &ctx).await.is_err());
+        assert!(CreateTextFile
+            .call(json!({ "path": "/tmp/x" }), &ctx)
+            .await
+            .is_err());
     }
 
     // ── FindFile ─────────────────────────────────────────────────────────────
@@ -532,10 +605,16 @@ mod tests {
         std::fs::write(dir.path().join("bar.rs"), "").unwrap();
         std::fs::write(dir.path().join("baz.txt"), "").unwrap();
 
-        let result = FindFile.call(json!({
-            "pattern": "*.rs",
-            "path": dir.path().to_str().unwrap()
-        }), &ctx).await.unwrap();
+        let result = FindFile
+            .call(
+                json!({
+                    "pattern": "*.rs",
+                    "path": dir.path().to_str().unwrap()
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
 
         let files = result["files"].as_array().unwrap();
         assert_eq!(files.len(), 2);
@@ -551,10 +630,16 @@ mod tests {
         std::fs::write(sub.join("lib.rs"), "").unwrap();
         std::fs::write(dir.path().join("main.rs"), "").unwrap();
 
-        let result = FindFile.call(json!({
-            "pattern": "**/*.rs",
-            "path": dir.path().to_str().unwrap()
-        }), &ctx).await.unwrap();
+        let result = FindFile
+            .call(
+                json!({
+                    "pattern": "**/*.rs",
+                    "path": dir.path().to_str().unwrap()
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
 
         let files = result["files"].as_array().unwrap();
         assert_eq!(files.len(), 2);
@@ -568,11 +653,17 @@ mod tests {
             std::fs::write(dir.path().join(format!("f{}.rs", i)), "").unwrap();
         }
 
-        let result = FindFile.call(json!({
-            "pattern": "*.rs",
-            "path": dir.path().to_str().unwrap(),
-            "max_results": 3
-        }), &ctx).await.unwrap();
+        let result = FindFile
+            .call(
+                json!({
+                    "pattern": "*.rs",
+                    "path": dir.path().to_str().unwrap(),
+                    "max_results": 3
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(result["files"].as_array().unwrap().len(), 3);
         assert_eq!(result["total"], 3);
@@ -584,10 +675,16 @@ mod tests {
         let dir = tempdir().unwrap();
         std::fs::write(dir.path().join("readme.md"), "").unwrap();
 
-        let result = FindFile.call(json!({
-            "pattern": "*.rs",
-            "path": dir.path().to_str().unwrap()
-        }), &ctx).await.unwrap();
+        let result = FindFile
+            .call(
+                json!({
+                    "pattern": "*.rs",
+                    "path": dir.path().to_str().unwrap()
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(result["files"].as_array().unwrap().len(), 0);
     }
@@ -601,12 +698,18 @@ mod tests {
         let file = dir.path().join("code.rs");
         std::fs::write(&file, "let x = 1;\nlet y = 2;\nlet x = 3;\n").unwrap();
 
-        let result = ReplaceContent.call(json!({
-            "path": file.to_str().unwrap(),
-            "old": "let x",
-            "new": "let z",
-            "replace_all": true
-        }), &ctx).await.unwrap();
+        let result = ReplaceContent
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "old": "let x",
+                    "new": "let z",
+                    "replace_all": true
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(result["replacements"], 2);
         let content = std::fs::read_to_string(&file).unwrap();
@@ -620,12 +723,18 @@ mod tests {
         let file = dir.path().join("code.rs");
         std::fs::write(&file, "aaa bbb aaa").unwrap();
 
-        let result = ReplaceContent.call(json!({
-            "path": file.to_str().unwrap(),
-            "old": "aaa",
-            "new": "ccc",
-            "replace_all": false
-        }), &ctx).await.unwrap();
+        let result = ReplaceContent
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "old": "aaa",
+                    "new": "ccc",
+                    "replace_all": false
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(result["replacements"], 1);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "ccc bbb aaa");
@@ -638,13 +747,19 @@ mod tests {
         let file = dir.path().join("data.txt");
         std::fs::write(&file, "foo123bar456baz").unwrap();
 
-        let result = ReplaceContent.call(json!({
-            "path": file.to_str().unwrap(),
-            "old": r"\d+",
-            "new": "NUM",
-            "is_regex": true,
-            "replace_all": true
-        }), &ctx).await.unwrap();
+        let result = ReplaceContent
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "old": r"\d+",
+                    "new": "NUM",
+                    "is_regex": true,
+                    "replace_all": true
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(result["replacements"], 2);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "fooNUMbarNUMbaz");
@@ -657,13 +772,19 @@ mod tests {
         let file = dir.path().join("data.txt");
         std::fs::write(&file, "aaa111bbb222").unwrap();
 
-        let result = ReplaceContent.call(json!({
-            "path": file.to_str().unwrap(),
-            "old": r"\d+",
-            "new": "X",
-            "is_regex": true,
-            "replace_all": false
-        }), &ctx).await.unwrap();
+        let result = ReplaceContent
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "old": r"\d+",
+                    "new": "X",
+                    "is_regex": true,
+                    "replace_all": false
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(result["replacements"], 1);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "aaaXbbb222");
@@ -676,11 +797,17 @@ mod tests {
         let file = dir.path().join("data.txt");
         std::fs::write(&file, "hello world").unwrap();
 
-        let result = ReplaceContent.call(json!({
-            "path": file.to_str().unwrap(),
-            "old": "xyz",
-            "new": "abc"
-        }), &ctx).await.unwrap();
+        let result = ReplaceContent
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "old": "xyz",
+                    "new": "abc"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(result["replacements"], 0);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "hello world");
@@ -690,6 +817,9 @@ mod tests {
     async fn replace_content_missing_params_errors() {
         let ctx = test_ctx().await;
         assert!(ReplaceContent.call(json!({}), &ctx).await.is_err());
-        assert!(ReplaceContent.call(json!({ "path": "/tmp/x", "old": "a" }), &ctx).await.is_err());
+        assert!(ReplaceContent
+            .call(json!({ "path": "/tmp/x", "old": "a" }), &ctx)
+            .await
+            .is_err());
     }
 }

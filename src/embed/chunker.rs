@@ -53,7 +53,7 @@ pub fn split(source: &str, chunk_size: usize, chunk_overlap: usize) -> Vec<RawCh
         chunks.push(RawChunk {
             content,
             start_line: start_line + 1, // convert to 1-indexed
-            end_line,                    // end_line is exclusive → last included line
+            end_line,                   // end_line is exclusive → last included line
         });
 
         // If this chunk reached the end of the file, we're done.
@@ -137,9 +137,9 @@ mod tests {
         let chunks = split(source, 20, 5);
         // Every line should appear in at least one chunk
         for line_num in 1..=10usize {
-            let covered = chunks.iter().any(|c| {
-                c.start_line <= line_num && line_num <= c.end_line
-            });
+            let covered = chunks
+                .iter()
+                .any(|c| c.start_line <= line_num && line_num <= c.end_line);
             assert!(covered, "line {} not covered by any chunk", line_num);
         }
     }
@@ -150,10 +150,12 @@ mod tests {
         let source = lines.join("\n");
         let chunks = split(&source, 100, 10);
         for chunk in &chunks {
-            let expected = lines[chunk.start_line - 1..chunk.end_line]
-                .join("\n");
-            assert_eq!(chunk.content, expected,
-                "chunk [{}-{}] content mismatch", chunk.start_line, chunk.end_line);
+            let expected = lines[chunk.start_line - 1..chunk.end_line].join("\n");
+            assert_eq!(
+                chunk.content, expected,
+                "chunk [{}-{}] content mismatch",
+                chunk.start_line, chunk.end_line
+            );
         }
     }
 

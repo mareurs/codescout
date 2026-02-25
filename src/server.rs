@@ -115,10 +115,7 @@ impl ServerHandler for CodeExplorerServer {
             .iter()
             .map(|t| {
                 let schema = t.input_schema();
-                let schema_obj = schema
-                    .as_object()
-                    .cloned()
-                    .unwrap_or_default();
+                let schema_obj = schema.as_object().cloned().unwrap_or_default();
                 McpTool {
                     name: t.name().to_owned().into(),
                     description: t.description().to_owned().into(),
@@ -127,7 +124,10 @@ impl ServerHandler for CodeExplorerServer {
             })
             .collect();
 
-        Ok(ListToolsResult { tools, next_cursor: None })
+        Ok(ListToolsResult {
+            tools,
+            next_cursor: None,
+        })
     }
 
     async fn call_tool(
@@ -135,23 +135,23 @@ impl ServerHandler for CodeExplorerServer {
         req: CallToolRequestParam,
         _ctx: RequestContext<RoleServer>,
     ) -> std::result::Result<CallToolResult, McpError> {
-        let tool = self
-            .find_tool(&req.name)
-            .ok_or_else(|| McpError::invalid_params(
-                format!("unknown tool: '{}'", req.name),
-                None,
-            ))?;
+        let tool = self.find_tool(&req.name).ok_or_else(|| {
+            McpError::invalid_params(format!("unknown tool: '{}'", req.name), None)
+        })?;
 
         let input: Value = req
             .arguments
             .map(Value::Object)
             .unwrap_or(Value::Object(Default::default()));
 
-        let ctx = ToolContext { agent: self.agent.clone(), lsp: self.lsp.clone() };
+        let ctx = ToolContext {
+            agent: self.agent.clone(),
+            lsp: self.lsp.clone(),
+        };
         match tool.call(input, &ctx).await {
             Ok(output) => {
-                let text = serde_json::to_string_pretty(&output)
-                    .unwrap_or_else(|_| output.to_string());
+                let text =
+                    serde_json::to_string_pretty(&output).unwrap_or_else(|_| output.to_string());
                 Ok(CallToolResult::success(vec![Content::text(text)]))
             }
             Err(e) => {
@@ -163,21 +163,20 @@ impl ServerHandler for CodeExplorerServer {
 }
 
 /// Entry point: start the MCP server with the chosen transport.
-pub async fn run(
-    project: Option<PathBuf>,
-    transport: &str,
-    host: &str,
-    port: u16,
-) -> Result<()> {
+pub async fn run(project: Option<PathBuf>, transport: &str, host: &str, port: u16) -> Result<()> {
     let agent = Agent::new(project).await?;
     let server = CodeExplorerServer::new(agent);
 
     match transport {
         "stdio" => {
             tracing::info!("code-explorer MCP server ready (stdio)");
-            let service = server.serve(rmcp::transport::stdio()).await
+            let service = server
+                .serve(rmcp::transport::stdio())
+                .await
                 .map_err(|e| anyhow::anyhow!("MCP server error: {}", e))?;
-            service.waiting().await
+            service
+                .waiting()
+                .await
                 .map_err(|e| anyhow::anyhow!("MCP server exited: {}", e))?;
             Ok(())
         }

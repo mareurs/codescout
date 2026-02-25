@@ -10,6 +10,7 @@ use anyhow::Result;
 use std::path::Path;
 
 use crate::lsp::symbols::SymbolInfo;
+pub use parser::DocstringInfo;
 
 /// Extract top-level symbols from a file using tree-sitter.
 ///
@@ -19,6 +20,13 @@ pub fn extract_symbols(path: &Path) -> Result<Vec<SymbolInfo>> {
     let source = std::fs::read_to_string(path)?;
     let language = detect_language(path);
     parser::extract_symbols_from_source(&source, language, path)
+}
+
+/// Extract docstrings/comments from a file using tree-sitter.
+pub fn extract_docstrings(path: &Path) -> Result<Vec<DocstringInfo>> {
+    let source = std::fs::read_to_string(path)?;
+    let language = detect_language(path);
+    parser::extract_docstrings_from_source(&source, language, path)
 }
 
 /// Detect the programming language from a file extension.

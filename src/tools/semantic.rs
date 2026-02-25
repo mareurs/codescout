@@ -1,7 +1,7 @@
 //! Semantic search tools backed by the embedding index.
 
-use serde_json::{json, Value};
 use super::{Tool, ToolContext};
+use serde_json::{json, Value};
 
 pub struct SemanticSearch;
 pub struct IndexProject;
@@ -9,7 +9,9 @@ pub struct IndexStatus;
 
 #[async_trait::async_trait]
 impl Tool for SemanticSearch {
-    fn name(&self) -> &str { "semantic_search" }
+    fn name(&self) -> &str {
+        "semantic_search"
+    }
     fn description(&self) -> &str {
         "Find code by natural language description or code snippet. \
          Returns ranked chunks with file path, line range, and similarity score."
@@ -28,13 +30,16 @@ impl Tool for SemanticSearch {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let query = input["query"].as_str()
+        let query = input["query"]
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing 'query' parameter"))?;
         let limit = input["limit"].as_u64().unwrap_or(10) as usize;
 
         let (root, model) = {
             let inner = ctx.agent.inner.read().await;
-            let p = inner.active_project.as_ref()
+            let p = inner
+                .active_project
+                .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("No active project. Use activate_project first."))?;
             (p.root.clone(), p.config.embeddings.model.clone())
         };
@@ -60,7 +65,9 @@ impl Tool for SemanticSearch {
 
 #[async_trait::async_trait]
 impl Tool for IndexProject {
-    fn name(&self) -> &str { "index_project" }
+    fn name(&self) -> &str {
+        "index_project"
+    }
     fn description(&self) -> &str {
         "Build or incrementally update the semantic search index for the active project."
     }
@@ -92,7 +99,9 @@ impl Tool for IndexProject {
 
 #[async_trait::async_trait]
 impl Tool for IndexStatus {
-    fn name(&self) -> &str { "index_status" }
+    fn name(&self) -> &str {
+        "index_status"
+    }
     fn description(&self) -> &str {
         "Show index stats: file count, chunk count, model, last update."
     }
@@ -102,7 +111,9 @@ impl Tool for IndexStatus {
     async fn call(&self, _input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         let (root, model) = {
             let inner = ctx.agent.inner.read().await;
-            let p = inner.active_project.as_ref()
+            let p = inner
+                .active_project
+                .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("No active project. Use activate_project first."))?;
             (p.root.clone(), p.config.embeddings.model.clone())
         };
@@ -132,17 +143,23 @@ impl Tool for IndexStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::agent::Agent;
     use crate::embed::index;
     use crate::lsp::LspManager;
+    use std::sync::Arc;
     use tempfile::tempdir;
 
     async fn project_ctx() -> (tempfile::TempDir, ToolContext) {
         let dir = tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".code-explorer")).unwrap();
         let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
-        (dir, ToolContext { agent, lsp: Arc::new(LspManager::new()) })
+        (
+            dir,
+            ToolContext {
+                agent,
+                lsp: Arc::new(LspManager::new()),
+            },
+        )
     }
 
     #[tokio::test]
@@ -179,8 +196,14 @@ mod tests {
 
     #[tokio::test]
     async fn tools_error_without_project() {
-        let ctx = ToolContext { agent: Agent::new(None).await.unwrap(), lsp: Arc::new(LspManager::new()) };
-        assert!(SemanticSearch.call(json!({ "query": "test" }), &ctx).await.is_err());
+        let ctx = ToolContext {
+            agent: Agent::new(None).await.unwrap(),
+            lsp: Arc::new(LspManager::new()),
+        };
+        assert!(SemanticSearch
+            .call(json!({ "query": "test" }), &ctx)
+            .await
+            .is_err());
         assert!(IndexProject.call(json!({}), &ctx).await.is_err());
         assert!(IndexStatus.call(json!({}), &ctx).await.is_err());
     }

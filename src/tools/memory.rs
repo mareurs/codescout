@@ -1,7 +1,7 @@
 //! Memory tools: persistent per-project knowledge store.
 
-use serde_json::{json, Value};
 use super::{Tool, ToolContext};
+use serde_json::{json, Value};
 
 pub struct WriteMemory;
 pub struct ReadMemory;
@@ -10,7 +10,9 @@ pub struct DeleteMemory;
 
 #[async_trait::async_trait]
 impl Tool for WriteMemory {
-    fn name(&self) -> &str { "write_memory" }
+    fn name(&self) -> &str {
+        "write_memory"
+    }
     fn description(&self) -> &str {
         "Persist a piece of knowledge about the project. \
          Topic is a path-like string, e.g. 'debugging/async-patterns'."
@@ -26,21 +28,29 @@ impl Tool for WriteMemory {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let topic = input["topic"].as_str()
+        let topic = input["topic"]
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing 'topic' parameter"))?;
-        let content = input["content"].as_str()
+        let content = input["content"]
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing 'content' parameter"))?;
-        ctx.agent.with_project(|p| {
-            p.memory.write(topic, content)?;
-            Ok(json!({ "status": "ok", "topic": topic }))
-        }).await
+        ctx.agent
+            .with_project(|p| {
+                p.memory.write(topic, content)?;
+                Ok(json!({ "status": "ok", "topic": topic }))
+            })
+            .await
     }
 }
 
 #[async_trait::async_trait]
 impl Tool for ReadMemory {
-    fn name(&self) -> &str { "read_memory" }
-    fn description(&self) -> &str { "Read a stored memory entry by topic." }
+    fn name(&self) -> &str {
+        "read_memory"
+    }
+    fn description(&self) -> &str {
+        "Read a stored memory entry by topic."
+    }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -49,36 +59,47 @@ impl Tool for ReadMemory {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let topic = input["topic"].as_str()
+        let topic = input["topic"]
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing 'topic' parameter"))?;
-        ctx.agent.with_project(|p| {
-            match p.memory.read(topic)? {
+        ctx.agent
+            .with_project(|p| match p.memory.read(topic)? {
                 Some(content) => Ok(json!({ "topic": topic, "content": content })),
                 None => Ok(json!({ "topic": topic, "content": null, "message": "not found" })),
-            }
-        }).await
+            })
+            .await
     }
 }
 
 #[async_trait::async_trait]
 impl Tool for ListMemories {
-    fn name(&self) -> &str { "list_memories" }
-    fn description(&self) -> &str { "List all stored memory topics for the active project." }
+    fn name(&self) -> &str {
+        "list_memories"
+    }
+    fn description(&self) -> &str {
+        "List all stored memory topics for the active project."
+    }
     fn input_schema(&self) -> Value {
         json!({ "type": "object", "properties": {} })
     }
     async fn call(&self, _input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        ctx.agent.with_project(|p| {
-            let topics = p.memory.list()?;
-            Ok(json!({ "topics": topics }))
-        }).await
+        ctx.agent
+            .with_project(|p| {
+                let topics = p.memory.list()?;
+                Ok(json!({ "topics": topics }))
+            })
+            .await
     }
 }
 
 #[async_trait::async_trait]
 impl Tool for DeleteMemory {
-    fn name(&self) -> &str { "delete_memory" }
-    fn description(&self) -> &str { "Delete a memory entry by topic." }
+    fn name(&self) -> &str {
+        "delete_memory"
+    }
+    fn description(&self) -> &str {
+        "Delete a memory entry by topic."
+    }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -87,24 +108,29 @@ impl Tool for DeleteMemory {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let topic = input["topic"].as_str()
+        let topic = input["topic"]
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("missing 'topic' parameter"))?;
-        ctx.agent.with_project(|p| {
-            p.memory.delete(topic)?;
-            Ok(json!({ "status": "ok", "topic": topic }))
-        }).await
+        ctx.agent
+            .with_project(|p| {
+                p.memory.delete(topic)?;
+                Ok(json!({ "status": "ok", "topic": topic }))
+            })
+            .await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::agent::Agent;
     use crate::lsp::LspManager;
+    use std::sync::Arc;
     use tempfile::tempdir;
 
-    fn lsp() -> Arc<LspManager> { Arc::new(LspManager::new()) }
+    fn lsp() -> Arc<LspManager> {
+        Arc::new(LspManager::new())
+    }
 
     async fn test_ctx_with_project() -> (tempfile::TempDir, ToolContext) {
         let dir = tempdir().unwrap();
@@ -115,69 +141,121 @@ mod tests {
     }
 
     async fn test_ctx_no_project() -> ToolContext {
-        ToolContext { agent: Agent::new(None).await.unwrap(), lsp: lsp() }
+        ToolContext {
+            agent: Agent::new(None).await.unwrap(),
+            lsp: lsp(),
+        }
     }
 
     #[tokio::test]
     async fn write_and_read_roundtrip() {
         let (_dir, ctx) = test_ctx_with_project().await;
-        let result = WriteMemory.call(json!({
-            "topic": "test-topic",
-            "content": "hello memory"
-        }), &ctx).await.unwrap();
+        let result = WriteMemory
+            .call(
+                json!({
+                    "topic": "test-topic",
+                    "content": "hello memory"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
         assert_eq!(result["status"], "ok");
 
-        let result = ReadMemory.call(json!({ "topic": "test-topic" }), &ctx).await.unwrap();
+        let result = ReadMemory
+            .call(json!({ "topic": "test-topic" }), &ctx)
+            .await
+            .unwrap();
         assert_eq!(result["content"], "hello memory");
     }
 
     #[tokio::test]
     async fn read_missing_returns_null() {
         let (_dir, ctx) = test_ctx_with_project().await;
-        let result = ReadMemory.call(json!({ "topic": "nonexistent" }), &ctx).await.unwrap();
+        let result = ReadMemory
+            .call(json!({ "topic": "nonexistent" }), &ctx)
+            .await
+            .unwrap();
         assert!(result["content"].is_null());
     }
 
     #[tokio::test]
     async fn list_after_writes() {
         let (_dir, ctx) = test_ctx_with_project().await;
-        WriteMemory.call(json!({ "topic": "b-topic", "content": "b" }), &ctx).await.unwrap();
-        WriteMemory.call(json!({ "topic": "a-topic", "content": "a" }), &ctx).await.unwrap();
+        WriteMemory
+            .call(json!({ "topic": "b-topic", "content": "b" }), &ctx)
+            .await
+            .unwrap();
+        WriteMemory
+            .call(json!({ "topic": "a-topic", "content": "a" }), &ctx)
+            .await
+            .unwrap();
 
         let result = ListMemories.call(json!({}), &ctx).await.unwrap();
-        let topics: Vec<&str> = result["topics"].as_array().unwrap()
-            .iter().map(|v| v.as_str().unwrap()).collect();
+        let topics: Vec<&str> = result["topics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
         assert_eq!(topics, vec!["a-topic", "b-topic"]);
     }
 
     #[tokio::test]
     async fn delete_removes_entry() {
         let (_dir, ctx) = test_ctx_with_project().await;
-        WriteMemory.call(json!({ "topic": "to-delete", "content": "bye" }), &ctx).await.unwrap();
-        DeleteMemory.call(json!({ "topic": "to-delete" }), &ctx).await.unwrap();
+        WriteMemory
+            .call(json!({ "topic": "to-delete", "content": "bye" }), &ctx)
+            .await
+            .unwrap();
+        DeleteMemory
+            .call(json!({ "topic": "to-delete" }), &ctx)
+            .await
+            .unwrap();
 
-        let result = ReadMemory.call(json!({ "topic": "to-delete" }), &ctx).await.unwrap();
+        let result = ReadMemory
+            .call(json!({ "topic": "to-delete" }), &ctx)
+            .await
+            .unwrap();
         assert!(result["content"].is_null());
     }
 
     #[tokio::test]
     async fn tools_error_without_active_project() {
         let ctx = test_ctx_no_project().await;
-        assert!(WriteMemory.call(json!({ "topic": "x", "content": "y" }), &ctx).await.is_err());
-        assert!(ReadMemory.call(json!({ "topic": "x" }), &ctx).await.is_err());
+        assert!(WriteMemory
+            .call(json!({ "topic": "x", "content": "y" }), &ctx)
+            .await
+            .is_err());
+        assert!(ReadMemory
+            .call(json!({ "topic": "x" }), &ctx)
+            .await
+            .is_err());
         assert!(ListMemories.call(json!({}), &ctx).await.is_err());
-        assert!(DeleteMemory.call(json!({ "topic": "x" }), &ctx).await.is_err());
+        assert!(DeleteMemory
+            .call(json!({ "topic": "x" }), &ctx)
+            .await
+            .is_err());
     }
 
     #[tokio::test]
     async fn nested_topic_works() {
         let (_dir, ctx) = test_ctx_with_project().await;
-        WriteMemory.call(json!({
-            "topic": "debugging/async-patterns",
-            "content": "avoid blocking the runtime"
-        }), &ctx).await.unwrap();
+        WriteMemory
+            .call(
+                json!({
+                    "topic": "debugging/async-patterns",
+                    "content": "avoid blocking the runtime"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
 
-        let result = ReadMemory.call(json!({ "topic": "debugging/async-patterns" }), &ctx).await.unwrap();
+        let result = ReadMemory
+            .call(json!({ "topic": "debugging/async-patterns" }), &ctx)
+            .await
+            .unwrap();
         assert_eq!(result["content"], "avoid blocking the runtime");
     }
 }

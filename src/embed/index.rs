@@ -117,10 +117,7 @@ pub fn delete_file_chunks(conn: &Connection, file_path: &str) -> Result<()> {
         "DELETE FROM chunks WHERE file_path = ?1",
         params![file_path],
     )?;
-    conn.execute(
-        "DELETE FROM files WHERE path = ?1",
-        params![file_path],
-    )?;
+    conn.execute("DELETE FROM files WHERE path = ?1", params![file_path])?;
     Ok(())
 }
 
@@ -235,9 +232,14 @@ pub async fn build_index(project_root: &Path, force: bool) -> Result<()> {
         if !path.is_file() {
             continue;
         }
-        let Some(_lang) = detect_language(path) else { continue };
+        let Some(_lang) = detect_language(path) else {
+            continue;
+        };
 
-        let rel = path.strip_prefix(project_root)?.to_string_lossy().to_string();
+        let rel = path
+            .strip_prefix(project_root)?
+            .to_string_lossy()
+            .to_string();
         let hash = hash_file(path)?;
 
         // Skip if unchanged and not forcing
@@ -304,13 +306,15 @@ pub struct IndexStats {
 
 /// Query index statistics from the database.
 pub fn index_stats(conn: &Connection) -> Result<IndexStats> {
-    let file_count: usize = conn
-        .query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))?;
-    let chunk_count: usize = conn
-        .query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0))?;
-    let embedding_count: usize = conn
-        .query_row("SELECT COUNT(*) FROM chunk_embeddings", [], |r| r.get(0))?;
-    Ok(IndexStats { file_count, chunk_count, embedding_count })
+    let file_count: usize = conn.query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))?;
+    let chunk_count: usize = conn.query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0))?;
+    let embedding_count: usize =
+        conn.query_row("SELECT COUNT(*) FROM chunk_embeddings", [], |r| r.get(0))?;
+    Ok(IndexStats {
+        file_count,
+        chunk_count,
+        embedding_count,
+    })
 }
 
 #[cfg(test)]
@@ -363,7 +367,11 @@ mod tests {
         insert_chunk(&conn, &dummy_chunk("f.rs", "chunk 1"), &[0.1]).unwrap();
         insert_chunk(&conn, &dummy_chunk("f.rs", "chunk 2"), &[0.2]).unwrap();
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM chunks WHERE file_path='f.rs'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM chunks WHERE file_path='f.rs'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(count, 2);
     }
@@ -372,7 +380,10 @@ mod tests {
     fn file_hash_upsert_and_get() {
         let (_dir, conn) = open_test_db();
         upsert_file_hash(&conn, "src/lib.rs", "aabbcc").unwrap();
-        assert_eq!(get_file_hash(&conn, "src/lib.rs").unwrap(), Some("aabbcc".to_string()));
+        assert_eq!(
+            get_file_hash(&conn, "src/lib.rs").unwrap(),
+            Some("aabbcc".to_string())
+        );
     }
 
     #[test]
@@ -380,7 +391,10 @@ mod tests {
         let (_dir, conn) = open_test_db();
         upsert_file_hash(&conn, "src/lib.rs", "hash1").unwrap();
         upsert_file_hash(&conn, "src/lib.rs", "hash2").unwrap();
-        assert_eq!(get_file_hash(&conn, "src/lib.rs").unwrap(), Some("hash2".to_string()));
+        assert_eq!(
+            get_file_hash(&conn, "src/lib.rs").unwrap(),
+            Some("hash2".to_string())
+        );
     }
 
     #[test]
@@ -398,7 +412,11 @@ mod tests {
         delete_file_chunks(&conn, "del.rs").unwrap();
 
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM chunks WHERE file_path='del.rs'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM chunks WHERE file_path='del.rs'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(count, 0);
         assert_eq!(get_file_hash(&conn, "del.rs").unwrap(), None);
@@ -413,7 +431,11 @@ mod tests {
         delete_file_chunks(&conn, "del.rs").unwrap();
 
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM chunks WHERE file_path='keep.rs'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM chunks WHERE file_path='keep.rs'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(count, 1);
     }
@@ -422,8 +444,18 @@ mod tests {
     fn cosine_search_returns_closest_vector() {
         let (_dir, conn) = open_test_db();
         // Two orthogonal 4-dim embeddings
-        insert_chunk(&conn, &dummy_chunk("a.rs", "fn a() {}"), &[1.0, 0.0, 0.0, 0.0]).unwrap();
-        insert_chunk(&conn, &dummy_chunk("b.rs", "fn b() {}"), &[0.0, 1.0, 0.0, 0.0]).unwrap();
+        insert_chunk(
+            &conn,
+            &dummy_chunk("a.rs", "fn a() {}"),
+            &[1.0, 0.0, 0.0, 0.0],
+        )
+        .unwrap();
+        insert_chunk(
+            &conn,
+            &dummy_chunk("b.rs", "fn b() {}"),
+            &[0.0, 1.0, 0.0, 0.0],
+        )
+        .unwrap();
 
         // Query aligned with a.rs
         let results = search(&conn, &[0.9, 0.1, 0.0, 0.0], 1).unwrap();
@@ -440,7 +472,8 @@ mod tests {
                 &conn,
                 &dummy_chunk(&format!("{}.rs", i), "fn f() {}"),
                 &[i as f32, 0.0],
-            ).unwrap();
+            )
+            .unwrap();
         }
         let results = search(&conn, &[1.0, 0.0], 3).unwrap();
         assert_eq!(results.len(), 3);
