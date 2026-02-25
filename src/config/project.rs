@@ -26,8 +26,19 @@ pub struct ProjectSection {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingsSection {
-    /// Model identifier: "local:jina-embeddings-v2-base-code",
-    /// "openai:text-embedding-3-small", "ollama:nomic-embed-code"
+    /// Model identifier — prefix determines the backend:
+    ///   "ollama:<model>"                    → Ollama local daemon (default)
+    ///   "openai:<model>"                    → OpenAI API (requires OPENAI_API_KEY)
+    ///   "custom:<model>@<base_url>"         → Any OpenAI-compatible endpoint
+    ///   "local:<EmbeddingModel variant>"    → fastembed-rs, no daemon needed,
+    ///                                         CPU/WSL2-friendly. Downloads model
+    ///                                         on first use to ~/.cache/huggingface/
+    ///
+    /// Recommended local models (rebuild with: cargo build --features local-embed):
+    ///   "local:JinaEmbeddingsV2BaseCode"    → 768d, code-specific, ~300MB
+    ///   "local:BGESmallENV15Q"              → 384d, quantized, ~20MB, fast CPU
+    ///   "local:AllMiniLML6V2Q"              → 384d, quantized, ~22MB, lightest
+    ///   "local:BGESmallENV15"               → 384d, full precision
     #[serde(default = "default_embed_model")]
     pub model: String,
     #[serde(default = "default_chunk_size")]

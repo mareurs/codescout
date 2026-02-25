@@ -23,7 +23,8 @@ pub mod local;
 
 use anyhow::Result;
 
-/// Embedding vector — 768-dim f32 for jina-embeddings-v2-base-code.
+/// Embedding vector — dimensions depend on the configured model
+/// (e.g. 768 for jina-embeddings-v2-base-code, 384 for bge-small).
 pub type Embedding = Vec<f32>;
 
 /// Trait implemented by all embedding backends.
