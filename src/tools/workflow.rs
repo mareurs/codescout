@@ -127,16 +127,12 @@ impl Tool for CheckOnboardingPerformed {
                 let onboarded = has_config && has_onboarding_memory;
 
                 let message = if onboarded {
-                    if memories.is_empty() {
-                        "Onboarding was performed but no memories were created. Consider running `onboarding` again.".to_string()
-                    } else {
-                        format!(
-                            "Onboarding already performed. Available memories: {}. \
-                             Use `read_memory(topic)` to read relevant ones as needed for your current task. \
-                             Do not read all memories at once — only read those relevant to what you're working on.",
-                            memories.join(", ")
-                        )
-                    }
+                    format!(
+                        "Onboarding already performed. Available memories: {}. \
+                         Use `read_memory(topic)` to read relevant ones as needed for your current task. \
+                         Do not read all memories at once — only read those relevant to what you're working on.",
+                        memories.join(", ")
+                    )
                 } else {
                     "Onboarding not performed yet. Call the `onboarding` tool to discover the project \
                      and create memories that will help you work effectively.".to_string()

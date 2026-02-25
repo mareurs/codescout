@@ -63,18 +63,20 @@ pub const ONBOARDING_PROMPT: &str = include_str!("onboarding_prompt.md");
 /// Build the onboarding prompt, substituting detected project information.
 pub fn build_onboarding_prompt(languages: &[String], top_level: &[String]) -> String {
     let mut prompt = ONBOARDING_PROMPT.to_string();
-    prompt.push_str("\n\n---\n\n## Detected Project Information\n\n");
-    if !languages.is_empty() {
-        prompt.push_str(&format!(
-            "**Detected languages:** {}\n\n",
-            languages.join(", ")
-        ));
-    }
-    if !top_level.is_empty() {
-        prompt.push_str(&format!(
-            "**Top-level structure:**\n```\n{}\n```\n",
-            top_level.join("\n")
-        ));
+    if !languages.is_empty() || !top_level.is_empty() {
+        prompt.push_str("\n\n---\n\n## Detected Project Information\n\n");
+        if !languages.is_empty() {
+            prompt.push_str(&format!(
+                "**Detected languages:** {}\n\n",
+                languages.join(", ")
+            ));
+        }
+        if !top_level.is_empty() {
+            prompt.push_str(&format!(
+                "**Top-level structure:**\n```\n{}\n```\n",
+                top_level.join("\n")
+            ));
+        }
     }
     prompt
 }
@@ -155,5 +157,6 @@ mod tests {
         let result = build_onboarding_prompt(&[], &[]);
         assert!(result.contains("## What to Explore"));
         assert!(!result.contains("Detected languages"));
+        assert!(!result.contains("Detected Project Information"));
     }
 }

@@ -38,6 +38,10 @@ pub struct CodeExplorerServer {
     agent: Agent,
     lsp: Arc<LspManager>,
     tools: Vec<Arc<dyn Tool>>,
+    /// Pre-computed at construction because `get_info()` is sync.
+    /// Becomes stale if project state changes mid-session (e.g. after onboarding or indexing).
+    /// For stdio this means instructions reflect the state at server startup;
+    /// for HTTP/SSE each connection gets fresh instructions.
     instructions: String,
 }
 
