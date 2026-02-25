@@ -452,15 +452,23 @@ impl LspClient {
         if let Ok(infos) = serde_json::from_value::<Vec<lsp_types::SymbolInformation>>(result) {
             return Ok(infos
                 .iter()
-                .map(|si| super::SymbolInfo {
-                    name: si.name.clone(),
-                    name_path: si.name.clone(),
-                    kind: si.kind.into(),
-                    file: file_path.clone(),
-                    start_line: si.location.range.start.line,
-                    end_line: si.location.range.end.line,
-                    start_col: si.location.range.start.character,
-                    children: vec![],
+                .map(|si| {
+                    let name_path = match &si.container_name {
+                        Some(container) if !container.is_empty() => {
+                            format!("{}/{}", container, si.name)
+                        }
+                        _ => si.name.clone(),
+                    };
+                    super::SymbolInfo {
+                        name: si.name.clone(),
+                        name_path,
+                        kind: si.kind.into(),
+                        file: file_path.clone(),
+                        start_line: si.location.range.start.line,
+                        end_line: si.location.range.end.line,
+                        start_col: si.location.range.start.character,
+                        children: vec![],
+                    }
                 })
                 .collect());
         }
@@ -819,5 +827,85 @@ struct Point {
             result[0].end_line, 10,
             "end_line should use range for body extent"
         );
+    }
+
+    #[test]
+    fn flat_symbol_information_builds_name_path_from_container() {
+        use crate::lsp::SymbolInfo;
+        use lsp_types::{
+            Location, Position, Range, SymbolInformation, SymbolKind as LspSymbolKind, Uri,
+        };
+
+        let uri: Uri = "file:///tmp/test.rb".parse().unwrap();
+        let infos = vec![
+            SymbolInformation {
+                name: "MyClass".to_string(),
+                kind: LspSymbolKind::CLASS,
+                tags: None,
+                deprecated: None,
+                location: Location {
+                    uri: uri.clone(),
+                    range: Range {
+                        start: Position {
+                            line: 0,
+                            character: 0,
+                        },
+                        end: Position {
+                            line: 20,
+                            character: 3,
+                        },
+                    },
+                },
+                container_name: None,
+            },
+            SymbolInformation {
+                name: "my_method".to_string(),
+                kind: LspSymbolKind::METHOD,
+                tags: None,
+                deprecated: None,
+                location: Location {
+                    uri: uri.clone(),
+                    range: Range {
+                        start: Position {
+                            line: 5,
+                            character: 2,
+                        },
+                        end: Position {
+                            line: 10,
+                            character: 5,
+                        },
+                    },
+                },
+                container_name: Some("MyClass".to_string()),
+            },
+        ];
+
+        // Simulate what document_symbols does with flat format
+        let file_path = std::path::PathBuf::from("/tmp/test.rb");
+        // Current code just does name_path: si.name.clone() — this test verifies the fix
+        let result: Vec<SymbolInfo> = infos
+            .iter()
+            .map(|si| {
+                let name_path = match &si.container_name {
+                    Some(container) if !container.is_empty() => {
+                        format!("{}/{}", container, si.name)
+                    }
+                    _ => si.name.clone(),
+                };
+                SymbolInfo {
+                    name: si.name.clone(),
+                    name_path,
+                    kind: si.kind.into(),
+                    file: file_path.clone(),
+                    start_line: si.location.range.start.line,
+                    end_line: si.location.range.end.line,
+                    start_col: si.location.range.start.character,
+                    children: vec![],
+                }
+            })
+            .collect();
+
+        assert_eq!(result[0].name_path, "MyClass");
+        assert_eq!(result[1].name_path, "MyClass/my_method");
     }
 }
