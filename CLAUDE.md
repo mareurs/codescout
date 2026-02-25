@@ -6,7 +6,7 @@ Rust MCP server giving LLMs IDE-grade code intelligence — symbol-level navigat
 
 ```bash
 cargo build                        # Build
-cargo test                         # Run tests (150+ passing)
+cargo test                         # Run tests (163 passing)
 cargo clippy -- -D warnings        # Lint
 cargo fmt                          # Format
 cargo run -- start --project .     # Run MCP server (stdio)
@@ -28,15 +28,17 @@ src/
 ├── git/             # git2: blame, file_log, open_repo
 ├── embed/           # Chunker, SQLite index, RemoteEmbedder, schema
 ├── memory/          # Markdown-based MemoryStore (.code-explorer/memories/)
+├── prompts/         # LLM guidance: server_instructions.md, onboarding_prompt.md
 ├── tools/           # Tool implementations by category
-│   ├── file.rs      #   read_file, list_dir, search_for_pattern  ← working
-│   ├── workflow.rs  #   execute_shell_command  ← working
-│   ├── symbol.rs    #   7 LSP-backed tools  ← stubs
-│   ├── git.rs       #   blame, log, diff  ← stubs (backends exist)
-│   ├── semantic.rs  #   search, index_project, index_status  ← stubs (backends exist)
-│   ├── memory.rs    #   CRUD tools  ← stubs (MemoryStore exists)
-│   ├── ast.rs       #   list_functions, extract_docstrings  ← stubs
-│   └── config.rs    #   activate_project, get_current_config  ← stubs
+│   ├── output.rs    #   OutputGuard: progressive disclosure (exploring/focused)
+│   ├── file.rs      #   read_file, list_dir, search_for_pattern, find_file, etc.
+│   ├── workflow.rs  #   onboarding, check_onboarding, execute_shell_command
+│   ├── symbol.rs    #   7 LSP-backed tools (find_symbol, get_symbols_overview, etc.)
+│   ├── git.rs       #   blame, log, diff
+│   ├── semantic.rs  #   search, index_project, index_status
+│   ├── memory.rs    #   CRUD tools (write/read/list/delete)
+│   ├── ast.rs       #   list_functions, extract_docstrings
+│   └── config.rs    #   activate_project, get_current_config
 └── util/            # fs helpers, text processing
 ```
 
