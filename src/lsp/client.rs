@@ -57,9 +57,9 @@ fn convert_document_symbols(
                 name_path: name_path.clone(),
                 kind: ds.kind.into(),
                 file: file.clone(),
-                start_line: ds.range.start.line,
+                start_line: ds.selection_range.start.line,
                 end_line: ds.range.end.line,
-                start_col: ds.range.start.character,
+                start_col: ds.selection_range.start.character,
                 children,
             }
         })
@@ -768,5 +768,56 @@ struct Point {
             .unwrap();
 
         client.shutdown().await.unwrap();
+    }
+
+    #[test]
+    fn convert_document_symbols_uses_selection_range() {
+        use lsp_types::{DocumentSymbol, Position, Range, SymbolKind as LspSymbolKind};
+
+        let symbols = vec![DocumentSymbol {
+            name: "my_func".to_string(),
+            detail: None,
+            kind: LspSymbolKind::FUNCTION,
+            tags: None,
+            deprecated: None,
+            range: Range {
+                start: Position {
+                    line: 5,
+                    character: 0,
+                },
+                end: Position {
+                    line: 10,
+                    character: 1,
+                },
+            },
+            selection_range: Range {
+                start: Position {
+                    line: 8,
+                    character: 4,
+                },
+                end: Position {
+                    line: 8,
+                    character: 11,
+                },
+            },
+            children: None,
+        }];
+
+        let path = std::path::PathBuf::from("/tmp/test.rs");
+        let result = convert_document_symbols(&symbols, &path, "");
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].start_line, 8,
+            "start_line should use selection_range"
+        );
+        assert_eq!(
+            result[0].start_col, 4,
+            "start_col should use selection_range"
+        );
+        assert_eq!(
+            result[0].end_line, 10,
+            "end_line should use range for body extent"
+        );
     }
 }
