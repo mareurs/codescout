@@ -169,7 +169,8 @@ impl Tool for IndexStatus {
 
         Ok(json!({
             "indexed": true,
-            "model": model,
+            "configured_model": model,
+            "indexed_with_model": stats.model,
             "file_count": stats.file_count,
             "chunk_count": stats.chunk_count,
             "embedding_count": stats.embedding_count,

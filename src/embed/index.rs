@@ -376,6 +376,8 @@ pub struct IndexStats {
     pub file_count: usize,
     pub chunk_count: usize,
     pub embedding_count: usize,
+    /// Model string stored at index time, if any.
+    pub model: Option<String>,
 }
 
 /// Query index statistics from the database.
@@ -384,10 +386,12 @@ pub fn index_stats(conn: &Connection) -> Result<IndexStats> {
     let chunk_count: usize = conn.query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0))?;
     let embedding_count: usize =
         conn.query_row("SELECT COUNT(*) FROM chunk_embeddings", [], |r| r.get(0))?;
+    let model = get_meta(conn, "embed_model")?;
     Ok(IndexStats {
         file_count,
         chunk_count,
         embedding_count,
+        model,
     })
 }
 
@@ -676,5 +680,20 @@ mod tests {
             err.contains("embeddings.db"),
             "error should hint at DB deletion"
         );
+    }
+
+    #[test]
+    fn index_stats_returns_stored_model() {
+        let (_dir, conn) = open_test_db();
+        set_meta(&conn, "embed_model", "ollama:mxbai-embed-large").unwrap();
+        let stats = index_stats(&conn).unwrap();
+        assert_eq!(stats.model.as_deref(), Some("ollama:mxbai-embed-large"));
+    }
+
+    #[test]
+    fn index_stats_model_is_none_when_unset() {
+        let (_dir, conn) = open_test_db();
+        let stats = index_stats(&conn).unwrap();
+        assert!(stats.model.is_none());
     }
 }
