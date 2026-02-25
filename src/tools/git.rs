@@ -23,7 +23,10 @@ impl Tool for GitBlame {
             "properties": {
                 "path": { "type": "string", "description": "File path relative to project root" },
                 "start_line": { "type": "integer" },
-                "end_line": { "type": "integer" }
+                "end_line": { "type": "integer" },
+                "detail_level": { "type": "string", "description": "Output detail: omit for compact (default), 'full' for all lines" },
+                "offset": { "type": "integer", "description": "Skip this many lines (focused mode pagination)" },
+                "limit": { "type": "integer", "description": "Max lines per page (focused mode, default 50)" }
             }
         })
     }
@@ -55,7 +58,17 @@ impl Tool for GitBlame {
             })
             .collect();
 
-        Ok(json!({ "lines": filtered, "total": filtered.len() }))
+        let guard = super::output::OutputGuard::from_input(&input);
+        let total = filtered.len();
+        let (filtered, overflow) = guard.cap_items(
+            filtered,
+            "Use start_line/end_line to narrow, or detail_level='full' for all lines",
+        );
+        let mut result = json!({ "lines": filtered, "total": total });
+        if let Some(ov) = overflow {
+            result["overflow"] = super::output::OutputGuard::overflow_json(&ov);
+        }
+        Ok(result)
     }
 }
 
@@ -120,7 +133,8 @@ impl Tool for GitDiff {
             "type": "object",
             "properties": {
                 "path": { "type": "string", "description": "Restrict diff to this file (optional)" },
-                "commit": { "type": "string", "description": "Commit SHA to diff against (default: HEAD)" }
+                "commit": { "type": "string", "description": "Commit SHA to diff against (default: HEAD)" },
+                "detail_level": { "type": "string", "description": "Output detail: omit for compact with truncation (default), 'full' for complete diff" }
             }
         })
     }
@@ -131,8 +145,24 @@ impl Tool for GitDiff {
         let file = input["path"].as_str().map(Path::new);
         let commit = input["commit"].as_str();
 
+        let guard = super::output::OutputGuard::from_input(&input);
         let diff_text = crate::git::diff_workdir(&repo, file, commit)?;
-        Ok(json!({ "diff": diff_text }))
+
+        if guard.mode == super::output::OutputMode::Exploring && diff_text.len() > 50_000 {
+            // Truncate at ~50KB, cutting at last newline to avoid mid-line breaks
+            let truncated = &diff_text[..50_000];
+            let cut = truncated.rfind('\n').unwrap_or(50_000);
+            Ok(json!({
+                "diff": &diff_text[..cut],
+                "overflow": {
+                    "shown_bytes": cut,
+                    "total_bytes": diff_text.len(),
+                    "hint": "Diff truncated. Use detail_level='full' for complete output, or restrict to a specific file with 'path'."
+                }
+            }))
+        } else {
+            Ok(json!({ "diff": diff_text }))
+        }
     }
 }
 
