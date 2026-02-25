@@ -59,7 +59,7 @@ fn default_timeout() -> u64 {
     60
 }
 fn default_embed_model() -> String {
-    "ollama:nomic-embed-text".into()
+    "ollama:mxbai-embed-large".into()
 }
 fn default_chunk_size() -> usize {
     4000
@@ -114,5 +114,21 @@ impl ProjectConfig {
     /// Path to the per-project data directory.
     pub fn data_dir(root: &Path) -> PathBuf {
         root.join(".code-explorer")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_model_is_mxbai() {
+        assert_eq!(default_embed_model(), "ollama:mxbai-embed-large");
+    }
+
+    #[test]
+    fn default_config_has_mxbai_model() {
+        let cfg = ProjectConfig::default_for("my-project".into());
+        assert_eq!(cfg.embeddings.model, "ollama:mxbai-embed-large");
     }
 }
