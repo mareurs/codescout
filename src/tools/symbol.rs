@@ -379,7 +379,7 @@ impl Tool for ReplaceSymbolBody {
         new_lines.push(new_body);
         new_lines.extend_from_slice(&lines[end..]);
 
-        std::fs::write(&full_path, new_lines.join("\n"))?;
+        write_lines(&full_path, &new_lines, content.ends_with('\n'))?;
         Ok(json!({ "status": "ok", "replaced_lines": format!("{}-{}", start + 1, end) }))
     }
 }
@@ -434,7 +434,7 @@ impl Tool for InsertBeforeSymbol {
         new_lines.push(code);
         new_lines.extend_from_slice(&lines[insert_at..]);
 
-        std::fs::write(&full_path, new_lines.join("\n"))?;
+        write_lines(&full_path, &new_lines, content.ends_with('\n'))?;
         Ok(json!({ "status": "ok", "inserted_at_line": insert_at + 1 }))
     }
 }
@@ -487,7 +487,7 @@ impl Tool for InsertAfterSymbol {
         new_lines.push(code);
         new_lines.extend_from_slice(&lines[insert_at..]);
 
-        std::fs::write(&full_path, new_lines.join("\n"))?;
+        write_lines(&full_path, &new_lines, content.ends_with('\n'))?;
         Ok(json!({ "status": "ok", "inserted_at_line": insert_at + 1 }))
     }
 }
@@ -616,6 +616,15 @@ impl Tool for RenameSymbol {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
+
+/// Write lines back to a file, preserving a trailing newline if the original had one.
+fn write_lines(path: &std::path::Path, lines: &[&str], had_trailing_newline: bool) -> std::io::Result<()> {
+    let mut out = lines.join("\n");
+    if had_trailing_newline {
+        out.push('\n');
+    }
+    std::fs::write(path, out)
+}
 
 /// Walk the symbol tree to find a symbol by name_path (e.g. "MyStruct/my_method").
 fn find_symbol_by_name_path<'a>(
