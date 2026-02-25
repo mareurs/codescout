@@ -168,6 +168,8 @@ impl ServerHandler for CodeExplorerServer {
 
 /// Entry point: start the MCP server with the chosen transport.
 pub async fn run(project: Option<PathBuf>, transport: &str, host: &str, port: u16) -> Result<()> {
+    // If no --project given, auto-detect from CWD (Claude Code launches servers from the project dir)
+    let project = project.or_else(|| std::env::current_dir().ok());
     let agent = Agent::new(project).await?;
     let lsp = Arc::new(LspManager::new());
 
