@@ -890,8 +890,10 @@ mod tests {
     async fn create_text_file_missing_params_errors() {
         let ctx = test_ctx().await;
         assert!(CreateTextFile.call(json!({}), &ctx).await.is_err());
+        let outside = std::env::temp_dir().join("nonexistent_xplat_test");
+        let outside_str = outside.to_str().unwrap();
         assert!(CreateTextFile
-            .call(json!({ "path": "/tmp/x" }), &ctx)
+            .call(json!({ "path": outside_str }), &ctx)
             .await
             .is_err());
     }
@@ -1113,8 +1115,10 @@ mod tests {
     async fn replace_content_missing_params_errors() {
         let ctx = test_ctx().await;
         assert!(ReplaceContent.call(json!({}), &ctx).await.is_err());
+        let outside = std::env::temp_dir().join("nonexistent_xplat_test");
+        let outside_str = outside.to_str().unwrap();
         assert!(ReplaceContent
-            .call(json!({ "path": "/tmp/x", "old": "a" }), &ctx)
+            .call(json!({ "path": outside_str, "old": "a" }), &ctx)
             .await
             .is_err());
     }
@@ -1205,8 +1209,10 @@ mod tests {
         );
 
         // Missing content
+        let outside = std::env::temp_dir().join("nonexistent_xplat_test.txt");
+        let outside_str = outside.to_str().unwrap();
         let result = CreateTextFile
-            .call(json!({ "path": "/tmp/test.txt" }), &ctx)
+            .call(json!({ "path": outside_str }), &ctx)
             .await;
         assert!(
             result.is_err(),
@@ -1223,8 +1229,10 @@ mod tests {
             "replace_content without params should error"
         );
 
+        let outside = std::env::temp_dir().join("nonexistent_xplat_test");
+        let outside_str = outside.to_str().unwrap();
         let result = ReplaceContent
-            .call(json!({ "path": "/tmp/x", "old": "a" }), &ctx)
+            .call(json!({ "path": outside_str, "old": "a" }), &ctx)
             .await;
         assert!(
             result.is_err(),
@@ -1456,8 +1464,10 @@ mod tests {
     #[tokio::test]
     async fn write_requires_active_project() {
         let ctx = test_ctx().await;
+        let outside = std::env::temp_dir().join("nonexistent_xplat_test.txt");
+        let outside_str = outside.to_str().unwrap();
         let result = CreateTextFile
-            .call(json!({ "path": "/tmp/test.txt", "content": "hi" }), &ctx)
+            .call(json!({ "path": outside_str, "content": "hi" }), &ctx)
             .await;
         assert!(result.is_err(), "write without active project should error");
     }

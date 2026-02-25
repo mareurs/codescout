@@ -824,7 +824,7 @@ struct Point {
             children: None,
         }];
 
-        let path = std::path::PathBuf::from("/tmp/test.rs");
+        let path = std::env::temp_dir().join("test.rs");
         let result = convert_document_symbols(&symbols, &path, "");
 
         assert_eq!(result.len(), 1);
@@ -849,7 +849,11 @@ struct Point {
             Location, Position, Range, SymbolInformation, SymbolKind as LspSymbolKind, Uri,
         };
 
-        let uri: Uri = "file:///tmp/test.rb".parse().unwrap();
+        let uri: Uri = if cfg!(windows) {
+            "file:///C:/temp/test.rb".parse().unwrap()
+        } else {
+            "file:///tmp/test.rb".parse().unwrap()
+        };
         let infos = vec![
             SymbolInformation {
                 name: "MyClass".to_string(),
@@ -894,7 +898,7 @@ struct Point {
         ];
 
         // Simulate what document_symbols does with flat format
-        let file_path = std::path::PathBuf::from("/tmp/test.rb");
+        let file_path = std::env::temp_dir().join("test.rb");
         // Current code just does name_path: si.name.clone() — this test verifies the fix
         let result: Vec<SymbolInfo> = infos
             .iter()

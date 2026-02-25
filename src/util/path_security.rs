@@ -372,20 +372,20 @@ mod tests {
 
     #[test]
     fn read_custom_denied_pattern() {
+        let secret_dir = std::env::temp_dir().join("code_explorer_secret_test");
+        let secret_str = secret_dir.to_str().unwrap().to_string();
         let config = PathSecurityConfig {
-            denied_read_patterns: vec!["/tmp/secret".to_string()],
+            denied_read_patterns: vec![secret_str.clone()],
             extra_write_roots: vec![],
             ..Default::default()
         };
-        let dir = tempdir().unwrap();
-        // Create the /tmp/secret directory so canonicalize works
-        let secret_dir = PathBuf::from("/tmp/secret");
+        // Create the directory so canonicalize works
         if secret_dir.exists() || std::fs::create_dir_all(&secret_dir).is_ok() {
-            let result = validate_read_path("/tmp/secret/data.txt", None, &config);
+            let test_path = format!("{}/data.txt", secret_str);
+            let result = validate_read_path(&test_path, None, &config);
             assert!(result.is_err());
             let _ = std::fs::remove_dir(&secret_dir);
         }
-        drop(dir);
     }
 
     // ── Write validation ─────────────────────────────────────────────────

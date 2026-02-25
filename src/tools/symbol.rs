@@ -1399,11 +1399,12 @@ impl Point {
 
     #[test]
     fn find_symbol_by_name_path_exact_match() {
+        let test_file = std::env::temp_dir().join("test.rs");
         let symbols = vec![SymbolInfo {
             name: "MyStruct".to_string(),
             name_path: "MyStruct".to_string(),
             kind: crate::lsp::SymbolKind::Struct,
-            file: PathBuf::from("/tmp/test.rs"),
+            file: test_file.clone(),
             start_line: 0,
             end_line: 10,
             start_col: 0,
@@ -1411,7 +1412,7 @@ impl Point {
                 name: "my_method".to_string(),
                 name_path: "MyStruct/my_method".to_string(),
                 kind: crate::lsp::SymbolKind::Method,
-                file: PathBuf::from("/tmp/test.rs"),
+                file: test_file,
                 start_line: 2,
                 end_line: 5,
                 start_col: 4,
