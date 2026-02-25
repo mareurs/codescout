@@ -16,21 +16,34 @@ use tokio::task::JoinHandle;
 use super::transport;
 
 /// Convert an LSP `file://` URI back to a filesystem path.
+///
+/// Uses `url::Url` for correct handling of Windows drive letters,
+/// UNC paths, and percent-encoding. Falls back to raw path extraction
+/// if the URI cannot be parsed.
 fn uri_to_path(uri: &lsp_types::Uri) -> PathBuf {
-    PathBuf::from(uri.path().as_str())
+    // Parse the lsp_types URI string with url::Url which handles
+    // Windows drive letters and percent-encoding correctly.
+    url::Url::parse(uri.as_str())
+        .ok()
+        .and_then(|u| u.to_file_path().ok())
+        .unwrap_or_else(|| PathBuf::from(uri.path().as_str()))
 }
 
 /// Convert a filesystem path to an LSP `file://` URI.
+///
+/// Uses `url::Url` for correct encoding of special characters and
+/// proper `file:///` formatting on all platforms.
 fn path_to_uri(path: &Path) -> Result<lsp_types::Uri> {
     let abs = if path.is_absolute() {
         path.to_path_buf()
     } else {
         std::env::current_dir()?.join(path)
     };
-    let uri_str = format!("file://{}", abs.display());
-    uri_str
+    let u = url::Url::from_file_path(&abs)
+        .map_err(|_| anyhow::anyhow!("cannot convert path to URI: {}", abs.display()))?;
+    u.as_str()
         .parse()
-        .map_err(|e| anyhow::anyhow!("invalid URI '{}': {}", uri_str, e))
+        .map_err(|e| anyhow::anyhow!("invalid URI: {}", e))
 }
 
 /// Convert hierarchical `DocumentSymbol[]` into our `SymbolInfo` tree.
@@ -907,5 +920,23 @@ struct Point {
 
         assert_eq!(result[0].name_path, "MyClass");
         assert_eq!(result[1].name_path, "MyClass/my_method");
+    }
+
+    #[test]
+    fn path_to_uri_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.rs");
+        std::fs::write(&file, "").unwrap();
+
+        let uri = path_to_uri(&file).unwrap();
+        let uri_str = uri.as_str();
+        assert!(
+            uri_str.starts_with("file:///"),
+            "URI should start with file:///: {}",
+            uri_str
+        );
+
+        let back = uri_to_path(&uri);
+        assert_eq!(back, file, "roundtrip should preserve the path");
     }
 }

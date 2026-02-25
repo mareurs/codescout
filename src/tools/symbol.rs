@@ -941,8 +941,13 @@ fn find_symbol_by_name_path<'a>(
 }
 
 /// Convert a `file://` URI to a filesystem path.
+///
+/// Uses `url::Url` for correct handling of Windows drive letters,
+/// UNC paths, and percent-encoding.
 fn uri_to_path(uri: &str) -> Option<PathBuf> {
-    uri.strip_prefix("file://").map(PathBuf::from)
+    url::Url::parse(uri)
+        .ok()
+        .and_then(|u| u.to_file_path().ok())
 }
 
 /// Apply LSP TextEdits to a source string, returning the modified version.
@@ -1233,8 +1238,9 @@ impl Point {
         assert!(result.starts_with("hello rust"), "got: {}", result);
     }
 
+    #[cfg(unix)]
     #[test]
-    fn uri_to_path_strips_prefix() {
+    fn uri_to_path_parses_unix_uri() {
         let p = uri_to_path("file:///home/user/code.rs").unwrap();
         assert_eq!(p, PathBuf::from("/home/user/code.rs"));
     }
