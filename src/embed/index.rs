@@ -1,0 +1,449 @@
+//! sqlite-vec based embedding index with incremental updates.
+//!
+//! Inspired by cocoindex-code's SQLite + sqlite-vec approach:
+//! zero external services, embedded in the project directory.
+//!
+//! Schema:
+//!   files(path TEXT, hash TEXT)            — tracks indexed file hashes
+//!   chunks(id, file_path, language,         — code chunks
+//!          content, start_line, end_line,
+//!          file_hash)
+//!   chunk_embeddings(rowid, embedding)      — sqlite-vec virtual table
+//!
+//! TODO: Load the sqlite-vec extension at connection time:
+//!   conn.load_extension_enable()?;
+//!   conn.load_extension("sqlite_vec", None)?;
+//!   conn.load_extension_disable()?;
+
+use anyhow::Result;
+use rusqlite::{params, Connection};
+use sha2::{Digest, Sha256};
+use std::path::{Path, PathBuf};
+
+use super::schema::{CodeChunk, SearchResult};
+
+/// Path to the embedding database within a project.
+pub fn db_path(project_root: &Path) -> PathBuf {
+    project_root.join(".code-explorer").join("embeddings.db")
+}
+
+/// Open (or create) the embedding database and apply the schema.
+pub fn open_db(project_root: &Path) -> Result<Connection> {
+    let path = db_path(project_root);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let conn = Connection::open(&path)?;
+
+    // TODO: load sqlite-vec extension here
+    // conn.load_extension_enable()?;
+    // conn.load_extension("sqlite_vec", None)?;
+
+    conn.execute_batch(
+        "
+        PRAGMA journal_mode = WAL;
+
+        CREATE TABLE IF NOT EXISTS files (
+            path  TEXT PRIMARY KEY,
+            hash  TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS chunks (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_path  TEXT NOT NULL,
+            language   TEXT NOT NULL,
+            content    TEXT NOT NULL,
+            start_line INTEGER NOT NULL,
+            end_line   INTEGER NOT NULL,
+            file_hash  TEXT NOT NULL
+        );
+
+        -- TODO: replace with sqlite-vec virtual table once extension is loaded:
+        -- CREATE VIRTUAL TABLE IF NOT EXISTS chunk_embeddings
+        --   USING vec0(embedding float[768]);
+        CREATE TABLE IF NOT EXISTS chunk_embeddings (
+            rowid     INTEGER PRIMARY KEY,
+            embedding BLOB NOT NULL
+        );
+        ",
+    )?;
+
+    Ok(conn)
+}
+
+/// Hash the content of a file for change detection.
+pub fn hash_file(path: &Path) -> Result<String> {
+    let bytes = std::fs::read(path)?;
+    let digest = Sha256::digest(&bytes);
+    Ok(hex::encode(digest))
+}
+
+/// Insert a chunk and its embedding into the database.
+pub fn insert_chunk(conn: &Connection, chunk: &CodeChunk, embedding: &[f32]) -> Result<i64> {
+    conn.execute(
+        "INSERT INTO chunks (file_path, language, content, start_line, end_line, file_hash)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            chunk.file_path,
+            chunk.language,
+            chunk.content,
+            chunk.start_line,
+            chunk.end_line,
+            chunk.file_hash,
+        ],
+    )?;
+    let row_id = conn.last_insert_rowid();
+
+    // Serialize embedding as little-endian f32 bytes (sqlite-vec format)
+    let blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
+    conn.execute(
+        "INSERT INTO chunk_embeddings (rowid, embedding) VALUES (?1, ?2)",
+        params![row_id, blob],
+    )?;
+
+    Ok(row_id)
+}
+
+/// Remove all chunks for a given file path.
+pub fn delete_file_chunks(conn: &Connection, file_path: &str) -> Result<()> {
+    // Delete embeddings for this file's chunks
+    conn.execute(
+        "DELETE FROM chunk_embeddings
+         WHERE rowid IN (SELECT id FROM chunks WHERE file_path = ?1)",
+        params![file_path],
+    )?;
+    conn.execute(
+        "DELETE FROM chunks WHERE file_path = ?1",
+        params![file_path],
+    )?;
+    conn.execute(
+        "DELETE FROM files WHERE path = ?1",
+        params![file_path],
+    )?;
+    Ok(())
+}
+
+/// Get the stored hash for a file (for incremental indexing).
+pub fn get_file_hash(conn: &Connection, file_path: &str) -> Result<Option<String>> {
+    let mut stmt = conn.prepare("SELECT hash FROM files WHERE path = ?1")?;
+    let mut rows = stmt.query(params![file_path])?;
+    Ok(rows.next()?.map(|r| r.get(0)).transpose()?)
+}
+
+/// Update or insert the file hash record.
+pub fn upsert_file_hash(conn: &Connection, file_path: &str, hash: &str) -> Result<()> {
+    conn.execute(
+        "INSERT INTO files (path, hash) VALUES (?1, ?2)
+         ON CONFLICT(path) DO UPDATE SET hash = excluded.hash",
+        params![file_path, hash],
+    )?;
+    Ok(())
+}
+
+/// Naive cosine similarity search (pure Rust fallback, no sqlite-vec).
+///
+/// TODO: Replace with sqlite-vec virtual table query for production:
+///   SELECT c.*, vec_distance_cosine(ce.embedding, ?1) AS distance
+///   FROM chunk_embeddings ce JOIN chunks c ON c.id = ce.rowid
+///   ORDER BY distance LIMIT ?2
+pub fn search(
+    conn: &Connection,
+    query_embedding: &[f32],
+    limit: usize,
+) -> Result<Vec<SearchResult>> {
+    let mut stmt = conn.prepare(
+        "SELECT c.file_path, c.language, c.content, c.start_line, c.end_line, ce.embedding
+         FROM chunks c JOIN chunk_embeddings ce ON c.id = ce.rowid",
+    )?;
+
+    let qnorm = l2_norm(query_embedding);
+    let mut scored: Vec<(f32, SearchResult)> = stmt
+        .query_map([], |row| {
+            let blob: Vec<u8> = row.get(5)?;
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, usize>(3)?,
+                row.get::<_, usize>(4)?,
+                blob,
+            ))
+        })?
+        .filter_map(|r| r.ok())
+        .map(|(fp, lang, content, sl, el, blob)| {
+            let emb = bytes_to_f32(&blob);
+            let sim = cosine_sim(query_embedding, &emb, qnorm);
+            (
+                sim,
+                SearchResult {
+                    file_path: fp,
+                    language: lang,
+                    content,
+                    start_line: sl,
+                    end_line: el,
+                    score: sim,
+                },
+            )
+        })
+        .collect();
+
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(scored.into_iter().take(limit).map(|(_, r)| r).collect())
+}
+
+fn bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .chunks_exact(4)
+        .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+        .collect()
+}
+
+fn l2_norm(v: &[f32]) -> f32 {
+    v.iter().map(|x| x * x).sum::<f32>().sqrt()
+}
+
+fn cosine_sim(a: &[f32], b: &[f32], a_norm: f32) -> f32 {
+    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let b_norm = l2_norm(b);
+    if a_norm == 0.0 || b_norm == 0.0 {
+        return 0.0;
+    }
+    (dot / (a_norm * b_norm)).clamp(0.0, 1.0)
+}
+
+/// Build or incrementally update the embedding index for a project.
+pub async fn build_index(project_root: &Path, force: bool) -> Result<()> {
+    use crate::ast::detect_language;
+    use crate::config::ProjectConfig;
+    use crate::embed::{chunker, create_embedder};
+
+    let config = ProjectConfig::load_or_default(project_root)?;
+    let conn = open_db(project_root)?;
+    let embedder = create_embedder(&config.embeddings.model).await?;
+
+    let walker = ignore::WalkBuilder::new(project_root)
+        .hidden(true)
+        .git_ignore(true)
+        .build();
+
+    let mut indexed = 0usize;
+    let mut skipped = 0usize;
+
+    for entry in walker.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(_lang) = detect_language(path) else { continue };
+
+        let rel = path.strip_prefix(project_root)?.to_string_lossy().to_string();
+        let hash = hash_file(path)?;
+
+        // Skip if unchanged and not forcing
+        if !force {
+            if let Some(stored) = get_file_hash(&conn, &rel)? {
+                if stored == hash {
+                    skipped += 1;
+                    continue;
+                }
+            }
+        }
+
+        // Re-index this file
+        delete_file_chunks(&conn, &rel)?;
+
+        let source = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(_) => continue, // skip binary files
+        };
+
+        let lang = detect_language(path).unwrap_or("unknown");
+        let raw_chunks = chunker::split(
+            &source,
+            config.embeddings.chunk_size,
+            config.embeddings.chunk_overlap,
+        );
+
+        let texts: Vec<&str> = raw_chunks.iter().map(|c| c.content.as_str()).collect();
+        let embeddings = embedder.embed(&texts).await?;
+
+        for (raw, emb) in raw_chunks.iter().zip(embeddings.iter()) {
+            let chunk = CodeChunk {
+                id: None,
+                file_path: rel.clone(),
+                language: lang.to_string(),
+                content: raw.content.clone(),
+                start_line: raw.start_line,
+                end_line: raw.end_line,
+                file_hash: hash.clone(),
+            };
+            insert_chunk(&conn, &chunk, emb)?;
+        }
+
+        upsert_file_hash(&conn, &rel, &hash)?;
+        indexed += 1;
+        tracing::debug!("indexed {} ({} chunks)", rel, raw_chunks.len());
+    }
+
+    tracing::info!(
+        "Index complete: {} files indexed, {} unchanged",
+        indexed,
+        skipped
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::embed::schema::CodeChunk;
+    use tempfile::tempdir;
+
+    fn open_test_db() -> (tempfile::TempDir, Connection) {
+        let dir = tempdir().unwrap();
+        let conn = open_db(dir.path()).unwrap();
+        (dir, conn)
+    }
+
+    fn dummy_chunk(file_path: &str, content: &str) -> CodeChunk {
+        CodeChunk {
+            id: None,
+            file_path: file_path.to_string(),
+            language: "rust".to_string(),
+            content: content.to_string(),
+            start_line: 1,
+            end_line: 3,
+            file_hash: "testhash".to_string(),
+        }
+    }
+
+    #[test]
+    fn open_db_creates_tables() {
+        let (_dir, conn) = open_test_db();
+        let files: i64 = conn
+            .query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))
+            .unwrap();
+        let chunks: i64 = conn
+            .query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(files, 0);
+        assert_eq!(chunks, 0);
+    }
+
+    #[test]
+    fn insert_chunk_assigns_row_id() {
+        let (_dir, conn) = open_test_db();
+        let id = insert_chunk(&conn, &dummy_chunk("a.rs", "fn a() {}"), &[0.1, 0.2]).unwrap();
+        assert!(id > 0);
+    }
+
+    #[test]
+    fn insert_multiple_chunks_for_same_file() {
+        let (_dir, conn) = open_test_db();
+        insert_chunk(&conn, &dummy_chunk("f.rs", "chunk 1"), &[0.1]).unwrap();
+        insert_chunk(&conn, &dummy_chunk("f.rs", "chunk 2"), &[0.2]).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM chunks WHERE file_path='f.rs'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn file_hash_upsert_and_get() {
+        let (_dir, conn) = open_test_db();
+        upsert_file_hash(&conn, "src/lib.rs", "aabbcc").unwrap();
+        assert_eq!(get_file_hash(&conn, "src/lib.rs").unwrap(), Some("aabbcc".to_string()));
+    }
+
+    #[test]
+    fn file_hash_upsert_updates_on_conflict() {
+        let (_dir, conn) = open_test_db();
+        upsert_file_hash(&conn, "src/lib.rs", "hash1").unwrap();
+        upsert_file_hash(&conn, "src/lib.rs", "hash2").unwrap();
+        assert_eq!(get_file_hash(&conn, "src/lib.rs").unwrap(), Some("hash2".to_string()));
+    }
+
+    #[test]
+    fn get_file_hash_missing_returns_none() {
+        let (_dir, conn) = open_test_db();
+        assert_eq!(get_file_hash(&conn, "nonexistent.rs").unwrap(), None);
+    }
+
+    #[test]
+    fn delete_file_chunks_removes_chunks_and_hash() {
+        let (_dir, conn) = open_test_db();
+        insert_chunk(&conn, &dummy_chunk("del.rs", "fn x() {}"), &[0.5]).unwrap();
+        upsert_file_hash(&conn, "del.rs", "abc").unwrap();
+
+        delete_file_chunks(&conn, "del.rs").unwrap();
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM chunks WHERE file_path='del.rs'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+        assert_eq!(get_file_hash(&conn, "del.rs").unwrap(), None);
+    }
+
+    #[test]
+    fn delete_does_not_affect_other_files() {
+        let (_dir, conn) = open_test_db();
+        insert_chunk(&conn, &dummy_chunk("keep.rs", "fn keep() {}"), &[0.1]).unwrap();
+        insert_chunk(&conn, &dummy_chunk("del.rs", "fn del() {}"), &[0.2]).unwrap();
+
+        delete_file_chunks(&conn, "del.rs").unwrap();
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM chunks WHERE file_path='keep.rs'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn cosine_search_returns_closest_vector() {
+        let (_dir, conn) = open_test_db();
+        // Two orthogonal 4-dim embeddings
+        insert_chunk(&conn, &dummy_chunk("a.rs", "fn a() {}"), &[1.0, 0.0, 0.0, 0.0]).unwrap();
+        insert_chunk(&conn, &dummy_chunk("b.rs", "fn b() {}"), &[0.0, 1.0, 0.0, 0.0]).unwrap();
+
+        // Query aligned with a.rs
+        let results = search(&conn, &[0.9, 0.1, 0.0, 0.0], 1).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].file_path, "a.rs");
+        assert!(results[0].score > 0.9, "score was {}", results[0].score);
+    }
+
+    #[test]
+    fn cosine_search_respects_limit() {
+        let (_dir, conn) = open_test_db();
+        for i in 0..5 {
+            insert_chunk(
+                &conn,
+                &dummy_chunk(&format!("{}.rs", i), "fn f() {}"),
+                &[i as f32, 0.0],
+            ).unwrap();
+        }
+        let results = search(&conn, &[1.0, 0.0], 3).unwrap();
+        assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn hash_file_produces_64_char_hex() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.rs");
+        std::fs::write(&file, b"fn main() {}").unwrap();
+        let hash = hash_file(&file).unwrap();
+        assert_eq!(hash.len(), 64);
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn hash_file_differs_for_different_content() {
+        let dir = tempdir().unwrap();
+        let f1 = dir.path().join("a.rs");
+        let f2 = dir.path().join("b.rs");
+        std::fs::write(&f1, b"fn a() {}").unwrap();
+        std::fs::write(&f2, b"fn b() {}").unwrap();
+        assert_ne!(hash_file(&f1).unwrap(), hash_file(&f2).unwrap());
+    }
+}

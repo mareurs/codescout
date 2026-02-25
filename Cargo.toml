@@ -1,0 +1,73 @@
+[package]
+name = "code-explorer"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance coding agent toolkit MCP server"
+license = "MIT"
+
+[[bin]]
+name = "code-explorer"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# MCP protocol (Rust SDK)
+rmcp = { version = "0.1", features = ["server", "macros", "transport-io"] }
+schemars = "0.8"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+async-trait = "0.1"
+
+# Logging / tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Git integration
+git2 = "0.19"
+
+# Database — SQLite with bundled libsqlite3
+# sqlite-vec extension loaded at runtime for vector similarity search
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# File system traversal (respects .gitignore)
+walkdir = "2"
+ignore = "0.4"
+globset = "0.4"
+
+# Text / regex
+regex = "1"
+
+# Content hashing (incremental indexing)
+sha2 = "0.10"
+hex = "0.4"
+
+# LSP protocol types
+lsp-types = "0.97"
+
+# AST parsing (tree-sitter)
+tree-sitter = "0.23"
+
+# HTTP client (remote embeddings — OpenAI-compatible APIs, Ollama, etc.)
+reqwest = { version = "0.12", features = ["json"], optional = true }
+
+[features]
+default = ["remote-embed"]
+# Remote embedding via OpenAI-compatible HTTP API (Ollama, OpenAI, etc.)
+remote-embed = ["dep:reqwest"]
+# Local embedding via candle (HuggingFace Rust ML — adds significant compile time)
+# local-embed = ["dep:candle-core", "dep:candle-transformers", "dep:candle-nn", "dep:hf-hub", "dep:tokenizers"]
+
+[dev-dependencies]
+tempfile = "3"
