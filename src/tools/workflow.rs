@@ -190,8 +190,16 @@ impl Tool for ExecuteShellCommand {
             }
         }
 
+        #[cfg(unix)]
         let child = tokio::process::Command::new("sh")
             .arg("-c")
+            .arg(command)
+            .current_dir(&root)
+            .output();
+
+        #[cfg(windows)]
+        let child = tokio::process::Command::new("cmd")
+            .arg("/C")
             .arg(command)
             .current_dir(&root)
             .output();
@@ -386,6 +394,7 @@ mod tests {
         assert!(result["memories"].as_array().unwrap().len() > 0);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn execute_shell_command_timeout_is_enforced() {
         let (_dir, ctx) = project_ctx().await;
@@ -411,6 +420,7 @@ mod tests {
         assert!(result["stdout"].as_str().unwrap().contains("hello"));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn execute_shell_command_output_truncated() {
         let (_dir, ctx) = project_ctx().await;
@@ -464,5 +474,21 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result["exit_code"], 42);
+    }
+
+    #[tokio::test]
+    async fn execute_shell_command_echo_cross_platform() {
+        let (_dir, ctx) = project_ctx().await;
+        // "echo hello" works on both sh and cmd.exe
+        let result = ExecuteShellCommand
+            .call(json!({ "command": "echo hello", "timeout_secs": 5 }), &ctx)
+            .await
+            .unwrap();
+        let stdout = result["stdout"].as_str().unwrap();
+        assert!(
+            stdout.contains("hello"),
+            "stdout should contain 'hello': {}",
+            stdout
+        );
     }
 }
