@@ -115,6 +115,7 @@ mod tests {
         assert!(err.to_string().contains("local-embed"));
     }
 
+    #[cfg(feature = "remote-embed")]
     #[test]
     fn custom_prefix_missing_at_sign_returns_error() {
         let rt = tokio::runtime::Runtime::new().unwrap();

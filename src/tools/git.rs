@@ -306,4 +306,74 @@ mod tests {
         assert!(GitLog.call(json!({}), &ctx).await.is_err());
         assert!(GitDiff.call(json!({}), &ctx).await.is_err());
     }
+
+    /// Helper: create a repo with two commits and return the test context.
+    async fn two_commit_ctx() -> (tempfile::TempDir, ToolContext) {
+        let dir = tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let sig = git2::Signature::now("Test", "test@test.com").unwrap();
+
+        let file_path = dir.path().join("hello.rs");
+        std::fs::write(&file_path, "fn v1() {}\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("hello.rs")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let parent = repo
+            .commit(Some("HEAD"), &sig, &sig, "first commit", &tree, &[])
+            .unwrap();
+
+        std::fs::write(&file_path, "fn v1() {}\nfn v2() {}\n").unwrap();
+        index.add_path(Path::new("hello.rs")).unwrap();
+        index.write().unwrap();
+        let tree_id2 = index.write_tree().unwrap();
+        let tree2 = repo.find_tree(tree_id2).unwrap();
+        let parent_commit = repo.find_commit(parent).unwrap();
+        repo.commit(
+            Some("HEAD"),
+            &sig,
+            &sig,
+            "second commit",
+            &tree2,
+            &[&parent_commit],
+        )
+        .unwrap();
+
+        std::fs::create_dir_all(dir.path().join(".code-explorer")).unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        (
+            dir,
+            ToolContext {
+                agent,
+                lsp: Arc::new(LspManager::new()),
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn diff_accepts_head_tilde_ref() {
+        let (_dir, ctx) = two_commit_ctx().await;
+        // HEAD~1 should resolve to the first commit; diff between first commit
+        // and working dir should show v2() as an addition.
+        let result = GitDiff
+            .call(json!({ "commit": "HEAD~1" }), &ctx)
+            .await
+            .expect("HEAD~1 should be a valid ref");
+        let diff = result["diff"].as_str().unwrap();
+        assert!(
+            diff.contains("v2"),
+            "diff against HEAD~1 should show v2 addition"
+        );
+    }
+
+    #[tokio::test]
+    async fn diff_rejects_invalid_ref() {
+        let (_dir, ctx) = two_commit_ctx().await;
+        let err = GitDiff
+            .call(json!({ "commit": "not-a-real-branch" }), &ctx)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Invalid commit ref"));
+    }
 }

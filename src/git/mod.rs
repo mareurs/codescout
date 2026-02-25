@@ -88,10 +88,13 @@ pub fn diff_workdir(
     file: Option<&Path>,
     commit_sha: Option<&str>,
 ) -> Result<String> {
-    let tree = if let Some(sha) = commit_sha {
-        let oid = git2::Oid::from_str(sha)
-            .map_err(|e| anyhow::anyhow!("Invalid commit SHA '{}': {}", sha, e))?;
-        let commit = repo.find_commit(oid)?;
+    let tree = if let Some(rev) = commit_sha {
+        let obj = repo
+            .revparse_single(rev)
+            .map_err(|e| anyhow::anyhow!("Invalid commit ref '{}': {}", rev, e))?;
+        let commit = obj
+            .peel_to_commit()
+            .map_err(|e| anyhow::anyhow!("'{}' is not a commit: {}", rev, e))?;
         Some(commit.tree()?)
     } else {
         // HEAD tree (may not exist for empty repos)

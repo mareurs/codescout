@@ -1,12 +1,12 @@
 # code-explorer
 
-Rust MCP server giving LLMs IDE-grade code intelligence — symbol-level navigation, semantic search, git integration. Inspired by [Serena](./serena-as-reference/) and [cocoindex-code](../cocoindex-code/).
+Rust MCP server giving LLMs IDE-grade code intelligence — symbol-level navigation, semantic search, git integration. Inspired by [Serena](https://github.com/oraios/serena).
 
 ## Development Commands
 
 ```bash
 cargo build                        # Build
-cargo test                         # Run tests (186 passing)
+cargo test                         # Run tests (232 total, 227 passing)
 cargo clippy -- -D warnings        # Lint
 cargo fmt                          # Format
 cargo run -- start --project .     # Run MCP server (stdio)
@@ -23,8 +23,8 @@ src/
 ├── server.rs        # rmcp ServerHandler — bridges Tool trait to MCP
 ├── agent.rs         # Orchestrator: active project, config, memory
 ├── config/          # ProjectConfig (.code-explorer/project.toml), modes
-├── lsp/             # LSP types, server configs (9 langs), client (stub)
-├── ast/             # Language detection (20+ exts), parser (stub)
+├── lsp/             # LSP types, server configs (9 langs), JSON-RPC client
+├── ast/             # Language detection (20+ exts), tree-sitter parser
 ├── git/             # git2: blame, file_log, open_repo
 ├── embed/           # Chunker, SQLite index, RemoteEmbedder, schema
 ├── memory/          # Markdown-based MemoryStore (.code-explorer/memories/)
@@ -77,8 +77,3 @@ top level, then semantic search.
 - `docs/plans/2026-02-25-v1-implementation-plan.md` — Sprint-level plan (Phase 0–5, 15 sprints)
 - `docs/ARCHITECTURE.md` — Component details, tech stack, design principles
 - `docs/ROADMAP.md` — Quick status overview
-
-## Reference
-
-- `serena-as-reference/` — Tool API patterns, LSP integration, memory system
-- `../cocoindex-code/` — Chunking strategy, sqlite-vec schema, incremental indexing

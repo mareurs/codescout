@@ -7,7 +7,7 @@ code-explorer is an MCP server that gives LLMs IDE-grade code intelligence. It e
 ```
 ┌────────────────────────────────────────────────────────┐
 │              MCP Layer (rmcp)                           │
-│   CodeExplorerServer → registered tools (27)           │
+│   CodeExplorerServer → registered tools (30)           │
 └────────────────────────────────────────────────────────┘
                           ↓
 ┌────────────────────────────────────────────────────────┐
@@ -52,12 +52,12 @@ Central orchestrator holding active project state behind `RwLock`. Manages:
 
 - `symbols.rs` — Language-agnostic `SymbolInfo`/`SymbolKind` types with `From<lsp_types::SymbolKind>`
 - `servers/mod.rs` — Default LSP server configs for 9 languages (rust-analyzer, pyright, typescript-language-server, gopls, jdtls, kotlin-language-server, clangd, omnisharp, solargraph)
-- `client.rs` — `LspClient` stub, needs tower-lsp/jsonrpc implementation
+- `client.rs` — `LspClient` with JSON-RPC transport, lifecycle management, and full LSP request support
 
 ### AST Engine (`src/ast/`)
 
 - `mod.rs` — `detect_language()` supporting 20+ file extensions; `extract_symbols()` delegates to parser
-- `parser.rs` — Stub returning empty vec, awaiting tree-sitter grammar integration
+- `parser.rs` — `extract_symbols()` via tree-sitter grammars for Rust, Python, TypeScript, Go, Java, Kotlin
 
 ### Git Engine (`src/git/`)
 
@@ -66,7 +66,7 @@ Central orchestrator holding active project state behind `RwLock`. Manages:
 
 ### Embedding Engine (`src/embed/`)
 
-Inspired by [cocoindex-code](../cocoindex-code/) — embedded semantic search with zero external services.
+Embedded semantic search with zero external services.
 
 - `schema.rs` — `CodeChunk` and `SearchResult` data types
 - `chunker.rs` — Language-aware recursive text splitter tracking 1-indexed line numbers. Handles overlap via character-count estimation.
@@ -86,14 +86,14 @@ Each tool implements the `Tool` trait (`name`, `description`, `input_schema`, `a
 
 | Category | File | Tools | Status |
 |----------|------|-------|--------|
-| File | `file.rs` | read_file, list_dir, search_for_pattern | Working |
-| Workflow | `workflow.rs` | execute_shell_command, onboarding, check_onboarding | 1/3 working |
-| Symbol | `symbol.rs` | find_symbol, find_referencing_symbols, get_symbols_overview, replace_symbol_body, insert_before/after_symbol, rename_symbol | Stubs (need LSP) |
-| AST | `ast.rs` | list_functions, extract_docstrings | Stubs (need tree-sitter) |
-| Git | `git.rs` | git_blame, git_log, git_diff | Stubs (backing funcs exist) |
-| Semantic | `semantic.rs` | semantic_search, index_project, index_status | Stubs (backing funcs exist) |
-| Memory | `memory.rs` | write_memory, read_memory, list_memories, delete_memory | Stubs (MemoryStore exists) |
-| Config | `config.rs` | activate_project, get_current_config | Stubs (Agent exists) |
+| File | `file.rs` | read_file, list_dir, search_for_pattern, find_file, create_text_file, replace_content | Working |
+| Workflow | `workflow.rs` | onboarding, check_onboarding_performed, execute_shell_command | Working |
+| Symbol | `symbol.rs` | find_symbol, get_symbols_overview, find_referencing_symbols, replace_symbol_body, insert_before_symbol, insert_after_symbol, rename_symbol | Working (LSP) |
+| AST | `ast.rs` | list_functions, extract_docstrings | Working (tree-sitter) |
+| Git | `git.rs` | git_blame, git_log, git_diff | Working |
+| Semantic | `semantic.rs` | semantic_search, index_project, index_status | Working |
+| Memory | `memory.rs` | write_memory, read_memory, list_memories, delete_memory | Working |
+| Config | `config.rs` | activate_project, get_current_config | Working |
 
 ### Utilities (`src/util/`)
 
@@ -128,8 +128,3 @@ Each tool implements the `Tool` trait (`name`, `description`, `input_schema`, `a
 - **Composable tools**: Small focused tools that combine well
 - **Fail gracefully**: LSP down → tree-sitter → text fallback
 - **Token-efficient**: Return minimal context; let the agent request more
-
-## Reference Projects
-
-- `serena-as-reference/` — Python MCP server for code intelligence (tool API patterns, LSP integration, memory system)
-- `../cocoindex-code/` — Python embedding MCP server (chunking strategy, sqlite-vec schema, incremental indexing)

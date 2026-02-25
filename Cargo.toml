@@ -3,7 +3,9 @@ name = "code-explorer"
 version = "0.1.0"
 edition = "2021"
 description = "High-performance coding agent toolkit MCP server"
+repository = "https://github.com/mareurs/code-explorer"
 license = "MIT"
+rust-version = "1.75"
 
 [lib]
 name = "code_explorer"

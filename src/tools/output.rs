@@ -78,7 +78,7 @@ impl OutputGuard {
     /// Reads optional fields:
     /// - `detail_level`: `"full"` → [`OutputMode::Focused`], anything else → [`OutputMode::Exploring`]
     /// - `offset`: pagination start (default 0)
-    /// - `limit`: page size (default 50)
+    /// - `limit`: page size (default 50). When explicitly provided, also caps exploring mode.
     pub fn from_input(input: &Value) -> Self {
         let mode = match input["detail_level"].as_str() {
             Some("full") => OutputMode::Focused,
@@ -87,11 +87,19 @@ impl OutputGuard {
         let offset = input["offset"].as_u64().unwrap_or(0) as usize;
         let limit = input["limit"].as_u64().unwrap_or(50) as usize;
 
+        // If the caller explicitly specifies a limit, honour it in exploring mode too.
+        let (max_files, max_results) = if input["limit"].is_number() {
+            (limit, limit)
+        } else {
+            (200, 200)
+        };
+
         Self {
             mode,
             offset,
             limit,
-            ..Self::default()
+            max_files,
+            max_results,
         }
     }
 

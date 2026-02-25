@@ -168,20 +168,33 @@ impl Tool for ExecuteShellCommand {
             }
         })
     }
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> anyhow::Result<Value> {
+    async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         let command = input["command"]
             .as_str()
             .ok_or_else(|| anyhow!("missing 'command' parameter"))?;
-        let output = tokio::process::Command::new("sh")
+        let timeout_secs = input["timeout_secs"].as_u64().unwrap_or(30);
+        let root = ctx.agent.require_project_root().await?;
+
+        let child = tokio::process::Command::new("sh")
             .arg("-c")
             .arg(command)
-            .output()
-            .await?;
-        Ok(json!({
-            "stdout": String::from_utf8_lossy(&output.stdout),
-            "stderr": String::from_utf8_lossy(&output.stderr),
-            "exit_code": output.status.code()
-        }))
+            .current_dir(&root)
+            .output();
+
+        match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), child).await {
+            Ok(Ok(output)) => Ok(json!({
+                "stdout": String::from_utf8_lossy(&output.stdout),
+                "stderr": String::from_utf8_lossy(&output.stderr),
+                "exit_code": output.status.code()
+            })),
+            Ok(Err(e)) => Err(anyhow!("command execution error: {}", e)),
+            Err(_) => Ok(json!({
+                "timed_out": true,
+                "stdout": "",
+                "stderr": format!("Command timed out after {} seconds", timeout_secs),
+                "exit_code": null
+            })),
+        }
     }
 }
 
@@ -301,5 +314,30 @@ mod tests {
         let msg = result["message"].as_str().unwrap();
         assert!(msg.contains("already performed"));
         assert!(result["memories"].as_array().unwrap().len() > 0);
+    }
+
+    #[tokio::test]
+    async fn execute_shell_command_timeout_is_enforced() {
+        let (_dir, ctx) = project_ctx().await;
+        let result = ExecuteShellCommand
+            .call(json!({ "command": "sleep 10", "timeout_secs": 1 }), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["timed_out"], true, "command should have timed out");
+        assert!(result["stderr"]
+            .as_str()
+            .unwrap()
+            .contains("timed out after 1 seconds"));
+    }
+
+    #[tokio::test]
+    async fn execute_shell_command_fast_command_succeeds() {
+        let (_dir, ctx) = project_ctx().await;
+        let result = ExecuteShellCommand
+            .call(json!({ "command": "echo hello", "timeout_secs": 5 }), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["timed_out"], serde_json::Value::Null);
+        assert!(result["stdout"].as_str().unwrap().contains("hello"));
     }
 }
