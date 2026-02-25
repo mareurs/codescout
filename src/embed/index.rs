@@ -277,11 +277,19 @@ pub async fn build_index(project_root: &Path, force: bool) -> Result<()> {
             Ok(s) => s,
             Err(_) => continue,
         };
-        let chunks = chunker::split(
-            &source,
-            config.embeddings.chunk_size,
-            config.embeddings.chunk_overlap,
-        );
+        let chunks = if lang == "markdown" {
+            chunker::split_markdown(
+                &source,
+                config.embeddings.chunk_size,
+                config.embeddings.chunk_overlap,
+            )
+        } else {
+            chunker::split(
+                &source,
+                config.embeddings.chunk_size,
+                config.embeddings.chunk_overlap,
+            )
+        };
         if chunks.is_empty() {
             continue;
         }

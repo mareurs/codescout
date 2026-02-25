@@ -62,10 +62,10 @@ fn default_embed_model() -> String {
     "ollama:mxbai-embed-large".into()
 }
 fn default_chunk_size() -> usize {
-    4000
+    1200
 }
 fn default_chunk_overlap() -> usize {
-    400
+    200
 }
 fn default_ignored_patterns() -> Vec<String> {
     vec![

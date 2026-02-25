@@ -71,6 +71,51 @@ pub fn split(source: &str, chunk_size: usize, chunk_overlap: usize) -> Vec<RawCh
     chunks
 }
 
+/// Split markdown content by heading boundaries, then apply character limits.
+///
+/// Each `#`, `##`, or `###` heading starts a new section. Sections that fit
+/// within `chunk_size` become a single chunk; oversized sections are sub-split
+/// by the regular [`split`] function with line offsets adjusted.
+pub fn split_markdown(source: &str, chunk_size: usize, chunk_overlap: usize) -> Vec<RawChunk> {
+    if source.is_empty() {
+        return vec![];
+    }
+
+    let lines: Vec<&str> = source.lines().collect();
+    let mut sections: Vec<(usize, usize)> = vec![]; // (start_idx, end_idx) 0-indexed
+    let mut section_start = 0;
+
+    for (i, line) in lines.iter().enumerate() {
+        if i > 0 && (line.starts_with("## ") || line.starts_with("### ") || line.starts_with("# "))
+        {
+            sections.push((section_start, i));
+            section_start = i;
+        }
+    }
+    sections.push((section_start, lines.len()));
+
+    let mut chunks = vec![];
+    for (start, end) in sections {
+        let section_text = lines[start..end].join("\n");
+        if section_text.len() <= chunk_size {
+            chunks.push(RawChunk {
+                content: section_text,
+                start_line: start + 1, // 1-indexed
+                end_line: end,         // end is exclusive in lines[], so this is the last line
+            });
+        } else {
+            // Section too large — sub-split with regular splitter
+            let sub_chunks = split(&section_text, chunk_size, chunk_overlap);
+            for mut sc in sub_chunks {
+                sc.start_line += start; // adjust to file-level line numbers
+                sc.end_line += start;
+                chunks.push(sc);
+            }
+        }
+    }
+    chunks
+}
+
 /// Estimate how many lines correspond to `overlap_chars` characters.
 fn estimate_overlap_lines(lines: &[&str], overlap_chars: usize) -> usize {
     if overlap_chars == 0 {
@@ -157,6 +202,54 @@ mod tests {
                 chunk.start_line, chunk.end_line
             );
         }
+    }
+
+    #[test]
+    fn markdown_splits_on_headings() {
+        let source = "# Title\n\nIntro text.\n\n## Section One\n\nContent one.\n\n## Section Two\n\nContent two.\n\n### Subsection\n\nMore content.\n";
+        let chunks = split_markdown(source, 500, 50);
+        // Should have at least 3 chunks (title+intro, section one, section two+subsection or separate)
+        assert!(
+            chunks.len() >= 3,
+            "got {} chunks: {:?}",
+            chunks.len(),
+            chunks
+                .iter()
+                .map(|c| &c.content[..c.content.len().min(40)])
+                .collect::<Vec<_>>()
+        );
+        // First chunk should contain "Title"
+        assert!(chunks[0].content.contains("Title"));
+        // Sections should be in separate chunks
+        assert!(chunks.iter().any(|c| c.content.contains("Section One")));
+        assert!(chunks.iter().any(|c| c.content.contains("Section Two")));
+    }
+
+    #[test]
+    fn markdown_large_section_gets_subsplit() {
+        // Create a section larger than chunk_size
+        let big_section = (0..100)
+            .map(|i| format!("Line {} of big section", i))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let source = format!(
+            "# Title\n\n## Big Section\n\n{}\n\n## Small Section\n\nJust a few words.\n",
+            big_section
+        );
+        let chunks = split_markdown(&source, 200, 20);
+        // Big section should be split into multiple chunks
+        assert!(
+            chunks.len() > 2,
+            "big section should be sub-split, got {} chunks",
+            chunks.len()
+        );
+        // Small section should still be its own chunk
+        assert!(chunks.iter().any(|c| c.content.contains("Small Section")));
+    }
+
+    #[test]
+    fn markdown_empty_returns_empty() {
+        assert!(split_markdown("", 500, 50).is_empty());
     }
 
     #[test]

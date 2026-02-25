@@ -52,6 +52,7 @@ pub fn detect_language(path: &Path) -> Option<&'static str> {
         "hs" => Some("haskell"),
         "lua" => Some("lua"),
         "sh" | "bash" => Some("bash"),
+        "md" | "markdown" => Some("markdown"),
         _ => None,
     }
 }
