@@ -306,7 +306,10 @@ impl Tool for FindSymbol {
                 "pattern": { "type": "string", "description": "Symbol name or substring to search for" },
                 "relative_path": { "type": "string", "description": "Restrict search to this file or glob pattern (e.g. 'src/**/*.rs')" },
                 "include_body": { "type": "boolean", "default": false },
-                "depth": { "type": "integer", "default": 0, "description": "Depth of children to include" }
+                "depth": { "type": "integer", "default": 0, "description": "Depth of children to include" },
+                "detail_level": { "type": "string", "description": "Output detail: omit for compact (default), 'full' for complete with bodies" },
+                "offset": { "type": "integer", "description": "Skip this many results (focused mode pagination)" },
+                "limit": { "type": "integer", "description": "Max results per page (focused mode, default 50)" }
             }
         })
     }
@@ -314,7 +317,10 @@ impl Tool for FindSymbol {
         let pattern = input["pattern"]
             .as_str()
             .ok_or_else(|| anyhow!("missing 'pattern' parameter"))?;
-        let include_body = input["include_body"].as_bool().unwrap_or(false);
+        let guard = OutputGuard::from_input(&input);
+        let include_body = input["include_body"]
+            .as_bool()
+            .unwrap_or_else(|| guard.should_include_body());
         let depth = input["depth"].as_u64().unwrap_or(0) as usize;
 
         let root = ctx.agent.require_project_root().await?;
@@ -387,7 +393,14 @@ impl Tool for FindSymbol {
             );
         }
 
-        Ok(json!({ "symbols": matches, "total": matches.len() }))
+        let total = matches.len();
+        let (matches, overflow) =
+            guard.cap_items(matches, "Restrict with a file path or glob pattern");
+        let mut result = json!({ "symbols": matches, "total": total });
+        if let Some(ov) = overflow {
+            result["overflow"] = OutputGuard::overflow_json(&ov);
+        }
+        Ok(result)
     }
 }
 
