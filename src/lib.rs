@@ -9,6 +9,7 @@ pub mod embed;
 pub mod git;
 pub mod lsp;
 pub mod memory;
+pub mod prompts;
 pub mod server;
 pub mod tools;
 pub mod util;
