@@ -269,7 +269,7 @@ pub async fn build_index(project_root: &Path, force: bool) -> Result<()> {
         let rel = path
             .strip_prefix(project_root)?
             .to_string_lossy()
-            .to_string();
+            .replace('\\', "/");
         let hash = hash_file(path)?;
 
         if !force {
@@ -695,5 +695,23 @@ mod tests {
         let (_dir, conn) = open_test_db();
         let stats = index_stats(&conn).unwrap();
         assert!(stats.model.is_none());
+    }
+
+    #[test]
+    fn normalize_rel_path_uses_forward_slashes() {
+        use std::path::PathBuf;
+        // Simulate what build_index does: strip prefix + to_string_lossy
+        let root = PathBuf::from(if cfg!(windows) {
+            "C:\\project"
+        } else {
+            "/project"
+        });
+        let file = root.join("src").join("tools").join("file.rs");
+        let rel = file
+            .strip_prefix(&root)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
+        assert_eq!(rel, "src/tools/file.rs");
     }
 }
