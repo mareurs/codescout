@@ -134,4 +134,39 @@ mod tests {
         let mgr = LspManager::new();
         mgr.shutdown_all().await; // Should not panic
     }
+
+    #[tokio::test]
+    async fn shutdown_all_stops_running_servers() {
+        use std::process::Command as StdCommand;
+
+        // Check if rust-analyzer is available
+        if StdCommand::new("rust-analyzer")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("Skipping: rust-analyzer not installed");
+            return;
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        // Create minimal Cargo project
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"t\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/lib.rs"), "pub fn f() {}").unwrap();
+
+        let mgr = LspManager::new();
+        let client = mgr.get_or_start("rust", dir.path()).await.unwrap();
+        assert!(client.is_alive());
+
+        mgr.shutdown_all().await;
+
+        // After shutdown, the client should be dead
+        assert!(!client.is_alive());
+        assert!(mgr.active_languages().await.is_empty());
+    }
 }

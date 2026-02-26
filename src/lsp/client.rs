@@ -106,6 +106,8 @@ pub struct LspClient {
     pub workspace_root: PathBuf,
     /// Server capabilities from initialization
     pub capabilities: StdMutex<lsp_types::ServerCapabilities>,
+    /// PID of the child LSP server process, for kill-on-drop safety net
+    child_pid: Option<u32>,
 }
 
 impl LspClient {
@@ -126,6 +128,7 @@ impl LspClient {
         let stdin = child.stdin.take().expect("stdin must be piped");
         let stdout = child.stdout.take().expect("stdout must be piped");
         let stderr = child.stderr.take().expect("stderr must be piped");
+        let child_pid = child.id();
 
         let pending: Arc<StdMutex<HashMap<i64, oneshot::Sender<Result<Value>>>>> =
             Arc::new(StdMutex::new(HashMap::new()));
@@ -211,6 +214,7 @@ impl LspClient {
             reader_handle: StdMutex::new(Some(reader_handle)),
             workspace_root: config.workspace_root.clone(),
             capabilities: StdMutex::new(lsp_types::ServerCapabilities::default()),
+            child_pid,
         };
 
         // Perform the LSP initialize handshake
@@ -621,11 +625,19 @@ impl LspClient {
 
 impl Drop for LspClient {
     fn drop(&mut self) {
-        // Abort the reader task — kill_on_drop on the child process
-        // ensures the server process is cleaned up too.
+        // Abort the reader task
         if let Ok(mut guard) = self.reader_handle.lock() {
             if let Some(handle) = guard.take() {
                 handle.abort();
+            }
+        }
+        // Kill the child process as a safety net.
+        // The graceful shutdown path (shutdown_all -> shutdown) sends LSP
+        // shutdown/exit first.  This ensures the process dies even if the
+        // graceful path was skipped (e.g., panic, abrupt exit).
+        if let Some(pid) = self.child_pid {
+            unsafe {
+                libc::kill(pid as i32, libc::SIGTERM);
             }
         }
     }
@@ -942,5 +954,36 @@ struct Point {
 
         let back = uri_to_path(&uri);
         assert_eq!(back, file, "roundtrip should preserve the path");
+    }
+
+    #[tokio::test]
+    async fn drop_kills_child_process() {
+        if !rust_analyzer_available() {
+            eprintln!("Skipping: rust-analyzer not installed");
+            return;
+        }
+        let dir = tempdir().unwrap();
+        create_test_cargo_project(dir.path());
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: dir.path().to_path_buf(),
+        };
+        let client = LspClient::start(config).await.unwrap();
+        let pid = client.child_pid.unwrap();
+
+        // Verify child is alive
+        let alive = unsafe { libc::kill(pid as i32, 0) };
+        assert_eq!(alive, 0, "child should be alive before drop");
+
+        // Drop the client
+        drop(client);
+
+        // Give the process a moment to die
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Verify child is dead
+        let dead = unsafe { libc::kill(pid as i32, 0) };
+        assert_ne!(dead, 0, "child should be dead after drop");
     }
 }

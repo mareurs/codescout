@@ -223,6 +223,26 @@ pub fn generate_auth_token() -> String {
     format!("{:016x}{:016x}", hi, lo)
 }
 
+/// Wait for SIGINT (Ctrl-C) or SIGTERM.
+async fn shutdown_signal() {
+    let ctrl_c = tokio::signal::ctrl_c();
+
+    #[cfg(unix)]
+    {
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler");
+        tokio::select! {
+            _ = ctrl_c => {}
+            _ = sigterm.recv() => {}
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        ctrl_c.await.ok();
+    }
+}
+
 pub async fn run(
     project: Option<PathBuf>,
     transport: &str,
@@ -241,15 +261,26 @@ pub async fn run(
                 tracing::warn!("--auth-token is ignored for stdio transport");
             }
             tracing::info!("code-explorer MCP server ready (stdio)");
-            let server = CodeExplorerServer::from_parts(agent, lsp).await;
+            let server = CodeExplorerServer::from_parts(agent, lsp.clone()).await;
             let service = server
                 .serve(rmcp::transport::stdio())
                 .await
                 .map_err(|e| anyhow::anyhow!("MCP server error: {}", e))?;
-            service
-                .waiting()
-                .await
-                .map_err(|e| anyhow::anyhow!("MCP server exited: {}", e))?;
+
+            // Wait for service to end OR shutdown signal
+            tokio::select! {
+                result = service.waiting() => {
+                    result.map_err(|e| anyhow::anyhow!("MCP server exited: {}", e))?;
+                }
+                _ = shutdown_signal() => {
+                    tracing::info!("Received shutdown signal");
+                }
+            }
+
+            // Gracefully shut down all LSP servers
+            tracing::info!("Shutting down LSP servers...");
+            lsp.shutdown_all().await;
+            tracing::info!("All LSP servers shut down");
             Ok(())
         }
         "http" => {
@@ -290,23 +321,40 @@ pub async fn run(
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to start SSE server: {}", e))?;
 
-            // Accept connections — each SSE session gets its own handler
-            while let Some(transport) = sse_server.next_transport().await {
-                let agent = agent.clone();
-                let lsp = lsp.clone();
-                tokio::spawn(async move {
-                    let handler = CodeExplorerServer::from_parts(agent, lsp).await;
-                    match handler.serve(transport).await {
-                        Ok(service) => {
-                            if let Err(e) = service.waiting().await {
-                                tracing::debug!("SSE session ended: {}", e);
+            // Accept connections until shutdown signal
+            loop {
+                tokio::select! {
+                    transport = sse_server.next_transport() => {
+                        match transport {
+                            Some(transport) => {
+                                let agent = agent.clone();
+                                let lsp = lsp.clone();
+                                tokio::spawn(async move {
+                                    let handler = CodeExplorerServer::from_parts(agent, lsp).await;
+                                    match handler.serve(transport).await {
+                                        Ok(service) => {
+                                            if let Err(e) = service.waiting().await {
+                                                tracing::debug!("SSE session ended: {}", e);
+                                            }
+                                        }
+                                        Err(e) => tracing::warn!("SSE session failed to start: {}", e),
+                                    }
+                                });
                             }
+                            None => break,
                         }
-                        Err(e) => tracing::warn!("SSE session failed to start: {}", e),
                     }
-                });
+                    _ = shutdown_signal() => {
+                        tracing::info!("Received shutdown signal");
+                        break;
+                    }
+                }
             }
 
+            // Gracefully shut down all LSP servers
+            tracing::info!("Shutting down LSP servers...");
+            lsp.shutdown_all().await;
+            tracing::info!("All LSP servers shut down");
             Ok(())
         }
         other => anyhow::bail!("Unknown transport '{}'. Use 'stdio' or 'http'.", other),

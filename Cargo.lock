@@ -457,6 +457,7 @@ dependencies = [
  "globset",
  "hex",
  "ignore",
+ "libc",
  "lsp-types",
  "regex",
  "reqwest",
