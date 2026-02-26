@@ -1,3 +1,559 @@
 # Symbol Navigation
 
-<!-- TODO: Write symbol navigation reference -->
+These seven tools give you IDE-grade code navigation backed by the Language
+Server Protocol. They understand code structure — symbols, definitions,
+references, types — not just bytes and lines.
+
+**Supported languages:** Rust, Python, TypeScript, JavaScript, TSX, JSX, Go,
+Java, Kotlin, C, C++, C#, Ruby.
+
+All symbol navigation tools require an LSP server for the target language. If
+the LSP server is not running or is still indexing, some tools fall back to
+tree-sitter for basic results.
+
+---
+
+## `get_symbols_overview`
+
+**Purpose:** Return the symbol tree (functions, classes, methods, structs, etc.)
+for a file, directory, or glob pattern. Use this to orient yourself before
+reading or editing.
+
+**Parameters:**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `relative_path` | string | no | project root | File, directory, or glob pattern (e.g. `src/**/*.rs`) |
+| `depth` | integer | no | 1 | Depth of children to include (0 = top-level names only, 1 = direct children) |
+| `detail_level` | string | no | exploring | `"full"` activates focused mode with symbol bodies |
+| `offset` | integer | no | 0 | Skip this many files (focused mode pagination) |
+| `limit` | integer | no | 50 | Max files per page |
+
+**Example — outline a single file:**
+
+```json
+{
+  "tool": "get_symbols_overview",
+  "arguments": {
+    "relative_path": "src/auth/middleware.rs"
+  }
+}
+```
+
+**Output (exploring mode):**
+
+```json
+{
+  "file": "src/auth/middleware.rs",
+  "symbols": [
+    { "name": "AuthMiddleware", "kind": "Struct", "start_line": 12, "end_line": 18 },
+    { "name": "new",            "kind": "Function", "start_line": 21, "end_line": 28 },
+    { "name": "handle",         "kind": "Function", "start_line": 31, "end_line": 74 },
+    { "name": "verify_token",   "kind": "Function", "start_line": 77, "end_line": 102 }
+  ]
+}
+```
+
+**Output (focused mode — `detail_level: "full"`):**
+
+Same structure, but each symbol includes a `"body"` field with the source lines
+from `start_line` to `end_line`.
+
+**Example — overview of a directory:**
+
+```json
+{
+  "tool": "get_symbols_overview",
+  "arguments": {
+    "relative_path": "src/handlers/"
+  }
+}
+```
+
+Returns one entry per file in the directory, each with its symbol list. At the
+project root (`.`), walks the entire source tree recursively.
+
+**Example — glob across multiple files:**
+
+```json
+{
+  "tool": "get_symbols_overview",
+  "arguments": {
+    "relative_path": "src/**/*.py",
+    "depth": 0
+  }
+}
+```
+
+With `depth: 0`, returns only top-level symbol names, which is useful for a
+very high-level map without the per-method detail.
+
+**Tips:**
+
+- Use this before reading or editing. Two tokens spent on the map saves dozens
+  spent re-reading the wrong file.
+- When the result overflows, the response includes an `overflow` object with
+  a hint. Narrow with a more specific path or glob.
+- For deep class hierarchies, increase `depth` to 2 or 3.
+- Use `detail_level: "full"` only after you have identified the specific file
+  you need — fetching bodies for an entire directory is expensive.
+
+---
+
+## `find_symbol`
+
+**Purpose:** Find symbols by name pattern across the project or within a
+specific file. Returns matching symbols with their location and, optionally,
+their source body.
+
+**Parameters:**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `pattern` | string | yes | — | Symbol name or substring (case-insensitive) |
+| `relative_path` | string | no | — | Restrict to this file or glob pattern |
+| `include_body` | boolean | no | false | Include source body in results |
+| `depth` | integer | no | 0 | Depth of children to include |
+| `detail_level` | string | no | exploring | `"full"` for bodies and pagination |
+| `offset` | integer | no | 0 | Skip this many results |
+| `limit` | integer | no | 50 | Max results per page |
+
+**Example — find a function anywhere in the project:**
+
+```json
+{
+  "tool": "find_symbol",
+  "arguments": {
+    "pattern": "authenticate_user"
+  }
+}
+```
+
+**Output (exploring mode):**
+
+```json
+{
+  "symbols": [
+    {
+      "name": "authenticate_user",
+      "name_path": "AuthService/authenticate_user",
+      "kind": "Function",
+      "file": "src/auth/service.rs",
+      "start_line": 44,
+      "end_line": 89
+    }
+  ],
+  "total": 1
+}
+```
+
+**Example — find with body, restricted to one file:**
+
+```json
+{
+  "tool": "find_symbol",
+  "arguments": {
+    "pattern": "authenticate_user",
+    "relative_path": "src/auth/service.rs",
+    "include_body": true,
+    "detail_level": "full"
+  }
+}
+```
+
+**Output (focused mode with body):**
+
+```json
+{
+  "symbols": [
+    {
+      "name": "authenticate_user",
+      "name_path": "AuthService/authenticate_user",
+      "kind": "Function",
+      "file": "src/auth/service.rs",
+      "start_line": 44,
+      "end_line": 89,
+      "body": "pub fn authenticate_user(&self, credentials: Credentials) -> Result<Session> {\n    let user = self.user_store.find_by_email(&credentials.email)?;\n    ..."
+    }
+  ],
+  "total": 1
+}
+```
+
+**Example — find all test functions in test files:**
+
+```json
+{
+  "tool": "find_symbol",
+  "arguments": {
+    "pattern": "test_",
+    "relative_path": "tests/**/*.rs"
+  }
+}
+```
+
+**Tips:**
+
+- Pattern matching is case-insensitive substring matching. `"auth"` matches
+  `AuthService`, `authenticate_user`, and `reauth_token`.
+- Without `relative_path`, uses `workspace/symbol` (one LSP request per
+  language), which is fast. With `relative_path`, uses per-file document
+  symbols, which is slower but scoped.
+- `name_path` in the result uses `/` as a separator for nested symbols, e.g.
+  `AuthService/authenticate_user`. You need this value for
+  `find_referencing_symbols`, `replace_symbol_body`, and related editing tools.
+- Use `include_body: true` in the same call to avoid a separate read step when
+  you already know the symbol name.
+
+---
+
+## `find_referencing_symbols`
+
+**Purpose:** Find all locations in the codebase that reference (call, use,
+import) a given symbol. This is the "find all usages" feature from your IDE.
+
+**Parameters:**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `name_path` | string | yes | — | Symbol identifier, e.g. `"MyStruct/my_method"` |
+| `relative_path` | string | yes | — | File that contains the symbol definition |
+| `detail_level` | string | no | exploring | `"full"` for pagination |
+| `offset` | integer | no | 0 | Skip this many results |
+| `limit` | integer | no | 50 | Max results per page |
+
+**Example — find all callers of a method:**
+
+```json
+{
+  "tool": "find_referencing_symbols",
+  "arguments": {
+    "name_path": "AuthService/authenticate_user",
+    "relative_path": "src/auth/service.rs"
+  }
+}
+```
+
+**Output (exploring mode):**
+
+```json
+{
+  "references": [
+    {
+      "file": "src/handlers/login.rs",
+      "line": 38,
+      "column": 18,
+      "context": "        let session = self.auth.authenticate_user(credentials)?;"
+    },
+    {
+      "file": "src/handlers/api.rs",
+      "line": 204,
+      "column": 22,
+      "context": "        auth_service.authenticate_user(req.credentials.clone())?;"
+    },
+    {
+      "file": "tests/auth_integration.rs",
+      "line": 91,
+      "column": 12,
+      "context": "    let result = service.authenticate_user(bad_creds);"
+    }
+  ],
+  "total": 3
+}
+```
+
+**Example — paginate a high-reference symbol:**
+
+```json
+{
+  "tool": "find_referencing_symbols",
+  "arguments": {
+    "name_path": "Logger/log",
+    "relative_path": "src/logging.rs",
+    "detail_level": "full",
+    "offset": 0,
+    "limit": 25
+  }
+}
+```
+
+**Tips:**
+
+- Both `name_path` and `relative_path` are required. The LSP needs to locate
+  the symbol's definition position before it can find references.
+- `name_path` must match the `name_path` value from `get_symbols_overview` or
+  `find_symbol` output, not just the bare name. For a top-level function, the
+  name_path is just the function name (e.g. `"validate_token"`). For a method,
+  it is `"StructName/method_name"`.
+- Each reference includes a `context` line showing the source at that location,
+  so you can often determine the call pattern without reading the file.
+- For symbols with many references (e.g. utility functions, common types),
+  use `detail_level: "full"` with `offset`/`limit` pagination.
+
+---
+
+## `replace_symbol_body`
+
+**Purpose:** Replace the entire body of a named symbol with new source code.
+The tool locates the symbol by name via LSP and replaces the lines from its
+start to its end — no line numbers required.
+
+**Parameters:**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `name_path` | string | yes | — | Symbol identifier, e.g. `"MyStruct/my_method"` |
+| `relative_path` | string | yes | — | File containing the symbol |
+| `new_body` | string | yes | — | Complete replacement source for the symbol |
+
+**Example — rewrite a Rust function:**
+
+```json
+{
+  "tool": "replace_symbol_body",
+  "arguments": {
+    "name_path": "UserService/find_by_email",
+    "relative_path": "src/services/user.rs",
+    "new_body": "pub async fn find_by_email(&self, email: &str) -> Result<Option<User>> {\n    self.db\n        .query_opt(\"SELECT * FROM users WHERE email = $1\", &[&email])\n        .await\n        .map(|row| row.map(User::from_row))\n}"
+  }
+}
+```
+
+**Output:**
+
+```json
+{
+  "status": "ok",
+  "replaced_lines": "34-67"
+}
+```
+
+**Example — update a Python method:**
+
+```json
+{
+  "tool": "replace_symbol_body",
+  "arguments": {
+    "name_path": "TokenValidator/validate",
+    "relative_path": "auth/validators.py",
+    "new_body": "def validate(self, token: str) -> Claims:\n    try:\n        return jwt.decode(token, self.secret, algorithms=[\"HS256\"])\n    except jwt.ExpiredSignatureError:\n        raise TokenExpiredError(token)"
+  }
+}
+```
+
+**Tips:**
+
+- The `new_body` replaces the entire span from the symbol's `start_line` to its
+  `end_line`. Include everything: the function signature, decorators if they are
+  within the span, and the closing brace.
+- Read the current body first with `find_symbol` + `include_body: true` before
+  rewriting, to confirm you understand the existing signature and indentation.
+- Use `replace_symbol_body` for any change that touches a significant portion
+  of the function. For small surgical changes (renaming a variable, changing
+  one line), `replace_content` with a literal pattern is less disruptive.
+- This tool is robust to refactors above the target function. Line numbers
+  change; symbol names generally do not.
+
+---
+
+## `insert_before_symbol`
+
+**Purpose:** Insert code immediately before a named symbol. The insertion point
+is the line where the symbol begins.
+
+**Parameters:**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `name_path` | string | yes | — | Symbol identifier |
+| `relative_path` | string | yes | — | File containing the symbol |
+| `code` | string | yes | — | Source code to insert |
+
+**Example — add a new function before an existing one:**
+
+```json
+{
+  "tool": "insert_before_symbol",
+  "arguments": {
+    "name_path": "authenticate_user",
+    "relative_path": "src/auth/service.rs",
+    "code": "/// Check whether the given token has not expired.\npub fn is_token_valid(token: &Token) -> bool {\n    token.expires_at > Utc::now()\n}\n"
+  }
+}
+```
+
+**Output:**
+
+```json
+{
+  "status": "ok",
+  "inserted_at_line": 44
+}
+```
+
+**Example — add an import before a TypeScript class:**
+
+```json
+{
+  "tool": "insert_before_symbol",
+  "arguments": {
+    "name_path": "AuthController",
+    "relative_path": "src/controllers/auth.ts",
+    "code": "import { RateLimiter } from '../middleware/rate-limiter';\n"
+  }
+}
+```
+
+**Tips:**
+
+- Use this to add a new function or class adjacent to a related existing one,
+  keeping the file organized by proximity.
+- For adding imports, inserting before the first class or function in a file
+  places the import in the right region.
+- The `code` string is inserted verbatim. Include a trailing newline to avoid
+  joining with the symbol that follows.
+- If you need to add something after the end of a symbol (e.g. a sibling
+  function), use `insert_after_symbol` instead.
+
+---
+
+## `insert_after_symbol`
+
+**Purpose:** Insert code immediately after a named symbol — on the line
+following the symbol's closing delimiter.
+
+**Parameters:**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `name_path` | string | yes | — | Symbol identifier |
+| `relative_path` | string | yes | — | File containing the symbol |
+| `code` | string | yes | — | Source code to insert |
+
+**Example — add a sibling method after an existing one:**
+
+```json
+{
+  "tool": "insert_after_symbol",
+  "arguments": {
+    "name_path": "UserService/find_by_email",
+    "relative_path": "src/services/user.rs",
+    "code": "\npub async fn find_by_id(&self, id: Uuid) -> Result<Option<User>> {\n    self.db\n        .query_opt(\"SELECT * FROM users WHERE id = $1\", &[&id])\n        .await\n        .map(|row| row.map(User::from_row))\n}\n"
+  }
+}
+```
+
+**Output:**
+
+```json
+{
+  "status": "ok",
+  "inserted_at_line": 68
+}
+```
+
+**Example — add a test after the function it tests:**
+
+```json
+{
+  "tool": "insert_after_symbol",
+  "arguments": {
+    "name_path": "parse_config",
+    "relative_path": "src/config.rs",
+    "code": "\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn test_parse_config_defaults() {\n        let cfg = parse_config(\"\").unwrap();\n        assert_eq!(cfg.timeout_ms, 5000);\n    }\n}\n"
+  }
+}
+```
+
+**Tips:**
+
+- A leading newline in `code` creates a blank line between the existing symbol
+  and the inserted code, which is standard style in most languages.
+- Prefer `insert_after_symbol` over `insert_before_symbol` when adding a
+  sibling method: the new method appears right after the related one, which
+  is the natural reading order.
+- Both insert tools are symbol-scoped. If you need to append to the end of a
+  file, use `create_text_file` (overwrite) or `replace_content` on a
+  unique anchor near the end.
+
+---
+
+## `rename_symbol`
+
+**Purpose:** Rename a symbol across the entire codebase using the LSP rename
+operation. Every reference in every file is updated atomically.
+
+**Parameters:**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `name_path` | string | yes | — | Symbol identifier |
+| `relative_path` | string | yes | — | File containing the symbol definition |
+| `new_name` | string | yes | — | New name for the symbol |
+
+**Example — rename a Rust struct:**
+
+```json
+{
+  "tool": "rename_symbol",
+  "arguments": {
+    "name_path": "AuthMiddleware",
+    "relative_path": "src/auth/middleware.rs",
+    "new_name": "AuthenticationMiddleware"
+  }
+}
+```
+
+**Output:**
+
+```json
+{
+  "status": "ok",
+  "files_changed": 4,
+  "total_edits": 11
+}
+```
+
+**Example — rename a Python function:**
+
+```json
+{
+  "tool": "rename_symbol",
+  "arguments": {
+    "name_path": "validate_token",
+    "relative_path": "auth/validators.py",
+    "new_name": "verify_access_token"
+  }
+}
+```
+
+**Example — rename a TypeScript interface:**
+
+```json
+{
+  "tool": "rename_symbol",
+  "arguments": {
+    "name_path": "UserDto",
+    "relative_path": "src/types/user.ts",
+    "new_name": "UserResponse"
+  }
+}
+```
+
+**Tips:**
+
+- `rename_symbol` is the safest way to rename. It uses the LSP workspace edit
+  operation, which understands import paths, qualified names, and string-based
+  references that IDEs handle. A text substitution with `replace_content` will
+  miss these cases.
+- The `relative_path` must point to the file that contains the definition, not
+  a file that merely uses it.
+- `name_path` must identify the definition unambiguously. If there are two
+  symbols with the same name in a file (e.g. a field and a method), use the
+  full `name_path` with the parent (e.g. `"MyStruct/value"`) to distinguish them.
+- After renaming, verify with `find_symbol` on the new name to confirm all
+  occurrences were updated.
+- LSP rename support varies by server. Most servers handle functions, methods,
+  classes, variables, and fields. Some do not rename string literals or
+  macro-generated identifiers. Check the result's `files_changed` count against
+  your expectations.
