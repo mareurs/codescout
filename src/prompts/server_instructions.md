@@ -23,6 +23,17 @@ When exploring an unfamiliar area:
 3. `semantic_search("what does this module do")` — get the high-level picture
 4. Then drill into specifics with `find_symbol` once you know what to look for
 
+### You want to know what changed meaningfully
+After re-indexing with `index_project`, check `check_drift` to see which files
+had significant semantic changes vs. trivial formatting/comment edits.
+
+### You need to read library/dependency code
+When you need to understand how a third-party library works:
+1. Navigate to a library symbol via `find_symbol` — external paths are auto-discovered
+2. `list_libraries` — see what's already registered
+3. Use `scope: "lib:<name>"` on symbol tools to search within a specific library
+4. `index_library(name)` then `semantic_search(query, scope: "lib:<name>")` for deeper exploration
+
 ## Output Modes
 
 Tools default to **exploring** mode — compact output (names, locations, counts)
@@ -48,16 +59,17 @@ Follow the hint to refine your query.
 ## Tool Reference
 
 ### Symbol Navigation (LSP-backed)
-- `find_symbol(pattern, [path], [include_body], [depth], [detail_level])` — find symbols by name
-- `get_symbols_overview([path], [depth], [detail_level])` — symbol tree for file/dir/glob
-- `find_referencing_symbols(name_path, file, [detail_level])` — find all references
-- `list_functions(path)` — quick function signatures via tree-sitter
+- `find_symbol(pattern, [path], [include_body], [depth], [detail_level], [scope])` — find symbols by name
+- `get_symbols_overview([path], [depth], [detail_level], [scope])` — symbol tree for file/dir/glob
+- `find_referencing_symbols(name_path, file, [detail_level], [scope])` — find all references
+- `list_functions(path, [scope])` — quick function signatures via tree-sitter
 
 ### Reading & Searching
 - `read_file(path, [start_line], [end_line])` — read file content (use line ranges for large files)
-- `semantic_search(query, [limit])` — find code by natural language description
+- `semantic_search(query, [limit], [scope])` — find code by natural language description
 - `search_for_pattern(pattern, [max_results])` — regex search across the project
 - `find_file(pattern, [max_results])` — find files by glob pattern
+- `check_drift([threshold], [path])` — query semantic drift scores from last index build *(requires `drift_detection_enabled = true` in `[embeddings]`)*
 
 ### Editing
 - `replace_symbol_body(name_path, file, new_body)` — replace a function/method body
@@ -74,6 +86,22 @@ Follow the hint to refine your query.
 
 ### Project Memory
 - `write_memory(topic, content)` / `read_memory(topic)` / `list_memories()` / `delete_memory(topic)`
+
+### Library Navigation
+- `list_libraries` — show all registered third-party libraries and their status
+- `index_library(name, [force])` — build embedding index for a registered library
+
+**Scope parameter:** Symbol and search tools accept an optional `scope` parameter to target library code:
+- `"project"` (default) — only project code
+- `"lib:<name>"` — a specific registered library (e.g. `"lib:serde"`)
+- `"libraries"` — all registered libraries
+- `"all"` — project + all libraries
+
+Tools with `scope`: `find_symbol`, `get_symbols_overview`, `find_referencing_symbols`, `list_functions`, `semantic_search`
+
+**Auto-discovery:** Libraries are automatically discovered and registered when LSP returns paths outside the project root (e.g. via goto_definition). Discovery walks up parent directories looking for package manifests (Cargo.toml, package.json, pyproject.toml, go.mod).
+
+**Source tagging:** All results include a `"source"` field: `"project"` or `"lib:<name>"` to distinguish origin.
 
 ### Project Management
 - `onboarding` — first-time project discovery and memory creation

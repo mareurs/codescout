@@ -6,7 +6,7 @@ Rust MCP server giving LLMs IDE-grade code intelligence — symbol-level navigat
 
 ```bash
 cargo build                        # Build
-cargo test                         # Run tests (232 total, 227 passing)
+cargo test                         # Run tests (411 passing)
 cargo clippy -- -D warnings        # Lint
 cargo fmt                          # Format
 cargo run -- start --project .     # Run MCP server (stdio)
@@ -70,7 +70,7 @@ top level, then semantic search.
 
 **Config** (`.code-explorer/project.toml`): Per-project settings including embedding model, chunk size, ignored paths. `ProjectConfig::load_or_default()` handles missing config gracefully.
 
-**Embedding pipeline**: `chunker::split()` → `RemoteEmbedder::embed()` → `index::insert_chunk()` → `index::search()` (cosine similarity). All stored in `.code-explorer/embeddings.db`.
+**Embedding pipeline**: `chunker::split()` → `RemoteEmbedder::embed()` → `index::insert_chunk()` → `index::search()` (cosine similarity). All stored in `.code-explorer/embeddings.db`. Incremental updates via `find_changed_files()`: git diff → mtime → SHA-256 fallback chain. `semantic_search` warns when the index is behind HEAD.
 
 ## Docs
 

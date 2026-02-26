@@ -47,6 +47,22 @@ pub struct EmbeddingsSection {
     pub chunk_size: usize,
     #[serde(default = "default_chunk_overlap")]
     pub chunk_overlap: usize,
+    /// Enable semantic drift detection during index builds (default: false).
+    ///
+    /// When enabled, `index_project` compares old and new chunk embeddings to
+    /// score how much each file's *meaning* changed (not just its bytes). Results
+    /// are stored in the `drift_report` table and surfaced via the `check_drift` tool.
+    ///
+    /// Experimental — reads all old embeddings before deletion, adding memory and
+    /// DB overhead proportional to the number of changed files.
+    ///
+    /// Enable in `.code-explorer/project.toml`:
+    /// ```toml
+    /// [embeddings]
+    /// drift_detection_enabled = true
+    /// ```
+    #[serde(default)]
+    pub drift_detection_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -125,6 +141,7 @@ impl SecuritySection {
             file_write_enabled: self.file_write_enabled,
             git_enabled: self.git_enabled,
             indexing_enabled: self.indexing_enabled,
+            library_paths: Vec::new(),
         }
     }
 }
@@ -135,6 +152,7 @@ impl Default for EmbeddingsSection {
             model: default_embed_model(),
             chunk_size: default_chunk_size(),
             chunk_overlap: default_chunk_overlap(),
+            drift_detection_enabled: false,
         }
     }
 }
@@ -225,9 +243,15 @@ mod tests {
         // Previously derived Default gave false for all bool fields,
         // silently disabling write tools for projects without a [security] TOML block.
         let sec = SecuritySection::default();
-        assert!(sec.file_write_enabled, "file_write_enabled should default to true");
+        assert!(
+            sec.file_write_enabled,
+            "file_write_enabled should default to true"
+        );
         assert!(sec.git_enabled, "git_enabled should default to true");
-        assert!(sec.indexing_enabled, "indexing_enabled should default to true");
+        assert!(
+            sec.indexing_enabled,
+            "indexing_enabled should default to true"
+        );
         assert!(!sec.shell_enabled, "shell_enabled should default to false");
     }
 
