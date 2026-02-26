@@ -25,7 +25,8 @@ impl Tool for ReadFile {
             "type": "object",
             "required": ["path"],
             "properties": {
-                "path": { "type": "string", "description": "File path relative to project root" },
+                "path": { "type": "string", "description": "File path relative to project root (also accepted: file_path)" },
+                "file_path": { "type": "string", "description": "Alias for path" },
                 "start_line": { "type": "integer", "description": "First line to return (1-indexed)" },
                 "end_line": { "type": "integer", "description": "Last line to return (1-indexed, inclusive)" }
             }
@@ -37,7 +38,11 @@ impl Tool for ReadFile {
 
         let path = input["path"]
             .as_str()
-            .ok_or_else(|| anyhow::anyhow!("missing path"))?;
+            .or_else(|| input["file_path"].as_str())
+            .ok_or_else(|| RecoverableError::with_hint(
+                "missing required parameter 'path'",
+                "Provide the file path as: path=\"relative/path/to/file\"",
+            ))?;
         let project_root = ctx.agent.project_root().await;
         let security = ctx.agent.security_config().await;
         let resolved = crate::util::path_security::validate_read_path(

@@ -78,6 +78,31 @@ Use `RecoverableError` for expected, input-driven failures (path not found, unsu
 
 **Embedding pipeline**: `chunker::split()` → `RemoteEmbedder::embed()` → `index::insert_chunk()` → `index::search()` (cosine similarity). All stored in `.code-explorer/embeddings.db`. Incremental updates via `find_changed_files()`: git diff → mtime → SHA-256 fallback chain. `semantic_search` warns when the index is behind HEAD.
 
+## Companion Plugin: code-explorer-routing
+
+This project has a companion Claude Code plugin at **`../claude-plugins/code-explorer-routing/`** that is **always active** when working on code-explorer. You must be aware of it.
+
+**What it does:**
+- `SessionStart` hook (`hooks/session-start.sh`) — injects tool guidance + memory hints into every session
+- `SubagentStart` hook (`hooks/subagent-guidance.sh`) — same for all subagents
+- `PreToolUse` hook on `Grep|Glob|Read` (`hooks/semantic-tool-router.sh`) — **blocks native Read/Grep/Glob on source files**, redirecting to code-explorer MCP tools
+
+**Critical implication for working on this codebase:**
+The `PreToolUse` hook will **block** any attempt to use the native `Read`, `Grep`, or `Glob` tools on source code files (`.rs`, `.ts`, `.py`, etc). You will see `PreToolUse:Read hook error` if you try.
+
+**You MUST use code-explorer's own MCP tools to read source code:**
+- `mcp__code-explorer__get_symbols_overview(path)` — see all symbols in a file/dir
+- `mcp__code-explorer__find_symbol(name, include_body=true)` — read a function body
+- `mcp__code-explorer__list_functions(path)` — quick signatures
+- `mcp__code-explorer__search_for_pattern(pattern)` — regex search
+- `mcp__code-explorer__semantic_search(query)` — concept-level search
+- `mcp__code-explorer__read_file(path)` — for non-source files (markdown, toml, json)
+
+**Configuration:**
+- Auto-detects code-explorer from `.mcp.json` or `~/.claude/settings.json`
+- Can be overridden via `.claude/code-explorer-routing.json`
+- `block_reads: false` in that config to disable blocking (dev/debug use)
+
 ## Docs
 
 - `docs/plans/2026-02-25-v1-implementation-plan.md` — Sprint-level plan (Phase 0–5, 15 sprints)

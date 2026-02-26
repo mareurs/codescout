@@ -12,17 +12,23 @@ issues.
 
 ## Design
 
-### File and runner
+### Files and runner
 
-A single shell script at `tests/mcp-smoke.sh`. Run manually or in CI:
+Per-language shell scripts in `tests/`:
+- `tests/mcp-smoke-rust.sh` — tests against own codebase (21 tests, 22 steps)
+- `tests/mcp-smoke-kotlin.sh` — tests against `backend-kotlin` project (18 tests, 20 steps)
+
+Run manually or in CI:
 ```bash
-./tests/mcp-smoke.sh
+./tests/mcp-smoke-rust.sh
+./tests/mcp-smoke-kotlin.sh
 ```
 
 Requires: `mcp` CLI (`~/.local/bin/mcp`), Rust toolchain for building.
 
-The script builds the release binary, creates a temp `mcp` alias, runs all scenarios,
-tears down, and reports results. Exit code is nonzero if any test fails (CI-friendly).
+Each script builds the release binary, creates a temp `mcp` alias pointing at its target
+project, runs all scenarios, tears down, and reports results. Exit code is nonzero if any
+test fails (CI-friendly).
 
 ### Scenario categories
 
