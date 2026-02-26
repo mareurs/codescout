@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 
 pub struct SemanticSearch;
 pub struct IndexProject;
+pub struct CheckDrift;
 pub struct IndexStatus;
 
 #[async_trait::async_trait]
@@ -153,14 +154,37 @@ impl Tool for IndexProject {
         let conn = crate::embed::index::open_db(&root)?;
         let stats = crate::embed::index::index_stats(&conn)?;
 
-        Ok(json!({
+        // Top 5 most-drifted files
+        let drift_summary: Vec<Value> = report
+            .drift
+            .iter()
+            .filter(|d| d.avg_drift > 0.05)
+            .take(5)
+            .map(|d| {
+                json!({
+                    "file": d.file_path,
+                    "avg_drift": format!("{:.2}", d.avg_drift),
+                    "max_drift": format!("{:.2}", d.max_drift),
+                    "added": d.chunks_added,
+                    "removed": d.chunks_removed,
+                })
+            })
+            .collect();
+
+        let mut result = json!({
             "status": "ok",
             "files_indexed": report.indexed,
             "files_deleted": report.deleted,
             "detail": report.skipped_msg,
             "total_files": stats.file_count,
             "total_chunks": stats.chunk_count,
-        }))
+        });
+
+        if !drift_summary.is_empty() {
+            result["drift_summary"] = json!(drift_summary);
+        }
+
+        Ok(result)
     }
 }
 
@@ -230,6 +254,77 @@ impl Tool for IndexStatus {
             }
         }
 
+        Ok(result)
+    }
+}
+
+#[async_trait::async_trait]
+impl Tool for CheckDrift {
+    fn name(&self) -> &str {
+        "check_drift"
+    }
+    fn description(&self) -> &str {
+        "Query semantic drift scores from the last index build. \
+         Shows which files changed meaningfully in code semantics, not just bytes. \
+         Use after index_project to find significant changes."
+    }
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "threshold": {
+                    "type": "number",
+                    "description": "Minimum avg_drift to include (default: 0.1). Range 0.0-1.0."
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Glob pattern to filter files (e.g. 'src/tools/%'). Uses SQL LIKE syntax."
+                },
+                "detail_level": {
+                    "type": "string",
+                    "enum": ["exploring", "full"],
+                    "description": "Output detail: 'exploring' (default) shows scores only, 'full' includes most-drifted chunk content."
+                }
+            }
+        })
+    }
+    async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
+        use super::output::OutputGuard;
+
+        let threshold = input["threshold"].as_f64().map(|v| v as f32).unwrap_or(0.1);
+        let path = input["path"].as_str();
+        let guard = OutputGuard::from_input(&input);
+
+        let root = ctx.agent.require_project_root().await?;
+        let conn = crate::embed::index::open_db(&root)?;
+        let rows = crate::embed::index::query_drift_report(&conn, Some(threshold), path)?;
+
+        let items: Vec<Value> = rows
+            .iter()
+            .map(|r| {
+                let mut obj = json!({
+                    "file_path": r.file_path,
+                    "avg_drift": r.avg_drift,
+                    "max_drift": r.max_drift,
+                    "chunks_added": r.chunks_added,
+                    "chunks_removed": r.chunks_removed,
+                });
+                if guard.should_include_body() {
+                    if let Some(chunk) = &r.max_drift_chunk {
+                        obj["max_drift_chunk"] = json!(chunk);
+                    }
+                }
+                obj
+            })
+            .collect();
+
+        let (items, overflow) =
+            guard.cap_items(items, "Use detail_level='full' with offset for pagination");
+        let total = overflow.as_ref().map_or(items.len(), |o| o.total);
+        let mut result = json!({ "results": items, "total": total });
+        if let Some(ov) = overflow {
+            result["overflow"] = OutputGuard::overflow_json(&ov);
+        }
         Ok(result)
     }
 }
@@ -428,5 +523,51 @@ mod tests {
         let result = IndexStatus.call(json!({}), &ctx).await.unwrap();
         assert_eq!(result["indexed"], true);
         assert_eq!(result["stale"], true);
+    }
+
+    #[tokio::test]
+    async fn check_drift_returns_empty_without_data() {
+        let (_dir, ctx) = project_ctx().await;
+        let result = CheckDrift.call(json!({}), &ctx).await.unwrap();
+        assert_eq!(result["results"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn check_drift_returns_drift_rows() {
+        let (_dir, ctx) = project_ctx().await;
+        let root = {
+            let inner = ctx.agent.inner.read().await;
+            inner.active_project.as_ref().unwrap().root.clone()
+        };
+        let conn = crate::embed::index::open_db(&root).unwrap();
+        crate::embed::index::upsert_drift_report(&conn, "a.rs", 0.5, 0.8, Some("fn x()"), 1, 0)
+            .unwrap();
+        crate::embed::index::upsert_drift_report(&conn, "b.rs", 0.02, 0.05, None, 0, 0).unwrap();
+        drop(conn);
+
+        // Default threshold 0.1 should filter out b.rs
+        let result = CheckDrift.call(json!({}), &ctx).await.unwrap();
+        let results = result["results"].as_array().unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0]["file_path"], "a.rs");
+    }
+
+    #[tokio::test]
+    async fn check_drift_respects_threshold() {
+        let (_dir, ctx) = project_ctx().await;
+        let root = {
+            let inner = ctx.agent.inner.read().await;
+            inner.active_project.as_ref().unwrap().root.clone()
+        };
+        let conn = crate::embed::index::open_db(&root).unwrap();
+        crate::embed::index::upsert_drift_report(&conn, "a.rs", 0.5, 0.8, None, 1, 0).unwrap();
+        drop(conn);
+
+        let result = CheckDrift
+            .call(json!({"threshold": 0.6}), &ctx)
+            .await
+            .unwrap();
+        let results = result["results"].as_array().unwrap();
+        assert!(results.is_empty()); // avg_drift 0.5 < threshold 0.6
     }
 }

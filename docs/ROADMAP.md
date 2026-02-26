@@ -122,6 +122,23 @@ Smart change detection for the embedding index — avoid re-hashing and re-embed
 
 ---
 
+### Semantic Drift Detection — **Implemented**
+
+Detect *how much* code changed in meaning, not just *that* it changed. SHA-256 is the gatekeeper (cheap, per-file); semantic comparison is the intelligent filter that tells you which differences actually matter. See [`plans/2026-02-26-semantic-drift-detection-design.md`](plans/2026-02-26-semantic-drift-detection-design.md) for the full design.
+
+**Architecture:** Computed inside `build_index` Phase 3 — before `delete_file_chunks`, read old embeddings; after inserting new chunks, compare old vs new using a content-hash-first matching algorithm with greedy cosine fallback. Results persisted in a `drift_report` table (cleared each build).
+
+**Use cases:**
+- **Smart doc staleness filtering** — SHA-256 flags 20 files, drift scores show only 3 had meaningful changes
+- **Drift-aware re-indexing feedback** — `IndexReport` gains drift summary so the agent knows *what kind* of changes happened
+- **On-demand query** — `check_drift` tool reads `drift_report` with threshold/path filters
+
+**Scoring:** Per-file `avg_drift` + `max_drift` (captures both broad-but-shallow and narrow-but-deep changes). Chunk matching: exact content match first (drift 0.0), then greedy cosine pairing on remainder, with unmatched chunks as added/removed (drift 1.0).
+
+**Future improvement:** File-level semantic fingerprints (mean of chunk embeddings per file) for codebase evolution tracking across git tags/releases. Deferred until the transient comparison proves useful.
+
+---
+
 ### Filesystem Watcher (Realtime Index Updates)
 
 Background filesystem watcher for near-realtime index updates. **Depends on** Incremental Index Rebuilding (Layer 2 of that design).

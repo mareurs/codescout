@@ -26,7 +26,7 @@ use crate::tools::{
     git::{GitBlame, GitDiff, GitLog},
     library::{IndexLibrary, ListLibraries},
     memory::{DeleteMemory, ListMemories, ReadMemory, WriteMemory},
-    semantic::{IndexProject, IndexStatus, SemanticSearch},
+    semantic::{CheckDrift, IndexProject, IndexStatus, SemanticSearch},
     symbol::{
         FindReferencingSymbols, FindSymbol, GetSymbolsOverview, InsertAfterSymbol,
         InsertBeforeSymbol, RenameSymbol, ReplaceSymbolBody,
@@ -94,6 +94,7 @@ impl CodeExplorerServer {
             Arc::new(SemanticSearch),
             Arc::new(IndexProject),
             Arc::new(IndexStatus),
+            Arc::new(CheckDrift),
             // Config tools (stub — require Agent wiring)
             Arc::new(ActivateProject),
             Arc::new(GetCurrentConfig),
@@ -347,6 +348,7 @@ mod tests {
             "semantic_search",
             "index_project",
             "index_status",
+            "check_drift",
             "activate_project",
             "get_current_config",
             "list_libraries",

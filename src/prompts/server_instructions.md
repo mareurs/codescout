@@ -23,6 +23,10 @@ When exploring an unfamiliar area:
 3. `semantic_search("what does this module do")` — get the high-level picture
 4. Then drill into specifics with `find_symbol` once you know what to look for
 
+### You want to know what changed meaningfully
+After re-indexing with `index_project`, check `check_drift` to see which files
+had significant semantic changes vs. trivial formatting/comment edits.
+
 ### You need to read library/dependency code
 When you need to understand how a third-party library works:
 1. Navigate to a library symbol via `find_symbol` — external paths are auto-discovered
@@ -65,6 +69,7 @@ Follow the hint to refine your query.
 - `semantic_search(query, [limit], [scope])` — find code by natural language description
 - `search_for_pattern(pattern, [max_results])` — regex search across the project
 - `find_file(pattern, [max_results])` — find files by glob pattern
+- `check_drift([threshold], [path])` — query semantic drift scores from last index build
 
 ### Editing
 - `replace_symbol_body(name_path, file, new_body)` — replace a function/method body

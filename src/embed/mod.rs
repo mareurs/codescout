@@ -12,6 +12,7 @@
 
 pub mod ast_chunker;
 pub mod chunker;
+pub mod drift;
 pub mod index;
 pub mod schema;
 
@@ -66,8 +67,8 @@ pub async fn create_embedder(model: &str) -> Result<Box<dyn Embedder>> {
         // setup, so we fall back to a CPU-friendly quantized local model.
         #[cfg(feature = "local-embed")]
         {
-            let host = std::env::var("OLLAMA_HOST")
-                .unwrap_or_else(|_| "http://localhost:11434".into());
+            let host =
+                std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".into());
             if let Err(e) = remote::probe_ollama(&host).await {
                 const FALLBACK: &str = "BGESmallENV15Q";
                 tracing::warn!(

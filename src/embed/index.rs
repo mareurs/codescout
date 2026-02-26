@@ -79,6 +79,16 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
             key   TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS drift_report (
+            file_path       TEXT PRIMARY KEY,
+            avg_drift       REAL NOT NULL,
+            max_drift       REAL NOT NULL,
+            max_drift_chunk TEXT,
+            chunks_added    INTEGER NOT NULL,
+            chunks_removed  INTEGER NOT NULL,
+            indexed_at      TEXT NOT NULL
+        );
         ",
     )?;
 
@@ -201,6 +211,35 @@ pub fn get_file_mtime(conn: &Connection, file_path: &str) -> Result<Option<i64>>
     }
 }
 
+/// A chunk's content and embedding vector, read from the DB before deletion.
+#[derive(Debug, Clone)]
+pub struct OldChunk {
+    pub content: String,
+    pub embedding: Vec<f32>,
+}
+
+/// Read all chunk content + embedding vectors for a file.
+/// Used to snapshot old state before `delete_file_chunks`.
+pub fn read_file_embeddings(conn: &Connection, file_path: &str) -> Result<Vec<OldChunk>> {
+    let mut stmt = conn.prepare(
+        "SELECT c.content, ce.embedding
+         FROM chunks c JOIN chunk_embeddings ce ON c.id = ce.rowid
+         WHERE c.file_path = ?1
+         ORDER BY c.start_line",
+    )?;
+    let chunks = stmt
+        .query_map(params![file_path], |row| {
+            let content: String = row.get(0)?;
+            let blob: Vec<u8> = row.get(1)?;
+            Ok(OldChunk {
+                content,
+                embedding: bytes_to_f32(&blob),
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(chunks)
+}
+
 /// Naive cosine similarity search (pure Rust fallback, no sqlite-vec).
 ///
 /// TODO: Replace with sqlite-vec virtual table query for production:
@@ -311,11 +350,11 @@ fn bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
         .collect()
 }
 
-fn l2_norm(v: &[f32]) -> f32 {
+pub(crate) fn l2_norm(v: &[f32]) -> f32 {
     v.iter().map(|x| x * x).sum::<f32>().sqrt()
 }
 
-fn cosine_sim(a: &[f32], b: &[f32], a_norm: f32) -> f32 {
+pub(crate) fn cosine_sim(a: &[f32], b: &[f32], a_norm: f32) -> f32 {
     let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
     let b_norm = l2_norm(b);
     if a_norm == 0.0 || b_norm == 0.0 {
@@ -596,7 +635,10 @@ pub async fn build_index(project_root: &Path, force: bool) -> Result<IndexReport
     // ── Phase 3: Single transaction for all DB writes ─────────────────────────
     let indexed = results.len();
     conn.execute_batch("BEGIN")?;
+    clear_drift_report(&conn)?;
+    let mut drift_results: Vec<crate::embed::drift::FileDrift> = Vec::new();
     for result in results {
+        let old_chunks = read_file_embeddings(&conn, &result.rel)?;
         delete_file_chunks(&conn, &result.rel)?;
         for (raw, emb) in result.chunks.iter().zip(result.embeddings.iter()) {
             let chunk = CodeChunk {
@@ -612,6 +654,32 @@ pub async fn build_index(project_root: &Path, force: bool) -> Result<IndexReport
             insert_chunk(&conn, &chunk, emb)?;
         }
         upsert_file_hash(&conn, &result.rel, &result.hash, Some(result.mtime))?;
+
+        // Compute drift if we had old chunks (skip for newly indexed files)
+        if !old_chunks.is_empty() {
+            let new_chunks: Vec<crate::embed::drift::NewChunk> = result
+                .chunks
+                .iter()
+                .zip(result.embeddings.iter())
+                .map(|(raw, emb)| crate::embed::drift::NewChunk {
+                    content: raw.content.clone(),
+                    embedding: emb.clone(),
+                })
+                .collect();
+            let drift =
+                crate::embed::drift::compute_file_drift(&result.rel, &old_chunks, &new_chunks);
+            upsert_drift_report(
+                &conn,
+                &drift.file_path,
+                drift.avg_drift,
+                drift.max_drift,
+                drift.max_drift_chunk.as_deref(),
+                drift.chunks_added,
+                drift.chunks_removed,
+            )?;
+            drift_results.push(drift);
+        }
+
         tracing::debug!("indexed {} ({} chunks)", result.rel, result.chunks.len());
     }
     set_meta(&conn, "embed_model", &config.embeddings.model)?;
@@ -639,6 +707,7 @@ pub async fn build_index(project_root: &Path, force: bool) -> Result<IndexReport
         } else {
             format!("{} deleted", change_set.deleted.len())
         },
+        drift: drift_results,
     })
 }
 
@@ -807,6 +876,7 @@ pub struct IndexReport {
     pub indexed: usize,
     pub deleted: usize,
     pub skipped_msg: String,
+    pub drift: Vec<crate::embed::drift::FileDrift>,
 }
 
 /// Statistics about the embedding index.
@@ -990,6 +1060,100 @@ fn count_commits_between(repo: &git2::Repository, from: &str, to: &str) -> usize
         return 0;
     }
     revwalk.count()
+}
+
+/// A row from the drift_report table.
+#[derive(Debug, Clone)]
+pub struct DriftReportRow {
+    pub file_path: String,
+    pub avg_drift: f32,
+    pub max_drift: f32,
+    pub max_drift_chunk: Option<String>,
+    pub chunks_added: usize,
+    pub chunks_removed: usize,
+    pub indexed_at: String,
+}
+
+/// Insert or update a drift report row for a file.
+pub fn upsert_drift_report(
+    conn: &Connection,
+    file_path: &str,
+    avg_drift: f32,
+    max_drift: f32,
+    max_drift_chunk: Option<&str>,
+    chunks_added: usize,
+    chunks_removed: usize,
+) -> Result<()> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .to_string();
+    conn.execute(
+        "INSERT INTO drift_report (file_path, avg_drift, max_drift, max_drift_chunk, chunks_added, chunks_removed, indexed_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(file_path) DO UPDATE SET
+             avg_drift = excluded.avg_drift,
+             max_drift = excluded.max_drift,
+             max_drift_chunk = excluded.max_drift_chunk,
+             chunks_added = excluded.chunks_added,
+             chunks_removed = excluded.chunks_removed,
+             indexed_at = excluded.indexed_at",
+        params![file_path, avg_drift, max_drift, max_drift_chunk, chunks_added as i64, chunks_removed as i64, now],
+    )?;
+    Ok(())
+}
+
+/// Query drift report rows, optionally filtering by threshold and path glob.
+///
+/// - `threshold`: minimum `max_drift` value (default 0.0 when None, which means
+///   only rows with max_drift > 0 are returned)
+/// - `path_glob`: SQL LIKE pattern for file_path filtering
+/// - Results sorted by `max_drift` DESC
+pub fn query_drift_report(
+    conn: &Connection,
+    threshold: Option<f32>,
+    path_glob: Option<&str>,
+) -> Result<Vec<DriftReportRow>> {
+    let threshold = threshold.unwrap_or(0.0);
+    let sql = if path_glob.is_some() {
+        "SELECT file_path, avg_drift, max_drift, max_drift_chunk, chunks_added, chunks_removed, indexed_at
+         FROM drift_report
+         WHERE avg_drift > ?1 AND file_path LIKE ?2
+         ORDER BY max_drift DESC"
+    } else {
+        "SELECT file_path, avg_drift, max_drift, max_drift_chunk, chunks_added, chunks_removed, indexed_at
+         FROM drift_report
+         WHERE avg_drift > ?1
+         ORDER BY max_drift DESC"
+    };
+    let mut stmt = conn.prepare(sql)?;
+    let rows = if let Some(glob) = path_glob {
+        stmt.query_map(params![threshold, glob], map_drift_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?
+    } else {
+        stmt.query_map(params![threshold], map_drift_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?
+    };
+    Ok(rows)
+}
+
+fn map_drift_row(row: &rusqlite::Row) -> rusqlite::Result<DriftReportRow> {
+    Ok(DriftReportRow {
+        file_path: row.get(0)?,
+        avg_drift: row.get(1)?,
+        max_drift: row.get(2)?,
+        max_drift_chunk: row.get(3)?,
+        chunks_added: row.get::<_, i64>(4)? as usize,
+        chunks_removed: row.get::<_, i64>(5)? as usize,
+        indexed_at: row.get(6)?,
+    })
+}
+
+/// Delete all rows from the drift_report table.
+pub fn clear_drift_report(conn: &Connection) -> Result<()> {
+    conn.execute("DELETE FROM drift_report", [])?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1601,6 +1765,15 @@ mod tests {
     }
 
     #[test]
+    fn open_db_creates_drift_report_table() {
+        let (_dir, conn) = open_test_db();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM drift_report", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
     fn find_changed_files_force_returns_all() {
         let dir = tempdir().unwrap();
         let conn = open_db(dir.path()).unwrap();
@@ -1613,5 +1786,93 @@ mod tests {
 
         let candidates = find_changed_files(&conn, dir.path(), true).unwrap();
         assert_eq!(candidates.changed.len(), 1); // force includes even unchanged
+    }
+
+    #[test]
+    fn read_file_embeddings_returns_content_and_vectors() {
+        let (_dir, conn) = open_test_db();
+        insert_chunk(
+            &conn,
+            &dummy_chunk("a.rs", "fn hello() {}"),
+            &[1.0, 0.0, 0.0],
+        )
+        .unwrap();
+        insert_chunk(
+            &conn,
+            &dummy_chunk("a.rs", "fn world() {}"),
+            &[0.0, 1.0, 0.0],
+        )
+        .unwrap();
+
+        let old = read_file_embeddings(&conn, "a.rs").unwrap();
+        assert_eq!(old.len(), 2);
+        assert_eq!(old[0].content, "fn hello() {}");
+        assert_eq!(old[0].embedding, vec![1.0, 0.0, 0.0]);
+        assert_eq!(old[1].content, "fn world() {}");
+        assert_eq!(old[1].embedding, vec![0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn read_file_embeddings_returns_empty_for_missing_file() {
+        let (_dir, conn) = open_test_db();
+        let old = read_file_embeddings(&conn, "missing.rs").unwrap();
+        assert!(old.is_empty());
+    }
+
+    #[test]
+    fn upsert_drift_report_inserts_and_queries() {
+        let (_dir, conn) = open_test_db();
+        upsert_drift_report(&conn, "a.rs", 0.25, 0.8, Some("fn changed() {}"), 1, 0).unwrap();
+
+        let reports = query_drift_report(&conn, None, None).unwrap();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].file_path, "a.rs");
+        assert!((reports[0].avg_drift - 0.25).abs() < 0.01);
+        assert!((reports[0].max_drift - 0.8).abs() < 0.01);
+        assert_eq!(
+            reports[0].max_drift_chunk.as_deref(),
+            Some("fn changed() {}")
+        );
+        assert_eq!(reports[0].chunks_added, 1);
+        assert_eq!(reports[0].chunks_removed, 0);
+    }
+
+    #[test]
+    fn upsert_drift_report_overwrites() {
+        let (_dir, conn) = open_test_db();
+        upsert_drift_report(&conn, "a.rs", 0.1, 0.2, None, 0, 0).unwrap();
+        upsert_drift_report(&conn, "a.rs", 0.9, 0.95, Some("new"), 2, 1).unwrap();
+        let reports = query_drift_report(&conn, None, None).unwrap();
+        assert_eq!(reports.len(), 1);
+        assert!((reports[0].avg_drift - 0.9).abs() < 0.01);
+    }
+
+    #[test]
+    fn query_drift_report_filters_by_threshold() {
+        let (_dir, conn) = open_test_db();
+        upsert_drift_report(&conn, "low.rs", 0.05, 0.1, None, 0, 0).unwrap();
+        upsert_drift_report(&conn, "high.rs", 0.5, 0.9, None, 1, 0).unwrap();
+        let reports = query_drift_report(&conn, Some(0.1), None).unwrap();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].file_path, "high.rs");
+    }
+
+    #[test]
+    fn query_drift_report_filters_by_path_glob() {
+        let (_dir, conn) = open_test_db();
+        upsert_drift_report(&conn, "src/tools/a.rs", 0.5, 0.5, None, 0, 0).unwrap();
+        upsert_drift_report(&conn, "src/embed/b.rs", 0.5, 0.5, None, 0, 0).unwrap();
+        let reports = query_drift_report(&conn, None, Some("src/tools/%")).unwrap();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].file_path, "src/tools/a.rs");
+    }
+
+    #[test]
+    fn clear_drift_report_removes_all_rows() {
+        let (_dir, conn) = open_test_db();
+        upsert_drift_report(&conn, "a.rs", 0.5, 0.5, None, 0, 0).unwrap();
+        clear_drift_report(&conn).unwrap();
+        let reports = query_drift_report(&conn, None, None).unwrap();
+        assert!(reports.is_empty());
     }
 }
