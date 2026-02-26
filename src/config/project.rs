@@ -47,6 +47,22 @@ pub struct EmbeddingsSection {
     pub chunk_size: usize,
     #[serde(default = "default_chunk_overlap")]
     pub chunk_overlap: usize,
+    /// Enable semantic drift detection during index builds (default: false).
+    ///
+    /// When enabled, `index_project` compares old and new chunk embeddings to
+    /// score how much each file's *meaning* changed (not just its bytes). Results
+    /// are stored in the `drift_report` table and surfaced via the `check_drift` tool.
+    ///
+    /// Experimental — reads all old embeddings before deletion, adding memory and
+    /// DB overhead proportional to the number of changed files.
+    ///
+    /// Enable in `.code-explorer/project.toml`:
+    /// ```toml
+    /// [embeddings]
+    /// drift_detection_enabled = true
+    /// ```
+    #[serde(default)]
+    pub drift_detection_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -136,6 +152,7 @@ impl Default for EmbeddingsSection {
             model: default_embed_model(),
             chunk_size: default_chunk_size(),
             chunk_overlap: default_chunk_overlap(),
+            drift_detection_enabled: false,
         }
     }
 }

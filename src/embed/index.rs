@@ -635,10 +635,16 @@ pub async fn build_index(project_root: &Path, force: bool) -> Result<IndexReport
     // ── Phase 3: Single transaction for all DB writes ─────────────────────────
     let indexed = results.len();
     conn.execute_batch("BEGIN")?;
+    // Always clear drift data so stale rows don't persist when the feature is toggled off
     clear_drift_report(&conn)?;
     let mut drift_results: Vec<crate::embed::drift::FileDrift> = Vec::new();
     for result in results {
-        let old_chunks = read_file_embeddings(&conn, &result.rel)?;
+        // Only snapshot old embeddings when drift detection is enabled
+        let old_chunks = if config.embeddings.drift_detection_enabled {
+            read_file_embeddings(&conn, &result.rel)?
+        } else {
+            Vec::new()
+        };
         delete_file_chunks(&conn, &result.rel)?;
         for (raw, emb) in result.chunks.iter().zip(result.embeddings.iter()) {
             let chunk = CodeChunk {
@@ -655,8 +661,8 @@ pub async fn build_index(project_root: &Path, force: bool) -> Result<IndexReport
         }
         upsert_file_hash(&conn, &result.rel, &result.hash, Some(result.mtime))?;
 
-        // Compute drift if we had old chunks (skip for newly indexed files)
-        if !old_chunks.is_empty() {
+        // Compute drift if enabled and we had old chunks (skip for newly indexed files)
+        if config.embeddings.drift_detection_enabled && !old_chunks.is_empty() {
             let new_chunks: Vec<crate::embed::drift::NewChunk> = result
                 .chunks
                 .iter()

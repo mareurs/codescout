@@ -135,6 +135,12 @@ Detect *how much* code changed in meaning, not just *that* it changed. SHA-256 i
 
 **Scoring:** Per-file `avg_drift` + `max_drift` (captures both broad-but-shallow and narrow-but-deep changes). Chunk matching: exact content match first (drift 0.0), then greedy cosine pairing on remainder, with unmatched chunks as added/removed (drift 1.0).
 
+**Configuration:** Opt-in via `.code-explorer/project.toml` (defaults to `false` — reads old embeddings before deletion, adding memory/DB overhead):
+```toml
+[embeddings]
+drift_detection_enabled = true
+```
+
 **Future improvement:** File-level semantic fingerprints (mean of chunk embeddings per file) for codebase evolution tracking across git tags/releases. Deferred until the transient comparison proves useful.
 
 ---

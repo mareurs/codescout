@@ -296,6 +296,23 @@ impl Tool for CheckDrift {
         let guard = OutputGuard::from_input(&input);
 
         let root = ctx.agent.require_project_root().await?;
+
+        // Return early if drift detection is not enabled in config
+        let drift_enabled = {
+            let inner = ctx.agent.inner.read().await;
+            inner
+                .active_project
+                .as_ref()
+                .map(|p| p.config.embeddings.drift_detection_enabled)
+                .unwrap_or(false)
+        };
+        if !drift_enabled {
+            return Ok(serde_json::json!({
+                "status": "disabled",
+                "hint": "Drift detection is disabled by default. Enable it in .code-explorer/project.toml:\n[embeddings]\ndrift_detection_enabled = true"
+            }));
+        }
+
         let conn = crate::embed::index::open_db(&root)?;
         let rows = crate::embed::index::query_drift_report(&conn, Some(threshold), path)?;
 
@@ -341,6 +358,25 @@ mod tests {
     async fn project_ctx() -> (tempfile::TempDir, ToolContext) {
         let dir = tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".code-explorer")).unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        (
+            dir,
+            ToolContext {
+                agent,
+                lsp: Arc::new(LspManager::new()),
+            },
+        )
+    }
+
+    async fn drift_enabled_ctx() -> (tempfile::TempDir, ToolContext) {
+        let dir = tempdir().unwrap();
+        let ce_dir = dir.path().join(".code-explorer");
+        std::fs::create_dir_all(&ce_dir).unwrap();
+        std::fs::write(
+            ce_dir.join("project.toml"),
+            "[project]\nname = \"test\"\n\n[embeddings]\ndrift_detection_enabled = true\n",
+        )
+        .unwrap();
         let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
         (
             dir,
@@ -526,15 +562,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn check_drift_returns_empty_without_data() {
+    async fn check_drift_disabled_by_default() {
         let (_dir, ctx) = project_ctx().await;
+        let result = CheckDrift.call(json!({}), &ctx).await.unwrap();
+        assert_eq!(result["status"], "disabled");
+        assert!(result["hint"].as_str().unwrap().contains("drift_detection_enabled"));
+    }
+
+    #[tokio::test]
+    async fn check_drift_returns_empty_without_data() {
+        let (_dir, ctx) = drift_enabled_ctx().await;
         let result = CheckDrift.call(json!({}), &ctx).await.unwrap();
         assert_eq!(result["results"], json!([]));
     }
 
     #[tokio::test]
     async fn check_drift_returns_drift_rows() {
-        let (_dir, ctx) = project_ctx().await;
+        let (_dir, ctx) = drift_enabled_ctx().await;
         let root = {
             let inner = ctx.agent.inner.read().await;
             inner.active_project.as_ref().unwrap().root.clone()
@@ -554,7 +598,7 @@ mod tests {
 
     #[tokio::test]
     async fn check_drift_respects_threshold() {
-        let (_dir, ctx) = project_ctx().await;
+        let (_dir, ctx) = drift_enabled_ctx().await;
         let root = {
             let inner = ctx.agent.inner.read().await;
             inner.active_project.as_ref().unwrap().root.clone()

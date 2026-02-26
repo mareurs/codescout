@@ -17,11 +17,16 @@ code-explorer is an MCP server that gives your AI coding agent the same navigati
 | Pillar | What it does | Tools |
 |---|---|---|
 | LSP Navigation | Go-to-definition, find references, rename — via real language servers | 7 tools, 9 languages |
-| Semantic Search | Find code by concept, not just text match — via embeddings | 3 tools |
+| Semantic Search | Find code by concept, not just text match — via embeddings | 4 tools |
 | Git Integration | Blame, history, diffs — context no other tool provides | 3 tools |
 | Persistent Memory | Remember project knowledge across sessions | 4 tools |
 
-Plus file operations (6 tools), AST analysis (2 tools), workflow (3 tools), and config (2 tools) — **30 tools total**.
+Plus file operations (7 tools), AST analysis (2 tools), workflow (3 tools), config (2 tools), and library navigation (2 tools) — **33 tools total**.
+
+**Recent additions:**
+- **Library Search** — navigate third-party dependency source code via LSP-inferred discovery, symbol navigation, and semantic search. Libraries auto-register when `goto_definition` returns paths outside the project root.
+- **Incremental Index Rebuilding** — smart change detection for the embedding index. Uses git diff → mtime → SHA-256 fallback chain to skip unchanged files, with staleness warnings when the index falls behind HEAD.
+- **Semantic Drift Detection** *(opt-in)* — detects *how much* code changed in meaning after re-indexing, not just that bytes changed. Useful for filtering doc staleness and understanding the scope of a refactor. Enable with `drift_detection_enabled = true` in `[embeddings]`.
 
 ## Platform Support
 
@@ -113,17 +118,18 @@ instead of `semantic_search`.
 tool to use for each situation. The `PreToolUse` hook actively intercepts
 suboptimal tool calls and redirects them before they execute.
 
-## Tools (31)
+## Tools (33)
 
 | Category | Count | Highlights |
 |---|---|---|
 | Symbol Navigation | 7 | `find_symbol`, `get_symbols_overview`, `find_referencing_symbols`, `rename_symbol` |
 | File Operations | 7 | `read_file`, `list_dir`, `search_for_pattern`, `create_text_file` |
-| Semantic Search | 3 | `semantic_search`, `index_project`, `index_status` |
+| Semantic Search | 4 | `semantic_search`, `index_project`, `index_status`, `check_drift` |
+| Library Navigation | 2 | `list_libraries`, `index_library` |
 | Git | 3 | `git_blame`, `git_log`, `git_diff` |
 | AST Analysis | 2 | `list_functions`, `extract_docstrings` (offline, instant) |
 | Memory | 4 | `write_memory`, `read_memory`, `list_memories`, `delete_memory` |
-| Workflow & Config | 5 | `onboarding`, `execute_shell_command`, `activate_project` |
+| Workflow & Config | 4 | `onboarding`, `execute_shell_command`, `activate_project` |
 
 Every tool defaults to compact output (exploring mode) and supports `detail_level: "full"` with pagination for when you need the complete picture.
 
