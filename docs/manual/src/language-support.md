@@ -71,9 +71,23 @@ is configured and no tree-sitter grammar is bundled.
 
 ## Installing LSP Servers
 
-code-explorer looks for each LSP server binary on `PATH`. It does not manage
-LSP server installation. Install the server for each language you need before
-starting code-explorer.
+code-explorer looks for each LSP server binary on `PATH`. The quickest way to
+get started is the bundled install script:
+
+```bash
+# See what's installed and what's missing
+./scripts/install-lsp.sh --check
+
+# Install all supported LSP servers
+./scripts/install-lsp.sh --all
+
+# Install specific languages only
+./scripts/install-lsp.sh rust python typescript go
+```
+
+The script supports Linux and macOS, detects your package managers, and skips
+servers that are already installed. For manual installation, see the
+per-language instructions below.
 
 ### Rust
 

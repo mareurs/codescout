@@ -34,6 +34,21 @@ Tested on **Linux**. macOS and Windows may work but have not been verified. Cont
 
 ## Installation
 
+> **This is a Claude Code tool.** code-explorer is built for [Claude Code](https://code.claude.com/) and currently requires it as the host agent. Other MCP-capable agents may work but are not tested.
+
+**The easiest way to get started:** clone the repo and let Claude do the installation for you. It has access to the full documentation, your system, and the install scripts — it will handle everything from building the binary to registering the MCP server and installing LSP servers for your languages.
+
+```bash
+git clone https://github.com/mareurs/code-explorer.git
+cd code-explorer
+claude
+# Then ask: "Help me install and set up code-explorer"
+```
+
+If you prefer to install manually, follow the steps below.
+
+---
+
 code-explorer has two components that work together:
 
 1. **MCP Server** — provides the 33 tools (symbol navigation, semantic search, git, etc.)
@@ -143,7 +158,15 @@ See the [full tool reference](docs/manual/src/tools/overview.md) for parameters,
 | **LSP only** | JavaScript, JSX, C, C++, C#, Ruby |
 | **Detection only** | PHP, Swift, Scala, Elixir, Haskell, Lua, Bash, Markdown |
 
-See [Language Support](docs/manual/src/language-support.md) for install commands and known quirks.
+Install LSP servers with the bundled script:
+
+```bash
+./scripts/install-lsp.sh --check          # see what's installed / missing
+./scripts/install-lsp.sh --all            # install everything
+./scripts/install-lsp.sh rust python go   # install specific languages
+```
+
+See [Language Support](docs/manual/src/language-support.md) for manual install commands and known quirks.
 
 ## Contributing
 

@@ -2,7 +2,24 @@
 
 > **Platform support:** code-explorer has been tested on **Linux**. macOS and Windows may work but have not been verified. Contributions welcome.
 
-## Prerequisites
+> **This is a Claude Code tool.** code-explorer is built for [Claude Code](https://code.claude.com/) and currently requires it as the host agent.
+
+## The Easy Way
+
+Clone the repo and let Claude handle the installation. It has access to the full documentation, your system, and the install scripts — it will build the binary, register the MCP server, install LSP servers for your languages, and set up the routing plugin.
+
+```bash
+git clone https://github.com/mareurs/code-explorer.git
+cd code-explorer
+claude
+# Then ask: "Help me install and set up code-explorer"
+```
+
+## Manual Installation
+
+If you prefer to install manually, follow the steps below.
+
+### Prerequisites
 
 You need a working Rust toolchain. If you do not have one, install it via [rustup](https://rustup.rs/):
 
