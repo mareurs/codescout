@@ -36,12 +36,18 @@ impl Tool for ListFunctions {
                 "path": {
                     "type": "string",
                     "description": "File path (absolute or relative to project root)"
+                },
+                "scope": {
+                    "type": "string",
+                    "description": "Search scope: 'project' (default), 'libraries', 'all', or 'lib:<name>'",
+                    "default": "project"
                 }
             }
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         let path = resolve_path(&input, ctx).await?;
+        let _scope = crate::library::scope::Scope::parse(input["scope"].as_str());
 
         if !path.exists() {
             anyhow::bail!("File not found: {}", path.display());
@@ -71,6 +77,7 @@ fn collect_functions(symbols: &[crate::lsp::symbols::SymbolInfo], out: &mut Vec<
                     "kind": sym.kind,
                     "start_line": sym.start_line,
                     "end_line": sym.end_line,
+                    "source": "project",
                 }));
             }
             _ => {}
@@ -270,5 +277,12 @@ mod tests {
             .unwrap();
         assert_eq!(result["total"].as_u64().unwrap(), 1);
         drop(dir);
+    }
+
+    #[tokio::test]
+    async fn list_functions_schema_includes_scope() {
+        let tool = ListFunctions;
+        let schema = tool.input_schema();
+        assert!(schema["properties"]["scope"].is_object());
     }
 }

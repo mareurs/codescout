@@ -124,15 +124,30 @@ fn collect_matching(
     symbols: &[SymbolInfo],
     pattern: &str,
     include_body: bool,
-    source: Option<&str>,
+    source_code: Option<&str>,
     depth: usize,
+    source: &str,
     out: &mut Vec<Value>,
 ) {
     for sym in symbols {
         if sym.name.to_lowercase().contains(pattern) {
-            out.push(symbol_to_json(sym, include_body, source, depth));
+            out.push(symbol_to_json(
+                sym,
+                include_body,
+                source_code,
+                depth,
+                source,
+            ));
         }
-        collect_matching(&sym.children, pattern, include_body, source, depth, out);
+        collect_matching(
+            &sym.children,
+            pattern,
+            include_body,
+            source_code,
+            depth,
+            source,
+            out,
+        );
     }
 }
 
@@ -140,8 +155,9 @@ fn collect_matching(
 fn symbol_to_json(
     sym: &SymbolInfo,
     include_body: bool,
-    source: Option<&str>,
+    source_code: Option<&str>,
     depth: usize,
+    source: &str,
 ) -> Value {
     let mut obj = json!({
         "name": sym.name,
@@ -150,10 +166,11 @@ fn symbol_to_json(
         "file": sym.file.display().to_string(),
         "start_line": sym.start_line,
         "end_line": sym.end_line,
+        "source": source,
     });
 
     if include_body {
-        if let Some(src) = source {
+        if let Some(src) = source_code {
             let lines: Vec<&str> = src.lines().collect();
             let start = sym.start_line as usize;
             let end = (sym.end_line as usize + 1).min(lines.len());
@@ -167,7 +184,7 @@ fn symbol_to_json(
         obj["children"] = json!(sym
             .children
             .iter()
-            .map(|c| symbol_to_json(c, include_body, source, depth - 1))
+            .map(|c| symbol_to_json(c, include_body, source_code, depth - 1, source))
             .collect::<Vec<_>>());
     }
 
@@ -195,7 +212,8 @@ impl Tool for GetSymbolsOverview {
                 "depth": { "type": "integer", "default": 1, "description": "Depth of children to include (0=none, 1=direct children)" },
                 "detail_level": { "type": "string", "description": "Output detail: omit or 'exploring' for compact (default), 'full' for complete with bodies" },
                 "offset": { "type": "integer", "description": "Skip this many files (focused mode pagination)" },
-                "limit": { "type": "integer", "description": "Max files per page (focused mode, default 50)" }
+                "limit": { "type": "integer", "description": "Max files per page (focused mode, default 50)" },
+                "scope": { "type": "string", "description": "Search scope: 'project' (default), 'libraries', 'all', or 'lib:<name>'", "default": "project" }
             }
         })
     }
@@ -203,6 +221,7 @@ impl Tool for GetSymbolsOverview {
         let rel_path = get_path_param(&input, false)?.unwrap_or(".");
         let depth = input["depth"].as_u64().unwrap_or(1) as usize;
         let guard = OutputGuard::from_input(&input);
+        let _scope = crate::library::scope::Scope::parse(input["scope"].as_str());
 
         // If the path contains glob metacharacters, expand and aggregate
         if is_glob(rel_path) {
@@ -227,7 +246,9 @@ impl Tool for GetSymbolsOverview {
                         };
                         let json_symbols: Vec<Value> = symbols
                             .iter()
-                            .map(|s| symbol_to_json(s, include_body, source.as_deref(), depth))
+                            .map(|s| {
+                                symbol_to_json(s, include_body, source.as_deref(), depth, "project")
+                            })
                             .collect();
                         result.push(json!({
                             "file": rel.display().to_string(),
@@ -256,7 +277,7 @@ impl Tool for GetSymbolsOverview {
             };
             let json_symbols: Vec<Value> = symbols
                 .iter()
-                .map(|s| symbol_to_json(s, include_body, source.as_deref(), depth))
+                .map(|s| symbol_to_json(s, include_body, source.as_deref(), depth, "project"))
                 .collect();
             Ok(json!({ "file": rel_path, "symbols": json_symbols }))
         } else if full_path.is_dir() {
@@ -318,7 +339,13 @@ impl Tool for GetSymbolsOverview {
                 let json_symbols: Vec<Value> = symbols
                     .iter()
                     .map(|s| {
-                        symbol_to_json(s, include_body, source.as_deref(), depth.saturating_sub(1))
+                        symbol_to_json(
+                            s,
+                            include_body,
+                            source.as_deref(),
+                            depth.saturating_sub(1),
+                            "project",
+                        )
                     })
                     .collect();
                 result.push(json!({
@@ -363,7 +390,8 @@ impl Tool for FindSymbol {
                 "depth": { "type": "integer", "default": 0, "description": "Depth of children to include" },
                 "detail_level": { "type": "string", "description": "Output detail: omit for compact (default), 'full' for complete with bodies" },
                 "offset": { "type": "integer", "description": "Skip this many results (focused mode pagination)" },
-                "limit": { "type": "integer", "description": "Max results per page (focused mode, default 50)" }
+                "limit": { "type": "integer", "description": "Max results per page (focused mode, default 50)" },
+                "scope": { "type": "string", "description": "Search scope: 'project' (default), 'libraries', 'all', or 'lib:<name>'", "default": "project" }
             }
         })
     }
@@ -376,6 +404,7 @@ impl Tool for FindSymbol {
             .as_bool()
             .unwrap_or_else(|| guard.should_include_body());
         let depth = input["depth"].as_u64().unwrap_or(0) as usize;
+        let _scope = crate::library::scope::Scope::parse(input["scope"].as_str());
 
         let root = ctx.agent.require_project_root().await?;
         let pattern_lower = pattern.to_lowercase();
@@ -422,6 +451,7 @@ impl Tool for FindSymbol {
                     include_body,
                     source.as_deref(),
                     depth,
+                    "project",
                     &mut matches,
                 );
             }
@@ -478,7 +508,13 @@ impl Tool for FindSymbol {
                         } else {
                             None
                         };
-                        matches.push(symbol_to_json(&sym, include_body, source.as_deref(), depth));
+                        matches.push(symbol_to_json(
+                            &sym,
+                            include_body,
+                            source.as_deref(),
+                            depth,
+                            "project",
+                        ));
                     }
                 }
             }
@@ -511,6 +547,7 @@ impl Tool for FindSymbol {
                             include_body,
                             source.as_deref(),
                             depth,
+                            "project",
                             &mut matches,
                         );
                     }
@@ -556,7 +593,8 @@ impl Tool for FindReferencingSymbols {
                 "relative_path": { "type": "string", "description": "File containing the symbol" },
                 "detail_level": { "type": "string", "description": "Output detail: omit for compact (default), 'full' for complete with bodies" },
                 "offset": { "type": "integer", "description": "Skip this many results (focused mode pagination)" },
-                "limit": { "type": "integer", "description": "Max results per page (focused mode, default 50)" }
+                "limit": { "type": "integer", "description": "Max results per page (focused mode, default 50)" },
+                "scope": { "type": "string", "description": "Search scope: 'project' (default), 'libraries', 'all', or 'lib:<name>'", "default": "project" }
             }
         })
     }
@@ -565,6 +603,7 @@ impl Tool for FindReferencingSymbols {
             .as_str()
             .ok_or_else(|| anyhow!("missing 'name_path'"))?;
         let rel_path = get_path_param(&input, true)?.unwrap();
+        let _scope = crate::library::scope::Scope::parse(input["scope"].as_str());
 
         let full_path = resolve_read_path(ctx, rel_path).await?;
         let (client, lang) = get_lsp_client(ctx, &full_path).await?;
@@ -603,6 +642,7 @@ impl Tool for FindReferencingSymbols {
                     "line": loc.range.start.line + 1,
                     "column": loc.range.start.character,
                     "context": context,
+                    "source": "project",
                 })
             })
             .collect();
@@ -1563,5 +1603,26 @@ fn main() {
             let ctx_line = r["context"].as_str().unwrap();
             assert!(!ctx_line.is_empty(), "Context line should not be empty");
         }
+    }
+
+    #[tokio::test]
+    async fn find_symbol_schema_includes_scope() {
+        let tool = FindSymbol;
+        let schema = tool.input_schema();
+        assert!(schema["properties"]["scope"].is_object());
+    }
+
+    #[tokio::test]
+    async fn get_symbols_overview_schema_includes_scope() {
+        let tool = GetSymbolsOverview;
+        let schema = tool.input_schema();
+        assert!(schema["properties"]["scope"].is_object());
+    }
+
+    #[tokio::test]
+    async fn find_referencing_symbols_schema_includes_scope() {
+        let tool = FindReferencingSymbols;
+        let schema = tool.input_schema();
+        assert!(schema["properties"]["scope"].is_object());
     }
 }
