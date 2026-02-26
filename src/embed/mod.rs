@@ -60,6 +60,23 @@ pub async fn create_embedder(model: &str) -> Result<Box<dyn Embedder>> {
     }
     #[cfg(feature = "remote-embed")]
     if let Some(model_id) = model.strip_prefix("ollama:") {
+        // When the local-embed feature is compiled in, probe Ollama before
+        // committing to it. A missing or stopped daemon is the most common
+        // reason embedding silently fails on machines without a GPU/Ollama
+        // setup, so we fall back to a CPU-friendly quantized local model.
+        #[cfg(feature = "local-embed")]
+        {
+            let host = std::env::var("OLLAMA_HOST")
+                .unwrap_or_else(|_| "http://localhost:11434".into());
+            if let Err(e) = remote::probe_ollama(&host).await {
+                const FALLBACK: &str = "BGESmallENV15Q";
+                tracing::warn!(
+                    "{e}. Falling back to local:{FALLBACK} (CPU-friendly, ~20 MB). \
+                     Set embeddings.model in .code-explorer/project.toml to suppress this."
+                );
+                return Ok(Box::new(local::LocalEmbedder::new(FALLBACK)?));
+            }
+        }
         return Ok(Box::new(remote::RemoteEmbedder::ollama(model_id)?));
     }
     #[cfg(feature = "remote-embed")]

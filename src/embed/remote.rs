@@ -99,6 +99,25 @@ impl Embedder for RemoteEmbedder {
     }
 }
 
+/// Probe whether the Ollama daemon is reachable at the given host URL.
+///
+/// Issues a GET to the Ollama root with a 2-second timeout. Used by
+/// `create_embedder` to detect when Ollama is absent and fall back to a
+/// local CPU model. Returns `Ok(())` on any HTTP response (even 4xx/5xx —
+/// the daemon is at least up), or an error if the connection is refused or
+/// times out.
+pub async fn probe_ollama(host: &str) -> anyhow::Result<()> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()?;
+    client
+        .get(host.trim_end_matches('/'))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("Ollama not reachable at {}: {}", host, e))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,6 +211,18 @@ mod tests {
         assert!(
             results.iter().all(|v| v.len() == dims),
             "all vectors same dims"
+        );
+    }
+
+    #[tokio::test]
+    async fn probe_ollama_errors_when_unreachable() {
+        // Port 1 is a reserved system port that is never listening in practice,
+        // so the connection is refused immediately without waiting for the timeout.
+        let result = super::probe_ollama("http://127.0.0.1:1").await;
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().to_string().contains("not reachable"),
+            "error message should mention 'not reachable'"
         );
     }
 }
