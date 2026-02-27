@@ -36,8 +36,8 @@ pub fn default_config(language: &str, workspace_root: &Path) -> Option<LspServer
             workspace_root: root,
         }),
         "kotlin" => Some(LspServerConfig {
-            command: "kotlin-language-server".into(),
-            args: vec![],
+            command: "kotlin-lsp".into(),
+            args: vec!["--stdio".into()],
             workspace_root: root,
         }),
         "c" | "cpp" => Some(LspServerConfig {
