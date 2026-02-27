@@ -257,11 +257,14 @@ impl Tool for SearchForPattern {
             .as_u64()
             .or_else(|| input["limit"].as_u64())
             .unwrap_or(50) as usize;
-
         let re = regex::RegexBuilder::new(pattern)
             .size_limit(1 << 20)
             .dfa_size_limit(1 << 20)
-            .build()?;
+            .build()
+            .map_err(|e| RecoverableError::with_hint(
+                format!("invalid regex: {e}"),
+                "patterns are full regex syntax — escape metacharacters like \\( \\. \\[ for literals",
+            ))?;
         let mut matches = vec![];
 
         let walker = ignore::WalkBuilder::new(&search_path)
@@ -806,11 +809,18 @@ mod tests {
 
     #[tokio::test]
     async fn search_invalid_regex_errors() {
-        let ctx = test_ctx().await;
-        let result = SearchForPattern
-            .call(json!({ "pattern": "[invalid" }), &ctx)
-            .await;
-        assert!(result.is_err());
+        let (dir, ctx) = project_ctx().await;
+        let err = SearchForPattern
+            .call(
+                json!({ "pattern": "[invalid", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.downcast_ref::<RecoverableError>().is_some(),
+            "invalid regex should be RecoverableError, not a hard error"
+        );
     }
 
     #[tokio::test]
@@ -1163,11 +1173,18 @@ mod tests {
 
     #[tokio::test]
     async fn search_for_pattern_invalid_regex_errors() {
-        let ctx = test_ctx().await;
-        let result = SearchForPattern
-            .call(json!({ "pattern": "[invalid(" }), &ctx)
-            .await;
-        assert!(result.is_err(), "invalid regex should produce an error");
+        let (dir, ctx) = project_ctx().await;
+        let err = SearchForPattern
+            .call(
+                json!({ "pattern": "[invalid(", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.downcast_ref::<RecoverableError>().is_some(),
+            "invalid regex should be RecoverableError, not a hard error"
+        );
     }
 
     #[tokio::test]
@@ -1330,7 +1347,7 @@ mod tests {
 
         // Build a regex that exceeds the 1MB compiled NFA size limit
         let huge_pattern = format!("({})", "a?".repeat(100_000));
-        let result = SearchForPattern
+        let err = SearchForPattern
             .call(
                 json!({
                     "pattern": huge_pattern,
@@ -1338,10 +1355,11 @@ mod tests {
                 }),
                 &ctx,
             )
-            .await;
+            .await
+            .unwrap_err();
         assert!(
-            result.is_err(),
-            "huge regex should be rejected by size limit"
+            err.downcast_ref::<RecoverableError>().is_some(),
+            "size-limit rejection must be RecoverableError so parallel sibling calls are not aborted"
         );
     }
 
@@ -1594,4 +1612,159 @@ mod tests {
             .await;
         assert!(result.is_ok(), "read_file should allow unknown extensions");
     }
+
+    // ── search_pattern: regex and string pattern tests ────────────────────────
+
+    #[tokio::test]
+    async fn search_pattern_regex_character_class_matches() {
+        // Regression: `const [a-zA-Z]+ = async` was returning 0 matches even
+        // when content matched. Verify character classes + quantifiers work.
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("code.js"),
+            "const foo = async () => {};\nconst bar = async () => {};\nfunction baz() {}\n",
+        )
+        .unwrap();
+
+        let result = SearchForPattern
+            .call(
+                json!({ "pattern": "const [a-zA-Z]+ = async", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let matches = result["matches"].as_array().unwrap();
+        assert_eq!(matches.len(), 2, "should match both const async arrow functions");
+        assert!(matches[0]["content"].as_str().unwrap().contains("const foo"));
+        assert!(matches[1]["content"].as_str().unwrap().contains("const bar"));
+        assert_eq!(result["total"], 2);
+    }
+
+    #[tokio::test]
+    async fn search_pattern_escaped_paren_matches_literal_paren() {
+        // `if \(name === '` should match a literal `if (name === '` in source.
+        // Without the backslash, `(` would open an unclosed regex group (invalid).
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("api.js"),
+            "function check() {\n  if (name === 'admin') { return true; }\n}\n",
+        )
+        .unwrap();
+
+        let result = SearchForPattern
+            .call(
+                json!({ "pattern": r"if \(name === '", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let matches = result["matches"].as_array().unwrap();
+        assert_eq!(matches.len(), 1, "escaped paren should match literal (");
+        assert!(matches[0]["content"].as_str().unwrap().contains("if (name"));
+    }
+
+    #[tokio::test]
+    async fn search_pattern_unescaped_paren_is_invalid_regex() {
+        // `if (name === '` — unescaped `(` opens a group that is never closed.
+        // Must be a RecoverableError (isError: false) so sibling parallel calls aren't aborted.
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("api.js"),
+            "function check() {\n  if (name === 'admin') { return true; }\n}\n",
+        )
+        .unwrap();
+
+        let err = SearchForPattern
+            .call(
+                json!({ "pattern": "if (name === '", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.downcast_ref::<RecoverableError>().is_some(),
+            "invalid regex must be RecoverableError so parallel sibling calls are not aborted"
+        );
+    }
+
+    #[tokio::test]
+    async fn search_pattern_dot_matches_any_char_not_literal_dot() {
+        // `.` in a regex matches ANY character, not just a literal `.`
+        // This confirms the tool is regex-based, not literal-string-based.
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("code.rs"),
+            "fn main() {}\nfn_main_alt() {}\n",
+        )
+        .unwrap();
+
+        let result = SearchForPattern
+            .call(
+                json!({ "pattern": "fn.main", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        // `.` matches `_` in `fn_main_alt` AND ` ` in `fn main()` — both lines match
+        let matches = result["matches"].as_array().unwrap();
+        assert_eq!(matches.len(), 2, "dot should match any char including space and underscore");
+    }
+
+    #[tokio::test]
+    async fn search_pattern_multi_file_returns_all_matches() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "pub fn handler() {}\n").unwrap();
+        std::fs::write(dir.path().join("b.rs"), "pub fn handler() {}\n").unwrap();
+        std::fs::write(dir.path().join("c.rs"), "fn unrelated() {}\n").unwrap();
+
+        let result = SearchForPattern
+            .call(
+                json!({ "pattern": "pub fn handler", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let matches = result["matches"].as_array().unwrap();
+        assert_eq!(matches.len(), 2, "should find matches across multiple files");
+        let files: Vec<&str> = matches
+            .iter()
+            .map(|m| m["file"].as_str().unwrap())
+            .collect();
+        assert!(files.iter().any(|f| f.ends_with("a.rs")));
+        assert!(files.iter().any(|f| f.ends_with("b.rs")));
+    }
+
+    #[tokio::test]
+    async fn search_pattern_case_sensitive_by_default() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("code.rs"),
+            "async fn handler() {}\nAsync fn Handler() {}\n",
+        )
+        .unwrap();
+
+        let result = SearchForPattern
+            .call(
+                json!({ "pattern": "async fn handler", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let matches = result["matches"].as_array().unwrap();
+        assert_eq!(matches.len(), 1, "search should be case-sensitive by default");
+        assert!(matches[0]["content"].as_str().unwrap().starts_with("async"));
+    }
+
 }
