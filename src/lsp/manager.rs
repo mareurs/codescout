@@ -18,8 +18,9 @@ use super::servers;
 pub struct LspManager {
     clients: Mutex<HashMap<String, Arc<LspClient>>>,
     /// Per-language startup barrier: concurrent callers for the same language
-    /// wait on the first caller's result instead of each spawning a JVM.
-    starting: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
+    /// wait on a `watch` channel. The first caller sends `true` on success or
+    /// `false` on failure; late arrivals always see the final value.
+    starting: Mutex<HashMap<String, tokio::sync::watch::Receiver<Option<bool>>>>,
 }
 
 impl Default for LspManager {
@@ -60,36 +61,56 @@ impl LspManager {
         }
 
         // Slow path: need to start (or wait for someone else starting).
-        // Use a per-language Notify to prevent thundering herd: only the first
-        // caller actually spawns the LSP process; concurrent callers wait.
-        let notify = {
+        // Use a per-language watch channel: the first caller creates a sender,
+        // concurrent callers clone the receiver and wait. Unlike Notify, watch
+        // channels never lose signals — late subscribers always see the value.
+        let mut rx_opt = None;
+        let tx_opt;
+        {
             let mut starting = self.starting.lock().await;
-            if let Some(existing) = starting.get(language) {
-                // Someone else is already starting this language — wait for them.
-                let notify = existing.clone();
-                drop(starting);
-                notify.notified().await;
-                // They're done — check the cache again.
-                let clients = self.clients.lock().await;
-                if let Some(client) = clients.get(language) {
-                    if client.is_alive() && client.workspace_root == workspace_root {
-                        return Ok(client.clone());
-                    }
-                }
-                // Their startup failed — fall through to try ourselves.
-                // Re-acquire starting lock and register ourselves.
-                let mut starting = self.starting.lock().await;
-                let notify = Arc::new(tokio::sync::Notify::new());
-                starting.insert(language.to_string(), notify.clone());
-                notify
+            if let Some(existing_rx) = starting.get(language) {
+                // Someone else is already starting this language — grab a receiver.
+                rx_opt = Some(existing_rx.clone());
+                tx_opt = None;
             } else {
-                // We're the first — register ourselves.
-                let notify = Arc::new(tokio::sync::Notify::new());
-                starting.insert(language.to_string(), notify.clone());
-                notify
+                // We're the first — create the channel and register.
+                let (tx, rx) = tokio::sync::watch::channel(None);
+                starting.insert(language.to_string(), rx);
+                tx_opt = Some(tx);
             }
-        };
+        }
 
+        // If we're a waiter, wait for the starter to finish.
+        if let Some(mut rx) = rx_opt {
+            // Wait until the value changes from None to Some(bool).
+            let _ = rx.wait_for(|v| v.is_some()).await;
+            // Check the cache — starter should have inserted on success.
+            let clients = self.clients.lock().await;
+            if let Some(client) = clients.get(language) {
+                if client.is_alive() && client.workspace_root == workspace_root {
+                    return Ok(client.clone());
+                }
+            }
+            // Starter failed or client doesn't match — fall through to try ourselves.
+            // Clean up the old barrier and register as a new starter.
+            let (tx, rx) = tokio::sync::watch::channel(None);
+            let mut starting = self.starting.lock().await;
+            starting.insert(language.to_string(), rx);
+            return self.do_start(language, workspace_root, tx).await;
+        }
+
+        // We're the starter.
+        self.do_start(language, workspace_root, tx_opt.unwrap())
+            .await
+    }
+
+    /// Internal: actually start the LSP, update cache, and signal waiters.
+    async fn do_start(
+        &self,
+        language: &str,
+        workspace_root: &Path,
+        tx: tokio::sync::watch::Sender<Option<bool>>,
+    ) -> Result<Arc<LspClient>> {
         // Evict dead/stale client if present.
         {
             let mut clients = self.clients.lock().await;
@@ -109,34 +130,33 @@ impl LspManager {
             Err(e) => Err(e),
         };
 
-        // CRITICAL ordering: on success, insert into cache BEFORE cleaning up
-        // the barrier. This ensures waiters see the client when they wake up.
-        // On failure, just clean up the barrier so waiters can retry.
         match result {
             Ok(new_client) => {
+                // Insert into cache BEFORE signalling waiters.
                 {
                     let mut clients = self.clients.lock().await;
                     clients.insert(language.to_string(), new_client.clone());
                 }
+                // Signal success and clean up barrier.
+                let _ = tx.send(Some(true));
                 {
                     let mut starting = self.starting.lock().await;
                     starting.remove(language);
                 }
-                notify.notify_waiters();
                 Ok(new_client)
             }
             Err(e) => {
+                // Signal failure and clean up barrier.
+                let _ = tx.send(Some(false));
                 {
                     let mut starting = self.starting.lock().await;
                     starting.remove(language);
                 }
-                notify.notify_waiters();
                 Err(e)
             }
         }
     }
 
-    /// Get an existing alive client without starting one.
     pub async fn get(&self, language: &str) -> Option<Arc<LspClient>> {
         let clients = self.clients.lock().await;
         clients.get(language).filter(|c| c.is_alive()).cloned()
