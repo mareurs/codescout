@@ -413,22 +413,22 @@ mod tests {
         let expected_tools = [
             "read_file",
             "list_dir",
-            "search_for_pattern",
-            "create_text_file",
+            "search_pattern",
+            "create_file",
             "find_file",
             "edit_lines",
-            "execute_shell_command",
+            "run_command",
             "onboarding",
-            "check_onboarding_performed",
+            "is_onboarded",
             "find_symbol",
-            "find_referencing_symbols",
-            "get_symbols_overview",
-            "replace_symbol_body",
+            "find_references",
+            "list_symbols",
+            "replace_symbol",
             "insert_before_symbol",
             "insert_after_symbol",
             "rename_symbol",
             "list_functions",
-            "extract_docstrings",
+            "list_docs",
             "git_blame",
             "git_log",
             "git_diff",
@@ -441,7 +441,7 @@ mod tests {
             "index_status",
             "check_drift",
             "activate_project",
-            "get_current_config",
+            "get_config",
             "list_libraries",
             "index_library",
         ];
@@ -568,10 +568,7 @@ mod tests {
         // Shell should be disabled by default — verify through security config
         let security = server.agent.security_config().await;
         assert!(!security.shell_enabled);
-        assert!(
-            crate::util::path_security::check_tool_access("execute_shell_command", &security)
-                .is_err()
-        );
+        assert!(crate::util::path_security::check_tool_access("run_command", &security).is_err());
     }
 
     // ── route_tool_error ───────────────────────────────────────────────────

@@ -221,7 +221,7 @@ pub struct SearchForPattern;
 #[async_trait::async_trait]
 impl Tool for SearchForPattern {
     fn name(&self) -> &str {
-        "search_for_pattern"
+        "search_pattern"
     }
 
     fn description(&self) -> &str {
@@ -235,7 +235,8 @@ impl Tool for SearchForPattern {
             "properties": {
                 "pattern": { "type": "string", "description": "Regex pattern" },
                 "path": { "type": "string", "description": "File or directory to search (default: project root)" },
-                "max_results": { "type": "integer", "default": 50 }
+                "max_results": { "type": "integer", "default": 50, "description": "Maximum matches to return. Alias: limit" },
+                "limit": { "type": "integer", "description": "Alias for max_results" }
             }
         })
     }
@@ -252,7 +253,10 @@ impl Tool for SearchForPattern {
             project_root.as_deref(),
             &security,
         )?;
-        let max = input["max_results"].as_u64().unwrap_or(50) as usize;
+        let max = input["max_results"]
+            .as_u64()
+            .or_else(|| input["limit"].as_u64())
+            .unwrap_or(50) as usize;
 
         let re = regex::RegexBuilder::new(pattern)
             .size_limit(1 << 20)
@@ -296,7 +300,7 @@ pub struct CreateTextFile;
 #[async_trait::async_trait]
 impl Tool for CreateTextFile {
     fn name(&self) -> &str {
-        "create_text_file"
+        "create_file"
     }
 
     fn description(&self) -> &str {
@@ -352,7 +356,8 @@ impl Tool for FindFile {
             "properties": {
                 "pattern": { "type": "string", "description": "Glob pattern" },
                 "path": { "type": "string", "description": "Directory to search (default: current dir)" },
-                "max_results": { "type": "integer", "default": 100 }
+                "max_results": { "type": "integer", "default": 100, "description": "Maximum files to return. Alias: limit" },
+                "limit": { "type": "integer", "description": "Alias for max_results" }
             }
         })
     }
@@ -369,7 +374,10 @@ impl Tool for FindFile {
             project_root.as_deref(),
             &security,
         )?;
-        let max = input["max_results"].as_u64().unwrap_or(100) as usize;
+        let max = input["max_results"]
+            .as_u64()
+            .or_else(|| input["limit"].as_u64())
+            .unwrap_or(100) as usize;
 
         let glob = globset::GlobBuilder::new(pattern)
             .literal_separator(false)

@@ -211,7 +211,7 @@ pub struct GetSymbolsOverview;
 #[async_trait::async_trait]
 impl Tool for GetSymbolsOverview {
     fn name(&self) -> &str {
-        "get_symbols_overview"
+        "list_symbols"
     }
     fn description(&self) -> &str {
         "Return a tree of symbols (functions, classes, methods, etc.) in a file or directory. \
@@ -616,7 +616,7 @@ pub struct FindReferencingSymbols;
 #[async_trait::async_trait]
 impl Tool for FindReferencingSymbols {
     fn name(&self) -> &str {
-        "find_referencing_symbols"
+        "find_references"
     }
     fn description(&self) -> &str {
         "Find all locations that reference the given symbol. \
@@ -703,7 +703,7 @@ pub struct ReplaceSymbolBody;
 #[async_trait::async_trait]
 impl Tool for ReplaceSymbolBody {
     fn name(&self) -> &str {
-        "replace_symbol_body"
+        "replace_symbol"
     }
     fn description(&self) -> &str {
         "Replace the entire body of a named symbol with new source code."
@@ -1251,10 +1251,7 @@ impl Point {
 
         // Trigger LSP startup and background indexing via a file-restricted call.
         let _ = FindSymbol
-            .call(
-                json!({ "pattern": "main", "path": "src/main.rs" }),
-                &ctx,
-            )
+            .call(json!({ "pattern": "main", "path": "src/main.rs" }), &ctx)
             .await;
 
         // Retry project-wide search (no relative_path → workspace/symbol fast path)
@@ -1314,10 +1311,7 @@ impl Point {
         };
         // Should error because no project, but NOT because of unknown param
         let err = GetSymbolsOverview
-            .call(
-                json!({ "path": "x", "detail_level": "full" }),
-                &ctx,
-            )
+            .call(json!({ "path": "x", "detail_level": "full" }), &ctx)
             .await
             .unwrap_err();
         assert!(
@@ -1915,10 +1909,7 @@ fn main() {
         let (_dir, ctx) = rich_project_ctx().await;
 
         let result = FindSymbol
-            .call(
-                json!({ "pattern": "add", "path": "src/main.rs" }),
-                &ctx,
-            )
+            .call(json!({ "pattern": "add", "path": "src/main.rs" }), &ctx)
             .await
             .unwrap();
 
@@ -1953,10 +1944,7 @@ fn main() {
         let (_dir, ctx) = rich_project_ctx().await;
 
         let result = FindSymbol
-            .call(
-                json!({ "pattern": "multiply", "path": "src/utils" }),
-                &ctx,
-            )
+            .call(json!({ "pattern": "multiply", "path": "src/utils" }), &ctx)
             .await
             .unwrap();
 
@@ -1974,10 +1962,7 @@ fn main() {
         let (_dir, ctx) = rich_project_ctx().await;
 
         let result = FindSymbol
-            .call(
-                json!({ "pattern": "add", "path": "src/**/*.rs" }),
-                &ctx,
-            )
+            .call(json!({ "pattern": "add", "path": "src/**/*.rs" }), &ctx)
             .await
             .unwrap();
 
@@ -1994,10 +1979,7 @@ fn main() {
         let (_dir, ctx) = rich_project_ctx().await;
 
         let result = FindSymbol
-            .call(
-                json!({ "pattern": "anything", "path": "src/empty" }),
-                &ctx,
-            )
+            .call(json!({ "pattern": "anything", "path": "src/empty" }), &ctx)
             .await
             .unwrap();
 

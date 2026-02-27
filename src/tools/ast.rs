@@ -90,7 +90,7 @@ fn collect_functions(symbols: &[crate::lsp::symbols::SymbolInfo], out: &mut Vec<
 #[async_trait::async_trait]
 impl Tool for ExtractDocstrings {
     fn name(&self) -> &str {
-        "extract_docstrings"
+        "list_docs"
     }
     fn description(&self) -> &str {
         "Extract all docstrings and top-level comments from a file using tree-sitter. \

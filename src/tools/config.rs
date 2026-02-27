@@ -50,7 +50,7 @@ impl Tool for ActivateProject {
 #[async_trait::async_trait]
 impl Tool for GetCurrentConfig {
     fn name(&self) -> &str {
-        "get_current_config"
+        "get_config"
     }
     fn description(&self) -> &str {
         "Display the active project config and server settings."

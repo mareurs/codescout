@@ -262,7 +262,7 @@ impl Tool for Onboarding {
 #[async_trait::async_trait]
 impl Tool for CheckOnboardingPerformed {
     fn name(&self) -> &str {
-        "check_onboarding_performed"
+        "is_onboarded"
     }
     fn description(&self) -> &str {
         "Check whether project onboarding has been performed for the active project."
@@ -305,7 +305,7 @@ impl Tool for CheckOnboardingPerformed {
 #[async_trait::async_trait]
 impl Tool for ExecuteShellCommand {
     fn name(&self) -> &str {
-        "execute_shell_command"
+        "run_command"
     }
     fn description(&self) -> &str {
         "Run a shell command in the active project root and return stdout/stderr."

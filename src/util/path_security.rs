@@ -246,16 +246,16 @@ pub fn validate_write_path(
 /// Returns Ok(()) if allowed, or an error message explaining how to enable it.
 pub fn check_tool_access(tool_name: &str, config: &PathSecurityConfig) -> Result<()> {
     match tool_name {
-        "execute_shell_command" => {
+        "run_command" => {
             if !config.shell_enabled {
                 bail!(
                     "Shell commands are disabled. Set security.shell_enabled = true in .code-explorer/project.toml to enable."
                 );
             }
         }
-        "create_text_file"
+        "create_file"
         | "edit_lines"
-        | "replace_symbol_body"
+        | "replace_symbol"
         | "insert_before_symbol"
         | "insert_after_symbol"
         | "rename_symbol" => {
@@ -545,22 +545,22 @@ mod tests {
     fn shell_disabled_by_default() {
         let config = PathSecurityConfig::default();
         assert!(!config.shell_enabled);
-        assert!(check_tool_access("execute_shell_command", &config).is_err());
+        assert!(check_tool_access("run_command", &config).is_err());
     }
 
     #[test]
     fn shell_enabled_when_configured() {
         let mut config = PathSecurityConfig::default();
         config.shell_enabled = true;
-        assert!(check_tool_access("execute_shell_command", &config).is_ok());
+        assert!(check_tool_access("run_command", &config).is_ok());
     }
 
     #[test]
     fn file_write_enabled_by_default() {
         let config = PathSecurityConfig::default();
         assert!(config.file_write_enabled);
-        assert!(check_tool_access("create_text_file", &config).is_ok());
-        assert!(check_tool_access("replace_symbol_body", &config).is_ok());
+        assert!(check_tool_access("create_file", &config).is_ok());
+        assert!(check_tool_access("replace_symbol", &config).is_ok());
     }
 
     #[test]
@@ -568,9 +568,9 @@ mod tests {
         let mut config = PathSecurityConfig::default();
         config.file_write_enabled = false;
         for tool in &[
-            "create_text_file",
+            "create_file",
             "edit_lines",
-            "replace_symbol_body",
+            "replace_symbol",
             "insert_before_symbol",
             "insert_after_symbol",
             "rename_symbol",
@@ -620,10 +620,10 @@ mod tests {
         for tool in &[
             "read_file",
             "list_dir",
-            "search_for_pattern",
+            "search_pattern",
             "find_file",
             "find_symbol",
-            "get_symbols_overview",
+            "list_symbols",
             "list_functions",
             "onboarding",
             "activate_project",
@@ -650,7 +650,7 @@ mod tests {
     #[test]
     fn check_tool_access_error_message_includes_config_hint() {
         let config = PathSecurityConfig::default();
-        let err = check_tool_access("execute_shell_command", &config).unwrap_err();
+        let err = check_tool_access("run_command", &config).unwrap_err();
         assert!(
             err.to_string().contains("shell_enabled"),
             "error should mention config key"
