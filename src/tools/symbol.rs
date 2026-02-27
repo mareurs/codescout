@@ -1901,7 +1901,10 @@ impl Point {
         };
 
         let augmented = augment_body_range_from_ast(sym);
-        assert_eq!(augmented.end_line, 0, "unknown name: range must stay unchanged");
+        assert_eq!(
+            augmented.end_line, 0,
+            "unknown name: range must stay unchanged"
+        );
     }
 
     #[test]
