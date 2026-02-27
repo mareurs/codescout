@@ -225,6 +225,16 @@ impl LspClient {
 
     /// Send a JSON-RPC request and await the response.
     pub async fn request(&self, method: &str, params: Value) -> Result<Value> {
+        self.request_with_timeout(method, params, std::time::Duration::from_secs(30))
+            .await
+    }
+
+    pub async fn request_with_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: std::time::Duration,
+    ) -> Result<Value> {
         if !self.alive.load(Ordering::SeqCst) {
             bail!("LSP server is not running");
         }
@@ -250,12 +260,16 @@ impl LspClient {
         }
 
         // Await response with timeout
-        match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
+        match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => bail!("LSP response channel closed"),
             Err(_) => {
                 self.pending.lock().unwrap().remove(&id);
-                bail!("LSP request timed out after 30s: {}", method)
+                bail!(
+                    "LSP request timed out after {}s: {}",
+                    timeout.as_secs(),
+                    method
+                )
             }
         }
     }
@@ -314,8 +328,14 @@ impl LspClient {
             ..Default::default()
         };
 
+        // JVM-based language servers (Kotlin, Java) can take 60-120s to initialize.
+        // Use a generous timeout for the handshake; normal requests keep the 30s default.
         let result = self
-            .request("initialize", serde_json::to_value(params)?)
+            .request_with_timeout(
+                "initialize",
+                serde_json::to_value(params)?,
+                std::time::Duration::from_secs(120),
+            )
             .await?;
 
         // Parse and store server capabilities

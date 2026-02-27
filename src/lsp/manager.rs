@@ -17,6 +17,9 @@ use super::servers;
 /// shut down and a new one started.
 pub struct LspManager {
     clients: Mutex<HashMap<String, Arc<LspClient>>>,
+    /// Per-language startup barrier: concurrent callers for the same language
+    /// wait on the first caller's result instead of each spawning a JVM.
+    starting: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
 }
 
 impl Default for LspManager {
@@ -29,6 +32,7 @@ impl LspManager {
     pub fn new() -> Self {
         Self {
             clients: Mutex::new(HashMap::new()),
+            starting: Mutex::new(HashMap::new()),
         }
     }
 
@@ -45,39 +49,75 @@ impl LspManager {
         language: &str,
         workspace_root: &Path,
     ) -> Result<Arc<LspClient>> {
-        // Phase 1: quick cache check under a short lock.
-        // If alive and matching workspace, return immediately.
-        // If dead or wrong workspace, evict it now so we restart below.
+        // Fast path: cache hit.
         {
-            let mut clients = self.clients.lock().await;
+            let clients = self.clients.lock().await;
             if let Some(client) = clients.get(language) {
                 if client.is_alive() && client.workspace_root == workspace_root {
                     return Ok(client.clone());
                 }
-                // Dead or wrong workspace — evict.
-                let old = clients.remove(language).unwrap();
-                let _ = old.shutdown().await;
             }
         }
-        // Lock released: concurrent callers for *different* languages now
-        // start their LSP processes in parallel.
 
-        let config = servers::default_config(language, workspace_root).ok_or_else(|| {
-            anyhow::anyhow!("No LSP server configured for language: {}", language)
-        })?;
+        // Slow path: need to start (or wait for someone else starting).
+        // Use a per-language Notify to prevent thundering herd: only the first
+        // caller actually spawns the LSP process; concurrent callers wait.
+        let notify = {
+            let mut starting = self.starting.lock().await;
+            if let Some(existing) = starting.get(language) {
+                // Someone else is already starting this language — wait for them.
+                let notify = existing.clone();
+                drop(starting);
+                notify.notified().await;
+                // They're done — check the cache again.
+                let clients = self.clients.lock().await;
+                if let Some(client) = clients.get(language) {
+                    if client.is_alive() && client.workspace_root == workspace_root {
+                        return Ok(client.clone());
+                    }
+                }
+                // Their startup failed — fall through to try ourselves.
+                // Re-acquire starting lock and register ourselves.
+                let mut starting = self.starting.lock().await;
+                let notify = Arc::new(tokio::sync::Notify::new());
+                starting.insert(language.to_string(), notify.clone());
+                notify
+            } else {
+                // We're the first — register ourselves.
+                let notify = Arc::new(tokio::sync::Notify::new());
+                starting.insert(language.to_string(), notify.clone());
+                notify
+            }
+        };
 
-        let new_client = Arc::new(LspClient::start(config).await?);
+        // Evict dead/stale client if present.
+        {
+            let mut clients = self.clients.lock().await;
+            if let Some(client) = clients.get(language) {
+                if !client.is_alive() || client.workspace_root != workspace_root {
+                    let old = clients.remove(language).unwrap();
+                    let _ = old.shutdown().await;
+                }
+            }
+        }
 
-        // Phase 2: re-acquire to insert.  A concurrent caller for the *same*
-        // language may have already stored a client while we were starting
-        // ours — if so, prefer theirs and discard ours.
+        let config = servers::default_config(language, workspace_root)
+            .ok_or_else(|| anyhow::anyhow!("No LSP server configured for language: {}", language));
+
+        let result = match config {
+            Ok(config) => LspClient::start(config).await.map(Arc::new),
+            Err(e) => Err(e),
+        };
+
+        // Clean up the starting barrier and notify waiters.
+        {
+            let mut starting = self.starting.lock().await;
+            starting.remove(language);
+        }
+        notify.notify_waiters();
+
+        let new_client = result?;
         let mut clients = self.clients.lock().await;
-        if let Some(existing) = clients.get(language) {
-            if existing.is_alive() && existing.workspace_root == workspace_root {
-                let _ = new_client.shutdown().await;
-                return Ok(existing.clone());
-            }
-        }
         clients.insert(language.to_string(), new_client.clone());
         Ok(new_client)
     }
