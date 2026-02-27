@@ -204,6 +204,37 @@ fn symbol_to_json(
     obj
 }
 
+/// When the LSP `workspace/symbol` response returns a degenerate range
+/// (`start_line == end_line`, i.e. only the name position), look up the
+/// true declaration end from tree-sitter and return an updated `SymbolInfo`.
+/// If `start_line != end_line` the symbol is returned unchanged.
+fn augment_body_range_from_ast(mut sym: SymbolInfo) -> SymbolInfo {
+    if sym.start_line != sym.end_line {
+        return sym;
+    }
+    let Ok(ast_syms) = crate::ast::extract_symbols(&sym.file) else {
+        return sym;
+    };
+    if let Some(end_line) = find_ast_end_line_in(&ast_syms, &sym.name, sym.start_line) {
+        sym.end_line = end_line;
+    }
+    sym
+}
+
+/// Recursively search `symbols` for a symbol with the given name whose
+/// `start_line` is within 1 of `lsp_start`. Returns its `end_line`.
+fn find_ast_end_line_in(symbols: &[SymbolInfo], name: &str, lsp_start: u32) -> Option<u32> {
+    for sym in symbols {
+        if sym.name == name && sym.start_line.abs_diff(lsp_start) <= 1 {
+            return Some(sym.end_line);
+        }
+        if let Some(end) = find_ast_end_line_in(&sym.children, name, lsp_start) {
+            return Some(end);
+        }
+    }
+    None
+}
+
 // ── get_symbols_overview ───────────────────────────────────────────────────
 
 /// Directory/glob scans can produce huge output (each file has many symbols).
@@ -549,6 +580,15 @@ impl Tool for FindSymbol {
                     if sym.name.to_lowercase().contains(&pattern_lower)
                         || sym.name_path.to_lowercase().contains(&pattern_lower)
                     {
+                        // workspace/symbol returns SymbolInformation whose
+                        // location.range covers only the identifier (start == end).
+                        // Augment with the true declaration range from tree-sitter
+                        // so that include_body returns the full function body.
+                        let sym = if include_body {
+                            augment_body_range_from_ast(sym)
+                        } else {
+                            sym
+                        };
                         let source = if include_body {
                             std::fs::read_to_string(&sym.file).ok()
                         } else {
@@ -1615,6 +1655,286 @@ impl Point {
         );
 
         ctx.lsp.shutdown_all().await;
+    }
+
+    /// Unit test for the body-range fix — no LSP required.
+    ///
+    /// Simulates what `workspace/symbol` returns for a multi-line function:
+    /// a `SymbolInfo` with `start_line == end_line` (name-only location).
+    /// `augment_body_range_from_ast` must replace end_line with the true
+    /// declaration end from tree-sitter.
+    #[test]
+    fn augment_body_range_from_ast_fixes_degenerate_range() {
+        use crate::lsp::SymbolKind;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("lib.rs");
+        // 4-line function: signature + body + closing brace (0-indexed lines 0..3)
+        std::fs::write(&file, "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n").unwrap();
+
+        // Simulate the degenerate SymbolInfo that workspace/symbol produces:
+        // start_line == end_line (only the name position was returned).
+        let sym = SymbolInfo {
+            name: "add".to_string(),
+            name_path: "add".to_string(),
+            kind: SymbolKind::Function,
+            file: file.clone(),
+            start_line: 0,
+            end_line: 0, // degenerate — only the fn-name line
+            start_col: 3,
+            children: vec![],
+        };
+
+        let augmented = augment_body_range_from_ast(sym);
+
+        assert!(
+            augmented.end_line > augmented.start_line,
+            "end_line ({}) should be > start_line ({}) after augmentation",
+            augmented.end_line,
+            augmented.start_line
+        );
+        // tree-sitter returns 0-indexed; closing brace is line 2
+        assert_eq!(augmented.end_line, 2);
+    }
+
+    #[test]
+    fn augment_body_range_from_ast_leaves_good_range_unchanged() {
+        use crate::lsp::SymbolKind;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("lib.rs");
+        std::fs::write(&file, "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n").unwrap();
+
+        // When start != end (LSP returned a real range), leave it alone.
+        let sym = SymbolInfo {
+            name: "add".to_string(),
+            name_path: "add".to_string(),
+            kind: SymbolKind::Function,
+            file: file.clone(),
+            start_line: 0,
+            end_line: 5, // already a real range
+            start_col: 3,
+            children: vec![],
+        };
+
+        let augmented = augment_body_range_from_ast(sym);
+        assert_eq!(
+            augmented.end_line, 5,
+            "should not touch an already-good range"
+        );
+    }
+
+    // ── augment_body_range_from_ast: multi-language coverage ─────────────────
+
+    #[test]
+    fn augment_body_range_from_ast_python() {
+        use crate::lsp::SymbolKind;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("lib.py");
+        std::fs::write(
+            &file,
+            "def add(a, b):\n    result = a + b\n    return result\n",
+        )
+        .unwrap();
+
+        let sym = SymbolInfo {
+            name: "add".to_string(),
+            name_path: "add".to_string(),
+            kind: SymbolKind::Function,
+            file: file.clone(),
+            start_line: 0,
+            end_line: 0, // degenerate
+            start_col: 4,
+            children: vec![],
+        };
+
+        let augmented = augment_body_range_from_ast(sym);
+        assert!(
+            augmented.end_line > augmented.start_line,
+            "Python: end_line ({}) should be > start_line ({})",
+            augmented.end_line,
+            augmented.start_line
+        );
+    }
+
+    #[test]
+    fn augment_body_range_from_ast_typescript() {
+        use crate::lsp::SymbolKind;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("lib.ts");
+        std::fs::write(
+            &file,
+            "function add(a: number, b: number): number {\n    const result = a + b;\n    return result;\n}\n",
+        )
+        .unwrap();
+
+        let sym = SymbolInfo {
+            name: "add".to_string(),
+            name_path: "add".to_string(),
+            kind: SymbolKind::Function,
+            file: file.clone(),
+            start_line: 0,
+            end_line: 0, // degenerate
+            start_col: 9,
+            children: vec![],
+        };
+
+        let augmented = augment_body_range_from_ast(sym);
+        assert!(
+            augmented.end_line > augmented.start_line,
+            "TypeScript: end_line ({}) should be > start_line ({})",
+            augmented.end_line,
+            augmented.start_line
+        );
+        assert_eq!(augmented.end_line, 3);
+    }
+
+    #[test]
+    fn augment_body_range_from_ast_go() {
+        use crate::lsp::SymbolKind;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("lib.go");
+        std::fs::write(
+            &file,
+            "package main\n\nfunc Add(a int, b int) int {\n\tresult := a + b\n\treturn result\n}\n",
+        )
+        .unwrap();
+
+        let sym = SymbolInfo {
+            name: "Add".to_string(),
+            name_path: "Add".to_string(),
+            kind: SymbolKind::Function,
+            file: file.clone(),
+            start_line: 2, // "func Add..." is line 2 (0-indexed)
+            end_line: 2,   // degenerate
+            start_col: 5,
+            children: vec![],
+        };
+
+        let augmented = augment_body_range_from_ast(sym);
+        assert!(
+            augmented.end_line > augmented.start_line,
+            "Go: end_line ({}) should be > start_line ({})",
+            augmented.end_line,
+            augmented.start_line
+        );
+        assert_eq!(augmented.end_line, 5);
+    }
+
+    #[test]
+    fn augment_body_range_from_ast_rust_with_doc_comment() {
+        use crate::lsp::SymbolKind;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("lib.rs");
+        // Doc comment on line 0; fn keyword on line 1.
+        // workspace/symbol would report lsp_start = 1 (the fn line).
+        // tree-sitter also starts at line 1.
+        std::fs::write(
+            &file,
+            "/// Adds two numbers.\nfn add(a: i32, b: i32) -> i32 {\n    let r = a + b;\n    r\n}\n",
+        )
+        .unwrap();
+
+        let sym = SymbolInfo {
+            name: "add".to_string(),
+            name_path: "add".to_string(),
+            kind: SymbolKind::Function,
+            file: file.clone(),
+            start_line: 1, // fn keyword, not the doc comment
+            end_line: 1,   // degenerate
+            start_col: 3,
+            children: vec![],
+        };
+
+        let augmented = augment_body_range_from_ast(sym);
+        assert!(
+            augmented.end_line > augmented.start_line,
+            "Rust+doc comment: end_line ({}) should be > start_line ({})",
+            augmented.end_line,
+            augmented.start_line
+        );
+        assert_eq!(augmented.end_line, 4);
+    }
+
+    #[test]
+    fn augment_body_range_from_ast_picks_correct_function_among_many() {
+        use crate::lsp::SymbolKind;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("lib.rs");
+        // `add` at lines 0-2, `multiply` at lines 4-6.
+        std::fs::write(
+            &file,
+            "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n\nfn multiply(a: i32, b: i32) -> i32 {\n    a * b\n}\n",
+        )
+        .unwrap();
+
+        let sym = SymbolInfo {
+            name: "multiply".to_string(),
+            name_path: "multiply".to_string(),
+            kind: SymbolKind::Function,
+            file: file.clone(),
+            start_line: 4,
+            end_line: 4, // degenerate
+            start_col: 3,
+            children: vec![],
+        };
+
+        let augmented = augment_body_range_from_ast(sym);
+        assert_eq!(augmented.start_line, 4, "start_line should not change");
+        assert_eq!(augmented.end_line, 6, "should match `multiply`, not `add`");
+    }
+
+    #[test]
+    fn augment_body_range_from_ast_name_not_in_file_leaves_unchanged() {
+        use crate::lsp::SymbolKind;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("lib.rs");
+        std::fs::write(&file, "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n").unwrap();
+
+        let sym = SymbolInfo {
+            name: "nonexistent_fn".to_string(),
+            name_path: "nonexistent_fn".to_string(),
+            kind: SymbolKind::Function,
+            file: file.clone(),
+            start_line: 0,
+            end_line: 0, // degenerate, but no match in AST
+            start_col: 3,
+            children: vec![],
+        };
+
+        let augmented = augment_body_range_from_ast(sym);
+        assert_eq!(augmented.end_line, 0, "unknown name: range must stay unchanged");
+    }
+
+    #[test]
+    fn augment_body_range_from_ast_recurses_into_children_for_method() {
+        use crate::lsp::SymbolKind;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("lib.rs");
+        // `distance` is a method inside `impl Point` — it will be a child symbol.
+        std::fs::write(
+            &file,
+            "struct Point { x: f64, y: f64 }\nimpl Point {\n    fn distance(&self) -> f64 {\n        (self.x * self.x + self.y * self.y).sqrt()\n    }\n}\n",
+        )
+        .unwrap();
+
+        let sym = SymbolInfo {
+            name: "distance".to_string(),
+            name_path: "Point/distance".to_string(),
+            kind: SymbolKind::Method,
+            file: file.clone(),
+            start_line: 2, // fn distance line (0-indexed)
+            end_line: 2,   // degenerate
+            start_col: 7,
+            children: vec![],
+        };
+
+        let augmented = augment_body_range_from_ast(sym);
+        assert!(
+            augmented.end_line > augmented.start_line,
+            "method in impl: end_line ({}) should be > start_line ({})",
+            augmented.end_line,
+            augmented.start_line
+        );
+        assert_eq!(augmented.end_line, 4);
     }
 
     #[tokio::test]
