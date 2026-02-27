@@ -82,32 +82,33 @@ fn convert_document_symbols(
 /// Configuration for launching a language server.
 #[derive(Debug, Clone)]
 pub struct LspServerConfig {
-    /// Executable to launch (e.g. "rust-analyzer", "pyright-langserver")
     pub command: String,
-    /// Arguments passed to the executable
+    #[allow(dead_code)]
     pub args: Vec<String>,
-    /// Working directory (usually the project root)
-    pub workspace_root: PathBuf,
+    pub workspace_root: std::path::PathBuf,
+    /// Timeout for the LSP `initialize` handshake. JVM-based servers need longer.
+    /// Defaults to 30s if not set.
+    pub init_timeout: Option<std::time::Duration>,
 }
 
 /// A running LSP client session connected to a language server process.
 pub struct LspClient {
-    /// Writer to the server's stdin
     writer: Mutex<ChildStdin>,
-    /// Monotonically increasing request ID
+    #[allow(dead_code)]
     next_id: AtomicI64,
-    /// Pending request senders, keyed by request ID
+    #[allow(dead_code)]
     pending: Arc<StdMutex<HashMap<i64, oneshot::Sender<Result<Value>>>>>,
-    /// Whether the server process is still alive
+    #[allow(dead_code)]
     alive: Arc<AtomicBool>,
-    /// Background reader task
+    #[allow(dead_code)]
     reader_handle: StdMutex<Option<JoinHandle<()>>>,
-    /// The workspace root for this server instance
-    pub workspace_root: PathBuf,
-    /// Server capabilities from initialization
-    pub capabilities: StdMutex<lsp_types::ServerCapabilities>,
-    /// PID of the child LSP server process, for kill-on-drop safety net
+    pub workspace_root: std::path::PathBuf,
+    #[allow(dead_code)]
+    pub(crate) capabilities: StdMutex<lsp_types::ServerCapabilities>,
+    #[allow(dead_code)]
     child_pid: Option<u32>,
+    /// Timeout for the LSP initialize handshake.
+    init_timeout: std::time::Duration,
 }
 
 impl LspClient {
@@ -205,6 +206,9 @@ impl LspClient {
             // Wait for child to exit (kill_on_drop will handle cleanup)
             let _ = child.wait().await;
         });
+        let init_timeout = config
+            .init_timeout
+            .unwrap_or(std::time::Duration::from_secs(30));
 
         let client = Self {
             writer: Mutex::new(stdin),
@@ -215,6 +219,7 @@ impl LspClient {
             workspace_root: config.workspace_root.clone(),
             capabilities: StdMutex::new(lsp_types::ServerCapabilities::default()),
             child_pid,
+            init_timeout,
         };
 
         // Perform the LSP initialize handshake
@@ -327,14 +332,13 @@ impl LspClient {
             }]),
             ..Default::default()
         };
-
-        // JVM-based language servers (Kotlin, Java) can take 60-120s to initialize.
-        // Use a generous timeout for the handshake; normal requests keep the 30s default.
+        // Use the per-server init_timeout. JVM-based servers (Kotlin, Java) need 300s;
+        // lightweight servers (rust-analyzer, pyright) use the default 30s.
         let result = self
             .request_with_timeout(
                 "initialize",
                 serde_json::to_value(params)?,
-                std::time::Duration::from_secs(120),
+                self.init_timeout,
             )
             .await?;
 
@@ -721,6 +725,7 @@ struct Point {
             command: "rust-analyzer".into(),
             args: vec![],
             workspace_root: dir.path().to_path_buf(),
+            init_timeout: None,
         };
 
         let client = LspClient::start(config).await.unwrap();
@@ -743,6 +748,7 @@ struct Point {
             command: "nonexistent-lsp-server-xyz".into(),
             args: vec![],
             workspace_root: dir.path().to_path_buf(),
+            init_timeout: None,
         };
 
         let result = LspClient::start(config).await;
@@ -763,6 +769,7 @@ struct Point {
             command: "rust-analyzer".into(),
             args: vec![],
             workspace_root: dir.path().to_path_buf(),
+            init_timeout: None,
         };
 
         let client = LspClient::start(config).await.unwrap();
@@ -811,6 +818,7 @@ struct Point {
             command: "rust-analyzer".into(),
             args: vec![],
             workspace_root: dir.path().to_path_buf(),
+            init_timeout: None,
         };
 
         let client = LspClient::start(config).await.unwrap();
@@ -988,6 +996,7 @@ struct Point {
             command: "rust-analyzer".into(),
             args: vec![],
             workspace_root: dir.path().to_path_buf(),
+            init_timeout: None,
         };
         let client = LspClient::start(config).await.unwrap();
         let pid = client.child_pid.unwrap();

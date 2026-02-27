@@ -15,6 +15,15 @@ cargo run -- index --project .     # Build embedding index
 
 **Always run `cargo fmt`, `cargo clippy`, and `cargo test` before completing any task.**
 
+## Git Workflow
+
+**This is a public repo.** Do not push incomplete or untested work.
+
+- **Batch related changes** into a single well-tested commit rather than committing every incremental step.
+- **Only commit when the full fix/feature is working** — all tests pass, clippy clean, manually verified if applicable.
+- **Do not push after every commit.** Accumulate local commits during a work session; push once when the work is solid.
+- When iterating on a fix (e.g. debugging a concurrency issue), keep working locally until the fix is confirmed, then commit the final state — not every intermediate attempt.
+
 ## Project Structure
 
 ```
