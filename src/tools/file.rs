@@ -29,8 +29,8 @@ impl Tool for ReadFile {
             "properties": {
                 "path": { "type": "string", "description": "File path relative to project root (also accepted: file_path)" },
                 "file_path": { "type": "string", "description": "Alias for path" },
-                "start_line": { "type": "integer", "description": "First line to return (1-indexed)" },
-                "end_line": { "type": "integer", "description": "Last line to return (1-indexed, inclusive)" }
+                "start_line": { "type": "integer", "description": "First line to return (1-indexed). Must be paired with end_line — together they unlock source code file reads." },
+                "end_line": { "type": "integer", "description": "Last line to return (1-indexed, inclusive). Must be paired with start_line." }
             }
         })
     }
