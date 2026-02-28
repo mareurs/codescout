@@ -78,6 +78,43 @@ impl std::fmt::Display for RecoverableError {
 
 impl std::error::Error for RecoverableError {}
 
+/// Convenience: extract a required parameter from a JSON `Value`, returning
+/// `RecoverableError` (not a fatal error) if it is missing.
+pub fn require_param<'a>(
+    input: &'a serde_json::Value,
+    name: &str,
+) -> anyhow::Result<&'a serde_json::Value> {
+    input.get(name).ok_or_else(|| {
+        RecoverableError::with_hint(
+            format!("missing '{}' parameter", name),
+            format!("Add the required '{}' parameter to the tool call.", name),
+        )
+        .into()
+    })
+}
+
+/// Convenience: extract a required string parameter from a JSON `Value`.
+pub fn require_str_param<'a>(input: &'a serde_json::Value, name: &str) -> anyhow::Result<&'a str> {
+    require_param(input, name)?.as_str().ok_or_else(|| {
+        RecoverableError::with_hint(
+            format!("'{}' must be a string", name),
+            format!("Provide '{}' as a string value.", name),
+        )
+        .into()
+    })
+}
+
+/// Convenience: extract a required u64 parameter from a JSON `Value`.
+pub fn require_u64_param(input: &serde_json::Value, name: &str) -> anyhow::Result<u64> {
+    require_param(input, name)?.as_u64().ok_or_else(|| {
+        RecoverableError::with_hint(
+            format!("'{}' must be a non-negative integer", name),
+            format!("Provide '{}' as a non-negative integer.", name),
+        )
+        .into()
+    })
+}
+
 /// Block write operations when git worktrees exist but the agent hasn't
 /// explicitly called `activate_project` to confirm which project to write to.
 ///

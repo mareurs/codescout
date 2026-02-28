@@ -247,9 +247,7 @@ impl Tool for SearchPattern {
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
-        let pattern = input["pattern"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("missing pattern"))?;
+        let pattern = super::require_str_param(&input, "pattern")?;
         let raw_path = input["path"].as_str().unwrap_or(".");
         let project_root = ctx.agent.project_root().await;
         let security = ctx.agent.security_config().await;
@@ -328,12 +326,8 @@ impl Tool for CreateFile {
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
         super::guard_worktree_write(ctx).await?;
-        let path = input["path"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("missing 'path' parameter"))?;
-        let content = input["content"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("missing 'content' parameter"))?;
+        let path = super::require_str_param(&input, "path")?;
+        let content = super::require_str_param(&input, "content")?;
         let root = ctx.agent.require_project_root().await?;
         let security = ctx.agent.security_config().await;
         let resolved = crate::util::path_security::validate_write_path(path, &root, &security)?;
@@ -372,9 +366,7 @@ impl Tool for FindFile {
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
-        let pattern = input["pattern"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("missing 'pattern' parameter"))?;
+        let pattern = super::require_str_param(&input, "pattern")?;
         let raw_path = input["path"].as_str().unwrap_or(".");
         let project_root = ctx.agent.project_root().await;
         let security = ctx.agent.security_config().await;
@@ -445,21 +437,17 @@ impl Tool for EditLines {
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
         super::guard_worktree_write(ctx).await?;
-        let path = input["path"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("missing 'path' parameter"))?;
-        let start_line = input["start_line"]
-            .as_u64()
-            .ok_or_else(|| anyhow::anyhow!("missing 'start_line' parameter"))?
-            as usize;
-        let delete_count = input["delete_count"]
-            .as_u64()
-            .ok_or_else(|| anyhow::anyhow!("missing 'delete_count' parameter"))?
-            as usize;
+        let path = super::require_str_param(&input, "path")?;
+        let start_line = super::require_u64_param(&input, "start_line")? as usize;
+        let delete_count = super::require_u64_param(&input, "delete_count")? as usize;
         let new_text = input["new_text"].as_str().unwrap_or("");
 
         if start_line == 0 {
-            anyhow::bail!("start_line must be >= 1 (1-based)");
+            return Err(super::RecoverableError::with_hint(
+                "start_line must be >= 1 (1-based)",
+                "Line numbers are 1-indexed. Use start_line: 1 for the first line.",
+            )
+            .into());
         }
 
         let root = ctx.agent.require_project_root().await?;
@@ -476,20 +464,25 @@ impl Tool for EditLines {
 
         // Allow idx == total for appending at end
         if idx > total {
-            anyhow::bail!(
-                "start_line {} is beyond end of file ({} lines)",
-                start_line,
-                total
-            );
+            return Err(super::RecoverableError::with_hint(
+                format!(
+                    "start_line {} is beyond end of file ({} lines)",
+                    start_line, total
+                ),
+                "Use list_symbols or read_file to check the file length first.",
+            )
+            .into());
         }
 
         if idx + delete_count > total {
-            anyhow::bail!(
-                "cannot delete {} lines starting at line {} (file has {} lines)",
-                delete_count,
-                start_line,
-                total
-            );
+            return Err(super::RecoverableError::with_hint(
+                format!(
+                    "cannot delete {} lines starting at line {} (file has {} lines)",
+                    delete_count, start_line, total
+                ),
+                "Reduce delete_count or adjust start_line.",
+            )
+            .into());
         }
 
         // Build new text lines

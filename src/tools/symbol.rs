@@ -2,7 +2,6 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::anyhow;
 use serde_json::{json, Value};
 
 use crate::tools::RecoverableError;
@@ -65,7 +64,12 @@ async fn resolve_glob(ctx: &ToolContext, path_or_glob: &str) -> anyhow::Result<V
     let glob = globset::GlobBuilder::new(path_or_glob)
         .literal_separator(false)
         .build()
-        .map_err(|e| anyhow!("invalid glob pattern '{}': {}", path_or_glob, e))?;
+        .map_err(|e| {
+            RecoverableError::with_hint(
+                format!("invalid glob pattern '{}': {}", path_or_glob, e),
+                "Check glob syntax: use * for any segment, ** for recursive, ? for single char.",
+            )
+        })?;
     let matcher = glob.compile_matcher();
 
     let mut matches = vec![];
@@ -103,7 +107,11 @@ fn get_path_param(input: &Value, required: bool) -> anyhow::Result<Option<&str>>
         .or_else(|| input["file"].as_str())
     {
         Some(p) => Ok(Some(p)),
-        None if required => Err(anyhow!("missing 'path' parameter")),
+        None if required => Err(RecoverableError::with_hint(
+            "missing 'path' parameter",
+            "Add the required 'path' parameter to the tool call.",
+        )
+        .into()),
         None => Ok(None),
     }
 }
@@ -451,10 +459,14 @@ impl Tool for ListSymbols {
             }
             Ok(result_json)
         } else {
-            Err(anyhow!(
-                "path is neither file nor directory: {}",
-                full_path.display()
-            ))
+            Err(RecoverableError::with_hint(
+                format!(
+                    "path is neither file nor directory: {}",
+                    full_path.display()
+                ),
+                "Verify the path exists with list_dir.",
+            )
+            .into())
         }
     }
 }
@@ -784,9 +796,7 @@ impl Tool for FindReferences {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let name_path = input["name_path"]
-            .as_str()
-            .ok_or_else(|| anyhow!("missing 'name_path'"))?;
+        let name_path = super::require_str_param(&input, "name_path")?;
         let rel_path = get_path_param(&input, true)?.unwrap();
         let _scope = crate::library::scope::Scope::parse(input["scope"].as_str());
 
@@ -795,8 +805,12 @@ impl Tool for FindReferences {
 
         // Find the symbol's position by walking document symbols
         let symbols = client.document_symbols(&full_path, &lang).await?;
-        let sym = find_symbol_by_name_path(&symbols, name_path)
-            .ok_or_else(|| anyhow!("symbol not found: {}", name_path))?;
+        let sym = find_symbol_by_name_path(&symbols, name_path).ok_or_else(|| {
+            RecoverableError::with_hint(
+                format!("symbol not found: {}", name_path),
+                "Use list_symbols(path) to see available symbols, or check the name_path spelling.",
+            )
+        })?;
 
         // Get references at the symbol's position
         let refs = client
@@ -868,11 +882,13 @@ impl Tool for GotoDefinition {
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         let rel_path = get_path_param(&input, true)?.unwrap();
-        let line_1 = input["line"]
-            .as_u64()
-            .ok_or_else(|| anyhow!("missing 'line'"))? as u32;
+        let line_1 = super::require_u64_param(&input, "line")? as u32;
         if line_1 == 0 {
-            anyhow::bail!("'line' must be >= 1 (1-indexed)");
+            return Err(RecoverableError::with_hint(
+                "'line' must be >= 1 (1-indexed)",
+                "Line numbers are 1-indexed. Use line: 1 for the first line.",
+            )
+            .into());
         }
         let line_0 = line_1 - 1;
         let identifier = input["identifier"].as_str();
@@ -988,11 +1004,13 @@ impl Tool for Hover {
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         let rel_path = get_path_param(&input, true)?.unwrap();
-        let line_1 = input["line"]
-            .as_u64()
-            .ok_or_else(|| anyhow!("missing 'line'"))? as u32;
+        let line_1 = super::require_u64_param(&input, "line")? as u32;
         if line_1 == 0 {
-            anyhow::bail!("'line' must be >= 1 (1-indexed)");
+            return Err(RecoverableError::with_hint(
+                "'line' must be >= 1 (1-indexed)",
+                "Line numbers are 1-indexed. Use line: 1 for the first line.",
+            )
+            .into());
         }
         let line_0 = line_1 - 1;
         let identifier = input["identifier"].as_str();
@@ -1069,20 +1087,20 @@ impl Tool for ReplaceSymbol {
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         super::guard_worktree_write(ctx).await?;
-        let name_path = input["name_path"]
-            .as_str()
-            .ok_or_else(|| anyhow!("missing 'name_path'"))?;
+        let name_path = super::require_str_param(&input, "name_path")?;
         let rel_path = get_path_param(&input, true)?.unwrap();
-        let new_body = input["new_body"]
-            .as_str()
-            .ok_or_else(|| anyhow!("missing 'new_body'"))?;
+        let new_body = super::require_str_param(&input, "new_body")?;
 
         let full_path = resolve_write_path(ctx, rel_path).await?;
         let (client, lang) = get_lsp_client(ctx, &full_path).await?;
 
         let symbols = client.document_symbols(&full_path, &lang).await?;
-        let sym = find_symbol_by_name_path(&symbols, name_path)
-            .ok_or_else(|| anyhow!("symbol not found: {}", name_path))?;
+        let sym = find_symbol_by_name_path(&symbols, name_path).ok_or_else(|| {
+            RecoverableError::with_hint(
+                format!("symbol not found: {}", name_path),
+                "Use list_symbols(path) to see available symbols, or check the name_path spelling.",
+            )
+        })?;
 
         let content = std::fs::read_to_string(&full_path)?;
         let lines: Vec<&str> = content.lines().collect();
@@ -1130,21 +1148,21 @@ impl Tool for InsertCode {
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         super::guard_worktree_write(ctx).await?;
-        let name_path = input["name_path"]
-            .as_str()
-            .ok_or_else(|| anyhow!("missing 'name_path'"))?;
+        let name_path = super::require_str_param(&input, "name_path")?;
         let rel_path = get_path_param(&input, true)?.unwrap();
-        let code = input["code"]
-            .as_str()
-            .ok_or_else(|| anyhow!("missing 'code'"))?;
+        let code = super::require_str_param(&input, "code")?;
         let position = input["position"].as_str().unwrap_or("after");
 
         let full_path = resolve_write_path(ctx, rel_path).await?;
         let (client, lang) = get_lsp_client(ctx, &full_path).await?;
 
         let symbols = client.document_symbols(&full_path, &lang).await?;
-        let sym = find_symbol_by_name_path(&symbols, name_path)
-            .ok_or_else(|| anyhow!("symbol not found: {}", name_path))?;
+        let sym = find_symbol_by_name_path(&symbols, name_path).ok_or_else(|| {
+            RecoverableError::with_hint(
+                format!("symbol not found: {}", name_path),
+                "Use list_symbols(path) to see available symbols, or check the name_path spelling.",
+            )
+        })?;
 
         let content = std::fs::read_to_string(&full_path)?;
         let lines: Vec<&str> = content.lines().collect();
@@ -1297,21 +1315,21 @@ impl Tool for RenameSymbol {
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         super::guard_worktree_write(ctx).await?;
-        let name_path = input["name_path"]
-            .as_str()
-            .ok_or_else(|| anyhow!("missing 'name_path'"))?;
+        let name_path = super::require_str_param(&input, "name_path")?;
         let rel_path = get_path_param(&input, true)?.unwrap();
-        let new_name = input["new_name"]
-            .as_str()
-            .ok_or_else(|| anyhow!("missing 'new_name'"))?;
+        let new_name = super::require_str_param(&input, "new_name")?;
 
         let full_path = resolve_write_path(ctx, rel_path).await?;
         let (client, lang) = get_lsp_client(ctx, &full_path).await?;
 
         // Find the symbol to get its position
         let symbols = client.document_symbols(&full_path, &lang).await?;
-        let sym = find_symbol_by_name_path(&symbols, name_path)
-            .ok_or_else(|| anyhow!("symbol not found: {}", name_path))?;
+        let sym = find_symbol_by_name_path(&symbols, name_path).ok_or_else(|| {
+            RecoverableError::with_hint(
+                format!("symbol not found: {}", name_path),
+                "Use list_symbols(path) to see available symbols, or check the name_path spelling.",
+            )
+        })?;
 
         // Request rename from LSP
         let edit = client

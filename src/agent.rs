@@ -106,7 +106,13 @@ impl Agent {
             .active_project
             .as_ref()
             .map(|p| p.root.clone())
-            .ok_or_else(|| anyhow::anyhow!("No active project. Use activate_project first."))
+            .ok_or_else(|| {
+                crate::tools::RecoverableError::with_hint(
+                    "No active project. Use activate_project first.",
+                    "Call activate_project(\"/path/to/project\") to set the active project.",
+                )
+                .into()
+            })
     }
 
     /// Get the current project status for building server instructions.

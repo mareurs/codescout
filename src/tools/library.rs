@@ -24,10 +24,12 @@ impl Tool for ListLibraries {
 
     async fn call(&self, _input: Value, ctx: &ToolContext) -> Result<Value> {
         let inner = ctx.agent.inner.read().await;
-        let project = inner
-            .active_project
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No active project. Use activate_project first."))?;
+        let project = inner.active_project.as_ref().ok_or_else(|| {
+            super::RecoverableError::with_hint(
+                "No active project. Use activate_project first.",
+                "Call activate_project(\"/path/to/project\") to set the active project.",
+            )
+        })?;
 
         let libs: Vec<Value> = project
             .library_registry
@@ -81,26 +83,23 @@ impl Tool for IndexLibrary {
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
-        let name = input["name"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("missing 'name' parameter"))?;
+        let name = super::require_str_param(&input, "name")?;
         let force = input["force"].as_bool().unwrap_or(false);
 
         let (root, lib_path) = {
             let inner = ctx.agent.inner.read().await;
-            let project = inner
-                .active_project
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("No active project. Use activate_project first."))?;
-            let entry = project
-                .library_registry
-                .lookup(name)
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "Library '{}' not found in registry. Use list_libraries to see registered libraries.",
-                        name
-                    )
-                })?;
+            let project = inner.active_project.as_ref().ok_or_else(|| {
+                super::RecoverableError::with_hint(
+                    "No active project. Use activate_project first.",
+                    "Call activate_project(\"/path/to/project\") to set the active project.",
+                )
+            })?;
+            let entry = project.library_registry.lookup(name).ok_or_else(|| {
+                super::RecoverableError::with_hint(
+                    format!("Library '{}' not found in registry.", name),
+                    "Use list_libraries to see registered libraries.",
+                )
+            })?;
             (project.root.clone(), entry.path.clone())
         };
 

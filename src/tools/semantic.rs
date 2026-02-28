@@ -44,18 +44,18 @@ impl Tool for SemanticSearch {
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         use super::output::OutputGuard;
 
-        let query = input["query"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("missing 'query' parameter"))?;
+        let query = super::require_str_param(&input, "query")?;
         let limit = input["limit"].as_u64().unwrap_or(10) as usize;
         let guard = OutputGuard::from_input(&input);
 
         let (root, model) = {
             let inner = ctx.agent.inner.read().await;
-            let p = inner
-                .active_project
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("No active project. Use activate_project first."))?;
+            let p = inner.active_project.as_ref().ok_or_else(|| {
+                super::RecoverableError::with_hint(
+                    "No active project. Use activate_project first.",
+                    "Call activate_project(\"/path/to/project\") to set the active project.",
+                )
+            })?;
             (p.root.clone(), p.config.embeddings.model.clone())
         };
 
@@ -228,10 +228,12 @@ impl Tool for IndexStatus {
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         let (root, model, drift_enabled) = {
             let inner = ctx.agent.inner.read().await;
-            let p = inner
-                .active_project
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("No active project. Use activate_project first."))?;
+            let p = inner.active_project.as_ref().ok_or_else(|| {
+                super::RecoverableError::with_hint(
+                    "No active project. Use activate_project first.",
+                    "Call activate_project(\"/path/to/project\") to set the active project.",
+                )
+            })?;
             (
                 p.root.clone(),
                 p.config.embeddings.model.clone(),

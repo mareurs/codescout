@@ -29,9 +29,7 @@ impl Tool for GitBlame {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let file = input["path"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("missing 'path' parameter"))?;
+        let file = super::require_str_param(&input, "path")?;
         let root = ctx.agent.require_project_root().await?;
 
         let security = ctx.agent.security_config().await;

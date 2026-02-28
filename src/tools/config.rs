@@ -26,12 +26,14 @@ impl Tool for ActivateProject {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let path = input["path"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("missing 'path' parameter"))?;
+        let path = super::require_str_param(&input, "path")?;
         let root = PathBuf::from(path);
         if !root.is_dir() {
-            anyhow::bail!("path '{}' is not a directory", path);
+            return Err(super::RecoverableError::with_hint(
+                format!("path '{}' is not a directory", path),
+                "Provide an absolute path to an existing directory.",
+            )
+            .into());
         }
         ctx.agent.activate(root).await?;
         let config = ctx

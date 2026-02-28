@@ -1,7 +1,6 @@
 //! Workflow and onboarding tools.
 
 use super::{Tool, ToolContext};
-use anyhow::anyhow;
 use serde_json::{json, Value};
 
 pub struct Onboarding;
@@ -367,9 +366,7 @@ impl Tool for RunCommand {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let command = input["command"]
-            .as_str()
-            .ok_or_else(|| anyhow!("missing 'command' parameter"))?;
+        let command = super::require_str_param(&input, "command")?;
         let timeout_secs = input["timeout_secs"].as_u64().unwrap_or(30);
         let root = ctx.agent.require_project_root().await?;
         let security = ctx.agent.security_config().await;
@@ -377,13 +374,18 @@ impl Tool for RunCommand {
         // Check shell command mode
         match security.shell_command_mode.as_str() {
             "disabled" => {
-                anyhow::bail!(
-                    "shell commands are disabled. Set security.shell_command_mode = \"warn\" or \"unrestricted\" in .code-explorer/project.toml"
-                );
+                return Err(super::RecoverableError::with_hint(
+                    "shell commands are disabled",
+                    "Set security.shell_command_mode = \"warn\" or \"unrestricted\" in .code-explorer/project.toml",
+                ).into());
             }
             "unrestricted" | "warn" | "" => {} // allowed
             other => {
-                anyhow::bail!("unknown shell_command_mode: '{}'. Use \"warn\", \"unrestricted\", or \"disabled\"", other);
+                return Err(super::RecoverableError::with_hint(
+                    format!("unknown shell_command_mode: '{}'", other),
+                    "Use \"warn\", \"unrestricted\", or \"disabled\".",
+                )
+                .into());
             }
         }
 
@@ -439,7 +441,9 @@ impl Tool for RunCommand {
 
                 Ok(result)
             }
-            Ok(Err(e)) => Err(anyhow!("command execution error: {}", e)),
+            Ok(Err(e)) => {
+                Err(super::RecoverableError::new(format!("command execution error: {}", e)).into())
+            }
             Err(_) => Ok(json!({
                 "timed_out": true,
                 "stdout": "",

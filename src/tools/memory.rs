@@ -28,12 +28,8 @@ impl Tool for WriteMemory {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let topic = input["topic"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("missing 'topic' parameter"))?;
-        let content = input["content"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("missing 'content' parameter"))?;
+        let topic = super::require_str_param(&input, "topic")?;
+        let content = super::require_str_param(&input, "content")?;
         ctx.agent
             .with_project(|p| {
                 p.memory.write(topic, content)?;
@@ -59,9 +55,7 @@ impl Tool for ReadMemory {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let topic = input["topic"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("missing 'topic' parameter"))?;
+        let topic = super::require_str_param(&input, "topic")?;
         ctx.agent
             .with_project(|p| match p.memory.read(topic)? {
                 Some(content) => Ok(json!({ "topic": topic, "content": content })),
@@ -108,9 +102,7 @@ impl Tool for DeleteMemory {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let topic = input["topic"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("missing 'topic' parameter"))?;
+        let topic = super::require_str_param(&input, "topic")?;
         ctx.agent
             .with_project(|p| {
                 p.memory.delete(topic)?;
