@@ -94,7 +94,17 @@ impl Tool for ReadFile {
             }
         };
 
-        let text = std::fs::read_to_string(&resolved)?;
+        let text = std::fs::read_to_string(&resolved).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::InvalidData {
+                RecoverableError::with_hint(
+                    "file contains non-UTF-8 data (binary file?)",
+                    "read_file only works with text files. Use list_dir to check file types.",
+                )
+                .into()
+            } else {
+                anyhow::anyhow!("failed to read {}: {}", resolved.display(), e)
+            }
+        })?;
 
         // If explicit line range given, use it directly (no capping)
         if let (Some(start), Some(end)) = (start_line, end_line) {
@@ -253,12 +263,12 @@ impl Tool for SearchPattern {
             "properties": {
                 "pattern": { "type": "string", "description": "Regex pattern" },
                 "path": { "type": "string", "description": "File or directory to search (default: project root)" },
-                "max_results": { "type": "integer", "default": 50, "description": "Maximum matches to return. Alias: limit" },
+                "max_results": { "type": "integer", "default": 50, "description": "Maximum matching lines to return (in context mode this counts individual matching lines, not blocks). Alias: limit" },
                 "limit": { "type": "integer", "description": "Alias for max_results" },
                 "context_lines": {
                     "type": "integer",
                     "default": 0,
-                    "description": "Lines of context before and after each match (max 20). Adjacent matches that share context are merged into one block with a flat multiline content string."
+                    "description": "Lines of context before and after each match (max 20). Adjacent matches that share context are merged into one block with a flat multiline content string. For merged blocks, match_line is the first match's line — scan content for further matches."
                 }
             }
         })
@@ -291,6 +301,7 @@ impl Tool for SearchPattern {
             })?;
         let mut matches = vec![];
         let mut total_match_count = 0usize;
+        let mut hit_cap = false;
 
         let walker = ignore::WalkBuilder::new(&search_path)
             .hidden(true)
@@ -308,12 +319,14 @@ impl Tool for SearchPattern {
                 // Original behaviour: one entry per matching line
                 for (i, line) in text.lines().enumerate() {
                     if re.is_match(line) {
+                        total_match_count += 1;
                         matches.push(json!({
                             "file": entry.path().display().to_string(),
                             "line": i + 1,
                             "content": line
                         }));
                         if matches.len() >= max {
+                            hit_cap = true;
                             break 'outer;
                         }
                     }
@@ -356,6 +369,7 @@ impl Tool for SearchPattern {
                     }
 
                     if total_match_count >= max {
+                        hit_cap = true;
                         break;
                     }
                 }
@@ -372,12 +386,23 @@ impl Tool for SearchPattern {
                 }
 
                 if total_match_count >= max {
+                    hit_cap = true;
                     break 'outer;
                 }
             }
         }
 
-        Ok(json!({ "matches": matches, "total": matches.len() }))
+        let mut result = json!({ "matches": matches, "total": total_match_count });
+        if hit_cap {
+            result["overflow"] = json!({
+                "shown": total_match_count,
+                "hint": format!(
+                    "Showing first {} matches (cap hit). Narrow with a more specific pattern or path=<file>.",
+                    total_match_count
+                )
+            });
+        }
+        Ok(result)
     }
 }
 
@@ -465,10 +490,17 @@ impl Tool for FindFile {
 
         let glob = globset::GlobBuilder::new(pattern)
             .literal_separator(false)
-            .build()?
+            .build()
+            .map_err(|e| {
+                RecoverableError::with_hint(
+                    format!("invalid glob pattern: {e}"),
+                    "Use glob syntax: * matches anything, ** crosses directories, ? matches one char",
+                )
+            })?
             .compile_matcher();
 
         let mut matches = vec![];
+        let mut hit_cap = false;
         let walker = ignore::WalkBuilder::new(&search_path)
             .hidden(true)
             .git_ignore(true)
@@ -484,12 +516,23 @@ impl Tool for FindFile {
             if glob.is_match(rel) {
                 matches.push(entry.path().display().to_string());
                 if matches.len() >= max {
+                    hit_cap = true;
                     break;
                 }
             }
         }
 
-        Ok(json!({ "files": matches, "total": matches.len() }))
+        let mut result = json!({ "files": matches, "total": matches.len() });
+        if hit_cap {
+            result["overflow"] = json!({
+                "shown": matches.len(),
+                "hint": format!(
+                    "Showing first {} files (cap hit). Narrow with a more specific pattern or path=<dir>.",
+                    matches.len()
+                )
+            });
+        }
+        Ok(result)
     }
 }
 
@@ -514,7 +557,7 @@ impl Tool for EditLines {
                 "start_line": { "type": "integer", "description": "1-based line where edit begins" },
                 "delete_count": { "type": "integer", "description": "Lines to remove (0 = pure insertion)" },
                 "new_text": { "type": "string", "description": "Text to insert (may contain newlines). Omit for pure deletion." },
-                "expected_content": { "type": "string", "description": "Safety guard: if provided, the content at start_line must match this string (whitespace-trimmed). If it does not match, the edit is aborted with an error showing the actual content found." }
+                "expected_content": { "type": "string", "description": "Safety guard: if provided, the content at start_line must match this string (whitespace-trimmed). May span multiple lines — the corresponding number of lines in the file are checked. If it does not match, the edit is aborted with an error showing the actual content found." }
             }
         })
     }
@@ -569,15 +612,25 @@ impl Tool for EditLines {
             )
             .into());
         }
-        // Safety guard: verify target line matches expected_content before editing
+
+        // Safety guard: verify target line(s) match expected_content before editing.
+        // expected_content may span multiple lines — count its lines and join that
+        // many consecutive file lines for comparison.
         if let Some(expected) = expected_content {
-            let actual = lines.get(idx).copied().unwrap_or("");
-            if actual.trim() != expected.trim() {
+            let expected_trimmed = expected.trim();
+            let expected_line_count = expected_trimmed.lines().count().max(1);
+            let end = (idx + expected_line_count).min(total);
+            let actual = if idx < end {
+                lines[idx..end].join("\n")
+            } else {
+                String::new()
+            };
+            if actual.trim() != expected_trimmed {
                 return Err(super::RecoverableError::with_hint(
                     format!(
                         "line {} content mismatch — expected {:?}, found {:?}",
                         start_line,
-                        expected.trim(),
+                        expected_trimmed,
                         actual.trim()
                     ),
                     "Verify the line number with search_pattern before editing. Prefer replace_symbol for code.",
@@ -586,7 +639,9 @@ impl Tool for EditLines {
             }
         }
 
-        // Build new text lines
+        // Build new text lines.  .lines() is correct here — it treats trailing \n
+        // as a line terminator (not an extra blank line), which matches the line-based
+        // splice semantics.  Intentional blank lines ("code\n\n") are preserved.
         let insert_lines: Vec<&str> = if new_text.is_empty() {
             vec![]
         } else {
@@ -1292,11 +1347,19 @@ mod tests {
         let file = dir.path().join("binary.bin");
         std::fs::write(&file, b"\x00\x01\x02\xff\xfe").unwrap();
 
-        // Binary file read should error (not valid UTF-8), not panic
+        // Binary file should produce a RecoverableError, not a fatal error or panic
         let result = ReadFile
             .call(json!({ "path": file.to_str().unwrap() }), &ctx)
             .await;
-        assert!(result.is_err(), "binary file should fail on read_to_string");
+        let err = result.unwrap_err();
+        assert!(
+            err.downcast_ref::<RecoverableError>().is_some(),
+            "binary file error should be RecoverableError, got: {err}"
+        );
+        assert!(
+            err.to_string().contains("non-UTF-8"),
+            "error should mention non-UTF-8, got: {err}"
+        );
     }
 
     #[tokio::test]
@@ -1710,6 +1773,64 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(&file).unwrap(),
             "alpha\nbeta\ngamma\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_lines_expected_content_multiline_matches_succeeds() {
+        // Reproduces the bug where multi-line expected_content always failed
+        // because the guard only compared a single file line.
+        let (dir, ctx) = project_ctx().await;
+        let file = dir.path().join("test.txt");
+        std::fs::write(&file, "// header\nfunction foo(\n    x: i32,\n) {}\n").unwrap();
+
+        let result = EditLines
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "start_line": 2,
+                    "delete_count": 3,
+                    "new_text": "function bar() {}",
+                    "expected_content": "function foo(\n    x: i32,\n) {}"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result, json!("ok"));
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "// header\nfunction bar() {}\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_lines_expected_content_multiline_mismatch_errors() {
+        let (dir, ctx) = project_ctx().await;
+        let file = dir.path().join("test.txt");
+        std::fs::write(&file, "// header\nfunction foo(\n    x: i32,\n) {}\n").unwrap();
+
+        let result = EditLines
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "start_line": 2,
+                    "delete_count": 3,
+                    "new_text": "function bar() {}",
+                    "expected_content": "function foo(\n    y: i32,\n) {}"
+                }),
+                &ctx,
+            )
+            .await;
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("content mismatch"),
+            "expected 'content mismatch' in: {err}"
+        );
+        // File must be untouched
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "// header\nfunction foo(\n    x: i32,\n) {}\n"
         );
     }
 
@@ -2182,9 +2303,18 @@ mod tests {
 
         let matches = result["matches"].as_array().unwrap();
         let total_blocks = matches.len();
+        // File a: 2 non-adjacent blocks (2 match events)
+        // File b: only 1 more event before hitting max=3 → 1 block
+        assert_eq!(
+            total_blocks, 3,
+            "max_results=3 should produce exactly 3 blocks globally, got {total_blocks}"
+        );
+        // total reports actual match count, not block count
+        assert_eq!(result["total"], 3);
+        // overflow should be present since cap was hit
         assert!(
-            total_blocks <= 3,
-            "max_results must be enforced globally across files, got {total_blocks} blocks"
+            result.get("overflow").is_some(),
+            "overflow should be present when cap is hit"
         );
     }
 }
