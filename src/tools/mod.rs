@@ -78,6 +78,36 @@ impl std::fmt::Display for RecoverableError {
 
 impl std::error::Error for RecoverableError {}
 
+/// Block write operations when git worktrees exist but the agent hasn't
+/// explicitly called `activate_project` to confirm which project to write to.
+///
+/// Returns `Ok(())` when writes are allowed:
+/// - Agent explicitly activated a project via `activate_project`
+/// - No git worktrees exist (no ambiguity)
+///
+/// Returns `RecoverableError` when writes should be blocked:
+/// - Worktrees exist AND the project was only implicitly set at startup
+pub async fn guard_worktree_write(ctx: &ToolContext) -> anyhow::Result<()> {
+    if ctx.agent.is_project_explicitly_activated().await {
+        return Ok(());
+    }
+    let root = ctx.agent.require_project_root().await?;
+    let worktrees = crate::util::path_security::list_git_worktrees(&root);
+    if worktrees.is_empty() {
+        return Ok(());
+    }
+    let wt_list: Vec<String> = worktrees.iter().map(|p| p.display().to_string()).collect();
+    Err(RecoverableError::with_hint(
+        format!(
+            "Write blocked: git worktrees detected but activate_project has not been called. \
+             Worktrees: [{}]",
+            wt_list.join(", ")
+        ),
+        "Call activate_project(\"/path/to/target\") to select which project to write to.",
+    )
+    .into())
+}
+
 /// A single MCP tool exposed to the LLM.
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
