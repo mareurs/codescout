@@ -6,7 +6,7 @@ Rust MCP server giving LLMs IDE-grade code intelligence — symbol-level navigat
 
 ```bash
 cargo build                        # Build
-cargo test                         # Run tests (435 passing)
+cargo test                         # Run tests (533 passing)
 cargo clippy -- -D warnings        # Lint
 cargo fmt                          # Format
 cargo run -- start --project .     # Run MCP server (stdio)
@@ -87,6 +87,19 @@ full detail, paginated via offset/limit. Enforced via `OutputGuard`
 (`find_symbol`, `list_symbols`, `goto_definition`, `hover`). Know the concept →
 semantic search first, then drill down. Know nothing → `list_dir` +
 `list_symbols` at top level, then semantic search.
+
+## Testing Patterns
+
+**Cache-invalidation tests use a three-query sandwich** — not two. The structure is:
+1. Query → record baseline state
+2. Mutate the underlying data (disk, cache, external system) without going through the normal notification path
+3. Query again → assert result is **stale** (same as baseline) — this proves the bug exists
+4. Trigger the invalidation (e.g. `did_change`, cache flush)
+5. Query again → assert result is **fresh** (reflects the mutation)
+
+A two-query test (baseline → post-invalidation) only confirms the happy path. The stale-assertion in step 3 is what makes it a *regression* test — it will fail if the underlying system ever changes to eagerly re-read on every query, alerting you that the invalidation logic has become wrong or unnecessary.
+
+See `did_change_refreshes_stale_symbol_positions` in `src/lsp/client.rs` for the canonical example.
 
 ## Key Patterns
 
