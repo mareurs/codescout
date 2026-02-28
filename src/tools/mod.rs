@@ -106,13 +106,21 @@ pub fn require_str_param<'a>(input: &'a serde_json::Value, name: &str) -> anyhow
 
 /// Convenience: extract a required u64 parameter from a JSON `Value`.
 pub fn require_u64_param(input: &serde_json::Value, name: &str) -> anyhow::Result<u64> {
-    require_param(input, name)?.as_u64().ok_or_else(|| {
-        RecoverableError::with_hint(
-            format!("'{}' must be a non-negative integer", name),
-            format!("Provide '{}' as a non-negative integer.", name),
-        )
-        .into()
-    })
+    let val = require_param(input, name)?;
+    // Accept both JSON numbers and string-encoded integers (LLMs sometimes quote them).
+    if let Some(n) = val.as_u64() {
+        return Ok(n);
+    }
+    if let Some(s) = val.as_str() {
+        if let Ok(n) = s.trim().parse::<u64>() {
+            return Ok(n);
+        }
+    }
+    Err(RecoverableError::with_hint(
+        format!("'{}' must be a non-negative integer", name),
+        format!("Provide '{}' as a non-negative integer.", name),
+    )
+    .into())
 }
 
 /// Block write operations when git worktrees exist but the agent hasn't
@@ -191,6 +199,29 @@ mod tests {
     }
 
     #[test]
+    fn require_u64_param_accepts_integer() {
+        let input = serde_json::json!({ "n": 42 });
+        assert_eq!(require_u64_param(&input, "n").unwrap(), 42);
+    }
+
+    #[test]
+    fn require_u64_param_accepts_string_encoded_integer() {
+        // LLMs sometimes quote integers — we must tolerate this.
+        let input = serde_json::json!({ "n": "11" });
+        assert_eq!(require_u64_param(&input, "n").unwrap(), 11);
+    }
+
+    #[test]
+    fn require_u64_param_rejects_non_numeric_string() {
+        let input = serde_json::json!({ "n": "abc" });
+        assert!(require_u64_param(&input, "n").is_err());
+    }
+
+    #[test]
+    fn require_u64_param_rejects_negative_string() {
+        let input = serde_json::json!({ "n": "-5" });
+        assert!(require_u64_param(&input, "n").is_err());
+    }
     fn recoverable_error_downcasts_from_anyhow() {
         let e: anyhow::Error = RecoverableError::new("test error").into();
         assert!(

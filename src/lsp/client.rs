@@ -727,6 +727,8 @@ impl LspClient {
 
     /// Send textDocument/didClose notification for a file.
     pub async fn did_close(&self, path: &Path) -> Result<()> {
+        self.open_files.lock().unwrap().remove(path);
+
         let uri = path_to_uri(path)?;
 
         self.notify(
