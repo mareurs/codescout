@@ -131,6 +131,24 @@ async fn get_lsp_client(
 }
 
 /// Recursively collect symbols whose name contains the given pattern (case-insensitive).
+/// Returns true if the symbol's kind matches the given filter string.
+/// Unknown filter values return true (no filtering).
+fn matches_kind_filter(kind: &crate::lsp::SymbolKind, filter: &str) -> bool {
+    use crate::lsp::SymbolKind as K;
+    match filter {
+        "function" => matches!(kind, K::Function | K::Method | K::Constructor),
+        "class" => matches!(kind, K::Class),
+        "struct" => matches!(kind, K::Struct),
+        "interface" => matches!(kind, K::Interface),
+        "type" => matches!(kind, K::TypeParameter),
+        "enum" => matches!(kind, K::Enum | K::EnumMember),
+        "module" => matches!(kind, K::Module | K::Namespace | K::Package),
+        "constant" => matches!(kind, K::Constant),
+        _ => true,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn collect_matching(
     symbols: &[SymbolInfo],
     pattern: &str,
@@ -139,11 +157,13 @@ fn collect_matching(
     depth: usize,
     source: &str,
     out: &mut Vec<Value>,
+    kind_filter: Option<&str>,
 ) {
     for sym in symbols {
-        if sym.name.to_lowercase().contains(pattern)
-            || sym.name_path.to_lowercase().contains(pattern)
-        {
+        let name_ok = sym.name.to_lowercase().contains(pattern)
+            || sym.name_path.to_lowercase().contains(pattern);
+        let kind_ok = kind_filter.map_or(true, |f| matches_kind_filter(&sym.kind, f));
+        if name_ok && kind_ok {
             out.push(symbol_to_json(
                 sym,
                 include_body,
@@ -152,6 +172,7 @@ fn collect_matching(
                 source,
             ));
         }
+        // Always recurse so nested matches inside filtered-out parents are still found.
         collect_matching(
             &sym.children,
             pattern,
@@ -160,6 +181,7 @@ fn collect_matching(
             depth,
             source,
             out,
+            kind_filter,
         );
     }
 }
@@ -240,6 +262,7 @@ fn find_ast_end_line_in(symbols: &[SymbolInfo], name: &str, lsp_start: u32) -> O
 /// Directory/glob scans can produce huge output (each file has many symbols).
 /// Cap exploring-mode file count lower than the global OutputGuard default (200).
 const LIST_SYMBOLS_MAX_FILES: usize = 50;
+const LIST_SYMBOLS_SINGLE_FILE_CAP: usize = 100;
 
 pub struct ListSymbols;
 
@@ -329,6 +352,23 @@ impl Tool for ListSymbols {
                 .iter()
                 .map(|s| symbol_to_json(s, include_body, source.as_deref(), depth, "project"))
                 .collect();
+
+            // Cap single-file results to prevent large files blowing the context window.
+            let total = json_symbols.len();
+            let mut file_guard = guard;
+            file_guard.max_results = LIST_SYMBOLS_SINGLE_FILE_CAP;
+            let hint = format!(
+                "File has {total} symbols. Use depth=1 for top-level overview, \
+                 or find_symbol(name_path='ClassName/methodName', include_body=true) for a specific symbol."
+            );
+            let (json_symbols, overflow) = file_guard.cap_items(json_symbols, &hint);
+            if let Some(ov) = overflow {
+                let total = ov.total;
+                let mut result =
+                    json!({ "file": rel_path, "symbols": json_symbols, "total": total });
+                result["overflow"] = OutputGuard::overflow_json(&ov);
+                return Ok(result);
+            }
             Ok(json!({ "file": rel_path, "symbols": json_symbols }))
         } else if full_path.is_dir() {
             // Collect file paths from directory.
@@ -423,6 +463,40 @@ impl Tool for ListSymbols {
 
 pub struct FindSymbol;
 
+const FIND_SYMBOL_MAX_RESULTS: usize = 50;
+const BY_FILE_CAP: usize = 15;
+
+/// Build a per-file distribution from a list of symbol JSON objects.
+/// Returns (entries sorted by count desc, number of files omitted by cap).
+fn build_by_file(matches: &[Value]) -> (Vec<(String, usize)>, usize) {
+    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for m in matches {
+        if let Some(file) = m["file"].as_str() {
+            *counts.entry(file.to_string()).or_default() += 1;
+        }
+    }
+    let mut sorted: Vec<(String, usize)> = counts.into_iter().collect();
+    sorted.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    let overflow = sorted.len().saturating_sub(BY_FILE_CAP);
+    sorted.truncate(BY_FILE_CAP);
+    (sorted, overflow)
+}
+
+/// Build the actionable overflow hint for find_symbol. Uses the top file from by_file
+/// as the concrete example path so the hint is copy-paste ready.
+fn make_find_symbol_hint(shown: usize, by_file: &[(String, usize)]) -> String {
+    let top_file = by_file
+        .first()
+        .map(|(f, _)| f.as_str())
+        .unwrap_or("path/to/file.rs");
+    format!(
+        "Showing {shown} of total. To narrow down:\n\
+         \u{2022} paginate:       add offset={shown}, limit=50\n\
+         \u{2022} filter by file: add path=\"{top_file}\"\n\
+         \u{2022} filter by kind: add kind=\"function\" (also: class, struct, interface, type, enum, module, constant)"
+    )
+}
+
 #[async_trait::async_trait]
 impl Tool for FindSymbol {
     fn name(&self) -> &str {
@@ -438,6 +512,11 @@ impl Tool for FindSymbol {
                 "pattern": { "type": "string", "description": "Symbol name or substring to search for" },
                 "name_path": { "type": "string", "description": "Exact name path from get_symbols_overview (e.g. 'MyStruct/my_method'). Alternative to pattern." },
                 "path": { "type": "string", "description": "Restrict search to this file or glob pattern (e.g. 'src/**/*.rs')" },
+                "kind": {
+                    "type": "string",
+                    "description": "Filter by symbol kind. Only applied when using 'pattern' — ignored with 'name_path'. Note: 'interface' matches Rust traits.",
+                    "enum": ["function", "class", "struct", "interface", "type", "enum", "module", "constant"]
+                },
                 "include_body": { "type": "boolean", "default": false },
                 "depth": { "type": "integer", "default": 0, "description": "Depth of children to include" },
                 "detail_level": { "type": "string", "description": "Output detail: omit for compact (default), 'full' for complete with bodies" },
@@ -457,7 +536,20 @@ impl Tool for FindSymbol {
                     "Provide 'pattern' (substring search) or 'name_path' (exact path from get_symbols_overview, e.g. 'MyStruct/my_method')",
                 )
             })?;
-        let guard = OutputGuard::from_input(&input);
+        let mut guard = OutputGuard::from_input(&input);
+        // find_symbol uses a tighter exploring cap than the default 200.
+        if matches!(guard.mode, OutputMode::Exploring) {
+            guard.max_results = FIND_SYMBOL_MAX_RESULTS;
+        }
+
+        // kind filter only applies to pattern-based searches, not exact name_path lookups.
+        let is_name_path = input["name_path"].is_string();
+        let kind_filter: Option<&str> = if is_name_path {
+            None
+        } else {
+            input["kind"].as_str()
+        };
+
         let include_body = input["include_body"]
             .as_bool()
             .unwrap_or_else(|| guard.should_include_body());
@@ -490,18 +582,7 @@ impl Tool for FindSymbol {
                 }
             };
 
-            // In exploring mode, stop early once we have enough results.
-            let early_cap = match guard.mode {
-                OutputMode::Exploring => Some(guard.max_results + 1),
-                OutputMode::Focused => None,
-            };
-
             for file_path in &files {
-                if let Some(cap) = early_cap {
-                    if matches.len() >= cap {
-                        break;
-                    }
-                }
                 let Some(lang) = ast::detect_language(file_path) else {
                     continue;
                 };
@@ -525,22 +606,8 @@ impl Tool for FindSymbol {
                     depth,
                     "project",
                     &mut matches,
+                    kind_filter,
                 );
-            }
-
-            let hit_early_cap = early_cap.is_some() && matches.len() > guard.max_results;
-            if hit_early_cap {
-                use super::output::OverflowInfo;
-                matches.truncate(guard.max_results);
-                let overflow = OverflowInfo {
-                    shown: guard.max_results,
-                    total: guard.max_results + 1,
-                    hint: "Restrict with a file path or glob pattern".to_string(),
-                    next_offset: None,
-                };
-                let mut result = json!({ "symbols": matches, "total": guard.max_results + 1 });
-                result["overflow"] = OutputGuard::overflow_json(&overflow);
-                return Ok(result);
             }
         } else {
             // Fast path: workspace/symbol — one LSP request per language instead of
@@ -577,9 +644,10 @@ impl Tool for FindSymbol {
                 };
                 for sym in symbols {
                     // LSP servers may use fuzzy/prefix matching — enforce substring.
-                    if sym.name.to_lowercase().contains(&pattern_lower)
-                        || sym.name_path.to_lowercase().contains(&pattern_lower)
-                    {
+                    let name_ok = sym.name.to_lowercase().contains(&pattern_lower)
+                        || sym.name_path.to_lowercase().contains(&pattern_lower);
+                    let kind_ok = kind_filter.map_or(true, |f| matches_kind_filter(&sym.kind, f));
+                    if name_ok && kind_ok {
                         // workspace/symbol returns SymbolInformation whose
                         // location.range covers only the identifier (start == end).
                         // Augment with the true declaration range from tree-sitter
@@ -635,6 +703,7 @@ impl Tool for FindSymbol {
                             depth,
                             "project",
                             &mut matches,
+                            kind_filter,
                         );
                     }
                     // Early cap to avoid scanning entire huge projects
@@ -645,8 +714,23 @@ impl Tool for FindSymbol {
             }
         }
 
-        let (mut matches, overflow) =
-            guard.cap_items(matches, "Restrict with a file path or glob pattern");
+        // Build by_file distribution from the full result set BEFORE truncation.
+        let (by_file_entries, by_file_overflow_count) = build_by_file(&matches);
+        let hint = if matches.len() > guard.max_results {
+            make_find_symbol_hint(guard.max_results, &by_file_entries)
+        } else {
+            String::from("Restrict with a file path or glob pattern")
+        };
+        let (mut matches, mut overflow) = guard.cap_items(matches, &hint);
+        // Patch by_file into the overflow object (RF6 resolution: mutate after cap_items).
+        if let Some(ref mut ov) = overflow {
+            if !by_file_entries.is_empty() {
+                ov.by_file = Some(by_file_entries);
+                ov.by_file_overflow = by_file_overflow_count;
+                // Rewrite hint with the real `shown` value now we know it.
+                ov.hint = make_find_symbol_hint(ov.shown, ov.by_file.as_deref().unwrap_or(&[]));
+            }
+        }
 
         // When include_body is on and there are many results, strip bodies
         // beyond a threshold to avoid blowing the context window.
@@ -2510,6 +2594,7 @@ fn main() {
             0,
             "project",
             &mut results,
+            None,
         );
         assert!(
             !results.is_empty(),
@@ -2527,6 +2612,7 @@ fn main() {
             0,
             "project",
             &mut results2,
+            None,
         );
         assert!(
             !results2.is_empty(),
@@ -2718,6 +2804,7 @@ fn main() {
             0,
             "project",
             &mut results,
+            None,
         );
         assert_eq!(
             results.len(),
@@ -2725,6 +2812,230 @@ fn main() {
             "slash pattern should match exactly 1 result (the method), not the parent struct"
         );
         assert_eq!(results[0]["name"], "my_method");
+    }
+
+    #[test]
+    fn matches_kind_filter_function_group() {
+        use crate::lsp::SymbolKind;
+        assert!(matches_kind_filter(&SymbolKind::Function, "function"));
+        assert!(matches_kind_filter(&SymbolKind::Method, "function"));
+        assert!(matches_kind_filter(&SymbolKind::Constructor, "function"));
+        assert!(!matches_kind_filter(&SymbolKind::Variable, "function"));
+        assert!(!matches_kind_filter(&SymbolKind::Class, "function"));
+    }
+
+    #[test]
+    fn matches_kind_filter_struct_vs_class() {
+        use crate::lsp::SymbolKind;
+        assert!(matches_kind_filter(&SymbolKind::Class, "class"));
+        assert!(!matches_kind_filter(&SymbolKind::Struct, "class"));
+        assert!(matches_kind_filter(&SymbolKind::Struct, "struct"));
+        assert!(!matches_kind_filter(&SymbolKind::Class, "struct"));
+    }
+
+    #[test]
+    fn matches_kind_filter_module_group() {
+        use crate::lsp::SymbolKind;
+        assert!(matches_kind_filter(&SymbolKind::Module, "module"));
+        assert!(matches_kind_filter(&SymbolKind::Namespace, "module"));
+        assert!(matches_kind_filter(&SymbolKind::Package, "module"));
+        assert!(!matches_kind_filter(&SymbolKind::Function, "module"));
+    }
+
+    #[test]
+    fn collect_matching_with_kind_filter_class_only() {
+        use crate::lsp::SymbolKind;
+        let symbols = vec![
+            SymbolInfo {
+                name: "WeeklyGrid".into(),
+                name_path: "WeeklyGrid".into(),
+                kind: SymbolKind::Class,
+                file: PathBuf::from("test.ts"),
+                start_line: 0,
+                end_line: 10,
+                start_col: 0,
+                children: vec![],
+            },
+            SymbolInfo {
+                name: "weeklyGrid".into(),
+                name_path: "weeklyGrid".into(),
+                kind: SymbolKind::Variable,
+                file: PathBuf::from("test.ts"),
+                start_line: 12,
+                end_line: 12,
+                start_col: 0,
+                children: vec![],
+            },
+            SymbolInfo {
+                name: "renderWeeklyGrid".into(),
+                name_path: "renderWeeklyGrid".into(),
+                kind: SymbolKind::Function,
+                file: PathBuf::from("test.ts"),
+                start_line: 14,
+                end_line: 20,
+                start_col: 0,
+                children: vec![],
+            },
+        ];
+
+        let mut out = vec![];
+        collect_matching(
+            &symbols,
+            "weeklygrid",
+            false,
+            None,
+            0,
+            "project",
+            &mut out,
+            Some("class"),
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["name"], "WeeklyGrid");
+    }
+
+    #[test]
+    fn collect_matching_kind_filter_none_returns_all_matching() {
+        use crate::lsp::SymbolKind;
+        let symbols = vec![
+            SymbolInfo {
+                name: "foo".into(),
+                name_path: "foo".into(),
+                kind: SymbolKind::Function,
+                file: PathBuf::from("test.rs"),
+                start_line: 0,
+                end_line: 5,
+                start_col: 0,
+                children: vec![],
+            },
+            SymbolInfo {
+                name: "FOO".into(),
+                name_path: "FOO".into(),
+                kind: SymbolKind::Constant,
+                file: PathBuf::from("test.rs"),
+                start_line: 7,
+                end_line: 7,
+                start_col: 0,
+                children: vec![],
+            },
+        ];
+
+        let mut out = vec![];
+        collect_matching(&symbols, "foo", false, None, 0, "project", &mut out, None);
+        assert_eq!(
+            out.len(),
+            2,
+            "no filter → all name-matching symbols returned"
+        );
+    }
+
+    #[test]
+    fn build_by_file_sorts_desc_and_caps_at_15() {
+        // 20 distinct files, file_i has (20 - i) matches
+        let mut matches: Vec<Value> = vec![];
+        for i in 0usize..20 {
+            for _ in 0..(20 - i) {
+                matches.push(json!({ "file": format!("src/file{i}.rs") }));
+            }
+        }
+        let (by_file, overflow) = build_by_file(&matches);
+        assert_eq!(by_file.len(), 15, "cap at 15");
+        assert_eq!(overflow, 5, "20 files - 15 = 5 overflow");
+        // First entry has highest count
+        assert_eq!(by_file[0].0, "src/file0.rs");
+        assert_eq!(by_file[0].1, 20);
+        // Sorted descending
+        for w in by_file.windows(2) {
+            assert!(w[0].1 >= w[1].1);
+        }
+    }
+
+    #[test]
+    fn build_by_file_no_overflow_under_cap() {
+        let matches: Vec<Value> = (0..3)
+            .flat_map(|i| vec![json!({ "file": format!("src/f{i}.rs") }); 5])
+            .collect();
+        let (by_file, overflow) = build_by_file(&matches);
+        assert_eq!(by_file.len(), 3);
+        assert_eq!(overflow, 0);
+    }
+
+    #[test]
+    fn make_find_symbol_hint_contains_top_file_and_kind_and_offset() {
+        let by_file = vec![
+            ("src/components/WeeklyGrid.tsx".to_string(), 12usize),
+            ("src/screens/Home.tsx".to_string(), 3),
+        ];
+        let hint = make_find_symbol_hint(50, &by_file);
+        assert!(
+            hint.contains("src/components/WeeklyGrid.tsx"),
+            "should show top file path"
+        );
+        assert!(hint.contains("kind="), "should mention kind filter");
+        assert!(
+            hint.contains("offset=50"),
+            "should show next pagination offset"
+        );
+    }
+
+    #[test]
+    fn kind_filter_skipped_when_using_name_path() {
+        // Verify the logic: if name_path is set, kind_filter is None.
+        let input = json!({ "name_path": "Foo", "kind": "function" });
+        let is_name_path = input["name_path"].is_string();
+        let kind_filter: Option<&str> = if is_name_path {
+            None
+        } else {
+            input["kind"].as_str()
+        };
+        assert!(kind_filter.is_none());
+    }
+
+    #[test]
+    fn list_symbols_single_file_cap_unit() {
+        // Unit test: simulate the cap logic on a Vec<Value> of 150 symbol entries.
+        use super::{OutputGuard, OutputMode};
+        let symbols: Vec<Value> = (0..150)
+            .map(|i| json!({ "name": format!("sym{i}"), "start_line": i + 1 }))
+            .collect();
+
+        const SINGLE_FILE_CAP: usize = 100;
+        let total = symbols.len();
+        let hint = format!(
+            "File has {total} symbols. Use depth=1 for top-level overview, \
+             or find_symbol(name_path='ClassName/methodName', include_body=true) for a specific symbol."
+        );
+        let mut g = OutputGuard::default();
+        g.max_results = SINGLE_FILE_CAP;
+        let (kept, overflow) = g.cap_items(symbols, &hint);
+
+        assert_eq!(kept.len(), 100);
+        let ov = overflow.expect("overflow must be present");
+        assert_eq!(ov.total, 150);
+        assert_eq!(ov.shown, 100);
+        assert!(ov.hint.contains("find_symbol"));
+        assert!(ov.hint.contains("name_path"));
+        assert!(
+            ov.by_file.is_none(),
+            "single-file overflow must not include by_file"
+        );
+    }
+
+    #[test]
+    fn list_symbols_single_file_no_overflow_under_cap_unit() {
+        use super::OutputGuard;
+        let symbols: Vec<Value> = (0..40)
+            .map(|i| json!({ "name": format!("sym{i}") }))
+            .collect();
+
+        let mut g = OutputGuard::default();
+        g.max_results = 100;
+        let (kept, overflow) = g.cap_items(symbols, "hint");
+
+        assert_eq!(kept.len(), 40);
+        assert!(
+            overflow.is_none(),
+            "no overflow for 40 symbols under cap of 100"
+        );
     }
 
     #[test]

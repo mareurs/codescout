@@ -8,7 +8,8 @@ git blame, semantic search (embeddings), and project memory.
 
 ### You know the name → use structure-aware tools
 - `find_symbol(pattern)` — locate by name substring. Also accepts `name_path` (e.g. 'MyStruct/my_method').
-- `list_symbols(path)` — symbol tree for file/dir/glob
+  Pass `kind` to narrow: `"function"`, `"class"`, `"struct"`, `"interface"`, `"type"`, `"enum"`, `"module"`, `"constant"`.
+- `list_symbols(path)` — symbol tree for file/dir/glob. Single-file mode caps at 100 top-level symbols.
 - `find_references(name_path, path)` — find all usages
 - `goto_definition(path, line)` — jump to a symbol's definition via LSP. Auto-discovers libraries.
 - `hover(path, line)` — get type info and documentation for a symbol at a position via LSP.
@@ -33,7 +34,8 @@ Default: **exploring** — compact, capped at 200 items.
 Pass `detail_level: "full"` for focused mode with `offset`/`limit` pagination.
 Only switch to focused AFTER identifying targets.
 
-Overflow produces: `{ "overflow": { "shown": N, "total": M, "hint": "..." } }` — follow the hint.
+Overflow produces: `{ "overflow": { "shown": N, "total": M, "hint": "...", "by_file": {...} } }` — follow the hint.
+`by_file` (on `find_symbol` overflow) shows per-file match counts; use `path=` to zoom into the top file.
 
 ## Rules
 
@@ -41,5 +43,5 @@ Overflow produces: `{ "overflow": { "shown": N, "total": M, "hint": "..." } }` �
 2. **`read_file` rejects source code.** Use symbol tools for `.rs`, `.py`, `.ts`, etc. `read_file` is for README, configs, TOML, JSON, YAML.
 3. **Semantic search for "how does X work?"** Then drill into results with symbol tools.
 4. **Exploring mode first.** Only `detail_level: "full"` after you know what you need.
-5. **Respect overflow hints.** Narrow your query, don't repeat it.
+5. **Respect overflow hints.** Use `path=`, `kind=`, or a more specific `pattern` — don't repeat broad queries.
 6. **Prefer symbol edits** (`replace_symbol`, `insert_code`) over `edit_lines` for code files.

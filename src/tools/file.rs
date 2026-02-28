@@ -106,6 +106,8 @@ impl Tool for ReadFile {
                     total_lines
                 ),
                 next_offset: None,
+                by_file: None,
+                by_file_overflow: 0,
             };
             let mut result =
                 json!({ "content": content, "total_lines": total_lines, "source": source_tag });
@@ -201,6 +203,8 @@ impl Tool for ListDir {
                 total: guard.max_results + 1, // at least this many
                 hint: "Use a more specific path or set recursive=false".to_string(),
                 next_offset: None,
+                by_file: None,
+                by_file_overflow: 0,
             };
             (entries, Some(overflow))
         } else {

@@ -23,6 +23,11 @@ pub struct OverflowInfo {
     pub hint: String,
     /// In focused mode, the offset for the next page (None in exploring mode).
     pub next_offset: Option<usize>,
+    /// Per-file result counts, sorted by count descending. Only for multi-file searches.
+    /// Capped at 15 entries — see `by_file_overflow` for how many were omitted.
+    pub by_file: Option<Vec<(String, usize)>>,
+    /// Number of additional files omitted from `by_file` due to the 15-entry cap.
+    pub by_file_overflow: usize,
 }
 
 /// Guards tool output size by capping or paginating results.
@@ -65,6 +70,8 @@ fn paginate<T>(
             total,
             hint: hint.to_string(),
             next_offset: next,
+            by_file: None,
+            by_file_overflow: 0,
         })
     } else {
         None
@@ -127,6 +134,8 @@ impl OutputGuard {
                         total,
                         hint: hint.to_string(),
                         next_offset: None,
+                        by_file: None,
+                        by_file_overflow: 0,
                     };
                     (kept, Some(overflow))
                 }
@@ -152,6 +161,8 @@ impl OutputGuard {
                         total,
                         hint: hint.to_string(),
                         next_offset: None,
+                        by_file: None,
+                        by_file_overflow: 0,
                     };
                     (kept, Some(overflow))
                 }
@@ -169,6 +180,16 @@ impl OutputGuard {
         });
         if let Some(next) = info.next_offset {
             obj["next_offset"] = json!(next);
+        }
+        if let Some(by_file) = &info.by_file {
+            let map: serde_json::Map<String, Value> = by_file
+                .iter()
+                .map(|(path, count)| (path.clone(), json!(count)))
+                .collect();
+            obj["by_file"] = Value::Object(map);
+            if info.by_file_overflow > 0 {
+                obj["by_file_overflow"] = json!(info.by_file_overflow);
+            }
         }
         obj
     }
@@ -352,6 +373,8 @@ mod tests {
             total: 1234,
             hint: "pass offset=50 for next page".to_string(),
             next_offset: Some(50),
+            by_file: None,
+            by_file_overflow: 0,
         };
         let j = OutputGuard::overflow_json(&info);
         assert_eq!(j["shown"], 50);
@@ -365,8 +388,61 @@ mod tests {
             total: 500,
             hint: "narrow query".to_string(),
             next_offset: None,
+            by_file: None,
+            by_file_overflow: 0,
         };
         let j2 = OutputGuard::overflow_json(&info_no_next);
         assert!(j2.get("next_offset").is_none());
+    }
+
+    #[test]
+    fn overflow_json_includes_by_file() {
+        let info = OverflowInfo {
+            shown: 50,
+            total: 90,
+            hint: "narrow".to_string(),
+            next_offset: None,
+            by_file: Some(vec![
+                ("src/a.rs".to_string(), 30),
+                ("src/b.rs".to_string(), 20),
+            ]),
+            by_file_overflow: 0,
+        };
+        let json = OutputGuard::overflow_json(&info);
+        assert_eq!(json["by_file"]["src/a.rs"], 30);
+        assert_eq!(json["by_file"]["src/b.rs"], 20);
+        assert!(
+            json.get("by_file_overflow").is_none(),
+            "zero overflow should be omitted"
+        );
+    }
+
+    #[test]
+    fn overflow_json_includes_by_file_overflow_when_nonzero() {
+        let info = OverflowInfo {
+            shown: 50,
+            total: 200,
+            hint: "narrow".to_string(),
+            next_offset: None,
+            by_file: Some(vec![("src/a.rs".to_string(), 10)]),
+            by_file_overflow: 42,
+        };
+        let json = OutputGuard::overflow_json(&info);
+        assert_eq!(json["by_file_overflow"], 42);
+    }
+
+    #[test]
+    fn overflow_json_omits_by_file_when_none() {
+        let info = OverflowInfo {
+            shown: 10,
+            total: 20,
+            hint: "hint".to_string(),
+            next_offset: None,
+            by_file: None,
+            by_file_overflow: 0,
+        };
+        let json = OutputGuard::overflow_json(&info);
+        assert!(json.get("by_file").is_none());
+        assert!(json.get("by_file_overflow").is_none());
     }
 }
