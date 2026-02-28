@@ -238,6 +238,33 @@ pub fn validate_write_path(
     Ok(resolved)
 }
 
+/// List the root paths of all linked git worktrees for `project_root`.
+///
+/// Reads `.git/worktrees/<name>/gitdir` files, which contain absolute paths
+/// like `/path/to/worktree/.git`. Returns the parent (the worktree root).
+/// Returns an empty vec if no worktrees exist (the common case).
+pub fn list_git_worktrees(project_root: &Path) -> Vec<PathBuf> {
+    let worktrees_dir = project_root.join(".git").join("worktrees");
+    if !worktrees_dir.is_dir() {
+        return vec![];
+    }
+    let entries = match std::fs::read_dir(&worktrees_dir) {
+        Ok(e) => e,
+        Err(_) => return vec![],
+    };
+    let mut paths = Vec::new();
+    for entry in entries.flatten() {
+        let gitdir_file = entry.path().join("gitdir");
+        if let Ok(content) = std::fs::read_to_string(&gitdir_file) {
+            let worktree_git = PathBuf::from(content.trim());
+            if let Some(worktree_root) = worktree_git.parent() {
+                paths.push(worktree_root.to_path_buf());
+            }
+        }
+    }
+    paths
+}
+
 // ---------------------------------------------------------------------------
 // Tool access controls
 // ---------------------------------------------------------------------------
@@ -659,5 +686,26 @@ mod tests {
     fn library_paths_default_is_empty() {
         let config = PathSecurityConfig::default();
         assert!(config.library_paths.is_empty());
+    }
+
+    #[test]
+    fn list_git_worktrees_empty_when_no_git_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = list_git_worktrees(dir.path());
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn list_git_worktrees_finds_linked_worktrees() {
+        let dir = tempfile::tempdir().unwrap();
+        let wt_root = tempfile::tempdir().unwrap();
+        let wt_entry = dir.path().join(".git").join("worktrees").join("feat");
+        std::fs::create_dir_all(&wt_entry).unwrap();
+        let gitdir_content = format!("{}/.git\n", wt_root.path().display());
+        std::fs::write(wt_entry.join("gitdir"), &gitdir_content).unwrap();
+
+        let result = list_git_worktrees(dir.path());
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], wt_root.path());
     }
 }

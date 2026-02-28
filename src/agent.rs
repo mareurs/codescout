@@ -23,6 +23,7 @@ pub struct Agent {
 
 pub struct AgentInner {
     pub active_project: Option<ActiveProject>,
+    pub project_explicitly_activated: bool,
 }
 
 pub struct ActiveProject {
@@ -50,7 +51,10 @@ impl Agent {
         };
 
         Ok(Self {
-            inner: Arc::new(RwLock::new(AgentInner { active_project })),
+            inner: Arc::new(RwLock::new(AgentInner {
+                active_project,
+                project_explicitly_activated: false,
+            })),
             cached_embedder: Arc::new(tokio::sync::Mutex::new(None)),
         })
     }
@@ -70,6 +74,7 @@ impl Agent {
             memory,
             library_registry,
         });
+        inner.project_explicitly_activated = true;
         // Clear cached embedder — new project may use a different model
         *self.cached_embedder.lock().await = None;
         Ok(())
@@ -133,6 +138,10 @@ impl Agent {
     pub async fn project_root(&self) -> Option<PathBuf> {
         let inner = self.inner.read().await;
         inner.active_project.as_ref().map(|p| p.root.clone())
+    }
+
+    pub async fn is_project_explicitly_activated(&self) -> bool {
+        self.inner.read().await.project_explicitly_activated
     }
 
     /// Get the security config, or defaults if no project is active.
@@ -366,5 +375,20 @@ mod tests {
         agent.activate(dir.path().to_path_buf()).await.unwrap();
         let status = agent.project_status().await.unwrap();
         assert_eq!(status.system_prompt.as_deref(), Some("From file\n"));
+    }
+
+    #[tokio::test]
+    async fn project_not_explicitly_activated_on_startup() {
+        let agent = Agent::new(None).await.unwrap();
+        assert!(!agent.is_project_explicitly_activated().await);
+    }
+
+    #[tokio::test]
+    async fn activate_sets_explicitly_activated() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".code-explorer")).unwrap();
+        let agent = Agent::new(None).await.unwrap();
+        agent.activate(dir.path().to_path_buf()).await.unwrap();
+        assert!(agent.is_project_explicitly_activated().await);
     }
 }
