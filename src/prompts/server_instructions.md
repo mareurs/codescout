@@ -14,6 +14,7 @@ git blame, semantic search (embeddings), and project memory.
 - `list_symbols(path)` — symbol tree for file/dir/glob. Single-file mode caps at 100 top-level symbols.
 - `find_references(name_path, path)` — find all usages
 - `goto_definition(path, line)` — jump to a symbol's definition via LSP. Auto-discovers libraries.
+- `hover(path, line)` — get type info and documentation for a symbol at a given position. Complements find_symbol (name lookup) and goto_definition (navigation).
 - `list_functions(path)` — quick function/method signatures (tree-sitter, no LSP)
 - `list_docs(path)` — extract all docstrings and doc comments from a file (tree-sitter)
 
@@ -24,18 +25,24 @@ git blame, semantic search (embeddings), and project memory.
 1. `list_dir(path)` → 2. `list_symbols(file)` → 3. `semantic_search("what does this do")`
 
 **Search by text or filename:**
-- `search_pattern(pattern)` — regex search across files
-- `find_file(pattern)` — glob-based file search (e.g. `**/*.rs`, `src/**/mod.rs`)
+- `search_pattern(pattern)` — regex search across files. Pass `context_lines` for merged context blocks around matches. Scope with `path=<file_or_dir>`, limit with `max_results` (default 50).
+- `find_file(pattern)` — glob-based file search (e.g. `**/*.rs`, `src/**/mod.rs`). Scope with `path=<dir>`, limit with `max_results` (default 100).
 
 **Non-source files & history:**
-- `read_file(path)` — for README, configs, TOML, JSON, YAML. Rejects source code — use symbol tools instead.
+- `read_file(path)` — for README, configs, TOML, JSON, YAML. Rejects source code without a line range — use symbol tools instead. For targeted source reads: provide `start_line` + `end_line`.
 - `git_blame(path)` — who last changed each line and in which commit
+
+**List directory contents:**
+- `list_dir(path)` — list files and directories. Pass `recursive=true` for a full tree.
+
+**Run shell commands:**
+- `run_command(command)` — run a shell command in the active project root and return stdout/stderr.
 
 ### Edit code
 
 - `replace_symbol(name_path, path, new_body)` — replace entire symbol body (preferred for code)
 - `insert_code(name_path, path, code, position)` — insert before or after a named symbol
-- `edit_lines(path, start_line, delete_count, new_text, expected_content?)` — line-level splice for non-code files or when symbol tools don't fit. Pass `expected_content` to guard against wrong-line edits: if the content at `start_line` doesn't match, the edit is aborted with an error showing what was actually there.
+- `edit_lines(path, start_line, delete_count, new_text, expected_content?)` — line-level splice for non-code files or when symbol tools don't fit. Pass `expected_content` to guard against wrong-line edits: if the content at `start_line` doesn't match, the edit is aborted with an error showing what was actually there. May span multiple lines — the corresponding number of lines in the file are checked.
 - `create_file(path, content)` — create or overwrite a file
 
 ### Refactor
@@ -59,8 +66,8 @@ Default: **exploring** — compact, capped at 200 items.
 Pass `detail_level: "full"` for focused mode with `offset`/`limit` pagination.
 Only switch to focused AFTER identifying targets.
 
-Overflow produces: `{ "overflow": { "shown": N, "total": M, "hint": "...", "by_file": {...} } }` — follow the hint.
-`by_file` (on `find_symbol` overflow) shows per-file match counts; use `path=` to zoom into the top file.
+Overflow produces: `{ "overflow": { "shown": N, "total": M, "hint": "...", "by_file": [{"file":"...","count":N},...] } }` — follow the hint.
+`by_file` (on `find_symbol` overflow) shows per-file match counts sorted by count descending; use `path=` to zoom into the top file.
 
 ## Project Management
 
@@ -92,7 +99,7 @@ To clean up: `git worktree prune` from the main repo root, then start a new sess
 ## Rules
 
 1. **PREFER symbol tools over read_file.** `list_symbols` + `find_symbol(include_body=true)` beats reading entire files.
-2. **`read_file` rejects source code.** Use symbol tools for `.rs`, `.py`, `.ts`, etc. `read_file` is for README, configs, TOML, JSON, YAML.
+2. **`read_file` rejects source code without a line range.** Use symbol tools for `.rs`, `.py`, `.ts`, etc. `read_file` is for README, configs, TOML, JSON, YAML. For targeted source reads, provide `start_line` + `end_line`.
 3. **Semantic search for "how does X work?"** Then drill into results with symbol tools.
 4. **Exploring mode first.** Only `detail_level: "full"` after you know what you need.
 5. **Respect overflow hints.** Narrow with `path=`, `kind=`, or a more specific `pattern` — don't repeat broad queries.

@@ -182,11 +182,11 @@ impl OutputGuard {
             obj["next_offset"] = json!(next);
         }
         if let Some(by_file) = &info.by_file {
-            let map: serde_json::Map<String, Value> = by_file
+            // Array format preserves count-descending sort order (BTreeMap would alphabetize).
+            obj["by_file"] = json!(by_file
                 .iter()
-                .map(|(path, count)| (path.clone(), json!(count)))
-                .collect();
-            obj["by_file"] = Value::Object(map);
+                .map(|(f, c)| json!({"file": f, "count": c}))
+                .collect::<Vec<_>>());
             if info.by_file_overflow > 0 {
                 obj["by_file_overflow"] = json!(info.by_file_overflow);
             }
@@ -409,8 +409,15 @@ mod tests {
             by_file_overflow: 0,
         };
         let json = OutputGuard::overflow_json(&info);
-        assert_eq!(json["by_file"]["src/a.rs"], 30);
-        assert_eq!(json["by_file"]["src/b.rs"], 20);
+        // Array format preserves count-descending order
+        let by_file = json["by_file"]
+            .as_array()
+            .expect("by_file should be an array");
+        assert_eq!(by_file.len(), 2);
+        assert_eq!(by_file[0]["file"], "src/a.rs");
+        assert_eq!(by_file[0]["count"], 30);
+        assert_eq!(by_file[1]["file"], "src/b.rs");
+        assert_eq!(by_file[1]["count"], 20);
         assert!(
             json.get("by_file_overflow").is_none(),
             "zero overflow should be omitted"
