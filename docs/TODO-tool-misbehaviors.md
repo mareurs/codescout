@@ -86,7 +86,9 @@ broad and matched a partial occurrence the tool incorrectly reported as 0.
 
 **Date:** 2026-02-28
 **Severity:** High — silently corrupts the file
-**Status:** ⚠️ PARTIALLY FIXED — `trim_symbol_start` skips leading `}` lines, but the fix has a blind spot. Observed recurrence: `replace_symbol` on `impl Tool for EditLines/call` (2026-02-28) still ate the closing `}` of `input_schema`, corrupting the file. The exact trigger is unclear — may be a case where the LSP range starts on the first real line of the target `fn` but the preceding method's `}` is somehow still included. Regression tests: `tests/symbol_lsp.rs::replace_symbol_preserves_preceding_close_brace`. **Workaround: use `edit_lines` instead of `replace_symbol` for method bodies in impl blocks.**
+**Status:** ✅ FIXED — Two root causes identified and resolved. Regression tests:
+`tests/symbol_lsp.rs::replace_symbol_preserves_preceding_close_brace`,
+`tests/symbol_lsp.rs::replace_symbol_preserves_paren_close_brace`.
 
 **What happened:**
 Called `replace_symbol` on `impl Tool for EditLines/input_schema`. The LSP's symbol range
@@ -95,20 +97,25 @@ for `input_schema` apparently included the closing `    }` and blank line of the
 `    }` prefix), so the description method lost its closing brace — making it span into
 `input_schema` and beyond in the compiler's view.
 
-**Root cause:**
-The LSP (rust-analyzer) reports the symbol range for a method as including any leading
-whitespace or closing tokens from the prior method that appear before the `fn` keyword.
-When `replace_symbol` replaces that range with content that doesn't re-emit those tokens,
-they're silently deleted.
+**Root cause (two components):**
+1. `trim_symbol_start` originally only skipped exact `}`, `},`, `};` strings but not
+   variants like `})` (closing a `json!({...})` macro) or `} // comment`. If the LSP
+   placed `start_line` at such a line, the preceding method's closing tokens were deleted.
+   **Fixed:** changed check to `t.starts_with('}')` — catches all closing-brace variants.
+2. Stale LSP cache: after a first `replace_symbol` write, the LSP wasn't notified of the
+   change, so a second call on the same file used stale line numbers, causing wrong splices.
+   **Fixed:** `ctx.lsp.notify_file_changed(&full_path)` called after every `write_lines`
+   (via `LspManager::notify_file_changed` → `did_change` on each active client).
 
 **Reproduction hint:**
-Any `replace_symbol` on a method that is not the first in an impl block. The preceding
-method's closing `}` and the blank line separator are both at risk.
+The `})` blind spot: a preceding method that ends with `json!({...})` — the `})` line
+caused `trim_symbol_start` to stop rather than skip. The stale-cache case: two consecutive
+`replace_symbol` calls on the same file without a `notify_file_changed` in between.
 
 **Fix applied:**
-`trim_symbol_start(start, &lines)` scans forward from `sym.start_line` skipping lines
-that are empty or contain only `}`, `},`, or `};` — landing on the actual `fn`/`pub`/
-keyword. Applied in both `replace_symbol::call` and `insert_code::call` ("before" case).
+`trim_symbol_start` now uses `t.starts_with('}')` to skip any closing-brace variant.
+Applied in both `replace_symbol::call` and `insert_code::call` ("before" case).
+`notify_file_changed` notifies all active LSP clients after every `write_lines`.
 
 ---
 

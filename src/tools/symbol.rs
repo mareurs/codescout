@@ -1072,11 +1072,18 @@ impl Tool for Hover {
 /// rust-analyzer reports the symbol range for a method as including the closing
 /// `}` (and optional blank line) of the *previous* method. Without this trim,
 /// `replace_symbol` and `insert_code("before")` would silently delete that `}`.
+/// Skip leading lines that belong to the *preceding* symbol's close token or blank
+/// separators, landing on the actual first line of the target declaration.
+///
+/// The LSP sometimes includes the preceding method's closing tokens in the reported
+/// `start_line` (range or selection_range). We skip any line whose trimmed content is
+/// blank or starts with `}` — this catches plain `}`, `})`, `};`, `} // comment`, etc.
+/// No function declaration in any supported language starts with `}`, so this is safe.
 fn trim_symbol_start(start: usize, lines: &[&str]) -> usize {
     let mut s = start;
     while s < lines.len() {
         let t = lines[s].trim();
-        if t.is_empty() || t == "}" || t == "}," || t == "};" {
+        if t.is_empty() || t.starts_with('}') {
             s += 1;
         } else {
             break;

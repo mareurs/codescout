@@ -117,6 +117,69 @@ async fn replace_symbol_preserves_preceding_close_brace() {
     );
 }
 
+#[tokio::test]
+async fn replace_symbol_preserves_paren_close_brace() {
+    // BUG-003 blind spot: `trim_symbol_start` didn't handle `})` patterns (e.g. the closing
+    // of a `json!({...})` macro in a preceding method). The LSP sometimes reports start_line
+    // at the `})` line, which trim previously stopped at rather than skipping.
+    //
+    // File layout (0-indexed):
+    //  0: "        })"     ← closing `)` of json! macro in the preceding method
+    //  1: "    }"          ← closing brace of the preceding method
+    //  2: ""               ← blank line
+    //  3: "    fn target() {"
+    //  4: "        old_body();"
+    //  5: "    }"
+    let src = "        })\n    }\n\n    fn target() {\n        old_body();\n    }\n";
+
+    let (dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
+        let file = root.join("src/lib.rs");
+        MockLspClient::new().with_symbols(
+            file.clone(),
+            // LSP reports start_line=0 (the `})` line) — the BUG-003 blind-spot scenario
+            vec![sym("target", 0, 5, file)],
+        )
+    })
+    .await;
+
+    ReplaceSymbol
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "name_path": "target",
+                "new_body": "    fn target() {\n        new_body();\n    }"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let result = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
+    assert!(
+        result.contains("        })"),
+        "preceding `}})` must be preserved; got:\n{result}"
+    );
+    assert!(
+        result.contains("    }"),
+        "preceding method close brace must be preserved; got:\n{result}"
+    );
+    assert!(
+        result.contains("new_body()"),
+        "replacement body must be applied; got:\n{result}"
+    );
+    assert!(
+        !result.contains("old_body()"),
+        "old body must be gone; got:\n{result}"
+    );
+    // The `})` must come before the new fn body
+    let paren_brace_pos = result.find("        })").unwrap();
+    let fn_pos = result.find("fn target").unwrap();
+    assert!(
+        paren_brace_pos < fn_pos,
+        "preceding `}})` must appear before fn target; got:\n{result}"
+    );
+}
+
 /// Normal case: LSP start_line points directly at `fn` — no lead-in to skip.
 #[tokio::test]
 async fn replace_symbol_clean_start_line() {
