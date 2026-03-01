@@ -2657,8 +2657,14 @@ mod tests {
             .await
             .unwrap_err();
 
-        let msg = err.to_string();
-        assert!(!msg.is_empty(), "expected an error for empty old_string");
+        let recoverable = err
+            .downcast_ref::<super::RecoverableError>()
+            .expect("expected a RecoverableError");
+        let hint = recoverable.hint.as_deref().unwrap_or("");
+        assert!(
+            hint.contains("create_file"),
+            "expected error hint to mention create_file, got: {hint}"
+        );
     }
 
     #[tokio::test]
