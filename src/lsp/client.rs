@@ -1075,12 +1075,24 @@ struct Point {
             #[allow(deprecated)]
             deprecated: None,
             range: Range {
-                start: Position { line: 0, character: 0 },
-                end: Position { line: 5, character: 1 },
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 5,
+                    character: 1,
+                },
             },
             selection_range: Range {
-                start: Position { line: 0, character: 3 },
-                end: Position { line: 0, character: 10 },
+                start: Position {
+                    line: 0,
+                    character: 3,
+                },
+                end: Position {
+                    line: 0,
+                    character: 10,
+                },
             },
             children: None,
         }];
@@ -1108,12 +1120,24 @@ struct Point {
             #[allow(deprecated)]
             deprecated: None,
             range: Range {
-                start: Position { line: 0, character: 0 },
-                end: Position { line: 5, character: 1 },
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 5,
+                    character: 1,
+                },
             },
             selection_range: Range {
-                start: Position { line: 0, character: 3 },
-                end: Position { line: 0, character: 10 },
+                start: Position {
+                    line: 0,
+                    character: 3,
+                },
+                end: Position {
+                    line: 0,
+                    character: 10,
+                },
             },
             children: None,
         }];
@@ -1122,8 +1146,7 @@ struct Point {
         let result = convert_document_symbols(&symbols, &path, "");
 
         assert_eq!(
-            result[0].detail,
-            None,
+            result[0].detail, None,
             "empty string detail should collapse to None"
         );
     }
