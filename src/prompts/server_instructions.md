@@ -68,6 +68,17 @@ Shell access to source files (`.rs`, `.py`, `.ts`, `.go`, etc.) is blocked — u
 - `remove_symbol(name_path, path)` — delete a symbol entirely, including its doc comments and attributes
 - `create_file(path, content)` — create or overwrite a file
 
+**Prefer symbol tools over `edit_file` for source code:**
+| ❌ `edit_file` for… | ✅ Use instead |
+|---|---|
+| Replacing a function/method/struct body | `replace_symbol(name_path, path, new_body)` |
+| Inserting code before or after a symbol | `insert_code(name_path, path, code, position)` |
+| Deleting a function, struct, or impl | `remove_symbol(name_path, path)` |
+| Renaming a symbol across the codebase | `rename_symbol(name_path, path, new_name)` |
+
+`edit_file` is for non-structural changes only: imports, string literals, comments, config values.
+Multi-line edits on source files (`.rs`, `.py`, `.ts`, `.go`, etc.) are blocked — the tool will tell you which symbol tool to use.
+
 ### Refactor
 
 - `rename_symbol(name_path, path, new_name)` — rename across the entire codebase via LSP. Sweeps for remaining textual occurrences (comments, docs, strings) that LSP missed. **Warning:** LSP rename may corrupt string literals or macro arguments that contain the old name — always verify changed files compile after use.
@@ -128,6 +139,8 @@ don't probe the same `@ref` multiple times for overlapping information.
 - `read_memory(topic)` — retrieve a stored entry
 - `list_memories` — list all topics
 - `delete_memory(topic)` — remove an entry
+- `write_memory(topic, content, private=true)` — store in project-local private store (not surfaced in system instructions; use for sensitive or session-specific notes)
+- `list_memories(include_private=true)` — returns both shared and private memories in `{ shared: [...], private: [...] }` shape
 
 ## Project Customization
 
