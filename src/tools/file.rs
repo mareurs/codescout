@@ -593,7 +593,6 @@ impl Tool for FindFile {
     }
 }
 
-#[cfg(test)]
 const DEF_KEYWORDS: &[&str] = &[
     "fn ",
     "def ",
@@ -614,7 +613,6 @@ const DEF_KEYWORDS: &[&str] = &[
 
 /// Infers which symbol-aware tool to suggest when `edit_file` is blocked on a source file.
 /// Priority: delete (empty new_string) → structural definition keyword → insertion (new > old) → fallback.
-#[cfg(test)]
 fn infer_edit_hint(old_string: &str, new_string: &str) -> &'static str {
     if new_string.is_empty() {
         return "remove_symbol(name_path, path) — deletes the symbol and its doc comments/attributes";
@@ -687,6 +685,16 @@ impl Tool for EditFile {
             return Err(super::RecoverableError::with_hint(
                 "old_string must not be empty",
                 "To create a new file use create_file. To insert at a specific line use insert_code.",
+            )
+            .into());
+        }
+
+        // Block multi-line edits on source files — symbol tools are safer and LSP-backed.
+        if old_string.contains('\n') && crate::util::path_security::is_source_path(path) {
+            let hint = infer_edit_hint(old_string, new_string);
+            return Err(super::RecoverableError::with_hint(
+                "edit_file cannot replace multi-line source code — use a symbol-aware tool instead",
+                hint,
             )
             .into());
         }
@@ -2565,6 +2573,126 @@ mod tests {
                 && hint.contains("insert_code")
                 && hint.contains("remove_symbol"),
             "got: {hint}"
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_file_blocks_multiline_on_rust_source() {
+        let (dir, ctx) = project_ctx().await;
+        let path = dir.path().join("src/lib.rs");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "fn foo() {\n    old();\n}\n").unwrap();
+
+        let result = EditFile
+            .call(
+                json!({
+                    "path": "src/lib.rs",
+                    "old_string": "fn foo() {\n    old();\n}",
+                    "new_string": "fn foo() {\n    new();\n}"
+                }),
+                &ctx,
+            )
+            .await;
+
+        let err = result.unwrap_err();
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .expect("should be RecoverableError");
+        assert!(rec.message.contains("symbol-aware"), "got: {}", rec.message);
+        assert!(
+            rec.hint.as_deref().unwrap_or("").contains("replace_symbol"),
+            "got: {:?}",
+            rec.hint
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_file_allows_singleline_on_rust_source() {
+        let (dir, ctx) = project_ctx().await;
+        let path = dir.path().join("src/lib.rs");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "let x = 1;\n").unwrap();
+
+        let result = EditFile
+            .call(
+                json!({"path": "src/lib.rs", "old_string": "x = 1", "new_string": "x = 2"}),
+                &ctx,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "single-line edits on source should pass: {:?}",
+            result.err()
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_file_allows_multiline_on_markdown() {
+        let (dir, ctx) = project_ctx().await;
+        let path = dir.path().join("README.md");
+        std::fs::write(&path, "line one\nline two\n").unwrap();
+
+        let result = EditFile
+            .call(
+                json!({"path": "README.md", "old_string": "line one\nline two", "new_string": "updated one\nupdated two"}),
+                &ctx,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "multi-line edits on non-source should pass: {:?}",
+            result.err()
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_file_blocks_multiline_python() {
+        let (dir, ctx) = project_ctx().await;
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, "def greet():\n    print('hello')\n").unwrap();
+
+        let result = EditFile
+            .call(
+                json!({"path": "app.py", "old_string": "def greet():\n    print('hello')", "new_string": "def greet():\n    print('hi')"}),
+                &ctx,
+            )
+            .await;
+
+        let err = result.unwrap_err();
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .expect("RecoverableError");
+        assert!(
+            rec.hint.as_deref().unwrap_or("").contains("replace_symbol"),
+            "got: {:?}",
+            rec.hint
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_file_blocks_hint_suggests_remove_when_new_empty() {
+        let (dir, ctx) = project_ctx().await;
+        let path = dir.path().join("src/lib.rs");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "fn foo() {\n    bar();\n}\n").unwrap();
+
+        let result = EditFile
+            .call(
+                json!({"path": "src/lib.rs", "old_string": "fn foo() {\n    bar();\n}", "new_string": ""}),
+                &ctx,
+            )
+            .await;
+
+        let err = result.unwrap_err();
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .expect("RecoverableError");
+        assert!(
+            rec.hint.as_deref().unwrap_or("").contains("remove_symbol"),
+            "got: {:?}",
+            rec.hint
         );
     }
 }
