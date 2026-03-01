@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 use crate::tools::RecoverableError;
 
-use super::output::{OutputGuard, OutputMode};
+use super::output::{OutputGuard, OutputMode, OverflowInfo};
 use super::user_format;
 use super::{Tool, ToolContext};
 use crate::ast;
@@ -277,7 +277,20 @@ fn find_ast_end_line_in(symbols: &[SymbolInfo], name: &str, lsp_start: u32) -> O
 /// Directory/glob scans can produce huge output (each file has many symbols).
 /// Cap exploring-mode file count lower than the global OutputGuard default (200).
 const LIST_SYMBOLS_MAX_FILES: usize = 50;
+/// Hard cap on top-level symbols (fallback when flat count is within budget).
 const LIST_SYMBOLS_SINGLE_FILE_CAP: usize = 100;
+/// Cap on *total* symbol entries including depth-1 children.
+/// A single `impl` block with 10 methods counts as 11 flat entries, so the
+/// flat budget prevents depth-1 output from ballooning even on rich files.
+const LIST_SYMBOLS_SINGLE_FILE_FLAT_CAP: usize = 150;
+
+/// Count top-level symbols plus their direct children (depth-1 children).
+fn flat_symbol_count(symbols: &[Value]) -> usize {
+    symbols
+        .iter()
+        .map(|s| 1 + s["children"].as_array().map(|c| c.len()).unwrap_or(0))
+        .sum()
+}
 
 pub struct ListSymbols;
 
@@ -369,14 +382,48 @@ impl Tool for ListSymbols {
                 .collect();
 
             // Cap single-file results to prevent large files blowing the context window.
+            // Primary check: flat count (top-level + depth-1 children combined).
+            // A file with 50 impl blocks each containing 5 methods has 300 flat entries
+            // even though it shows "50 symbols" — the flat cap catches that case.
             let total = json_symbols.len();
-            let mut file_guard = guard;
-            file_guard.max_results = LIST_SYMBOLS_SINGLE_FILE_CAP;
-            let hint = format!(
-                "File has {total} symbols. Use depth=1 for top-level overview, \
-                 or find_symbol(name_path='ClassName/methodName', include_body=true) for a specific symbol."
-            );
-            let (json_symbols, overflow) = file_guard.cap_items(json_symbols, &hint);
+            let flat_total = flat_symbol_count(&json_symbols);
+            let (json_symbols, overflow) = if flat_total > LIST_SYMBOLS_SINGLE_FILE_FLAT_CAP {
+                // Greedily include top-level symbols within the flat budget.
+                let mut budget = LIST_SYMBOLS_SINGLE_FILE_FLAT_CAP;
+                let mut capped: Vec<Value> = Vec::new();
+                for sym in json_symbols {
+                    let cost = 1 + sym["children"].as_array().map(|c| c.len()).unwrap_or(0);
+                    if cost <= budget {
+                        budget -= cost;
+                        capped.push(sym);
+                    } else {
+                        break;
+                    }
+                }
+                let shown = capped.len();
+                let hint = format!(
+                    "File has {total} top-level symbols ({flat_total} total including children). \
+                     Use depth=0 for a top-level-only overview, or \
+                     find_symbol(name_path='...', include_body=true) for a specific symbol."
+                );
+                let ov = OverflowInfo {
+                    shown,
+                    total,
+                    hint,
+                    next_offset: None,
+                    by_file: None,
+                    by_file_overflow: 0,
+                };
+                (capped, Some(ov))
+            } else {
+                let mut file_guard = guard;
+                file_guard.max_results = LIST_SYMBOLS_SINGLE_FILE_CAP;
+                let hint = format!(
+                    "File has {total} symbols. Use depth=0 for top-level overview, \
+                     or find_symbol(name_path='ClassName/methodName', include_body=true) for a specific symbol."
+                );
+                file_guard.cap_items(json_symbols, &hint)
+            };
             if let Some(ov) = overflow {
                 let total = ov.total;
                 let mut result =
@@ -1623,10 +1670,9 @@ impl Tool for RenameSymbol {
         // a separator (`_`, `(`, ` `, `:`, etc.) should always appear at a call/use site.
         let mut corruption_hints: Vec<Value> = vec![];
         if new_name.len() >= 4 {
-            if let Ok(embedded_re) = regex::Regex::new(&format!(
-                r"[a-zA-Z0-9]{}",
-                regex::escape(new_name)
-            )) {
+            if let Ok(embedded_re) =
+                regex::Regex::new(&format!(r"[a-zA-Z0-9]{}", regex::escape(new_name)))
+            {
                 for path in &lsp_files {
                     let Ok(content) = std::fs::read_to_string(path) else {
                         continue;
@@ -3396,6 +3442,50 @@ fn main() {
     }
 
     #[test]
+    fn list_symbols_flat_cap_triggers_on_symbol_with_many_children() {
+        // 20 top-level symbols each with 10 children = 220 flat entries > FLAT_CAP(150).
+        // Greedy take: each symbol costs 11 flat entries; 150/11 = 13 symbols fit.
+        let symbols: Vec<Value> = (0..20)
+            .map(|i| {
+                let children: Vec<Value> = (0..10)
+                    .map(|j| json!({ "name": format!("child_{i}_{j}") }))
+                    .collect();
+                json!({ "name": format!("sym{i}"), "children": children })
+            })
+            .collect();
+
+        let flat = super::flat_symbol_count(&symbols);
+        assert_eq!(flat, 220); // 20 * (1 + 10)
+
+        // Greedy capping within FLAT_CAP=150
+        let budget = super::LIST_SYMBOLS_SINGLE_FILE_FLAT_CAP;
+        let mut remaining = budget;
+        let mut capped: Vec<Value> = Vec::new();
+        for sym in symbols {
+            let cost = 1 + sym["children"].as_array().map(|c| c.len()).unwrap_or(0);
+            if cost <= remaining {
+                remaining -= cost;
+                capped.push(sym);
+            } else {
+                break;
+            }
+        }
+        // Each symbol costs 11; 13 symbols = 143 flat entries ≤ 150; 14th would be 154.
+        assert_eq!(capped.len(), 13);
+    }
+
+    #[test]
+    fn list_symbols_flat_cap_not_triggered_for_leaf_heavy_symbols() {
+        // 50 top-level leaf symbols (no children) = 50 flat entries — under FLAT_CAP.
+        let symbols: Vec<Value> = (0..50)
+            .map(|i| json!({ "name": format!("fn{i}") }))
+            .collect();
+        let flat = super::flat_symbol_count(&symbols);
+        assert_eq!(flat, 50);
+        assert!(flat <= super::LIST_SYMBOLS_SINGLE_FILE_FLAT_CAP);
+    }
+
+    #[test]
     fn list_symbols_single_file_cap_unit() {
         // Unit test: simulate the cap logic on a Vec<Value> of 150 symbol entries.
         use super::OutputGuard;
@@ -3751,8 +3841,14 @@ fn main() {
         let content = "// \u{03B1}: foo\n";
         let edits = vec![lsp_types::TextEdit {
             range: lsp_types::Range {
-                start: lsp_types::Position { line: 0, character: 6 },
-                end: lsp_types::Position { line: 0, character: 9 },
+                start: lsp_types::Position {
+                    line: 0,
+                    character: 6,
+                },
+                end: lsp_types::Position {
+                    line: 0,
+                    character: 9,
+                },
             },
             new_text: "bar".to_string(),
         }];
@@ -3771,8 +3867,14 @@ fn main() {
         let content = "\u{1F600} foo\n";
         let edits = vec![lsp_types::TextEdit {
             range: lsp_types::Range {
-                start: lsp_types::Position { line: 0, character: 3 },
-                end: lsp_types::Position { line: 0, character: 6 },
+                start: lsp_types::Position {
+                    line: 0,
+                    character: 3,
+                },
+                end: lsp_types::Position {
+                    line: 0,
+                    character: 6,
+                },
             },
             new_text: "bar".to_string(),
         }];

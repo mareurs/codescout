@@ -38,6 +38,86 @@ pub trait Embedder: Send + Sync {
     async fn embed(&self, texts: &[&str]) -> Result<Vec<Embedding>>;
 }
 
+/// Returns the chunk size in characters appropriate for the given model spec.
+///
+/// Derived from each model's documented maximum sequence length using a
+/// conservative formula: `max_tokens × 0.85 × 3 chars/token`.
+///
+/// - The 0.85 factor leaves 15 % headroom for tokenisation variance and
+///   control tokens (BOS/EOS).
+/// - Code tokenises at roughly 3–4 chars/token; 3 is the conservative lower
+///   bound, ensuring chunks stay within the context window even for files with
+///   many short identifiers and operators.
+///
+/// Unknown or custom models fall back to 512 tokens (the most common context
+/// window among small embedding models). This is intentionally conservative —
+/// chunks will be smaller than necessary but will never be truncated.
+///
+/// This value is not user-configurable. It is derived from the model spec
+/// so that users cannot accidentally misconfigure it.
+pub fn chunk_size_for_model(model_spec: &str) -> usize {
+    // 85 % of context × 3 chars/token.
+    fn from_tokens(n: usize) -> usize {
+        (n as f64 * 0.85 * 3.0) as usize
+    }
+
+    // Map well-known model name substrings to their published max sequence
+    // lengths. Matching is done on the bare model name (prefix stripped) so
+    // that "ollama:nomic-embed-text" and "openai:nomic-embed-text" both match.
+    fn tokens_for_bare(name: &str) -> usize {
+        let l = name.to_lowercase();
+        // 8 192-token models
+        if l.contains("nomic-embed") || l.contains("jina") {
+            return 8192;
+        }
+        // OpenAI text-embedding-3-* and text-embedding-ada-002
+        if l.starts_with("text-embedding-") {
+            return 8191;
+        }
+        // mxbai-embed-large (MixedBread)
+        if l.contains("mxbai") {
+            return 512;
+        }
+        // BGE Small variants
+        if l.contains("bge-small") || l.starts_with("bge_small") {
+            return 512;
+        }
+        // all-MiniLM-L6-v2
+        if l.contains("all-minilm") || l.contains("minilm-l6") {
+            return 256;
+        }
+        // Unknown — conservative fallback
+        512
+    }
+
+    // Local fastembed models use their documented sequence lengths.
+    // These are listed here rather than in local.rs to avoid a feature-gate
+    // dependency (local.rs is #[cfg(feature = "local-embed")]).
+    if let Some(local_name) = model_spec.strip_prefix("local:") {
+        let max_tokens = match local_name.to_lowercase().as_str() {
+            "jinaembeddingsv2basecode" => 8192,
+            "bgesmallenv15q" | "bgesmallenv15" => 512,
+            "allminilml6v2q" | "allminilml6v2" => 256,
+            _ => 512,
+        };
+        return from_tokens(max_tokens);
+    }
+
+    // Strip backend prefix to get the bare model name.
+    let bare = model_spec
+        .strip_prefix("ollama:")
+        .or_else(|| model_spec.strip_prefix("openai:"))
+        .or_else(|| {
+            // "custom:model-name@base_url" — extract only the model-name part
+            model_spec
+                .strip_prefix("custom:")
+                .map(|rest| rest.split('@').next().unwrap_or(rest))
+        })
+        .unwrap_or(model_spec);
+
+    from_tokens(tokens_for_bare(bare))
+}
+
 /// Convenience extension for embedding a single text.
 pub async fn embed_one(embedder: &dyn Embedder, text: &str) -> Result<Embedding> {
     let mut batch = embedder.embed(&[text]).await?;
@@ -140,5 +220,58 @@ mod tests {
         let result = rt.block_on(super::create_embedder("custom:no-at-sign"));
         let err = result.err().expect("expected an error");
         assert!(err.to_string().contains("custom:<model>@<base_url>"));
+    }
+
+    // ---------- chunk_size_for_model ----------
+
+    #[test]
+    fn chunk_size_mxbai_embed_large() {
+        // Default model: 512-token context. Formula: 512 × 0.85 × 3 = 1305.
+        let sz = super::chunk_size_for_model("ollama:mxbai-embed-large");
+        assert_eq!(sz, 1305);
+    }
+
+    #[test]
+    fn chunk_size_nomic_embed_text() {
+        // 8 192-token context. Formula: 8192 × 0.85 × 3 = 20 889.
+        let sz = super::chunk_size_for_model("ollama:nomic-embed-text");
+        assert_eq!(sz, 20889);
+    }
+
+    #[test]
+    fn chunk_size_openai_text_embedding_3_small() {
+        let sz = super::chunk_size_for_model("openai:text-embedding-3-small");
+        assert_eq!(sz, 20887); // 8191 × 0.85 × 3
+    }
+
+    #[test]
+    fn chunk_size_local_jina() {
+        let sz = super::chunk_size_for_model("local:JinaEmbeddingsV2BaseCode");
+        assert_eq!(sz, 20889); // 8192 × 0.85 × 3
+    }
+
+    #[test]
+    fn chunk_size_local_bge_small() {
+        let sz = super::chunk_size_for_model("local:BGESmallENV15Q");
+        assert_eq!(sz, 1305); // 512 × 0.85 × 3
+    }
+
+    #[test]
+    fn chunk_size_local_all_minilm() {
+        let sz = super::chunk_size_for_model("local:AllMiniLML6V2Q");
+        assert_eq!(sz, 652); // 256 × 0.85 × 3
+    }
+
+    #[test]
+    fn chunk_size_custom_model() {
+        // custom: prefix with @url — model name extracted before @
+        let sz = super::chunk_size_for_model("custom:mxbai-embed-large@http://localhost:1234");
+        assert_eq!(sz, 1305);
+    }
+
+    #[test]
+    fn chunk_size_unknown_model_falls_back_to_512_tokens() {
+        let sz = super::chunk_size_for_model("ollama:some-unknown-model");
+        assert_eq!(sz, 1305); // 512 × 0.85 × 3
     }
 }

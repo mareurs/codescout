@@ -47,8 +47,15 @@ pub struct EmbeddingsSection {
     ///   "local:BGESmallENV15"               → 384d, full precision
     #[serde(default = "default_embed_model")]
     pub model: String,
-    #[serde(default = "default_chunk_size")]
-    pub chunk_size: usize,
+    /// Ignored — kept for backwards-compatible deserialisation of existing
+    /// `project.toml` files that include a `chunk_size` key.
+    ///
+    /// Chunk size is now derived automatically from the model's published
+    /// context window — see `embed::chunk_size_for_model`. Manual tuning was
+    /// error-prone (too large → truncation and degraded recall; too small →
+    /// unnecessary splitting of coherent functions).
+    #[serde(default, skip_serializing, rename = "chunk_size")]
+    pub _chunk_size_ignored: Option<usize>,
     /// Ignored — kept for backwards-compatible deserialisation of existing
     /// `project.toml` files that include a `chunk_overlap` key.
     ///
@@ -174,7 +181,7 @@ impl Default for EmbeddingsSection {
     fn default() -> Self {
         Self {
             model: default_embed_model(),
-            chunk_size: default_chunk_size(),
+            _chunk_size_ignored: None,
             _chunk_overlap_ignored: None,
             drift_detection_enabled: default_drift_detection_enabled(),
         }
@@ -190,9 +197,7 @@ fn default_timeout() -> u64 {
 fn default_embed_model() -> String {
     "ollama:mxbai-embed-large".into()
 }
-fn default_chunk_size() -> usize {
-    1200
-}
+
 fn default_ignored_patterns() -> Vec<String> {
     vec![
         ".git".into(),

@@ -417,11 +417,15 @@ pub fn check_source_file_access(command: &str) -> Option<String> {
     let cmd_re = Regex::new(SOURCE_ACCESS_COMMANDS).ok()?;
     let ext_re = Regex::new(SOURCE_EXTENSIONS).ok()?;
 
-    if !cmd_re.is_match(command) || !ext_re.is_match(command) {
-        return None;
-    }
+    // Check each pipeline segment independently.
+    // `git diff src/server.rs | head -80` should NOT be blocked — `head` here
+    // filters git output, not the source file directly. Both conditions must
+    // match within the *same* segment to trigger a block.
+    let blocked_segment = command
+        .split('|')
+        .find(|seg| cmd_re.is_match(seg) && ext_re.is_match(seg))?;
 
-    let hint = if let Some(m) = cmd_re.find(command) {
+    let hint = if let Some(m) = cmd_re.find(blocked_segment) {
         match m.as_str() {
             "sed" | "awk" => {
                 "use read_file(path, start_line, end_line), list_symbols(path), \
@@ -1005,5 +1009,18 @@ mod tests {
     fn source_file_access_allows_non_blocked_command() {
         // cp, mv, diff are not in the blocked command set
         assert!(check_source_file_access("cp src/main.rs src/main2.rs").is_none());
+    }
+
+    #[test]
+    fn source_file_access_allows_git_diff_piped_to_head() {
+        // `head` is in the second segment; the `.rs` file is in the first (git diff arg).
+        // Per-segment check means this should NOT be blocked.
+        assert!(check_source_file_access("git diff src/server.rs | head -80").is_none());
+    }
+
+    #[test]
+    fn source_file_access_blocks_cat_in_same_segment_as_source_file() {
+        // `cat` and `.rs` are in the same segment — still blocked.
+        assert!(check_source_file_access("cat src/main.rs | grep fn").is_some());
     }
 }

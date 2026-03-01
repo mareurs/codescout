@@ -212,6 +212,59 @@ Classic TOCTOU (time-of-check / time-of-use) race in `maybe_migrate_to_vec0`:
 
 ---
 
+### BUG-007 — `run_command`: pipeline false-positive blocks `git diff src/server.rs | head -80`
+
+**Date:** 2026-03-01
+**Severity:** Medium — blocks legitimate git+pipe workflows
+**Status:** ✅ FIXED — per-segment pipeline check in `check_source_file_access`.
+
+**What happened:**
+`run_command("git diff src/server.rs | head -80")` returned
+`"shell access to source files is blocked"` with a hint to use `read_file` instead.
+`head` is being used to limit `git diff` output, not to read the `.rs` file directly.
+
+**Root cause:**
+`check_source_file_access` applied its two regexes (`SOURCE_ACCESS_COMMANDS` and
+`SOURCE_EXTENSIONS`) against the entire command string. `head` matched in segment 2,
+`.rs` matched in segment 1 — both satisfied, so blocked. The check had no awareness
+of pipeline boundaries.
+
+**Fix applied:**
+Split the command on `|` and find the first segment where BOTH regexes match. If no
+single segment contains both a blocked command and a source extension, return `None`.
+New tests: `source_file_access_allows_git_diff_piped_to_head`,
+`source_file_access_blocks_cat_in_same_segment_as_source_file`.
+
+---
+
+### BUG-008 — `list_symbols`: 50-symbol file returns ~13k tokens due to uncounted children
+
+**Date:** 2026-03-01
+**Severity:** Medium — fills context window on files with many `impl` blocks
+**Status:** ✅ FIXED — flat symbol count cap (`LIST_SYMBOLS_SINGLE_FILE_FLAT_CAP = 150`).
+
+**What happened:**
+`list_symbols("src/tools/symbol.rs")` reported "50 symbols" (top-level cap of 100 not
+reached) but produced ~13k tokens in the MCP response. Claude Code flagged it as
+`⚠ Large MCP response`.
+
+**Root cause:**
+`LIST_SYMBOLS_SINGLE_FILE_CAP = 100` counts top-level symbols only. With `depth=1`
+(default), each top-level symbol embeds its children in the JSON. A file with 50
+`impl` blocks × 4 methods each = 250 flat entries even though only 50 top-level
+symbols were reported. No overflow was triggered because 50 < 100.
+
+**Fix applied:**
+Added `LIST_SYMBOLS_SINGLE_FILE_FLAT_CAP = 150` and a `flat_symbol_count` helper that
+counts top-level + depth-1 children. When flat count exceeds the cap, greedy
+top-level truncation produces an overflow with a hint mentioning `depth=0` and
+`find_symbol`. The existing top-level cap of 100 remains as a secondary check for
+files with many childless symbols.
+New tests: `list_symbols_flat_cap_triggers_on_symbol_with_many_children`,
+`list_symbols_flat_cap_not_triggered_for_leaf_heavy_symbols`.
+
+---
+
 ## Template for new entries
 
 ```
