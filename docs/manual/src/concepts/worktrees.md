@@ -76,6 +76,28 @@ git worktree prune
 
 Run this from the main repo root, not from inside the (now-deleted) worktree.
 
+## Plan Execution Gotcha: Start a New Session in the Worktree
+
+When using a workflow like [Superpowers writing-plans](superpowers.md) and
+choosing the **Parallel Session** option, don't try to launch `executing-plans`
+from the same session that created the worktree. The `EnterWorktree` +
+`activate_project` dance is easy to miss, and subagents spawned from the current
+session won't automatically inherit the right project root.
+
+The cleanest approach — one that sidesteps all of this — is:
+
+```bash
+cd /path/to/.worktrees/<feature-branch>
+claude
+```
+
+Open a new terminal, `cd` into the worktree, and start Claude there. The session
+is rooted in the worktree from the first message. No `activate_project` call
+needed, no stale context from the planning session, no risk of writes going to
+the main repo.
+
+Other approaches can work, but this one always does.
+
 ## Further Reading
 
 - [Superpowers Workflow](superpowers.md) — how the Superpowers plugin integrates
