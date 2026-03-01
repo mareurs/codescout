@@ -1086,16 +1086,44 @@ pub fn format_remove_symbol(result: &Value) -> String {
 
 pub fn format_git_blame(result: &Value) -> String {
     let file = result["file"].as_str().unwrap_or("?");
-    let line_count = result["lines"].as_array().map(|a| a.len()).unwrap_or(0);
-    let authors: std::collections::HashSet<&str> = result["lines"]
-        .as_array()
-        .map(|lines| lines.iter().filter_map(|l| l["author"].as_str()).collect())
-        .unwrap_or_default();
-    if authors.is_empty() {
-        format!("{file} · {line_count} lines")
-    } else {
-        format!("{file} · {line_count} lines · {} authors", authors.len())
+    let lines = match result["lines"].as_array() {
+        Some(l) => l,
+        None => return file.to_string(),
+    };
+    let line_count = lines.len();
+
+    let mut author_counts: std::collections::HashMap<&str, usize> =
+        std::collections::HashMap::new();
+    for l in lines.iter() {
+        if let Some(author) = l["author"].as_str() {
+            *author_counts.entry(author).or_insert(0) += 1;
+        }
     }
+
+    if author_counts.len() <= 1 {
+        let author_note = author_counts
+            .keys()
+            .next()
+            .map(|a| format!(" · {a}"))
+            .unwrap_or_default();
+        return format!("{file} · {line_count} lines{author_note}");
+    }
+
+    let mut authors: Vec<(&str, usize)> = author_counts.into_iter().collect();
+    authors.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let name_width = authors.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
+    let mut out = format!("{file} · {line_count} lines");
+    const MAX_AUTHORS: usize = 5;
+    for (author, count) in authors.iter().take(MAX_AUTHORS) {
+        let label = if *count == 1 { "line" } else { "lines" };
+        out.push_str(&format!("\n  {author:<name_width$}  {count} {label}"));
+    }
+    let hidden = authors.len().saturating_sub(MAX_AUTHORS);
+    if hidden > 0 {
+        out.push_str(&format!("\n  … +{hidden} more authors"));
+    }
+    out
 }
 
 pub fn format_run_command(result: &Value) -> String {
@@ -2472,7 +2500,10 @@ mod tests {
         });
         let out = format_find_references(&result);
         assert!(out.contains("8 refs"), "should show total");
-        assert!(out.contains("src/tools/symbol.rs:142"), "should show locations");
+        assert!(
+            out.contains("src/tools/symbol.rs:142"),
+            "should show locations"
+        );
         assert!(out.contains("src/server.rs:87"), "should show locations");
         assert!(out.contains("more"), "should show trailer for hidden refs");
         assert!(!out.contains("src/config.rs"), "should cap at 5");
@@ -2528,7 +2559,10 @@ mod tests {
         });
         let out = format_list_functions(&result);
         assert!(out.contains("src/tools/symbol.rs"), "should show file");
-        assert!(out.contains("collect_matching"), "should show function name");
+        assert!(
+            out.contains("collect_matching"),
+            "should show function name"
+        );
         assert!(out.contains("build_by_file"), "should show function name");
         assert!(out.contains('3'), "should show count");
     }
@@ -2559,7 +2593,10 @@ mod tests {
         let out = format_list_docs(&result);
         assert!(out.contains("src/tools/output.rs"), "should show file");
         assert!(out.contains("OutputGuard"), "should show symbol name");
-        assert!(out.contains("Enforces progressive"), "should show doc preview");
+        assert!(
+            out.contains("Enforces progressive"),
+            "should show doc preview"
+        );
         assert!(out.contains("more"), "should cap at 3");
         assert!(!out.contains("overflow_json"), "4th entry should be hidden");
     }
@@ -2647,5 +2684,34 @@ mod diff_tests {
         let out = format_read_memory(&result);
         assert!(out.contains("not found"), "should say not found");
         assert!(out.contains("missing"), "should include topic name");
+    }
+
+    #[test]
+    fn format_git_blame_shows_author_breakdown() {
+        let lines: Vec<serde_json::Value> = vec![
+            serde_json::json!({"author": "alice", "line": 1}),
+            serde_json::json!({"author": "alice", "line": 2}),
+            serde_json::json!({"author": "alice", "line": 3}),
+            serde_json::json!({"author": "bob", "line": 4}),
+            serde_json::json!({"author": "bob", "line": 5}),
+            serde_json::json!({"author": "carol", "line": 6}),
+        ];
+        let result = serde_json::json!({ "file": "src/main.rs", "lines": lines });
+        let out = format_git_blame(&result);
+        assert!(out.contains("src/main.rs"), "should show file");
+        assert!(out.contains("alice"), "should show author");
+        assert!(out.contains("bob"), "should show author");
+        assert!(out.contains("carol"), "should show author");
+    }
+
+    #[test]
+    fn format_git_blame_single_author_no_breakdown() {
+        let lines: Vec<serde_json::Value> = (0..5)
+            .map(|i| serde_json::json!({"author": "solo", "line": i}))
+            .collect();
+        let result = serde_json::json!({ "file": "src/lib.rs", "lines": lines });
+        let out = format_git_blame(&result);
+        assert!(out.contains("src/lib.rs"), "should show file");
+        assert!(!out.contains('\n'), "no breakdown for single author");
     }
 }
