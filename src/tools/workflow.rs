@@ -241,6 +241,22 @@ fn build_system_prompt_draft(languages: &[String], entry_points: &[String]) -> S
     draft.push_str("## Project Rules\n");
     draft.push_str("- [Add project-specific conventions here]\n");
 
+    // Private memory rules
+    draft.push_str("\n## Private Memory Rules\n\n");
+    draft.push_str(
+        "Private memories are gitignored — personal to this developer, not shared with the team.\n\
+         They live in `.code-explorer/private-memories/`.\n\n\
+         **Write to the private store** (`write_memory(topic, content, private=true)`) for:\n\
+         - Personal preferences and workflow rules for this developer\n\
+         - Machine-specific config (local ports, paths, GPU type, env quirks)\n\
+         - WIP notes and in-progress debugging context\n\
+         - Personal debugging history specific to this setup\n\n\
+         **Write to the shared store** (`write_memory(topic, content)`) for:\n\
+         - Architecture, conventions, design patterns — knowledge useful to ALL contributors\n\
+         - When in doubt: private first, promote to shared only if universally applicable\n\n\
+         **Each session:** `list_memories(include_private=true)` to see what's available.\n",
+    );
+
     draft
 }
 
@@ -1824,6 +1840,23 @@ mod tests {
         assert!(
             !draft.contains("impl Trait for Type"),
             "rust hints should not leak into python-only draft"
+        );
+    }
+
+    #[test]
+    fn system_prompt_draft_includes_private_memory_rules() {
+        let draft = build_system_prompt_draft(&[], &[]);
+        assert!(
+            draft.contains("Private Memory Rules"),
+            "draft should include Private Memory Rules section"
+        );
+        assert!(
+            draft.contains("private=true"),
+            "draft should mention private=true parameter"
+        );
+        assert!(
+            draft.contains("gitignored"),
+            "draft should explain that private memories are gitignored"
         );
     }
 
