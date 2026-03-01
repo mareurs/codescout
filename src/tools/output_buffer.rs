@@ -232,6 +232,15 @@ impl OutputBuffer {
     ///   command is one of our temp files (i.e., the command operates solely on
     ///   buffered output, not real filesystem paths)
     pub fn resolve_refs(&self, command: &str) -> Result<(String, Vec<PathBuf>, bool)> {
+        // Guard: @ack_* handles are for deferred execution, not content interpolation.
+        if Regex::new(r"@ack_[0-9a-f]{8}").expect("valid regex").is_match(command) {
+            return Err(RecoverableError::with_hint(
+                "ack handle cannot be used for interpolation",
+                "Use run_command(\"@ack_<id>\") directly to execute a pending acknowledgment.",
+            )
+            .into());
+        }
+
         let re = Regex::new(r"@(?:cmd|file|tool)_[0-9a-f]{8}(\.err)?").expect("valid regex");
 
         let refs: Vec<&str> = re.find_iter(command).map(|m| m.as_str()).collect();
@@ -658,5 +667,15 @@ mod tests {
         }
         assert!(buf.get_dangerous(&handles[0]).is_none(), "oldest ack should be evicted");
         assert!(buf.get_dangerous(&handles[20]).is_some(), "newest ack should survive");
+    }
+
+    #[test]
+    fn resolve_refs_rejects_ack_handle_interpolation() {
+        let buf = OutputBuffer::new(10);
+        let handle = buf.store_dangerous("rm -rf /dist".to_string(), None, 30);
+        let result = buf.resolve_refs(&format!("grep pattern {handle}"));
+        assert!(result.is_err(), "interpolating an @ack_ handle should return an error");
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("ack handle"), "error should mention 'ack handle', got: {msg}");
     }
 }
