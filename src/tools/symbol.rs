@@ -1092,6 +1092,40 @@ fn trim_symbol_start(start: usize, lines: &[&str]) -> usize {
     s
 }
 
+/// Scan backwards from `start` to include contiguous doc comments (`///`, `//!`),
+/// attributes (`#[...]`), and blank lines between them. Stops at the first line
+/// that doesn't match these patterns.
+fn scan_backwards_for_docs(start: usize, lines: &[&str]) -> usize {
+    let mut s = start;
+    while s > 0 {
+        let t = lines[s - 1].trim();
+        if t.is_empty() || t.starts_with("///") || t.starts_with("//!") || t.starts_with("#[") {
+            s -= 1;
+        } else {
+            break;
+        }
+    }
+    s
+}
+
+/// Collapse runs of 3+ consecutive blank lines down to 1 blank line.
+fn collapse_blank_lines<'a>(lines: &[&'a str]) -> Vec<&'a str> {
+    let mut result: Vec<&'a str> = Vec::new();
+    let mut blank_run = 0;
+    for &line in lines {
+        if line.trim().is_empty() {
+            blank_run += 1;
+            if blank_run <= 1 {
+                result.push(line);
+            }
+        } else {
+            blank_run = 0;
+            result.push(line);
+        }
+    }
+    result
+}
+
 pub struct ReplaceSymbol;
 
 #[async_trait::async_trait]
@@ -1144,6 +1178,70 @@ impl Tool for ReplaceSymbol {
         write_lines(&full_path, &new_lines, content.ends_with('\n'))?;
         ctx.lsp.notify_file_changed(&full_path).await;
         Ok(json!({ "status": "ok", "replaced_lines": format!("{}-{}", start + 1, end) }))
+    }
+}
+
+// ── remove_symbol ──────────────────────────────────────────────────────────
+
+pub struct RemoveSymbol;
+
+#[async_trait::async_trait]
+impl Tool for RemoveSymbol {
+    fn name(&self) -> &str {
+        "remove_symbol"
+    }
+
+    fn description(&self) -> &str {
+        "Delete a symbol (function, struct, impl block, test, etc.) by name. Removes the entire declaration including doc comments and attributes."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["name_path", "path"],
+            "properties": {
+                "name_path": { "type": "string", "description": "Symbol name path (e.g. 'MyStruct/my_method', 'tests/old_test')" },
+                "path": { "type": "string", "description": "File path" }
+            }
+        })
+    }
+
+    async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
+        super::guard_worktree_write(ctx).await?;
+        let name_path = super::require_str_param(&input, "name_path")?;
+        let rel_path = get_path_param(&input, true)?.unwrap();
+
+        let full_path = resolve_write_path(ctx, rel_path).await?;
+        let (client, lang) = get_lsp_client(ctx, &full_path).await?;
+
+        let symbols = client.document_symbols(&full_path, &lang).await?;
+        let sym = find_symbol_by_name_path(&symbols, name_path).ok_or_else(|| {
+            RecoverableError::with_hint(
+                format!("symbol not found: {}", name_path),
+                "Use list_symbols(path) to see available symbols, or check the name_path spelling.",
+            )
+        })?;
+
+        let content = std::fs::read_to_string(&full_path)?;
+        let lines: Vec<&str> = content.lines().collect();
+
+        let trimmed_start = trim_symbol_start(sym.start_line as usize, &lines);
+        let end = (sym.end_line as usize + 1).min(lines.len());
+
+        // Scan backwards from trimmed_start to include doc comments and attributes
+        let start = scan_backwards_for_docs(trimmed_start, &lines);
+
+        // Build new lines: everything before + everything after
+        let mut new_lines: Vec<&str> = Vec::new();
+        new_lines.extend_from_slice(&lines[..start]);
+        new_lines.extend_from_slice(&lines[end..]);
+
+        // Collapse runs of 3+ blank lines down to 1
+        let new_lines = collapse_blank_lines(&new_lines);
+
+        write_lines(&full_path, &new_lines, content.ends_with('\n'))?;
+        ctx.lsp.notify_file_changed(&full_path).await;
+        Ok(json!("ok"))
     }
 }
 
@@ -3427,5 +3525,54 @@ fn main() {
         }];
         let result = apply_text_edits(content, &edits);
         assert_eq!(result, "aaa\nxxx\nyyy\nccc\n");
+    }
+
+    // ── scan_backwards_for_docs tests ──────────────────────────────────────
+
+    #[test]
+    fn scan_backwards_includes_doc_comments() {
+        // Blank line between code and docs is included (eaten as separator)
+        let lines = vec![
+            "other code",
+            "",
+            "/// Doc line 1",
+            "/// Doc line 2",
+            "fn foo() {}",
+        ];
+        assert_eq!(scan_backwards_for_docs(4, &lines), 1);
+    }
+
+    #[test]
+    fn scan_backwards_includes_attributes() {
+        let lines = vec!["other code", "#[test]", "#[ignore]", "fn foo() {}"];
+        assert_eq!(scan_backwards_for_docs(3, &lines), 1);
+    }
+
+    #[test]
+    fn scan_backwards_stops_at_code() {
+        let lines = vec!["let x = 1;", "fn foo() {}"];
+        assert_eq!(scan_backwards_for_docs(1, &lines), 1);
+    }
+
+    #[test]
+    fn scan_backwards_at_start_of_file() {
+        let lines = vec!["/// Doc", "fn foo() {}"];
+        assert_eq!(scan_backwards_for_docs(1, &lines), 0);
+    }
+
+    // ── collapse_blank_lines tests ─────────────────────────────────────────
+
+    #[test]
+    fn collapse_blank_lines_collapses_triple() {
+        let lines = vec!["a", "", "", "", "b"];
+        let result = collapse_blank_lines(&lines);
+        assert_eq!(result, vec!["a", "", "b"]);
+    }
+
+    #[test]
+    fn collapse_blank_lines_preserves_single() {
+        let lines = vec!["a", "", "b"];
+        let result = collapse_blank_lines(&lines);
+        assert_eq!(result, vec!["a", "", "b"]);
     }
 }

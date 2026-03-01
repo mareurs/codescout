@@ -287,7 +287,8 @@ pub fn check_tool_access(tool_name: &str, config: &PathSecurityConfig) -> Result
                 );
             }
         }
-        "create_file" | "edit_file" | "replace_symbol" | "insert_code" | "rename_symbol" | "remove_symbol" => {
+        "create_file" | "edit_file" | "replace_symbol" | "insert_code" | "rename_symbol"
+        | "remove_symbol" => {
             if !config.file_write_enabled {
                 bail!(
                     "File write tools are disabled. Set security.file_write_enabled = true in .code-explorer/project.toml to enable."
