@@ -94,13 +94,20 @@ Overflow produces: `{ "overflow": { "shown": N, "total": M, "hint": "...", "by_f
 
 ## Output Buffers
 
-Large content — whether from a command or a file read — is stored in an
-`OutputBuffer` rather than dumped into your context. You get a smart summary
-and an `@ref` handle (`@cmd_*` for commands, `@file_*` for files). The full
-content costs you nothing to hold. Query it via `run_command` + Unix tools:
+Large content — whether from a command, a file read, or a large tool response —
+is stored in an `OutputBuffer` rather than dumped into your context. You get a
+smart summary and an `@ref` handle. The full content costs you nothing to hold.
+Query it via `run_command` + Unix tools:
+
+- **`@cmd_*`** — shell command output (from `run_command`). Stderr captured automatically; no `.err` suffix needed for most cases, but `@cmd_id.err` accesses stderr-only when available.
+- **`@file_*`** — large file reads (>200 lines, from `read_file`).
+- **`@tool_*`** — large tool responses (>10 KB). When any tool response exceeds 10,000 bytes, it is automatically stored in the buffer and you receive a compact summary + ref handle. Query with `run_command("jq '.field' @tool_abc12345")` or `run_command("grep pattern @tool_abc12345")`. Stored as compact JSON (not pretty-printed). No `.err` suffix variant.
+
+Example queries:
 
     run_command("grep FAILED @cmd_a1b2c3")
     run_command("sed -n '42,80p' @file_abc123")
+    run_command("jq '.symbols[] | .name' @tool_abc12345")
     run_command("diff @cmd_a1b2c3 @file_abc123")
 
 **Be targeted:** extract what you need in one well-crafted query per buffer —
