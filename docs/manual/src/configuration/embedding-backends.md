@@ -22,6 +22,26 @@ model = "ollama:mxbai-embed-large"   # default
 
 ---
 
+## Recommended Models
+
+Start with the default. Switch only when you have a specific reason to.
+
+| Model string                    | Backend  | Dims | Speed          | Code quality | Notes                                     |
+|---------------------------------|----------|------|----------------|--------------|-------------------------------------------|
+| `ollama:mxbai-embed-large`      | Ollama   | 1024 | Medium         | Good         | **Default. Best starting point.**         |
+| `ollama:nomic-embed-text`       | Ollama   |  768 | Fast           | Good         | Lighter; slightly lower recall            |
+| `ollama:all-minilm`             | Ollama   |  384 | Very fast      | Fair         | Large repos where indexing speed matters  |
+| `openai:text-embedding-3-small` | OpenAI   | 1536 | Fast (network) | Excellent    | Best quality/cost if cloud is acceptable  |
+| `openai:text-embedding-3-large` | OpenAI   | 3072 | Fast (network) | Best         | Overkill for most codebases               |
+| `local:BGESmallENV15Q`          | fastembed|  384 | Medium (CPU)   | Good         | Air-gapped or no daemon; no GPU needed    |
+
+**Switching models requires a full reindex** — see
+[Rebuilding After a Model Change](#rebuilding-after-a-model-change) below.
+Scores are not comparable across models; a score of 0.75 means different things
+with different models.
+
+---
+
 ## Ollama (Default)
 
 Uses a locally running [Ollama](https://ollama.com/) daemon. No API key is required.
