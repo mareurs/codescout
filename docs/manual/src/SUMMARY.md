@@ -14,6 +14,7 @@
   - [Output Buffers](concepts/output-buffers.md)
   - [Shell Integration](concepts/shell-integration.md)
   - [Git Worktrees](concepts/worktrees.md)
+  - [Routing Plugin](concepts/routing-plugin.md)
 
 - [Project Configuration](configuration/project-toml.md)
   - [Embedding Backends](configuration/embedding-backends.md)

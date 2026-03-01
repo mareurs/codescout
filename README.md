@@ -40,6 +40,12 @@ Plus file operations (6 tools), AST analysis (2 tools), workflow & config (4 too
 - **Incremental Index Rebuilding** — smart change detection for the embedding index. Uses git diff → mtime → SHA-256 fallback chain to skip unchanged files, with staleness warnings when the index falls behind HEAD.
 - **Semantic Drift Detection** — detects *how much* code changed in meaning after re-indexing, not just that bytes changed. Surfaced via `index_status(threshold)`. Opt out with `drift_detection_enabled = false` in `[embeddings]`.
 
+## Routing Plugin
+
+The MCP server gives Claude the tools, but subagents start with a blank slate and fall back to `Read`/`Grep`/`Bash` by default. The companion `code-explorer-routing` plugin closes this: it injects guidance into every agent and subagent via Claude Code hooks, hard-blocks native file-read patterns before they execute, auto-reindexes in the background, and enforces worktree safety.
+
+→ [Full details: Routing Plugin](docs/manual/src/concepts/routing-plugin.md)
+
 ## Output Buffers
 
 Large command output and file reads are stored in a buffer and returned as `@id` handles rather than dumped into context. The AI queries them with Unix tools: `run_command("grep FAILED @cmd_a1b2c3")`, `run_command("sed -n '42,80p' @file_abc456")`. Each query appears as a distinct tool call in Claude Code's UI, keeping exploration visible and the context window lean.
