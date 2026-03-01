@@ -15,6 +15,11 @@ You must build the index before searching. Use `index_project` once, then
 `semantic_search` as many times as you like. Incremental re-indexing is cheap:
 only files that changed since the last run are re-embedded.
 
+> **See also:** [Semantic Search Concepts](../concepts/semantic-search.md) — how
+> chunking, embedding, and scoring work; when to use semantic search vs symbol
+> tools. [Setup Guide](../semantic-search-guide.md) — step-by-step configuration
+> and indexing walkthrough.
+
 ---
 
 ## `semantic_search`

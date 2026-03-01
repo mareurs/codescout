@@ -45,7 +45,7 @@ language support.
 ## [Semantic Search](semantic-search.md)
 
 Find code by meaning rather than by name or pattern. Requires an embedding
-index built with `index_project`. Use the optional `scope` parameter to search
+index built with `index_project` — see the [Setup Guide](../semantic-search-guide.md). Use the optional `scope` parameter to search
 within a specific library (see [Library Navigation](#library-navigation)).
 
 | Tool | Description |
