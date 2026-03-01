@@ -885,8 +885,17 @@ pub fn format_read_memory(result: &Value) -> String {
 }
 
 pub fn format_list_memories(result: &Value) -> String {
-    let count = result["topics"].as_array().map(|a| a.len()).unwrap_or(0);
-    format!("{count} topics")
+    let topics = match result["topics"].as_array() {
+        Some(t) if !t.is_empty() => t,
+        _ => return "0 topics".to_string(),
+    };
+    let mut out = format!("{} topics", topics.len());
+    for topic in topics.iter() {
+        if let Some(name) = topic.as_str() {
+            out.push_str(&format!("\n  {name}"));
+        }
+    }
+    out
 }
 
 pub fn format_delete_memory(result: &Value) -> String {
@@ -2426,5 +2435,24 @@ mod diff_tests {
         let diff = render_insert_diff("src/a.rs", "fn new() {}", Some(42), "after", "my_sym");
         assert!(diff.contains("new"), "got: {diff}");
         assert!(diff.contains("\x1b[32m"), "no green: {diff}");
+    }
+
+    #[test]
+    fn format_list_memories_shows_topic_names() {
+        let result = serde_json::json!({
+            "topics": ["architecture", "conventions", "gotchas"]
+        });
+        let out = format_list_memories(&result);
+        assert!(out.contains("architecture"), "should list topic names");
+        assert!(out.contains("conventions"), "should list topic names");
+        assert!(out.contains("gotchas"), "should list topic names");
+        assert!(out.contains('3'), "should include count");
+    }
+
+    #[test]
+    fn format_list_memories_empty() {
+        let result = serde_json::json!({ "topics": [] });
+        let out = format_list_memories(&result);
+        assert!(out.contains('0'), "should say 0 topics");
     }
 }
