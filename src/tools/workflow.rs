@@ -134,6 +134,47 @@ fn gather_project_context(root: &std::path::Path) -> GatheredContext {
     ctx
 }
 
+fn language_navigation_hints(lang: &str) -> Option<&'static str> {
+    match lang {
+        "rust" => Some(
+            "- name_path: `StructName/method`, `impl Trait for Type/method`\n\
+             - find_symbol(kind=\"struct\") for data types, kind=\"function\" for free fns\n\
+             - impl blocks: `find_symbol(\"impl MyStruct\")` or list_symbols shows `impl Trait for Type`\n\
+             - Example: `find_symbol(\"Server/handle_request\")` finds a method on Server",
+        ),
+        "python" => Some(
+            "- name_path: `ClassName/method_name`, `module_func`\n\
+             - find_symbol(kind=\"class\") for classes, kind=\"function\" for functions/methods\n\
+             - Decorators aren't in name_path — search for the function name\n\
+             - Example: `find_symbol(\"UserService/create\")` finds a method on UserService",
+        ),
+        "typescript" | "javascript" | "tsx" | "jsx" => Some(
+            "- name_path: `ClassName/method`, `exportedFunction`\n\
+             - find_symbol(kind=\"class\") for classes, kind=\"function\" for functions/arrow fns\n\
+             - React components are functions — use kind=\"function\" not kind=\"class\"\n\
+             - Example: `find_symbol(\"AuthProvider/login\")` finds a class method",
+        ),
+        "go" => Some(
+            "- name_path: `TypeName/MethodName`, `PackageFunc`\n\
+             - find_symbol(kind=\"function\") covers both functions and methods\n\
+             - Receiver methods: `find_symbol(\"Server/ListenAndServe\")`\n\
+             - Interfaces: find_symbol(kind=\"interface\") then list_symbols for signatures",
+        ),
+        "java" | "kotlin" => Some(
+            "- name_path: `ClassName/methodName`, `InnerClass`\n\
+             - find_symbol(kind=\"class\") for classes/interfaces, kind=\"function\" for methods\n\
+             - Annotations aren't in name_path — search by method name\n\
+             - Example: `find_symbol(\"UserRepository/findById\")`",
+        ),
+        "c" | "cpp" => Some(
+            "- name_path: `ClassName/method`, `namespace_func`\n\
+             - find_symbol(kind=\"struct\") or kind=\"class\" depending on codebase style\n\
+             - Header vs implementation: find_symbol shows both — use path= to narrow",
+        ),
+        _ => None,
+    }
+}
+
 fn build_system_prompt_draft(languages: &[String], entry_points: &[String]) -> String {
     let mut draft = String::new();
     draft.push_str("# Project — Code Explorer Guidance\n\n");
@@ -159,6 +200,18 @@ fn build_system_prompt_draft(languages: &[String], entry_points: &[String]) -> S
         draft.push_str(&format!("- This is a {} project\n", languages.join("/")));
     }
     draft.push_str("- Use specific terms over generic ones (e.g., avoid 'data', 'utils')\n\n");
+
+    // Language-specific navigation hints
+    let hints: Vec<_> = languages
+        .iter()
+        .filter_map(|lang| language_navigation_hints(lang).map(|h| (lang.as_str(), h)))
+        .collect();
+    if !hints.is_empty() {
+        draft.push_str("## Language Navigation\n");
+        for (lang, hint) in &hints {
+            draft.push_str(&format!("**{}:**\n{}\n\n", lang, hint));
+        }
+    }
 
     // Navigation strategy
     draft.push_str("## Navigation Strategy\n");
@@ -1252,6 +1305,74 @@ mod tests {
             r2["stdout"].as_str().unwrap().trim(),
             "50",
             "stdout should be exactly '50'"
+        );
+    }
+
+    #[test]
+    fn language_hints_covers_main_languages() {
+        for lang in &[
+            "rust",
+            "python",
+            "typescript",
+            "javascript",
+            "go",
+            "java",
+            "kotlin",
+            "c",
+            "cpp",
+            "tsx",
+            "jsx",
+        ] {
+            assert!(
+                language_navigation_hints(lang).is_some(),
+                "expected hints for '{}'",
+                lang
+            );
+        }
+    }
+
+    #[test]
+    fn language_hints_returns_none_for_unsupported() {
+        // "bash" and "markdown" are real detect_language() values, just without hints
+        assert!(language_navigation_hints("markdown").is_none());
+        assert!(language_navigation_hints("bash").is_none());
+        assert!(language_navigation_hints("unknown_lang").is_none());
+    }
+
+    #[test]
+    fn system_prompt_draft_includes_language_hints() {
+        let langs = vec!["rust".to_string(), "python".to_string()];
+        let draft = build_system_prompt_draft(&langs, &[]);
+        assert!(
+            draft.contains("## Language Navigation"),
+            "should have Language Navigation section"
+        );
+        assert!(draft.contains("**rust:**"), "should have rust hints");
+        assert!(draft.contains("**python:**"), "should have python hints");
+        assert!(
+            draft.contains("name_path"),
+            "hints should mention name_path"
+        );
+    }
+
+    #[test]
+    fn system_prompt_draft_omits_hints_for_unsupported_languages() {
+        let langs = vec!["markdown".to_string()];
+        let draft = build_system_prompt_draft(&langs, &[]);
+        assert!(
+            !draft.contains("## Language Navigation"),
+            "should not have Language Navigation for markdown-only"
+        );
+    }
+
+    #[test]
+    fn system_prompt_draft_isolates_hints_per_language() {
+        let langs = vec!["python".to_string()];
+        let draft = build_system_prompt_draft(&langs, &[]);
+        assert!(draft.contains("**python:**"), "should have python hints");
+        assert!(
+            !draft.contains("impl Trait for Type"),
+            "rust hints should not leak into python-only draft"
         );
     }
 }
