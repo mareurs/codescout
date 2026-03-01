@@ -203,10 +203,11 @@ pub trait Tool: Send + Sync {
         let json = serde_json::to_string(&val).unwrap_or_else(|_| val.to_string());
 
         if json.len() > TOOL_OUTPUT_BUFFER_THRESHOLD {
-            let ref_id = ctx.output_buffer.store_tool(self.name(), json.clone());
+            let json_len = json.len();
+            let ref_id = ctx.output_buffer.store_tool(self.name(), json);
             let summary = self
                 .format_for_user(&val)
-                .unwrap_or_else(|| format!("Result stored in {} ({} bytes)", ref_id, json.len()));
+                .unwrap_or_else(|| format!("Result stored in {} ({} bytes)", ref_id, json_len));
             return Ok(vec![Content::text(format!(
                 "{}\nFull result: {}",
                 summary, ref_id
@@ -338,6 +339,7 @@ mod tests {
             .await
             .unwrap();
         // Small output: no buffering — content should contain the JSON
+        assert_eq!(content.len(), 1, "small output should not be buffered");
         let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
         assert!(text.contains("key"));
     }
