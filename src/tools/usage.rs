@@ -1,4 +1,4 @@
-use crate::tools::{RecoverableError, Tool, ToolContext};
+use crate::tools::{user_format, RecoverableError, Tool, ToolContext};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::Value;
@@ -46,6 +46,10 @@ impl Tool for GetUsageStats {
         let conn = crate::usage::db::open_db(&project_root)?;
         let stats = crate::usage::db::query_stats(&conn, window)?;
         Ok(serde_json::to_value(stats)?)
+    }
+
+    fn format_for_user(&self, result: &Value) -> Option<String> {
+        Some(user_format::format_get_usage_stats(result))
     }
 }
 
