@@ -18,7 +18,7 @@ impl Tool for ReadFile {
     }
 
     fn description(&self) -> &str {
-        "Read the contents of a file. Optionally restrict to a line range. Source code files (.rs, .py, .ts, etc.) require start_line + end_line — use symbol tools for whole-file reads."
+        "Read the contents of a file. Optionally restrict to a line range. Large files (>200 lines) are automatically buffered and returned as a summary + @file_* handle. Use start_line + end_line to read a specific range directly. For symbol-level navigation of source code, prefer symbol tools."
     }
 
     fn input_schema(&self) -> Value {
@@ -28,7 +28,7 @@ impl Tool for ReadFile {
             "properties": {
                 "path": { "type": "string", "description": "File path relative to project root (also accepted: file_path)" },
                 "file_path": { "type": "string", "description": "Alias for path" },
-                "start_line": { "type": "integer", "description": "First line to return (1-indexed). Must be paired with end_line — together they unlock source code file reads." },
+                "start_line": { "type": "integer", "description": "First line to return (1-indexed). Must be paired with end_line." },
                 "end_line": { "type": "integer", "description": "Last line to return (1-indexed, inclusive). Must be paired with start_line." }
             }
         })
@@ -91,9 +91,10 @@ impl Tool for ReadFile {
         }
 
         // No explicit range: buffer large files instead of truncating or erroring
-        let has_explicit_range = start_line.is_some() || end_line.is_some();
+        // If only one bound supplied (degenerate input), skip buffering.
+        let has_partial_range = start_line.is_some() || end_line.is_some();
         let line_count = text.lines().count();
-        if !has_explicit_range && line_count > crate::tools::file_summary::FILE_BUFFER_THRESHOLD {
+        if !has_partial_range && line_count > crate::tools::file_summary::FILE_BUFFER_THRESHOLD {
             let file_id = ctx
                 .output_buffer
                 .store_file(resolved.to_string_lossy().to_string(), text.clone());
@@ -1690,7 +1691,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn read_file_large_source_file_no_longer_errors() {
+    async fn read_file_small_source_file_no_longer_errors() {
         let (dir, ctx) = project_ctx().await;
         let path = dir.path().join("lib.rs");
         let content: String = (0..105)
