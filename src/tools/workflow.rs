@@ -1,5 +1,7 @@
 //! Workflow and onboarding tools.
 
+use std::path::PathBuf;
+
 use super::{Tool, ToolContext};
 use serde_json::{json, Value};
 
@@ -353,25 +355,96 @@ impl Tool for RunCommand {
         "run_command"
     }
     fn description(&self) -> &str {
-        "Run a shell command in the active project root and return stdout/stderr."
+        "Run a shell command in the project root. Large output is buffered with a smart summary \
+         — query it with Unix tools via @output_id refs (e.g. grep pattern @cmd_abc)."
     }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
             "required": ["command"],
             "properties": {
-                "command": { "type": "string" },
-                "timeout_secs": { "type": "integer", "default": 30 }
+                "command": {
+                    "type": "string",
+                    "description": "Shell command to execute. May reference stored output buffers with @output_id syntax (e.g. grep FAILED @cmd_a1b2c3)."
+                },
+                "timeout_secs": { "type": "integer", "default": 30 },
+                "cwd": {
+                    "type": "string",
+                    "description": "Subdirectory relative to project root. Validated to stay within project."
+                },
+                "acknowledge_risk": {
+                    "type": "boolean",
+                    "description": "Bypass speed bump for dangerous commands. Required after a destructive command is detected."
+                }
             }
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
+        use super::output_buffer::OutputBuffer;
+
         let command = super::require_str_param(&input, "command")?;
         let timeout_secs = input["timeout_secs"].as_u64().unwrap_or(30);
+        let acknowledge_risk = input["acknowledge_risk"].as_bool().unwrap_or(false);
+        let cwd_param = input["cwd"].as_str();
         let root = ctx.agent.require_project_root().await?;
         let security = ctx.agent.security_config().await;
 
-        // Check shell command mode
+        // --- Step 1: Resolve @cmd_ buffer references ---
+        let (resolved_command, temp_files, buffer_only) =
+            ctx.output_buffer.resolve_refs(command)?;
+
+        // Helper: run inner logic then always clean up temp files.
+        let result = run_command_inner(
+            command,
+            &resolved_command,
+            timeout_secs,
+            acknowledge_risk,
+            cwd_param,
+            buffer_only,
+            &root,
+            &security,
+            ctx,
+        )
+        .await;
+
+        OutputBuffer::cleanup_temp_files(&temp_files);
+        result
+    }
+}
+
+/// Inner logic for `RunCommand::call`, extracted so temp-file cleanup
+/// always happens in the caller regardless of early returns.
+#[allow(clippy::too_many_arguments)]
+async fn run_command_inner(
+    original_command: &str,
+    resolved_command: &str,
+    timeout_secs: u64,
+    acknowledge_risk: bool,
+    cwd_param: Option<&str>,
+    buffer_only: bool,
+    root: &PathBuf,
+    security: &crate::util::path_security::PathSecurityConfig,
+    ctx: &ToolContext,
+) -> anyhow::Result<Value> {
+    use super::command_summary::{
+        count_lines, detect_command_type, needs_summary, summarize_build_output, summarize_generic,
+        summarize_test_output, CommandType,
+    };
+    use crate::util::path_security::is_dangerous_command;
+
+    // --- Step 2: Dangerous command speed bump ---
+    if !buffer_only && !acknowledge_risk {
+        if let Some(reason) = is_dangerous_command(resolved_command, security) {
+            return Err(super::RecoverableError::with_hint(
+                format!("dangerous command blocked: {}", reason),
+                "Re-run with acknowledge_risk: true if you are certain this is safe.",
+            )
+            .into());
+        }
+    }
+
+    // --- Step 3: Shell command mode check (skip for buffer-only queries) ---
+    if !buffer_only {
         match security.shell_command_mode.as_str() {
             "disabled" => {
                 return Err(super::RecoverableError::with_hint(
@@ -388,52 +461,104 @@ impl Tool for RunCommand {
                 .into());
             }
         }
+    }
 
-        #[cfg(unix)]
-        let child = tokio::process::Command::new("sh")
-            .arg("-c")
-            .arg(command)
-            .current_dir(&root)
-            .output();
+    // --- Step 4: Resolve working directory ---
+    let work_dir = if let Some(rel) = cwd_param {
+        let candidate = root.join(rel);
+        let canonical = candidate.canonicalize().map_err(|e| {
+            super::RecoverableError::with_hint(
+                format!("cwd '{}' is not a valid directory: {}", rel, e),
+                "Provide a relative path to an existing subdirectory of the project.",
+            )
+        })?;
+        if !canonical.starts_with(root) {
+            return Err(super::RecoverableError::with_hint(
+                format!("cwd '{}' escapes project root", rel),
+                "The cwd must be a subdirectory within the project.",
+            )
+            .into());
+        }
+        canonical
+    } else {
+        root.clone()
+    };
 
-        #[cfg(windows)]
-        let child = tokio::process::Command::new("cmd")
-            .arg("/C")
-            .arg(command)
-            .current_dir(&root)
-            .output();
+    // --- Step 5: Execute command ---
+    #[cfg(unix)]
+    let child = tokio::process::Command::new("sh")
+        .arg("-c")
+        .arg(resolved_command)
+        .current_dir(&work_dir)
+        .output();
 
-        let output_limit = if security.shell_output_limit_bytes > 0 {
-            security.shell_output_limit_bytes
-        } else {
-            100 * 1024
-        };
+    #[cfg(windows)]
+    let child = tokio::process::Command::new("cmd")
+        .arg("/C")
+        .arg(resolved_command)
+        .current_dir(&work_dir)
+        .output();
 
-        match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), child).await {
-            Ok(Ok(output)) => {
-                let raw_stdout = String::from_utf8_lossy(&output.stdout);
-                let raw_stderr = String::from_utf8_lossy(&output.stderr);
+    match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), child).await {
+        Ok(Ok(output)) => {
+            let raw_stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+            let raw_stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+            let exit_code = output.status.code().unwrap_or(-1);
 
-                let (stdout, stdout_truncated) = truncate_output(&raw_stdout, output_limit);
-                let (stderr, stderr_truncated) = truncate_output(&raw_stderr, output_limit);
+            // --- Step 6: Decide whether to buffer + summarize ---
+            if needs_summary(&raw_stdout, &raw_stderr) {
+                let output_id = ctx.output_buffer.store(
+                    original_command.to_string(),
+                    raw_stdout.clone(),
+                    raw_stderr.clone(),
+                    exit_code,
+                );
 
-                let mut result = json!({
-                    "stdout": stdout,
-                    "stderr": stderr,
-                    "exit_code": output.status.code()
-                });
+                let cmd_type = detect_command_type(original_command);
+                let mut summary = match cmd_type {
+                    CommandType::Test => summarize_test_output(&raw_stdout, &raw_stderr, exit_code),
+                    CommandType::Build => {
+                        summarize_build_output(&raw_stdout, &raw_stderr, exit_code)
+                    }
+                    CommandType::Generic => summarize_generic(&raw_stdout, &raw_stderr, exit_code),
+                };
 
-                if stdout_truncated {
-                    result["stdout_truncated"] = json!(true);
-                    result["stdout_total_bytes"] = json!(raw_stdout.len());
+                // Add buffer metadata
+                summary["output_id"] = json!(output_id);
+                summary["total_stdout_lines"] = json!(count_lines(&raw_stdout));
+                let stderr_lines = count_lines(&raw_stderr);
+                if stderr_lines > 0 {
+                    summary["total_stderr_lines"] = json!(stderr_lines);
                 }
-                if stderr_truncated {
-                    result["stderr_truncated"] = json!(true);
-                    result["stderr_total_bytes"] = json!(raw_stderr.len());
-                }
+                summary["hint"] = json!(format!(
+                    "Full output stored. Query with: grep/tail/awk/sed {}",
+                    output_id
+                ));
 
                 // Add warning in warn mode
-                if security.shell_command_mode == "warn" || security.shell_command_mode.is_empty() {
+                if !buffer_only
+                    && (security.shell_command_mode == "warn"
+                        || security.shell_command_mode.is_empty())
+                {
+                    summary["warning"] = json!(
+                        "Shell commands execute with full user permissions. Only use for build/test commands."
+                    );
+                }
+
+                Ok(summary)
+            } else {
+                // Short output — return directly
+                let mut result = json!({
+                    "stdout": raw_stdout,
+                    "stderr": raw_stderr,
+                    "exit_code": exit_code,
+                });
+
+                // Add warning in warn mode
+                if !buffer_only
+                    && (security.shell_command_mode == "warn"
+                        || security.shell_command_mode.is_empty())
+                {
                     result["warning"] = json!(
                         "Shell commands execute with full user permissions. Only use for build/test commands."
                     );
@@ -441,19 +566,20 @@ impl Tool for RunCommand {
 
                 Ok(result)
             }
-            Ok(Err(e)) => {
-                Err(super::RecoverableError::new(format!("command execution error: {}", e)).into())
-            }
-            Err(_) => Ok(json!({
-                "timed_out": true,
-                "stdout": "",
-                "stderr": format!("Command timed out after {} seconds", timeout_secs),
-                "exit_code": null
-            })),
         }
+        Ok(Err(e)) => {
+            Err(super::RecoverableError::new(format!("command execution error: {}", e)).into())
+        }
+        Err(_) => Ok(json!({
+            "timed_out": true,
+            "stdout": "",
+            "stderr": format!("Command timed out after {} seconds", timeout_secs),
+            "exit_code": null
+        })),
     }
 }
 
+#[allow(dead_code)] // Kept as safety net for byte-level shell_output_limit_bytes config.
 fn truncate_output(output: &str, limit: usize) -> (String, bool) {
     if output.len() > limit {
         let truncated = &output[..limit];
@@ -618,7 +744,8 @@ mod tests {
     #[tokio::test]
     async fn execute_shell_command_output_truncated() {
         let (_dir, ctx) = project_ctx().await;
-        // Generate output larger than default limit
+        // Generate output larger than summary threshold (>50 lines).
+        // seq 1 100000 produces ~588KB / 100K lines — should be buffered.
         let result = RunCommand
             .call(
                 json!({ "command": "seq 1 100000", "timeout_secs": 10 }),
@@ -626,14 +753,16 @@ mod tests {
             )
             .await
             .unwrap();
-        // Output should be truncated (seq 1 100000 produces ~588KB)
-        assert_eq!(
-            result["stdout_truncated"], true,
-            "large output should be truncated"
+        // New behavior: large output is buffered, not byte-truncated.
+        assert!(
+            result["output_id"].as_str().is_some(),
+            "large output should be buffered with output_id"
         );
-        assert!(result["stdout_total_bytes"].as_u64().unwrap() > 100 * 1024);
-        // The truncated output should still be valid
-        assert!(result["stdout"].as_str().unwrap().contains("truncated"));
+        assert!(result["total_stdout_lines"].as_u64().unwrap() > 50);
+        assert!(result["hint"]
+            .as_str()
+            .unwrap()
+            .contains("Full output stored"));
     }
 
     #[tokio::test]
@@ -643,7 +772,8 @@ mod tests {
             .call(json!({ "command": "echo hello", "timeout_secs": 5 }), &ctx)
             .await
             .unwrap();
-        assert_eq!(result["stdout_truncated"], serde_json::Value::Null);
+        // Short output: no output_id, direct stdout
+        assert_eq!(result["output_id"], serde_json::Value::Null);
         assert!(result["stdout"].as_str().unwrap().contains("hello"));
     }
 
@@ -790,5 +920,156 @@ mod tests {
         );
         let draft = result["system_prompt_draft"].as_str().unwrap();
         assert!(!draft.is_empty(), "system_prompt_draft should not be empty");
+    }
+
+    // -----------------------------------------------------------------------
+    // New RunCommand tests (Task 5)
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn run_command_short_output_no_buffer() {
+        let (_dir, ctx) = project_ctx().await;
+        let result = RunCommand
+            .call(json!({ "command": "echo hello" }), &ctx)
+            .await
+            .unwrap();
+        // Short output: direct stdout, no output_id
+        assert!(result["stdout"].as_str().unwrap().contains("hello"));
+        assert_eq!(result["output_id"], serde_json::Value::Null);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn run_command_long_output_buffered() {
+        let (_dir, ctx) = project_ctx().await;
+        // seq 1 200 produces 200 lines — well above the 50-line threshold
+        let result = RunCommand
+            .call(json!({ "command": "seq 1 200", "timeout_secs": 5 }), &ctx)
+            .await
+            .unwrap();
+        let output_id = result["output_id"].as_str().unwrap();
+        assert!(output_id.starts_with("@cmd_"));
+        assert_eq!(result["total_stdout_lines"].as_u64().unwrap(), 200);
+        assert!(result["hint"].as_str().unwrap().contains(output_id));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn run_command_buffer_ref_query() {
+        let (_dir, ctx) = project_ctx().await;
+        // First: generate output and get a buffer handle
+        let result = RunCommand
+            .call(json!({ "command": "seq 1 200", "timeout_secs": 5 }), &ctx)
+            .await
+            .unwrap();
+        let output_id = result["output_id"].as_str().unwrap();
+
+        // Second: query the buffered output via grep
+        let query = format!("grep '^10$' {}", output_id);
+        let result2 = RunCommand
+            .call(json!({ "command": query, "timeout_secs": 5 }), &ctx)
+            .await
+            .unwrap();
+        let stdout = result2["stdout"].as_str().unwrap();
+        assert!(stdout.contains("10"), "grep should find '10': {}", stdout);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn run_command_dangerous_blocked_without_acknowledge() {
+        let (_dir, ctx) = project_ctx().await;
+        let result = RunCommand
+            .call(
+                json!({ "command": "rm -rf /tmp/code_explorer_test_nonexistent" }),
+                &ctx,
+            )
+            .await;
+        // Should be an error (dangerous command blocked)
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("dangerous command blocked"),
+            "error should mention dangerous: {}",
+            err_msg
+        );
+    }
+
+    #[tokio::test]
+    async fn run_command_dangerous_allowed_with_acknowledge() {
+        let (_dir, ctx) = project_ctx().await;
+        // Use a safe command but with acknowledge_risk: true — should succeed
+        let result = RunCommand
+            .call(
+                json!({ "command": "echo safe", "acknowledge_risk": true }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(result["stdout"].as_str().unwrap().contains("safe"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn run_command_buffer_only_skips_safety() {
+        let (_dir, ctx) = project_ctx().await;
+        // Store some output in the buffer
+        let result = RunCommand
+            .call(json!({ "command": "seq 1 200", "timeout_secs": 5 }), &ctx)
+            .await
+            .unwrap();
+        let output_id = result["output_id"].as_str().unwrap();
+
+        // grep on buffer ref only — should skip both dangerous-command check
+        // and shell_command_mode check (buffer_only = true).
+        let query = format!("grep '^5$' {}", output_id);
+        let result2 = RunCommand
+            .call(json!({ "command": query, "timeout_secs": 5 }), &ctx)
+            .await
+            .unwrap();
+        // No warning should be present when buffer_only
+        // (the default mode is "warn" which adds warning for non-buffer commands)
+        assert_eq!(
+            result2["warning"],
+            serde_json::Value::Null,
+            "buffer-only queries should not get shell warning"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn run_command_cwd_works() {
+        let (dir, ctx) = project_ctx().await;
+        // Create a subdirectory with a file
+        let sub = dir.path().join("subdir");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("hello.txt"), "world").unwrap();
+
+        let result = RunCommand
+            .call(
+                json!({ "command": "cat hello.txt", "cwd": "subdir", "timeout_secs": 5 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["stdout"].as_str().unwrap().trim(), "world");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn run_command_cwd_rejects_traversal() {
+        let (_dir, ctx) = project_ctx().await;
+        let result = RunCommand
+            .call(
+                json!({ "command": "ls", "cwd": "../../etc", "timeout_secs": 5 }),
+                &ctx,
+            )
+            .await;
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("escapes project root") || err_msg.contains("not a valid directory"),
+            "should reject traversal: {}",
+            err_msg
+        );
     }
 }
