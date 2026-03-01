@@ -133,7 +133,6 @@ Project setup, shell execution, and server configuration.
 ---
 
 ## Which Tool Do I Use?
-## Which Tool Do I Use?
 
 Use this table when you know what you want but are not sure which tool to reach
 for.

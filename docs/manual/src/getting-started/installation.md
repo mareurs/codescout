@@ -123,7 +123,7 @@ code-explorer has three embedding modes, controlled at compile time via Cargo fe
 cargo install code-explorer --features local-embed
 ```
 
-The first time you build a semantic search index, the selected model (typically
+The first time you build a semantic search index, the local backend model (typically
 `nomic-embed-text`, ~130MB) downloads automatically to `~/.cache/huggingface/hub/`. Subsequent
 uses are fully offline.
 
