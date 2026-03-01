@@ -163,7 +163,7 @@ impl Tool for ReadFile {
         }
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_read_file(result))
     }
 }
@@ -267,7 +267,7 @@ impl Tool for ListDir {
         Ok(result)
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_list_dir(result))
     }
 }
@@ -437,7 +437,7 @@ impl Tool for SearchPattern {
         Ok(result)
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_search_pattern(result))
     }
 }
@@ -573,7 +573,7 @@ impl Tool for FindFile {
         Ok(result)
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_find_file(result))
     }
 }
@@ -2503,7 +2503,7 @@ mod tests {
         use serde_json::json;
         let tool = FindFile;
         let result = json!({ "files": ["src/a.rs", "src/b.rs"], "total": 2 });
-        let text = tool.format_for_user(&result).unwrap();
+        let text = tool.format_compact(&result).unwrap();
         assert!(text.contains("2 files"), "got: {text}");
     }
 

@@ -68,7 +68,7 @@ impl Tool for ListFunctions {
         }))
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(crate::tools::user_format::format_list_functions(result))
     }
 }
@@ -146,7 +146,7 @@ impl Tool for ListDocs {
         }))
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(crate::tools::user_format::format_list_docs(result))
     }
 }
@@ -380,7 +380,7 @@ mod tests {
         use serde_json::json;
         let tool = ListFunctions;
         let result = json!({ "functions": [{"name":"foo"}, {"name":"bar"}], "file": "src/a.rs" });
-        let text = tool.format_for_user(&result).unwrap();
+        let text = tool.format_compact(&result).unwrap();
         assert!(text.contains("2"), "got: {text}");
     }
 
@@ -389,7 +389,7 @@ mod tests {
         use serde_json::json;
         let tool = ListDocs;
         let result = json!({ "docstrings": [{"symbol":"Foo"}], "file": "src/a.rs" });
-        let text = tool.format_for_user(&result).unwrap();
+        let text = tool.format_compact(&result).unwrap();
         assert!(text.contains("1"), "got: {text}");
     }
 }

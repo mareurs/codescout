@@ -50,7 +50,7 @@ impl Tool for ListLibraries {
         Ok(json!({ "libraries": libs }))
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(crate::tools::user_format::format_list_libraries(result))
     }
 }
@@ -143,7 +143,7 @@ impl Tool for IndexLibrary {
         }))
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(crate::tools::user_format::format_index_library(result))
     }
 }

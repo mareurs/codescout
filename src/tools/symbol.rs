@@ -524,7 +524,7 @@ impl Tool for ListSymbols {
         }
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_list_symbols(result))
     }
 }
@@ -825,7 +825,7 @@ impl Tool for FindSymbol {
         Ok(result)
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_find_symbol(result))
     }
 }
@@ -918,7 +918,7 @@ impl Tool for FindReferences {
         Ok(result)
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_find_references(result))
     }
 }
@@ -1043,7 +1043,7 @@ impl Tool for GotoDefinition {
         }))
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_goto_definition(result))
     }
 }
@@ -1159,7 +1159,7 @@ impl Tool for Hover {
         }
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_hover(result))
     }
 }
@@ -1341,7 +1341,7 @@ impl Tool for ReplaceSymbol {
         Ok(resp)
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_replace_symbol(result))
     }
 
@@ -1452,7 +1452,7 @@ impl Tool for RemoveSymbol {
         Ok(resp)
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_remove_symbol(result))
     }
 
@@ -1559,7 +1559,7 @@ impl Tool for InsertCode {
         Ok(resp)
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_insert_code(result))
     }
 
@@ -1947,7 +1947,7 @@ impl Tool for RenameSymbol {
         Ok(result)
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_rename_symbol(result))
     }
 
@@ -4171,7 +4171,7 @@ fn main() {
         use serde_json::json;
         let tool = FindReferences;
         let result = json!({ "references": [{"file":"a.rs","line":10}], "total": 1 });
-        let text = tool.format_for_user(&result).unwrap();
+        let text = tool.format_compact(&result).unwrap();
         assert!(text.contains("1 ref"), "got: {text}");
     }
 
@@ -4180,7 +4180,7 @@ fn main() {
         use serde_json::json;
         let tool = RenameSymbol;
         let result = json!({ "total_edits": 5, "textual_match_count": 1, "files_changed": 2, "new_name": "bar" });
-        let text = tool.format_for_user(&result).unwrap();
+        let text = tool.format_compact(&result).unwrap();
         assert!(text.contains("bar"), "got: {text}");
     }
 
@@ -4189,7 +4189,7 @@ fn main() {
         use serde_json::json;
         let tool = InsertCode;
         let result = json!({ "status": "ok", "inserted_at_line": 42, "position": "after" });
-        let text = tool.format_for_user(&result).unwrap();
+        let text = tool.format_compact(&result).unwrap();
         assert!(text.contains("42"), "got: {text}");
     }
 
@@ -4197,7 +4197,7 @@ fn main() {
     fn replace_symbol_format_for_user_shows_range() {
         let tool = ReplaceSymbol;
         let r = json!({ "status": "ok", "replaced_lines": "124-145" });
-        let t = tool.format_for_user(&r).unwrap();
+        let t = tool.format_compact(&r).unwrap();
         assert!(t.contains("L124"), "got: {t}");
     }
 
@@ -4205,7 +4205,7 @@ fn main() {
     fn remove_symbol_format_for_user_shows_range() {
         let tool = RemoveSymbol;
         let r = json!({ "status": "ok", "removed_lines": "201-215", "line_count": 14 });
-        let t = tool.format_for_user(&r).unwrap();
+        let t = tool.format_compact(&r).unwrap();
         assert!(t.contains("201"), "got: {t}");
         assert!(t.contains("14"), "got: {t}");
     }

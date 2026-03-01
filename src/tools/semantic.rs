@@ -135,7 +135,7 @@ impl Tool for SemanticSearch {
         Ok(result)
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_semantic_search(result))
     }
 }
@@ -228,7 +228,7 @@ impl Tool for IndexProject {
         }))
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_index_project(result))
     }
 }
@@ -426,7 +426,7 @@ impl Tool for IndexStatus {
         Ok(result)
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_index_status(result))
     }
 }

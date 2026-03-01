@@ -16,7 +16,7 @@ pub(crate) fn format_line_range(start: u64, end: u64) -> String {
 }
 
 /// Truncate a path to max_len chars, replacing the middle with "...".
-#[allow(dead_code)] // Used by format_for_user impls added in subsequent tasks.
+#[allow(dead_code)] // Used by format_compact impls in tool modules.
 pub(crate) fn truncate_path(path: &str, max_len: usize) -> String {
     if path.len() <= max_len {
         return path.to_string();

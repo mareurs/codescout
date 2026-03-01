@@ -24,7 +24,7 @@ pub mod workflow;
 use std::sync::Arc;
 
 use anyhow::Result;
-use rmcp::model::{Content, Role};
+use rmcp::model::Content;
 use serde_json::Value;
 
 use crate::agent::Agent;
@@ -188,8 +188,22 @@ pub trait Tool: Send + Sync {
     /// When Some, call_content() emits dual-audience blocks:
     ///   1. Compact JSON (audience: assistant)
     ///   2. Formatted plain text (audience: user)
-    fn format_for_user(&self, _result: &Value) -> Option<String> {
+    /// Compact plain-text summary used in the buffer path alongside `@tool_*` refs.
+    /// Return `None` for the generic "Result stored in @tool_xxx (N bytes)" fallback.
+    fn format_compact(&self, _result: &Value) -> Option<String> {
         None
+    }
+
+    /// Human-readable display text for the MCP user-facing channel.
+    ///
+    /// Defaults to `format_compact()`. Override for richer display when the user
+    /// channel differs from the buffer summary.
+    ///
+    /// Not yet called — wire in `call_content` at the TODO comment when either
+    /// Claude Code issue #13600 (audience filtering) or #3174 (notifications/message)
+    /// ships.
+    fn format_for_user_channel(&self, result: &Value) -> Option<String> {
+        self.format_compact(result)
     }
 
     /// Returns MCP content blocks for this tool call.
@@ -197,6 +211,11 @@ pub trait Tool: Send + Sync {
     /// If format_for_user() returns Some, emits dual-audience blocks:
     /// compact JSON for the assistant, formatted text for the user.
     /// Otherwise, falls back to pretty-printed JSON for both.
+    /// Override directly for full control over content blocks.
+    /// Returns MCP content blocks for this tool call.
+    ///
+    /// Large output (> threshold) is stored in the output buffer and a compact
+    /// summary is returned. Small output is returned as pretty-printed JSON.
     /// Override directly for full control over content blocks.
     async fn call_content(&self, input: Value, ctx: &ToolContext) -> Result<Vec<Content>> {
         let val = self.call(input, ctx).await?;
@@ -206,7 +225,7 @@ pub trait Tool: Send + Sync {
             let json_len = json.len();
             let ref_id = ctx.output_buffer.store_tool(self.name(), json);
             let summary = self
-                .format_for_user(&val)
+                .format_compact(&val)
                 .unwrap_or_else(|| format!("Result stored in {} ({} bytes)", ref_id, json_len));
             return Ok(vec![Content::text(format!(
                 "{}\nFull result: {}",
@@ -214,15 +233,11 @@ pub trait Tool: Send + Sync {
             ))]);
         }
 
-        match self.format_for_user(&val) {
-            Some(user_text) => Ok(vec![
-                Content::text(json).with_audience(vec![Role::Assistant]),
-                Content::text(user_text).with_audience(vec![Role::User]),
-            ]),
-            None => Ok(vec![Content::text(
-                serde_json::to_string_pretty(&val).unwrap_or_else(|_| val.to_string()),
-            )]),
-        }
+        // Small output — return pretty JSON to the assistant.
+        // TODO(#13600/#3174): emit self.format_for_user_channel(&val) to user channel here.
+        Ok(vec![Content::text(
+            serde_json::to_string_pretty(&val).unwrap_or_else(|_| val.to_string()),
+        )])
     }
 }
 
@@ -321,7 +336,7 @@ mod tests {
         async fn call(&self, _input: Value, _ctx: &ToolContext) -> anyhow::Result<Value> {
             Ok(self.result.clone())
         }
-        fn format_for_user(&self, _result: &Value) -> Option<String> {
+        fn format_compact(&self, _result: &Value) -> Option<String> {
             self.user_summary.clone()
         }
     }
@@ -342,6 +357,30 @@ mod tests {
         assert_eq!(content.len(), 1, "small output should not be buffered");
         let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
         assert!(text.contains("key"));
+    }
+
+    #[tokio::test]
+    async fn call_content_small_output_ignores_format_compact() {
+        // Even when format_compact returns Some, call_content must return exactly
+        // 1 block with pretty JSON — the compact text is NOT injected into small outputs.
+        let ctx = bare_ctx().await;
+        let result = serde_json::json!({"key": "value"});
+        let tool = EchoTool {
+            result: result.clone(),
+            user_summary: Some("compact summary".to_string()),
+        };
+        let content = tool
+            .call_content(serde_json::json!({}), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(content.len(), 1, "small output must produce exactly 1 block, got: {:?}", content);
+        let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+        assert!(text.contains("key"), "block must contain the JSON key, got: {}", text);
+        assert!(
+            !text.contains("compact summary"),
+            "compact summary must NOT appear in small-output block, got: {}",
+            text
+        );
     }
 
     #[tokio::test]
@@ -374,7 +413,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn call_content_uses_format_for_user_in_compact_text() {
+    async fn call_content_uses_format_compact_in_buffer_summary() {
         let ctx = bare_ctx().await;
         let big_array: Vec<Value> = (0..500)
             .map(|i| {
@@ -403,7 +442,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn call_content_generic_fallback_without_format_for_user() {
+    async fn call_content_generic_fallback_without_format_compact() {
         let ctx = bare_ctx().await;
         let big_array: Vec<Value> = (0..500)
             .map(|i| {
@@ -423,7 +462,7 @@ mod tests {
             .await
             .unwrap();
         let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
-        // No format_for_user → generic fallback message with byte count and ref
+        // No format_compact → generic fallback message with byte count and ref
         assert!(
             text.contains("bytes") || text.contains("stored"),
             "expected fallback in: {}",

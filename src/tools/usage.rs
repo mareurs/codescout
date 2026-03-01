@@ -48,7 +48,7 @@ impl Tool for GetUsageStats {
         Ok(serde_json::to_value(stats)?)
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_get_usage_stats(result))
     }
 }

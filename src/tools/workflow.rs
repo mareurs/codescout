@@ -452,7 +452,7 @@ impl Tool for Onboarding {
         }))
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_onboarding(result))
     }
 }
@@ -546,7 +546,7 @@ impl Tool for RunCommand {
         result
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_run_command(result))
     }
 }
@@ -1959,7 +1959,7 @@ mod tests {
             "passed": 533, "failed": 0, "ignored": 0,
             "output_id": "@cmd_abc123"
         });
-        let text = tool.format_for_user(&result).unwrap();
+        let text = tool.format_compact(&result).unwrap();
         assert!(text.contains("533"), "got: {text}");
         assert!(text.contains("passed"), "got: {text}");
     }
@@ -1968,7 +1968,7 @@ mod tests {
     fn run_command_format_for_user_short_output() {
         let tool = RunCommand;
         let result = json!({ "stdout": "hello\nworld", "stderr": "", "exit_code": 0 });
-        let text = tool.format_for_user(&result).unwrap();
+        let text = tool.format_compact(&result).unwrap();
         assert!(text.contains("exit 0"), "got: {text}");
     }
 

@@ -91,7 +91,7 @@ impl Tool for ReadMemory {
             .await
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_read_memory(result))
     }
 }
@@ -132,7 +132,7 @@ impl Tool for ListMemories {
             .await
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_list_memories(result))
     }
 }
@@ -327,7 +327,7 @@ mod tests {
         use serde_json::json;
         let tool = ListMemories;
         let r = json!({ "topics": ["a", "b", "c"] });
-        let t = tool.format_for_user(&r).unwrap();
+        let t = tool.format_compact(&r).unwrap();
         assert!(t.contains("3"), "got: {t}");
     }
 

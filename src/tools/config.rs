@@ -48,7 +48,7 @@ impl Tool for ActivateProject {
         Ok(json!({ "status": "ok", "activated": config }))
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(super::user_format::format_activate_project(result))
     }
 }
@@ -75,7 +75,7 @@ impl Tool for GetConfig {
             .await
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(super::user_format::format_get_config(result))
     }
 }

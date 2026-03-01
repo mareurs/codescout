@@ -91,7 +91,7 @@ impl Tool for GitBlame {
         Ok(result)
     }
 
-    fn format_for_user(&self, result: &Value) -> Option<String> {
+    fn format_compact(&self, result: &Value) -> Option<String> {
         Some(user_format::format_git_blame(result))
     }
 }
@@ -214,7 +214,7 @@ mod tests {
     fn git_blame_format_for_user_shows_lines() {
         let tool = GitBlame;
         let result = json!({ "lines": [{"line":1},{"line":2}], "file": "src/a.rs" });
-        let text = tool.format_for_user(&result).unwrap();
+        let text = tool.format_compact(&result).unwrap();
         assert!(text.contains("2"), "got: {text}");
         assert!(text.contains("src/a.rs"), "got: {text}");
     }
