@@ -2214,7 +2214,7 @@ mod tests {
     // ── CreateFile::call_content audience split ───────────────────────────────
 
     #[tokio::test]
-    async fn create_file_call_content_returns_two_audience_blocks() {
+    async fn create_file_call_content_returns_user_only_block() {
         use rmcp::model::Role;
         let (dir, ctx) = project_ctx().await;
         let file = dir.path().join("demo.rs");
@@ -2230,33 +2230,18 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(blocks.len(), 2, "expected two content blocks");
+        assert_eq!(blocks.len(), 1, "expected exactly one content block");
 
-        // Block 0: LLM-only "ok"
-        let llm_block = &blocks[0];
+        let block = &blocks[0];
         assert_eq!(
-            llm_block.audience(),
-            Some(&vec![Role::Assistant]),
-            "first block must be assistant-only"
-        );
-        assert!(
-            format!("{:?}", llm_block).contains("ok"),
-            "LLM block must contain 'ok'"
-        );
-
-        // Block 1: user-only markdown header
-        let user_block = &blocks[1];
-        assert_eq!(
-            user_block.audience(),
+            block.audience(),
             Some(&vec![Role::User]),
-            "second block must be user-only"
+            "block must be user-only"
         );
-        let user_text = format!("{:?}", user_block);
-        assert!(user_text.contains("Created"), "user block must have header");
-        assert!(
-            user_text.contains("demo.rs"),
-            "user block must mention filename"
-        );
+        let text = format!("{:?}", block);
+        assert!(text.contains("demo.rs"), "block must mention filename");
+        // ANSI header produced by render_diff_header starts with ESC[
+        assert!(text.contains("\\u{1b}["), "block must contain ANSI codes");
     }
 
     // ── EditFile ──────────────────────────────────────────────────────────────
