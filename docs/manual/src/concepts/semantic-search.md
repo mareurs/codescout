@@ -13,10 +13,14 @@ search when you know the concept.
 Three steps happen when you call `semantic_search`:
 
 **1. Chunking** — The first time `index_project` runs, every source file is split
-into overlapping chunks of roughly 1500 characters. Splits follow language
-structure: function and class boundaries are preferred over arbitrary line cuts.
-Each chunk records its 1-indexed start and end line so results link back to
-exact source locations.
+into chunks whose size is derived from the configured model's context window
+(roughly `max_tokens × 3 chars/token` at 85 % utilisation). Splits follow
+language structure: each top-level function, method, or class becomes its own
+chunk. When a container (an `impl` block, a class) exceeds the budget, it is
+recursively split into one chunk per inner method, plus a header chunk for the
+container signature. The plain-text fallback path handles languages without
+tree-sitter support. Each chunk records its 1-indexed start and end line so
+results link back to exact source locations.
 
 **2. Embedding** — Each chunk is converted to a vector (a list of floating-point
 numbers) by the configured embedding model. Semantically similar text produces

@@ -73,13 +73,10 @@ projects:
 ```toml
 [embeddings]
 model = "ollama:mxbai-embed-large"
-chunk_size = 1200
-chunk_overlap = 200
 ```
 
-`model` is the only required change if you want a different backend. The
-`chunk_size` and `chunk_overlap` values are in characters (not tokens). Their
-effects are described in the [Tuning](#tuning) section below.
+`model` is the only setting you need to change. Chunk size is derived
+automatically from the model's context window — no manual tuning required.
 
 To use OpenAI instead, set the model and export your API key:
 
@@ -105,9 +102,11 @@ What happens internally:
 1. code-explorer walks the project tree, skipping directories listed in
    `ignored_paths` (by default: `.git`, `node_modules`, `target`,
    `__pycache__`, `.venv`, `dist`, `build`, `.code-explorer`).
-2. Each source file is split into overlapping chunks using an AST-aware
-   chunker. Function and class boundaries are used as natural split points
-   before falling back to character-count limits.
+2. Each source file is split into chunks using an AST-aware chunker. Each
+   top-level function, method, or class becomes its own chunk. Oversized
+   containers (impl blocks, classes) are recursively split into one chunk per
+   inner method plus a header chunk for the container signature. Chunk size is
+   derived from the model's context window — no configuration needed.
 3. Each chunk is sent to the configured embedding backend, which returns a
    dense vector.
 4. The vectors and chunk metadata are stored in
@@ -205,22 +204,31 @@ relevant chunks, use the symbol tools to navigate the surrounding code:
 
 ## Tuning
 
-### `chunk_size`
+### Chunk Size
 
-Controls the maximum character length of each embedded chunk (default: 1200).
+Chunk size is **not configurable** — it is derived automatically from the
+model's published context window using the formula:
 
-- Larger chunks (1500–2000): more surrounding context per result, better for
-  finding architectural patterns, but each result covers more code and
-  similarity is averaged over a larger region.
-- Smaller chunks (600–900): more precise location of the matching concept,
-  useful for large files where a single function is what you want.
+```
+chunk_size = max_tokens × 0.85 × 3 chars/token
+```
 
-### `chunk_overlap`
+The 0.85 factor leaves headroom for tokenisation variance; 3 chars/token is a
+conservative lower bound for mixed code and prose. Representative values:
 
-Controls how many characters of overlap exist between consecutive chunks
-(default: 200). Overlap prevents a concept from being silently split across
-a chunk boundary. Reducing this below 100 risks missing matches that span
-the end of one chunk and the start of the next.
+| Model | Context | Chunk budget |
+|---|---|---|
+| `ollama:mxbai-embed-large` (default) | 512 tokens | ~1 300 chars |
+| `ollama:nomic-embed-text` | 8 192 tokens | ~20 900 chars |
+| `openai:text-embedding-3-small` | 8 191 tokens | ~20 900 chars |
+| `local:JinaEmbeddingsV2BaseCode` | 8 192 tokens | ~20 900 chars |
+| `local:BGESmallENV15Q` | 512 tokens | ~1 300 chars |
+| `local:AllMiniLML6V2Q` | 256 tokens | ~650 chars |
+
+Because AST chunking splits at function/method boundaries rather than at
+character counts, most chunks are well within the budget regardless of model.
+The budget mainly controls when a single oversized node is recursively split
+into inner methods.
 
 ### Model Choice
 
