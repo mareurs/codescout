@@ -540,7 +540,11 @@ mod tests {
     fn store_tool_generates_tool_ref() {
         let buf = OutputBuffer::new(10);
         let id = buf.store_tool("list_symbols", "{\"symbols\":[]}".to_string());
-        assert!(id.starts_with("@tool_"), "expected @tool_ prefix, got {}", id);
+        assert!(
+            id.starts_with("@tool_"),
+            "expected @tool_ prefix, got {}",
+            id
+        );
     }
 
     #[test]

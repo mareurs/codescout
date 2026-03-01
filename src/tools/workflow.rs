@@ -659,8 +659,7 @@ async fn run_command_inner(
                     let (stderr_out, stderr_shown, stderr_total) =
                         truncate_lines(&buffer_stderr, STDERR_BUDGET);
 
-                    let was_truncated =
-                        stdout_shown < stdout_total || stderr_shown < stderr_total;
+                    let was_truncated = stdout_shown < stdout_total || stderr_shown < stderr_total;
 
                     let mut result = json!({
                         "stdout": stdout_out,
@@ -1504,13 +1503,27 @@ mod tests {
             .call(json!({ "command": format!("cat {}", id) }), &ctx)
             .await
             .expect("expected Ok with truncated inline output");
-        assert_eq!(result["truncated"], true, "should be truncated: {:?}", result);
-        assert_eq!(result["stdout_shown"], SUMMARY_LINE_THRESHOLD,
-            "stdout_shown should equal threshold: {:?}", result);
-        assert_eq!(result["stdout_total"], SUMMARY_LINE_THRESHOLD + 1,
-            "stdout_total should be full count: {:?}", result);
-        assert!(result.get("output_id").is_none(),
-            "must not create a new buffer ref: {:?}", result);
+        assert_eq!(
+            result["truncated"], true,
+            "should be truncated: {:?}",
+            result
+        );
+        assert_eq!(
+            result["stdout_shown"], SUMMARY_LINE_THRESHOLD,
+            "stdout_shown should equal threshold: {:?}",
+            result
+        );
+        assert_eq!(
+            result["stdout_total"],
+            SUMMARY_LINE_THRESHOLD + 1,
+            "stdout_total should be full count: {:?}",
+            result
+        );
+        assert!(
+            result.get("output_id").is_none(),
+            "must not create a new buffer ref: {:?}",
+            result
+        );
     }
 
     #[cfg(unix)]
@@ -1564,8 +1577,16 @@ mod tests {
             "must not create a new buffer ref: {:?}",
             result
         );
-        assert_eq!(result["truncated"], true, "should be truncated: {:?}", result);
-        assert_eq!(result["stdout_total"], 100usize, "stdout_total: {:?}", result);
+        assert_eq!(
+            result["truncated"], true,
+            "should be truncated: {:?}",
+            result
+        );
+        assert_eq!(
+            result["stdout_total"], 100usize,
+            "stdout_total: {:?}",
+            result
+        );
     }
 
     #[cfg(unix)]
@@ -1581,10 +1602,26 @@ mod tests {
             .call(json!({ "command": format!("cat {}", id) }), &ctx)
             .await
             .expect("expected Ok");
-        assert_eq!(result["stderr_shown"], 20usize, "stderr_shown: {:?}", result);
-        assert_eq!(result["stderr_total"], 25usize, "stderr_total: {:?}", result);
-        assert_eq!(result["stdout_shown"], 30usize, "stdout_shown: {:?}", result);
-        assert_eq!(result["stdout_total"], 60usize, "stdout_total: {:?}", result);
+        assert_eq!(
+            result["stderr_shown"], 20usize,
+            "stderr_shown: {:?}",
+            result
+        );
+        assert_eq!(
+            result["stderr_total"], 25usize,
+            "stderr_total: {:?}",
+            result
+        );
+        assert_eq!(
+            result["stdout_shown"], 30usize,
+            "stdout_shown: {:?}",
+            result
+        );
+        assert_eq!(
+            result["stdout_total"], 60usize,
+            "stdout_total: {:?}",
+            result
+        );
         assert_eq!(result["truncated"], true);
     }
 
@@ -1601,8 +1638,16 @@ mod tests {
             .call(json!({ "command": format!("cat {}", id) }), &ctx)
             .await
             .expect("expected Ok");
-        assert_eq!(result["stdout_shown"], 40usize, "stdout_shown: {:?}", result);
-        assert_eq!(result["stdout_total"], 60usize, "stdout_total: {:?}", result);
+        assert_eq!(
+            result["stdout_shown"], 40usize,
+            "stdout_shown: {:?}",
+            result
+        );
+        assert_eq!(
+            result["stdout_total"], 60usize,
+            "stdout_total: {:?}",
+            result
+        );
         assert_eq!(result["truncated"], true);
     }
 
@@ -1619,9 +1664,21 @@ mod tests {
             .call(json!({ "command": format!("cat {}", id) }), &ctx)
             .await
             .expect("expected Ok");
-        assert!(result.get("truncated").is_none(), "no truncated field: {:?}", result);
-        assert!(result.get("stdout_shown").is_none(), "no stdout_shown: {:?}", result);
-        assert!(result.get("output_id").is_none(), "no buffer ref: {:?}", result);
+        assert!(
+            result.get("truncated").is_none(),
+            "no truncated field: {:?}",
+            result
+        );
+        assert!(
+            result.get("stdout_shown").is_none(),
+            "no stdout_shown: {:?}",
+            result
+        );
+        assert!(
+            result.get("output_id").is_none(),
+            "no buffer ref: {:?}",
+            result
+        );
     }
 
     #[test]
