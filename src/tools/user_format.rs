@@ -889,6 +889,27 @@ pub fn format_read_memory(result: &Value) -> String {
 }
 
 pub fn format_list_memories(result: &Value) -> String {
+    // include_private=true path: { shared: [...], private: [...] }
+    if let (Some(shared), Some(private)) =
+        (result["shared"].as_array(), result["private"].as_array())
+    {
+        let mut out = format!("{} shared, {} private", shared.len(), private.len());
+        for t in shared {
+            if let Some(name) = t.as_str() {
+                out.push_str(&format!("\n  {name}"));
+            }
+        }
+        if !private.is_empty() {
+            out.push_str("\n  -- private --");
+            for t in private {
+                if let Some(name) = t.as_str() {
+                    out.push_str(&format!("\n  {name}"));
+                }
+            }
+        }
+        return out;
+    }
+    // Default path: { topics: [...] }
     let topics = match result["topics"].as_array() {
         Some(t) if !t.is_empty() => t,
         _ => return "0 topics".to_string(),
@@ -2833,6 +2854,24 @@ mod diff_tests {
         let result = serde_json::json!({ "topics": [] });
         let out = format_list_memories(&result);
         assert!(out.contains('0'), "should say 0 topics");
+    }
+
+    #[test]
+    fn format_list_memories_include_private_shows_both() {
+        let result = serde_json::json!({ "shared": ["arch", "conventions"], "private": ["prefs"] });
+        let out = format_list_memories(&result);
+        assert!(out.contains("2 shared"));
+        assert!(out.contains("1 private"));
+        assert!(out.contains("arch"));
+        assert!(out.contains("prefs"));
+    }
+
+    #[test]
+    fn format_list_memories_include_private_empty_private() {
+        let result = serde_json::json!({ "shared": ["arch"], "private": [] });
+        let out = format_list_memories(&result);
+        assert!(out.contains("1 shared"));
+        assert!(out.contains("0 private"));
     }
 
     #[test]

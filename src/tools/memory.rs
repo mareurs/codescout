@@ -115,11 +115,18 @@ impl Tool for ListMemories {
             }
         })
     }
-    async fn call(&self, _input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
+    async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
+        let include_private = input["include_private"].as_bool().unwrap_or(false);
         ctx.agent
             .with_project(|p| {
-                let topics = p.memory.list()?;
-                Ok(json!({ "topics": topics }))
+                if include_private {
+                    let shared = p.memory.list()?;
+                    let private = p.private_memory.list()?;
+                    Ok(json!({ "shared": shared, "private": private }))
+                } else {
+                    let topics = p.memory.list()?;
+                    Ok(json!({ "topics": topics }))
+                }
             })
             .await
     }
@@ -456,5 +463,66 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result, Some("keep".to_string()));
+    }
+
+    #[tokio::test]
+    async fn list_memories_default_returns_topics_key() {
+        let (_dir, ctx) = test_ctx_with_project().await;
+        ctx.agent
+            .with_project(|p| p.memory.write("arch", "..."))
+            .await
+            .unwrap();
+        let result = ListMemories.call(json!({}), &ctx).await.unwrap();
+        assert!(result["topics"].is_array());
+        assert!(result["shared"].is_null()); // old shape preserved by default
+    }
+
+    #[tokio::test]
+    async fn list_memories_include_private_returns_shared_and_private_keys() {
+        let (_dir, ctx) = test_ctx_with_project().await;
+        ctx.agent
+            .with_project(|p| {
+                p.memory.write("arch", "...")?;
+                p.private_memory.write("prefs", "...")?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let result = ListMemories
+            .call(json!({"include_private": true}), &ctx)
+            .await
+            .unwrap();
+        assert!(result["shared"].is_array());
+        assert!(result["private"].is_array());
+        assert!(result["topics"].is_null()); // new shape, no "topics" key
+        let shared: Vec<_> = result["shared"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(shared.contains(&"arch"));
+        let private: Vec<_> = result["private"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(private.contains(&"prefs"));
+    }
+
+    #[tokio::test]
+    async fn list_memories_include_private_empty_private_store() {
+        let (_dir, ctx) = test_ctx_with_project().await;
+        ctx.agent
+            .with_project(|p| p.memory.write("arch", "..."))
+            .await
+            .unwrap();
+        let result = ListMemories
+            .call(json!({"include_private": true}), &ctx)
+            .await
+            .unwrap();
+        let private = result["private"].as_array().unwrap();
+        assert!(private.is_empty());
     }
 }
