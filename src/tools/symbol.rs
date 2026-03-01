@@ -1615,6 +1615,48 @@ impl Tool for RenameSymbol {
             }
         }
 
+        // Phase 1.5: post-edit corruption scan.
+        // If the LSP produced a wrong edit range (e.g. rust-analyzer off-by-N column), the
+        // new name can end up embedded inside an existing token: "assertmy_new_fn()" instead
+        // of "assert!(my_new_fn())". Detect this by checking whether any occurrence of
+        // new_name in a changed file is immediately preceded by an alphanumeric character —
+        // a separator (`_`, `(`, ` `, `:`, etc.) should always appear at a call/use site.
+        let mut corruption_hints: Vec<Value> = vec![];
+        if new_name.len() >= 4 {
+            if let Ok(embedded_re) = regex::Regex::new(&format!(
+                r"[a-zA-Z0-9]{}",
+                regex::escape(new_name)
+            )) {
+                for path in &lsp_files {
+                    let Ok(content) = std::fs::read_to_string(path) else {
+                        continue;
+                    };
+                    let rel = path
+                        .strip_prefix(&rename_root)
+                        .unwrap_or(path)
+                        .display()
+                        .to_string();
+                    let mut flagged_lines: Vec<u32> = vec![];
+                    let mut previews: Vec<String> = vec![];
+                    for (i, line) in content.lines().enumerate() {
+                        if embedded_re.is_match(line) {
+                            flagged_lines.push((i + 1) as u32);
+                            if previews.len() < 3 {
+                                previews.push(line.trim().to_string());
+                            }
+                        }
+                    }
+                    if !flagged_lines.is_empty() {
+                        corruption_hints.push(json!({
+                            "file": rel,
+                            "lines": flagged_lines,
+                            "previews": previews,
+                        }));
+                    }
+                }
+            }
+        }
+
         // Phase 2: text sweep for remaining textual occurrences
         let old_name_str = name_path.rsplit('/').next().unwrap_or(name_path);
         let (textual, sweep_skipped, sweep_skip_reason) = if old_name_str.len() < 4 {
@@ -1663,6 +1705,14 @@ impl Tool for RenameSymbol {
             "sweep_skipped": sweep_skipped,
             "verify_hint": "LSP rename may match occurrences inside string literals, comments, or macro arguments. Verify each changed file is still valid (e.g. cargo check / tsc --noEmit).",
         });
+        if !corruption_hints.is_empty() {
+            result["corruption_warning"] = json!(
+                "new_name appears immediately after an alphanumeric character in the files \
+                 below — the LSP may have applied an edit at the wrong column. Inspect \
+                 these lines and run a build check (e.g. cargo check) before proceeding."
+            );
+            result["corruption_hints"] = json!(corruption_hints);
+        }
         if let Some(reason) = sweep_skip_reason {
             result["sweep_skip_reason"] = json!(reason);
         }
@@ -1717,6 +1767,22 @@ fn uri_to_path(uri: &str) -> Option<PathBuf> {
 /// Apply LSP TextEdits to a source string, returning the modified version.
 ///
 /// Edits are applied from bottom to top to preserve line numbers.
+/// Convert a UTF-16 code-unit offset (as returned by LSP) to a UTF-8 byte offset.
+/// LSP specifies all `character` positions in UTF-16 code units; Rust's str uses UTF-8.
+/// For ASCII-only lines these are equal, but any non-ASCII character causes divergence.
+fn utf16_to_byte_offset(s: &str, utf16_offset: usize) -> usize {
+    let mut byte_pos = 0;
+    let mut utf16_pos = 0usize;
+    for ch in s.chars() {
+        if utf16_pos >= utf16_offset {
+            break;
+        }
+        byte_pos += ch.len_utf8();
+        utf16_pos += ch.len_utf16();
+    }
+    byte_pos.min(s.len())
+}
+
 fn apply_text_edits(content: &str, edits: &[lsp_types::TextEdit]) -> String {
     let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
     // Ensure trailing newline is preserved
@@ -1744,19 +1810,13 @@ fn apply_text_edits(content: &str, edits: &[lsp_types::TextEdit]) -> String {
             continue;
         }
 
-        // Build the new content: prefix + new_text + suffix
-        let prefix = if start_char <= lines[start_line].len() {
-            &lines[start_line][..start_char]
-        } else {
-            &lines[start_line]
-        };
+        // LSP character offsets are UTF-16 code units; convert to byte offsets.
+        let start_byte = utf16_to_byte_offset(&lines[start_line], start_char);
+        let prefix = &lines[start_line][..start_byte];
 
         let suffix = if end_line < lines.len() {
-            if end_char <= lines[end_line].len() {
-                &lines[end_line][end_char..]
-            } else {
-                ""
-            }
+            let end_byte = utf16_to_byte_offset(&lines[end_line], end_char);
+            &lines[end_line][end_byte..]
         } else {
             ""
         };
@@ -3673,6 +3733,51 @@ fn main() {
         }];
         let result = apply_text_edits(content, &edits);
         assert_eq!(result, "aaa\nxxx\nyyy\nccc\n");
+    }
+
+    // ── BUG-002: apply_text_edits uses UTF-16 offsets correctly ─────────────
+
+    /// LSP character positions are UTF-16 code units.  A line like
+    /// `// α foo` has `α` (U+03B1) at byte 3, but at UTF-16 offset 3.
+    /// `foo` starts at byte 6 but UTF-16 offset 5.
+    /// The old byte-index code would slice at byte 5, landing mid-codepoint
+    /// and either panicking or producing garbled text.
+    #[test]
+    fn apply_text_edits_utf16_offset() {
+        // Line 0: "// α: foo"
+        //   byte offsets:  0='/', 1='/', 2=' ', 3..5='α'(2 bytes), 5=':', 6=' ', 7='f', 8='o', 9='o'
+        //   UTF-16 offsets: 0='/', 1='/', 2=' ', 3='α'(1 unit),    4=':', 5=' ', 6='f', 7='o', 8='o'
+        // Replace "foo" (UTF-16 chars 6..9) with "bar"
+        let content = "// \u{03B1}: foo\n";
+        let edits = vec![lsp_types::TextEdit {
+            range: lsp_types::Range {
+                start: lsp_types::Position { line: 0, character: 6 },
+                end: lsp_types::Position { line: 0, character: 9 },
+            },
+            new_text: "bar".to_string(),
+        }];
+        let result = apply_text_edits(content, &edits);
+        assert_eq!(result, "// \u{03B1}: bar\n");
+    }
+
+    /// Surrogate pair: emoji (U+1F600) is 4 UTF-8 bytes but 2 UTF-16 code units.
+    /// Text after the emoji has a higher UTF-16 offset than byte offset.
+    #[test]
+    fn apply_text_edits_utf16_surrogate_pair() {
+        // Line: "😀 foo"
+        //   bytes: 0..3=😀(4 bytes), 4=' ', 5='f', 6='o', 7='o'
+        //   UTF-16: 0..1=😀(2 units), 2=' ', 3='f', 4='o', 5='o'
+        // Replace "foo" (UTF-16 3..6) with "bar"
+        let content = "\u{1F600} foo\n";
+        let edits = vec![lsp_types::TextEdit {
+            range: lsp_types::Range {
+                start: lsp_types::Position { line: 0, character: 3 },
+                end: lsp_types::Position { line: 0, character: 6 },
+            },
+            new_text: "bar".to_string(),
+        }];
+        let result = apply_text_edits(content, &edits);
+        assert_eq!(result, "\u{1F600} bar\n");
     }
 
     // ── scan_backwards_for_docs tests ──────────────────────────────────────

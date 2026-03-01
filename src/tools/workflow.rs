@@ -397,11 +397,11 @@ impl Tool for Onboarding {
         // Build the system prompt draft scaffold
         let system_prompt_draft = build_system_prompt_draft(&lang_list, &gathered.entry_points);
 
-        let features_suggestion = gathered.features_md.is_none().then(|| {
+        let features_suggestion = gathered.features_md.is_none().then_some(
             "No FEATURES.md found. Consider creating docs/FEATURES.md to document \
              implemented capabilities — helps agents understand what's already built \
-             and avoid re-suggesting existing features."
-        });
+             and avoid re-suggesting existing features.",
+        );
 
         Ok(json!({
             "languages": lang_list,

@@ -45,7 +45,8 @@ Added optional `expected_content: String` guard — if line N doesn't match, ret
 
 **Date:** 2026-02-28
 **Severity:** High — produces unparseable source
-**Status:** Open
+**Status:** ✅ FIXED — UTF-16 → byte offset corrected in `apply_text_edits`; post-rename
+corruption scan added to detect wrong-column edits from the LSP.
 
 **What happened:**
 Renamed test function `project_not_explicitly_activated_on_startup` →
