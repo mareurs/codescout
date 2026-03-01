@@ -876,11 +876,15 @@ pub fn format_write_memory(result: &Value) -> String {
 
 pub fn format_read_memory(result: &Value) -> String {
     let topic = result["topic"].as_str().unwrap_or("?");
-    if result["content"].is_null() {
-        format!("not found · {topic}")
-    } else {
-        let chars = result["content"].as_str().map(|s| s.len()).unwrap_or(0);
-        format!("{topic} · {chars} chars")
+    match result["content"].as_str() {
+        None => format!("not found · {topic}"),
+        Some(content) => {
+            let mut out = topic.to_string();
+            for line in content.lines() {
+                out.push_str(&format!("\n  {line}"));
+            }
+            out
+        }
     }
 }
 
@@ -2454,5 +2458,25 @@ mod diff_tests {
         let result = serde_json::json!({ "topics": [] });
         let out = format_list_memories(&result);
         assert!(out.contains('0'), "should say 0 topics");
+    }
+
+    #[test]
+    fn format_read_memory_shows_content() {
+        let result = serde_json::json!({
+            "topic": "architecture",
+            "content": "## Layers\n\nAgent → Server → Tools"
+        });
+        let out = format_read_memory(&result);
+        assert!(out.contains("architecture"), "should show topic");
+        assert!(out.contains("Layers"), "should show content");
+        assert!(out.contains("Agent → Server → Tools"), "should show full content");
+    }
+
+    #[test]
+    fn format_read_memory_not_found_unchanged() {
+        let result = serde_json::json!({ "topic": "missing", "content": null });
+        let out = format_read_memory(&result);
+        assert!(out.contains("not found"), "should say not found");
+        assert!(out.contains("missing"), "should include topic name");
     }
 }
