@@ -161,11 +161,39 @@ pub fn maybe_migrate_to_vec0(conn: &Connection) -> Result<()> {
 
     tracing::info!("Migrating chunk_embeddings to vec0 virtual table (dims={dims})");
 
-    // Wrap all four steps in a transaction so that a crash between steps cannot
-    // leave the database in a half-migrated state (empty vec0 table + data still
-    // in chunk_embeddings_v1). vec0 DDL supports explicit SQLite transactions
-    // (verified by the vec0_migration_is_transactional test).
-    conn.execute_batch("BEGIN")?;
+    // Use BEGIN IMMEDIATE to serialise concurrent migration attempts.  Only
+    // one connection can hold the reserved (write) lock at a time, so the
+    // second caller blocks here until the first commits.  Without IMMEDIATE
+    // the check-then-migrate sequence is a classic TOCTOU race: two
+    // connections can both observe "plain table" outside any transaction,
+    // then the loser corrupts the database by renaming the already-migrated
+    // vec0 virtual table (ALTER TABLE succeeds) and then failing on CREATE
+    // VIRTUAL TABLE because the shadow tables (e.g. chunk_embeddings_info)
+    // still exist under their original names.
+    conn.execute_batch("BEGIN IMMEDIATE")?;
+
+    // Re-check inside the exclusive transaction: another connection may have
+    // migrated between our initial fast-path check above and acquiring the
+    // write lock here.
+    let sql_after_lock: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='chunk_embeddings'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
+    match sql_after_lock {
+        None => {
+            conn.execute_batch("ROLLBACK")?;
+            return Ok(());
+        }
+        Some(s) if s.contains("USING vec0") => {
+            conn.execute_batch("ROLLBACK")?;
+            return Ok(()); // another connection migrated first
+        }
+        _ => {} // still plain — proceed with migration
+    }
+
     conn.execute_batch("ALTER TABLE chunk_embeddings RENAME TO chunk_embeddings_v1")?;
     conn.execute_batch(&format!(
         "CREATE VIRTUAL TABLE chunk_embeddings USING vec0(embedding float[{dims}] distance_metric=cosine)"
@@ -724,7 +752,6 @@ pub async fn build_index(project_root: &Path, force: bool) -> Result<IndexReport
             lang,
             &path,
             config.embeddings.chunk_size,
-            config.embeddings.chunk_overlap,
         );
         if chunks.is_empty() {
             continue;
@@ -949,7 +976,6 @@ pub async fn build_library_index(
             lang,
             path,
             config.embeddings.chunk_size,
-            config.embeddings.chunk_overlap,
         );
         if chunks.is_empty() {
             continue;
@@ -1512,6 +1538,238 @@ mod tests {
         assert!(
             sql.contains("USING vec0"),
             "expected vec0 after reopen, got: {sql}"
+        );
+    }
+
+    /// Verify that vec0 shadow tables ARE properly rolled back on transaction ROLLBACK.
+    /// If this test FAILS, it means shadow tables survive ROLLBACK, which is the root cause
+    /// of the "chunk_embeddings_info already exists" error on subsequent open_db calls.
+    #[test]
+    fn vec0_create_virtual_table_rolls_back_shadow_tables_on_rollback() {
+        let (_dir, conn) = open_test_db();
+        insert_chunk(
+            &conn,
+            &dummy_chunk("a.rs", "fn a() {}"),
+            &[0.1_f32, 0.2_f32],
+        )
+        .unwrap();
+        set_meta(&conn, "embedding_dims", "2").unwrap();
+
+        // Manually replay the migration steps, then ROLLBACK instead of COMMIT
+        conn.execute_batch("BEGIN").unwrap();
+        conn.execute_batch("ALTER TABLE chunk_embeddings RENAME TO chunk_embeddings_v1")
+            .unwrap();
+        conn.execute_batch("CREATE VIRTUAL TABLE chunk_embeddings USING vec0(embedding float[2])")
+            .unwrap();
+        // Rollback WITHOUT committing — simulates a failed migration
+        conn.execute_batch("ROLLBACK").unwrap();
+
+        // After ROLLBACK: chunk_embeddings must be the plain table again
+        let sql: Option<String> = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='chunk_embeddings'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+            .unwrap();
+        assert!(
+            sql.as_deref()
+                .map(|s| !s.contains("USING vec0"))
+                .unwrap_or(false),
+            "chunk_embeddings should be plain table after ROLLBACK, got: {sql:?}"
+        );
+
+        // The shadow tables must NOT persist after ROLLBACK
+        let info_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name='chunk_embeddings_info'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap()
+            > 0;
+        assert!(
+            !info_exists,
+            "chunk_embeddings_info must not exist after ROLLBACK of CREATE VIRTUAL TABLE"
+        );
+
+        // A subsequent migration must succeed (no leftover shadow tables to conflict)
+        maybe_migrate_to_vec0(&conn).unwrap();
+    }
+
+    /// Regression test: calling open_db on a DB that was already migrated to vec0
+    /// must not fail with "table chunk_embeddings_info already exists".
+    /// The execute_batch DDL in open_db runs `CREATE TABLE IF NOT EXISTS chunk_embeddings`
+    /// every time — it must be a true no-op when chunk_embeddings is already a vec0 VT.
+    #[test]
+    fn open_db_is_idempotent_after_vec0_migration() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Conn1: plain table setup + dims set (simulates post-index_project state)
+        let conn1 = open_db(dir.path()).unwrap();
+        insert_chunk(
+            &conn1,
+            &dummy_chunk("x.rs", "fn x() {}"),
+            &[1.0_f32, 0.0_f32],
+        )
+        .unwrap();
+        set_meta(&conn1, "embedding_dims", "2").unwrap();
+        drop(conn1);
+
+        // Conn2: open_db triggers migration → chunk_embeddings becomes vec0
+        let conn2 = open_db(dir.path()).unwrap();
+        drop(conn2);
+
+        // Conn3: open_db on already-migrated DB must NOT error with
+        // "Could not create '_info' shadow table: table chunk_embeddings_info already exists"
+        let conn3 = open_db(dir.path())
+            .expect("third open_db must succeed when chunk_embeddings is already vec0");
+        let sql: String = conn3
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name='chunk_embeddings'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            sql.contains("USING vec0"),
+            "expected vec0 to persist across opens, got: {sql}"
+        );
+
+        // Print all sqlite_master entries to understand vec0 table structure
+        let mut stmt = conn3
+            .prepare("SELECT type, name, sql FROM sqlite_master ORDER BY type, name")
+            .unwrap();
+        let rows: Vec<(String, String, Option<String>)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        eprintln!("sqlite_master after 3rd open:");
+        for (t, n, s) in &rows {
+            eprintln!("  type={t:?} name={n:?} sql={s:?}");
+        }
+    }
+
+    /// Documents the SQLite behavior that caused the TOCTOU race:
+    /// renaming a vec0 virtual table succeeds but does NOT rename its shadow
+    /// tables, so a subsequent CREATE VIRTUAL TABLE with the original name
+    /// fails because the shadow tables (e.g. chunk_embeddings_info) still
+    /// exist.  This test is deterministic and always passes — it serves as a
+    /// pinned understanding of the underlying SQLite quirk.
+    #[test]
+    fn migration_race_loser_exposes_shadow_table_conflict() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Set up: plain table + dims + data (post-index_project state)
+        let conn = open_db(dir.path()).unwrap();
+        insert_chunk(
+            &conn,
+            &dummy_chunk("a.rs", "fn a() {}"),
+            &[0.1_f32, 0.2_f32],
+        )
+        .unwrap();
+        set_meta(&conn, "embedding_dims", "2").unwrap();
+        drop(conn);
+
+        // First connection migrates successfully (plain → vec0)
+        let conn_a = open_db(dir.path()).unwrap();
+        drop(conn_a);
+
+        // Simulate what the losing connection would do WITHOUT BEGIN IMMEDIATE:
+        // it observed "plain table" before the lock, then acquired the write
+        // lock after conn_a committed.  At that point chunk_embeddings is
+        // already a vec0 VT.  ALTERing it succeeds (SQLite allows renaming VTs
+        // since 3.26.0) but shadow tables are NOT renamed.
+        let conn_b = open_db(dir.path()).unwrap();
+        conn_b
+            .execute_batch("ALTER TABLE chunk_embeddings RENAME TO chunk_embeddings_v1")
+            .expect("ALTER TABLE on vec0 VT should succeed");
+
+        // The shadow table chunk_embeddings_info still exists under its original
+        // name → CREATE VIRTUAL TABLE must fail with the shadow-table conflict.
+        let result = conn_b.execute_batch(
+            "CREATE VIRTUAL TABLE chunk_embeddings USING vec0(embedding float[2] distance_metric=cosine)",
+        );
+        assert!(
+            result.is_err(),
+            "expected shadow-table conflict but CREATE succeeded"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("already exists"),
+            "expected 'already exists' error, got: {err}"
+        );
+    }
+
+    /// Regression test: two threads racing through open_db on a migration-ready
+    /// database must both succeed.  Before the BEGIN IMMEDIATE fix the second
+    /// thread could corrupt the database and return an error.
+    #[test]
+    fn concurrent_open_db_migrations_do_not_corrupt() {
+        use std::sync::{Arc, Barrier};
+
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().to_owned();
+
+        // Set up: plain table + dims + data, then close the connection so the
+        // DB is in the "ready to migrate" state (no open connections).
+        {
+            let conn = open_db(&db_path).unwrap();
+            insert_chunk(
+                &conn,
+                &dummy_chunk("a.rs", "fn a() {}"),
+                &[0.1_f32, 0.2_f32],
+            )
+            .unwrap();
+            set_meta(&conn, "embedding_dims", "2").unwrap();
+        }
+
+        // Barrier ensures both threads call open_db at the same time, maximising
+        // the probability of the TOCTOU race manifesting without the fix.
+        let barrier = Arc::new(Barrier::new(2));
+
+        let barrier_a = Arc::clone(&barrier);
+        let path_a = db_path.clone();
+        let handle_a = std::thread::spawn(move || -> anyhow::Result<()> {
+            barrier_a.wait();
+            open_db(&path_a).map(|_| ())
+        });
+
+        let barrier_b = Arc::clone(&barrier);
+        let path_b = db_path.clone();
+        let handle_b = std::thread::spawn(move || -> anyhow::Result<()> {
+            barrier_b.wait();
+            open_db(&path_b).map(|_| ())
+        });
+
+        let result_a = handle_a.join().expect("thread A panicked");
+        let result_b = handle_b.join().expect("thread B panicked");
+
+        assert!(
+            result_a.is_ok(),
+            "thread A open_db failed: {:?}",
+            result_a.err()
+        );
+        assert!(
+            result_b.is_ok(),
+            "thread B open_db failed: {:?}",
+            result_b.err()
+        );
+
+        // Verify the DB is in the correct final state: vec0 virtual table.
+        let conn = open_db(&db_path).unwrap();
+        let sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name='chunk_embeddings'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            sql.contains("USING vec0"),
+            "expected vec0 after concurrent migration, got: {sql}"
         );
     }
 

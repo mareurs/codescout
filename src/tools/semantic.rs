@@ -178,22 +178,34 @@ impl Tool for IndexProject {
         let state_arc = ctx.agent.indexing.clone();
         tokio::spawn(async move {
             let result = crate::embed::index::build_index(&root, force).await;
-            let mut state = state_arc.lock().unwrap();
-            *state = match result {
-                Ok(report) => {
-                    let (total_files, total_chunks) =
+
+            // Gather post-index stats *before* locking the mutex so that a
+            // MutexGuard (which is !Send) is never held across an await point.
+            let stats = if result.is_ok() {
+                tokio::task::spawn_blocking({
+                    let root = root.clone();
+                    move || {
                         crate::embed::index::open_db(&root)
                             .and_then(|conn| crate::embed::index::index_stats(&conn))
                             .map(|s| (s.file_count, s.chunk_count))
-                            .unwrap_or((0, 0));
-                    IndexingState::Done {
-                        files_indexed: report.indexed,
-                        files_deleted: report.deleted,
-                        detail: report.skipped_msg,
-                        total_files,
-                        total_chunks,
+                            .unwrap_or((0, 0))
                     }
-                }
+                })
+                .await
+                .unwrap_or((0, 0))
+            } else {
+                (0, 0)
+            };
+
+            let mut state = state_arc.lock().unwrap();
+            *state = match result {
+                Ok(report) => IndexingState::Done {
+                    files_indexed: report.indexed,
+                    files_deleted: report.deleted,
+                    detail: report.skipped_msg,
+                    total_files: stats.0,
+                    total_chunks: stats.1,
+                },
                 Err(e) => IndexingState::Failed(e.to_string()),
             };
         });

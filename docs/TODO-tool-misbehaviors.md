@@ -168,6 +168,50 @@ Added `is_dir()` guard before `read_to_string`. Also converted `NotFound` to
 
 ---
 
+### BUG-006 — `index_status` / `index_project`: second call fails with shadow-table conflict
+
+**Date:** 2026-03-01
+**Severity:** High — `index_status` crashes on every call after the first post-indexing call
+**Status:** ✅ FIXED — `BEGIN IMMEDIATE` + re-check in `maybe_migrate_to_vec0`;
+`open_db` after `build_index` wrapped in `spawn_blocking`. Regression tests:
+`migration_race_loser_exposes_shadow_table_conflict`,
+`concurrent_open_db_migrations_do_not_corrupt`.
+
+**What happened:**
+First `index_status` call after `index_project` succeeds. Every subsequent call returned:
+`"Could not create '_info' shadow table: table 'chunk_embeddings_info' already exists"`.
+
+**Root cause:**
+Classic TOCTOU (time-of-check / time-of-use) race in `maybe_migrate_to_vec0`:
+
+1. `build_index` completes; `embedding_dims` is now set in `meta`; plain `chunk_embeddings`
+   holds BLOB data.
+2. `IndexProject`'s background `tokio::spawn` calls `open_db` **directly on the async
+   thread** (no `spawn_blocking`) to read post-index stats — this is connection A.
+3. `index_status` is called concurrently; its `spawn_blocking` calls `open_db` — this is
+   connection B.
+4. Both connections read `sqlite_master` *outside any transaction* and both observe
+   `"plain table"`.
+5. Connection A enters `BEGIN` (deferred), gets write lock, migrates plain → vec0,
+   commits.  Shadow tables `chunk_embeddings_info` etc. are now live.
+6. Connection B enters `BEGIN` (deferred), gets write lock.  B's view sees vec0 now.
+   B runs `ALTER TABLE chunk_embeddings RENAME TO chunk_embeddings_v1` — SQLite allows
+   renaming a virtual table since 3.26.0, **but does NOT rename shadow tables**.
+   `chunk_embeddings_info` remains under its original name.
+   B then runs `CREATE VIRTUAL TABLE chunk_embeddings USING vec0(...)` — fails with
+   `"table 'chunk_embeddings_info' already exists"`.
+
+**Fix applied:**
+- `maybe_migrate_to_vec0`: changed `BEGIN` → `BEGIN IMMEDIATE` so only one connection
+  can be attempting migration at a time.  Added a re-check inside the exclusive
+  transaction: if the table is already vec0, ROLLBACK and return `Ok(())`.
+- `IndexProject::call`: wrapped post-build `open_db` stats call in
+  `tokio::task::spawn_blocking` so it runs on a dedicated thread and the async runtime
+  is not blocked.  Also restructured to gather stats before acquiring the `Mutex` guard
+  (a `MutexGuard` is `!Send` and cannot be held across an `.await`).
+
+---
+
 ## Template for new entries
 
 ```
