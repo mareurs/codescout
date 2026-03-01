@@ -687,6 +687,99 @@ impl Tool for EditLines {
     }
 }
 
+pub struct EditFile;
+
+#[async_trait::async_trait]
+impl Tool for EditFile {
+    fn name(&self) -> &str {
+        "edit_file"
+    }
+
+    fn description(&self) -> &str {
+        "Replace an exact string in a file. old_string must match the file content exactly (including whitespace/indentation). Use replace_all: true to replace every occurrence."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["path", "old_string", "new_string"],
+            "properties": {
+                "path": { "type": "string", "description": "File path" },
+                "old_string": {
+                    "type": "string",
+                    "description": "Exact text to find (must match file content including whitespace/indentation)"
+                },
+                "new_string": {
+                    "type": "string",
+                    "description": "Replacement text. Empty string deletes the match."
+                },
+                "replace_all": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Replace all occurrences (default: first unique match only)"
+                }
+            }
+        })
+    }
+
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
+        super::guard_worktree_write(ctx).await?;
+        let path = super::require_str_param(&input, "path")?;
+        let old_string = super::require_str_param(&input, "old_string")?;
+        let new_string = input["new_string"].as_str().unwrap_or("");
+        let replace_all = input["replace_all"].as_bool().unwrap_or(false);
+
+        if old_string.is_empty() {
+            return Err(super::RecoverableError::with_hint(
+                "old_string must not be empty",
+                "To create a new file use create_file. To insert at a specific line use insert_code.",
+            )
+            .into());
+        }
+
+        let root = ctx.agent.require_project_root().await?;
+        let security = ctx.agent.security_config().await;
+        let resolved = crate::util::path_security::validate_write_path(path, &root, &security)?;
+
+        let content = std::fs::read_to_string(&resolved)?;
+
+        let match_count = content.matches(old_string).count();
+
+        if match_count == 0 {
+            return Err(super::RecoverableError::with_hint(
+                format!("old_string not found in {path}"),
+                "Check whitespace and indentation — old_string must match exactly. Use search_pattern to verify the exact text.",
+            )
+            .into());
+        }
+
+        if match_count > 1 && !replace_all {
+            let line_numbers: Vec<usize> = content
+                .match_indices(old_string)
+                .map(|(byte_offset, _)| content[..byte_offset].lines().count() + 1)
+                .collect();
+            let lines_str = line_numbers
+                .iter()
+                .map(|n| n.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(super::RecoverableError::with_hint(
+                format!(
+                    "old_string found {match_count} times (lines {lines_str}). Include more surrounding context or use replace_all: true."
+                ),
+                "Expand old_string to include unique surrounding context, or set replace_all: true to replace every occurrence.",
+            )
+            .into());
+        }
+
+        let new_content = content.replace(old_string, new_string);
+        std::fs::write(&resolved, &new_content)?;
+        ctx.lsp.notify_file_changed(&resolved).await;
+
+        Ok(json!("ok"))
+    }
+}
+
 fn render_create_header(
     path: &std::path::Path,
     lang: Option<&str>,
@@ -2418,6 +2511,225 @@ mod tests {
         assert!(
             user_text.contains("demo.rs"),
             "user block must mention filename"
+        );
+    }
+
+    // ── EditFile ──────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn edit_file_replaces_unique_match() {
+        let (dir, ctx) = project_ctx().await;
+        let file = dir.path().join("test.txt");
+        std::fs::write(&file, "hello world\n").unwrap();
+
+        let result = EditFile
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "old_string": "hello",
+                    "new_string": "goodbye"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result, json!("ok"));
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "goodbye world\n");
+    }
+
+    #[tokio::test]
+    async fn edit_file_empty_new_string_deletes() {
+        let (dir, ctx) = project_ctx().await;
+        let file = dir.path().join("test.txt");
+        std::fs::write(&file, "aaa bbb ccc\n").unwrap();
+
+        let result = EditFile
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "old_string": " bbb",
+                    "new_string": ""
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result, json!("ok"));
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "aaa ccc\n");
+    }
+
+    #[tokio::test]
+    async fn edit_file_not_found_errors() {
+        let (dir, ctx) = project_ctx().await;
+        let file = dir.path().join("test.txt");
+        std::fs::write(&file, "hello world\n").unwrap();
+
+        let err = EditFile
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "old_string": "does not exist",
+                    "new_string": "replacement"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("not found"),
+            "error should mention 'not found', got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_file_multiple_matches_without_replace_all_errors() {
+        let (dir, ctx) = project_ctx().await;
+        let file = dir.path().join("test.txt");
+        std::fs::write(&file, "foo bar foo baz foo\n").unwrap();
+
+        let err = EditFile
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "old_string": "foo",
+                    "new_string": "qux"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("3 times"),
+            "error should mention '3 times', got: {msg}"
+        );
+        // File must be untouched
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "foo bar foo baz foo\n");
+    }
+
+    #[tokio::test]
+    async fn edit_file_replace_all_replaces_all_occurrences() {
+        let (dir, ctx) = project_ctx().await;
+        let file = dir.path().join("test.txt");
+        std::fs::write(&file, "foo bar foo baz foo\n").unwrap();
+
+        let result = EditFile
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "old_string": "foo",
+                    "new_string": "qux",
+                    "replace_all": true
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result, json!("ok"));
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "qux bar qux baz qux\n");
+    }
+
+    #[tokio::test]
+    async fn edit_file_empty_old_string_errors() {
+        let (dir, ctx) = project_ctx().await;
+        let file = dir.path().join("test.txt");
+        std::fs::write(&file, "some content\n").unwrap();
+
+        let err = EditFile
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "old_string": "",
+                    "new_string": "replacement"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+
+        let msg = err.to_string();
+        assert!(!msg.is_empty(), "expected an error for empty old_string");
+    }
+
+    #[tokio::test]
+    async fn edit_file_multiline_replace() {
+        let (dir, ctx) = project_ctx().await;
+        let file = dir.path().join("test.txt");
+        std::fs::write(&file, "fn old() {\n    todo!()\n}\n").unwrap();
+
+        let result = EditFile
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "old_string": "fn old() {\n    todo!()\n}",
+                    "new_string": "fn new_func() {\n    42\n}"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result, json!("ok"));
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "fn new_func() {\n    42\n}\n");
+    }
+
+    #[tokio::test]
+    async fn edit_file_whitespace_sensitive() {
+        let (dir, ctx) = project_ctx().await;
+        let file = dir.path().join("test.txt");
+        std::fs::write(&file, "    indented\n").unwrap();
+
+        // old_string without leading spaces still matches as a substring
+        let result = EditFile
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "old_string": "indented",
+                    "new_string": "replaced"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result, json!("ok"));
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "    replaced\n");
+    }
+
+    #[tokio::test]
+    async fn edit_file_returns_ok_string() {
+        let (dir, ctx) = project_ctx().await;
+        let file = dir.path().join("test.txt");
+        std::fs::write(&file, "hello world\n").unwrap();
+
+        let result = EditFile
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "old_string": "hello",
+                    "new_string": "goodbye"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result, json!("ok"));
+        assert!(
+            result.is_string(),
+            "response must be a plain string, not an object"
         );
     }
 }
