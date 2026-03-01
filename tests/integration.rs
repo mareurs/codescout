@@ -566,3 +566,160 @@ async fn write_allowed_when_project_provided_at_startup_even_with_worktrees() {
 
     drop(dir);
 }
+
+// ---------------------------------------------------------------------------
+// Workflow: run_command large output → buffer → grep via buffer ref
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[tokio::test]
+async fn integration_run_command_buffer_round_trip() {
+    use code_explorer::tools::workflow::RunCommand;
+
+    let (dir, ctx) = project_with_files(&[("README.md", "# test\n")]).await;
+
+    // Generate > 50 lines so output gets buffered
+    let r1 = RunCommand
+        .call(json!({ "command": "seq 1 100", "timeout_secs": 10 }), &ctx)
+        .await
+        .unwrap();
+    let output_id = r1["output_id"]
+        .as_str()
+        .expect("seq 1 100 (100 lines) should be buffered and return output_id");
+    assert!(
+        output_id.starts_with("@cmd_"),
+        "output_id should start with @cmd_, got: {}",
+        output_id
+    );
+
+    // Query the buffer ref with grep
+    let r2 = RunCommand
+        .call(
+            json!({
+                "command": format!("grep '^50$' {}", output_id),
+                "timeout_secs": 10
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(r2["exit_code"], 0, "grep should succeed: {r2:?}");
+    assert_eq!(
+        r2["stdout"].as_str().unwrap().trim(),
+        "50",
+        "grep result should be '50': {r2:?}"
+    );
+
+    drop(dir);
+}
+
+// ---------------------------------------------------------------------------
+// Workflow: read_file on large file → file_id buffer → grep via buffer ref
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[tokio::test]
+async fn integration_read_file_large_then_query_via_buffer() {
+    use code_explorer::tools::file::ReadFile;
+    use code_explorer::tools::workflow::RunCommand;
+
+    // Build a file with 250 lines (above the 200-line FILE_BUFFER_THRESHOLD)
+    let content: String = (1..=250).map(|i| format!("entry {}\n", i)).collect();
+    let (dir, ctx) = project_with_files(&[("big.txt", &content)]).await;
+    let path = dir.path().join("big.txt").display().to_string();
+
+    let r1 = ReadFile.call(json!({ "path": &path }), &ctx).await.unwrap();
+    let file_id = r1["file_id"]
+        .as_str()
+        .expect("250-line file should be buffered and return file_id");
+    assert!(
+        file_id.starts_with("@file_"),
+        "file_id should start with @file_, got: {}",
+        file_id
+    );
+
+    // Query the buffer with grep
+    let r2 = RunCommand
+        .call(
+            json!({
+                "command": format!("grep 'entry 200' {}", file_id),
+                "timeout_secs": 10
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(r2["exit_code"], 0, "grep should succeed: {r2:?}");
+    assert!(
+        r2["stdout"].as_str().unwrap().contains("entry 200"),
+        "grep result should contain 'entry 200': {r2:?}"
+    );
+
+    drop(dir);
+}
+
+// ---------------------------------------------------------------------------
+// Workflow: dangerous command → speed bump → acknowledged execution
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[tokio::test]
+async fn integration_speed_bump_two_round_trips() {
+    use code_explorer::tools::workflow::RunCommand;
+    use code_explorer::tools::RecoverableError;
+
+    let (dir, ctx) = project_with_files(&[("README.md", "# test\n")]).await;
+
+    // First call: dangerous command should be blocked as RecoverableError
+    let r1 = RunCommand
+        .call(
+            json!({ "command": "rm -rf /tmp/ce_integration_test_nonexistent_dir" }),
+            &ctx,
+        )
+        .await;
+    assert!(r1.is_err(), "dangerous command should be blocked");
+    let err = r1.unwrap_err();
+    let rec = err
+        .downcast_ref::<RecoverableError>()
+        .expect("blocked command should produce a RecoverableError");
+    assert!(
+        rec.message.to_lowercase().contains("dangerous"),
+        "error message should mention dangerous, got: {}",
+        rec.message
+    );
+    assert!(
+        rec.hint
+            .as_deref()
+            .unwrap_or("")
+            .contains("acknowledge_risk"),
+        "hint should mention acknowledge_risk, got: {:?}",
+        rec.hint
+    );
+
+    // Second call: with acknowledge_risk=true → command runs (rm on nonexistent path is fine)
+    let r2 = RunCommand
+        .call(
+            json!({
+                "command": "rm -rf /tmp/ce_integration_test_nonexistent_dir",
+                "acknowledge_risk": true,
+                "timeout_secs": 10
+            }),
+            &ctx,
+        )
+        .await;
+    // The command may exit non-zero (path doesn't exist) but must NOT be a dangerous block
+    match &r2 {
+        Ok(_) => {} // happy path
+        Err(e) => {
+            // Acceptable only if it is NOT a "dangerous command blocked" error
+            let msg = e.to_string().to_lowercase();
+            assert!(
+                !msg.contains("dangerous command blocked"),
+                "acknowledged command should not be blocked as dangerous, got: {}",
+                msg
+            );
+        }
+    }
+
+    drop(dir);
+}
