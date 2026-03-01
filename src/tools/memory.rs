@@ -34,9 +34,14 @@ impl Tool for WriteMemory {
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         let topic = super::require_str_param(&input, "topic")?;
         let content = super::require_str_param(&input, "content")?;
+        let private = input["private"].as_bool().unwrap_or(false);
         ctx.agent
             .with_project(|p| {
-                p.memory.write(topic, content)?;
+                if private {
+                    p.private_memory.write(topic, content)?;
+                } else {
+                    p.memory.write(topic, content)?;
+                }
                 Ok(json!({ "status": "ok", "topic": topic }))
             })
             .await
@@ -70,10 +75,18 @@ impl Tool for ReadMemory {
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         let topic = super::require_str_param(&input, "topic")?;
+        let private = input["private"].as_bool().unwrap_or(false);
         ctx.agent
-            .with_project(|p| match p.memory.read(topic)? {
-                Some(content) => Ok(json!({ "topic": topic, "content": content })),
-                None => Ok(json!({ "topic": topic, "content": null, "message": "not found" })),
+            .with_project(|p| {
+                let store = if private {
+                    &p.private_memory
+                } else {
+                    &p.memory
+                };
+                match store.read(topic)? {
+                    Some(content) => Ok(json!({ "topic": topic, "content": content })),
+                    None => Ok(json!({ "topic": topic, "content": null, "message": "not found" })),
+                }
             })
             .await
     }
@@ -139,9 +152,14 @@ impl Tool for DeleteMemory {
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         let topic = super::require_str_param(&input, "topic")?;
+        let private = input["private"].as_bool().unwrap_or(false);
         ctx.agent
             .with_project(|p| {
-                p.memory.delete(topic)?;
+                if private {
+                    p.private_memory.delete(topic)?;
+                } else {
+                    p.memory.delete(topic)?;
+                }
                 Ok(json!({ "status": "ok", "topic": topic }))
             })
             .await
@@ -346,5 +364,78 @@ mod tests {
         let schema = ListMemories.input_schema();
         assert!(schema["properties"]["include_private"].is_object());
         assert_eq!(schema["properties"]["include_private"]["type"], "boolean");
+    }
+
+    #[tokio::test]
+    async fn write_private_goes_to_private_store() {
+        let (_dir, ctx) = test_ctx_with_project().await;
+        WriteMemory
+            .call(
+                json!({"topic": "prefs", "content": "verbose", "private": true}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        // not in shared store
+        let shared = ctx
+            .agent
+            .with_project(|p| p.memory.read("prefs"))
+            .await
+            .unwrap();
+        assert_eq!(shared, None);
+        // is in private store
+        let private = ctx
+            .agent
+            .with_project(|p| p.private_memory.read("prefs"))
+            .await
+            .unwrap();
+        assert_eq!(private, Some("verbose".to_string()));
+    }
+
+    #[tokio::test]
+    async fn read_private_reads_from_private_store() {
+        let (_dir, ctx) = test_ctx_with_project().await;
+        ctx.agent
+            .with_project(|p| p.private_memory.write("wip", "issue-42"))
+            .await
+            .unwrap();
+        let result = ReadMemory
+            .call(json!({"topic": "wip", "private": true}), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["content"], "issue-42");
+    }
+
+    #[tokio::test]
+    async fn read_private_does_not_see_shared() {
+        let (_dir, ctx) = test_ctx_with_project().await;
+        ctx.agent
+            .with_project(|p| p.memory.write("shared-topic", "data"))
+            .await
+            .unwrap();
+        let result = ReadMemory
+            .call(json!({"topic": "shared-topic", "private": true}), &ctx)
+            .await
+            .unwrap();
+        assert!(result["content"].is_null());
+    }
+
+    #[tokio::test]
+    async fn delete_private_removes_from_private_store() {
+        let (_dir, ctx) = test_ctx_with_project().await;
+        ctx.agent
+            .with_project(|p| p.private_memory.write("tmp", "gone"))
+            .await
+            .unwrap();
+        DeleteMemory
+            .call(json!({"topic": "tmp", "private": true}), &ctx)
+            .await
+            .unwrap();
+        let result = ctx
+            .agent
+            .with_project(|p| p.private_memory.read("tmp"))
+            .await
+            .unwrap();
+        assert_eq!(result, None);
     }
 }
