@@ -22,6 +22,8 @@ pub struct BufferEntry {
     pub stderr: String,
     pub exit_code: i32,
     pub timestamp: u64,
+    /// Set only for `@file_*` entries. Enables mtime-based auto-refresh in `get()`.
+    pub source_path: Option<PathBuf>,
 }
 
 /// A dangerous command held pending agent acknowledgment.
@@ -94,6 +96,7 @@ impl OutputBuffer {
             stderr,
             exit_code,
             timestamp: now,
+            source_path: None,
         };
 
         inner.entries.insert(id.clone(), entry);
@@ -140,11 +143,12 @@ impl OutputBuffer {
             }
         }
         let entry = BufferEntry {
-            command: path,
+            command: path.clone(),
             stdout: content,
             stderr: String::new(),
             exit_code: 0,
             timestamp: now,
+            source_path: Some(PathBuf::from(&path)),
         };
         inner.entries.insert(id.clone(), entry);
         inner.order.push(id.clone());
@@ -176,6 +180,7 @@ impl OutputBuffer {
             stderr: String::new(),
             exit_code: 0,
             timestamp: now,
+            source_path: None,
         };
         inner.entries.insert(id.clone(), entry);
         inner.order.push(id.clone());
@@ -712,5 +717,29 @@ mod tests {
             msg.contains("ack handle"),
             "error should mention 'ack handle', got: {msg}"
         );
+    }
+
+    #[test]
+    fn store_file_sets_source_path() {
+        let buf = OutputBuffer::new(10);
+        let id = buf.store_file("/tmp/foo.rs".to_string(), "content".to_string());
+        let entry = buf.get(&id).unwrap();
+        assert_eq!(entry.source_path, Some(PathBuf::from("/tmp/foo.rs")));
+    }
+
+    #[test]
+    fn store_cmd_has_no_source_path() {
+        let buf = OutputBuffer::new(10);
+        let id = buf.store("echo hi".to_string(), "hi".to_string(), "".to_string(), 0);
+        let entry = buf.get(&id).unwrap();
+        assert_eq!(entry.source_path, None);
+    }
+
+    #[test]
+    fn store_tool_has_no_source_path() {
+        let buf = OutputBuffer::new(10);
+        let id = buf.store_tool("my_tool", "output".to_string());
+        let entry = buf.get(&id).unwrap();
+        assert_eq!(entry.source_path, None);
     }
 }
