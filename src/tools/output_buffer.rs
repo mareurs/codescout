@@ -47,9 +47,12 @@ struct BufferInner {
     order: Vec<String>,
     max_entries: usize,
     counter: u64,
-    // --- pending-ack store ---
+    // --- pending-ack store (methods added in Task 2) ---
+    #[allow(dead_code)]
     pending_acks: HashMap<String, PendingAckCommand>,
+    #[allow(dead_code)]
     pending_order: Vec<String>,
+    #[allow(dead_code)]
     max_pending: usize,
 }
 
