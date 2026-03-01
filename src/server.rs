@@ -27,7 +27,7 @@ use crate::tools::{
     semantic::{IndexProject, IndexStatus, SemanticSearch},
     symbol::{
         FindReferences, FindSymbol, GotoDefinition, Hover, InsertCode, ListSymbols, RenameSymbol,
-        ReplaceSymbol,
+        RemoveSymbol, ReplaceSymbol,
     },
     usage::GetUsageStats,
     workflow::{Onboarding, RunCommand},
@@ -76,6 +76,7 @@ impl CodeExplorerServer {
             Arc::new(Hover),
             Arc::new(ListSymbols),
             Arc::new(ReplaceSymbol),
+            Arc::new(RemoveSymbol),
             Arc::new(InsertCode),
             Arc::new(RenameSymbol),
             // AST tools (stub — require tree-sitter wiring)
@@ -447,6 +448,7 @@ mod tests {
             "replace_symbol",
             "insert_code",
             "rename_symbol",
+            "remove_symbol",
             "goto_definition",
             "hover",
             "list_functions",
