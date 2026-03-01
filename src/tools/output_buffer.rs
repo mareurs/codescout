@@ -268,9 +268,7 @@ impl OutputBuffer {
     /// filesystem — they only read from in-memory output buffers materialized
     /// as read-only temp files.
     pub fn is_buffer_only(command: &str) -> bool {
-        if !command.contains("@cmd_")
-            && !command.contains("@file_")
-            && !command.contains("@tool_")
+        if !command.contains("@cmd_") && !command.contains("@file_") && !command.contains("@tool_")
         {
             return false;
         }
