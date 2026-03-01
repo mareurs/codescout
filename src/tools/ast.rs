@@ -67,6 +67,10 @@ impl Tool for ListFunctions {
             "total": functions.len(),
         }))
     }
+
+    fn format_for_user(&self, result: &Value) -> Option<String> {
+        Some(crate::tools::user_format::format_list_functions(result))
+    }
 }
 
 fn collect_functions(symbols: &[crate::lsp::symbols::SymbolInfo], out: &mut Vec<Value>) {
@@ -141,6 +145,10 @@ impl Tool for ListDocs {
             "total": results.len(),
         }))
     }
+
+    fn format_for_user(&self, result: &Value) -> Option<String> {
+        Some(crate::tools::user_format::format_list_docs(result))
+    }
 }
 
 #[cfg(test)]
@@ -166,6 +174,7 @@ mod tests {
                 output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(
                     20,
                 )),
+                progress: None,
             },
         )
     }
@@ -266,6 +275,7 @@ mod tests {
             agent,
             lsp: LspManager::new_arc(),
             output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
         };
         let result = ListFunctions
             .call(json!({ "path": "nonexistent.rs" }), &ctx)
@@ -363,5 +373,23 @@ mod tests {
         let tool = ListFunctions;
         let schema = tool.input_schema();
         assert!(schema["properties"]["scope"].is_object());
+    }
+
+    #[test]
+    fn list_functions_format_for_user_shows_count() {
+        use serde_json::json;
+        let tool = ListFunctions;
+        let result = json!({ "functions": [{"name":"foo"}, {"name":"bar"}], "file": "src/a.rs" });
+        let text = tool.format_for_user(&result).unwrap();
+        assert!(text.contains("2"), "got: {text}");
+    }
+
+    #[test]
+    fn list_docs_format_for_user_shows_count() {
+        use serde_json::json;
+        let tool = ListDocs;
+        let result = json!({ "docstrings": [{"symbol":"Foo"}], "file": "src/a.rs" });
+        let text = tool.format_for_user(&result).unwrap();
+        assert!(text.contains("1"), "got: {text}");
     }
 }

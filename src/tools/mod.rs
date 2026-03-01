@@ -13,6 +13,7 @@ pub mod library;
 pub mod memory;
 pub mod output;
 pub mod output_buffer;
+pub mod progress;
 pub mod semantic;
 pub mod symbol;
 pub mod usage;
@@ -38,6 +39,7 @@ pub struct ToolContext {
     pub agent: Agent,
     pub lsp: Arc<dyn LspProvider>,
     pub output_buffer: Arc<output_buffer::OutputBuffer>,
+    pub progress: Option<Arc<progress::ProgressReporter>>,
 }
 
 /// A recoverable tool error: the LLM gave bad input and can self-correct.
@@ -213,6 +215,14 @@ pub trait Tool: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tool_context_has_progress_field() {
+        // Compile-only test: ensures the progress field exists and has the right type.
+        fn _check_progress_field_type(_ctx: &ToolContext) {
+            let _p: &Option<std::sync::Arc<progress::ProgressReporter>> = &_ctx.progress;
+        }
+    }
 
     #[test]
     fn recoverable_error_stores_message() {

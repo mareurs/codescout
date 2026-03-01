@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use super::{Tool, ToolContext};
+use super::{user_format, Tool, ToolContext};
 use serde_json::{json, Value};
 
 pub struct Onboarding;
@@ -419,6 +419,10 @@ impl Tool for Onboarding {
             "system_prompt_draft": system_prompt_draft,
         }))
     }
+
+    fn format_for_user(&self, result: &Value) -> Option<String> {
+        Some(user_format::format_onboarding(result))
+    }
 }
 #[async_trait::async_trait]
 impl Tool for RunCommand {
@@ -484,6 +488,10 @@ impl Tool for RunCommand {
 
         OutputBuffer::cleanup_temp_files(&temp_files);
         result
+    }
+
+    fn format_for_user(&self, result: &Value) -> Option<String> {
+        Some(user_format::format_run_command(result))
     }
 }
 
@@ -587,6 +595,25 @@ async fn run_command_inner(
         .arg(resolved_command)
         .current_dir(&work_dir)
         .output();
+
+    // Heartbeat: send elapsed-seconds progress every 3s while the command runs.
+    // AbortOnDrop guarantees the task is cancelled even when early `return`s fire.
+    struct AbortOnDrop(tokio::task::JoinHandle<()>);
+    impl Drop for AbortOnDrop {
+        fn drop(&mut self) {
+            self.0.abort();
+        }
+    }
+    let progress_clone = ctx.progress.clone();
+    let _heartbeat = AbortOnDrop(tokio::spawn(async move {
+        let start = std::time::Instant::now();
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            if let Some(p) = &progress_clone {
+                p.report(start.elapsed().as_secs() as u32, None).await;
+            }
+        }
+    }));
 
     match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), child).await {
         Ok(Ok(output)) => {
@@ -787,6 +814,7 @@ mod tests {
                 output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(
                     20,
                 )),
+                progress: None,
             },
         )
     }
@@ -854,6 +882,7 @@ mod tests {
             agent: Agent::new(None).await.unwrap(),
             lsp: lsp(),
             output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
         };
         assert!(Onboarding.call(json!({}), &ctx).await.is_err());
     }
@@ -1039,6 +1068,7 @@ mod tests {
             agent,
             lsp: lsp(),
             output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
         };
         let result = Onboarding.call(json!({}), &ctx).await.unwrap();
 
@@ -1064,6 +1094,7 @@ mod tests {
             agent,
             lsp: lsp(),
             output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
         };
         let result = Onboarding.call(json!({}), &ctx).await.unwrap();
 
@@ -1659,5 +1690,26 @@ mod tests {
             !draft.contains("impl Trait for Type"),
             "rust hints should not leak into python-only draft"
         );
+    }
+
+    #[test]
+    fn run_command_format_for_user_test_result() {
+        let tool = RunCommand;
+        let result = json!({
+            "type": "test", "exit_code": 0,
+            "passed": 533, "failed": 0, "ignored": 0,
+            "output_id": "@cmd_abc123"
+        });
+        let text = tool.format_for_user(&result).unwrap();
+        assert!(text.contains("533"), "got: {text}");
+        assert!(text.contains("passed"), "got: {text}");
+    }
+
+    #[test]
+    fn run_command_format_for_user_short_output() {
+        let tool = RunCommand;
+        let result = json!({ "stdout": "hello\nworld", "stderr": "", "exit_code": 0 });
+        let text = tool.format_for_user(&result).unwrap();
+        assert!(text.contains("exit 0"), "got: {text}");
     }
 }

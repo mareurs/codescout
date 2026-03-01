@@ -47,6 +47,10 @@ impl Tool for ActivateProject {
             .await?;
         Ok(json!({ "status": "ok", "activated": config }))
     }
+
+    fn format_for_user(&self, result: &Value) -> Option<String> {
+        Some(super::user_format::format_activate_project(result))
+    }
 }
 
 #[async_trait::async_trait]
@@ -70,6 +74,10 @@ impl Tool for GetConfig {
             })
             .await
     }
+
+    fn format_for_user(&self, result: &Value) -> Option<String> {
+        Some(super::user_format::format_get_config(result))
+    }
 }
 
 #[cfg(test)]
@@ -91,6 +99,7 @@ mod tests {
             agent: Agent::new(None).await.unwrap(),
             lsp: lsp(),
             output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
         };
 
         // No project initially
@@ -120,6 +129,7 @@ mod tests {
             agent: Agent::new(None).await.unwrap(),
             lsp: lsp(),
             output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
         };
         let result = ActivateProject
             .call(
@@ -143,6 +153,7 @@ mod tests {
             agent: Agent::new(Some(dir1.path().to_path_buf())).await.unwrap(),
             lsp: lsp(),
             output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
         };
 
         // Activate dir2

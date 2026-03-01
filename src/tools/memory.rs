@@ -1,6 +1,6 @@
 //! Memory tools: persistent per-project knowledge store.
 
-use super::{Tool, ToolContext};
+use super::{user_format, Tool, ToolContext};
 use serde_json::{json, Value};
 
 pub struct WriteMemory;
@@ -37,6 +37,10 @@ impl Tool for WriteMemory {
             })
             .await
     }
+
+    fn format_for_user(&self, result: &Value) -> Option<String> {
+        Some(user_format::format_write_memory(result))
+    }
 }
 
 #[async_trait::async_trait]
@@ -63,6 +67,10 @@ impl Tool for ReadMemory {
             })
             .await
     }
+
+    fn format_for_user(&self, result: &Value) -> Option<String> {
+        Some(user_format::format_read_memory(result))
+    }
 }
 
 #[async_trait::async_trait]
@@ -83,6 +91,10 @@ impl Tool for ListMemories {
                 Ok(json!({ "topics": topics }))
             })
             .await
+    }
+
+    fn format_for_user(&self, result: &Value) -> Option<String> {
+        Some(user_format::format_list_memories(result))
     }
 }
 
@@ -110,6 +122,10 @@ impl Tool for DeleteMemory {
             })
             .await
     }
+
+    fn format_for_user(&self, result: &Value) -> Option<String> {
+        Some(user_format::format_delete_memory(result))
+    }
 }
 
 #[cfg(test)]
@@ -136,6 +152,7 @@ mod tests {
                 output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(
                     20,
                 )),
+                progress: None,
             },
         )
     }
@@ -145,6 +162,7 @@ mod tests {
             agent: Agent::new(None).await.unwrap(),
             lsp: lsp(),
             output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
         }
     }
 
@@ -258,5 +276,23 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result["content"], "avoid blocking the runtime");
+    }
+
+    #[test]
+    fn write_memory_format_for_user() {
+        use serde_json::json;
+        let tool = WriteMemory;
+        let r = json!({ "status": "ok", "topic": "arch" });
+        let t = tool.format_for_user(&r).unwrap();
+        assert!(t.contains("arch"), "got: {t}");
+    }
+
+    #[test]
+    fn list_memories_format_for_user() {
+        use serde_json::json;
+        let tool = ListMemories;
+        let r = json!({ "topics": ["a", "b", "c"] });
+        let t = tool.format_for_user(&r).unwrap();
+        assert!(t.contains("3"), "got: {t}");
     }
 }

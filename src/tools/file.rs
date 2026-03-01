@@ -594,6 +594,10 @@ impl Tool for FindFile {
         }
         Ok(result)
     }
+
+    fn format_for_user(&self, result: &Value) -> Option<String> {
+        Some(user_format::format_find_file(result))
+    }
 }
 
 pub struct EditFile;
@@ -691,6 +695,54 @@ impl Tool for EditFile {
             Some(h) => json!({ "worktree_hint": h }),
         })
     }
+
+    async fn call_content(&self, input: Value, ctx: &ToolContext) -> Result<Vec<Content>> {
+        // Clone strings before moving `input` into self.call()
+        let path = super::require_str_param(&input, "path")?.to_owned();
+        let old_string = super::require_str_param(&input, "old_string")?.to_owned();
+        let new_string = input["new_string"].as_str().unwrap_or("").to_owned();
+
+        // Find line position of old_string before the write
+        let start_line: Option<usize> = async {
+            let root = ctx.agent.require_project_root().await.ok()?;
+            let security = ctx.agent.security_config().await;
+            let resolved =
+                crate::util::path_security::validate_write_path(&path, &root, &security).ok()?;
+            let content = std::fs::read_to_string(&resolved).ok()?;
+            let byte_pos = content.find(old_string.as_str())?;
+            Some(content[..byte_pos].lines().count() + 1)
+        }
+        .await;
+
+        // Execute the write
+        let result = self.call(input, ctx).await?;
+
+        // Build compact summary line
+        let old_line_count = old_string.lines().count();
+        let new_line_count = new_string.lines().count();
+        let diff_note = if old_line_count == new_line_count {
+            format!("{old_line_count} lines replaced")
+        } else {
+            let delta = new_line_count as i64 - old_line_count as i64;
+            let sign = if delta >= 0 { "+" } else { "" };
+            format!("-{old_line_count} +{new_line_count} ({sign}{delta})")
+        };
+        let summary = match start_line {
+            Some(l) => format!("{path} → L{l} · {diff_note}"),
+            None => format!("{path} → {diff_note}"),
+        };
+
+        // Build ANSI diff viewer
+        let header = user_format::render_diff_header("edit_file", &path);
+        let diff = user_format::render_edit_diff(&path, &old_string, &new_string, start_line);
+        let user_text = format!("{summary}\n\n{header}\n{diff}");
+
+        let json_str = serde_json::to_string(&result).unwrap_or_else(|_| "\"ok\"".into());
+        Ok(vec![
+            Content::text(json_str).with_audience(vec![Role::Assistant]),
+            Content::text(user_text).with_audience(vec![Role::User]),
+        ])
+    }
 }
 
 fn render_create_header(
@@ -737,6 +789,7 @@ mod tests {
             agent: Agent::new(None).await.unwrap(),
             lsp: LspManager::new_arc(),
             output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
         }
     }
 
@@ -752,6 +805,7 @@ mod tests {
                 output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(
                     20,
                 )),
+                progress: None,
             },
         )
     }
@@ -2434,5 +2488,24 @@ mod tests {
             result.is_string(),
             "response must be a plain string, not an object"
         );
+    }
+
+    #[test]
+    fn find_file_format_for_user_shows_count() {
+        use serde_json::json;
+        let tool = FindFile;
+        let result = json!({ "files": ["src/a.rs", "src/b.rs"], "total": 2 });
+        let text = tool.format_for_user(&result).unwrap();
+        assert!(text.contains("2 files"), "got: {text}");
+    }
+
+    #[test]
+    fn edit_file_call_content_user_block_contains_diff() {
+        let header = user_format::render_diff_header("edit_file", "src/a.rs");
+        let diff = user_format::render_edit_diff("src/a.rs", "old text", "new text", Some(5));
+        let user_block = format!("{header}\n{diff}");
+        assert!(user_block.contains("old text"), "got: {user_block}");
+        assert!(user_block.contains("new text"), "got: {user_block}");
+        assert!(user_block.contains("\x1b["), "no ANSI: {user_block}");
     }
 }

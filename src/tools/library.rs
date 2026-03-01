@@ -49,6 +49,10 @@ impl Tool for ListLibraries {
 
         Ok(json!({ "libraries": libs }))
     }
+
+    fn format_for_user(&self, result: &Value) -> Option<String> {
+        Some(crate::tools::user_format::format_list_libraries(result))
+    }
 }
 
 pub struct IndexLibrary;
@@ -138,6 +142,10 @@ impl Tool for IndexLibrary {
             "chunks": chunk_count,
         }))
     }
+
+    fn format_for_user(&self, result: &Value) -> Option<String> {
+        Some(crate::tools::user_format::format_index_library(result))
+    }
 }
 
 #[cfg(test)]
@@ -158,6 +166,7 @@ mod tests {
             agent,
             lsp: LspManager::new_arc(),
             output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
         }
     }
 
@@ -198,6 +207,7 @@ mod tests {
             agent,
             lsp: LspManager::new_arc(),
             output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
         };
         let tool = ListLibraries;
         let result = tool.call(json!({}), &ctx).await;

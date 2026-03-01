@@ -38,6 +38,7 @@ async fn ctx_with_mock(
         output_buffer: std::sync::Arc::new(code_explorer::tools::output_buffer::OutputBuffer::new(
             20,
         )),
+        progress: None,
     };
     (dir, ctx)
 }

@@ -24,6 +24,7 @@ use crate::tools::{
     git::GitBlame,
     library::{IndexLibrary, ListLibraries},
     memory::{DeleteMemory, ListMemories, ReadMemory, WriteMemory},
+    progress,
     semantic::{IndexProject, IndexStatus, SemanticSearch},
     symbol::{
         FindReferences, FindSymbol, GotoDefinition, Hover, InsertCode, ListSymbols, RemoveSymbol,
@@ -165,7 +166,7 @@ impl ServerHandler for CodeExplorerServer {
     async fn call_tool(
         &self,
         req: CallToolRequestParam,
-        _ctx: RequestContext<RoleServer>,
+        req_ctx: RequestContext<RoleServer>,
     ) -> std::result::Result<CallToolResult, McpError> {
         let tool = self.find_tool(&req.name).ok_or_else(|| {
             McpError::invalid_params(format!("unknown tool: '{}'", req.name), None)
@@ -182,10 +183,15 @@ impl ServerHandler for CodeExplorerServer {
             .map(Value::Object)
             .unwrap_or(Value::Object(Default::default()));
 
+        let progress = Some(progress::ProgressReporter::new(
+            req_ctx.peer.clone(),
+            req_ctx.id.clone(),
+        ));
         let ctx = ToolContext {
             agent: self.agent.clone(),
             lsp: self.lsp.clone(),
             output_buffer: self.output_buffer.clone(),
+            progress,
         };
 
         let timeout_secs = if tool_skips_server_timeout(&req.name) {

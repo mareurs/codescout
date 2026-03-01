@@ -27,6 +27,7 @@ async fn project_with_files(files: &[(&str, &str)]) -> (tempfile::TempDir, ToolC
         output_buffer: std::sync::Arc::new(code_explorer::tools::output_buffer::OutputBuffer::new(
             20,
         )),
+        progress: None,
     };
     (dir, ctx)
 }
@@ -240,6 +241,7 @@ async fn workflow_git_blame() {
         output_buffer: std::sync::Arc::new(code_explorer::tools::output_buffer::OutputBuffer::new(
             20,
         )),
+        progress: None,
     };
 
     // Step 1: Create a file via tool
@@ -555,6 +557,7 @@ async fn write_allowed_when_project_provided_at_startup_even_with_worktrees() {
         output_buffer: std::sync::Arc::new(code_explorer::tools::output_buffer::OutputBuffer::new(
             20,
         )),
+        progress: None,
     };
 
     // 3. Write should succeed — worktree guard bypassed because project was

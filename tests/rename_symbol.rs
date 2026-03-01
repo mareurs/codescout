@@ -32,6 +32,7 @@ async fn project(files: &[(&str, &str)]) -> (tempfile::TempDir, ToolContext) {
         agent,
         lsp: Arc::new(LspManager::new()),
         output_buffer: Arc::new(code_explorer::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
     };
     (dir, ctx)
 }

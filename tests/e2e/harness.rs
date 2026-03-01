@@ -44,6 +44,7 @@ async fn fixture_context(language: &str) -> Arc<ToolContext> {
         agent,
         lsp,
         output_buffer: Arc::new(code_explorer::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
     })
 }
 

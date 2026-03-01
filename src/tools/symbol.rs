@@ -917,6 +917,10 @@ impl Tool for FindReferences {
         }
         Ok(result)
     }
+
+    fn format_for_user(&self, result: &Value) -> Option<String> {
+        Some(user_format::format_find_references(result))
+    }
 }
 
 pub struct GotoDefinition;
@@ -1274,6 +1278,41 @@ impl Tool for ReplaceSymbol {
         }
         Ok(resp)
     }
+
+    fn format_for_user(&self, result: &Value) -> Option<String> {
+        Some(user_format::format_replace_symbol(result))
+    }
+
+    async fn call_content(
+        &self,
+        input: Value,
+        ctx: &ToolContext,
+    ) -> anyhow::Result<Vec<rmcp::model::Content>> {
+        use rmcp::model::Role;
+
+        let path = input["path"].as_str().unwrap_or("?").to_owned();
+        let name_path = input["name_path"].as_str().unwrap_or("?").to_owned();
+        let new_body = input["new_body"].as_str().unwrap_or("").to_owned();
+
+        let result = self.call(input, ctx).await?;
+
+        let replaced_range = result["replaced_lines"].as_str().unwrap_or("?");
+        let summary = format!("{path} · {name_path} → L{replaced_range}");
+
+        let header = user_format::render_diff_header("replace_symbol", &path);
+        let insert_note = format!(
+            "\x1b[1;32m+++ {} lines at L{}\x1b[0m\n",
+            new_body.lines().count(),
+            replaced_range.split('-').next().unwrap_or("?"),
+        );
+        let user_text = format!("{summary}\n\n{header}\n{insert_note}");
+
+        let json_str = serde_json::to_string(&result).unwrap_or_else(|_| "\"ok\"".into());
+        Ok(vec![
+            rmcp::model::Content::text(json_str).with_audience(vec![Role::Assistant]),
+            rmcp::model::Content::text(user_text).with_audience(vec![Role::User]),
+        ])
+    }
 }
 
 // ── remove_symbol ──────────────────────────────────────────────────────────
@@ -1338,10 +1377,21 @@ impl Tool for RemoveSymbol {
         ctx.lsp.notify_file_changed(&full_path).await;
         let root = ctx.agent.require_project_root().await?;
         let hint = crate::util::path_security::worktree_hint(&root);
-        Ok(match hint {
-            None => json!("ok"),
-            Some(h) => json!({ "worktree_hint": h }),
-        })
+        let line_count = end - start;
+        let removed_range = format!("{}-{}", start + 1, end);
+        let mut resp = json!({
+            "status": "ok",
+            "removed_lines": removed_range,
+            "line_count": line_count,
+        });
+        if let Some(h) = hint {
+            resp["worktree_hint"] = json!(h);
+        }
+        Ok(resp)
+    }
+
+    fn format_for_user(&self, result: &Value) -> Option<String> {
+        Some(user_format::format_remove_symbol(result))
     }
 }
 
@@ -1413,6 +1463,10 @@ impl Tool for InsertCode {
             resp["worktree_hint"] = json!(h);
         }
         Ok(resp)
+    }
+
+    fn format_for_user(&self, result: &Value) -> Option<String> {
+        Some(user_format::format_insert_code(result))
     }
 }
 
@@ -1767,6 +1821,10 @@ impl Tool for RenameSymbol {
         }
         Ok(result)
     }
+
+    fn format_for_user(&self, result: &Value) -> Option<String> {
+        Some(user_format::format_rename_symbol(result))
+    }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -1990,6 +2048,7 @@ impl Point {
                 agent,
                 lsp: lsp(),
                 output_buffer: buf(),
+                progress: None,
             },
         ))
     }
@@ -2393,6 +2452,7 @@ impl Point {
             agent: Agent::new(None).await.unwrap(),
             lsp: lsp(),
             output_buffer: buf(),
+            progress: None,
         };
         // Should error because no project, but NOT because of unknown param
         let err = ListSymbols
@@ -2415,6 +2475,7 @@ impl Point {
             agent,
             lsp: lsp(),
             output_buffer: buf(),
+            progress: None,
         };
 
         let err = ListSymbols
@@ -2439,6 +2500,7 @@ impl Point {
             agent,
             lsp: lsp(),
             output_buffer: buf(),
+            progress: None,
         };
 
         let err = ListSymbols
@@ -2465,6 +2527,7 @@ impl Point {
             agent,
             lsp: lsp(),
             output_buffer: buf(),
+            progress: None,
         };
 
         let err = ListSymbols
@@ -2486,6 +2549,7 @@ impl Point {
             agent: Agent::new(None).await.unwrap(),
             lsp: lsp(),
             output_buffer: buf(),
+            progress: None,
         };
         assert!(ListSymbols.call(json!({"path": "x"}), &ctx).await.is_err());
         assert!(FindSymbol
@@ -2543,6 +2607,7 @@ impl Point {
             agent,
             lsp: lsp(),
             output_buffer: buf(),
+            progress: None,
         };
 
         // Project-wide search (no relative_path) — LSP will fail/return empty,
@@ -2597,6 +2662,7 @@ impl Point {
             agent,
             lsp: lsp(),
             output_buffer: buf(),
+            progress: None,
         };
 
         // Project-wide (no path) — should find both root and nested files
@@ -2639,6 +2705,7 @@ impl Point {
             agent,
             lsp: lsp(),
             output_buffer: buf(),
+            progress: None,
         };
 
         // Target "src" specifically — should be shallow (depth 1)
@@ -2781,6 +2848,7 @@ fn main() {
             agent,
             lsp: lsp(),
             output_buffer: buf(),
+            progress: None,
         };
 
         // rust-analyzer needs time to load the Cargo project and build its index
@@ -3026,6 +3094,7 @@ fn main() {
                 agent,
                 lsp: lsp(),
                 output_buffer: buf(),
+                progress: None,
             },
         )
     }
@@ -3929,5 +3998,49 @@ fn main() {
         let lines = vec!["a", "", "b"];
         let result = collapse_blank_lines(&lines);
         assert_eq!(result, vec!["a", "", "b"]);
+    }
+
+    #[test]
+    fn find_references_format_for_user_shows_count() {
+        use serde_json::json;
+        let tool = FindReferences;
+        let result = json!({ "references": [{"file":"a.rs","line":10}], "total": 1 });
+        let text = tool.format_for_user(&result).unwrap();
+        assert!(text.contains("1 ref"), "got: {text}");
+    }
+
+    #[test]
+    fn rename_symbol_format_for_user_shows_sites() {
+        use serde_json::json;
+        let tool = RenameSymbol;
+        let result = json!({ "total_edits": 5, "textual_match_count": 1, "files_changed": 2, "new_name": "bar" });
+        let text = tool.format_for_user(&result).unwrap();
+        assert!(text.contains("bar"), "got: {text}");
+    }
+
+    #[test]
+    fn insert_code_format_for_user_shows_location() {
+        use serde_json::json;
+        let tool = InsertCode;
+        let result = json!({ "status": "ok", "inserted_at_line": 42, "position": "after" });
+        let text = tool.format_for_user(&result).unwrap();
+        assert!(text.contains("42"), "got: {text}");
+    }
+
+    #[test]
+    fn replace_symbol_format_for_user_shows_range() {
+        let tool = ReplaceSymbol;
+        let r = json!({ "status": "ok", "replaced_lines": "124-145" });
+        let t = tool.format_for_user(&r).unwrap();
+        assert!(t.contains("L124"), "got: {t}");
+    }
+
+    #[test]
+    fn remove_symbol_format_for_user_shows_range() {
+        let tool = RemoveSymbol;
+        let r = json!({ "status": "ok", "removed_lines": "201-215", "line_count": 14 });
+        let t = tool.format_for_user(&r).unwrap();
+        assert!(t.contains("201"), "got: {t}");
+        assert!(t.contains("14"), "got: {t}");
     }
 }

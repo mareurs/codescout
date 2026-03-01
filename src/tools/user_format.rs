@@ -858,6 +858,329 @@ fn format_read_file_summary(val: &Value, file_type: &str) -> String {
     out
 }
 
+pub fn format_find_file(result: &Value) -> String {
+    let total = result["total"].as_u64().unwrap_or(0);
+    let overflow = result["overflow"].is_object();
+    let cap_note = if overflow {
+        " (cap hit — narrow pattern)"
+    } else {
+        ""
+    };
+    format!("{total} files{cap_note}")
+}
+
+pub fn format_write_memory(result: &Value) -> String {
+    let topic = result["topic"].as_str().unwrap_or("?");
+    format!("written · {topic}")
+}
+
+pub fn format_read_memory(result: &Value) -> String {
+    let topic = result["topic"].as_str().unwrap_or("?");
+    if result["content"].is_null() {
+        format!("not found · {topic}")
+    } else {
+        let chars = result["content"].as_str().map(|s| s.len()).unwrap_or(0);
+        format!("{topic} · {chars} chars")
+    }
+}
+
+pub fn format_list_memories(result: &Value) -> String {
+    let count = result["topics"].as_array().map(|a| a.len()).unwrap_or(0);
+    format!("{count} topics")
+}
+
+pub fn format_delete_memory(result: &Value) -> String {
+    let topic = result["topic"].as_str().unwrap_or("?");
+    format!("deleted · {topic}")
+}
+
+pub fn format_get_config(result: &Value) -> String {
+    let root = result["project_root"].as_str().unwrap_or("?");
+    let name = std::path::Path::new(root)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(root);
+    format!("config · {name}")
+}
+
+pub fn format_activate_project(result: &Value) -> String {
+    let root = result["activated"]["project_root"]
+        .as_str()
+        .or_else(|| result["path"].as_str())
+        .unwrap_or("?");
+    let name = std::path::Path::new(root)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(root);
+    format!("activated · {name}")
+}
+
+pub fn format_index_project(result: &Value) -> String {
+    let status = result["status"].as_str().unwrap_or("?");
+    format!("index {status}")
+}
+
+pub fn format_index_library(result: &Value) -> String {
+    let name = result["library"].as_str().unwrap_or("?");
+    let chunks = result["chunks"].as_u64().unwrap_or(0);
+    format!("{name} · {chunks} chunks")
+}
+
+pub fn format_list_libraries(result: &Value) -> String {
+    let count = result["libraries"].as_array().map(|a| a.len()).unwrap_or(0);
+    format!("{count} libraries")
+}
+
+pub fn format_index_status(result: &Value) -> String {
+    let indexed = result["indexed"].as_bool().unwrap_or(false);
+    if !indexed {
+        return "not indexed".to_string();
+    }
+    let files = result["file_count"].as_u64().unwrap_or(0);
+    let chunks = result["chunk_count"].as_u64().unwrap_or(0);
+    let stale = result["stale"].as_bool().unwrap_or(false);
+    let stale_note = if stale { " · stale" } else { "" };
+    format!("{files} files · {chunks} chunks{stale_note}")
+}
+
+pub fn format_list_functions(result: &Value) -> String {
+    let count = result["functions"].as_array().map(|a| a.len()).unwrap_or(0);
+    let file = result["file"].as_str().unwrap_or("?");
+    format!("{file} → {count} functions")
+}
+
+pub fn format_list_docs(result: &Value) -> String {
+    let count = result["docstrings"]
+        .as_array()
+        .map(|a| a.len())
+        .unwrap_or(0);
+    let file = result["file"].as_str().unwrap_or("?");
+    format!("{file} → {count} docstrings")
+}
+
+pub fn format_find_references(result: &Value) -> String {
+    let total = result["total"].as_u64().unwrap_or_else(|| {
+        result["references"]
+            .as_array()
+            .map(|a| a.len() as u64)
+            .unwrap_or(0)
+    });
+    let files: std::collections::HashSet<&str> = result["references"]
+        .as_array()
+        .map(|refs| refs.iter().filter_map(|r| r["file"].as_str()).collect())
+        .unwrap_or_default();
+    let file_count = files.len();
+    if file_count > 1 {
+        format!("{total} refs · {file_count} files")
+    } else {
+        format!("{total} refs")
+    }
+}
+
+pub fn format_rename_symbol(result: &Value) -> String {
+    let total_edits = result["total_edits"].as_u64().unwrap_or(0);
+    let textual = result["textual_match_count"].as_u64().unwrap_or(0);
+    let total = total_edits + textual;
+    let new_name = result["new_name"].as_str().unwrap_or("?");
+    let files = result["files_changed"].as_u64().unwrap_or(0);
+    if files <= 1 {
+        format!("→ {new_name} · {total} sites")
+    } else {
+        format!("→ {new_name} · {total} sites · {files} files")
+    }
+}
+
+pub fn format_insert_code(result: &Value) -> String {
+    let line = result["inserted_at_line"].as_u64().unwrap_or(0);
+    let pos = result["position"].as_str().unwrap_or("after");
+    format!("inserted {pos} L{line}")
+}
+
+pub fn format_replace_symbol(result: &Value) -> String {
+    let lines = result["replaced_lines"].as_str().unwrap_or("?");
+    format!("replaced · L{lines}")
+}
+
+pub fn format_remove_symbol(result: &Value) -> String {
+    let lines = result["removed_lines"].as_str().unwrap_or("?");
+    let count = result["line_count"].as_u64().unwrap_or(0);
+    format!("removed · L{lines} ({count} lines)")
+}
+
+pub fn format_git_blame(result: &Value) -> String {
+    let file = result["file"].as_str().unwrap_or("?");
+    let line_count = result["lines"].as_array().map(|a| a.len()).unwrap_or(0);
+    let authors: std::collections::HashSet<&str> = result["lines"]
+        .as_array()
+        .map(|lines| lines.iter().filter_map(|l| l["author"].as_str()).collect())
+        .unwrap_or_default();
+    if authors.is_empty() {
+        format!("{file} · {line_count} lines")
+    } else {
+        format!("{file} · {line_count} lines · {} authors", authors.len())
+    }
+}
+
+pub fn format_run_command(result: &Value) -> String {
+    if result["output_id"].is_string() {
+        let exit = result["exit_code"].as_i64().unwrap_or(0);
+        let check = if exit == 0 { "✓" } else { "✗" };
+        let output_id = result["output_id"].as_str().unwrap_or("");
+        match result["type"].as_str() {
+            Some("test") => {
+                let passed = result["passed"].as_u64().unwrap_or(0);
+                let failed = result["failed"].as_u64().unwrap_or(0);
+                let ignored = result["ignored"].as_u64().unwrap_or(0);
+                let mut s = format!("{check} exit {exit} · {passed} passed");
+                if failed > 0 {
+                    s.push_str(&format!(" · {failed} FAILED"));
+                }
+                if ignored > 0 {
+                    s.push_str(&format!(" · {ignored} ignored"));
+                }
+                s.push_str(&format!("  (query {output_id})"));
+                s
+            }
+            Some("build") => {
+                let errors = result["errors"].as_u64().unwrap_or(0);
+                if errors > 0 {
+                    format!("{check} exit {exit} · {errors} errors  (query {output_id})")
+                } else {
+                    format!("{check} exit {exit}  (query {output_id})")
+                }
+            }
+            _ => {
+                let lines = result["total_stdout_lines"].as_u64().unwrap_or(0);
+                format!("{check} exit {exit} · {lines} lines  (query {output_id})")
+            }
+        }
+    } else if result["timed_out"].as_bool().unwrap_or(false) {
+        "✗ timed out".to_string()
+    } else {
+        let exit = result["exit_code"].as_i64().unwrap_or(0);
+        let stdout_lines = result["stdout"]
+            .as_str()
+            .map(|s| s.lines().count())
+            .unwrap_or(0);
+        let check = if exit == 0 { "✓" } else { "✗" };
+        format!("{check} exit {exit} · {stdout_lines} lines")
+    }
+}
+
+pub fn format_onboarding(result: &Value) -> String {
+    let langs = result["languages"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_else(|| "?".to_string());
+    let created = result["config_created"].as_bool().unwrap_or(false);
+    let config_note = if created { " · config created" } else { "" };
+    format!("[{langs}]{config_note}")
+}
+
+// ─── ANSI diff helpers ────────────────────────────────────────────────────────
+
+const BOLD_CYAN: &str = "\x1b[1;36m";
+const BOLD_GREEN: &str = "\x1b[1;32m";
+const BOLD_RED: &str = "\x1b[1;31m";
+const GREEN: &str = "\x1b[32m";
+const RED: &str = "\x1b[31m";
+const DIM: &str = "\x1b[2m";
+const RESET: &str = "\x1b[0m";
+
+const DIFF_PREVIEW_LINES: usize = 8;
+
+/// Format a separator header line:  ─── tool_name: path ──────
+pub fn render_diff_header(tool_name: &str, path: &str) -> String {
+    let title = format!(" {tool_name}: {path} ");
+    let pad = "─".repeat((60usize).saturating_sub(title.len()));
+    format!("{BOLD_CYAN}───{title}{pad}{RESET}")
+}
+
+/// Render a unified-style diff between old_string and new_string.
+/// start_line is the 1-indexed line where old_string begins in the file (optional).
+pub fn render_edit_diff(
+    _path: &str,
+    old_string: &str,
+    new_string: &str,
+    start_line: Option<usize>,
+) -> String {
+    let mut out = String::new();
+    let old_lines: Vec<&str> = old_string.lines().collect();
+    let new_lines: Vec<&str> = new_string.lines().collect();
+    let hunk_start = start_line.unwrap_or(1);
+    let hunk = format!(
+        "@@ -{hunk_start},{} +{hunk_start},{} @@",
+        old_lines.len(),
+        new_lines.len()
+    );
+    out.push_str(&format!("{DIM}{hunk}{RESET}\n"));
+    for line in &old_lines {
+        out.push_str(&format!("{RED}-{line}{RESET}\n"));
+    }
+    for line in &new_lines {
+        out.push_str(&format!("{GREEN}+{line}{RESET}\n"));
+    }
+    out
+}
+
+/// Render a diff showing removed symbol (all lines red).
+pub fn render_removal_diff(
+    _path: &str,
+    removed_content: &str,
+    start_line: Option<usize>,
+    name: &str,
+) -> String {
+    let lines: Vec<&str> = removed_content.lines().collect();
+    let total = lines.len();
+    let preview_count = DIFF_PREVIEW_LINES.min(total);
+    let hunk_start = start_line.unwrap_or(1);
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{BOLD_RED}--- removed · {name} · {total} lines{RESET}\n"
+    ));
+    out.push_str(&format!("{DIM}@@ -{hunk_start},{total} @@{RESET}\n"));
+    for line in &lines[..preview_count] {
+        out.push_str(&format!("{RED}-{line}{RESET}\n"));
+    }
+    if total > preview_count {
+        let remaining = total - preview_count;
+        out.push_str(&format!("{DIM}···  ({remaining} more lines){RESET}\n"));
+    }
+    out
+}
+
+/// Render a diff showing inserted code (all lines green).
+pub fn render_insert_diff(
+    _path: &str,
+    code: &str,
+    at_line: Option<usize>,
+    position: &str,
+    near_symbol: &str,
+) -> String {
+    let lines: Vec<&str> = code.lines().collect();
+    let total = lines.len();
+    let preview_count = DIFF_PREVIEW_LINES.min(total);
+    let insert_line = at_line.unwrap_or(1);
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{BOLD_GREEN}+++ inserted {position} {near_symbol} · {total} lines{RESET}\n"
+    ));
+    out.push_str(&format!("{DIM}@@ +{insert_line},{total} @@{RESET}\n"));
+    for line in &lines[..preview_count] {
+        out.push_str(&format!("{GREEN}+{line}{RESET}\n"));
+    }
+    if total > preview_count {
+        let remaining = total - preview_count;
+        out.push_str(&format!("{DIM}···  ({remaining} more lines){RESET}\n"));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2026,5 +2349,48 @@ mod tests {
         assert!(result.starts_with("50 lines (Markdown)\n"));
         assert!(!result.contains("Headings:"));
         assert!(result.contains("Buffer: @file_md"));
+    }
+}
+
+#[cfg(test)]
+mod diff_tests {
+    use super::*;
+
+    #[test]
+    fn render_diff_header_contains_path() {
+        let h = render_diff_header("edit_file", "src/server.rs");
+        assert!(h.contains("edit_file"), "got: {h}");
+        assert!(h.contains("src/server.rs"), "got: {h}");
+        assert!(h.contains("\x1b[0m"), "no reset: {h}");
+    }
+
+    #[test]
+    fn render_edit_diff_shows_minus_plus_lines() {
+        let diff = render_edit_diff(
+            "src/a.rs",
+            "let old = 1;\nlet also_old = 2;",
+            "let new = 3;",
+            Some(88),
+        );
+        assert!(diff.contains("old"), "got: {diff}");
+        assert!(diff.contains("new"), "got: {diff}");
+        assert!(
+            diff.contains("\x1b[31m") || diff.contains("\x1b[32m"),
+            "no colors: {diff}"
+        );
+    }
+
+    #[test]
+    fn render_removal_diff_marks_all_lines_red() {
+        let diff = render_removal_diff("src/a.rs", "fn old() {\n    1\n}", Some(10), "old");
+        assert!(diff.contains("old"), "got: {diff}");
+        assert!(diff.contains("\x1b[31m"), "no red: {diff}");
+    }
+
+    #[test]
+    fn render_insert_diff_marks_all_lines_green() {
+        let diff = render_insert_diff("src/a.rs", "fn new() {}", Some(42), "after", "my_sym");
+        assert!(diff.contains("new"), "got: {diff}");
+        assert!(diff.contains("\x1b[32m"), "no green: {diff}");
     }
 }

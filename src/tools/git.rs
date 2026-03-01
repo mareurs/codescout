@@ -1,6 +1,6 @@
 //! Git tools: blame, log, diff.
 
-use super::{Tool, ToolContext};
+use super::{user_format, Tool, ToolContext};
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -90,6 +90,10 @@ impl Tool for GitBlame {
         }
         Ok(result)
     }
+
+    fn format_for_user(&self, result: &Value) -> Option<String> {
+        Some(user_format::format_git_blame(result))
+    }
 }
 
 #[cfg(test)]
@@ -127,6 +131,7 @@ mod tests {
                 output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(
                     20,
                 )),
+                progress: None,
             },
         )
     }
@@ -200,7 +205,17 @@ mod tests {
             agent: Agent::new(None).await.unwrap(),
             lsp: LspManager::new_arc(),
             output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
         };
         assert!(GitBlame.call(json!({ "path": "x" }), &ctx).await.is_err());
+    }
+
+    #[test]
+    fn git_blame_format_for_user_shows_lines() {
+        let tool = GitBlame;
+        let result = json!({ "lines": [{"line":1},{"line":2}], "file": "src/a.rs" });
+        let text = tool.format_for_user(&result).unwrap();
+        assert!(text.contains("2"), "got: {text}");
+        assert!(text.contains("src/a.rs"), "got: {text}");
     }
 }

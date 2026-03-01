@@ -64,6 +64,7 @@ mod tests {
             agent,
             lsp: LspManager::new_arc(),
             output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
         }
     }
 
@@ -85,6 +86,7 @@ mod tests {
             agent,
             lsp: LspManager::new_arc(),
             output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
         };
         let tool = GetUsageStats;
         let result = tool.call(serde_json::json!({}), &ctx).await;
