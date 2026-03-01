@@ -76,7 +76,7 @@ Sample output:
 Embedding index status
   Files indexed : 312
   Chunks        : 4 847
-  Model         : nomic-embed-text
+  Model         : mxbai-embed-large
   Last updated  : 2026-02-26 14:32 UTC
 ```
 

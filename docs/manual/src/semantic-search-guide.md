@@ -5,6 +5,10 @@ knowing what it is called. This page walks you through the full setup from
 choosing a backend to writing effective queries. For a reference of the
 individual tools, see [Semantic Search Tools](tools/semantic-search.md).
 
+> For an explanation of how semantic search works under the hood — chunking,
+> scoring, and when to use it vs symbol tools — see
+> [Semantic Search Concepts](concepts/semantic-search.md).
+
 ## Choosing an Embedding Backend
 
 code-explorer supports four embedding backends. The model string prefix in
