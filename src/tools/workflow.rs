@@ -278,24 +278,40 @@ impl Tool for Onboarding {
                     let has_config = p.root.join(".code-explorer").join("project.toml").exists();
                     let memories = p.memory.list()?;
                     let has_onboarding_memory = memories.iter().any(|m| m == "onboarding");
-                    Ok((has_config, has_onboarding_memory, memories))
+                    let private_memories = p.private_memory.list()?;
+                    Ok((
+                        has_config,
+                        has_onboarding_memory,
+                        memories,
+                        private_memories,
+                    ))
                 })
                 .await?;
-            let (has_config, has_onboarding_memory, memories) = status;
+            let (has_config, has_onboarding_memory, memories, private_memories) = status;
             if has_config && has_onboarding_memory {
-                let message = format!(
-                    "Onboarding already performed. Available memories: {}. \
+                let mut message = format!(
+                    "Onboarding already performed. Available shared memories: {}. \
                      Use `read_memory(topic)` to read relevant ones as needed for your current task. \
                      Do not read all memories at once — only read those relevant to what you're working on.",
                     memories.join(", ")
                 );
-                return Ok(json!({
+                if !private_memories.is_empty() {
+                    message.push_str(&format!(
+                        " Private memories: {}. Read with `read_memory(topic, private=true)`.",
+                        private_memories.join(", ")
+                    ));
+                }
+                let mut response = json!({
                     "onboarded": true,
                     "has_config": true,
                     "has_onboarding_memory": true,
                     "memories": memories,
                     "message": message,
-                }));
+                });
+                if !private_memories.is_empty() {
+                    response["private_memories"] = json!(private_memories);
+                }
+                return Ok(response);
             }
         }
 
@@ -923,6 +939,41 @@ mod tests {
         let msg = result["message"].as_str().unwrap();
         assert!(msg.contains("already performed"));
         assert!(result["memories"].as_array().unwrap().len() > 0);
+    }
+
+    #[tokio::test]
+    async fn onboarding_status_includes_private_memories_when_present() {
+        let (_dir, ctx) = project_ctx().await;
+
+        // Run full onboarding first (creates config + onboarding memory)
+        Onboarding.call(json!({}), &ctx).await.unwrap();
+
+        // Seed a private memory
+        ctx.agent
+            .with_project(|p| p.private_memory.write("my-prefs", "verbose"))
+            .await
+            .unwrap();
+
+        // Fast-path status call should include private memories
+        let result = Onboarding.call(json!({}), &ctx).await.unwrap();
+        assert!(result["onboarded"].as_bool().unwrap_or(false));
+        let private = result["private_memories"].as_array().unwrap();
+        assert!(private.iter().any(|v| v.as_str() == Some("my-prefs")));
+        assert!(result["message"].as_str().unwrap().contains("my-prefs"));
+    }
+
+    #[tokio::test]
+    async fn onboarding_status_omits_private_memories_field_when_empty() {
+        let (_dir, ctx) = project_ctx().await;
+
+        // Run full onboarding first (creates config + onboarding memory), no private memory
+        Onboarding.call(json!({}), &ctx).await.unwrap();
+
+        // Fast-path status call should NOT include private_memories field
+        let result = Onboarding.call(json!({}), &ctx).await.unwrap();
+        assert!(result["onboarded"].as_bool().unwrap_or(false));
+        assert!(result["private_memories"].is_null());
+        assert!(!result["message"].as_str().unwrap().contains("private"));
     }
 
     #[cfg(unix)]
