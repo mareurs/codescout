@@ -8,6 +8,7 @@ pub mod command_summary;
 pub mod config;
 pub mod file;
 pub mod file_summary;
+pub(crate) mod format;
 pub mod git;
 pub mod library;
 pub mod memory;
