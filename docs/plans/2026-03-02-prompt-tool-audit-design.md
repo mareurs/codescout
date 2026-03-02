@@ -65,11 +65,33 @@ is contained to `src/tools/output_buffer.rs` and `src/tools/workflow.rs`.
 | `CLAUDE.md` | `"30 tools registered"` → `"32 tools registered"` |
 | `src/prompts/onboarding_prompt.md` | `get_symbols_overview("src")` → `list_symbols("src/")` |
 
+### 4. Remove `worktree_hint` from all write-tool responses
+
+The `worktree_hint` advisory field was added to write-tool responses to alert
+agents when they may have written to the wrong project. In practice it creates
+noise in every write response when worktrees are present. The `guard_worktree_write`
+hard-block in `src/tools/mod.rs` is sufficient protection.
+
+**Remove `worktree_hint()` calls and the helper function:**
+
+- `src/tools/file.rs` — 3 sites: `create_file`, `edit_file` (prepend/append), `edit_file` (regular)
+  Each site: delete the `worktree_hint` call, return plain `json!("ok")`.
+- `src/tools/symbol.rs` — 4 sites: `replace_symbol`, `remove_symbol`, `insert_code`, `rename_symbol`
+  Each site: delete the hint call and the `if let Some(h)` injection.
+- `src/util/path_security.rs` — delete `worktree_hint()` function + 2 associated tests
+  (`worktree_hint_none_when_no_worktrees`, `worktree_hint_some_when_worktrees_exist`).
+  Keep `list_git_worktrees()` — still used by `guard_worktree_write`.
+- `src/prompts/server_instructions.md` — remove the `worktree_hint` mention from the
+  Worktrees section (keep the rest of the worktree guidance).
+
 ## Files Touched
 
 - `src/tools/output_buffer.rs` — extend `resolve_refs` return type, track refreshed handles
 - `src/tools/workflow.rs` — consume refreshed list, prepend indicator lines
-- `src/prompts/server_instructions.md` — remove `get_usage_stats` bullet
+- `src/prompts/server_instructions.md` — remove `get_usage_stats` bullet; remove `worktree_hint` mention
 - `src/prompts/onboarding_prompt.md` — fix `get_symbols_overview` → `list_symbols`
+- `src/tools/file.rs` — remove `worktree_hint` from 3 write sites
+- `src/tools/symbol.rs` — remove `worktree_hint` from 4 write sites
+- `src/util/path_security.rs` — delete `worktree_hint()` + 2 tests
 - `.code-explorer/system-prompt.md` — fix tool count
 - `CLAUDE.md` — fix tool count
