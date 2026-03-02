@@ -459,6 +459,11 @@ pub async fn run(
 /// `root_prefix` must end with `/`. Pass an empty string when no project is
 /// active; the replace becomes a no-op.
 ///
+/// Note: values like `"project_root": "/abs/path"` in `activate_project` / `get_config`
+/// responses are intentionally not stripped — they use a bare absolute path without a
+/// trailing slash, so they do not match `root_prefix` and pass through unchanged.
+/// Agents that need to call `activate_project` again can still use those values as-is.
+///
 /// Buffer content (`@tool_xxx` refs) is covered automatically: it only
 /// re-enters the pipeline through `run_command`, which also passes through
 /// `call_tool` and gets stripped there.
@@ -800,6 +805,10 @@ mod tests {
             .find_map(|c| c.as_text().map(|t| t.text.as_str()))
             .unwrap_or("");
 
+        assert!(
+            !text.is_empty(),
+            "list_dir returned empty output — the strip test is not actually exercising anything"
+        );
         assert!(
             !text.contains(&root),
             "Expected absolute root to be stripped, but found it in output:\n{text}"
