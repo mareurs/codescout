@@ -554,6 +554,42 @@ project root to get the correct repo-relative path for the tree lookup.
 
 ---
 
+### BUG-016 — `insert_code`: inserts after symbol's opening line, not after its closing brace
+
+**Date:** 2026-03-02
+**Severity:** High
+**Status:** Open
+
+**What happened:**
+Called `insert_code(name_path="tests/other_tools_do_not_skip_server_timeout", position="after", ...)`.
+Expected the new code to appear after the function's closing `}`. Instead it was injected after
+the third *body line* of the function (the `name` variable reference inside the for loop), producing
+syntactically invalid Rust that broke the entire file.
+
+**Reproduction hint:**
+```
+insert_code(
+    path="src/server.rs",
+    name_path="tests/other_tools_do_not_skip_server_timeout",
+    position="after",
+    code="... new test ..."
+)
+# → code lands mid-function body, not after closing brace
+```
+
+**Root cause hypothesis:**
+`insert_code` resolves "after" to the line reported by the LSP symbol range's `end_line`, but
+that value appears to be off or pointing to the wrong position for nested symbols (functions
+inside a `mod tests` block). The insertion point is the symbol's declaration/open line rather
+than its end.
+
+**Fix ideas:**
+- Use `end_line` from the LSP symbol range correctly (off-by-one or wrong field).
+- As a workaround: use `run_command` with a Python/sed script to append text before the
+  module's closing `}` when `insert_code` placement would be inside a nested context.
+
+---
+
 ### BUG-XXX — <tool name>: <one-line description>
 
 **Date:** YYYY-MM-DD
@@ -574,3 +610,31 @@ project root to get the correct repo-relative path for the tree lookup.
 
 ---
 ```
+
+### BUG-018 — `replace_symbol`: duplicates body instead of replacing, leaves stray tokens
+
+**Date:** 2026-03-02
+**Severity:** High — silently corrupts the file; cargo still compiles past the first error
+**Status:** Open
+
+**What happened:**
+Used `replace_symbol` to update a function body in `src/server.rs` (the integration test
+`call_tool_strips_project_root_from_output`). Instead of replacing the old body, the tool
+inserted the new body *inside* the old one, producing a doubly-nested function. It also
+left a stray `}` and a duplicate `#[tokio::test]` attribute from the old function boundary.
+The file did not compile. Required manual repair via `run_command("sed ...")` to remove the
+duplicate section.
+
+**Reproduction:**
+Call `replace_symbol` on a `#[tokio::test] async fn` inside a `#[cfg(test)] mod tests`
+block. The symbol range likely includes only the function signature line, not the full body,
+causing the replacement to be inserted mid-function rather than replacing it.
+
+**Probable cause:**
+Same root cause as BUG-003 and BUG-013 — LSP symbol range for functions inside test modules
+may have an off-by-one on the end line, causing the replacement to target a smaller range
+than the actual function body.
+
+**Workaround:**
+Use `edit_file(old_string=<full function text>, new_string=<replacement>)` for test
+functions. `replace_symbol` is unreliable for functions inside `mod tests` blocks.
