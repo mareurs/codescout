@@ -1,6 +1,6 @@
 //! Memory tools: persistent per-project knowledge store.
 
-use super::{user_format, RecoverableError, Tool, ToolContext};
+use super::{RecoverableError, Tool, ToolContext};
 use serde_json::{json, Value};
 
 pub struct WriteMemory;
@@ -92,7 +92,7 @@ impl Tool for ReadMemory {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(user_format::format_read_memory(result))
+        Some(format_read_memory(result))
     }
 }
 
@@ -133,8 +133,47 @@ impl Tool for ListMemories {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(user_format::format_list_memories(result))
+        Some(format_list_memories(result))
     }
+}
+
+fn format_read_memory(result: &Value) -> String {
+    result["content"].as_str().unwrap_or("").to_string()
+}
+
+fn format_list_memories(result: &Value) -> String {
+    // include_private=true path: { shared: [...], private: [...] }
+    if let (Some(shared), Some(private)) =
+        (result["shared"].as_array(), result["private"].as_array())
+    {
+        let mut out = format!("{} shared, {} private", shared.len(), private.len());
+        for t in shared {
+            if let Some(name) = t.as_str() {
+                out.push_str(&format!("\n  {name}"));
+            }
+        }
+        if !private.is_empty() {
+            out.push_str("\n  -- private --");
+            for t in private {
+                if let Some(name) = t.as_str() {
+                    out.push_str(&format!("\n  {name}"));
+                }
+            }
+        }
+        return out;
+    }
+    // Default path: { topics: [...] }
+    let topics = match result["topics"].as_array() {
+        Some(t) if !t.is_empty() => t,
+        _ => return "0 topics".to_string(),
+    };
+    let mut out = format!("{} topics", topics.len());
+    for topic in topics.iter() {
+        if let Some(name) = topic.as_str() {
+            out.push_str(&format!("\n  {name}"));
+        }
+    }
+    out
 }
 
 #[async_trait::async_trait]
@@ -510,5 +549,57 @@ mod tests {
             .unwrap();
         let private = result["private"].as_array().unwrap();
         assert!(private.is_empty());
+    }
+
+    // --- format_list_memories / format_read_memory tests ---
+
+    #[test]
+    fn format_list_memories_shows_topic_names() {
+        let result = serde_json::json!({
+            "topics": ["architecture", "conventions", "gotchas"]
+        });
+        let out = format_list_memories(&result);
+        assert!(out.contains("architecture"), "should list topic names");
+        assert!(out.contains("conventions"), "should list topic names");
+        assert!(out.contains("gotchas"), "should list topic names");
+        assert!(out.contains('3'), "should include count");
+    }
+
+    #[test]
+    fn format_list_memories_empty() {
+        let result = serde_json::json!({ "topics": [] });
+        let out = format_list_memories(&result);
+        assert!(out.contains('0'), "should say 0 topics");
+    }
+
+    #[test]
+    fn format_list_memories_include_private_shows_both() {
+        let result = serde_json::json!({ "shared": ["arch", "conventions"], "private": ["prefs"] });
+        let out = format_list_memories(&result);
+        assert!(out.contains("2 shared"));
+        assert!(out.contains("1 private"));
+        assert!(out.contains("arch"));
+        assert!(out.contains("prefs"));
+    }
+
+    #[test]
+    fn format_list_memories_include_private_empty_private() {
+        let result = serde_json::json!({ "shared": ["arch"], "private": [] });
+        let out = format_list_memories(&result);
+        assert!(out.contains("1 shared"));
+        assert!(out.contains("0 private"));
+    }
+
+    #[test]
+    fn format_read_memory_shows_content() {
+        let result = serde_json::json!({
+            "content": "## Layers\n\nAgent → Server → Tools"
+        });
+        let out = format_read_memory(&result);
+        assert!(out.contains("Layers"), "should show content");
+        assert!(
+            out.contains("Agent → Server → Tools"),
+            "should show full content"
+        );
     }
 }

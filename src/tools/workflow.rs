@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use super::{user_format, Tool, ToolContext};
+use super::{Tool, ToolContext};
 use serde_json::{json, Value};
 
 pub struct Onboarding;
@@ -453,7 +453,7 @@ impl Tool for Onboarding {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(user_format::format_onboarding(result))
+        Some(format_onboarding(result))
     }
 }
 #[async_trait::async_trait]
@@ -547,7 +547,68 @@ impl Tool for RunCommand {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(user_format::format_run_command(result))
+        Some(format_run_command(result))
+    }
+}
+
+fn format_onboarding(result: &Value) -> String {
+    let langs = result["languages"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_else(|| "?".to_string());
+    let created = result["config_created"].as_bool().unwrap_or(false);
+    let config_note = if created { " · config created" } else { "" };
+    format!("[{langs}]{config_note}")
+}
+
+fn format_run_command(result: &Value) -> String {
+    if result["output_id"].is_string() {
+        let exit = result["exit_code"].as_i64().unwrap_or(0);
+        let check = if exit == 0 { "✓" } else { "✗" };
+        let output_id = result["output_id"].as_str().unwrap_or("");
+        match result["type"].as_str() {
+            Some("test") => {
+                let passed = result["passed"].as_u64().unwrap_or(0);
+                let failed = result["failed"].as_u64().unwrap_or(0);
+                let ignored = result["ignored"].as_u64().unwrap_or(0);
+                let mut s = format!("{check} exit {exit} · {passed} passed");
+                if failed > 0 {
+                    s.push_str(&format!(" · {failed} FAILED"));
+                }
+                if ignored > 0 {
+                    s.push_str(&format!(" · {ignored} ignored"));
+                }
+                s.push_str(&format!("  (query {output_id})"));
+                s
+            }
+            Some("build") => {
+                let errors = result["errors"].as_u64().unwrap_or(0);
+                if errors > 0 {
+                    format!("{check} exit {exit} · {errors} errors  (query {output_id})")
+                } else {
+                    format!("{check} exit {exit}  (query {output_id})")
+                }
+            }
+            _ => {
+                let lines = result["total_stdout_lines"].as_u64().unwrap_or(0);
+                format!("{check} exit {exit} · {lines} lines  (query {output_id})")
+            }
+        }
+    } else if result["timed_out"].as_bool().unwrap_or(false) {
+        "✗ timed out".to_string()
+    } else {
+        let exit = result["exit_code"].as_i64().unwrap_or(0);
+        let stdout_lines = result["stdout"]
+            .as_str()
+            .map(|s| s.lines().count())
+            .unwrap_or(0);
+        let check = if exit == 0 { "✓" } else { "✗" };
+        format!("{check} exit {exit} · {stdout_lines} lines")
     }
 }
 

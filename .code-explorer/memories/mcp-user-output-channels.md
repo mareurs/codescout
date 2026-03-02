@@ -31,8 +31,13 @@ Single switch to flip when either issue is fixed upstream.
 
 ## Infrastructure Ready
 - `ProgressReporter::report_text()` in `src/tools/progress.rs` — calls `notify_logging_message`, ready for when #3174 is fixed
-- `format_create_file()` in `src/tools/user_format.rs` — ANSI line-numbered preview
-- `format_for_user()` on tools that have it — user-facing formatting, zero cost while toggle is off
+
+## Note on format functions (2026-03-02)
+`user_format.rs` was deleted as part of a refactor. All `format_compact()` helpers now
+live as private `fn format_*()` functions in their respective tool files
+(symbol.rs, file.rs, semantic.rs, git.rs, ast.rs, library.rs, memory.rs, usage.rs,
+workflow.rs, config.rs). Shared helpers (`format_line_range`, `format_overflow`,
+`truncate_path`) live in `src/tools/format.rs`.
 
 ## When to Revisit
 - Claude Code fixes #13600 (audience filtering) → flip `USER_OUTPUT_ENABLED = true`

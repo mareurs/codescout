@@ -49,7 +49,7 @@ impl Tool for ActivateProject {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(super::user_format::format_activate_project(result))
+        Some(format_activate_project(result))
     }
 }
 
@@ -76,8 +76,29 @@ impl Tool for GetConfig {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(super::user_format::format_get_config(result))
+        Some(format_get_config(result))
     }
+}
+
+fn format_activate_project(result: &Value) -> String {
+    let root = result["activated"]["project_root"]
+        .as_str()
+        .or_else(|| result["path"].as_str())
+        .unwrap_or("?");
+    let name = std::path::Path::new(root)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(root);
+    format!("activated · {name}")
+}
+
+fn format_get_config(result: &Value) -> String {
+    let root = result["project_root"].as_str().unwrap_or("?");
+    let name = std::path::Path::new(root)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(root);
+    format!("config · {name}")
 }
 
 #[cfg(test)]

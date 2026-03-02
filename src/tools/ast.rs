@@ -69,7 +69,7 @@ impl Tool for ListFunctions {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(crate::tools::user_format::format_list_functions(result))
+        Some(format_list_functions(result))
     }
 }
 
@@ -147,8 +147,56 @@ impl Tool for ListDocs {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(crate::tools::user_format::format_list_docs(result))
+        Some(format_list_docs(result))
     }
+}
+
+fn format_list_functions(result: &Value) -> String {
+    let file = result["file"].as_str().unwrap_or("?");
+    let funcs = match result["functions"].as_array() {
+        Some(f) if !f.is_empty() => f,
+        _ => return format!("{file} — 0 functions"),
+    };
+    const MAX_SHOW: usize = 8;
+    let total = funcs.len();
+    let mut out = format!("{file} — {total} functions");
+    for f in funcs.iter().take(MAX_SHOW) {
+        let name = f["name"].as_str().unwrap_or("?");
+        out.push_str(&format!("\n  {name}"));
+    }
+    let hidden = total.saturating_sub(MAX_SHOW);
+    if hidden > 0 {
+        out.push_str(&format!("\n  … +{hidden} more"));
+    }
+    out
+}
+
+fn format_list_docs(result: &Value) -> String {
+    let file = result["file"].as_str().unwrap_or("?");
+    let docs = match result["docstrings"].as_array() {
+        Some(d) if !d.is_empty() => d,
+        _ => return format!("{file} — 0 docstrings"),
+    };
+    const MAX_SHOW: usize = 3;
+    let total = docs.len();
+    let mut out = format!("{file} — {total} docstrings");
+    for entry in docs.iter().take(MAX_SHOW) {
+        let symbol = entry["symbol_name"].as_str().unwrap_or("?");
+        let content = entry["content"].as_str().unwrap_or("");
+        let first_line = content.lines().next().unwrap_or("").trim();
+        let preview = if first_line.chars().count() > 72 {
+            let truncated: String = first_line.chars().take(72).collect();
+            format!("{truncated}…")
+        } else {
+            first_line.to_string()
+        };
+        out.push_str(&format!("\n  {symbol}  {preview}"));
+    }
+    let hidden = total.saturating_sub(MAX_SHOW);
+    if hidden > 0 {
+        out.push_str(&format!("\n  … +{hidden} more"));
+    }
+    out
 }
 
 #[cfg(test)]
@@ -391,5 +439,76 @@ mod tests {
         let result = json!({ "docstrings": [{"symbol":"Foo"}], "file": "src/a.rs" });
         let text = tool.format_compact(&result).unwrap();
         assert!(text.contains("1"), "got: {text}");
+    }
+
+    // --- format_list_functions tests ---
+
+    #[test]
+    fn format_list_functions_shows_names() {
+        let result = serde_json::json!({
+            "file": "src/tools/symbol.rs",
+            "functions": [
+                {"name": "collect_matching", "start_line": 100, "end_line": 140},
+                {"name": "build_by_file", "start_line": 150, "end_line": 180},
+                {"name": "matches_kind_filter", "start_line": 190, "end_line": 200}
+            ]
+        });
+        let out = format_list_functions(&result);
+        assert!(out.contains("src/tools/symbol.rs"), "should show file");
+        assert!(
+            out.contains("collect_matching"),
+            "should show function name"
+        );
+        assert!(out.contains("build_by_file"), "should show function name");
+        assert!(out.contains('3'), "should show count");
+    }
+
+    #[test]
+    fn format_list_functions_caps_at_eight() {
+        let funcs: Vec<serde_json::Value> = (0..12)
+            .map(|i| serde_json::json!({"name": format!("func_{i}"), "start_line": i, "end_line": i + 5}))
+            .collect();
+        let result = serde_json::json!({ "file": "src/big.rs", "functions": funcs });
+        let out = format_list_functions(&result);
+        assert!(out.contains("func_0"), "should show first func");
+        assert!(!out.contains("func_8"), "should not show 9th func");
+        assert!(out.contains("more"), "should show trailer");
+    }
+
+    // --- format_list_docs tests ---
+
+    #[test]
+    fn format_list_docs_shows_previews() {
+        let result = serde_json::json!({
+            "file": "src/tools/output.rs",
+            "docstrings": [
+                {"symbol_name": "OutputGuard", "content": "Enforces progressive disclosure across all tools."},
+                {"symbol_name": "cap_items", "content": "Truncate to exploring-mode limit and produce OverflowInfo."},
+                {"symbol_name": "cap_files", "content": "File-level capping for multi-file result sets."},
+                {"symbol_name": "overflow_json", "content": "Build the overflow object to include in JSON response."}
+            ]
+        });
+        let out = format_list_docs(&result);
+        assert!(out.contains("src/tools/output.rs"), "should show file");
+        assert!(out.contains("OutputGuard"), "should show symbol name");
+        assert!(
+            out.contains("Enforces progressive"),
+            "should show doc preview"
+        );
+        assert!(out.contains("more"), "should cap at 3");
+        assert!(!out.contains("overflow_json"), "4th entry should be hidden");
+    }
+
+    #[test]
+    fn format_list_docs_handles_unicode_near_boundary() {
+        let long_doc: String = "a".repeat(71) + "ñ world and more text here";
+        let result = serde_json::json!({
+            "file": "src/lib.rs",
+            "docstrings": [
+                {"symbol_name": "MyStruct", "content": long_doc}
+            ]
+        });
+        let out = format_list_docs(&result);
+        assert!(out.contains("MyStruct"), "should show symbol");
     }
 }

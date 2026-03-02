@@ -6,7 +6,7 @@ Rust MCP server giving LLMs IDE-grade code intelligence — symbol-level navigat
 
 ```bash
 cargo build                        # Build
-cargo test                         # Run tests (533 passing)
+cargo test                         # Run tests (862 passing)
 cargo clippy -- -D warnings        # Lint
 cargo fmt                          # Format
 cargo run -- start --project .     # Run MCP server (stdio)
@@ -53,6 +53,7 @@ src/
 ├── prompts/         # LLM guidance: server_instructions.md, onboarding_prompt.md
 ├── tools/           # Tool implementations by category
 │   ├── output.rs    #   OutputGuard: progressive disclosure (exploring/focused)
+│   ├── format.rs    #   Shared format helpers (format_line_range, format_overflow, truncate_path)
 │   ├── file.rs      #   read_file, list_dir, search_pattern, create_file, find_file, edit_file
 │   ├── workflow.rs  #   onboarding, run_command
 │   ├── symbol.rs    #   10 LSP-backed tools (find_symbol, list_symbols, goto_definition, hover, remove_symbol, etc.)

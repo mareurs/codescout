@@ -1,6 +1,6 @@
 //! Git tools: blame, log, diff.
 
-use super::{user_format, Tool, ToolContext};
+use super::{Tool, ToolContext};
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -92,8 +92,50 @@ impl Tool for GitBlame {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(user_format::format_git_blame(result))
+        Some(format_git_blame(result))
     }
+}
+
+fn format_git_blame(result: &Value) -> String {
+    let file = result["file"].as_str().unwrap_or("?");
+    let lines = match result["lines"].as_array() {
+        Some(l) => l,
+        None => return file.to_string(),
+    };
+    let line_count = lines.len();
+
+    let mut author_counts: std::collections::HashMap<&str, usize> =
+        std::collections::HashMap::new();
+    for l in lines.iter() {
+        if let Some(author) = l["author"].as_str() {
+            *author_counts.entry(author).or_insert(0) += 1;
+        }
+    }
+
+    if author_counts.len() <= 1 {
+        let author_note = author_counts
+            .keys()
+            .next()
+            .map(|a| format!(" · {a}"))
+            .unwrap_or_default();
+        return format!("{file} · {line_count} lines{author_note}");
+    }
+
+    let mut authors: Vec<(&str, usize)> = author_counts.into_iter().collect();
+    authors.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let name_width = authors.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
+    let mut out = format!("{file} · {line_count} lines");
+    const MAX_AUTHORS: usize = 5;
+    for (author, count) in authors.iter().take(MAX_AUTHORS) {
+        let label = if *count == 1 { "line" } else { "lines" };
+        out.push_str(&format!("\n  {author:<name_width$}  {count} {label}"));
+    }
+    let hidden = authors.len().saturating_sub(MAX_AUTHORS);
+    if hidden > 0 {
+        out.push_str(&format!("\n  … +{hidden} more authors"));
+    }
+    out
 }
 
 #[cfg(test)]
@@ -263,5 +305,36 @@ mod tests {
         let lines = result["lines"].as_array().unwrap();
         assert_eq!(lines.len(), 1);
         assert!(lines[0]["content"].as_str().unwrap().contains("add"));
+    }
+
+    // --- format_git_blame tests ---
+
+    #[test]
+    fn format_git_blame_shows_author_breakdown() {
+        let lines: Vec<serde_json::Value> = vec![
+            serde_json::json!({"author": "alice", "line": 1}),
+            serde_json::json!({"author": "alice", "line": 2}),
+            serde_json::json!({"author": "alice", "line": 3}),
+            serde_json::json!({"author": "bob", "line": 4}),
+            serde_json::json!({"author": "bob", "line": 5}),
+            serde_json::json!({"author": "carol", "line": 6}),
+        ];
+        let result = serde_json::json!({ "file": "src/main.rs", "lines": lines });
+        let out = format_git_blame(&result);
+        assert!(out.contains("src/main.rs"), "should show file");
+        assert!(out.contains("alice"), "should show author");
+        assert!(out.contains("bob"), "should show author");
+        assert!(out.contains("carol"), "should show author");
+    }
+
+    #[test]
+    fn format_git_blame_single_author_no_breakdown() {
+        let lines: Vec<serde_json::Value> = (0..5)
+            .map(|i| serde_json::json!({"author": "solo", "line": i}))
+            .collect();
+        let result = serde_json::json!({ "file": "src/lib.rs", "lines": lines });
+        let out = format_git_blame(&result);
+        assert!(out.contains("src/lib.rs"), "should show file");
+        assert!(!out.contains('\n'), "no breakdown for single author");
     }
 }

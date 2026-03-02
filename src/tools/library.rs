@@ -51,7 +51,7 @@ impl Tool for ListLibraries {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(crate::tools::user_format::format_list_libraries(result))
+        Some(format_list_libraries(result))
     }
 }
 
@@ -144,8 +144,38 @@ impl Tool for IndexLibrary {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(crate::tools::user_format::format_index_library(result))
+        Some(format_index_library(result))
     }
+}
+
+fn format_list_libraries(result: &Value) -> String {
+    let libs = match result["libraries"].as_array() {
+        Some(l) if !l.is_empty() => l,
+        _ => return "0 libraries".to_string(),
+    };
+    let name_width = libs
+        .iter()
+        .filter_map(|l| l["name"].as_str())
+        .map(|n| n.len())
+        .max()
+        .unwrap_or(0);
+    let mut out = format!("{} libraries", libs.len());
+    for lib in libs.iter() {
+        let name = lib["name"].as_str().unwrap_or("?");
+        let status = if lib["indexed"].as_bool().unwrap_or(false) {
+            "indexed"
+        } else {
+            "not indexed"
+        };
+        out.push_str(&format!("\n  {name:<name_width$}  {status}"));
+    }
+    out
+}
+
+fn format_index_library(result: &Value) -> String {
+    let name = result["library"].as_str().unwrap_or("?");
+    let chunks = result["chunks"].as_u64().unwrap_or(0);
+    format!("{name} · {chunks} chunks")
 }
 
 #[cfg(test)]
@@ -245,6 +275,31 @@ mod tests {
         assert!(
             required.iter().any(|v| v.as_str() == Some("name")),
             "'name' must be required"
+        );
+    }
+
+    // --- format_list_libraries tests ---
+
+    #[test]
+    fn format_list_libraries_shows_names_and_status() {
+        let result = serde_json::json!({
+            "libraries": [
+                {"name": "serde", "indexed": true},
+                {"name": "tokio", "indexed": false}
+            ]
+        });
+        let out = format_list_libraries(&result);
+        assert!(
+            out.contains("serde"),
+            "should show library name, got: {out}"
+        );
+        assert!(
+            out.contains("tokio"),
+            "should show library name, got: {out}"
+        );
+        assert!(
+            out.contains("indexed"),
+            "should show index status, got: {out}"
         );
     }
 }

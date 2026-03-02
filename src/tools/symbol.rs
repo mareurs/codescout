@@ -6,8 +6,8 @@ use serde_json::{json, Value};
 
 use crate::tools::RecoverableError;
 
+use super::format::{format_line_range, format_overflow};
 use super::output::{OutputGuard, OutputMode, OverflowInfo};
-use super::user_format;
 use super::{Tool, ToolContext};
 use crate::ast;
 use crate::lsp::SymbolInfo;
@@ -286,6 +286,42 @@ fn find_ast_end_line_in(symbols: &[SymbolInfo], name: &str, lsp_start: u32) -> O
     None
 }
 
+/// Returns `true` if `line` could plausibly be the first line of a symbol range
+/// as reported by an LSP server, `false` if it looks like the interior of a
+/// function body (which would indicate a stale line number).
+///
+/// LSP servers legitimately start a symbol's range at:
+/// - A Rust item keyword (`fn`, `pub`, `struct`, `impl`, ...)
+/// - A closing delimiter (`}`, `})`, ...) — over-extension into the preceding symbol
+/// - A blank line, comment, or attribute
+///
+/// They would never start at a `let` binding, `return`, function call, etc.
+/// Detecting those catches the BUG-019 class of stale-LSP corruption.
+fn is_valid_symbol_start_line(line: &str) -> bool {
+    let t = line.trim();
+    if t.is_empty() {
+        return true;
+    }
+    // Closing delimiters — LSP may include tail of preceding symbol
+    if t.starts_with(['}', ']', ')']) {
+        return true;
+    }
+    // Comments and doc comments
+    if t.starts_with("//") || t.starts_with("/*") || t.starts_with('*') {
+        return true;
+    }
+    // Attributes
+    if t.starts_with("#[") || t.starts_with("#!") {
+        return true;
+    }
+    // Rust item keywords
+    let item_starts = [
+        "fn ", "pub ", "pub(", "async ", "unsafe ", "struct ", "impl ", "trait ", "enum ", "type ",
+        "const ", "static ", "mod ", "use ", "extern ",
+    ];
+    item_starts.iter().any(|kw| t.starts_with(kw))
+}
+
 // ── get_symbols_overview ───────────────────────────────────────────────────
 
 /// Directory/glob scans can produce huge output (each file has many symbols).
@@ -539,7 +575,7 @@ impl Tool for ListSymbols {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(user_format::format_list_symbols(result))
+        Some(format_list_symbols(result))
     }
 }
 
@@ -836,7 +872,7 @@ impl Tool for FindSymbol {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(user_format::format_find_symbol(result))
+        Some(format_find_symbol(result))
     }
 }
 
@@ -947,7 +983,7 @@ impl Tool for FindReferences {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(user_format::format_find_references(result))
+        Some(format_find_references(result))
     }
 }
 
@@ -1072,7 +1108,7 @@ impl Tool for GotoDefinition {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(user_format::format_goto_definition(result))
+        Some(format_goto_definition(result))
     }
 }
 
@@ -1188,7 +1224,7 @@ impl Tool for Hover {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(user_format::format_hover(result))
+        Some(format_hover(result))
     }
 }
 
@@ -1280,6 +1316,23 @@ impl Tool for ReplaceSymbol {
             .into());
         }
 
+        // BUG-019 guard: reject stale LSP line numbers.
+        // If the line at start_line looks like function-body content (let, return,
+        // expression) rather than a symbol declaration, the LSP is operating on a
+        // stale view of the file — likely modified without a did_change notification.
+        if !is_valid_symbol_start_line(lines[start]) {
+            return Err(RecoverableError::with_hint(
+                format!(
+                    "symbol location appears stale — line {} does not look like a symbol start: {:?}",
+                    start + 1,
+                    lines[start].trim(),
+                ),
+                "The LSP may have stale data from a file modified without notification. \
+                 Re-run list_symbols(path) to refresh LSP state, then retry.",
+            )
+            .into());
+        }
+
         let mut new_lines = Vec::new();
         new_lines.extend_from_slice(&lines[..start]);
         new_lines.extend(new_body.lines());
@@ -1298,9 +1351,8 @@ impl Tool for ReplaceSymbol {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(user_format::format_replace_symbol(result))
+        Some(format_replace_symbol(result))
     }
-
 }
 
 // ── remove_symbol ──────────────────────────────────────────────────────────
@@ -1387,9 +1439,8 @@ impl Tool for RemoveSymbol {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(user_format::format_remove_symbol(result))
+        Some(format_remove_symbol(result))
     }
-
 }
 
 // ── insert_code (before/after a symbol) ────────────────────────────────────
@@ -1472,9 +1523,8 @@ impl Tool for InsertCode {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(user_format::format_insert_code(result))
+        Some(format_insert_code(result))
     }
-
 }
 
 /// A textual match found during post-rename sweep.
@@ -1830,9 +1880,384 @@ impl Tool for RenameSymbol {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(user_format::format_rename_symbol(result))
+        Some(format_rename_symbol(result))
+    }
+}
+
+// ── format_compact helpers ────────────────────────────────────────────────────
+
+fn format_goto_definition(val: &Value) -> String {
+    let defs = match val["definitions"].as_array() {
+        Some(arr) => arr,
+        None => return String::new(),
+    };
+
+    if defs.is_empty() {
+        return String::new();
     }
 
+    if defs.len() == 1 {
+        let d = &defs[0];
+        let file = d["file"].as_str().unwrap_or("?");
+        let line = d["line"].as_u64().unwrap_or(0);
+        let context = d["context"].as_str().unwrap_or("");
+        let source = d["source"].as_str().unwrap_or("project");
+
+        let mut out = if source != "project" {
+            format!("{}:{} ({})", file, line, source)
+        } else {
+            format!("{}:{}", file, line)
+        };
+
+        if !context.is_empty() {
+            out.push_str("\n\n  ");
+            out.push_str(context);
+        }
+        return out;
+    }
+
+    let mut out = format!("{} definitions\n", defs.len());
+    for d in defs {
+        let file = d["file"].as_str().unwrap_or("?");
+        let line = d["line"].as_u64().unwrap_or(0);
+        let context = d["context"].as_str().unwrap_or("");
+        let source = d["source"].as_str().unwrap_or("project");
+
+        out.push_str("\n  ");
+        out.push_str(&format!("{}:{}", file, line));
+        if source != "project" {
+            out.push_str(&format!(" ({})", source));
+        }
+        if !context.is_empty() {
+            out.push_str(&format!("   {}", context));
+        }
+    }
+    out
+}
+
+fn format_hover(val: &Value) -> String {
+    let content = match val["content"].as_str() {
+        Some(s) => s,
+        None => return String::new(),
+    };
+    let location = val["location"].as_str().unwrap_or("");
+
+    let mut out = String::new();
+    if !location.is_empty() {
+        out.push_str(location);
+        out.push_str("\n\n");
+    }
+
+    let mut in_code_block = false;
+    let mut first_content_line = true;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            in_code_block = !in_code_block;
+            continue;
+        }
+        if !first_content_line {
+            out.push('\n');
+        }
+        out.push_str("  ");
+        out.push_str(line);
+        first_content_line = false;
+    }
+    out
+}
+
+fn format_find_symbol(val: &Value) -> String {
+    let symbols = match val["symbols"].as_array() {
+        Some(arr) => arr,
+        None => return String::new(),
+    };
+
+    let total = val["total"].as_u64().unwrap_or(symbols.len() as u64);
+
+    if symbols.is_empty() {
+        return "0 matches".to_string();
+    }
+
+    struct SymRow {
+        kind: String,
+        location: String,
+        name_path: String,
+        body: Option<String>,
+    }
+
+    let rows: Vec<SymRow> = symbols
+        .iter()
+        .map(|s| {
+            let kind = s["kind"].as_str().unwrap_or("?").to_string();
+            let file = s["file"].as_str().unwrap_or("?");
+            let start = s["start_line"].as_u64().unwrap_or(0);
+            let end = s["end_line"].as_u64().unwrap_or(0);
+            let location = if end > start {
+                format!("{file}:{start}-{end}")
+            } else {
+                format!("{file}:{start}")
+            };
+            let name_path = s["name_path"]
+                .as_str()
+                .or_else(|| s["name"].as_str())
+                .unwrap_or("?")
+                .to_string();
+            let body = s["body"].as_str().map(|b| b.to_string());
+            SymRow {
+                kind,
+                location,
+                name_path,
+                body,
+            }
+        })
+        .collect();
+
+    let max_kind_len = rows.iter().map(|r| r.kind.len()).max().unwrap_or(0);
+    let max_loc_len = rows.iter().map(|r| r.location.len()).max().unwrap_or(0);
+
+    let match_word = if total == 1 { "match" } else { "matches" };
+    let header = if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
+        let shown = overflow["shown"].as_u64().unwrap_or(symbols.len() as u64);
+        format!("{shown} {match_word} ({total} total)")
+    } else {
+        format!("{total} {match_word}")
+    };
+    let mut out = format!("{header}\n");
+
+    for row in &rows {
+        let kind_pad = max_kind_len - row.kind.len();
+        let loc_pad = max_loc_len - row.location.len();
+        out.push_str("\n  ");
+        out.push_str(&row.kind);
+        for _ in 0..kind_pad {
+            out.push(' ');
+        }
+        out.push_str("  ");
+        out.push_str(&row.location);
+        for _ in 0..loc_pad {
+            out.push(' ');
+        }
+        out.push_str("   ");
+        out.push_str(&row.name_path);
+
+        if let Some(body) = &row.body {
+            out.push('\n');
+            for line in body.lines() {
+                out.push_str("\n      ");
+                out.push_str(line);
+            }
+        }
+    }
+
+    if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
+        out.push('\n');
+        out.push_str(&format_overflow(overflow));
+    }
+
+    out
+}
+
+fn format_list_symbols(val: &Value) -> String {
+    // File mode
+    if let Some(file) = val["file"].as_str() {
+        let symbols = match val["symbols"].as_array() {
+            Some(arr) => arr,
+            None => return String::new(),
+        };
+        let count = symbols.len();
+        let sym_word = if count == 1 { "symbol" } else { "symbols" };
+        let mut out = format!("{file} — {count} {sym_word}\n");
+        format_symbol_tree(&mut out, symbols, 2);
+
+        if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
+            out.push('\n');
+            out.push_str(&format_overflow(overflow));
+        }
+        return out;
+    }
+
+    // Directory or pattern mode
+    let dir = val["directory"]
+        .as_str()
+        .or_else(|| val["pattern"].as_str())
+        .unwrap_or(".");
+    let files = match val["files"].as_array() {
+        Some(arr) => arr,
+        None => return String::new(),
+    };
+
+    if files.is_empty() {
+        return format!("{dir} — 0 symbols");
+    }
+
+    let mut out = format!("{dir}\n");
+
+    for file_entry in files {
+        let file = file_entry["file"].as_str().unwrap_or("?");
+        let symbols = match file_entry["symbols"].as_array() {
+            Some(arr) => arr,
+            None => continue,
+        };
+        let count = symbols.len();
+        let sym_word = if count == 1 { "symbol" } else { "symbols" };
+        out.push_str(&format!("\n  {file} — {count} {sym_word}\n"));
+        format_symbol_tree(&mut out, symbols, 4);
+    }
+
+    if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
+        out.push('\n');
+        out.push_str(&format_overflow(overflow));
+    }
+
+    out
+}
+
+fn format_symbol_tree(out: &mut String, symbols: &[Value], indent: usize) {
+    let max_kind_len = symbols
+        .iter()
+        .map(|s| s["kind"].as_str().unwrap_or("").len())
+        .max()
+        .unwrap_or(0);
+    let max_name_len = symbols
+        .iter()
+        .map(|s| {
+            s["name_path"]
+                .as_str()
+                .or_else(|| s["name"].as_str())
+                .unwrap_or("")
+                .len()
+        })
+        .max()
+        .unwrap_or(0);
+
+    let pad = " ".repeat(indent);
+
+    for sym in symbols {
+        let kind = sym["kind"].as_str().unwrap_or("?");
+        let name = sym["name_path"]
+            .as_str()
+            .or_else(|| sym["name"].as_str())
+            .unwrap_or("?");
+        let start = sym["start_line"].as_u64().unwrap_or(0);
+        let end = sym["end_line"].as_u64().unwrap_or(0);
+        let line_range = format_line_range(start, end);
+
+        let kind_pad = max_kind_len - kind.len();
+        let name_pad = max_name_len.saturating_sub(name.len());
+        out.push('\n');
+        out.push_str(&pad);
+        out.push_str(kind);
+        for _ in 0..kind_pad {
+            out.push(' ');
+        }
+        out.push_str("   ");
+        out.push_str(name);
+        for _ in 0..name_pad {
+            out.push(' ');
+        }
+        out.push_str("  ");
+        out.push_str(&line_range);
+
+        if let Some(children) = sym["children"].as_array() {
+            let child_indent = indent + 5;
+            let child_pad = " ".repeat(child_indent);
+            let max_child_name = children
+                .iter()
+                .map(|c| c["name"].as_str().unwrap_or("").len())
+                .max()
+                .unwrap_or(0);
+
+            for child in children {
+                let child_kind = child["kind"].as_str().unwrap_or("?");
+                let child_name = child["name"].as_str().unwrap_or("?");
+                let cs = child["start_line"].as_u64().unwrap_or(0);
+                let ce = child["end_line"].as_u64().unwrap_or(0);
+                let child_lr = format_line_range(cs, ce);
+                let child_name_pad = max_child_name.saturating_sub(child_name.len());
+
+                out.push('\n');
+                out.push_str(&child_pad);
+
+                if child_kind == "EnumMember" || child_kind == "Field" {
+                    out.push_str(child_name);
+                    for _ in 0..child_name_pad {
+                        out.push(' ');
+                    }
+                } else {
+                    out.push_str(child_kind);
+                    out.push_str("  ");
+                    out.push_str(child_name);
+                    for _ in 0..child_name_pad {
+                        out.push(' ');
+                    }
+                }
+                out.push_str("  ");
+                out.push_str(&child_lr);
+            }
+        }
+    }
+}
+
+fn format_find_references(result: &Value) -> String {
+    let total = result["total"].as_u64().unwrap_or_else(|| {
+        result["references"]
+            .as_array()
+            .map(|a| a.len() as u64)
+            .unwrap_or(0)
+    });
+
+    if total == 0 {
+        return "No references found.".to_string();
+    }
+
+    let refs = match result["references"].as_array() {
+        Some(r) => r,
+        None => return format!("{total} refs"),
+    };
+
+    const MAX_SHOW: usize = 5;
+    let mut out = format!("{total} refs");
+    for r in refs.iter().take(MAX_SHOW) {
+        let file = r["file"].as_str().unwrap_or("?");
+        let line = r["line"].as_u64().unwrap_or(0);
+        out.push_str(&format!("\n  {file}:{line}"));
+    }
+    let shown = refs.len().min(MAX_SHOW);
+    let hidden = (total as usize).saturating_sub(shown);
+    if hidden > 0 {
+        out.push_str(&format!("\n  … +{hidden} more"));
+    }
+    out
+}
+
+fn format_replace_symbol(result: &Value) -> String {
+    let lines = result["replaced_lines"].as_str().unwrap_or("?");
+    format!("replaced · L{lines}")
+}
+
+fn format_remove_symbol(result: &Value) -> String {
+    let lines = result["removed_lines"].as_str().unwrap_or("?");
+    let count = result["line_count"].as_u64().unwrap_or(0);
+    format!("removed · L{lines} ({count} lines)")
+}
+
+fn format_insert_code(result: &Value) -> String {
+    let line = result["inserted_at_line"].as_u64().unwrap_or(0);
+    let pos = result["position"].as_str().unwrap_or("after");
+    format!("inserted {pos} L{line}")
+}
+
+fn format_rename_symbol(result: &Value) -> String {
+    let total_edits = result["total_edits"].as_u64().unwrap_or(0);
+    let textual = result["textual_match_count"].as_u64().unwrap_or(0);
+    let total = total_edits + textual;
+    let new_name = result["new_name"].as_str().unwrap_or("?");
+    let files = result["files_changed"].as_u64().unwrap_or(0);
+    if files <= 1 {
+        format!("→ {new_name} · {total} sites")
+    } else {
+        format!("→ {new_name} · {total} sites · {files} files")
+    }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -4172,5 +4597,535 @@ fn main() {
         let t = tool.format_compact(&r).unwrap();
         assert!(t.contains("201"), "got: {t}");
         assert!(t.contains("14"), "got: {t}");
+    }
+
+    // --- format_goto_definition tests ---
+
+    #[test]
+    fn goto_single_project_definition() {
+        let val = serde_json::json!({
+            "definitions": [{
+                "file": "src/tools/output.rs",
+                "line": 35,
+                "end_line": 41,
+                "context": "pub struct OutputGuard {",
+                "source": "project"
+            }],
+            "from": "symbol.rs:120"
+        });
+        let result = format_goto_definition(&val);
+        assert_eq!(
+            result,
+            "src/tools/output.rs:35\n\n  pub struct OutputGuard {"
+        );
+    }
+
+    #[test]
+    fn goto_single_external_definition() {
+        let val = serde_json::json!({
+            "definitions": [{
+                "file": "/home/user/.rustup/toolchains/stable/lib.rs",
+                "line": 100,
+                "end_line": 110,
+                "context": "pub enum Option<T> {",
+                "source": "external"
+            }],
+            "from": "main.rs:5"
+        });
+        let result = format_goto_definition(&val);
+        assert!(result.contains("(external)"));
+        assert!(result.contains(":100"));
+        assert!(result.contains("pub enum Option<T> {"));
+    }
+
+    #[test]
+    fn goto_multiple_definitions() {
+        let val = serde_json::json!({
+            "definitions": [
+                { "file": "src/a.rs", "line": 10, "end_line": 15, "context": "fn foo()", "source": "project" },
+                { "file": "src/b.rs", "line": 20, "end_line": 25, "context": "fn foo()", "source": "project" }
+            ],
+            "from": "main.rs:1"
+        });
+        let result = format_goto_definition(&val);
+        assert!(result.starts_with("2 definitions"));
+        assert!(result.contains("src/a.rs:10"));
+        assert!(result.contains("src/b.rs:20"));
+    }
+
+    #[test]
+    fn goto_empty_definitions() {
+        let val = serde_json::json!({ "definitions": [] });
+        assert_eq!(format_goto_definition(&val), "");
+    }
+
+    #[test]
+    fn goto_no_context() {
+        let val = serde_json::json!({
+            "definitions": [{
+                "file": "src/lib.rs",
+                "line": 1,
+                "end_line": 1,
+                "context": "",
+                "source": "project"
+            }],
+            "from": "main.rs:1"
+        });
+        let result = format_goto_definition(&val);
+        assert_eq!(result, "src/lib.rs:1");
+    }
+
+    #[test]
+    fn goto_multiple_with_external() {
+        let val = serde_json::json!({
+            "definitions": [
+                { "file": "src/a.rs", "line": 10, "end_line": 10, "context": "fn foo()", "source": "project" },
+                { "file": "/ext/lib.rs", "line": 20, "end_line": 20, "context": "fn foo()", "source": "lib:serde" }
+            ],
+            "from": "main.rs:1"
+        });
+        let result = format_goto_definition(&val);
+        assert!(result.contains("2 definitions"));
+        assert!(result.contains("src/a.rs:10"));
+        assert!(result.contains("(lib:serde)"));
+    }
+
+    // --- format_hover tests ---
+
+    #[test]
+    fn hover_with_code_fence() {
+        let val = serde_json::json!({
+            "content": "```rust\npub struct OutputGuard {\n    mode: OutputMode,\n}\n```\n\nProgressive disclosure guard.",
+            "location": "output.rs:35"
+        });
+        let result = format_hover(&val);
+        assert!(result.starts_with("output.rs:35"));
+        assert!(result.contains("  pub struct OutputGuard {"));
+        assert!(result.contains("  Progressive disclosure guard."));
+        assert!(!result.contains("```"));
+    }
+
+    #[test]
+    fn hover_plain_text_no_fences() {
+        let val = serde_json::json!({
+            "content": "Some plain documentation.",
+            "location": "lib.rs:10"
+        });
+        let result = format_hover(&val);
+        assert_eq!(result, "lib.rs:10\n\n  Some plain documentation.");
+    }
+
+    #[test]
+    fn hover_no_location() {
+        let val = serde_json::json!({
+            "content": "```rust\nfn main() {}\n```"
+        });
+        let result = format_hover(&val);
+        assert!(!result.contains("```"));
+        assert!(result.contains("  fn main() {}"));
+    }
+
+    #[test]
+    fn hover_empty_content() {
+        let val = serde_json::json!({});
+        assert_eq!(format_hover(&val), "");
+    }
+
+    #[test]
+    fn hover_multiline_doc() {
+        let val = serde_json::json!({
+            "content": "```rust\nfn add(a: i32, b: i32) -> i32\n```\n\nAdds two numbers.\n\nReturns the sum.",
+            "location": "math.rs:5"
+        });
+        let result = format_hover(&val);
+        assert!(result.contains("  fn add(a: i32, b: i32) -> i32"));
+        assert!(result.contains("  Adds two numbers."));
+        assert!(result.contains("  Returns the sum."));
+        assert!(!result.contains("```"));
+    }
+
+    // --- format_find_symbol tests ---
+
+    #[test]
+    fn find_symbol_no_body() {
+        let val = serde_json::json!({
+            "symbols": [
+                {
+                    "name": "OutputGuard", "name_path": "OutputGuard",
+                    "kind": "Struct", "file": "src/tools/output.rs",
+                    "start_line": 35, "end_line": 50
+                },
+                {
+                    "name": "cap_items", "name_path": "OutputGuard/cap_items",
+                    "kind": "Function", "file": "src/tools/output.rs",
+                    "start_line": 55, "end_line": 80
+                }
+            ],
+            "total": 2
+        });
+        let result = format_find_symbol(&val);
+        assert!(result.starts_with("2 matches\n"));
+        assert!(result.contains("Struct"));
+        assert!(result.contains("Function"));
+        assert!(result.contains("OutputGuard"));
+        assert!(result.contains("OutputGuard/cap_items"));
+        assert!(result.contains("src/tools/output.rs:35-50"));
+        assert!(result.contains("src/tools/output.rs:55-80"));
+    }
+
+    #[test]
+    fn find_symbol_with_body() {
+        let val = serde_json::json!({
+            "symbols": [
+                {
+                    "name": "cap_items", "name_path": "OutputGuard/cap_items",
+                    "kind": "Function", "file": "src/tools/output.rs",
+                    "start_line": 55, "end_line": 80,
+                    "body": "pub fn cap_items(&self) -> Option<OverflowInfo> {\n    // impl\n}"
+                }
+            ],
+            "total": 1
+        });
+        let result = format_find_symbol(&val);
+        assert!(result.starts_with("1 match\n"));
+        assert!(result.contains("Function"));
+        assert!(result.contains("OutputGuard/cap_items"));
+        assert!(result.contains("      pub fn cap_items(&self) -> Option<OverflowInfo> {"));
+        assert!(result.contains("      // impl"));
+        assert!(result.contains("      }"));
+    }
+
+    #[test]
+    fn find_symbol_with_overflow() {
+        let val = serde_json::json!({
+            "symbols": [
+                {
+                    "name": "foo", "name_path": "foo",
+                    "kind": "Function", "file": "src/a.rs",
+                    "start_line": 10, "end_line": 10
+                }
+            ],
+            "total": 100,
+            "overflow": {
+                "shown": 20, "total": 100,
+                "hint": "narrow with path=",
+                "by_file": [["src/a.rs", 50], ["src/b.rs", 30]]
+            }
+        });
+        let result = format_find_symbol(&val);
+        assert!(result.contains("20 matches (100 total)"));
+        assert!(result.contains("20 of 100"));
+        assert!(result.contains("narrow with path="));
+    }
+
+    #[test]
+    fn find_symbol_empty() {
+        let val = serde_json::json!({
+            "symbols": [],
+            "total": 0
+        });
+        assert_eq!(format_find_symbol(&val), "0 matches");
+    }
+
+    #[test]
+    fn find_symbol_missing_symbols_key() {
+        let val = serde_json::json!({});
+        assert_eq!(format_find_symbol(&val), "");
+    }
+
+    #[test]
+    fn find_symbol_alignment() {
+        let val = serde_json::json!({
+            "symbols": [
+                {
+                    "name": "Foo", "name_path": "Foo",
+                    "kind": "Struct", "file": "src/a.rs",
+                    "start_line": 1, "end_line": 5
+                },
+                {
+                    "name": "bar_baz", "name_path": "bar_baz",
+                    "kind": "Function", "file": "src/very/long/path.rs",
+                    "start_line": 100, "end_line": 200
+                }
+            ],
+            "total": 2
+        });
+        let result = format_find_symbol(&val);
+        assert!(result.contains("Struct  "));
+        assert!(result.contains("Function"));
+        assert!(result.contains("src/a.rs:1-5"));
+        assert!(result.contains("src/very/long/path.rs:100-200"));
+    }
+
+    #[test]
+    fn find_symbol_single_line_location() {
+        let val = serde_json::json!({
+            "symbols": [
+                {
+                    "name": "X", "name_path": "X",
+                    "kind": "Constant", "file": "src/lib.rs",
+                    "start_line": 42, "end_line": 42
+                }
+            ],
+            "total": 1
+        });
+        let result = format_find_symbol(&val);
+        assert!(result.contains("src/lib.rs:42"));
+        assert!(!result.contains("42-42"));
+    }
+
+    // --- format_list_symbols tests ---
+
+    #[test]
+    fn list_symbols_file_mode() {
+        let val = serde_json::json!({
+            "file": "src/tools/output.rs",
+            "symbols": [
+                {
+                    "name": "OutputMode", "name_path": "OutputMode",
+                    "kind": "Enum", "start_line": 10, "end_line": 15,
+                    "children": [
+                        { "name": "Exploring", "kind": "EnumMember", "start_line": 11, "end_line": 11 },
+                        { "name": "Focused", "kind": "EnumMember", "start_line": 12, "end_line": 12 }
+                    ]
+                },
+                {
+                    "name": "OutputGuard", "name_path": "OutputGuard",
+                    "kind": "Struct", "start_line": 35, "end_line": 50
+                }
+            ]
+        });
+        let result = format_list_symbols(&val);
+        assert!(result.starts_with("src/tools/output.rs — 2 symbols\n"));
+        assert!(result.contains("Enum"));
+        assert!(result.contains("OutputMode"));
+        assert!(result.contains("L10-15"));
+        assert!(result.contains("Exploring"));
+        assert!(result.contains("L11"));
+        assert!(result.contains("Focused"));
+        assert!(result.contains("L12"));
+        assert!(result.contains("Struct"));
+        assert!(result.contains("OutputGuard"));
+        assert!(result.contains("L35-50"));
+        assert!(!result.contains("EnumMember"));
+    }
+
+    #[test]
+    fn list_symbols_directory_mode() {
+        let val = serde_json::json!({
+            "directory": "src/tools",
+            "files": [
+                {
+                    "file": "src/tools/ast.rs",
+                    "symbols": [
+                        { "name": "ListFunctions", "name_path": "ListFunctions", "kind": "Struct", "start_line": 10, "end_line": 20 }
+                    ]
+                },
+                {
+                    "file": "src/tools/config.rs",
+                    "symbols": [
+                        { "name": "GetConfig", "name_path": "GetConfig", "kind": "Struct", "start_line": 5, "end_line": 15 },
+                        { "name": "ActivateProject", "name_path": "ActivateProject", "kind": "Struct", "start_line": 20, "end_line": 30 }
+                    ]
+                }
+            ]
+        });
+        let result = format_list_symbols(&val);
+        assert!(result.starts_with("src/tools\n"));
+        assert!(result.contains("src/tools/ast.rs — 1 symbol\n"));
+        assert!(result.contains("src/tools/config.rs — 2 symbols\n"));
+        assert!(result.contains("ListFunctions"));
+        assert!(result.contains("GetConfig"));
+        assert!(result.contains("ActivateProject"));
+    }
+
+    #[test]
+    fn list_symbols_pattern_mode() {
+        let val = serde_json::json!({
+            "pattern": "src/**/*.rs",
+            "files": [
+                {
+                    "file": "src/main.rs",
+                    "symbols": [
+                        { "name": "main", "name_path": "main", "kind": "Function", "start_line": 1, "end_line": 10 }
+                    ]
+                }
+            ]
+        });
+        let result = format_list_symbols(&val);
+        assert!(result.starts_with("src/**/*.rs\n"));
+        assert!(result.contains("src/main.rs — 1 symbol\n"));
+        assert!(result.contains("main"));
+    }
+
+    #[test]
+    fn list_symbols_empty_file() {
+        let val = serde_json::json!({
+            "file": "src/empty.rs",
+            "symbols": []
+        });
+        let result = format_list_symbols(&val);
+        assert!(result.contains("0 symbols"));
+    }
+
+    #[test]
+    fn list_symbols_empty_directory() {
+        let val = serde_json::json!({
+            "directory": "src/empty",
+            "files": []
+        });
+        let result = format_list_symbols(&val);
+        assert_eq!(result, "src/empty — 0 symbols");
+    }
+
+    #[test]
+    fn list_symbols_with_overflow() {
+        let val = serde_json::json!({
+            "directory": "src",
+            "files": [
+                {
+                    "file": "src/a.rs",
+                    "symbols": [
+                        { "name": "Foo", "name_path": "Foo", "kind": "Struct", "start_line": 1, "end_line": 5 }
+                    ]
+                }
+            ],
+            "overflow": { "shown": 10, "total": 50, "hint": "Narrow with a more specific glob or file path" }
+        });
+        let result = format_list_symbols(&val);
+        assert!(result.contains("10 of 50"));
+        assert!(result.contains("Narrow with a more specific glob"));
+    }
+
+    #[test]
+    fn list_symbols_children_with_fields() {
+        let val = serde_json::json!({
+            "file": "src/model.rs",
+            "symbols": [
+                {
+                    "name": "Config", "name_path": "Config",
+                    "kind": "Struct", "start_line": 1, "end_line": 10,
+                    "children": [
+                        { "name": "port", "kind": "Field", "start_line": 2, "end_line": 2 },
+                        { "name": "host", "kind": "Field", "start_line": 3, "end_line": 3 }
+                    ]
+                }
+            ]
+        });
+        let result = format_list_symbols(&val);
+        assert!(!result.contains("Field"));
+        assert!(result.contains("port"));
+        assert!(result.contains("host"));
+        assert!(result.contains("L2"));
+        assert!(result.contains("L3"));
+    }
+
+    #[test]
+    fn list_symbols_children_with_methods() {
+        let val = serde_json::json!({
+            "file": "src/service.rs",
+            "symbols": [
+                {
+                    "name": "Server", "name_path": "Server",
+                    "kind": "Struct", "start_line": 1, "end_line": 50,
+                    "children": [
+                        { "name": "new", "kind": "Function", "start_line": 5, "end_line": 10 },
+                        { "name": "run", "kind": "Function", "start_line": 12, "end_line": 40 }
+                    ]
+                }
+            ]
+        });
+        let result = format_list_symbols(&val);
+        assert!(result.contains("Function  new"));
+        assert!(result.contains("Function  run"));
+    }
+
+    #[test]
+    fn list_symbols_missing_symbols_key() {
+        let val = serde_json::json!({});
+        assert_eq!(format_list_symbols(&val), "");
+    }
+
+    #[test]
+    fn list_symbols_singular_symbol_word() {
+        let val = serde_json::json!({
+            "file": "src/single.rs",
+            "symbols": [
+                { "name": "main", "name_path": "main", "kind": "Function", "start_line": 1, "end_line": 5 }
+            ]
+        });
+        let result = format_list_symbols(&val);
+        assert!(result.contains("1 symbol\n"));
+        assert!(!result.contains("1 symbols"));
+    }
+
+    // --- format_find_references tests ---
+
+    #[test]
+    fn find_references_basic() {
+        let result = serde_json::json!({
+            "references": [
+                {"file": "src/foo.rs", "line": 10, "kind": "usage"},
+                {"file": "src/bar.rs", "line": 20, "kind": "usage"},
+                {"file": "src/foo.rs", "line": 30, "kind": "usage"}
+            ],
+            "total": 3
+        });
+        let text = format_find_references(&result);
+        assert!(text.contains("3"), "should mention count");
+        assert!(
+            text.contains("refs") || text.contains("reference"),
+            "should say refs or reference(s)"
+        );
+    }
+
+    #[test]
+    fn find_references_empty() {
+        let result = serde_json::json!({ "references": [], "total": 0 });
+        let text = format_find_references(&result);
+        assert!(
+            text.contains("No"),
+            "should say 'No references found.', got: {}",
+            text
+        );
+    }
+
+    #[test]
+    fn format_find_references_shows_locations() {
+        let result = serde_json::json!({
+            "total": 8,
+            "references": [
+                {"file": "src/tools/symbol.rs", "line": 142},
+                {"file": "src/tools/symbol.rs", "line": 198},
+                {"file": "src/server.rs", "line": 87},
+                {"file": "src/agent.rs", "line": 210},
+                {"file": "src/main.rs", "line": 45},
+                {"file": "src/config.rs", "line": 12}
+            ]
+        });
+        let out = format_find_references(&result);
+        assert!(out.contains("8 refs"), "should show total");
+        assert!(
+            out.contains("src/tools/symbol.rs:142"),
+            "should show locations"
+        );
+        assert!(out.contains("src/server.rs:87"), "should show locations");
+        assert!(out.contains("more"), "should show trailer for hidden refs");
+        assert!(!out.contains("src/config.rs"), "should cap at 5");
+    }
+
+    #[test]
+    fn format_find_references_five_or_fewer_no_trailer() {
+        let result = serde_json::json!({
+            "total": 3,
+            "references": [
+                {"file": "src/a.rs", "line": 1},
+                {"file": "src/b.rs", "line": 2},
+                {"file": "src/c.rs", "line": 3}
+            ]
+        });
+        let out = format_find_references(&result);
+        assert!(out.contains("src/a.rs:1"));
+        assert!(!out.contains("more"), "no trailer when all fit");
     }
 }

@@ -3,10 +3,9 @@
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use super::user_format;
+use super::format::format_overflow;
 use super::{RecoverableError, Tool, ToolContext};
 use crate::util::text::extract_lines;
-
 
 // ── read_file ────────────────────────────────────────────────────────────────
 
@@ -164,7 +163,7 @@ impl Tool for ReadFile {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(user_format::format_read_file(result))
+        Some(format_read_file(result))
     }
 }
 
@@ -268,7 +267,7 @@ impl Tool for ListDir {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(user_format::format_list_dir(result))
+        Some(format_list_dir(result))
     }
 }
 
@@ -438,7 +437,7 @@ impl Tool for SearchPattern {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(user_format::format_search_pattern(result))
+        Some(format_search_pattern(result))
     }
 }
 
@@ -574,8 +573,349 @@ impl Tool for FindFile {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(user_format::format_find_file(result))
+        Some(format_find_file(result))
     }
+}
+
+// ── format_compact helpers ────────────────────────────────────────────────────
+
+fn format_read_file(val: &Value) -> String {
+    // Summary modes have a "type" key
+    if let Some(file_type) = val["type"].as_str() {
+        return format_read_file_summary(val, file_type);
+    }
+
+    // Content mode
+    let content = match val["content"].as_str() {
+        Some(c) => c,
+        None => return String::new(),
+    };
+
+    let total_lines = val["total_lines"]
+        .as_u64()
+        .unwrap_or_else(|| content.lines().count() as u64);
+
+    if content.is_empty() {
+        let mut out = "0 lines".to_string();
+        if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
+            out.push('\n');
+            out.push_str(&format_overflow(overflow));
+        }
+        return out;
+    }
+
+    let line_word = if total_lines == 1 { "line" } else { "lines" };
+    let mut out = format!("{total_lines} {line_word}\n");
+
+    // Line-numbered content with right-aligned line numbers
+    let lines: Vec<&str> = content.lines().collect();
+    let max_lineno = total_lines as usize;
+    let lineno_width = max_lineno.to_string().len();
+
+    for (i, line) in lines.iter().enumerate() {
+        let lineno = i + 1;
+        out.push('\n');
+        out.push_str(&format!("{:>width$}| {line}", lineno, width = lineno_width));
+    }
+
+    // Overflow
+    if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
+        out.push('\n');
+        out.push_str(&format_overflow(overflow));
+    }
+
+    out
+}
+
+fn format_read_file_summary(val: &Value, file_type: &str) -> String {
+    let line_count = val["line_count"].as_u64().unwrap_or(0);
+
+    let type_label = match file_type {
+        "markdown" => " (Markdown)",
+        "config" => " (Config)",
+        _ => "",
+    };
+    let mut out = format!("{line_count} lines{type_label}\n");
+
+    match file_type {
+        "source" => {
+            if let Some(symbols) = val["symbols"].as_array() {
+                if !symbols.is_empty() {
+                    out.push_str("\n  Symbols:");
+
+                    // Compute alignment widths
+                    let max_kind = symbols
+                        .iter()
+                        .map(|s| s["kind"].as_str().unwrap_or("").len())
+                        .max()
+                        .unwrap_or(0);
+                    let max_name = symbols
+                        .iter()
+                        .map(|s| s["name"].as_str().unwrap_or("").len())
+                        .max()
+                        .unwrap_or(0);
+
+                    for sym in symbols {
+                        let kind = sym["kind"].as_str().unwrap_or("?");
+                        let name = sym["name"].as_str().unwrap_or("?");
+                        let line = sym["line"].as_u64().unwrap_or(0);
+                        let kind_pad = " ".repeat(max_kind - kind.len());
+                        let name_pad = " ".repeat(max_name.saturating_sub(name.len()));
+                        out.push_str(&format!(
+                            "\n    {kind}{kind_pad}  {name}{name_pad}  L{line}"
+                        ));
+                    }
+                }
+            }
+        }
+        "markdown" => {
+            if let Some(headings) = val["headings"].as_array() {
+                if !headings.is_empty() {
+                    out.push_str("\n  Headings:");
+                    for h in headings {
+                        if let Some(heading) = h.as_str() {
+                            out.push_str(&format!("\n    {heading}"));
+                        }
+                    }
+                }
+            }
+        }
+        "config" => {
+            if let Some(preview) = val["preview"].as_str() {
+                out.push_str("\n  Preview:");
+                for line in preview.lines() {
+                    out.push_str(&format!("\n    {line}"));
+                }
+            }
+        }
+        "generic" => {
+            if let Some(head) = val["head"].as_str() {
+                out.push_str("\n  Head:");
+                for line in head.lines() {
+                    out.push_str(&format!("\n    {line}"));
+                }
+            }
+            if let Some(tail) = val["tail"].as_str() {
+                out.push_str("\n  Tail:");
+                for line in tail.lines() {
+                    out.push_str(&format!("\n    {line}"));
+                }
+            }
+        }
+        _ => {}
+    }
+
+    // Buffer reference
+    if let Some(file_id) = val["file_id"].as_str() {
+        out.push_str(&format!("\n\n  Buffer: {file_id}"));
+    }
+    if let Some(hint) = val["hint"].as_str() {
+        out.push_str(&format!("\n  {hint}"));
+    }
+
+    out
+}
+
+fn format_list_dir(val: &Value) -> String {
+    let entries = match val["entries"].as_array() {
+        Some(arr) => arr,
+        None => return String::new(),
+    };
+
+    if entries.is_empty() {
+        return "(empty directory)".to_string();
+    }
+
+    let names: Vec<&str> = entries.iter().filter_map(|e| e.as_str()).collect();
+    if names.is_empty() {
+        return "(empty directory)".to_string();
+    }
+
+    let prefix = common_path_prefix(&names);
+
+    let short_names: Vec<&str> = names
+        .iter()
+        .map(|n| {
+            let stripped = &n[prefix.len()..];
+            if stripped.is_empty() {
+                *n
+            } else {
+                stripped
+            }
+        })
+        .collect();
+
+    let dir_display = if prefix.is_empty() {
+        ".".to_string()
+    } else {
+        prefix.trim_end_matches('/').to_string()
+    };
+    let mut out = format!("{} — {} entries\n", dir_display, names.len());
+
+    let max_name_len = short_names.iter().map(|n| n.len()).max().unwrap_or(0);
+    let col_width = max_name_len + 2;
+    let num_cols = (78 / col_width).max(1);
+
+    out.push('\n');
+    for (i, name) in short_names.iter().enumerate() {
+        if i % num_cols == 0 {
+            out.push_str("  ");
+        }
+        out.push_str(name);
+        if (i + 1) % num_cols != 0 && i + 1 < short_names.len() {
+            let padding = col_width - name.len();
+            for _ in 0..padding {
+                out.push(' ');
+            }
+        }
+        if (i + 1) % num_cols == 0 && i + 1 < short_names.len() {
+            out.push('\n');
+        }
+    }
+
+    if let Some(overflow) = val.get("overflow") {
+        if overflow.is_object() {
+            out.push('\n');
+            out.push_str(&format_overflow(overflow));
+        }
+    }
+
+    out
+}
+
+fn common_path_prefix(paths: &[&str]) -> String {
+    if paths.is_empty() {
+        return String::new();
+    }
+    if paths.len() == 1 {
+        if let Some(pos) = paths[0].rfind('/') {
+            return paths[0][..=pos].to_string();
+        }
+        return String::new();
+    }
+
+    let first = paths[0];
+    let mut prefix_len = 0;
+    let mut last_slash = 0;
+
+    for (i, ch) in first.char_indices() {
+        if paths[1..]
+            .iter()
+            .any(|p| p.len() <= i || p.as_bytes()[i] != ch as u8)
+        {
+            break;
+        }
+        prefix_len = i + ch.len_utf8();
+        if ch == '/' {
+            last_slash = prefix_len;
+        }
+    }
+
+    if last_slash > 0 {
+        first[..last_slash].to_string()
+    } else {
+        let candidate = &first[..prefix_len];
+        if candidate.ends_with('/') {
+            candidate.to_string()
+        } else {
+            String::new()
+        }
+    }
+}
+
+fn format_search_pattern(val: &Value) -> String {
+    let matches = match val["matches"].as_array() {
+        Some(arr) => arr,
+        None => return String::new(),
+    };
+
+    let total = val["total"].as_u64().unwrap_or(matches.len() as u64);
+
+    if matches.is_empty() {
+        return "0 matches".to_string();
+    }
+
+    let is_context_mode = matches[0].get("start_line").is_some();
+
+    let match_word = if total == 1 { "match" } else { "matches" };
+    let mut out = format!("{total} {match_word}\n");
+
+    if is_context_mode {
+        format_search_context_mode(&mut out, matches);
+    } else {
+        format_search_simple_mode(&mut out, matches);
+    }
+
+    if let Some(overflow) = val.get("overflow") {
+        if overflow.is_object() {
+            out.push('\n');
+            out.push_str(&format_overflow(overflow));
+        }
+    }
+
+    out
+}
+
+fn format_search_simple_mode(out: &mut String, matches: &[Value]) {
+    let locations: Vec<String> = matches
+        .iter()
+        .map(|m| {
+            let file = m["file"].as_str().unwrap_or("?");
+            let line = m["line"].as_u64().unwrap_or(0);
+            format!("{file}:{line}")
+        })
+        .collect();
+
+    let max_loc_len = locations.iter().map(|l| l.len()).max().unwrap_or(0);
+
+    for (i, m) in matches.iter().enumerate() {
+        let content = m["content"].as_str().unwrap_or("");
+        let padding = max_loc_len - locations[i].len();
+        out.push_str("\n  ");
+        out.push_str(&locations[i]);
+        for _ in 0..padding {
+            out.push(' ');
+        }
+        out.push_str("   ");
+        out.push_str(content.trim());
+    }
+}
+
+fn format_search_context_mode(out: &mut String, matches: &[Value]) {
+    let mut current_file: Option<&str> = None;
+
+    for m in matches {
+        let file = m["file"].as_str().unwrap_or("?");
+        let start_line = m["start_line"].as_u64().unwrap_or(1);
+        let content = m["content"].as_str().unwrap_or("");
+
+        if current_file != Some(file) {
+            out.push_str("\n  ");
+            out.push_str(file);
+            out.push('\n');
+            current_file = Some(file);
+        }
+
+        for (i, line) in content.lines().enumerate() {
+            let line_num = start_line + i as u64;
+            out.push_str(&format!("  {:<4} {}\n", line_num, line));
+        }
+    }
+
+    if out.ends_with('\n') {
+        out.pop();
+    }
+}
+
+fn format_find_file(result: &Value) -> String {
+    let total = result["total"].as_u64().unwrap_or(0);
+    let overflow = result["overflow"].is_object();
+    let cap_note = if overflow {
+        " (cap hit — narrow pattern)"
+    } else {
+        ""
+    };
+    format!("{total} files{cap_note}")
 }
 
 const DEF_KEYWORDS: &[&str] = &[
@@ -668,6 +1008,25 @@ impl Tool for EditFile {
         super::guard_worktree_write(ctx).await?;
         let path = super::require_str_param(&input, "path")?;
         let new_string = input["new_string"].as_str().unwrap_or("");
+        let acknowledge_risk = input["acknowledge_risk"].as_bool().unwrap_or(false);
+
+        // Dispatch @ack_* handle for a previously deferred multi-line source edit.
+        if path.starts_with("@ack_") {
+            let edit = ctx.output_buffer.get_pending_edit(path).ok_or_else(|| {
+                super::RecoverableError::with_hint(
+                    "ack handle expired or unknown",
+                    "Re-run the original edit_file call to get a fresh handle.",
+                )
+            })?;
+            return perform_edit(
+                &edit.path,
+                &edit.old_string,
+                &edit.new_string,
+                edit.replace_all,
+                ctx,
+            )
+            .await;
+        }
 
         // Prepend/append mode — no string match needed.
         if let Some(insert) = input["insert"].as_str() {
@@ -706,62 +1065,80 @@ impl Tool for EditFile {
             .into());
         }
 
-        // Block multi-line edits on source files — symbol tools are safer and LSP-backed.
-        if old_string.contains('\n') && crate::util::path_security::is_source_path(path) {
+        // Multi-line edits on source files: nudge toward symbol tools but allow with ack.
+        if old_string.contains('\n')
+            && crate::util::path_security::is_source_path(path)
+            && !acknowledge_risk
+        {
             let hint = infer_edit_hint(old_string, new_string);
-            return Err(super::RecoverableError::with_hint(
-                "edit_file cannot replace multi-line source code — use a symbol-aware tool instead",
-                hint,
-            )
-            .into());
+            let handle = ctx.output_buffer.store_pending_edit(
+                path.to_string(),
+                old_string.to_string(),
+                new_string.to_string(),
+                replace_all,
+            );
+            return Ok(json!({
+                "pending_ack": handle,
+                "reason": "multi-line edit on source file — symbol-aware tools are safer and LSP-backed",
+                "hint": format!("Prefer {}. To proceed anyway: edit_file(\"{}\")", hint, handle)
+            }));
         }
 
-        let root = ctx.agent.require_project_root().await?;
-        let security = ctx.agent.security_config().await;
-        let resolved = crate::util::path_security::validate_write_path(path, &root, &security)?;
+        perform_edit(path, old_string, new_string, replace_all, ctx).await
+    }
+}
 
-        let content = std::fs::read_to_string(&resolved)?;
+async fn perform_edit(
+    path: &str,
+    old_string: &str,
+    new_string: &str,
+    replace_all: bool,
+    ctx: &ToolContext,
+) -> Result<Value> {
+    let root = ctx.agent.require_project_root().await?;
+    let security = ctx.agent.security_config().await;
+    let resolved = crate::util::path_security::validate_write_path(path, &root, &security)?;
 
-        let match_count = content.matches(old_string).count();
+    let content = std::fs::read_to_string(&resolved)?;
 
-        if match_count == 0 {
-            return Err(super::RecoverableError::with_hint(
-                format!("old_string not found in {path}"),
-                "Check whitespace and indentation — old_string must match exactly. Use search_pattern to verify the exact text.",
-            )
-            .into());
-        }
+    let match_count = content.matches(old_string).count();
 
-        if match_count > 1 && !replace_all {
-            let line_numbers: Vec<usize> = content
-                .match_indices(old_string)
-                .map(|(byte_offset, _)| content[..byte_offset].lines().count() + 1)
-                .collect();
-            let lines_str = line_numbers
-                .iter()
-                .map(|n| n.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            return Err(super::RecoverableError::with_hint(
-                format!(
-                    "old_string found {match_count} times (lines {lines_str}). Include more surrounding context or use replace_all: true."
-                ),
-                "Expand old_string to include unique surrounding context, or set replace_all: true to replace every occurrence.",
-            )
-            .into());
-        }
-
-        let new_content = content.replace(old_string, new_string);
-        std::fs::write(&resolved, &new_content)?;
-        ctx.lsp.notify_file_changed(&resolved).await;
-
-        let hint = crate::util::path_security::worktree_hint(&root);
-        Ok(match hint {
-            None => json!("ok"),
-            Some(h) => json!({ "worktree_hint": h }),
-        })
+    if match_count == 0 {
+        return Err(super::RecoverableError::with_hint(
+            format!("old_string not found in {path}"),
+            "Check whitespace and indentation — old_string must match exactly. Use search_pattern to verify the exact text.",
+        )
+        .into());
     }
 
+    if match_count > 1 && !replace_all {
+        let line_numbers: Vec<usize> = content
+            .match_indices(old_string)
+            .map(|(byte_offset, _)| content[..byte_offset].lines().count() + 1)
+            .collect();
+        let lines_str = line_numbers
+            .iter()
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(super::RecoverableError::with_hint(
+            format!(
+                "old_string found {match_count} times (lines {lines_str}). Include more surrounding context or use replace_all: true."
+            ),
+            "Expand old_string to include unique surrounding context, or set replace_all: true to replace every occurrence.",
+        )
+        .into());
+    }
+
+    let new_content = content.replace(old_string, new_string);
+    std::fs::write(&resolved, &new_content)?;
+    ctx.lsp.notify_file_changed(&resolved).await;
+
+    let hint = crate::util::path_security::worktree_hint(&root);
+    Ok(match hint {
+        None => json!("ok"),
+        Some(h) => json!({ "worktree_hint": h }),
+    })
 }
 
 #[cfg(test)]
@@ -2205,8 +2582,6 @@ mod tests {
         );
     }
 
-
-
     // ── EditFile ──────────────────────────────────────────────────────────────
 
     #[tokio::test]
@@ -2486,7 +2861,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn edit_file_blocks_multiline_on_rust_source() {
+    async fn edit_file_warns_multiline_on_rust_source() {
         let (dir, ctx) = project_ctx().await;
         let path = dir.path().join("src/lib.rs");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -2501,17 +2876,19 @@ mod tests {
                 }),
                 &ctx,
             )
-            .await;
+            .await
+            .expect("should return Ok with pending_ack, not an error");
 
-        let err = result.unwrap_err();
-        let rec = err
-            .downcast_ref::<crate::tools::RecoverableError>()
-            .expect("should be RecoverableError");
-        assert!(rec.message.contains("symbol-aware"), "got: {}", rec.message);
         assert!(
-            rec.hint.as_deref().unwrap_or("").contains("replace_symbol"),
-            "got: {:?}",
-            rec.hint
+            result["pending_ack"].as_str().is_some(),
+            "expected pending_ack handle, got: {result}"
+        );
+        assert!(
+            result["hint"]
+                .as_str()
+                .unwrap_or("")
+                .contains("replace_symbol"),
+            "hint should mention replace_symbol, got: {result}"
         );
     }
 
@@ -2557,7 +2934,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn edit_file_blocks_multiline_python() {
+    async fn edit_file_warns_multiline_python() {
         let (dir, ctx) = project_ctx().await;
         let path = dir.path().join("app.py");
         std::fs::write(&path, "def greet():\n    print('hello')\n").unwrap();
@@ -2567,21 +2944,24 @@ mod tests {
                 json!({"path": "app.py", "old_string": "def greet():\n    print('hello')", "new_string": "def greet():\n    print('hi')"}),
                 &ctx,
             )
-            .await;
+            .await
+            .expect("should return Ok with pending_ack, not an error");
 
-        let err = result.unwrap_err();
-        let rec = err
-            .downcast_ref::<crate::tools::RecoverableError>()
-            .expect("RecoverableError");
         assert!(
-            rec.hint.as_deref().unwrap_or("").contains("replace_symbol"),
-            "got: {:?}",
-            rec.hint
+            result["pending_ack"].as_str().is_some(),
+            "expected pending_ack handle, got: {result}"
+        );
+        assert!(
+            result["hint"]
+                .as_str()
+                .unwrap_or("")
+                .contains("replace_symbol"),
+            "hint should mention replace_symbol, got: {result}"
         );
     }
 
     #[tokio::test]
-    async fn edit_file_blocks_hint_suggests_remove_when_new_empty() {
+    async fn edit_file_warns_hint_suggests_remove_when_new_empty() {
         let (dir, ctx) = project_ctx().await;
         let path = dir.path().join("src/lib.rs");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -2592,16 +2972,19 @@ mod tests {
                 json!({"path": "src/lib.rs", "old_string": "fn foo() {\n    bar();\n}", "new_string": ""}),
                 &ctx,
             )
-            .await;
+            .await
+            .expect("should return Ok with pending_ack, not an error");
 
-        let err = result.unwrap_err();
-        let rec = err
-            .downcast_ref::<crate::tools::RecoverableError>()
-            .expect("RecoverableError");
         assert!(
-            rec.hint.as_deref().unwrap_or("").contains("remove_symbol"),
-            "got: {:?}",
-            rec.hint
+            result["pending_ack"].as_str().is_some(),
+            "expected pending_ack handle, got: {result}"
+        );
+        assert!(
+            result["hint"]
+                .as_str()
+                .unwrap_or("")
+                .contains("remove_symbol"),
+            "hint should mention remove_symbol, got: {result}"
         );
     }
 
@@ -2658,5 +3041,535 @@ mod tests {
             .await;
 
         assert!(result.is_ok(), "should succeed without old_string");
+    }
+
+    #[tokio::test]
+    async fn edit_file_ack_handle_executes_edit() {
+        let (dir, ctx) = project_ctx().await;
+        let path = dir.path().join("src/lib.rs");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "fn foo() {\n    old();\n}\n").unwrap();
+
+        // First call: returns pending_ack handle.
+        let warn = EditFile
+            .call(
+                json!({
+                    "path": "src/lib.rs",
+                    "old_string": "fn foo() {\n    old();\n}",
+                    "new_string": "fn foo() {\n    new();\n}"
+                }),
+                &ctx,
+            )
+            .await
+            .expect("first call should return Ok");
+        let handle = warn["pending_ack"]
+            .as_str()
+            .expect("should have pending_ack handle")
+            .to_string();
+
+        // Second call: pass the ack handle as path — edit executes.
+        let result = EditFile
+            .call(json!({"path": handle, "new_string": ""}), &ctx)
+            .await
+            .expect("ack call should succeed");
+        assert_eq!(result, json!("ok"));
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            written.contains("new()"),
+            "file should contain new() after ack: {written}"
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_file_acknowledge_risk_bypasses_source_check() {
+        let (dir, ctx) = project_ctx().await;
+        let path = dir.path().join("src/lib.rs");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "fn foo() {\n    old();\n}\n").unwrap();
+
+        let result = EditFile
+            .call(
+                json!({
+                    "path": "src/lib.rs",
+                    "old_string": "fn foo() {\n    old();\n}",
+                    "new_string": "fn foo() {\n    new();\n}",
+                    "acknowledge_risk": true
+                }),
+                &ctx,
+            )
+            .await
+            .expect("acknowledge_risk should bypass the check");
+        assert_eq!(result, json!("ok"));
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            written.contains("new()"),
+            "file should contain new() after direct ack: {written}"
+        );
+    }
+
+    // --- format_list_dir tests ---
+
+    #[test]
+    fn list_dir_basic() {
+        let val = serde_json::json!({
+            "entries": [
+                "src/tools/ast.rs",
+                "src/tools/config.rs",
+                "src/tools/file.rs",
+                "src/tools/git.rs",
+                "src/tools/library.rs",
+                "src/tools/memory.rs",
+                "src/tools/mod.rs",
+                "src/tools/output.rs",
+                "src/tools/semantic.rs",
+                "src/tools/symbol.rs",
+                "src/tools/workflow.rs",
+                "src/tools/user_format.rs"
+            ]
+        });
+        let result = format_list_dir(&val);
+        assert!(result.starts_with("src/tools — 12 entries"));
+        assert!(result.contains("ast.rs"));
+        assert!(result.contains("mod.rs"));
+        assert!(result.contains("user_format.rs"));
+        assert!(!result.contains("src/tools/ast.rs"));
+    }
+
+    #[test]
+    fn list_dir_with_overflow() {
+        let val = serde_json::json!({
+            "entries": ["src/a.rs", "src/b.rs"],
+            "overflow": { "shown": 200, "total": 350, "hint": "Use a more specific path" }
+        });
+        let result = format_list_dir(&val);
+        assert!(result.contains("2 entries"));
+        assert!(result.contains("200 of 350"));
+        assert!(result.contains("Use a more specific path"));
+    }
+
+    #[test]
+    fn list_dir_empty() {
+        let val = serde_json::json!({ "entries": [] });
+        assert_eq!(format_list_dir(&val), "(empty directory)");
+    }
+
+    #[test]
+    fn list_dir_no_common_prefix() {
+        let val = serde_json::json!({
+            "entries": ["Cargo.toml", "README.md", "src/"]
+        });
+        let result = format_list_dir(&val);
+        assert!(result.starts_with(". — 3 entries"));
+        assert!(result.contains("Cargo.toml"));
+        assert!(result.contains("README.md"));
+        assert!(result.contains("src/"));
+    }
+
+    #[test]
+    fn list_dir_recursive_deep_paths() {
+        let val = serde_json::json!({
+            "entries": [
+                "src/lsp/client.rs",
+                "src/lsp/ops.rs",
+                "src/lsp/config.rs",
+                "src/lsp/types.rs"
+            ]
+        });
+        let result = format_list_dir(&val);
+        assert!(result.starts_with("src/lsp — 4 entries"));
+        assert!(result.contains("client.rs"));
+        assert!(result.contains("ops.rs"));
+    }
+
+    #[test]
+    fn list_dir_single_entry() {
+        let val = serde_json::json!({
+            "entries": ["src/main.rs"]
+        });
+        let result = format_list_dir(&val);
+        assert!(result.contains("1 entries"));
+        assert!(result.contains("main.rs"));
+    }
+
+    #[test]
+    fn list_dir_directories_with_slash() {
+        let val = serde_json::json!({
+            "entries": ["src/tools/", "src/lsp/", "src/embed/"]
+        });
+        let result = format_list_dir(&val);
+        assert!(result.contains("tools/"));
+        assert!(result.contains("lsp/"));
+        assert!(result.contains("embed/"));
+    }
+
+    #[test]
+    fn list_dir_missing_entries() {
+        let val = serde_json::json!({});
+        assert_eq!(format_list_dir(&val), "");
+    }
+
+    // --- common_path_prefix tests ---
+
+    #[test]
+    fn prefix_empty_input() {
+        assert_eq!(common_path_prefix(&[]), "");
+    }
+
+    #[test]
+    fn prefix_single_path() {
+        assert_eq!(common_path_prefix(&["src/tools/mod.rs"]), "src/tools/");
+    }
+
+    #[test]
+    fn prefix_common_dir() {
+        assert_eq!(
+            common_path_prefix(&["src/tools/a.rs", "src/tools/b.rs"]),
+            "src/tools/"
+        );
+    }
+
+    #[test]
+    fn prefix_no_common() {
+        assert_eq!(common_path_prefix(&["Cargo.toml", "README.md"]), "");
+    }
+
+    #[test]
+    fn prefix_partial_name_not_included() {
+        assert_eq!(
+            common_path_prefix(&["src/tools/a.rs", "src/tokens/b.rs"]),
+            "src/"
+        );
+    }
+
+    // --- format_search_pattern tests ---
+
+    #[test]
+    fn search_simple_mode() {
+        let val = serde_json::json!({
+            "matches": [
+                { "file": "src/tools/mod.rs", "line": 54, "content": "pub struct RecoverableError {" },
+                { "file": "src/tools/mod.rs", "line": 60, "content": "    RecoverableError { error, hint }" },
+                { "file": "src/server.rs", "line": 230, "content": "RecoverableError => {" }
+            ],
+            "total": 3
+        });
+        let result = format_search_pattern(&val);
+        assert!(result.starts_with("3 matches"));
+        assert!(result.contains("src/tools/mod.rs:54"));
+        assert!(result.contains("src/server.rs:230"));
+        assert!(result.contains("pub struct RecoverableError {"));
+    }
+
+    #[test]
+    fn search_context_mode() {
+        let val = serde_json::json!({
+            "matches": [
+                {
+                    "file": "src/tools/mod.rs",
+                    "match_line": 54,
+                    "start_line": 52,
+                    "content": "/// Soft error\npub struct RecoverableError {\n    pub error: String,"
+                }
+            ],
+            "total": 1
+        });
+        let result = format_search_pattern(&val);
+        assert!(result.starts_with("1 match\n"));
+        assert!(result.contains("src/tools/mod.rs"));
+        assert!(result.contains("52   /// Soft error"));
+        assert!(result.contains("53   pub struct RecoverableError {"));
+        assert!(result.contains("54       pub error: String,"));
+    }
+
+    #[test]
+    fn search_with_overflow() {
+        let val = serde_json::json!({
+            "matches": [
+                { "file": "src/a.rs", "line": 1, "content": "match" }
+            ],
+            "total": 1,
+            "overflow": { "shown": 50, "hint": "Showing first 50 matches (cap hit). Narrow with a more specific pattern." }
+        });
+        let result = format_search_pattern(&val);
+        assert!(result.contains("first 50"));
+        assert!(result.contains("Narrow with a more specific pattern"));
+    }
+
+    #[test]
+    fn search_empty_matches() {
+        let val = serde_json::json!({
+            "matches": [],
+            "total": 0
+        });
+        assert_eq!(format_search_pattern(&val), "0 matches");
+    }
+
+    #[test]
+    fn search_single_match_singular() {
+        let val = serde_json::json!({
+            "matches": [
+                { "file": "src/main.rs", "line": 1, "content": "fn main() {" }
+            ],
+            "total": 1
+        });
+        let result = format_search_pattern(&val);
+        assert!(result.starts_with("1 match\n"));
+        assert!(!result.starts_with("1 matches"));
+    }
+
+    #[test]
+    fn search_context_mode_multiple_files() {
+        let val = serde_json::json!({
+            "matches": [
+                {
+                    "file": "src/a.rs",
+                    "match_line": 10,
+                    "start_line": 9,
+                    "content": "// context\nfn foo() {"
+                },
+                {
+                    "file": "src/b.rs",
+                    "match_line": 5,
+                    "start_line": 4,
+                    "content": "// other\nfn bar() {"
+                }
+            ],
+            "total": 2
+        });
+        let result = format_search_pattern(&val);
+        assert!(result.contains("2 matches"));
+        assert!(result.contains("src/a.rs"));
+        assert!(result.contains("src/b.rs"));
+        assert!(result.contains("9    // context"));
+        assert!(result.contains("10   fn foo() {"));
+        assert!(result.contains("4    // other"));
+        assert!(result.contains("5    fn bar() {"));
+    }
+
+    #[test]
+    fn search_simple_alignment() {
+        let val = serde_json::json!({
+            "matches": [
+                { "file": "a.rs", "line": 1, "content": "short" },
+                { "file": "very/long/path.rs", "line": 100, "content": "long" }
+            ],
+            "total": 2
+        });
+        let result = format_search_pattern(&val);
+        assert!(result.contains("a.rs:1"));
+        assert!(result.contains("very/long/path.rs:100"));
+    }
+
+    #[test]
+    fn search_missing_matches_key() {
+        let val = serde_json::json!({});
+        assert_eq!(format_search_pattern(&val), "");
+    }
+
+    // --- format_read_file tests ---
+
+    #[test]
+    fn read_file_content_mode_basic() {
+        let val = serde_json::json!({
+            "content": "fn main() {\n    println!(\"hello\");\n}\n",
+            "total_lines": 3,
+            "source": "project"
+        });
+        let result = format_read_file(&val);
+        assert!(result.starts_with("3 lines\n"));
+        assert!(result.contains("1| fn main() {"));
+        assert!(result.contains("2|     println!(\"hello\");"));
+        assert!(result.contains("3| }"));
+    }
+
+    #[test]
+    fn read_file_content_mode_single_line() {
+        let val = serde_json::json!({
+            "content": "hello world",
+            "total_lines": 1,
+            "source": "project"
+        });
+        let result = format_read_file(&val);
+        assert!(result.starts_with("1 line\n"));
+        assert!(!result.starts_with("1 lines"));
+        assert!(result.contains("1| hello world"));
+    }
+
+    #[test]
+    fn read_file_content_with_overflow() {
+        let val = serde_json::json!({
+            "content": "line1\nline2\n",
+            "total_lines": 500,
+            "source": "project",
+            "overflow": { "shown": 200, "total": 500, "hint": "File has 500 lines. Use start_line/end_line to read specific ranges" }
+        });
+        let result = format_read_file(&val);
+        assert!(result.starts_with("500 lines\n"));
+        assert!(result.contains("200 of 500"));
+        assert!(result.contains("start_line/end_line"));
+    }
+
+    #[test]
+    fn read_file_empty_content() {
+        let val = serde_json::json!({
+            "content": "",
+            "total_lines": 0,
+            "source": "project"
+        });
+        let result = format_read_file(&val);
+        assert_eq!(result, "0 lines");
+    }
+
+    #[test]
+    fn read_file_missing_content() {
+        let val = serde_json::json!({});
+        assert_eq!(format_read_file(&val), "");
+    }
+
+    #[test]
+    fn read_file_source_summary() {
+        let val = serde_json::json!({
+            "type": "source",
+            "line_count": 500,
+            "symbols": [
+                { "name": "OutputGuard", "kind": "Struct", "line": 35 },
+                { "name": "cap_items", "kind": "Function", "line": 55 }
+            ],
+            "file_id": "@file_abc123",
+            "hint": "Full file stored as @file_abc123. Query with: run_command(\"grep/sed/awk @file_abc123\")"
+        });
+        let result = format_read_file(&val);
+        assert!(result.starts_with("500 lines\n"));
+        assert!(result.contains("Symbols:"));
+        assert!(result.contains("Struct"));
+        assert!(result.contains("OutputGuard"));
+        assert!(result.contains("L35"));
+        assert!(result.contains("Function"));
+        assert!(result.contains("cap_items"));
+        assert!(result.contains("L55"));
+        assert!(result.contains("Buffer: @file_abc123"));
+        assert!(result.contains("Full file stored as @file_abc123"));
+    }
+
+    #[test]
+    fn read_file_markdown_summary() {
+        let val = serde_json::json!({
+            "type": "markdown",
+            "line_count": 200,
+            "headings": ["# Title", "## Section 1", "## Section 2"],
+            "file_id": "@file_xyz",
+            "hint": "Full file stored as @file_xyz."
+        });
+        let result = format_read_file(&val);
+        assert!(result.starts_with("200 lines (Markdown)\n"));
+        assert!(result.contains("Headings:"));
+        assert!(result.contains("# Title"));
+        assert!(result.contains("## Section 1"));
+        assert!(result.contains("## Section 2"));
+        assert!(result.contains("Buffer: @file_xyz"));
+    }
+
+    #[test]
+    fn read_file_config_summary() {
+        let val = serde_json::json!({
+            "type": "config",
+            "line_count": 50,
+            "preview": "[package]\nname = \"code-explorer\"\nversion = \"0.1.0\"",
+            "file_id": "@file_cfg",
+            "hint": "Full file stored as @file_cfg."
+        });
+        let result = format_read_file(&val);
+        assert!(result.starts_with("50 lines (Config)\n"));
+        assert!(result.contains("Preview:"));
+        assert!(result.contains("[package]"));
+        assert!(result.contains("name = \"code-explorer\""));
+        assert!(result.contains("Buffer: @file_cfg"));
+    }
+
+    #[test]
+    fn read_file_generic_summary() {
+        let val = serde_json::json!({
+            "type": "generic",
+            "line_count": 300,
+            "head": "first line\nsecond line",
+            "tail": "last line",
+            "file_id": "@file_gen",
+            "hint": "Full file stored as @file_gen."
+        });
+        let result = format_read_file(&val);
+        assert!(result.starts_with("300 lines\n"));
+        assert!(result.contains("Head:"));
+        assert!(result.contains("first line"));
+        assert!(result.contains("second line"));
+        assert!(result.contains("Tail:"));
+        assert!(result.contains("last line"));
+        assert!(result.contains("Buffer: @file_gen"));
+    }
+
+    #[test]
+    fn read_file_source_summary_empty_symbols() {
+        let val = serde_json::json!({
+            "type": "source",
+            "line_count": 100,
+            "symbols": [],
+            "file_id": "@file_empty",
+            "hint": "Full file stored as @file_empty."
+        });
+        let result = format_read_file(&val);
+        assert!(result.starts_with("100 lines\n"));
+        assert!(!result.contains("Symbols:"));
+        assert!(result.contains("Buffer: @file_empty"));
+    }
+
+    #[test]
+    fn read_file_lineno_alignment() {
+        let content = (1..=12)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let val = serde_json::json!({
+            "content": content,
+            "total_lines": 12,
+            "source": "project"
+        });
+        let result = format_read_file(&val);
+        assert!(result.contains(" 1| line 1"));
+        assert!(result.contains(" 9| line 9"));
+        assert!(result.contains("10| line 10"));
+        assert!(result.contains("12| line 12"));
+    }
+
+    #[test]
+    fn read_file_source_summary_symbol_alignment() {
+        let val = serde_json::json!({
+            "type": "source",
+            "line_count": 200,
+            "symbols": [
+                { "name": "Foo", "kind": "Struct", "line": 10 },
+                { "name": "bar_function", "kind": "Function", "line": 50 }
+            ],
+            "file_id": "@file_align",
+            "hint": "test"
+        });
+        let result = format_read_file(&val);
+        assert!(result.contains("Struct  "));
+        assert!(result.contains("Function"));
+    }
+
+    #[test]
+    fn read_file_markdown_empty_headings() {
+        let val = serde_json::json!({
+            "type": "markdown",
+            "line_count": 50,
+            "headings": [],
+            "file_id": "@file_md",
+            "hint": "test"
+        });
+        let result = format_read_file(&val);
+        assert!(result.starts_with("50 lines (Markdown)\n"));
+        assert!(!result.contains("Headings:"));
+        assert!(result.contains("Buffer: @file_md"));
     }
 }

@@ -19,7 +19,6 @@ pub mod semantic;
 pub mod symbol;
 pub mod usage;
 pub use usage::GetUsageStats;
-pub mod user_format;
 pub mod workflow;
 
 use std::sync::Arc;

@@ -1,6 +1,7 @@
 //! Semantic search tools backed by the embedding index.
 
-use super::{user_format, Tool, ToolContext};
+use super::format::format_overflow;
+use super::{Tool, ToolContext};
 use serde_json::{json, Value};
 
 pub struct SemanticSearch;
@@ -136,7 +137,7 @@ impl Tool for SemanticSearch {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(user_format::format_semantic_search(result))
+        Some(format_semantic_search(result))
     }
 }
 
@@ -229,7 +230,7 @@ impl Tool for IndexProject {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(user_format::format_index_project(result))
+        Some(format_index_project(result))
     }
 }
 
@@ -427,8 +428,129 @@ impl Tool for IndexStatus {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(user_format::format_index_status(result))
+        Some(format_index_status(result))
     }
+}
+
+fn format_semantic_search(val: &Value) -> String {
+    let results = match val["results"].as_array() {
+        Some(arr) => arr,
+        None => return String::new(),
+    };
+    let total = val["total"].as_u64().unwrap_or(results.len() as u64);
+
+    if results.is_empty() {
+        return "0 results".to_string();
+    }
+
+    let result_word = if total == 1 { "result" } else { "results" };
+    let mut out = format!("{total} {result_word}\n");
+
+    // Build rows: (score_str, location, preview)
+    let rows: Vec<(String, String, String)> = results
+        .iter()
+        .map(|r| {
+            let score = r["score"].as_f64().unwrap_or(0.0);
+            let score_str = format!("{:.2}", score);
+            let file = r["file_path"].as_str().unwrap_or("?");
+            let start = r["start_line"].as_u64().unwrap_or(0);
+            let end = r["end_line"].as_u64().unwrap_or(0);
+            let location = if start > 0 && end > 0 && start != end {
+                format!("{file}:{start}-{end}")
+            } else if start > 0 {
+                format!("{file}:{start}")
+            } else {
+                file.to_string()
+            };
+
+            // Content preview: first line, truncated to ~50 chars
+            let content = r["content"].as_str().unwrap_or("");
+            let first_line = content.lines().next().unwrap_or("").trim();
+            let preview = if first_line.len() > 50 {
+                format!("{}...", &first_line[..47])
+            } else {
+                first_line.to_string()
+            };
+
+            (score_str, location, preview)
+        })
+        .collect();
+
+    // Compute column widths for alignment
+    let max_score_len = rows.iter().map(|(s, _, _)| s.len()).max().unwrap_or(0);
+    let max_loc_len = rows.iter().map(|(_, l, _)| l.len()).max().unwrap_or(0);
+
+    for (score_str, location, preview) in &rows {
+        out.push('\n');
+        let score_pad = max_score_len - score_str.len();
+        out.push_str("  ");
+        for _ in 0..score_pad {
+            out.push(' ');
+        }
+        out.push_str(score_str);
+        out.push_str("  ");
+        out.push_str(location);
+        let loc_pad = max_loc_len - location.len();
+        for _ in 0..loc_pad {
+            out.push(' ');
+        }
+        if !preview.is_empty() {
+            out.push_str("  ");
+            out.push_str(preview);
+        }
+    }
+
+    // Staleness warning
+    if val["stale"].as_bool() == Some(true) {
+        out.push('\n');
+        let behind = val["behind_commits"].as_u64();
+        if let Some(n) = behind {
+            out.push_str(&format!(
+                "\n  Index is {n} commits behind HEAD — run index_project to refresh"
+            ));
+        } else if let Some(hint) = val["hint"].as_str() {
+            out.push_str(&format!("\n  {hint}"));
+        }
+    }
+
+    // Overflow
+    if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
+        out.push('\n');
+        out.push_str(&format_overflow(overflow));
+    }
+
+    out
+}
+
+fn format_index_project(result: &Value) -> String {
+    let status = result["status"].as_str().unwrap_or("?");
+    format!("index {status}")
+}
+
+fn format_index_status(result: &Value) -> String {
+    let indexed = result["indexed"].as_bool().unwrap_or(false);
+    if !indexed {
+        return "not indexed".to_string();
+    }
+    let files = result["file_count"].as_u64().unwrap_or(0);
+    let chunks = result["chunk_count"].as_u64().unwrap_or(0);
+
+    let mut out = format!("{files} files · {chunks} chunks");
+
+    if let Some(model) = result["indexed_with_model"].as_str() {
+        out.push_str(&format!(" · {model}"));
+    }
+    if let Some(ts) = result["indexed_at"].as_str() {
+        out.push_str(&format!(" · {ts}"));
+    }
+    if result["stale"].as_bool().unwrap_or(false) {
+        if let Some(behind) = result["behind_commits"].as_u64().filter(|&n| n > 0) {
+            out.push_str(&format!(" · {behind} commits behind"));
+        } else {
+            out.push_str(" · stale");
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -788,5 +910,219 @@ mod tests {
         // We expect errors since there's no embedder in test environment
         let _ = r1;
         let _ = r2;
+    }
+
+    // --- format_semantic_search tests ---
+
+    #[test]
+    fn semantic_search_basic() {
+        let val = serde_json::json!({
+            "results": [
+                {
+                    "file_path": "src/tools/output.rs",
+                    "language": "rust",
+                    "content": "pub struct OutputGuard {\n    mode: OutputMode,\n}",
+                    "start_line": 35,
+                    "end_line": 50,
+                    "score": 0.923,
+                    "source": "project"
+                },
+                {
+                    "file_path": "src/tools/mod.rs",
+                    "language": "rust",
+                    "content": "pub trait Tool {\n    fn name(&self) -> &str;\n}",
+                    "start_line": 120,
+                    "end_line": 140,
+                    "score": 0.81,
+                    "source": "project"
+                }
+            ],
+            "total": 2
+        });
+        let result = format_semantic_search(&val);
+        assert!(result.starts_with("2 results\n"));
+        assert!(result.contains("0.92"));
+        assert!(result.contains("0.81"));
+        assert!(result.contains("src/tools/output.rs:35-50"));
+        assert!(result.contains("src/tools/mod.rs:120-140"));
+        assert!(result.contains("pub struct OutputGuard {"));
+        assert!(result.contains("pub trait Tool {"));
+    }
+
+    #[test]
+    fn semantic_search_single_result() {
+        let val = serde_json::json!({
+            "results": [
+                {
+                    "file_path": "src/main.rs",
+                    "language": "rust",
+                    "content": "fn main() {}",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "score": 0.95,
+                    "source": "project"
+                }
+            ],
+            "total": 1
+        });
+        let result = format_semantic_search(&val);
+        assert!(result.starts_with("1 result\n"));
+        assert!(!result.starts_with("1 results"));
+        assert!(result.contains("0.95"));
+        assert!(result.contains("src/main.rs:1"));
+    }
+
+    #[test]
+    fn semantic_search_empty() {
+        let val = serde_json::json!({
+            "results": [],
+            "total": 0
+        });
+        assert_eq!(format_semantic_search(&val), "0 results");
+    }
+
+    #[test]
+    fn semantic_search_missing_results() {
+        let val = serde_json::json!({});
+        assert_eq!(format_semantic_search(&val), "");
+    }
+
+    #[test]
+    fn semantic_search_with_staleness() {
+        let val = serde_json::json!({
+            "results": [
+                {
+                    "file_path": "src/a.rs",
+                    "content": "fn foo() {}",
+                    "start_line": 1,
+                    "end_line": 5,
+                    "score": 0.9,
+                    "source": "project"
+                }
+            ],
+            "total": 1,
+            "stale": true,
+            "behind_commits": 5,
+            "hint": "Index is behind HEAD. Run index_project to update."
+        });
+        let result = format_semantic_search(&val);
+        assert!(result.contains("5 commits behind HEAD"));
+        assert!(result.contains("index_project"));
+    }
+
+    #[test]
+    fn semantic_search_with_overflow() {
+        let val = serde_json::json!({
+            "results": [
+                {
+                    "file_path": "src/a.rs",
+                    "content": "fn foo() {}",
+                    "start_line": 1,
+                    "end_line": 5,
+                    "score": 0.9,
+                    "source": "project"
+                }
+            ],
+            "total": 50,
+            "overflow": {
+                "shown": 10,
+                "total": 50,
+                "hint": "Use detail_level='full' with offset for pagination"
+            }
+        });
+        let result = format_semantic_search(&val);
+        assert!(result.contains("10 of 50"));
+    }
+
+    #[test]
+    fn semantic_search_long_content_truncated() {
+        let long_content = "a".repeat(80);
+        let val = serde_json::json!({
+            "results": [
+                {
+                    "file_path": "src/a.rs",
+                    "content": long_content,
+                    "start_line": 1,
+                    "end_line": 10,
+                    "score": 0.85,
+                    "source": "project"
+                }
+            ],
+            "total": 1
+        });
+        let result = format_semantic_search(&val);
+        assert!(result.contains("..."));
+        assert!(!result.contains(&"a".repeat(80)));
+    }
+
+    #[test]
+    fn semantic_search_score_alignment() {
+        let val = serde_json::json!({
+            "results": [
+                {
+                    "file_path": "a.rs",
+                    "content": "short",
+                    "start_line": 1, "end_line": 1,
+                    "score": 0.9, "source": "project"
+                },
+                {
+                    "file_path": "very/long/path/to/file.rs",
+                    "content": "long path",
+                    "start_line": 100, "end_line": 200,
+                    "score": 0.85, "source": "project"
+                }
+            ],
+            "total": 2
+        });
+        let result = format_semantic_search(&val);
+        assert!(result.contains("a.rs:1"));
+        assert!(result.contains("very/long/path/to/file.rs:100-200"));
+    }
+
+    // --- format_index_status tests ---
+
+    #[test]
+    fn format_index_status_shows_model_and_timestamp() {
+        let result = serde_json::json!({
+            "indexed": true,
+            "file_count": 42,
+            "chunk_count": 1234,
+            "stale": false,
+            "indexed_with_model": "text-embedding-3-small",
+            "indexed_at": "2026-03-01 14:22"
+        });
+        let out = format_index_status(&result);
+        assert!(
+            out.contains("42 files"),
+            "should show file count, got: {out}"
+        );
+        assert!(
+            out.contains("1234 chunks"),
+            "should show chunk count, got: {out}"
+        );
+        assert!(
+            out.contains("text-embedding-3-small"),
+            "should show model, got: {out}"
+        );
+        assert!(
+            out.contains("2026-03-01"),
+            "should show timestamp, got: {out}"
+        );
+    }
+
+    #[test]
+    fn format_index_status_stale_shows_commit_count() {
+        let result = serde_json::json!({
+            "indexed": true,
+            "file_count": 10,
+            "chunk_count": 100,
+            "stale": true,
+            "behind_commits": 5
+        });
+        let out = format_index_status(&result);
+        assert!(
+            out.contains("5 commits behind") || out.contains("stale"),
+            "should note staleness, got: {out}"
+        );
     }
 }
