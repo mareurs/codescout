@@ -611,6 +611,55 @@ than its end.
 ---
 ```
 
+### BUG-019 — `replace_symbol`: lands in wrong symbol when LSP has stale line numbers
+
+**Date:** 2026-03-02
+**Severity:** High — silently corrupts the file; no error returned, `status: "ok"` reported
+**Status:** ✅ FIXED — `is_valid_symbol_start_line` guard added to `replace_symbol::call`; rejects start lines that look like function-body content (`let`, expressions) rather than symbol declarations, closing delimiters, comments, or attributes. Returns `RecoverableError` before touching the file. Regression test: `replace_symbol_rejects_stale_lsp_start_line` in `tests/symbol_lsp.rs`.
+
+**What happened:**
+Called `replace_symbol(name_path="impl Tool for EditFile/input_schema", path="src/tools/file.rs", new_body=<updated schema>)`.
+The tool reported `replaced_lines: "639-665"` and `status: "ok"`, but those lines were
+**inside `format_read_file_summary`**, not inside `impl Tool for EditFile`. The result:
+- My new `input_schema` body was injected mid-function into `format_read_file_summary`
+- `format_read_file_summary`'s own body at L639-665 was overwritten and lost
+- The file gained a spurious nested `fn input_schema` function and failed to compile:
+  `error: mismatched closing delimiter: `)' at src/tools/file.rs:631`
+
+The correct `impl Tool for EditFile/input_schema` was later found at L988, well past L665.
+
+**Reproduction:**
+1. Start with a clean file where symbol X is at line N.
+2. Insert new functions/content ABOVE symbol X (shifting it to line N+K) without sending
+   `did_change` to the LSP (e.g., via `create_file` on a different path, or if the LSP
+   didn't process a prior `notify_file_changed`).
+3. Call `replace_symbol(name_path="X", ...)`.
+4. LSP returns stale location N (not N+K); `replace_symbol` replaces lines N..N+M
+   which now contain different content — silently corrupting that content.
+
+**Root cause:**
+`replace_symbol` reads the symbol location from LSP, which has a **stale view** of the file.
+The file had ~300 lines of new format-helper functions inserted above `impl Tool for EditFile`,
+but the LSP was never notified (no `did_change`). So LSP returned `start_line = 639` —
+which was correct for the old file but now falls inside `format_read_file_summary`.
+`replace_symbol` then splices `[639..665]` unconditionally, destroying the content there.
+
+**Missing guard:**
+No validation that the content at `start_line` actually contains the target symbol name
+or a Rust item keyword. If it did, this would have caught the mismatch:
+- Expected: `fn input_schema` at L639
+- Actual: `let mut out = format!(...)` at L639 → stale, reject with RecoverableError.
+
+**Fix:**
+After resolving `(start_line, end_line)` from LSP, read line `start_line` from the
+current file and verify it contains `fn`, `pub`, `async`, `struct`, `impl`, `trait`,
+`enum`, `type`, `const`, or `static`. If none of those are found, return
+`RecoverableError("symbol location appears stale — line {start_line} does not start a Rust item; re-run after LSP syncs")`.
+This is the same class of guard added for BUG-013 (`is_declaration_line`), and it would
+catch the stale-LSP class of errors.
+
+---
+
 ### BUG-018 — `replace_symbol`: duplicates body instead of replacing, leaves stray tokens
 
 **Date:** 2026-03-02

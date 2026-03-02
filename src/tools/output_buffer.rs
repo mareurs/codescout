@@ -34,6 +34,15 @@ pub struct PendingAckCommand {
     pub timeout_secs: u64,
 }
 
+/// A multi-line source edit held pending agent acknowledgment.
+#[derive(Debug, Clone)]
+pub struct PendingAckEdit {
+    pub path: String,
+    pub old_string: String,
+    pub new_string: String,
+    pub replace_all: bool,
+}
+
 /// Thread-safe LRU buffer for command output.
 ///
 /// `store()` inserts an entry and returns an opaque `@cmd_<8hex>` handle.
@@ -49,9 +58,12 @@ struct BufferInner {
     order: Vec<String>,
     max_entries: usize,
     counter: u64,
-    // --- pending-ack store ---
+    // --- pending-ack store (commands) ---
     pending_acks: HashMap<String, PendingAckCommand>,
     pending_order: Vec<String>,
+    // --- pending-ack store (source edits) ---
+    pending_edits: HashMap<String, PendingAckEdit>,
+    pending_edits_order: Vec<String>,
     max_pending: usize,
 }
 
@@ -66,6 +78,8 @@ impl OutputBuffer {
                 counter: 0,
                 pending_acks: HashMap::new(),
                 pending_order: Vec::new(),
+                pending_edits: HashMap::new(),
+                pending_edits_order: Vec::new(),
                 max_pending: 20,
             }),
         }
@@ -286,6 +300,48 @@ impl OutputBuffer {
     pub fn get_dangerous(&self, handle: &str) -> Option<PendingAckCommand> {
         let inner = self.inner.lock().unwrap();
         inner.pending_acks.get(handle).cloned()
+    }
+
+    /// Store a multi-line source edit pending acknowledgement and return an `@ack_*` handle.
+    pub fn store_pending_edit(
+        &self,
+        path: String,
+        old_string: String,
+        new_string: String,
+        replace_all: bool,
+    ) -> String {
+        let mut inner = self.inner.lock().unwrap();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        inner.counter = inner.counter.wrapping_add(1);
+        let id = format!("@ack_{:08x}", now.wrapping_add(inner.counter) as u32);
+
+        if inner.pending_edits.len() >= inner.max_pending {
+            if let Some(oldest) = inner.pending_edits_order.first().cloned() {
+                inner.pending_edits_order.remove(0);
+                inner.pending_edits.remove(&oldest);
+            }
+        }
+
+        inner.pending_edits.insert(
+            id.clone(),
+            PendingAckEdit {
+                path,
+                old_string,
+                new_string,
+                replace_all,
+            },
+        );
+        inner.pending_edits_order.push(id.clone());
+        id
+    }
+
+    /// Retrieve a stored pending edit by handle.
+    pub fn get_pending_edit(&self, handle: &str) -> Option<PendingAckEdit> {
+        let inner = self.inner.lock().unwrap();
+        inner.pending_edits.get(handle).cloned()
     }
 
     /// Resolve `@cmd_<8hex>` (and `@cmd_<8hex>.err`) references in a command string.

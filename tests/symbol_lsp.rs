@@ -198,6 +198,64 @@ async fn replace_symbol_clean_start_line() {
     );
 }
 
+// ── BUG-019: stale LSP line number guard ─────────────────────────────────────
+
+/// When the file has been modified (e.g. lines inserted above) without notifying
+/// the LSP, the LSP returns stale line numbers that point into the middle of a
+/// function body rather than a declaration. `replace_symbol` must detect this and
+/// return a RecoverableError instead of silently corrupting the file.
+#[tokio::test]
+async fn replace_symbol_rejects_stale_lsp_start_line() {
+    // File layout (0-indexed):
+    //  0: "fn preamble() {"
+    //  1: "    let x = 1;"
+    //  2: "    let result = compute();"   ← stale LSP start_line for "target"
+    //  3: "}"
+    //  4: ""
+    //  5: "fn target() {"
+    //  6: "    old_body();"
+    //  7: "}"
+    //
+    // Simulates: "target" was originally at line 2 (before extra lines were
+    // inserted above it), but the LSP was never notified of the change.
+    let src = "fn preamble() {\n    let x = 1;\n    let result = compute();\n}\n\nfn target() {\n    old_body();\n}\n";
+
+    let (_dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
+        let file = root.join("src/lib.rs");
+        MockLspClient::new().with_symbols(
+            file.clone(),
+            // Stale: "target" reported at line 2 (inside preamble's body)
+            vec![sym("target", 2, 7, file)],
+        )
+    })
+    .await;
+
+    let err = ReplaceSymbol
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "name_path": "target",
+                "new_body": "fn target() {\n    new_body();\n}"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("stale"),
+        "expected stale LSP error, got: {msg}"
+    );
+
+    // File must be untouched — the original content must survive
+    let content = std::fs::read_to_string(_dir.path().join("src/lib.rs")).unwrap();
+    assert!(
+        content.contains("old_body()"),
+        "file must be unmodified after stale guard; got:\n{content}"
+    );
+}
+
 // ── BUG-010: insert_code "before" must walk past #[attr] and /// doc lines ────
 
 /// `insert_code(position="before")` targeting a struct with a leading doc comment
