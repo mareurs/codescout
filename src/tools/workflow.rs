@@ -556,6 +556,9 @@ impl Tool for RunCommand {
                         )
                     })
                     .collect();
+                // Note: silently skips injection if "stdout" is absent (e.g. pending_ack
+                // shape or buffered-output summary). These cases are extremely unlikely
+                // to co-occur with a @file_* refresh, but worth noting.
                 if let Some(stdout) = val["stdout"].as_str() {
                     val["stdout"] = serde_json::json!(format!("{}{}", prefix, stdout));
                 }

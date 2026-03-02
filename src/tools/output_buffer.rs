@@ -410,7 +410,7 @@ impl OutputBuffer {
                 ))?;
 
             if was_refreshed {
-                refreshed_handles.push(base_id.to_string());
+                refreshed_handles.push(token.to_string());
             }
 
             let content = if is_stderr {
