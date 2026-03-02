@@ -363,7 +363,9 @@ impl OutputBuffer {
     /// - `is_buffer_only`: true if every file-path-like argument in the resulting
     ///   command is one of our temp files (i.e., the command operates solely on
     ///   buffered output, not real filesystem paths)
-    pub fn resolve_refs(&self, command: &str) -> Result<(String, Vec<PathBuf>, bool)> {
+    /// - `refreshed_handles`: canonical handle IDs (e.g. `@file_abc123`) that were
+    ///   auto-refreshed from disk because the underlying file had changed
+    pub fn resolve_refs(&self, command: &str) -> Result<(String, Vec<PathBuf>, bool, Vec<String>)> {
         // Guard: @ack_* handles are for deferred execution, not content interpolation.
         if Regex::new(r"@ack_[0-9a-f]{8}")
             .expect("valid regex")
@@ -380,7 +382,7 @@ impl OutputBuffer {
 
         let refs: Vec<&str> = re.find_iter(command).map(|m| m.as_str()).collect();
         if refs.is_empty() {
-            return Ok((command.to_string(), vec![], false));
+            return Ok((command.to_string(), vec![], false, vec![]));
         }
 
         // Deduplicate while preserving order (same ref token may appear twice).
@@ -390,6 +392,7 @@ impl OutputBuffer {
         let mut result = command.to_string();
         let mut temp_paths: Vec<PathBuf> = Vec::new();
         let mut temp_path_strings: Vec<String> = Vec::new();
+        let mut refreshed_handles: Vec<String> = Vec::new();
 
         for token in &unique_refs {
             let is_stderr = token.ends_with(".err");
@@ -399,12 +402,16 @@ impl OutputBuffer {
                 token
             };
 
-            let entry = self
-                .get(base_id)
+            let (entry, was_refreshed) = self
+                .get_with_refresh_flag(base_id)
                 .ok_or_else(|| RecoverableError::with_hint(
                     format!("buffer reference not found: {}", token),
                     "Buffer refs expire when the session resets. Re-run the command to get a fresh ref.",
                 ))?;
+
+            if was_refreshed {
+                refreshed_handles.push(base_id.to_string());
+            }
 
             let content = if is_stderr {
                 &entry.stderr
@@ -450,7 +457,7 @@ impl OutputBuffer {
                     .any(|tp| word.contains(tp.as_str()))
         });
 
-        Ok((result, temp_paths, is_buffer_only))
+        Ok((result, temp_paths, is_buffer_only, refreshed_handles))
     }
 
     /// Remove temp files created by [`resolve_refs`].
@@ -587,7 +594,7 @@ mod tests {
     #[test]
     fn resolve_refs_no_refs() {
         let buf = OutputBuffer::new(20);
-        let (cmd, files, is_buffer_only) = buf.resolve_refs("cargo test").unwrap();
+        let (cmd, files, is_buffer_only, _refreshed) = buf.resolve_refs("cargo test").unwrap();
         assert_eq!(cmd, "cargo test");
         assert!(files.is_empty());
         assert!(!is_buffer_only);
@@ -598,7 +605,8 @@ mod tests {
     fn resolve_refs_single_ref() {
         let buf = OutputBuffer::new(20);
         let id = buf.store("prev".into(), "hello world\n".into(), "".into(), 0);
-        let (cmd, files, is_buffer_only) = buf.resolve_refs(&format!("grep hello {}", id)).unwrap();
+        let (cmd, files, is_buffer_only, _refreshed) =
+            buf.resolve_refs(&format!("grep hello {}", id)).unwrap();
         assert!(!cmd.contains(&id));
         assert!(cmd.contains("/")); // temp file path
         assert_eq!(files.len(), 1);
@@ -613,7 +621,7 @@ mod tests {
         let buf = OutputBuffer::new(20);
         let id = buf.store("prev".into(), "stdout".into(), "stderr_content".into(), 1);
         let err_ref = format!("{}.err", id);
-        let (cmd, files, _) = buf
+        let (cmd, files, _, _refreshed) = buf
             .resolve_refs(&format!("grep error {}", err_ref))
             .unwrap();
         assert!(!cmd.contains(&err_ref));
@@ -627,7 +635,7 @@ mod tests {
         let buf = OutputBuffer::new(20);
         let id1 = buf.store("cmd1".into(), "out1".into(), "".into(), 0);
         let id2 = buf.store("cmd2".into(), "out2".into(), "".into(), 0);
-        let (cmd, files, is_buffer_only) =
+        let (cmd, files, is_buffer_only, _refreshed) =
             buf.resolve_refs(&format!("diff {} {}", id1, id2)).unwrap();
         assert_eq!(files.len(), 2);
         assert!(is_buffer_only);
@@ -647,7 +655,7 @@ mod tests {
     fn resolve_refs_not_buffer_only_with_real_paths() {
         let buf = OutputBuffer::new(20);
         let id = buf.store("prev".into(), "data".into(), "".into(), 0);
-        let (_, files, is_buffer_only) = buf
+        let (_, files, is_buffer_only, _refreshed) = buf
             .resolve_refs(&format!("diff {} /etc/passwd", id))
             .unwrap();
         assert!(!is_buffer_only);
@@ -658,7 +666,7 @@ mod tests {
     fn resolve_refs_temp_files_are_readonly() {
         let buf = OutputBuffer::new(20);
         let id = buf.store("prev".into(), "data".into(), "".into(), 0);
-        let (_, files, _) = buf.resolve_refs(&format!("cat {}", id)).unwrap();
+        let (_, files, _, _refreshed) = buf.resolve_refs(&format!("cat {}", id)).unwrap();
         assert_eq!(files.len(), 1);
         #[cfg(unix)]
         {
@@ -683,7 +691,8 @@ mod tests {
     fn resolve_refs_substitutes_cmd_ref() {
         let buf = OutputBuffer::new(20);
         let id = buf.store("echo hi".into(), "hello\n".into(), "".into(), 0);
-        let (resolved, files, _) = buf.resolve_refs(&format!("grep hello {}", id)).unwrap();
+        let (resolved, files, _, _refreshed) =
+            buf.resolve_refs(&format!("grep hello {}", id)).unwrap();
         assert!(!resolved.contains('@'), "got: {}", resolved);
         assert!(resolved.starts_with("grep hello /"));
         OutputBuffer::cleanup_temp_files(&files);
@@ -693,7 +702,7 @@ mod tests {
     fn resolve_refs_substitutes_file_ref() {
         let buf = OutputBuffer::new(20);
         let id = buf.store_file("README.md".into(), "# Hello\n".into());
-        let (resolved, files, _) = buf.resolve_refs(&format!("wc -l {}", id)).unwrap();
+        let (resolved, files, _, _refreshed) = buf.resolve_refs(&format!("wc -l {}", id)).unwrap();
         assert!(!resolved.contains('@'), "got: {}", resolved);
         OutputBuffer::cleanup_temp_files(&files);
     }
@@ -703,7 +712,8 @@ mod tests {
         let buf = OutputBuffer::new(20);
         let id = buf.store("cmd".into(), "out".into(), "err_text".into(), 0);
         let err_ref = format!("{}.err", id);
-        let (resolved, files, _) = buf.resolve_refs(&format!("grep x {}", err_ref)).unwrap();
+        let (resolved, files, _, _refreshed) =
+            buf.resolve_refs(&format!("grep x {}", err_ref)).unwrap();
         let tmp_path = resolved.split_whitespace().last().unwrap();
         let content = std::fs::read_to_string(tmp_path).unwrap();
         assert_eq!(content, "err_text");
@@ -722,7 +732,7 @@ mod tests {
         let buf = OutputBuffer::new(20);
         let id = buf.store("cmd".into(), "data".into(), "".into(), 0);
         let cmd = format!("grep foo {}", id);
-        let (resolved, files, is_buf_only) = buf.resolve_refs(&cmd).unwrap();
+        let (resolved, files, is_buf_only, _refreshed) = buf.resolve_refs(&cmd).unwrap();
         assert!(is_buf_only, "resolved: {}", resolved);
         OutputBuffer::cleanup_temp_files(&files);
     }
@@ -761,7 +771,7 @@ mod tests {
         let json = "{\"symbols\":[]}".to_string();
         let id = buf.store_tool("list_symbols", json);
         let cmd = format!("jq '.symbols' {}", id);
-        let (resolved, _paths, _is_buf_only) = buf.resolve_refs(&cmd).unwrap();
+        let (resolved, _paths, _is_buf_only, _refreshed) = buf.resolve_refs(&cmd).unwrap();
         assert!(
             !resolved.contains("@tool_"),
             "ref should be substituted, got: {}",
@@ -1003,5 +1013,51 @@ mod tests {
         let (entry, was_refreshed) = buf.get_with_refresh_flag(&id).unwrap();
         assert!(!was_refreshed, "cmd entries never refresh");
         assert_eq!(entry.stdout, "hi");
+    }
+
+    #[test]
+    fn resolve_refs_reports_refreshed_file_handle() {
+        use std::fs;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("data.txt");
+        fs::write(&path, "original").unwrap();
+
+        let buf = OutputBuffer::new(10);
+        let id = buf.store_file(path.to_string_lossy().to_string(), "original".to_string());
+
+        // Modify the file so it looks newer
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        fs::write(&path, "updated").unwrap();
+        let future = std::time::SystemTime::now() + std::time::Duration::from_secs(2);
+        filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(future)).unwrap();
+
+        let cmd = format!("cat {}", id);
+        let (_resolved, _temps, _buffer_only, refreshed) = buf.resolve_refs(&cmd).unwrap();
+        assert_eq!(refreshed, vec![id], "should report the refreshed handle");
+    }
+
+    #[test]
+    fn resolve_refs_no_refresh_for_unchanged_file() {
+        use std::fs;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("data.txt");
+        fs::write(&path, "content").unwrap();
+
+        let buf = OutputBuffer::new(10);
+        let id = buf.store_file(path.to_string_lossy().to_string(), "content".to_string());
+
+        let cmd = format!("cat {}", id);
+        let (_resolved, _temps, _buffer_only, refreshed) = buf.resolve_refs(&cmd).unwrap();
+        assert!(refreshed.is_empty(), "no refresh when file unchanged");
+    }
+
+    #[test]
+    fn resolve_refs_no_refresh_for_cmd_handle() {
+        let buf = OutputBuffer::new(10);
+        let id = buf.store("cmd".to_string(), "output".to_string(), String::new(), 0);
+
+        let cmd = format!("grep foo {}", id);
+        let (_resolved, _temps, _buffer_only, refreshed) = buf.resolve_refs(&cmd).unwrap();
+        assert!(refreshed.is_empty(), "cmd handles never refresh");
     }
 }

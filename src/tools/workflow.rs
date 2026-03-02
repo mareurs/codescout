@@ -525,11 +525,11 @@ impl Tool for RunCommand {
         }
 
         // --- Step 1: Resolve @cmd_ buffer references ---
-        let (resolved_command, temp_files, buffer_only) =
+        let (resolved_command, temp_files, buffer_only, refreshed_handles) =
             ctx.output_buffer.resolve_refs(command)?;
 
         // Helper: run inner logic then always clean up temp files.
-        let result = run_command_inner(
+        let mut result = run_command_inner(
             command,
             &resolved_command,
             timeout_secs,
@@ -543,6 +543,25 @@ impl Tool for RunCommand {
         .await;
 
         OutputBuffer::cleanup_temp_files(&temp_files);
+
+        // Inject refresh indicator into stdout when any @file_* handle was auto-refreshed.
+        if !refreshed_handles.is_empty() {
+            if let Ok(ref mut val) = result {
+                let prefix: String = refreshed_handles
+                    .iter()
+                    .map(|id| {
+                        format!(
+                            "↻ {} refreshed from disk (file changed since last read)\n",
+                            id
+                        )
+                    })
+                    .collect();
+                if let Some(stdout) = val["stdout"].as_str() {
+                    val["stdout"] = serde_json::json!(format!("{}{}", prefix, stdout));
+                }
+            }
+        }
+
         result
     }
 
