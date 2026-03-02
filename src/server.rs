@@ -9,7 +9,7 @@ use anyhow::Result;
 use rmcp::{
     model::{
         CallToolRequestParam, CallToolResult, Content, ListToolsResult, PaginatedRequestParam,
-        ServerCapabilities, ServerInfo, Tool as McpTool,
+        RawContent, ServerCapabilities, ServerInfo, Tool as McpTool,
     },
     service::RequestContext,
     Error as McpError, RoleServer, ServerHandler, ServiceExt,
@@ -422,6 +422,31 @@ pub async fn run(
     }
 }
 
+/// Strips the absolute project root prefix from all text content blocks in a
+/// `CallToolResult`. This normalises tool output to relative paths, reducing
+/// token usage — the prefix (e.g. "/home/user/work/project/") is identical in
+/// every response and carries no information since agents always operate within
+/// the project directory.
+///
+/// `root_prefix` must end with `/`. Pass an empty string when no project is
+/// active; the replace becomes a no-op.
+///
+/// Buffer content (`@tool_xxx` refs) is covered automatically: it only
+/// re-enters the pipeline through `run_command`, which also passes through
+/// `call_tool` and gets stripped there.
+#[allow(dead_code)] // wired into call_tool in Task 3
+fn strip_project_root_from_result(mut result: CallToolResult, root_prefix: &str) -> CallToolResult {
+    if root_prefix.is_empty() {
+        return result;
+    }
+    debug_assert!(root_prefix.ends_with('/'), "root_prefix must end with '/' to avoid stripping partial path components");
+    for block in &mut result.content {
+        if let RawContent::Text(ref mut t) = block.raw {
+            t.text = t.text.replace(root_prefix, "");
+        }
+    }
+    result
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -726,5 +751,39 @@ mod tests {
                 name
             );
         }
+    }
+
+    #[test]
+    fn strip_project_root_removes_prefix_from_text_content() {
+        let prefix = "/home/user/myproject/";
+        let result = CallToolResult::success(vec![Content::text(
+            r#"{"file":"/home/user/myproject/src/foo.rs","line":1}"#,
+        )]);
+        let stripped = strip_project_root_from_result(result, prefix);
+        let text = extract_text(&stripped);
+        assert_eq!(text, r#"{"file":"src/foo.rs","line":1}"#);
+    }
+
+    #[test]
+    fn strip_project_root_no_op_when_prefix_empty() {
+        let result = CallToolResult::success(vec![Content::text("some output")]);
+        let stripped = strip_project_root_from_result(result, "");
+        assert_eq!(extract_text(&stripped), "some output");
+    }
+
+    #[test]
+    fn strip_project_root_no_op_when_prefix_absent() {
+        let prefix = "/home/user/myproject/";
+        let result = CallToolResult::success(vec![Content::text("no paths here")]);
+        let stripped = strip_project_root_from_result(result, prefix);
+        assert_eq!(extract_text(&stripped), "no paths here");
+    }
+
+    fn extract_text(result: &CallToolResult) -> String {
+        result
+            .content
+            .iter()
+            .find_map(|c| c.as_text().map(|t| t.text.clone()))
+            .unwrap_or_default()
     }
 }
