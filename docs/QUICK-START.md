@@ -71,7 +71,7 @@ when they open the repo in Claude Code.
 
 ```bash
 claude mcp list
-# should show: code-explorer  (32 tools)
+# should show: code-explorer  (23 tools)
 ```
 
 ---
@@ -196,8 +196,8 @@ future sessions start with context already loaded.
 | Find all usages | `find_references` |
 | Rename a symbol everywhere | `rename_symbol` |
 | Replace a function body | `replace_symbol` |
-| View git blame | `git_blame` |
-| Save a project note | `write_memory` |
+| View git blame | `run_command("git blame <file>")` |
+| Save a project note | `memory` with `action: "write"` |
 
 ---
 
@@ -227,4 +227,4 @@ The LSP server for your language may not be installed. Run:
 **`semantic_search` returns nothing**
 
 The embedding index hasn't been built yet. Run `index_project` first, then verify with
-`index_status`.
+`project_status`.

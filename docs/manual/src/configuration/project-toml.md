@@ -56,7 +56,7 @@ drift_detection_enabled = true
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `model` | string | `"ollama:mxbai-embed-large"` | Embedding model. The prefix selects the backend. See [Embedding Backends](embedding-backends.md) for the full list of supported prefixes and models. |
-| `drift_detection_enabled` | bool | `true` | Enable semantic drift detection during index builds. `index_project` compares old and new chunk embeddings to score how much each changed file's *meaning* shifted. Results queryable via `index_status(threshold)`. Set to `false` to opt out. Experimental — adds memory overhead proportional to changed-file count. |
+| `drift_detection_enabled` | bool | `true` | Enable semantic drift detection during index builds. `index_project` compares old and new chunk embeddings to score how much each changed file's *meaning* shifted. Results queryable via `project_status(threshold)`. Set to `false` to opt out. Experimental — adds memory overhead proportional to changed-file count. |
 
 > **Note — chunk size is automatic.** code-explorer derives the chunk budget
 > directly from the model's published context window using a conservative
@@ -143,8 +143,8 @@ indexing_enabled = true
 | `shell_output_limit_bytes` | integer | `102400` | Maximum bytes captured from shell command stdout or stderr. Output beyond this limit is truncated and flagged in the response. |
 | `shell_enabled` | bool | `false` | Master switch for shell execution. Must be `true` for `run_command` to run any command regardless of `shell_command_mode`. |
 | `file_write_enabled` | bool | `true` | Enables file write tools: `create_file` and the symbol write tools. Set to `false` for a read-only session. |
-| `git_enabled` | bool | `true` | Enables git tools: `git_blame`. |
-| `indexing_enabled` | bool | `true` | Enables `index_project` and `index_status`. Set to `false` to prevent the agent from kicking off potentially long-running indexing. |
+| `git_enabled` | bool | `true` | Enables git operations via `run_command`. |
+| `indexing_enabled` | bool | `true` | Enables `index_project` and `project_status`. Set to `false` to prevent the agent from kicking off potentially long-running indexing. |
 
 ### Built-in Read Deny-List
 
@@ -253,10 +253,10 @@ At startup and whenever `activate_project` is called, code-explorer:
 2. If found, parses it. Any section that is missing falls back to its defaults.
 3. If not found, constructs a default config using the directory name as the project name.
 
-The effective configuration is always visible via the `get_config` tool:
+The effective configuration is always visible via the `project_status` tool:
 
 ```json
-{ "name": "get_config", "arguments": {} }
+{ "name": "project_status", "arguments": {} }
 ```
 
 Changes to `project.toml` take effect the next time the project is activated — either by

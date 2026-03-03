@@ -2,7 +2,7 @@
 
 ## Why the Plugin Exists
 
-Claude Code has access to code-explorer's 31 tools, but it also has built-in tools like `grep`,
+Claude Code has access to code-explorer's 23 tools, but it also has built-in tools like `grep`,
 `cat`, and `Read`. Without guidance, Claude tends to reach for the familiar built-ins — especially
 in subagents, which start each task with a blank slate and have no memory of earlier instructions.
 
@@ -39,7 +39,7 @@ The difference in practice:
 │  └──────────────────────┬──────────────────────┘    │
 │                         │ routes to                   │
 │  ┌──────────────────────▼──────────────────────┐    │
-│  │  code-explorer MCP server (31 tools)         │    │
+│  │  code-explorer MCP server (23 tools)         │    │
 │  │                                              │    │
 │  │  LSP · Semantic · Git · AST · Memory · ...   │    │
 │  └──────────────────────────────────────────────┘    │

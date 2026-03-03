@@ -11,7 +11,7 @@ code-explorer is an MCP server that gives LLMs IDE-grade code intelligence. It e
 ```
 ┌────────────────────────────────────────────────────────┐
 │              MCP Layer (rmcp)                           │
-│   CodeExplorerServer → registered tools (31)           │
+│   CodeExplorerServer → registered tools (23)           │
 └────────────────────────────────────────────────────────┘
                           ↓
 ┌────────────────────────────────────────────────────────┐
@@ -98,7 +98,7 @@ Markdown-based persistent store in `.code-explorer/memories/`. Supports nested t
 
 ### Usage Recorder (`src/usage/`)
 
-Transparent wrapper around the tool dispatch loop in `server.rs`. Records every tool call to `.code-explorer/usage.db` (append-only SQLite). Captures: tool name, timestamp, outcome (success/error/overflow), latency (ms), and output mode. Surfaced via `get_usage_stats`.
+Transparent wrapper around the tool dispatch loop in `server.rs`. Records every tool call to `.code-explorer/usage.db` (append-only SQLite). Captures: tool name, timestamp, outcome (success/error/overflow), latency (ms), and output mode. Accessible via the dashboard (`code-explorer dashboard`).
 
 ### Dashboard (`src/dashboard/`)
 
@@ -110,16 +110,13 @@ Each tool implements the `Tool` trait (`name`, `description`, `input_schema`, `a
 
 | Category | File | Tools |
 |----------|------|-------|
-| File | `file.rs` | `read_file`, `list_dir`, `search_pattern`, `find_file`, `create_file`, `edit_lines` |
+| File | `file.rs` | `read_file`, `list_dir`, `search_pattern`, `find_file`, `create_file`, `edit_file` |
 | Workflow | `workflow.rs` | `onboarding`, `run_command` |
-| Symbol | `symbol.rs` | `find_symbol`, `list_symbols`, `goto_definition`, `hover`, `find_references`, `replace_symbol`, `insert_code`, `rename_symbol` (all navigation tools support `scope` param) |
-| AST | `ast.rs` | `list_functions`, `list_docs` |
-| Git | `git.rs` | `git_blame` |
-| Semantic | `semantic.rs` | `semantic_search`, `index_project`, `index_status` (includes drift query via `threshold`/`path` params) |
-| Library | `library.rs` | `list_libraries`, `index_library` |
-| Memory | `memory.rs` | `write_memory`, `read_memory`, `list_memories`, `delete_memory` |
-| Config | `config.rs` | `activate_project`, `get_config` |
-| Usage | `usage.rs` | `get_usage_stats` |
+| Symbol | `symbol.rs` | `find_symbol`, `list_symbols`, `goto_definition`, `hover`, `find_references`, `replace_symbol`, `remove_symbol`, `insert_code`, `rename_symbol` (all navigation tools support `scope` param) |
+| Semantic | `semantic.rs` | `semantic_search`, `index_project` |
+| Library | `library.rs` | `list_libraries` |
+| Memory | `memory.rs` | `memory` (dispatches `read` / `write` / `list` / `delete` via `action` param) |
+| Config | `config.rs` | `activate_project`, `project_status` |
 
 ### Utilities (`src/util/`)
 

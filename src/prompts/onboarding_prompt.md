@@ -1,13 +1,13 @@
-You have just onboarded this project. Below you'll find pre-gathered context from key project files. Your job is to **synthesize this into 6 memories** using `write_memory(topic, content)`.
+You have just onboarded this project. Below you'll find pre-gathered context from key project files. Your job is to **synthesize this into 6 memories** using `memory(action: "write", topic: ..., content: ...)`.
 
 ## Rules
 
 1. **Do NOT duplicate CLAUDE.md** — If CLAUDE.md content is provided below, it's loaded every session automatically. Memories should *supplement* it, not repeat it. If CLAUDE.md already covers dev commands, your `development-commands` memory should only add what's missing.
 2. **Be specific** — Include file paths, exact command names, concrete patterns. "Uses clean architecture" is useless. "api/ → service/ → repository/ with interface+impl pattern" is useful.
 3. **Be concise** — Each memory should be 15–40 lines. Longer means too much detail.
-4. **Explore before writing** — The gathered data gives you a head start, but use code-explorer tools to verify and fill gaps: `list_symbols("src/")` for architecture, `find_symbol` for key abstractions, `list_functions` for API surface.
+4. **Explore before writing** — The gathered data gives you a head start, but use code-explorer tools to verify and fill gaps: `list_symbols("src/")` for architecture, `find_symbol` for key abstractions, `list_symbols` for API surface.
 5. **Confirm with the user** — After creating all 6 memories, summarize what you wrote and ask if anything needs correction.
-6. **Private memories** — Use `write_memory(topic, content, private=true)` for project-local notes that should not appear in system instructions (e.g. personal debugging notes, temporary state). Standard `write_memory` creates shared memories visible to all agents.
+6. **Private memories** — Use `memory(action: "write", topic: ..., content: ..., private: true)` for project-local notes that should not appear in system instructions (e.g. personal debugging notes, temporary state). Standard `memory(action: "write", ...)` creates shared memories visible to all agents.
 
 ## Memories to Create
 
@@ -211,10 +211,10 @@ After confirming all 6 memories and the system prompt with the user, deliver thi
 
 - **System prompt** (`.code-explorer/system-prompt.md`) — always-on project guidance,
   injected into every session. Edit anytime to refine how AI navigates your codebase.
-- **Memories** — reference material read on demand via `read_memory(topic)`. Update
-  with `write_memory(topic, content)`.
+- **Memories** — reference material read on demand via `memory(action: "read", topic: ...)`. Update
+  with `memory(action: "write", topic: ..., content: ...)`.
 - **Quick start for new tasks:**
-  1. `read_memory("architecture")` — orient yourself
+  1. `memory(action: "read", topic: "architecture")` — orient yourself
   2. `list_symbols("src/")` — see the module structure
   3. `semantic_search("your concept")` — find relevant code
   4. `find_symbol("Name", include_body=true)` — read the implementation
@@ -230,6 +230,6 @@ The data below was collected automatically. Use it as your starting point, then 
 ## Optional: Private Memories
 
 After creating the 6 shared memories above, check if any personal context is worth
-capturing now. Use `write_memory(topic, content, private=true)` for anything specific
+capturing now. Use `memory(action: "write", topic: ..., content: ..., private: true)` for anything specific
 to your setup — local machine config, personal workflow preferences, or current WIP
 context. This is optional; skip if nothing personal applies yet.

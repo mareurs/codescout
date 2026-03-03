@@ -17,7 +17,7 @@ The server is not registered in your MCP configuration.
 claude mcp list
 ```
 
-You should see `code-explorer` listed with 31 tools. If it is missing,
+You should see `code-explorer` listed with 23 tools. If it is missing,
 register it:
 
 ```bash
@@ -122,12 +122,11 @@ retry the tool call.
 
 ### "No tree-sitter grammar for 'X'"
 
-The `list_functions` or `list_docs` tool was called on a file whose
-language does not have a bundled tree-sitter grammar.
+A tree-sitter grammar was requested for a language that does not have one bundled.
 
 **Fix:** Use LSP-based tools instead. `list_symbols` provides similar
 information (file structure, symbol names and kinds) and works for all 9 LSP
-languages, not just the 6 with tree-sitter grammars.
+languages.
 
 If the language is not supported at all, only file operations and semantic
 search (after indexing) are available.
@@ -166,10 +165,10 @@ The embedding index has not been built for this project.
 
 ```json
 { "tool": "index_project", "arguments": {} }
-{ "tool": "index_status", "arguments": {} }
+{ "tool": "project_status", "arguments": {} }
 ```
 
-`index_status` shows the number of indexed files and chunks. If both are zero,
+`project_status` shows the number of indexed files and chunks. If both are zero,
 the index build failed -- check server logs for errors.
 
 ### "Connection refused" when indexing
@@ -220,7 +219,7 @@ models are incompatible -- mixing them produces meaningless similarity scores.
 Then verify the models match:
 
 ```json
-{ "tool": "index_status", "arguments": {} }
+{ "tool": "project_status", "arguments": {} }
 ```
 
 The response includes `configured_model` and `indexed_with_model`. They must
@@ -374,14 +373,6 @@ Two common causes:
    git_enabled = true   # default is true
    ```
 
-### `git_blame` returns errors on new files
-
-Files that have never been committed cannot be blamed -- there is no git
-history for them.
-
-**Fix:** This is expected. Commit the file first, or use `run_command` with `git diff` to see
-its contents as uncommitted changes.
-
 ---
 
 ## Performance
@@ -402,9 +393,8 @@ process. Startup time varies:
 | `kotlin-language-server` | 5-15 seconds |
 
 **Fix:** This is expected. Subsequent calls are fast because the server stays
-running. If startup time is a problem for Java or Kotlin, consider using the
-AST tools (`list_functions`, `list_docs`) for initial exploration --
-they use tree-sitter and have no startup delay.
+running. If startup time is a problem for Java or Kotlin, use `search_pattern`
+or `semantic_search` for initial exploration — they have no startup delay.
 
 ### Large project causes tool timeouts
 
@@ -452,11 +442,11 @@ If none of the above resolves your issue:
 
    This shows every tool call, LSP message, and embedding operation.
 
-3. **Check the configuration.** Use the `get_config` tool to see the
+3. **Check the configuration.** Use the `project_status` tool to see the
    active configuration as the server sees it:
 
    ```json
-   { "tool": "get_config", "arguments": {} }
+   { "tool": "project_status", "arguments": {} }
    ```
 
 4. **File an issue.** Open a GitHub issue with:

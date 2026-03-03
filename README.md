@@ -27,24 +27,27 @@ code-explorer is an MCP server that gives your AI coding agent the same navigati
 
 | Pillar | What it does | Tools |
 |---|---|---|
-| LSP Navigation | Go-to-definition, hover, find references, rename — via real language servers | 8 tools, 9 languages |
-| Semantic Search | Find code by concept, not just text match — via embeddings | 3 tools |
-| Git Integration | Blame — context no other tool provides | 1 tool |
-| Persistent Memory | Remember project knowledge across sessions | 4 tools |
+| LSP Navigation | Go-to-definition, hover, find references, rename — via real language servers | 9 tools, 9 languages |
+| Semantic Search | Find code by concept, not just text match — via embeddings | 2 tools |
+| Persistent Memory | Remember project knowledge across sessions | 1 tool |
 
-Plus file operations (6 tools), AST analysis (2 tools), workflow & config (4 tools), library navigation (2 tools), and usage statistics (1 tool) — **31 tools total**.
+Plus file operations (6 tools), workflow (2 tools), and config & navigation (3 tools) — **23 tools total**.
 
 **Recent additions:**
 - **`goto_definition` + `hover`** — LSP-backed jump-to-definition and type/doc inspection. `goto_definition` auto-discovers and registers library source when the definition lives outside the project root.
-- **`get_usage_stats`** — per-tool call counts, error rates, overflow rates, and p50/p99 latency over configurable time windows (1h / 24h / 7d / 30d).
+- **`project_status`** — unified project health snapshot: config, embedding index stats, usage telemetry (call counts, error rates, p50/p99 latency), and registered libraries — all in one call.
 - **Dashboard** — `code-explorer dashboard --project .` launches a local web UI (default port 8099) with tool usage charts and project health views.
-- **Library Search** — navigate third-party dependency source code via LSP-inferred discovery, symbol navigation, and semantic search. Libraries auto-register when `goto_definition` returns paths outside the project root.
+- **Library Search** — navigate third-party dependency source code via LSP-inferred discovery, symbol navigation, and semantic search. Libraries auto-register when `goto_definition` returns paths outside the project root. Index a library with `index_project(scope: "lib:name")`.
 - **Incremental Index Rebuilding** — smart change detection for the embedding index. Uses git diff → mtime → SHA-256 fallback chain to skip unchanged files, with staleness warnings when the index falls behind HEAD.
-- **Semantic Drift Detection** — detects *how much* code changed in meaning after re-indexing, not just that bytes changed. Surfaced via `index_status(threshold)`. Opt out with `drift_detection_enabled = false` in `[embeddings]`.
+- **Semantic Drift Detection** — detects *how much* code changed in meaning after re-indexing, not just that bytes changed. Query via `project_status`. Opt out with `drift_detection_enabled = false` in `[embeddings]`.
 
 ## Superpowers
 
-For large plans and parallel work, the recommended workflow is to manually `git worktree add` + `cd` + launch Claude from inside the worktree — one terminal per branch, fully isolated, no mid-session project-switching. Note: `finishing-a-development-branch` cleanup can fail when Claude's CWD is inside the worktree; use `git worktree prune` from the main repo instead.
+The structured workflows we use in this project — TDD, systematic debugging, brainstorming before building, parallel agent dispatch, code review — come from **[Superpowers](https://github.com/obra/superpowers)**, a Claude Code plugin by [Jesse Luoto (obra)](https://github.com/obra). His [blog post introducing Superpowers](https://blog.fsck.com/2025/10/09/superpowers/) is what got us thinking seriously about agent-first development workflows. The discipline baked into our day-to-day work here — the TDD gates, the brainstorming-before-building habit, the worktree isolation patterns — all flow from that foundation. If it has helped you, consider [sponsoring Jesse's open-source work](https://github.com/sponsors/obra).
+
+We also want to acknowledge **[Serena](https://github.com/oraios/serena)**, an MCP code intelligence server we ran for a good while before deciding to build our own. Serena proved the concept: an LLM really can navigate a real codebase through LSP and tree-sitter. That proof of concept directly shaped what code-explorer became — we kept the good ideas, threw out what didn't fit, and wrote the rest in Rust.
+
+For the worktree workflow specifically: the recommended pattern for large plans and parallel work is to manually `git worktree add` + `cd` + launch Claude from inside the worktree — one terminal per branch, fully isolated, no mid-session project-switching. Note: `finishing-a-development-branch` cleanup can fail when Claude's CWD is inside the worktree; use `git worktree prune` from the main repo instead.
 
 → [Full details: Superpowers Workflow](docs/manual/src/concepts/superpowers.md)
 
@@ -92,7 +95,7 @@ The behavior described in this README — Claude consistently reaching for the r
 
 | Component | Plugin ID | Role |
 |---|---|---|
-| **code-explorer** | *(this server)* | 31 tools: symbol navigation, semantic search, git, memory |
+| **code-explorer** | *(this server)* | 23 tools: symbol navigation, semantic search, memory |
 | **code-explorer-routing** | `code-explorer-routing@sdd-misc-plugins` | Hooks that enforce tool selection — intercepts `grep`/`cat`/`read` in all sessions and subagents and redirects to code-explorer equivalents |
 | **superpowers** | `superpowers@superpowers-marketplace` | Skills framework: TDD, systematic debugging, brainstorming, parallel agents, code review |
 | **episodic-memory** | `episodic-memory@superpowers-marketplace` | Cross-session memory: Claude searches past conversations semantically before starting any task |
@@ -103,7 +106,7 @@ The behavior described in this README — Claude consistently reaching for the r
 
 - **Without `code-explorer-routing`**: Claude has the tools but won't always reach for them. Old habits resurface — especially `grep`, `cat`, and `read` in subagents that start with a blank slate. The routing plugin is what makes the behavior consistent.
 - **Without `superpowers`**: Claude works but lacks structured workflows. TDD, systematic debugging, and parallel agent dispatch require the skills framework.
-- **Without `episodic-memory`**: Knowledge resets each session. The built-in `write_memory`/`read_memory` tools persist notes within a project, but only episodic-memory lets Claude search past *conversations*.
+- **Without `episodic-memory`**: Knowledge resets each session. The built-in `memory` tool persists notes within a project, but only episodic-memory lets Claude search past *conversations*.
 - **Without `rust-analyzer-lsp`** (or a running `rust-analyzer` daemon): LSP tools (`goto_definition`, `hover`, `find_references`, `find_symbol`) degrade to tree-sitter-only mode for Rust — still useful, but no type resolution or cross-file navigation.
 
 ## Installation
@@ -125,7 +128,7 @@ If you prefer to install manually, follow the steps below.
 
 code-explorer has two components that work together:
 
-1. **MCP Server** — provides the 31 tools (symbol navigation, semantic search, git, etc.)
+1. **MCP Server** — provides the 23 tools (symbol navigation, semantic search, memory, etc.)
 2. **Routing Plugin** — ensures Claude always uses the right tool, across all sessions and subagents
 
 **Both are recommended.** The MCP server gives Claude the capability; the plugin ensures
@@ -173,7 +176,7 @@ The plugin is available from the [claude-plugins marketplace](https://github.com
 
 ```bash
 claude mcp list
-# Should show: code-explorer with 31 tools
+# Should show: code-explorer with 23 tools
 ```
 
 ### How They Interact
@@ -192,9 +195,9 @@ claude mcp list
 │  └──────────────────────┬──────────────────────┘    │
 │                         │ routes to                   │
 │  ┌──────────────────────▼──────────────────────┐    │
-│  │  code-explorer MCP server (31 tools)         │    │
+│  │  code-explorer MCP server (23 tools)         │    │
 │  │                                              │    │
-│  │  LSP · Semantic · Git · AST · Memory · ...   │    │
+│  │  LSP · Semantic · Memory · ...               │    │
 │  └──────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────┘
 ```
@@ -207,19 +210,16 @@ instead of `semantic_search`.
 tool to use for each situation. The `PreToolUse` hook actively intercepts
 suboptimal tool calls and redirects them before they execute.
 
-## Tools (31)
+## Tools (23)
 
 | Category | Count | Highlights |
 |---|---|---|
-| Symbol Navigation | 8 | `find_symbol`, `list_symbols`, `goto_definition`, `hover`, `find_references`, `replace_symbol`, `insert_code`, `rename_symbol` |
-| File Operations | 6 | `read_file`, `list_dir`, `search_pattern`, `create_file`, `find_file`, `edit_lines` |
-| Semantic Search | 3 | `semantic_search`, `index_project`, `index_status` |
-| Library Navigation | 2 | `list_libraries`, `index_library` |
-| Git | 1 | `git_blame` |
-| AST Analysis | 2 | `list_functions`, `list_docs` (offline, instant) |
-| Memory | 4 | `write_memory`, `read_memory`, `list_memories`, `delete_memory` |
-| Workflow & Config | 4 | `onboarding`, `run_command`, `activate_project`, `get_config` |
-| Usage | 1 | `get_usage_stats` |
+| Symbol Navigation | 9 | `find_symbol`, `list_symbols`, `goto_definition`, `hover`, `find_references`, `replace_symbol`, `remove_symbol`, `insert_code`, `rename_symbol` |
+| File Operations | 6 | `read_file`, `list_dir`, `search_pattern`, `create_file`, `find_file`, `edit_file` |
+| Semantic Search | 2 | `semantic_search`, `index_project` |
+| Memory | 1 | `memory` (read / write / list / delete) |
+| Workflow | 2 | `onboarding`, `run_command` |
+| Config & Navigation | 3 | `activate_project`, `project_status`, `list_libraries` |
 
 Every tool defaults to compact output (exploring mode) and supports `detail_level: "full"` with pagination for when you need the complete picture.
 

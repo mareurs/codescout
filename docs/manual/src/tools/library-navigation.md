@@ -38,8 +38,7 @@ or search tool:
 | `"all"` | Project source + all libraries |
 
 Tools that accept `scope`:
-`find_symbol`, `list_symbols`, `find_references`,
-`list_functions`, `semantic_search`
+`find_symbol`, `list_symbols`, `find_references`, `semantic_search`
 
 All results include a `"source"` field (`"project"` or `"lib:<name>"`) to
 distinguish origin.
@@ -82,41 +81,33 @@ semantic index has been built for each.
 **Tips:**
 
 - Libraries with `"indexed": false` support symbol navigation (LSP + tree-sitter)
-  but not `semantic_search`. Run `index_library` to add semantic search.
+  but not `semantic_search`. Run `index_project` with the library's root path to add semantic search.
 - The registry is stored in `.code-explorer/libraries.json`. You can inspect it
   directly if you need to edit or remove an entry.
 
 ---
 
-## `index_library`
+## Indexing a Library for Semantic Search
 
-**Purpose:** Build or incrementally update the semantic search index for a
-registered library. After indexing, `semantic_search` with
-`scope: "lib:<name>"` searches within that library.
+> **Note:** The `index_library` tool was removed in the v1 tool restructure.
+> Use `index_project` directly, passing the library's root path.
 
-**Parameters:**
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `name` | string | yes | — | Library name as shown in `list_libraries` |
-| `force` | boolean | no | `false` | Force full reindex, ignoring cached file hashes |
-
-**Example:**
+Once a library is registered (via `list_libraries` or auto-discovery), build its
+semantic index by pointing `index_project` at its root:
 
 ```json
 {
-  "name": "serde"
+  "tool": "index_project",
+  "arguments": { "path": "/home/user/.cargo/registry/src/.../serde-1.0.195/" }
 }
 ```
 
-**Output:**
+After indexing, `semantic_search` with `scope: "lib:<name>"` searches within that library:
 
 ```json
 {
-  "status": "ok",
-  "library": "serde",
-  "files_indexed": 42,
-  "total_chunks": 380
+  "tool": "semantic_search",
+  "arguments": { "query": "channel with backpressure", "scope": "lib:tokio" }
 }
 ```
 
@@ -125,12 +116,4 @@ registered library. After indexing, `semantic_search` with
 - Only index libraries you actively need to search semantically. LSP symbol
   navigation (`find_symbol`, `list_symbols`) works without indexing.
 - Indexing a large library (e.g. `tokio`) may take a few minutes on the first
-  run. Subsequent incremental updates are fast.
-- Use `semantic_search` with `scope: "lib:<name>"` after indexing:
-
-```json
-{
-  "query": "channel with backpressure",
-  "scope": "lib:tokio"
-}
-```
+  run. The library path is shown in `list_libraries` output.

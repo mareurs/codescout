@@ -66,7 +66,7 @@ code-explorer dashboard --project . --port 9000
 
 ## Further Reading
 
-- [Memory Tools](../tools/memory.md) — the four CRUD tools (`write_memory`, `read_memory`, `list_memories`, `delete_memory`) that back the Memories browser
-- [Semantic Search Tools](../tools/semantic-search.md) — `index_status` is the data source for the index health and drift panels on the Overview page
-- [Workflow & Config Tools](../tools/workflow-and-config.md) — `get_usage_stats` is the tool behind the Tool Stats page
+- [Memory Tools](../tools/memory.md) — the `memory` tool that backs the Memories browser
+- [Semantic Search Tools](../tools/semantic-search.md) — `project_status` is the data source for the index health and drift panels on the Overview page
+- [Workflow & Config Tools](../tools/workflow-and-config.md) — usage data from `.code-explorer/usage.db` backs the Tool Stats page
 - [Project Configuration](../configuration/project-toml.md) — the Overview page shows your active configuration from `.code-explorer/project.toml`

@@ -168,16 +168,29 @@ The tool returns an error if the path does not exist or is not a directory.
 
 ---
 
-## `get_config`
+## `project_status`
 
-**Purpose:** Display the active project root and the full contents of its configuration.
+**Purpose:** Display the full state of the active project in one call: config, semantic index health, usage telemetry summary, and library registry. Combines what was previously `get_config` and `index_status`.
 
-**Parameters:** None.
+**Parameters:**
 
-**Example:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `threshold` | number | no | — | When provided, includes drift data: minimum `avg_drift` to include (0.0–1.0) |
+| `path` | string | no | — | SQL LIKE pattern to filter drift results by file path (e.g. `"src/tools/%"`) |
+| `detail_level` | string | no | `"exploring"` | Drift output detail: `"full"` includes most-drifted chunk content |
+| `window` | string | no | `"30d"` | Time window for usage summary: `"1h"`, `"24h"`, `"7d"`, or `"30d"` |
+
+**Example (basic):**
 
 ```json
 {}
+```
+
+**Example (with drift query):**
+
+```json
+{ "threshold": 0.2, "window": "7d" }
 ```
 
 **Output:**
@@ -186,86 +199,23 @@ The tool returns an error if the path does not exist or is not a directory.
 {
   "project_root": "/home/user/projects/my-service",
   "config": {
-    "project": {
-      "name": "my-service",
-      "languages": ["rust", "toml"],
-      "encoding": "utf-8",
-      "tool_timeout_secs": 60
-    },
-    "embeddings": {
-      "model": "sentence-transformers/all-MiniLM-L6-v2",
-      "chunk_size": 512,
-      "chunk_overlap": 64
-    },
-    "ignored_paths": {
-      "patterns": ["target/", "*.lock", ".git/"]
-    },
-    "security": {
-      "shell_command_mode": "warn",
-      "shell_output_limit_bytes": 102400,
-      "shell_enabled": false,
-      "file_write_enabled": true,
-      "git_enabled": true,
-      "indexing_enabled": true
-    }
-  }
-}
-```
-
-
-
----
-
-## `get_usage_stats`
-
-**Purpose:** Get tool call statistics for the current project. Returns per-tool call counts, error rates, overflow rates, and latency percentiles (p50/p99) for a time window. Use this to diagnose agent behavior: high `overflow_rate_pct` means queries are too broad; high `error_rate_pct` on a tool means it is failing repeatedly.
-
-**Parameters:**
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `window` | string | no | `"30d"` | Time window: `"1h"`, `"24h"`, `"7d"`, or `"30d"` |
-
-**Example:**
-
-```json
-{ "window": "7d" }
-```
-
-**Output:**
-
-```json
-{
-  "window": "7d",
-  "tools": [
-    {
-      "tool_name": "semantic_search",
-      "call_count": 142,
-      "error_rate_pct": 0.0,
-      "overflow_rate_pct": 12.7,
-      "p50_ms": 210,
-      "p99_ms": 890
-    },
-    {
-      "tool_name": "find_symbol",
-      "call_count": 98,
-      "error_rate_pct": 2.0,
-      "overflow_rate_pct": 4.1,
-      "p50_ms": 35,
-      "p99_ms": 180
-    }
-  ]
+    "project": { "name": "my-service", "languages": ["rust", "toml"] },
+    "embeddings": { "model": "sentence-transformers/all-MiniLM-L6-v2" }
+  },
+  "index": {
+    "indexed": true,
+    "files": 47,
+    "chunks": 312,
+    "model": "sentence-transformers/all-MiniLM-L6-v2",
+    "last_updated": "2025-01-15T10:30:00Z"
+  },
+  "libraries": { "count": 2, "indexed": 1 }
 }
 ```
 
 **Tips:**
 
-- Use `get_usage_stats` to understand how an agent is using the tool set. A high `overflow_rate_pct` for `semantic_search` suggests the agent is querying too broadly — it should use `find_symbol` for known names instead.
-- Compare error rates across windows to spot regressions after changes to the project or config.
-- The stats are read from `.code-explorer/usage.db` which is populated by the usage recorder built into the MCP server. The database is created automatically on the first tool call.
-- Stats are only available for the active project. Switch projects with `activate_project` before calling `get_usage_stats`.
-
-> **See also:** [Dashboard](../concepts/dashboard.md) — the Tool Stats page
-> shows the same data as `get_usage_stats` with charts, time-window filtering,
-> and per-error inspection, without writing a tool call.
-**Tips:** Use this to verify which project is active and to check security settings before attempting shell commands or indexing. If you need to change configuration, edit `.code-explorer/project.toml` directly — the config is re-read on each tool call, so changes take effect immediately without restarting the server.
+- Use `project_status` to verify which project is active and to check security settings before attempting shell commands or indexing.
+- Pass `threshold: 0.1` after re-indexing to surface files that changed semantically — a whitespace reformat scores near `0.0`, a full function rewrite approaches `1.0`.
+- If you need to change configuration, edit `.code-explorer/project.toml` directly — the config is re-read on each tool call, so changes take effect immediately without restarting the server.
+- For full per-tool call stats with charts and time-window filtering, see the [Dashboard](../concepts/dashboard.md).

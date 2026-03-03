@@ -1,6 +1,6 @@
 # Development Commands
 
-See CLAUDE.md for primary commands. This memory adds gotchas and extras.
+See CLAUDE.md for primary commands (926 tests passing as of 2026-03-03). This memory adds gotchas and extras.
 
 ## Extras Not in CLAUDE.md
 

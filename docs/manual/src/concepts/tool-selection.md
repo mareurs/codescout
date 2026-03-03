@@ -30,14 +30,6 @@ before deciding which symbol to read.
 ```
 ```
 
-**`list_functions(path)`** — list all function and method signatures in a file
-using tree-sitter. No language server required; works immediately on any
-supported file.
-
-```json
-{ "tool": "list_functions", "arguments": { "path": "src/services/auth.rs" } }
-```
-
 **`find_references(name_path, path)`** — find every location
 that references a specific symbol. Use this when you know the symbol and want
 to trace all its callers or usages.

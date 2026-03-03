@@ -10,7 +10,7 @@ languages (see the [Extending](extending/adding-languages.md) chapter for that).
 
 code-explorer is an MCP server that gives LLMs IDE-grade code intelligence. It
 sits between the AI assistant (Claude Code, Cursor, or any MCP-capable client)
-and the project's source code, providing 31 tools for navigation, search,
+and the project's source code, providing 23 tools for navigation, search,
 editing, and analysis.
 
 The server is a single Rust binary. It launches language servers, parses source
@@ -106,7 +106,7 @@ across all tool calls and, in HTTP mode, across all connections. Calling
 
 **Source:** `src/server.rs`
 
-All 31 tools are registered at startup in `CodeExplorerServer::from_parts()` as
+All 23 tools are registered at startup in `CodeExplorerServer::from_parts()` as
 a `Vec<Arc<dyn Tool>>`. Dispatch is by name: `call_tool()` iterates the vector
 and matches on `tool.name()`.
 
@@ -167,10 +167,7 @@ via `libc::kill`, ensuring cleanup even if the graceful path is bypassed.
 Tree-sitter provides offline parsing that works without a language server. It
 is faster than LSP for simple structural queries and has zero startup cost.
 
-The AST engine powers two tools:
-
-- `list_functions` -- extracts all function and method signatures from a file.
-- `list_docs` -- extracts doc comments paired with their symbol names.
+The AST engine is used internally for richer symbol extraction and semantic chunking. It is not exposed as a standalone tool — use `list_symbols` (LSP-backed) for interactive symbol navigation.
 
 Supported languages for tree-sitter: Rust, Python, TypeScript, Go, Java,
 Kotlin. See the [Language Support](language-support.md) page for the full

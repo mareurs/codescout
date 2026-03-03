@@ -51,7 +51,7 @@ Session-scoped LRU buffer (max 20 entries) that stores large command output and 
 Large files are no longer dumped raw into context.
 
 **Behaviour by file type:**
-- **Source code files** (Rust, Python, TS, Go, etc.): blocked for direct reads — use `list_symbols`, `find_symbol(include_body=true)`, or `list_functions` instead. Targeted reads with `start_line` + `end_line` are allowed.
+- **Source code files** (Rust, Python, TS, Go, etc.): blocked for direct reads — use `list_symbols` or `find_symbol(include_body=true)` instead. Targeted reads with `start_line` + `end_line` are allowed.
 - **Non-source files** (Markdown, TOML, JSON, etc.): returned directly for short files; buffered with smart summary + `@file_*` ref for large files (> 200 lines).
 
 **Smart summarizers** per file type: Markdown (headings outline), TOML/JSON (top-level key structure), source fallback (top-level symbol names via AST).
@@ -62,7 +62,7 @@ Large files are no longer dumped raw into context.
 
 8 read-heavy tools emit two representations in a single response: structured JSON for the agent and a human-readable preview rendered in the UI.
 
-**Affected tools:** `read_file`, `list_dir`, `list_symbols`, `list_functions`, `list_docs`, `find_symbol`, `search_pattern`, `git_blame`
+**Affected tools:** `read_file`, `list_dir`, `list_symbols`, `find_symbol`, `search_pattern`
 
 **Why:** Agents need machine-parseable data; humans reviewing tool output in the UI need readable prose. The split is handled via `call_content()` — the agent sees JSON, the UI renders markdown.
 
@@ -226,7 +226,7 @@ Search and navigate third-party library/dependency source code. Read-only access
 |-------|------|-----------------|
 | A | Follow-through reads | Read files LSP points to outside project root |
 | B | Symbol navigation | `find_symbol` / `list_symbols` on library code with `scope` parameter |
-| C | Semantic search | Explicit `index_library` + scoped `semantic_search` on dependency source |
+| C | Semantic search | `index_project` on library path + scoped `semantic_search` on dependency source |
 | D | LSP-inferred discovery | Auto-register libraries from `goto_definition` responses |
 
 **Key concepts:**
@@ -234,7 +234,7 @@ Search and navigate third-party library/dependency source code. Read-only access
 - All library access is read-only
 - Results tagged `"source": "lib:<name>"` to distinguish from project code
 - `list_libraries` — show registered libraries and status
-- `index_library(name)` — build embedding index for a specific library
+- `index_project` with library path — build embedding index for a specific library
 
 ---
 
@@ -273,7 +273,7 @@ Track tool call patterns to surface bugs, usage drift, and performance regressio
 
 **Storage:** Append-only SQLite table in `.code-explorer/usage.db`.
 
-**Surfacing via `get_usage_stats` tool:**
+**Surfacing via the dashboard** (`code-explorer dashboard`):
 - Per-tool call counts, error rates, p50/p99 latency
 - Time-bucketed view: last hour / day / week / 30 days
 - Overflow rate per tool (high overflow = agent asking too broadly)
@@ -311,7 +311,7 @@ Detect *how much* code changed in meaning, not just *that* it changed. SHA-256 i
 **Use cases:**
 - **Smart doc staleness filtering** — SHA-256 flags 20 files, drift scores show only 3 had meaningful changes
 - **Drift-aware re-indexing feedback** — `IndexReport` includes drift summary
-- **On-demand query** — `index_status(threshold, path)` reads `drift_report` with threshold/path filters
+- **On-demand query** — `project_status(threshold, path)` reads `drift_report` with threshold/path filters
 
 **Scoring:** Per-file `avg_drift` + `max_drift`. Chunk matching: exact content match first (drift 0.0), then greedy cosine pairing, with unmatched chunks as added/removed (drift 1.0).
 

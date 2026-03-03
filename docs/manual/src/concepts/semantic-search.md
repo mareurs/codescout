@@ -76,18 +76,18 @@ Build the index once before first use:
 Check its health:
 
 ```json
-{ "tool": "index_status", "arguments": {} }
+{ "tool": "project_status", "arguments": {} }
 ```
 
 The index is stored in `.code-explorer/embeddings.db` and excluded from version
 control by default. Each team member builds their own local copy.
 
-**Drift detection:** `index_status` can report per-file drift scores — a measure
+**Drift detection:** `project_status` can report per-file drift scores — a measure
 of how much file content has changed since it was last indexed. Pass `threshold`
 to surface files with high drift:
 
 ```json
-{ "tool": "index_status", "arguments": { "threshold": 0.3 } }
+{ "tool": "project_status", "arguments": { "threshold": 0.3 } }
 ```
 
 Switching embedding models invalidates the entire index — all chunks must be
@@ -101,4 +101,4 @@ for model selection guidance.
 - [Embedding Backends](../configuration/embedding-backends.md) — all supported
   backends and model selection guidance
 - [Semantic Search Tools](../tools/semantic-search.md) — full reference for
-  `semantic_search`, `index_project`, and `index_status`
+  `semantic_search`, `index_project`, and `project_status`

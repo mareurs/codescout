@@ -109,7 +109,7 @@ The `content` field contains the full source text of each chunk. Combine with
   version of a pattern.
 - Scores above 0.85 are typically a strong match. Scores below 0.6 usually
   indicate the concept is not well represented in the index.
-- If results are poor, check `index_status` to confirm the index is up to date,
+- If results are poor, check `project_status` to confirm the index is up to date,
   and `index_project` to rebuild if files have changed.
 - For finding a symbol by name, `find_symbol` is faster and more precise.
   Semantic search is for concepts, not identifiers.
@@ -193,95 +193,23 @@ the current HEAD commit, results include:
 
 ---
 
-## `index_status`
+## Index Status and Drift
 
-**Purpose:** Show the current state of the embedding index: how many files and
-chunks it covers, which model was used to build it, and where the database
-lives.
+Index health (file count, model, staleness, drift scores) is now part of **`project_status`** — see [Workflow & Config](workflow-and-config.md#project_status) for the full reference.
 
-**Parameters:**
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `threshold` | number | no | — | When provided, includes drift data: minimum `avg_drift` to include (0.0–1.0). Omit to skip drift query. |
-| `path` | string | no | — | SQL LIKE pattern to filter drift results by file path (e.g. `"src/tools/%"`) |
-
-**Example (basic stats only):**
+**Quick reference:**
 
 ```json
-{}
+{ "tool": "project_status", "arguments": {} }
 ```
 
-**Output (index exists):**
+Pass `threshold: 0.1` to include drift data for files that changed semantically since the last index:
 
 ```json
-{
-  "indexed": true,
-  "configured_model": "text-embedding-3-small",
-  "indexed_with_model": "text-embedding-3-small",
-  "file_count": 47,
-  "chunk_count": 312,
-  "embedding_count": 312,
-  "db_path": "/home/user/myproject/.code-explorer/embeddings.db"
-}
+{ "tool": "project_status", "arguments": { "threshold": 0.1 } }
 ```
 
-**Output (no index):**
-
-```json
-{
-  "indexed": false,
-  "message": "No index found. Run index_project first."
-}
-```
-
-**Example (with drift query):**
-
-```json
-{ "threshold": 0.2 }
-```
-
-**Output (with drift data):**
-
-```json
-{
-  "indexed": true,
-  "file_count": 47,
-  "chunk_count": 312,
-  "drift": {
-    "results": [
-      {
-        "file_path": "src/auth/service.rs",
-        "avg_drift": 0.72,
-        "max_drift": 0.91,
-        "chunks_added": 2,
-        "chunks_removed": 1
-      }
-    ],
-    "total": 1
-  }
-}
-```
-
-Drift results are sorted by `max_drift` descending. `avg_drift` is the mean across all chunks; `max_drift` is the worst single chunk. Use `threshold: 0.1` to surface all meaningfully changed files; use `threshold: 0.4` to focus on major rewrites only.
-
-Opt out of drift detection entirely with `drift_detection_enabled = false` in `.code-explorer/project.toml`:
-
-```toml
-[embeddings]
-drift_detection_enabled = false
-```
-
-**Tips:**
-
-- Call `index_status` before `semantic_search` to confirm the index exists and
-  is built with the same model currently configured. If `configured_model`
-  differs from `indexed_with_model`, search results will be unreliable — run
-  `index_project` with `force: true` to rebuild.
-- `chunk_count` and `embedding_count` should be equal under normal conditions.
-  A mismatch can indicate an interrupted indexing run; fix it with
-  `index_project`.
-- Use `index_status` with `threshold: 0.1` after re-indexing to surface which files changed semantically, not just syntactically. A whitespace-only reformat will have `avg_drift ≈ 0.0`; a full function rewrite will approach `1.0`.
+Opt out of drift detection with `drift_detection_enabled = false` in `.code-explorer/project.toml`.
 
 > **See also:** [Dashboard](../concepts/dashboard.md) — the Overview page
 > surfaces index staleness and per-file drift scores visually, without a tool

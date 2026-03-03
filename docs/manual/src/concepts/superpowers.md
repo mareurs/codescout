@@ -25,10 +25,10 @@ entirely and do it manually:
 
 ```bash
 # create the worktree on a new branch
-git worktree add .claude/worktrees/my-feature my-feature
+git worktree add .worktrees/my-feature my-feature
 
 # cd into it and launch Claude from there
-cd .claude/worktrees/my-feature
+cd .worktrees/my-feature
 claude
 ```
 
@@ -36,7 +36,7 @@ Claude starts with its CWD already set to the worktree. The MCP server needs one
 `activate_project` call to follow:
 
 ```
-activate_project("/abs/path/to/.claude/worktrees/my-feature")
+activate_project("/abs/path/to/.worktrees/my-feature")
 ```
 
 After that, every read, write, and shell command targets the worktree
@@ -59,16 +59,16 @@ same time, parallel worktrees let you do all of it concurrently:
 
 ```bash
 # terminal 1 — big feature
-git worktree add .claude/worktrees/big-feature big-feature
-cd .claude/worktrees/big-feature && claude
+git worktree add .worktrees/big-feature big-feature
+cd .worktrees/big-feature && claude
 
 # terminal 2 — hotfix
-git worktree add .claude/worktrees/hotfix-auth hotfix-auth
-cd .claude/worktrees/hotfix-auth && claude
+git worktree add .worktrees/hotfix-auth hotfix-auth
+cd .worktrees/hotfix-auth && claude
 
 # terminal 3 — docs update
-git worktree add .claude/worktrees/docs-update docs-update
-cd .claude/worktrees/docs-update && claude
+git worktree add .worktrees/docs-update docs-update
+cd .worktrees/docs-update && claude
 ```
 
 Each session is fully isolated. They share the object store (fast) and can see

@@ -40,10 +40,10 @@ code at a glance.
 ## Building a Library Index
 
 Semantic search over library code requires an embedding index, just like project
-code. Build one with `index_library`:
+code. Build one with `index_project` pointed at the library's root path:
 
 ```json
-{ "tool": "index_library", "arguments": { "name": "tokio" } }
+{ "tool": "index_project", "arguments": { "path": "/path/to/tokio-1.35.1/" } }
 ```
 
 This is a one-time cost per library. The index persists in
@@ -62,7 +62,7 @@ This is a one-time cost per library. The index persists in
 ## Further Reading
 
 - [Library Navigation Tools](../tools/library-navigation.md) — full reference for
-  `list_libraries` and `index_library`
+  `list_libraries` and library indexing
 - [Symbol Navigation Tools](../tools/symbol-navigation.md) — the tools that accept
   the `scope` parameter
 - [Semantic Search Tools](../tools/semantic-search.md) — semantic search within

@@ -4,11 +4,10 @@ code-explorer provides three tiers of support depending on which backends are
 available for a given language.
 
 - **Full support** — LSP server + tree-sitter grammar. All symbol tools work,
-  including `list_functions` and `list_docs`. Semantic search is also
+  and richer AST extraction is available internally. Semantic search is also
   available after indexing.
 - **LSP only** — LSP server configured, no tree-sitter grammar. Symbol
-  navigation, references, and rename work. `list_functions` and
-  `list_docs` are not available.
+  navigation, references, and rename work.
 - **Detection only** — Language is recognized for chunking and file detection.
   No LSP server and no tree-sitter grammar. Only file operations and semantic
   search (after indexing) are available.
@@ -61,10 +60,8 @@ is configured and no tree-sitter grammar is bundled.
 | `replace_symbol`          | Yes          | Yes      | No             |
 | `insert_code`             | Yes          | Yes      | No             |
 | `rename_symbol`           | Yes          | Yes      | No             |
-| `list_functions`          | Yes          | No       | No             |
-| `list_docs`               | Yes          | No       | No             |
 | `semantic_search`         | Yes          | Yes      | Yes            |
-| File tools, git tools     | Yes          | Yes      | Yes            |
+| File tools                | Yes          | Yes      | Yes            |
 
 ---
 

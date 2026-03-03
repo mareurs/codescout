@@ -150,7 +150,7 @@ These tools respect `detail_level`, `offset`, and `limit`:
 | `find_symbol` | Names, kinds, locations | + bodies (when `include_body=true`) |
 | `find_references` | Reference locations | Paginated reference list |
 | `list_dir` | File paths | Paginated entries |
-| `git_blame` | First 200 lines | Paginated full blame |
+| `search_pattern` | Top matches | Paginated full matches |
 | `semantic_search` | Top matches with scores | Paginated full chunks |
 
 ## Tools With Fixed Output
@@ -162,8 +162,7 @@ switching:
 |------|-----------|
 | `search_pattern` | Always returns up to `max_results` matches (default: 50) |
 | `find_file` | Always returns up to `max_results` paths (default: 100) |
-| `list_functions` | Returns all functions in a single file; files are bounded by nature |
-| `list_docs` | Returns all docstrings in a single file |
+| `list_symbols` | Returns all symbols in a file (bounded by nature) |
 
 For these tools, use their own `limit` or `max_results` parameter to control
 output size. They do not use the `detail_level` / `offset` / `limit` pattern.

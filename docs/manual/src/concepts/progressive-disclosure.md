@@ -15,7 +15,7 @@ Without guardrails, code intelligence tools can produce enormous output:
 | `find_symbol(pattern)` | Project-wide search with thousands of matches |
 | `find_references` | Popular symbols referenced in hundreds of files |
 | `list_dir(recursive=true)` | Full directory tree of a large monorepo |
-| `git_blame` (no line range) | Every line in a long file |
+| `run_command("git blame file")` (no line range) | Every line in a long file |
 
 Filling the context window with irrelevant symbols, boilerplate bodies, and
 off-target files makes it harder to reason about the code you actually care

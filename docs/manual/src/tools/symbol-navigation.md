@@ -11,7 +11,7 @@ All symbol navigation tools require an LSP server for the target language. If
 the LSP server is not running or is still indexing, some tools fall back to
 tree-sitter for basic results.
 
-**Scope parameter:** `find_symbol`, `list_symbols`, `find_references`, and `list_functions` accept an optional `scope` string to search library code as well as project code. See [Library Navigation](library-navigation.md) for the full scope reference.
+**Scope parameter:** `find_symbol`, `list_symbols`, and `find_references` accept an optional `scope` string to search library code as well as project code. See [Library Navigation](library-navigation.md) for the full scope reference.
 
 > **See also:** [Tool Selection](../concepts/tool-selection.md) — when to reach
 > for symbol tools vs semantic search vs text search. [Progressive Disclosure](../concepts/progressive-disclosure.md) — how `detail_level` controls output volume for these tools.
@@ -355,7 +355,7 @@ start to its end — no line numbers required.
   rewriting, to confirm you understand the existing signature and indentation.
 - Use `replace_symbol` for any change that touches a significant portion
   of the function. For small surgical changes (renaming a variable, changing
-  one line), `edit_lines` with a precise range is less disruptive.
+  one line), `edit_file` with a precise match string is less disruptive.
 - This tool is robust to refactors above the target function. Line numbers
   change; symbol names generally do not.
 
@@ -477,7 +477,7 @@ operation. Every reference in every file is updated atomically.
 
 - `rename_symbol` is the safest way to rename. It uses the LSP workspace edit
   operation, which understands import paths, qualified names, and string-based
-  references that IDEs handle. A text substitution with `search_pattern` + `edit_lines` will
+  references that IDEs handle. A text substitution with `search_pattern` + `edit_file` will
   miss these cases.
 - The `relative_path` must point to the file that contains the definition, not
   a file that merely uses it.
@@ -549,7 +549,7 @@ When the definition is in a library (outside the project root), the response inc
 **Tips:**
 
 - Use `goto_definition` to quickly locate where a type, trait, or function is defined without searching by name.
-- When the definition is in an external library and `library_registered` appears, run `index_library` on that library to enable `semantic_search` across it.
+- When the definition is in an external library and `library_registered` appears, run `index_project` with the library's root path to enable `semantic_search` across it.
 - Supply `identifier` when the line has multiple symbols (e.g. a method call chain) to pin the lookup to the one you care about.
 - The result is the definition site — if you want the symbol's type and documentation without navigating away, use `hover` instead.
 

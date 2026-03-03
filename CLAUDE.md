@@ -6,7 +6,7 @@ Rust MCP server giving LLMs IDE-grade code intelligence — symbol-level navigat
 
 ```bash
 cargo build                        # Build
-cargo test                         # Run tests (862 passing)
+cargo test                         # Run tests (932 passing)
 cargo clippy -- -D warnings        # Lint
 cargo fmt                          # Format
 cargo run -- start --project .     # Run MCP server (stdio)
@@ -56,13 +56,13 @@ src/
 │   ├── format.rs    #   Shared format helpers (format_line_range, format_overflow, truncate_path)
 │   ├── file.rs      #   read_file, list_dir, search_pattern, create_file, find_file, edit_file
 │   ├── workflow.rs  #   onboarding, run_command
-│   ├── symbol.rs    #   10 LSP-backed tools (find_symbol, list_symbols, goto_definition, hover, remove_symbol, etc.)
-│   ├── git.rs       #   git_blame
-│   ├── semantic.rs  #   semantic_search, index_project, index_status (incl. drift)
-│   ├── library.rs   #   list_libraries, index_library
-│   ├── memory.rs    #   CRUD tools (write/read/list/delete)
-│   ├── ast.rs       #   list_functions, list_docs
-│   └── config.rs    #   activate_project, get_config
+│   ├── symbol.rs    #   9 LSP-backed tools (find_symbol, list_symbols, goto_definition, hover, remove_symbol, etc.)
+│   ├── git.rs       #   git_blame, file_log (not registered; used by dashboard)
+│   ├── semantic.rs  #   semantic_search, index_project
+│   ├── library.rs   #   list_libraries
+│   ├── memory.rs    #   memory (action: read/write/list/delete)
+│   ├── ast.rs       #   list_functions, list_docs (not registered; tree-sitter offline tools)
+│   └── config.rs    #   activate_project, project_status
 └── util/            # fs helpers, text processing
 ```
 
@@ -111,7 +111,7 @@ See `did_change_refreshes_stale_symbol_positions` in `src/lsp/client.rs` for the
 
 ## Key Patterns
 
-**Tool trait** (`src/tools/mod.rs`): Each tool is a struct implementing `name()`, `description()`, `input_schema()`, `async call(Value, &ToolContext) -> Result<Value>`. 32 tools registered. All use `#[async_trait]`.
+**Tool trait** (`src/tools/mod.rs`): Each tool is a struct implementing `name()`, `description()`, `input_schema()`, `async call(Value, &ToolContext) -> Result<Value>`. 23 tools registered. All use `#[async_trait]`.
 
 **Tool↔MCP bridge** (`src/server.rs`): Tools registered as `Vec<Arc<dyn Tool>>`, dispatched dynamically in `call_tool`. Errors are routed through `route_tool_error`:
 - `RecoverableError` (`src/tools/mod.rs`) → `isError: false` with JSON `{"error":"…","hint":"…"}` — LLM sees the problem and a corrective hint, **sibling parallel calls are not aborted by Claude Code**.
@@ -138,7 +138,6 @@ The `PreToolUse` hook will **block** any attempt to use the native `Read`, `Grep
 **You MUST use code-explorer's own MCP tools to read source code:**
 - `mcp__code-explorer__list_symbols(path)` — see all symbols in a file/dir
 - `mcp__code-explorer__find_symbol(name, include_body=true)` — read a function body
-- `mcp__code-explorer__list_functions(path)` — quick signatures
 - `mcp__code-explorer__search_pattern(pattern)` — regex search
 - `mcp__code-explorer__semantic_search(query)` — concept-level search
 - `mcp__code-explorer__read_file(path)` — for non-source files (markdown, toml, json)

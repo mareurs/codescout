@@ -7,7 +7,7 @@ previous. You can ship a partial implementation and add deeper support later.
 |-------|-----------------|--------|
 | Detection only | File detection, semantic search chunking, basic file ops | 1 line |
 | LSP support | All symbol tools (`find_symbol`, `list_symbols`, references, rename) | ~10 lines |
-| Tree-sitter grammar | Offline `list_functions`, `list_docs`, richer AST extraction | ~50–200 lines |
+| Tree-sitter grammar | Richer offline AST extraction, improved symbol fallback | ~50–200 lines |
 
 ---
 
@@ -151,8 +151,8 @@ subsequent requests.
 ## Level 3: Tree-sitter Grammar (full support)
 
 Tree-sitter gives you offline symbol extraction without a running language
-server. This powers `list_functions` and `list_docs`, and improves
-the fallback path when LSP is unavailable.
+server. This improves the fallback path when LSP is unavailable and enables
+richer AST extraction used internally by symbol tools.
 
 ### Step 1: Add the tree-sitter crate
 
@@ -294,8 +294,7 @@ If the language has a documentation comment convention, add a corresponding
 
 **What this enables:**
 
-- `list_functions` — fast offline function listing without an LSP server
-- `list_docs` — documentation extraction
+- Richer offline symbol extraction used internally by `list_symbols` and semantic chunking
 - Better fallback when the LSP server is unavailable or slow to start
 
 ---

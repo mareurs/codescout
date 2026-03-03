@@ -1,86 +1,75 @@
-# Memory Tools
+# Memory
 
-Memory tools give the agent persistent, project-scoped storage. Notes written in one session are available in every future session, letting the agent build up knowledge about a codebase over time rather than rediscovering the same things repeatedly.
+The `memory` tool gives the agent persistent, project-scoped storage. Notes written in one session are available in every future session, letting the agent build up knowledge about a codebase over time rather than rediscovering the same things repeatedly.
 
-## `write_memory`
+## `memory`
 
-**Purpose:** Persist a piece of knowledge about the active project under a named topic.
+**Purpose:** Read, write, list, or delete persistent memory entries via a single unified tool.
 
 **Parameters:**
 
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `topic` | string | yes | — | Path-like key, e.g. `"architecture"` or `"debugging/async-patterns"` |
-| `content` | string | yes | — | Markdown text to store |
+| `action` | string | **yes** | — | One of: `"read"`, `"write"`, `"list"`, `"delete"` |
+| `topic` | string | required for `read`/`write`/`delete` | — | Path-like key, e.g. `"architecture"` or `"debugging/async-patterns"` |
+| `content` | string | required for `write` | — | Markdown text to persist |
+| `private` | boolean | no | `false` | If true, use the gitignored private store (personal notes not shared with teammates) |
+| `include_private` | boolean | no | `false` | For `list`: also return private topics — returns `{ shared, private }` instead of `{ topics }` |
+
+---
+
+### `action: "write"`
+
+Persist a piece of knowledge under a named topic.
 
 **Example:**
 
 ```json
 {
+  "action": "write",
   "topic": "conventions/error-handling",
   "content": "All public functions return `anyhow::Result`. Errors are propagated with `?`. Only `main` and tool `call` methods convert to user-facing messages."
 }
 ```
 
-**Output:**
+**Output:** `"ok"`
 
-```json
-{ "status": "ok", "topic": "conventions/error-handling" }
-```
-
-**Tips:** Write a memory whenever you learn something non-obvious — a naming convention, an architectural decision, a gotcha you had to debug. Topics with a slash create a sub-directory, which keeps related entries grouped. Calling `write_memory` with an existing topic overwrites it.
+**Tips:** Write a memory whenever you learn something non-obvious — a naming convention, an architectural decision, a gotcha you had to debug. Topics with a slash create a sub-directory, which keeps related entries grouped. Calling `write` with an existing topic overwrites it.
 
 ---
 
-## `read_memory`
+### `action: "read"`
 
-**Purpose:** Retrieve a previously stored memory entry by its topic.
-
-**Parameters:**
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `topic` | string | yes | — | Exact topic string used when the entry was written |
+Retrieve a previously stored memory entry by its topic.
 
 **Example:**
 
 ```json
-{ "topic": "conventions/error-handling" }
+{ "action": "read", "topic": "conventions/error-handling" }
 ```
 
 **Output (found):**
 
 ```json
 {
-  "topic": "conventions/error-handling",
   "content": "All public functions return `anyhow::Result`. Errors are propagated with `?`. Only `main` and tool `call` methods convert to user-facing messages."
 }
 ```
 
-**Output (not found):**
+**Output (not found):** Returns a `RecoverableError` with a hint to call `list` first.
 
-```json
-{
-  "topic": "conventions/error-handling",
-  "content": null,
-  "message": "not found"
-}
-```
-
-**Tips:** Read memories that are relevant to your current task. Do not read all memories at once — use `list_memories` first to see what exists, then read only the ones that apply to what you are working on.
+**Tips:** Read memories that are relevant to your current task. Use `list` first to see what topics exist, then read only the ones that apply.
 
 ---
 
-## `list_memories`
+### `action: "list"`
 
-**Purpose:** List all stored memory topics for the active project.
-
-**Parameters:** None.
+List all stored memory topics for the active project.
 
 **Example:**
 
 ```json
-{}
+{ "action": "list" }
 ```
 
 **Output:**
@@ -97,33 +86,48 @@ Memory tools give the agent persistent, project-scoped storage. Notes written in
 }
 ```
 
-**Tips:** Call this at the start of a session to get an overview of what the agent already knows about the project. The list is sorted alphabetically. Topics with slashes indicate sub-categories — scan the list for entries relevant to your current task, then use `read_memory` to fetch them individually.
-
----
-
-## `delete_memory`
-
-**Purpose:** Remove a memory entry that is no longer accurate or needed.
-
-**Parameters:**
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `topic` | string | yes | — | Exact topic of the entry to delete |
-
-**Example:**
+**With private topics:**
 
 ```json
-{ "topic": "debugging/lsp-timeouts" }
+{ "action": "list", "include_private": true }
 ```
 
 **Output:**
 
 ```json
-{ "status": "ok", "topic": "debugging/lsp-timeouts" }
+{
+  "shared": ["architecture", "conventions/error-handling"],
+  "private": ["personal/wip-notes"]
+}
 ```
 
-**Tips:** Delete memories when a refactor changes the architecture they describe, or when a bug they document has been fixed. Stale memories are worse than no memories — they send future sessions down dead ends. Deleting a topic that does not exist is a no-op; it does not return an error.
+**Tips:** Call this at the start of a session to get an overview of what the agent already knows. Topics with slashes indicate sub-categories — scan the list for entries relevant to your current task.
+
+---
+
+### `action: "delete"`
+
+Remove a memory entry that is no longer accurate or needed.
+
+**Example:**
+
+```json
+{ "action": "delete", "topic": "debugging/lsp-timeouts" }
+```
+
+**Output:** `"ok"`
+
+**Tips:** Delete memories when a refactor changes the architecture they describe, or when a bug they document has been fixed. Stale memories are worse than no memories. Deleting a topic that does not exist is a no-op.
+
+---
+
+## Private Store
+
+Pass `private: true` to any action to target the gitignored private store at `.code-explorer/private-memories/`. Private memories are never surfaced in system instructions and are not shared with teammates:
+
+```json
+{ "action": "write", "topic": "wip-notes", "content": "...", "private": true }
+```
 
 ---
 
@@ -140,7 +144,7 @@ You can inspect or version-control these files like any other project file.
 
 ### Topic naming
 
-Topics support path-like nesting with forward slashes. A flat structure works fine for small projects; for larger codebases, grouping by category keeps the list scannable:
+Topics support path-like nesting with forward slashes:
 
 | Category | Example topics |
 |----------|---------------|
@@ -148,30 +152,26 @@ Topics support path-like nesting with forward slashes. A flat structure works fi
 | Architecture | `architecture`, `architecture/data-flow`, `architecture/module-boundaries` |
 | Debugging notes | `debugging/async-patterns`, `debugging/known-issues` |
 | Team preferences | `preferences/review-style`, `preferences/commit-format` |
-| Onboarding summary | `onboarding` (written automatically) |
+| Onboarding summary | `onboarding` (written automatically by the `onboarding` tool) |
 
 ### What to store
 
-Good candidates for memory entries:
+Good candidates:
 
-- **Project conventions** — naming rules, code style decisions not captured by linting, patterns used throughout the codebase
-- **Architectural decisions** — why a module is structured a particular way, trade-offs that were consciously made
-- **Debugging insights** — root causes of tricky bugs, non-obvious interactions between components
-- **Team preferences** — review expectations, commit message style, PR process
+- **Project conventions** — naming rules, code style decisions not captured by linting
+- **Architectural decisions** — why a module is structured a particular way, trade-offs consciously made
+- **Debugging insights** — root causes of tricky bugs, non-obvious component interactions
 - **Gotchas** — behaviours that surprised you and would surprise the next agent too
 
-Avoid storing things that are already obvious from reading the code, or that change so frequently that the memory would immediately go stale.
+Avoid storing things already obvious from reading the code, or things that change so frequently the memory would immediately go stale.
 
-### Persistence across sessions
+### Recommended workflow
 
-Memory persists indefinitely across sessions. The recommended workflow is:
-
-1. At the start of a new session, call `onboarding`. If onboarding has been done, it will list available memories.
-2. Scan the list and call `read_memory` for topics relevant to your current task.
-3. As you work, call `write_memory` when you learn something worth remembering.
-4. If you correct an earlier misunderstanding, overwrite the old entry with updated content.
-
-The `onboarding` tool writes a summary entry under the topic `"onboarding"` automatically. You can write all other entries manually as you explore the codebase.
+1. Start a new session → call `onboarding` (lists available memories if already done)
+2. Call `memory(action: "list")` to see what topics exist
+3. Call `memory(action: "read", topic: ...)` for topics relevant to your current task
+4. As you work, call `memory(action: "write", ...)` when you learn something worth remembering
+5. If you correct an earlier misunderstanding, overwrite the old entry with updated content
 
 > **See also:** [Dashboard](../concepts/dashboard.md) — the Memories page lets
 > you browse, create, and delete topics directly in a browser UI without writing

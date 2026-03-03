@@ -134,11 +134,11 @@ index must be rebuilt:
 You can check index health at any time:
 
 ```json
-{ "name": "index_status", "arguments": {} }
+{ "name": "project_status", "arguments": {} }
 ```
 
-The output shows `configured_model` (from `project.toml`) and
-`indexed_with_model` (what was used to build the current index). If they
+The output shows `config.embeddings.model` (from `project.toml`) and
+the `index.model` (what was used to build the current index). If they
 differ, a force reindex is needed.
 
 ## Searching Effectively
@@ -244,8 +244,8 @@ After changing the model, always run `index_project` with `force: true`.
 
 **"No results" or empty results list**
 
-The index may not be built yet. Run `index_status` to check. If
-`indexed: false`, run `index_project`. If the index exists but results are
+The index may not be built yet. Run `project_status` to check. If
+`index.indexed` is false, run `index_project`. If the index exists but results are
 empty, the query may be too generic — try a more specific description.
 
 **"Connection refused" when indexing**
@@ -268,8 +268,8 @@ only the files that changed.
 
 The index was built with a different model and the vectors are no longer
 compatible. Run `index_project` with `force: true`. You can confirm the
-mismatch by checking `index_status`: if `configured_model` and
-`indexed_with_model` differ, a force reindex is required.
+mismatch by checking `project_status`: if the config model and the index model
+differ, a force reindex is required.
 
 **Indexing is very slow**
 

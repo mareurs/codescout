@@ -99,7 +99,7 @@ After registering, confirm Claude Code sees the server and all its tools:
 claude mcp list
 ```
 
-You should see `code-explorer` listed with 31 tools. If it does not appear, make sure the
+You should see `code-explorer` listed with 23 tools. If it does not appear, make sure the
 `code-explorer` binary is on your PATH:
 
 ```bash

@@ -55,7 +55,7 @@ redirecting to symbol tools.
 
 **Design**: 9 tools backed by Language Server Protocol — the same infrastructure
 IDEs use. `find_symbol`, `goto_definition`, `hover`, `find_references`,
-`list_symbols`, `list_functions`, `list_docs`.
+`list_symbols`, `replace_symbol`, `remove_symbol`, `insert_code`, `rename_symbol`.
 
 ### "Language Server CLI Empowers Language Agents with Process Rewards" (Lanser-CLI)
 *arXiv:2510.22907 — 2025*
@@ -109,7 +109,7 @@ implements. Achieved SOTA on SWE-bench by careful interface design alone.
 
 **Design**: Vector embedding index + cosine similarity for concept-level retrieval
 (`semantic_search`, `index_project`), with incremental updates and drift detection
-(`index_status`).
+(`project_status`).
 
 ### "LLM Agents Improve Semantic Code Search"
 *arXiv:2408.11058 — 2024*

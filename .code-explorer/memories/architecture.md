@@ -1,50 +1,53 @@
-# Architecture
+# code-explorer Architecture
 
 ## Layer Structure
+
 ```
-CLI (src/main.rs)
-  └─ Server (src/server.rs) — rmcp ServerHandler, tool dispatch
-       └─ Tools (src/tools/*.rs) — 31 tool implementations
-            └─ Agent (src/agent.rs) — orchestrator: active project, config, embedder cache
-                 ├─ LSP (src/lsp/) — language server management
-                 ├─ Embed (src/embed/) — semantic search pipeline
-                 ├─ AST (src/ast/) — tree-sitter parsing
-                 ├─ Git (src/git/) — git2 operations
-                 ├─ Library (src/library/) — third-party dependency navigation
-                 ├─ Memory (src/memory/) — persistent markdown-based knowledge
-                 ├─ Config (src/config/) — project.toml + modes
-                 └─ Usage (src/usage/) — tool call telemetry
+MCP Layer (rmcp) → 23 registered tools
+        ↓
+Agent / Orchestrator (Arc<RwLock<AgentInner>>)
+Active project state: root, config, memory, library_registry
+        ↓
+LSP Client | AST Engine | Git Engine | Embedding Engine
+        ↓
+Storage: SymbolIndex, EmbeddingIndex (sqlite-vec), MemoryStore, IncrementalCache
 ```
+
+## Tool Registry (23 tools)
+
+| Category | File | Tools |
+|---|---|---|
+| File (6) | `src/tools/file.rs` | read_file, list_dir, search_pattern, create_file, find_file, edit_file |
+| Workflow (2) | `src/tools/workflow.rs` | onboarding, run_command |
+| Symbol (9) | `src/tools/symbol.rs` | find_symbol, list_symbols, goto_definition, hover, find_references, replace_symbol, remove_symbol, insert_code, rename_symbol |
+| Semantic (2) | `src/tools/semantic.rs` | semantic_search, index_project |
+| Library (1) | `src/tools/library.rs` | list_libraries |
+| Memory (1) | `src/tools/memory.rs` | memory (action: read/write/list/delete) |
+| Config (2) | `src/tools/config.rs` | activate_project, project_status |
+
+**Not registered as MCP tools** (internal use):
+- `src/tools/git.rs` — git_blame, file_log (used by dashboard)
+- `src/tools/ast.rs` — list_functions, list_docs (tree-sitter, used internally by symbol tools)
+- `src/tools/usage.rs` — get_usage_stats (surfaced via dashboard only)
 
 ## Key Abstractions
 
-| Abstraction | File | Role |
-|---|---|---|
-| `Tool` trait | `src/tools/mod.rs:167` | Interface all 31 tools implement: `name()`, `description()`, `input_schema()`, `call()` |
-| `ToolContext` | `src/tools/mod.rs:35` | Shared context passed to every tool call: `agent`, `lsp`, `output_buffer` |
-| `OutputGuard` | `src/tools/output.rs:35` | Progressive disclosure enforcer: Exploring (compact, 200 cap) vs Focused (full, paginated) |
-| `RecoverableError` | `src/tools/mod.rs:54` | Non-fatal errors with hints — `isError: false` so sibling parallel calls aren't aborted |
-| `Agent` | `src/agent.rs:17` | Orchestrator holding active project, config, embedder cache (`Arc<Mutex<AgentInner>>`) |
-| `ActiveProject` | `src/agent.rs:29` | Current project state: root path, config, memory store, library registry |
-| `LspManager` | `src/lsp/manager.rs:18` | Manages LSP server lifecycle per language; implements `LspProvider` |
-| `LspClientOps` trait | `src/lsp/ops.rs:9` | Abstract LSP operations (document_symbols, workspace_symbol, etc.) |
-| `LspProvider` trait | `src/lsp/ops.rs:57` | Provides LSP clients by language; testable via `MockLspProvider` |
-| `CodeExplorerServer` | `src/server.rs:40` | rmcp `ServerHandler` — bridges Tool trait to MCP protocol |
-| `Embedder` trait | `src/embed/mod.rs:33` | Abstraction for embedding backends (remote HTTP or local ONNX) |
-| `Scope` enum | `src/library/scope.rs:3` | Controls search scope: Project, Libraries, All, or Lib(name) |
-| `PathSecurityConfig` | `src/util/path_security.rs:40` | Path validation — blocks reads to sensitive dirs, validates writes |
+- `Tool` trait (`src/tools/mod.rs:167`) — name, description, input_schema, async call
+- `OutputGuard` (`src/tools/output.rs:35`) — Exploring (compact, ≤200 items) vs Focused (full, paginated)
+- `RecoverableError` (`src/tools/mod.rs:54`) — isError:false + hint; sibling calls not aborted
+- `LspClientOps` / `LspProvider` (`src/lsp/ops.rs`) — testable LSP abstraction
+- `Embedder` trait (`src/embed/mod.rs:33`) — embedding backend abstraction
+- `ProjectStatus` tool — combines old `get_config` + `index_status` + usage summary
 
-## Data Flow
-1. MCP request → `CodeExplorerServer::call_tool()` dispatches by name
-2. Tool's `call(Value, &ToolContext)` executes, using `ToolContext.agent` for state
-3. LSP tools: `ToolContext.lsp` → `LspManager` → `LspClient` (JSON-RPC over stdio)
-4. Semantic tools: `Agent` → `Embedder` → SQLite index (cosine similarity via sqlite-vec)
-5. Results pass through `OutputGuard` for mode-appropriate truncation
-6. Errors routed through `route_tool_error()`: `RecoverableError` → soft, other → fatal
+## Agent Locking
 
-## Design Patterns
-- **Trait-based tool dispatch:** All tools share one interface, registered as `Vec<Arc<dyn Tool>>`
-- **Two-mode output:** `OutputGuard::from_input()` reads `detail_level` param, enforces caps
-- **Recoverable vs fatal errors:** Input-driven failures are recoverable (with hints), system failures are fatal
-- **Interior mutability:** `Agent` wraps `AgentInner` in `Arc<Mutex<>>` for shared state across tools
-- **LSP testability:** `LspClientOps` + `LspProvider` traits enable `MockLspClient` for unit tests
+`Arc<RwLock<AgentInner>>` — multiple readers OK, exclusive write lock for project switches.
+
+## Error Routing (`src/server.rs`)
+
+- `RecoverableError` → `isError: false` + `{"error":"…","hint":"…"}`
+- `anyhow::bail!` → `isError: true` (fatal)
+
+## Test Count
+
+932 tests passing (900 unit + 10 integration + 22 other).

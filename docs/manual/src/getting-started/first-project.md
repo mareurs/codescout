@@ -24,10 +24,10 @@ The first time code-explorer activates in a project it:
    grammar support).
 3. Starts LSP servers for the detected languages, ready to answer symbol queries.
 
-You can check the generated configuration at any time with the `get_config` tool:
+You can check the generated configuration at any time with the `project_status` tool:
 
 ```json
-{ "name": "get_config", "arguments": {} }
+{ "name": "project_status", "arguments": {} }
 ```
 
 
@@ -67,7 +67,7 @@ Indexing chunks every source file, embeds each chunk, and stores the vectors in
 Verify the index was built successfully:
 
 ```json
-{ "name": "index_status", "arguments": {} }
+{ "name": "project_status", "arguments": {} }
 ```
 
 Sample output:

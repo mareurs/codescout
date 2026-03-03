@@ -54,7 +54,7 @@ tree-sitter, git, embedding index) and returns structured, compact results.
 
 Four pillars:
 
-### LSP Navigation (8 tools, 9 languages)
+### LSP Navigation (9 tools, 9 languages)
 
 The Language Server Protocol is how IDEs answer questions like "where is this
 defined?" and "who calls this?". code-explorer runs LSP servers on your behalf
@@ -65,6 +65,7 @@ and exposes their answers as agent-friendly tools.
   functions, structs, in tree form
 - `find_references` — all callers/usages of a given symbol
 - `replace_symbol` — replace a function body by name, not by line number
+- `remove_symbol` — delete a named symbol entirely
 - `insert_code` — add code relative to a named symbol (`position: "before"` or `position: "after"`)
 - `goto_definition` — jump to the definition of a symbol at a given line
 - `hover` — type info and documentation for a symbol at a given position
@@ -73,7 +74,7 @@ and exposes their answers as agent-friendly tools.
 Supported languages: Rust, Python, TypeScript/JavaScript, Go, Java, Kotlin,
 C/C++, C#, Ruby.
 
-### Semantic Search (3 tools)
+### Semantic Search (2 tools)
 
 Sometimes you know the concept but not the name. Semantic search finds code by
 meaning using embeddings, not keywords.
@@ -84,47 +85,36 @@ meaning using embeddings, not keywords.
   library, or all sources.
 - `index_project` — build or incrementally update the embedding index (smart
   change detection via git diff → mtime → SHA-256 fallback)
-- `index_status` — check index coverage, staleness, and semantic drift (use `threshold` parameter
-  to surface files that changed meaningfully in *semantics* vs. trivially in bytes). Opt out with
-  `drift_detection_enabled = false` in `[embeddings]`.
 
 The embedding backend is configurable: OpenAI, Ollama, or any compatible
 endpoint.
 
-### Git Integration (1 tool)
-
-- `git_blame` — who last changed each line and in which commit
-
-For commit history and diffs, use `run_command` with shell git commands (e.g. `run_command("git log src/auth.rs")` or `run_command("git diff HEAD")`).
+For git history and diffs, use `run_command` with shell git commands (e.g. `run_command("git log src/auth.rs")` or `run_command("git diff HEAD")`).
 
 
-### Persistent Memory (4 tools)
+### Persistent Memory (1 tool)
 
 Agents are stateless across sessions by default. code-explorer provides a
 lightweight key-value store backed by markdown files in `.code-explorer/memories/`.
 
-- `write_memory` / `read_memory` / `list_memories` / `delete_memory`
+- `memory` — unified dispatch tool: `action: "read"` / `"write"` / `"list"` / `"delete"`
 
 Use this to record decisions, gotchas, and conventions so the agent picks them
 up on the next session without re-discovery.
 
-### Library Navigation (2 tools)
+### Library Navigation (1 tool)
 
 Navigate third-party dependency source code without leaving your agent workflow.
 Libraries auto-register when LSP `goto_definition` returns paths outside the
 project root.
 
-- `list_libraries` — see all registered libraries and their status
-- `index_library` — build an embedding index for a library so you can
-  `semantic_search` within it using `scope: "lib:<name>"`
+- `list_libraries` — see all registered libraries and their status (use `index_project` with a library path to build a semantic index for it)
 
 ### The Rest
 
-Beyond the five pillars: 6 file operation tools (directory listing, file
-reading, pattern search, file creation, line-level editing), 2 AST analysis
-tools (function signatures, docstrings via tree-sitter), 3 workflow tools
-(project onboarding, shell commands), and 2 config tools — **31 tools total**.
-(project onboarding, shell commands), and 2 config tools — **33 tools total**.
+Beyond these pillars: 6 file operation tools (directory listing, file
+reading, pattern search, file search, file creation, find-and-replace editing), 2 workflow tools
+(project onboarding, shell commands), and 2 config tools — **23 tools total**.
 
 ### Token Efficiency by Design
 

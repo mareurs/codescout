@@ -2,164 +2,198 @@ code-explorer MCP server: high-performance semantic code intelligence.
 Provides file operations, symbol navigation (LSP), AST analysis (tree-sitter),
 semantic search (embeddings), and project memory.
 
-**Subagents and spawned agents SHOULD use code-explorer too.** If you spawn a subagent or delegate to another agent, instruct it to use code-explorer tools for all code navigation — do not fall back to native Read/Grep/Glob on source files.
+**Subagents and spawned agents SHOULD use code-explorer too.** If you spawn a subagent
+or delegate to another agent, instruct it to use code-explorer tools for all code
+navigation — do not fall back to native Read/Grep/Glob on source files.
+
+## Iron Laws
+
+These are non-negotiable. Violating the letter IS violating the spirit.
+
+1. **NO `read_file` ON SOURCE CODE.** Use `list_symbols` + `find_symbol(include_body=true)`.
+   `read_file` on source returns a summary, not raw content. Symbol tools give you
+   structured, token-efficient navigation. `read_file` is for config, markdown, and data files.
+
+2. **NO `edit_file` FOR STRUCTURAL CODE CHANGES.** Use `replace_symbol`, `insert_code`,
+   `remove_symbol`, or `rename_symbol`. `edit_file` is for imports, literals, comments, config.
+   Multi-line edits on source files are blocked — the tool tells you which symbol tool to use.
+
+3. **NO PIPING `run_command` OUTPUT.** Run the command bare, then query the `@ref` buffer
+   in a follow-up: `cargo test` → `grep FAILED @cmd_id`. Never `cargo test 2>&1 | grep FAILED`.
+   The buffer system exists to save your context window — use it.
 
 ## How to Choose the Right Tool
 
-### Navigate code
+### By knowledge level
 
-**You know the name → structure-aware tools:**
-- `find_symbol(pattern)` — locate by name substring. Also accepts `name_path` (e.g. 'MyStruct/my_method').
-  Pass `kind` to narrow: `"function"`, `"class"`, `"struct"`, `"interface"`, `"type"`, `"enum"`, `"module"`, `"constant"`.
-- `list_symbols(path)` — symbol tree for file/dir/glob. Single-file mode caps at 100 top-level symbols.
-- `find_references(name_path, path)` — find all usages
-- `goto_definition(path, line)` — jump to a symbol's definition via LSP. Auto-discovers libraries.
-- `hover(path, line)` — get type info and documentation for a symbol at a given position. Complements find_symbol (name lookup) and goto_definition (navigation).
-- `list_symbols(path, include_docs=true)` — also returns docstrings alongside symbols (tree-sitter)
+| You know… | Start with | Then drill with |
+|---|---|---|
+| **The name** (function, type, symbol) | `find_symbol(pattern)` or `list_symbols(path)` | `find_symbol(name_path, include_body=true)` |
+| **The concept** ("how does auth work?") | `semantic_search(query)` | `list_symbols` / `find_symbol` on results |
+| **Nothing** (new codebase) | `list_dir(path)` → `list_symbols(file)` | `semantic_search("what does this do")` |
+| **A text pattern** (regex, error message) | `search_pattern(pattern)` | `find_symbol` on matched files |
+| **A filename** (glob pattern) | `find_file(pattern)` | `read_file` or `list_symbols` on result |
 
-**You know the concept → semantic search:**
-- `semantic_search(query)` → then drill down with `list_symbols` / `find_symbol(include_body=true)`
+### By task
 
-**You know nothing → start with the map:**
-1. `list_dir(path)` → 2. `list_symbols(file)` → 3. `semantic_search("what does this do")`
+| Task | Tool | NOT this |
+|---|---|---|
+| Read a function body | `find_symbol(name, include_body=true)` | ~~`read_file("src/foo.rs")`~~ |
+| See file structure | `list_symbols(path)` | ~~`read_file` entire file~~ |
+| Get docstrings | `list_symbols(path, include_docs=true)` | ~~removed `list_docs`~~ |
+| Get function signatures | `list_symbols(path)` | ~~removed `list_functions`~~ |
+| Find all usages | `find_references(name_path, path)` | ~~`search_pattern`~~ |
+| Jump to definition | `goto_definition(path, line)` | — |
+| Type info / docs | `hover(path, line)` | — |
+| Replace a function body | `replace_symbol(name_path, path, new_body)` | ~~`edit_file` with old_string~~ |
+| Insert code near a symbol | `insert_code(name_path, path, code, position)` | ~~`edit_file`~~ |
+| Delete a symbol | `remove_symbol(name_path, path)` | ~~`edit_file` with empty string~~ |
+| Rename across codebase | `rename_symbol(name_path, path, new_name)` | ~~manual find/replace~~ |
+| Change an import/literal/comment | `edit_file(path, old_string, new_string)` | — (correct tool) |
+| Read config/markdown/data | `read_file(path)` | — (correct tool) |
+| Run a shell command | `run_command(command)` | ~~piped commands~~ |
+| Index a library | `index_project(scope="lib:name")` | ~~removed `index_library`~~ |
+| Project health check | `project_status` | ~~removed `get_config`, `index_status`, `get_usage_stats`~~ |
+| Persistent notes | `memory(action="read\|write\|list\|delete")` | ~~removed 4 separate memory tools~~ |
 
-**Search by text or filename:**
-- `search_pattern(pattern)` — regex search across files. Pass `context_lines` for merged context blocks around matches. Scope with `path=<file_or_dir>`, limit with `max_results` (default 50).
-- `find_file(pattern)` — glob-based file search (e.g. `**/*.rs`, `src/**/mod.rs`). Scope with `path=<dir>`, limit with `max_results` (default 100).
+## Anti-Patterns — STOP if you catch yourself doing these
 
-**Non-source files & history:**
-- `read_file(path)` — read a file. Returns content directly for short files,
-  smart summary + `@file_*` ref for large files (>200 lines). For source code
-  files the summary includes top-level symbols. Prefer `list_symbols` /
-  `find_symbol` for source code navigation — they are more structured and
-  token-efficient.
-- `run_command("git blame path")` — who last changed each line and in which commit
+| ❌ Never do this | ✅ Do this instead | Why |
+|---|---|---|
+| `read_file("src/main.rs")` to read source | `list_symbols("src/main.rs")` then `find_symbol(name, include_body=true)` | Symbol tools are structured + token-efficient |
+| `read_file` then scan for a function | `find_symbol("function_name")` directly | Skip the file, go straight to the symbol |
+| `edit_file` with multi-line old_string on `.rs`/`.py`/`.ts` | `replace_symbol(name_path, path, new_body)` | Structural edits > fragile string matching |
+| `edit_file` to delete a function | `remove_symbol(name_path, path)` | LSP knows the exact range |
+| `edit_file` to add code after a function | `insert_code(name_path, path, code, "after")` | Position-aware, no string matching |
+| `run_command("cargo test 2>&1 \| grep FAIL")` | `run_command("cargo test")` then `grep FAIL @cmd_id` | Buffer saves context; pipes waste it |
+| `run_command("cd /abs/path && cmd")` | `run_command("cmd")` — already in project root | Use `cwd` param for subdirectories |
+| `run_command("cat src/lib.rs")` | `list_symbols("src/lib.rs")` or `read_file` with line range | Shell reads on source are blocked |
+| Repeat a broad `find_symbol` after overflow | Narrow with `path=`, `kind=`, or more specific pattern | Follow the overflow hint |
+| Ignore `by_file` in overflow response | Use top file from `by_file` as `path=` filter | The hint tells you exactly where to look |
 
-**List directory contents:**
+**If you catch yourself rationalizing** ("I'll just quickly read the file", "this edit is
+too small for replace_symbol", "one pipe won't hurt") — that's the signal to stop and
+use the right tool. Small shortcuts compound into large context waste.
+
+## Tool Reference
+
+### File I/O
+
+- `read_file(path)` — read a file. Short files return content directly; large files
+  (>200 lines) return a smart summary + `@file_*` ref. Source code summaries include
+  top-level symbols. Use `start_line`/`end_line` for targeted excerpts.
 - `list_dir(path)` — list files and directories. Pass `recursive=true` for a full tree.
+- `search_pattern(pattern)` — regex search across files. Pass `context_lines` for
+  merged context blocks. Scope with `path=`, limit with `max_results` (default 50).
+- `find_file(pattern)` — glob-based file search (e.g. `**/*.rs`, `src/**/mod.rs`).
+- `create_file(path, content)` — create or overwrite a file.
+- `edit_file(path, old_string, new_string)` — exact string replacement. Whitespace-sensitive.
+  `replace_all=true` for all occurrences. `insert="prepend"|"append"` to add at file
+  boundaries. For imports, literals, comments, config — NOT structural code changes.
 
-**Run shell commands:**
-- `run_command(command)` — execute a shell command. Run freely even if output
-  might be large; the buffer handles it. Returns content directly for short
-  output, smart summary + `@cmd_*` ref for large output.
-  **Runs from the project root automatically** — no `cd` prefix needed.
-  Stderr is captured automatically — no `2>&1` needed.
+### Symbol Navigation (LSP)
+
+- `find_symbol(pattern)` — locate by name substring. Accepts `name_path` (e.g.
+  `MyStruct/my_method`). Filter with `kind`: function, class, struct, interface, type,
+  enum, module, constant. Pass `include_body=true` to read the implementation.
+- `list_symbols(path)` — symbol tree for file/dir/glob. Pass `include_docs=true` for
+  docstrings. Signatures always included. Single-file mode caps at 100 top-level symbols.
+- `find_references(name_path, path)` — find all usages of a symbol.
+- `goto_definition(path, line)` — jump to definition via LSP. Auto-discovers libraries.
+- `hover(path, line)` — type info and documentation for a symbol at a position.
+
+### Symbol Editing (LSP)
+
+- `replace_symbol(name_path, path, new_body)` — replace entire symbol body.
+- `insert_code(name_path, path, code, position)` — insert before or after a named symbol.
+- `remove_symbol(name_path, path)` — delete a symbol (removes lines covered by LSP range).
+- `rename_symbol(name_path, path, new_name)` — rename across the codebase via LSP.
+  Sweeps for textual remainders in comments/docs/strings. **Warning:** may corrupt string
+  literals containing the old name — verify compilation after use.
+
+### Semantic Search
+
+- `semantic_search(query)` — find code by natural language or snippet. Returns ranked
+  chunks with similarity scores. Use `scope="lib:<name>"` for library code.
+- `index_project` — build or update the semantic index. Use `scope="lib:<name>"` to
+  index a registered library. Pass `force=true` to rebuild from scratch.
+
+### Workflow
+
+- `run_command(command)` — execute a shell command from the project root. Large output
+  stored as `@cmd_*` buffer ref. Stderr captured automatically.
   - `cwd` — run from a subdirectory (relative to project root)
   - `acknowledge_risk` — bypass safety check for destructive commands
   - `timeout_secs` — max execution time (default 30)
+- `onboarding` — project discovery: detect languages, read key files, generate system
+  prompt draft. Use `force=true` to re-scan.
 
-Anti-patterns (never do these):
-- ❌ `cd /home/user/proj && cargo test` → ✅ `cargo test`
-- ❌ `cargo test 2>&1 | tail -20` → ✅ `cargo test` then `tail -20 @cmd_id`
-- ❌ `cargo test 2>&1 | grep FAILED | head -20` → ✅ `cargo test` then `grep FAILED @cmd_id`
-- ❌ `cat src/main.rs` → ✅ `read_file("src/main.rs", start_line, end_line)` or `list_symbols("src/main.rs")`
-- ❌ `head -20 lib.py` → ✅ `read_file("lib.py", start_line=1, end_line=20)`
-- ❌ `sed -n '1,50p' main.ts` → ✅ `read_file("main.ts", start_line=1, end_line=50)`
-- ❌ `awk '{print}' server.go` → ✅ `search_pattern(regex)` or `find_symbol(name)`
+### Memory
 
-Shell access to source files (`.rs`, `.py`, `.ts`, `.go`, etc.) is blocked — use code-explorer symbol tools instead. Pass `acknowledge_risk: true` to bypass if absolutely necessary.
+- `memory(action, ...)` — persistent project knowledge.
+  - `action="write"` — requires `topic`, `content`. Pass `private=true` for gitignored store.
+  - `action="read"` — requires `topic`. Pass `private=true` for private store.
+  - `action="list"` — pass `include_private=true` to see both shared and private topics.
+  - `action="delete"` — requires `topic`. Pass `private=true` for private store.
 
-### Edit code
+### Project & Libraries
 
-- `replace_symbol(name_path, path, new_body)` — replace entire symbol body (preferred for code)
-- `insert_code(name_path, path, code, position)` — insert before or after a named symbol
-- `edit_file(path, old_string, new_string, replace_all?)` — find-and-replace: locates old_string in the file and replaces it with new_string. Must match exactly (whitespace-sensitive). Fails if not found; fails if multiple matches unless replace_all is true. Empty new_string deletes the match. Alternatively, use insert: "prepend" or "append" to add text at the start or end of the file without a string match.
-- `remove_symbol(name_path, path)` — delete a symbol entirely (removes the lines covered by the LSP symbol range)
-- `create_file(path, content)` — create or overwrite a file
+- `activate_project(path)` — switch active project root. Required after `EnterWorktree`.
+- `project_status` — project state: config, semantic index health, usage telemetry,
+  library summary. Pass `threshold` for drift scores, `window` for usage time range.
+- `list_libraries` — registered libraries and index status. Use `scope="lib:<name>"` in
+  `semantic_search`, `find_symbol`, or `index_project` to target a library.
 
-**Prefer symbol tools over `edit_file` for source code:**
-| ❌ `edit_file` for… | ✅ Use instead |
-|---|---|
-| Replacing a function/method/struct body | `replace_symbol(name_path, path, new_body)` |
-| Inserting code before or after a symbol | `insert_code(name_path, path, code, position)` |
-| Deleting a function, struct, or impl | `remove_symbol(name_path, path)` |
-| Renaming a symbol across the codebase | `rename_symbol(name_path, path, new_name)` |
+## Output System
 
-`edit_file` is for non-structural changes only: imports, string literals, comments, config values.
-Multi-line edits on source files (`.rs`, `.py`, `.ts`, `.go`, etc.) are blocked — the tool will tell you which symbol tool to use.
+**File paths in tool output are relative to the project root** (e.g. `src/tools/mod.rs`,
+not `/home/user/project/src/tools/mod.rs`). Pass them as-is to other tools.
 
-### Refactor
-
-- `rename_symbol(name_path, path, new_name)` — rename across the entire codebase via LSP. Sweeps for remaining textual occurrences (comments, docs, strings) that LSP missed. **Warning:** LSP rename may corrupt string literals or macro arguments that contain the old name — always verify changed files compile after use.
-
-### Library code
-
-`find_symbol` auto-discovers libraries. Use `scope: "lib:<name>"` on symbol/search tools.
-- `list_libraries` — show registered libraries and their status
-- `index_project(scope='lib:name')` — build embedding index for a library
-
-### Other local repositories
-
-- **Quick peek** (few files): use absolute paths — `list_dir`, `read_file`, `list_symbols`, `search_pattern` all work without switching projects
-- **Deep dive** (symbols, references, semantic search): `activate_project("/absolute/path")` first, explore, then switch back
-
-## Output Modes
-
-**File paths in tool output are relative to the project root** (e.g. `src/tools/mod.rs`, not `/home/user/project/src/tools/mod.rs`). Pass them as-is to other tools — no relativization needed.
+### Modes
 
 Default: **exploring** — compact, capped at 200 items.
 Pass `detail_level: "full"` for focused mode with `offset`/`limit` pagination.
 Only switch to focused AFTER identifying targets.
 
-Overflow produces: `{ "overflow": { "shown": N, "total": M, "hint": "...", "by_file": [{"file":"...","count":N},...] } }` — follow the hint.
-`by_file` (on `find_symbol` overflow) shows per-file match counts sorted by count descending; use `path=` to zoom into the top file.
+Overflow produces: `{ "overflow": { "shown": N, "total": M, "hint": "...", "by_file": [...] } }`
+— **follow the hint.** Narrow with `path=`, `kind=`, or a more specific `pattern`.
+`by_file` shows per-file match counts; use the top file as your `path=` filter.
 
-## Output Buffers
+### Output Buffers
 
-Large content — whether from a command, a file read, or a large tool response —
-is stored in an `OutputBuffer` rather than dumped into your context. You get a
-smart summary and an `@ref` handle. The full content costs you nothing to hold.
-Query it via `run_command` + Unix tools:
+Large content is stored in an `OutputBuffer` — you get a smart summary + `@ref` handle.
+The full content costs nothing to hold. Query via `run_command` + Unix tools:
 
-- **`@cmd_*`** — shell command output (from `run_command`). Stderr captured automatically; no `.err` suffix needed for most cases, but `@cmd_id.err` accesses stderr-only when available.
-- **`@file_*`** — large file reads (>200 lines, from `read_file`).
-- **`@tool_*`** — large tool responses (>10 KB). When any tool response exceeds 10,000 bytes, it is automatically stored in the buffer and you receive a compact summary + ref handle. Query with `run_command("jq '.field' @tool_abc12345")` or `run_command("grep pattern @tool_abc12345")`. Stored as compact JSON (not pretty-printed). No `.err` suffix variant.
+| Ref pattern | Source | Example query |
+|---|---|---|
+| `@cmd_*` | `run_command` output | `grep FAILED @cmd_a1b2c3` |
+| `@file_*` | Large file reads (>200 lines) | `sed -n '42,80p' @file_abc123` |
+| `@tool_*` | Large tool responses (>10 KB) | `jq '.symbols[].name' @tool_abc12345` |
 
-Example queries:
-
-    run_command("grep FAILED @cmd_a1b2c3")
-    run_command("sed -n '42,80p' @file_abc123")
-    run_command("jq '.symbols[] | .name' @tool_abc12345")
-    run_command("diff @cmd_a1b2c3 @file_abc123")
-
-**Be targeted:** extract what you need in one well-crafted query per buffer —
-don't probe the same `@ref` multiple times for overlapping information.
+Buffer queries return ≤ 100 lines inline. Truncation hints show the exact `sed` command
+to continue. Do NOT pipe buffer queries (`grep @ref | head`) — run targeted commands directly.
 
 ## Project Management
 
-- `onboarding` — initial project discovery: detect languages, read key files (README, CLAUDE.md, build file), create config, generate `system_prompt_draft`. Returns `features_md` path if found, or `features_suggestion` if not. Use `force: true` to re-scan.
-- `activate_project(path)` — switch the active project root. Required after `EnterWorktree`.
-- `project_status` — active project config, index health, usage telemetry, library summary. Pass `threshold` for drift.
-- `index_project` — build or incrementally update the semantic search index. Pass `scope='lib:name'` for libraries.
+### Worktrees
 
-### Memory (persistent per-project knowledge)
+After `EnterWorktree`, call `activate_project` with the worktree path — write tools are
+NOT automatically coupled to the shell's working directory. If you forget, writes silently
+modify the main repo. To clean up: `git worktree prune` from the main repo root.
 
-- `memory(action, topic?, content?)` — CRUD for persistent project knowledge.
-  - `action: "write"` — `topic` + `content` required. `private=true` for gitignored store.
-  - `action: "read"` — `topic` required. `private=true` to read from private store.
-  - `action: "list"` — lists all topics. `include_private=true` returns `{ shared, private }`.
-  - `action: "delete"` — `topic` required.
+### Project Customization
 
-## Project Customization
-
-If `.code-explorer/system-prompt.md` exists, its contents appear below as
-"Custom Instructions" — project-specific guidance from the user. Edit the file
-to customize how the AI navigates and works with your codebase.
-
-## Worktrees
-
-After `EnterWorktree`, call `activate_project` with the worktree path — write tools are NOT automatically coupled to the shell's working directory.
-If you forget, write tools will silently modify the main repo instead of the worktree — call `activate_project` and redo the write.
-To clean up: `git worktree prune` from the main repo root, then start a new session.
+If `.code-explorer/system-prompt.md` exists, its contents appear below as "Custom
+Instructions" — project-specific guidance. Edit the file to customize AI behavior.
 
 ## Rules
 
-1. **PREFER symbol tools over `read_file` for source code.** `list_symbols` + `find_symbol(include_body=true)` beats reading entire files. `read_file` on a large source file returns a summary + `@file_*` ref, not raw content — use `start_line` + `end_line` when you need a targeted excerpt.
-2. **Check `features_md` from `onboarding` before suggesting features.** If the project has a FEATURES.md, read it first — don't propose work that's already done.
-3. **Semantic search for "how does X work?"** Then drill into results with symbol tools.
+1. **Symbol tools over `read_file` for source code.** `list_symbols` + `find_symbol(include_body=true)` beats reading entire files.
+2. **Symbol edits over `edit_file` for code.** `replace_symbol`, `insert_code`, `remove_symbol` for structural changes. `edit_file` for imports, literals, comments.
+3. **Run commands bare, query buffers after.** `cargo test` → `grep FAILED @cmd_id`. Never pipe.
 4. **Exploring mode first.** Only `detail_level: "full"` after you know what you need.
-5. **Respect overflow hints.** Narrow with `path=`, `kind=`, or a more specific `pattern` — don't repeat broad queries.
-6. **Prefer symbol edits** (`replace_symbol`, `insert_code`, `remove_symbol`, `rename_symbol`) for code. Use `edit_file` when symbol tools don't fit.
-7. **`run_command` is already in the project root.** Never prefix with `cd /abs/path &&`. Use `cwd` param for subdirectories only.
-8. **Don't inline-pipe `run_command` output.** Run the command bare, then query the buffer in a follow-up: `cargo test` → `grep FAILED @cmd_id`. Never `cargo test 2>&1 | grep FAILED`.
-9. **Buffer queries return ≤ 100 lines inline.** When querying a `@ref` (e.g. `grep pattern @cmd_id`, `jq '.field' @tool_abc`), output above 100 lines is truncated — the hint shows the exact next-page `sed` command to continue. Do NOT pipe buffer queries (`grep @ref | head`) — run the targeted command directly. For text/markdown files, prefer `read_file(path, start_line, end_line)` over `run_command("cat file") + buffer queries`.
+5. **Follow overflow hints.** Narrow with `path=`, `kind=`, or a more specific pattern — don't repeat broad queries.
+6. **`run_command` is already in the project root.** Never prefix with `cd /abs/path &&`. Use `cwd` for subdirectories.
+7. **Buffer queries: run targeted, don't pipe.** `grep pattern @cmd_id` — never `grep @ref | head`.
+8. **Check `features_md` from `onboarding` before suggesting features.** Don't propose work that's already done.
+9. **Semantic search for "how does X work?"** Then drill into results with symbol tools.

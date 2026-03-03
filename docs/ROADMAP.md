@@ -17,7 +17,7 @@ See the detailed implementation plan: [`plans/2026-02-25-v1-implementation-plan.
 
 See [`FEATURES.md`](FEATURES.md) for the full feature reference. Summary:
 
-- **31 tools** across 10 categories (file, workflow, symbol, AST, git, semantic, memory, config, library, usage)
+- **23 tools** across 6 categories (file, workflow, symbol, semantic, memory, config/nav)
 - **LSP client** — transport, lifecycle, document symbols, references, definition, hover, rename + text sweep
 - **Tree-sitter AST** — symbol extraction + docstrings for Rust, Python, TypeScript, Go, Java, Kotlin
 - **Semantic search** — embedding pipeline with sqlite-vec ANN-indexed KNN, incremental rebuilds, drift detection ([concepts](manual/src/concepts/semantic-search.md), [backends](manual/src/configuration/embedding-backends.md))
@@ -35,9 +35,9 @@ See [`FEATURES.md`](FEATURES.md) for the full feature reference. Summary:
 - **RecoverableError** — non-fatal tool failures don't abort sibling parallel calls
 - **Dashboard** — `code-explorer dashboard` web UI with tool stats and project health ([concept page](manual/src/concepts/dashboard.md))
 - **Companion Claude Code plugin** — `code-explorer-routing` for tool routing guidance (live at [mareurs/claude-plugins](https://github.com/mareurs/claude-plugins))
-- **Usage monitor** — per-tool call stats in `usage.db`, surfaced via `get_usage_stats`
+- **Usage monitor** — per-tool call stats in `usage.db`, surfaced via the dashboard
 - **Git blame** via git2; persistent memory store (markdown topics)
-- **MCP over stdio** (rmcp); 733 tests passing
+- **MCP over stdio** (rmcp); 932 tests passing
 
 ## What's Next
 
@@ -186,8 +186,8 @@ Surface current sprint status from the roadmap, map recent commits to sprint ite
 
 ### `debugging`
 
-Systematic workflow from symptom to fix to verification — covering build failures, test failures, LSP timeouts, tree-sitter parse errors, and embedding pipeline issues. Guides contributors through hypothesis formation (`semantic_search`, `find_symbol`), targeted investigation (`git_blame`, `search_pattern`), and the `cargo build` / `cargo test` / `cargo clippy` verification loop.
+Systematic workflow from symptom to fix to verification — covering build failures, test failures, LSP timeouts, tree-sitter parse errors, and embedding pipeline issues. Guides contributors through hypothesis formation (`semantic_search`, `find_symbol`), targeted investigation (`run_command("git log/blame")`, `search_pattern`), and the `cargo build` / `cargo test` / `cargo clippy` verification loop.
 
 ### `log-stat-analyzer`
 
-Structured workflow for interpreting Tool Usage Monitor data: per-tool call counts, error rates, p50/p99 latency, overflow rates, and time-bucketed drift detection. Produces actionable summaries (e.g. "semantic_search error rate up 3× in last 24h"). Uses the `get_usage_stats` tool.
+Structured workflow for interpreting Tool Usage Monitor data: per-tool call counts, error rates, p50/p99 latency, overflow rates, and time-bucketed drift detection. Produces actionable summaries (e.g. "semantic_search error rate up 3× in last 24h"). Uses the dashboard (`code-explorer dashboard`).

@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn static_instructions_contain_key_sections() {
         assert!(SERVER_INSTRUCTIONS.contains("## How to Choose the Right Tool"));
-        assert!(SERVER_INSTRUCTIONS.contains("## Output Modes"));
+        assert!(SERVER_INSTRUCTIONS.contains("## Output System"));
         assert!(SERVER_INSTRUCTIONS.contains("## Rules"));
     }
 

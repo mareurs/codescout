@@ -2,7 +2,7 @@
 
 code-explorer provides two categories of editing tools:
 
-- **Text-level editing** — `edit_lines` operates on raw text and line positions.
+- **Text-level editing** — `edit_file` finds and replaces an exact string in a file.
 - **Symbol-level editing** — `replace_symbol`, `insert_code`, and `rename_symbol` operate on named code symbols located via the LSP. These are the preferred tools for editing source code.
 
 All write operations are restricted to the active project root. Attempts to write outside the project root, or to paths on the security deny-list, are rejected with an error.
@@ -19,11 +19,11 @@ All write operations are restricted to the active project root. Attempts to writ
 | Rewrite a function or method body | `replace_symbol` |
 | Add a new function next to an existing one | `insert_code` |
 | Rename a symbol everywhere it is used | `rename_symbol` |
-| Edit lines inside a function when you know their numbers | `edit_lines` |
-| Edit a config file, Markdown, or other non-code file | `edit_lines` |
+| Change a string, constant, or small code fragment | `edit_file` |
+| Edit a config file, Markdown, or other non-code file | `edit_file` |
 | Create a new file | `create_file` |
 
-For source code, prefer the symbol tools. They address code by name rather than by line number, which means your edit remains correct even if the file was modified since you last read it. Fall back to `edit_lines` when you need to change something inside a function body at a known position.
+For source code, prefer the symbol tools. They address code by name rather than by position, which means your edit remains correct even if the file was modified since you last read it. Fall back to `edit_file` when you need to change something small that is not naturally symbol-scoped.
 
 ---
 
@@ -59,88 +59,83 @@ For source code, prefer the symbol tools. They address code by name rather than 
 
 **Tips:**
 
-- Use this tool when you are generating a file from scratch. If the file already exists and you only need to change part of it, use `edit_lines` or a symbol tool instead — those tools are less likely to accidentally discard content you did not intend to touch.
+- Use this tool when you are generating a file from scratch. If the file already exists and you only need to change part of it, use `edit_file` or a symbol tool instead — those tools are less likely to accidentally discard content you did not intend to touch.
 - The path is resolved relative to the active project root, so `src/util/helpers.rs` and `./src/util/helpers.rs` both work. Absolute paths that fall inside the project root are also accepted.
 
 ---
 
-## `edit_lines`
+## `edit_file`
 
-**Purpose:** Splice-edit a file by line position. Replace a range of lines, insert new lines, or delete lines — without having to send the old content as a match string.
+**Purpose:** Find-and-replace editing. Locates `old_string` in the file and replaces it with `new_string`. Works on any file type. Alternatively, prepend or append text without a match string.
 
 **Parameters:**
 
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
 | `path` | string | yes | — | File to edit, relative to project root |
-| `start_line` | integer | yes | — | First line affected by the edit (1-based) |
-| `delete_count` | integer | yes | — | Number of lines to remove; `0` means pure insertion |
-| `new_text` | string | no | `""` | Text to insert at `start_line`; may contain newlines. Omit for pure deletion. |
+| `old_string` | string | yes* | — | Exact text to find, including whitespace and indentation. *Not required when using `insert`. |
+| `new_string` | string | yes | — | Replacement text. Set to `""` to delete the match. |
+| `replace_all` | boolean | no | `false` | Replace every occurrence instead of requiring a unique match. |
+| `insert` | string | no | — | `"prepend"` or `"append"` — add text at the start or end of the file without a match string. |
 
-The operation is a splice: `delete_count` lines beginning at `start_line` are removed and replaced by the lines in `new_text`. Setting `delete_count` to `0` inserts without removing anything. Omitting `new_text` (or setting it to `""`) deletes without inserting.
-
-**Example — replace a single line:**
+**Example — change a constant value:**
 
 ```json
 {
   "path": "src/config.rs",
-  "start_line": 42,
-  "delete_count": 1,
-  "new_text": "    pub const MAX_RETRIES: u32 = 5;"
+  "old_string": "    pub const MAX_RETRIES: u32 = 3;",
+  "new_string": "    pub const MAX_RETRIES: u32 = 5;"
 }
 ```
 
-**Example — insert two lines before line 10 (no deletion):**
+**Example — add an import at the top of a file:**
 
 ```json
 {
   "path": "src/lib.rs",
-  "start_line": 10,
-  "delete_count": 0,
-  "new_text": "// Safety: caller ensures the pointer is valid.\n// See module docs for invariants."
+  "insert": "prepend",
+  "new_string": "use std::collections::HashMap;\n"
 }
 ```
 
-**Example — delete lines 15 through 17:**
+**Example — delete a block of lines:**
 
 ```json
 {
-  "path": "src/lib.rs",
-  "start_line": 15,
-  "delete_count": 3
+  "path": "src/config.rs",
+  "old_string": "    // TODO: remove this\n    legacy_init();\n",
+  "new_string": ""
 }
 ```
 
-**Example — append at end of file (set `start_line` to one past the last line):**
+**Example — replace all occurrences of a deprecated API:**
 
 ```json
 {
-  "path": "src/lib.rs",
-  "start_line": 101,
-  "delete_count": 0,
-  "new_text": "\n// end of file marker"
+  "path": "src/util.rs",
+  "old_string": "old_function()",
+  "new_string": "new_function()",
+  "replace_all": true
 }
 ```
 
 **Output:**
 
 ```json
-{
-  "status": "ok",
-  "path": "/home/user/project/src/config.rs",
-  "lines_deleted": 1,
-  "lines_inserted": 1,
-  "new_total_lines": 120
-}
+"ok"
 ```
 
-The tool preserves the file's trailing newline. Requesting a `start_line` beyond the end of the file, or a `delete_count` that would reach past the end, returns an error.
+If `old_string` is not found, or appears multiple times without `replace_all: true`, the tool returns a recoverable error with the line numbers of all matches.
+
+**Multi-line edits on source files:** When `old_string` spans multiple lines in a `.rs`, `.py`, `.ts`, or similar file, the tool responds with a `pending_ack` handle and suggests a symbol tool instead. You can confirm the edit by re-running with `acknowledge_risk: true`, or by passing the returned handle as the `path`.
 
 **Tips:**
 
-- Use `read_file` with `start_line`/`end_line` to confirm the exact line numbers before making the edit.
-- `edit_lines` is well suited to changes inside a function body when you already know the line range from a prior `read_file` or `find_symbol` call.
-- For adding a completely new top-level definition adjacent to an existing one, `insert_code` is more convenient because you address the location by symbol name rather than line number.
+- `old_string` must match exactly — include any leading whitespace and indentation.
+- Use `search_pattern` first to verify the exact text if you are unsure what to match.
+- If you get a multiple-matches error, expand `old_string` to include enough surrounding context to make it unique, or use `replace_all: true`.
+- Use `insert: "prepend"` or `insert: "append"` to add content at the start or end of a file when there is no anchor string to match.
+- For adding a completely new top-level definition adjacent to an existing one, `insert_code` is more convenient — it addresses the location by symbol name rather than requiring an exact text match.
 
 ---
 
@@ -267,5 +262,5 @@ All three require:
 **Tips for symbol tools:**
 
 - Use `find_symbol` or `list_symbols` first to obtain the correct `name_path`. Nested symbols use a slash-separated path: `"OuterStruct/inner_method"`.
-- `rename_symbol` requires a running LSP server for the file's language. If the LSP is unavailable, the tool returns an error — fall back to `search_pattern` combined with manual `edit_lines` in that case, but be aware it will not respect scoping.
-- After a `replace_symbol` edit, the file's line numbers shift. If you plan to make additional `edit_lines` edits in the same file, re-read the file or call `list_symbols` again to get fresh line numbers.
+- `rename_symbol` requires a running LSP server for the file's language. If the LSP is unavailable, the tool returns an error — fall back to `search_pattern` combined with `edit_file` in that case, but be aware it will not respect scoping.
+- After a `replace_symbol` edit, the file content shifts. If you plan to make additional `edit_file` edits in the same file, use `search_pattern` to verify the exact text you want to match before editing.
