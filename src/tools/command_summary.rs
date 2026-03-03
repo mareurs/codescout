@@ -273,6 +273,41 @@ pub(crate) fn truncate_lines(text: &str, max_lines: usize) -> (String, usize, us
     (truncated, max_lines, total)
 }
 
+/// Truncate `text` to at most `max_lines` lines **and** at most `max_bytes` bytes.
+///
+/// Both limits are applied; whichever is more restrictive wins. Truncation
+/// always occurs on a line boundary so output is never split mid-line.
+///
+/// Returns `(content, lines_shown, total_lines)`.
+pub(crate) fn truncate_lines_and_bytes(
+    text: &str,
+    max_lines: usize,
+    max_bytes: usize,
+) -> (String, usize, usize) {
+    let total = count_lines(text);
+    let mut result = String::new();
+    let mut lines_shown = 0;
+
+    for line in text.lines().take(max_lines) {
+        // Each line adds the line itself plus a '\n' separator (except the first).
+        let needed = if result.is_empty() {
+            line.len()
+        } else {
+            line.len() + 1 // +1 for '\n'
+        };
+        if result.len() + needed > max_bytes {
+            break;
+        }
+        if !result.is_empty() {
+            result.push('\n');
+        }
+        result.push_str(line);
+        lines_shown += 1;
+    }
+
+    (result, lines_shown, total)
+}
+
 /// Extract text between the first `failures:` section markers in cargo test output.
 fn extract_test_failures(output: &str) -> Option<String> {
     // Cargo test outputs failures between two "failures:" markers.
@@ -557,5 +592,51 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
         assert_eq!(out, "");
         assert_eq!(shown, 0);
         assert_eq!(total, 0);
+    }
+
+    #[test]
+    fn truncate_lines_and_bytes_line_limit_wins() {
+        // 3 lines, byte budget is generous — line limit (2) wins.
+        let text = "aaa\nbbb\nccc";
+        let (out, shown, total) = truncate_lines_and_bytes(text, 2, 1000);
+        assert_eq!(out, "aaa\nbbb");
+        assert_eq!(shown, 2);
+        assert_eq!(total, 3);
+    }
+
+    #[test]
+    fn truncate_lines_and_bytes_byte_limit_wins() {
+        // 5 short lines, byte budget forces truncation after the 2nd line.
+        // "aaa\nbbb" = 7 bytes; adding "\nccc" = 11 bytes — over the 8-byte budget.
+        let text = "aaa\nbbb\nccc\nddd\neee";
+        let (out, shown, total) = truncate_lines_and_bytes(text, 10, 8);
+        assert_eq!(out, "aaa\nbbb");
+        assert_eq!(shown, 2);
+        assert_eq!(total, 5);
+    }
+
+    #[test]
+    fn truncate_lines_and_bytes_both_fit() {
+        let text = "a\nb\nc";
+        let (out, shown, total) = truncate_lines_and_bytes(text, 10, 1000);
+        assert_eq!(out, text);
+        assert_eq!(shown, 3);
+        assert_eq!(total, 3);
+    }
+
+    #[test]
+    fn truncate_lines_and_bytes_long_lines_stay_under_byte_budget() {
+        // Simulate log output: 200-char lines, budget = 10_000 bytes (TOOL_OUTPUT_BUFFER_THRESHOLD).
+        let long_line = "x".repeat(200);
+        let text: String = (0..100).map(|_| format!("{long_line}\n")).collect();
+        let (out, shown, _total) = truncate_lines_and_bytes(&text, 100, 10_000);
+        // Must fit within budget.
+        assert!(
+            out.len() <= 10_000,
+            "output {} bytes exceeds budget",
+            out.len()
+        );
+        // Should have shown fewer than 100 lines (200-char lines can't all fit in 10KB).
+        assert!(shown < 100, "expected byte truncation, shown={shown}");
     }
 }

@@ -504,6 +504,19 @@ impl Tool for RunCommand {
 
         // --- Early dispatch: @ack_* handle ---
         if looks_like_ack_handle(command) {
+            // Cross-tool guard: edit_file also issues @ack_ handles (pending_edits store).
+            // If the caller passed an edit ack to run_command, give a targeted error rather
+            // than a misleading "expired" message.
+            if ctx.output_buffer.get_pending_edit(command).is_some() {
+                return Err(super::RecoverableError::with_hint(
+                    "this ack handle belongs to edit_file, not run_command",
+                    format!(
+                        "Re-run as edit_file(\"{command}\") to execute the deferred edit, \
+                         or re-issue the original edit_file call with acknowledge_risk: true"
+                    ),
+                )
+                .into());
+            }
             let stored = ctx.output_buffer.get_dangerous(command).ok_or_else(|| {
                 super::RecoverableError::with_hint(
                     "ack handle expired or unknown",
@@ -675,7 +688,8 @@ async fn run_command_inner(
 ) -> anyhow::Result<Value> {
     use super::command_summary::{
         count_lines, detect_command_type, needs_summary, summarize_build_output, summarize_generic,
-        summarize_test_output, truncate_lines, CommandType, BUFFER_QUERY_INLINE_CAP,
+        summarize_test_output, truncate_lines, truncate_lines_and_bytes, CommandType,
+        BUFFER_QUERY_INLINE_CAP,
     };
     use crate::util::path_security::is_dangerous_command;
 
@@ -825,10 +839,22 @@ async fn run_command_inner(
                     let stderr_budget = STDERR_BUDGET.min(count_lines(&buffer_stderr));
                     let stdout_budget = BUFFER_QUERY_INLINE_CAP - stderr_budget;
 
-                    let (stdout_out, stdout_shown, stdout_total) =
-                        truncate_lines(&raw_stdout, stdout_budget);
+                    // Compute stderr first so we know its byte size for the stdout budget.
                     let (stderr_out, stderr_shown, stderr_total) =
                         truncate_lines(&buffer_stderr, STDERR_BUDGET);
+
+                    // Byte budget: ensure the final JSON stays under TOOL_OUTPUT_BUFFER_THRESHOLD
+                    // so call_content() does not immediately re-buffer the result as @tool_*.
+                    // That re-buffering creates an infinite query loop:
+                    //   grep @cmd_A → inline JSON → >10KB → @tool_B → jq @tool_B → same → @tool_C…
+                    // Overhead ≈ 300 bytes for JSON keys, stderr content, and truncation fields.
+                    const JSON_OVERHEAD: usize = 300;
+                    let stdout_byte_budget = crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD
+                        .saturating_sub(JSON_OVERHEAD)
+                        .saturating_sub(stderr_out.len());
+
+                    let (stdout_out, stdout_shown, stdout_total) =
+                        truncate_lines_and_bytes(&raw_stdout, stdout_budget, stdout_byte_budget);
 
                     let was_truncated = stdout_shown < stdout_total || stderr_shown < stderr_total;
 
@@ -1846,6 +1872,46 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn run_command_buffer_only_long_lines_fit_under_threshold() {
+        // Regression: buffer-only queries with long lines (e.g. Java/Kotlin log output
+        // with timestamps and class names, ~200 chars/line) must produce a response JSON
+        // that stays under TOOL_OUTPUT_BUFFER_THRESHOLD.  Before the fix, a 100-line cap
+        // on 200-char lines produced ~20 KB of stdout, which call_content() re-buffered
+        // as @tool_* — creating an infinite query loop:
+        //   grep @cmd_A → inline JSON (>10KB) → @tool_B → jq @tool_B → same → @tool_C…
+        let (_dir, ctx) = project_ctx().await;
+
+        // 200-char lines: typical Java log output with timestamp + class + message.
+        let long_line = "x".repeat(200);
+        let content: String = (0..=BUFFER_QUERY_INLINE_CAP)
+            .map(|_| format!("{long_line}\n"))
+            .collect();
+        let id = ctx.output_buffer.store("cmd".into(), content, "".into(), 0);
+
+        let result = RunCommand
+            .call(json!({ "command": format!("cat {}", id) }), &ctx)
+            .await
+            .expect("expected Ok");
+
+        // Core assertion: the serialized JSON must fit under the re-buffering threshold.
+        let json_size = serde_json::to_string(&result).unwrap().len();
+        assert!(
+            json_size <= crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD,
+            "buffer_only response ({json_size} bytes) must not exceed TOOL_OUTPUT_BUFFER_THRESHOLD \
+             ({} bytes) — would cause infinite @tool_* re-buffering loop",
+            crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD,
+        );
+
+        // Must also avoid creating a new buffer ref.
+        assert!(
+            result.get("output_id").is_none(),
+            "must not create a new buffer ref: {:?}",
+            result
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn run_command_buffer_only_stderr_gets_priority() {
         // stderr = 25 lines (> 20 cap) + stdout = 250 lines (> remaining budget).
         // Expected: stderr_shown = 20, stdout_shown = 80 (BUFFER_QUERY_INLINE_CAP - 20).
@@ -2172,6 +2238,34 @@ mod tests {
         assert!(
             err.to_string().contains("expired"),
             "error should mention 'expired', got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_command_rejects_edit_file_ack_handle_with_clear_error() {
+        // A handle stored by edit_file (pending_edits) must not silently appear "expired"
+        // when passed to run_command — it should produce a targeted cross-tool error.
+        let (_dir, ctx) = project_ctx().await;
+        let handle = ctx.output_buffer.store_pending_edit(
+            "src/lib.rs".to_string(),
+            "old\nline".to_string(),
+            "new\nline".to_string(),
+            false,
+        );
+
+        let err = RunCommand
+            .call(serde_json::json!({ "command": handle }), &ctx)
+            .await
+            .expect_err("edit_file ack passed to run_command should return Err");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("edit_file"),
+            "error should name the correct tool, got: {msg}"
+        );
+        assert!(
+            !msg.contains("expired"),
+            "should not say 'expired' (that implies a run_command ack), got: {msg}"
         );
     }
 

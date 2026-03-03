@@ -967,6 +967,26 @@ fn infer_edit_hint(old_string: &str, new_string: &str) -> &'static str {
     }
 
     if new_string.len() > old_string.len() {
+        // Heuristic: comma-separated identifiers with no `(`, `=`, or `->` → likely a
+        // `use`/`import` identifier list rather than addressable symbol code.
+        // insert_code requires a name_path and is inapplicable to import lists;
+        // acknowledge_risk is the right escape hatch in that case.
+        let looks_like_import = old_string.contains(',')
+            && !old_string.contains('(')
+            && !old_string.contains('=')
+            && !old_string.contains("->");
+        if looks_like_import {
+            return "edit_file with acknowledge_risk: true — \
+                    target looks like an import list, not a named symbol";
+        }
+        let looks_like_import = old_string.contains(',')
+            && !old_string.contains('(')
+            && !old_string.contains('=')
+            && !old_string.contains("->");
+        if looks_like_import {
+            return "edit_file with acknowledge_risk: true — \
+                    target looks like an import list, not a named symbol";
+        }
         return "insert_code(name_path, path, code, position) — inserts before or after a named symbol";
     }
 
@@ -1089,7 +1109,7 @@ impl Tool for EditFile {
             return Ok(json!({
                 "pending_ack": handle,
                 "reason": "multi-line edit on source file — symbol-aware tools are safer and LSP-backed",
-                "hint": format!("Prefer {}. To proceed anyway: edit_file(\"{}\")", hint, handle)
+                "hint": format!("Prefer {}. To bypass: re-run with acknowledge_risk: true, or pass the ack handle as the path: edit_file(\"{}\")", hint, handle)
             }));
         }
 
@@ -3007,6 +3027,36 @@ mod tests {
     }
 
     #[test]
+    fn infer_edit_hint_import_list_suggests_acknowledge_risk() {
+        // Editing inside a `use {…}` block: only identifiers, commas, whitespace.
+        // No `(`, `=`, `->` → import-fragment heuristic fires; insert_code is inapplicable.
+        let old =
+            "    count_lines, detect_command_type, needs_summary,\n    summarize_build_output,";
+        let new = "    count_lines, detect_command_type, needs_summary,\n    summarize_build_output, truncate_lines_and_bytes,";
+        let hint = infer_edit_hint(old, new);
+        assert!(
+            hint.contains("acknowledge_risk"),
+            "import list edit should suggest acknowledge_risk, got: {hint}"
+        );
+        assert!(
+            !hint.contains("insert_code"),
+            "import list edit must not suggest insert_code (no name_path exists), got: {hint}"
+        );
+    }
+
+    #[test]
+    fn infer_edit_hint_insert_code_still_fires_for_real_code_insertions() {
+        // When old_string has `(` it's real code (function call / expression), not an import.
+        let old = "    let x = foo(\n        bar,\n    );";
+        let new = "    let x = foo(\n        bar,\n        baz,\n    );";
+        let hint = infer_edit_hint(old, new);
+        assert!(
+            hint.contains("insert_code"),
+            "code expression edit should still suggest insert_code, got: {hint}"
+        );
+    }
+
+    #[test]
     fn infer_edit_hint_fallback_lists_all_tools() {
         let hint = infer_edit_hint("old line\nother line", "new line\nother line");
         assert!(
@@ -3046,6 +3096,72 @@ mod tests {
                 .unwrap_or("")
                 .contains("replace_symbol"),
             "hint should mention replace_symbol, got: {result}"
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_file_blocking_hint_always_includes_acknowledge_risk() {
+        // Bug 3 regression: the hint template previously said only
+        // "To proceed anyway: edit_file(\"@ack_xxx\")" — making acknowledge_risk: true
+        // invisible to the LLM. The hint must surface acknowledge_risk as an explicit bypass.
+        let (dir, ctx) = project_ctx().await;
+        let path = dir.path().join("src/lib.rs");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "fn foo() {\n    old();\n}\n").unwrap();
+
+        let result = EditFile
+            .call(
+                json!({
+                    "path": "src/lib.rs",
+                    "old_string": "fn foo() {\n    old();\n}",
+                    "new_string": "fn foo() {\n    new();\n}"
+                }),
+                &ctx,
+            )
+            .await
+            .expect("should return Ok with pending_ack, not an error");
+
+        let hint = result["hint"].as_str().unwrap_or("");
+        assert!(
+            hint.contains("acknowledge_risk"),
+            "blocking hint must mention acknowledge_risk so the LLM has a clear bypass, got: {hint}"
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_file_import_list_hint_suggests_acknowledge_risk_not_insert_code() {
+        // Bug 2 regression (integration path): editing a multi-line use-import list triggered
+        // the length heuristic in infer_edit_hint and returned insert_code, which requires
+        // a name_path that doesn't exist for import identifiers.
+        let (dir, ctx) = project_ctx().await;
+        let path = dir.path().join("src/lib.rs");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "use crate::foo::{\n    count_lines,\n    needs_summary,\n};\n",
+        )
+        .unwrap();
+
+        let result = EditFile
+            .call(
+                json!({
+                    "path": "src/lib.rs",
+                    "old_string": "    count_lines,\n    needs_summary,",
+                    "new_string": "    count_lines,\n    needs_summary,\n    truncate_lines_and_bytes,"
+                }),
+                &ctx,
+            )
+            .await
+            .expect("should return Ok with pending_ack, not an error");
+
+        let hint = result["hint"].as_str().unwrap_or("");
+        assert!(
+            hint.contains("acknowledge_risk"),
+            "import list edit must suggest acknowledge_risk (no name_path exists), got: {hint}"
+        );
+        assert!(
+            !hint.contains("insert_code"),
+            "import list edit must not suggest insert_code, got: {hint}"
         );
     }
 

@@ -31,7 +31,7 @@ use crate::agent::Agent;
 use crate::lsp::LspProvider;
 
 /// Compact JSON size above which tool output is routed through OutputBuffer.
-const TOOL_OUTPUT_BUFFER_THRESHOLD: usize = 10_000;
+pub(crate) const TOOL_OUTPUT_BUFFER_THRESHOLD: usize = 10_000;
 
 /// Shared context passed to every tool invocation.
 ///

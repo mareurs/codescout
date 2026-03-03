@@ -609,6 +609,37 @@ which now catches this case. The insertion fails loudly rather than silently cor
 ---
 ```
 
+### BUG-020 — `edit_file` + `run_command`: cross-tool `@ack_*` handle confusion
+
+**Date:** 2026-03-03
+**Severity:** Medium — caused a silent failure loop; the original edit goal was blocked
+
+**What happened:**
+`edit_file` on a multi-line `use {…}` import list was blocked (source-file guard) and returned a
+`pending_ack` handle `@ack_b32f095e`. The LLM then called `run_command("@ack_b32f095e")`.
+`run_command` has its own `@ack_*` early-dispatch that calls `get_dangerous()` — the wrong store.
+Result: "ack handle expired or unknown" with hint "Re-run the original command" — both misleading.
+
+**Root causes (3 compounding):**
+1. `run_command`'s ack dispatch didn't distinguish command acks from edit acks → misleading error.
+2. `infer_edit_hint` returned `insert_code` for the import list (length heuristic, no def-keywords);
+   `insert_code` requires a `name_path` which doesn't exist for import identifier lists → wrong advice.
+3. The blocking hint only showed `edit_file("@ack_xxx")`, not `acknowledge_risk: true` → LLM
+   confused the ack with `run_command`'s own ack protocol.
+
+**Fix (2026-03-03, all tests pass):**
+- `workflow.rs`: Cross-tool guard before `get_dangerous()` — if handle is in `pending_edits`,
+  return targeted error naming `edit_file` and `acknowledge_risk: true`.
+- `file.rs/infer_edit_hint`: Comma + no-`(`/`=`/`->` heuristic → detects import fragments,
+  suggests `acknowledge_risk: true` instead of `insert_code`.
+- `file.rs` hint template: now leads with `acknowledge_risk: true`, ack handle is secondary.
+
+**Tests added:** `run_command_rejects_edit_file_ack_handle_with_clear_error`,
+`infer_edit_hint_import_list_suggests_acknowledge_risk`,
+`infer_edit_hint_insert_code_still_fires_for_real_code_insertions`.
+
+---
+
 ### BUG-019 — `replace_symbol`: lands in wrong symbol when LSP has stale line numbers
 
 **Date:** 2026-03-02
