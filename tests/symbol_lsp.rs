@@ -779,8 +779,14 @@ async fn replace_symbol_works_for_python() {
         .unwrap();
 
     let result = std::fs::read_to_string(dir.path().join("greet.py")).unwrap();
-    assert!(result.contains("'new'"), "new body must be present; got:\n{result}");
-    assert!(!result.contains("'old'"), "old body must be gone; got:\n{result}");
+    assert!(
+        result.contains("'new'"),
+        "new body must be present; got:\n{result}"
+    );
+    assert!(
+        !result.contains("'old'"),
+        "old body must be gone; got:\n{result}"
+    );
 }
 
 /// TypeScript: `function` was not in the Rust keyword allowlist → old code rejected it.
@@ -806,8 +812,14 @@ async fn replace_symbol_works_for_typescript() {
         .unwrap();
 
     let result = std::fs::read_to_string(dir.path().join("greet.ts")).unwrap();
-    assert!(result.contains("'new'"), "new body must be present; got:\n{result}");
-    assert!(!result.contains("'old'"), "old body must be gone; got:\n{result}");
+    assert!(
+        result.contains("'new'"),
+        "new body must be present; got:\n{result}"
+    );
+    assert!(
+        !result.contains("'old'"),
+        "old body must be gone; got:\n{result}"
+    );
 }
 
 /// JavaScript: `function` keyword → same Rust-allowlist rejection as TypeScript.
@@ -830,8 +842,14 @@ async fn replace_symbol_works_for_javascript() {
         .unwrap();
 
     let result = std::fs::read_to_string(dir.path().join("greet.js")).unwrap();
-    assert!(result.contains("'new'"), "new body must be present; got:\n{result}");
-    assert!(!result.contains("'old'"), "old body must be gone; got:\n{result}");
+    assert!(
+        result.contains("'new'"),
+        "new body must be present; got:\n{result}"
+    );
+    assert!(
+        !result.contains("'old'"),
+        "old body must be gone; got:\n{result}"
+    );
 }
 
 /// Go: `func` was not in the Rust keyword allowlist → old code rejected it.
@@ -854,8 +872,14 @@ async fn replace_symbol_works_for_go() {
         .unwrap();
 
     let result = std::fs::read_to_string(dir.path().join("greet.go")).unwrap();
-    assert!(result.contains("\"new\""), "new body must be present; got:\n{result}");
-    assert!(!result.contains("\"old\""), "old body must be gone; got:\n{result}");
+    assert!(
+        result.contains("\"new\""),
+        "new body must be present; got:\n{result}"
+    );
+    assert!(
+        !result.contains("\"old\""),
+        "old body must be gone; got:\n{result}"
+    );
 }
 
 /// Java: `public` at the start of a method was not in the allowlist → rejected.
@@ -879,8 +903,14 @@ async fn replace_symbol_works_for_java() {
         .unwrap();
 
     let result = std::fs::read_to_string(dir.path().join("Greet.java")).unwrap();
-    assert!(result.contains("\"new\""), "new body must be present; got:\n{result}");
-    assert!(!result.contains("\"old\""), "old body must be gone; got:\n{result}");
+    assert!(
+        result.contains("\"new\""),
+        "new body must be present; got:\n{result}"
+    );
+    assert!(
+        !result.contains("\"old\""),
+        "old body must be gone; got:\n{result}"
+    );
 }
 
 /// Kotlin: `fun` was not in the Rust keyword allowlist → old code rejected it.
@@ -903,8 +933,14 @@ async fn replace_symbol_works_for_kotlin() {
         .unwrap();
 
     let result = std::fs::read_to_string(dir.path().join("Greet.kt")).unwrap();
-    assert!(result.contains("\"new\""), "new body must be present; got:\n{result}");
-    assert!(!result.contains("\"old\""), "old body must be gone; got:\n{result}");
+    assert!(
+        result.contains("\"new\""),
+        "new body must be present; got:\n{result}"
+    );
+    assert!(
+        !result.contains("\"old\""),
+        "old body must be gone; got:\n{result}"
+    );
 }
 
 /// C: return-type-first signatures were not in the Rust keyword allowlist → rejected.
@@ -927,8 +963,14 @@ async fn replace_symbol_works_for_c() {
         .unwrap();
 
     let result = std::fs::read_to_string(dir.path().join("greet.c")).unwrap();
-    assert!(result.contains("return 1"), "new body must be present; got:\n{result}");
-    assert!(!result.contains("return 0"), "old body must be gone; got:\n{result}");
+    assert!(
+        result.contains("return 1"),
+        "new body must be present; got:\n{result}"
+    );
+    assert!(
+        !result.contains("return 0"),
+        "old body must be gone; got:\n{result}"
+    );
 }
 
 /// C++: same as C — return-type-first → rejected by old allowlist.
@@ -951,8 +993,14 @@ async fn replace_symbol_works_for_cpp() {
         .unwrap();
 
     let result = std::fs::read_to_string(dir.path().join("greet.cpp")).unwrap();
-    assert!(result.contains("\"new\""), "new body must be present; got:\n{result}");
-    assert!(!result.contains("\"old\""), "old body must be gone; got:\n{result}");
+    assert!(
+        result.contains("\"new\""),
+        "new body must be present; got:\n{result}"
+    );
+    assert!(
+        !result.contains("\"old\""),
+        "old body must be gone; got:\n{result}"
+    );
 }
 
 /// Ruby: `def` (without parens) was not in the Rust keyword allowlist → rejected.
@@ -979,6 +1027,12 @@ async fn replace_symbol_works_for_ruby() {
         .unwrap();
 
     let result = std::fs::read_to_string(dir.path().join("greet.rb")).unwrap();
-    assert!(result.contains("'new'"), "new body must be present; got:\n{result}");
-    assert!(!result.contains("'old'"), "old body must be gone; got:\n{result}");
+    assert!(
+        result.contains("'new'"),
+        "new body must be present; got:\n{result}"
+    );
+    assert!(
+        !result.contains("'old'"),
+        "old body must be gone; got:\n{result}"
+    );
 }

@@ -1228,25 +1228,43 @@ mod tests {
 
         // Baseline: valid 1-indexed range succeeds and returns content
         let result = ReadFile
-            .call(json!({ "path": path, "start_line": 1, "end_line": 2 }), &ctx)
+            .call(
+                json!({ "path": path, "start_line": 1, "end_line": 2 }),
+                &ctx,
+            )
             .await
             .unwrap();
-        assert!(!result["content"].as_str().unwrap().is_empty(), "valid range must return content");
+        assert!(
+            !result["content"].as_str().unwrap().is_empty(),
+            "valid range must return content"
+        );
 
         // Stale (the bug): old code passed start_line=0 through to extract_lines, which
         // silently returned an empty string — indistinguishable from an empty file.
         // Fixed: start_line=0 is now rejected with a RecoverableError.
         let result = ReadFile
-            .call(json!({ "path": path, "start_line": 0, "end_line": 3 }), &ctx)
+            .call(
+                json!({ "path": path, "start_line": 0, "end_line": 3 }),
+                &ctx,
+            )
             .await;
-        assert!(result.is_err(), "start_line=0 must be rejected (lines are 1-indexed)");
+        assert!(
+            result.is_err(),
+            "start_line=0 must be rejected (lines are 1-indexed)"
+        );
 
         // Fresh: valid range is unaffected — the guard is narrow and precise
         let result = ReadFile
-            .call(json!({ "path": path, "start_line": 2, "end_line": 3 }), &ctx)
+            .call(
+                json!({ "path": path, "start_line": 2, "end_line": 3 }),
+                &ctx,
+            )
             .await
             .unwrap();
-        assert!(!result["content"].as_str().unwrap().is_empty(), "valid range after error cases must still return content");
+        assert!(
+            !result["content"].as_str().unwrap().is_empty(),
+            "valid range after error cases must still return content"
+        );
     }
 
     #[tokio::test]
@@ -1259,25 +1277,40 @@ mod tests {
 
         // Baseline: valid range succeeds
         let result = ReadFile
-            .call(json!({ "path": path, "start_line": 2, "end_line": 4 }), &ctx)
+            .call(
+                json!({ "path": path, "start_line": 2, "end_line": 4 }),
+                &ctx,
+            )
             .await
             .unwrap();
-        assert!(!result["content"].as_str().unwrap().is_empty(), "valid range must return content");
+        assert!(
+            !result["content"].as_str().unwrap().is_empty(),
+            "valid range must return content"
+        );
 
         // Stale (the bug): old code passed end < start through to extract_lines, which
         // computed a negative/empty slice and silently returned "".
         // Fixed: end_line < start_line is now rejected with a RecoverableError.
         let result = ReadFile
-            .call(json!({ "path": path, "start_line": 5, "end_line": 2 }), &ctx)
+            .call(
+                json!({ "path": path, "start_line": 5, "end_line": 2 }),
+                &ctx,
+            )
             .await;
         assert!(result.is_err(), "end_line < start_line must be rejected");
 
         // Fresh: equal start/end (single line) is valid, not rejected
         let result = ReadFile
-            .call(json!({ "path": path, "start_line": 3, "end_line": 3 }), &ctx)
+            .call(
+                json!({ "path": path, "start_line": 3, "end_line": 3 }),
+                &ctx,
+            )
             .await
             .unwrap();
-        assert!(!result["content"].as_str().unwrap().is_empty(), "start_line == end_line (single line) must succeed");
+        assert!(
+            !result["content"].as_str().unwrap().is_empty(),
+            "start_line == end_line (single line) must succeed"
+        );
     }
 
     #[tokio::test]
@@ -2595,17 +2628,31 @@ mod tests {
         // but old code still set total=2 (line count) — inconsistent with matches.len()=1.
         // Fixed: total now equals the number of merged blocks returned.
         let with_ctx = SearchPattern
-            .call(json!({ "pattern": "MATCH_", "path": path, "context_lines": 2 }), &ctx)
+            .call(
+                json!({ "pattern": "MATCH_", "path": path, "context_lines": 2 }),
+                &ctx,
+            )
             .await
             .unwrap();
         let matches = with_ctx["matches"].as_array().unwrap();
         let total = with_ctx["total"].as_u64().unwrap();
 
         // Sandwich assertion: the two matches must have merged into exactly one block
-        assert_eq!(matches.len(), 1, "adjacent matches with context_lines=2 must merge into one block");
+        assert_eq!(
+            matches.len(),
+            1,
+            "adjacent matches with context_lines=2 must merge into one block"
+        );
         // Fresh: total now tracks blocks, not lines — so it equals 1, not 2
-        assert_eq!(total, 1, "total must be block count (1), not line count (2)");
-        assert_eq!(total, matches.len() as u64, "total must always equal matches.len()");
+        assert_eq!(
+            total, 1,
+            "total must be block count (1), not line count (2)"
+        );
+        assert_eq!(
+            total,
+            matches.len() as u64,
+            "total must always equal matches.len()"
+        );
     }
 
     #[tokio::test]

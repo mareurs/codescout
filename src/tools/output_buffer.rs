@@ -452,7 +452,9 @@ impl OutputBuffer {
         // of our own injected temp files. Relative paths without a ./ prefix (e.g.
         // "src/main.rs") are also treated as non-buffer-only.
         let is_buffer_only = !shell_words(&result).iter().any(|word| {
-            let is_temp = temp_path_strings.iter().any(|tp| word.contains(tp.as_str()));
+            let is_temp = temp_path_strings
+                .iter()
+                .any(|tp| word.contains(tp.as_str()));
             if is_temp {
                 return false;
             }
@@ -791,7 +793,10 @@ mod tests {
         // Baseline: command with only a buffer ref → IS buffer-only (safe to skip checks)
         let (_, files, is_buf_only, _) = buf.resolve_refs(&format!("cat {id}")).unwrap();
         OutputBuffer::cleanup_temp_files(&files);
-        assert!(is_buf_only, "command with only buffer refs must be buffer-only");
+        assert!(
+            is_buf_only,
+            "command with only buffer refs must be buffer-only"
+        );
 
         // Stale (the bug): old resolve_refs also classified 'grep foo @cmd src/main.rs'
         // as buffer-only because it only checked '/' and './' prefixes on real args.
