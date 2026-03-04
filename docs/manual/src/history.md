@@ -36,8 +36,8 @@ Then it got LSP: real go-to-definition, hover types, find-all-references — the
 developer gets from their IDE, available to the AI.
 
 Then semantic search: find code by concept, not just by text match. Then persistent memory: notes
-the AI can read back next session, carrying context forward. Then shell integration with output buffers, so large command output
-doesn't blow the context window. Then a dashboard for project health.
+the AI can read back next session, carrying context forward. Then shell integration with output
+buffers, so large command output doesn't blow the context window. Then a dashboard for project health.
 
 Each addition was driven by a recurring friction — the AI doing something clumsy that a better
 tool could prevent. The scope kept expanding because the problem kept expanding.
@@ -54,7 +54,8 @@ If you were running `code-explorer` before, here's everything that changed at th
 | Cargo crate | `code-explorer` | `codescout` |
 
 Update your `.mcp.json` (or Claude Code's `~/.claude/settings.json`) to use `"codescout"` as the
-server key. The tool list and behavior are unchanged — it's a rename, not a rewrite.
+server key. The core behavior is unchanged — it's a rename, not a rewrite. Tool names were also
+tidied up alongside the rename; see [What else changed](#what-else-changed) below.
 
 ## What else changed
 
