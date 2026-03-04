@@ -38,6 +38,11 @@ impl Tool for SemanticSearch {
                 "scope": {
                     "type": "string",
                     "description": "Search scope: 'project' (default), 'libraries', 'all', or 'lib:<name>' for a specific library"
+                },
+                "include_memories": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "If true, also search semantic memories and include them in results tagged with source='memory'."
                 }
             }
         })
@@ -47,6 +52,7 @@ impl Tool for SemanticSearch {
 
         let query = super::require_str_param(&input, "query")?;
         let limit = input["limit"].as_u64().unwrap_or(10) as usize;
+        let include_memories = input["include_memories"].as_bool().unwrap_or(false);
         let guard = OutputGuard::from_input(&input);
 
         let (root, model) = {
@@ -74,7 +80,7 @@ impl Tool for SemanticSearch {
 
         // Sync SQLite off async runtime
         let root2 = root.clone();
-        let (results, staleness) = tokio::task::spawn_blocking(move || {
+        let (results, memory_results, staleness) = tokio::task::spawn_blocking(move || {
             let conn = crate::embed::index::open_db(&root2)?;
             let results = crate::embed::index::search_scoped(
                 &conn,
@@ -82,13 +88,19 @@ impl Tool for SemanticSearch {
                 limit,
                 source_filter.as_deref(),
             )?;
+            let memory_results = if include_memories {
+                crate::embed::index::ensure_vec_memories(&conn)?;
+                crate::embed::index::search_memories(&conn, &query_embedding, None, limit)?
+            } else {
+                vec![]
+            };
             let staleness = crate::embed::index::check_index_staleness(&conn, &root2).ok();
-            anyhow::Ok((results, staleness))
+            anyhow::Ok((results, memory_results, staleness))
         })
         .await??;
 
-        // Transform results based on mode
-        let result_items: Vec<Value> = results
+        // Transform code results based on mode
+        let mut result_items: Vec<Value> = results
             .iter()
             .map(|r| {
                 let content_field = if guard.should_include_body() {
@@ -114,6 +126,36 @@ impl Tool for SemanticSearch {
                 )
             })
             .collect();
+
+        // Merge memory results if requested
+        for mr in &memory_results {
+            let content_field = if guard.should_include_body() {
+                mr.content.clone()
+            } else {
+                let preview_len = 150.min(mr.content.len());
+                let mut preview = mr.content[..preview_len].to_string();
+                if mr.content.len() > preview_len {
+                    preview.push_str("...");
+                }
+                preview
+            };
+            result_items.push(format_search_result_item(
+                &format!("[memory:{}]", mr.title),
+                mr.similarity,
+                0,
+                0,
+                "memory",
+                "memory",
+                content_field,
+            ));
+        }
+
+        // Sort merged results by score descending
+        result_items.sort_by(|a, b| {
+            let sa = a["score"].as_f64().unwrap_or(0.0);
+            let sb = b["score"].as_f64().unwrap_or(0.0);
+            sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Apply pagination/capping
         let (result_items, overflow) = guard.cap_items(
@@ -796,6 +838,13 @@ mod tests {
         let schema = SemanticSearch.input_schema();
         let props = schema["properties"].as_object().unwrap();
         assert!(props.contains_key("scope"), "should accept scope parameter");
+    }
+
+    #[test]
+    fn semantic_search_schema_has_include_memories() {
+        let schema = SemanticSearch.input_schema();
+        assert!(schema["properties"]["include_memories"].is_object());
+        assert_eq!(schema["properties"]["include_memories"]["type"], "boolean");
     }
 
     #[tokio::test]
