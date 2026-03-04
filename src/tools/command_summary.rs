@@ -118,6 +118,56 @@ pub fn detect_command_type(command: &str) -> CommandType {
     }
 }
 
+/// Returns the byte offset of the `|` pipe character that separates a command
+/// from a terminal filter stage (grep, head, tail, sed, awk, cut, wc, sort,
+/// uniq, tr, rg, egrep, fgrep).
+///
+/// Returns `None` if the command has no pipe, or if the last pipe stage is not
+/// a known terminal filter. Pipe characters inside quoted strings are ignored.
+pub fn detect_terminal_filter(cmd: &str) -> Option<usize> {
+    const TERMINAL_FILTERS: &[&str] = &[
+        "grep", "egrep", "fgrep", "rg", "head", "tail", "sed", "awk", "cut", "wc", "sort", "uniq",
+        "tr",
+    ];
+
+    let mut last_pipe: Option<usize> = None;
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escape_next = false;
+
+    for (i, ch) in cmd.char_indices() {
+        if escape_next {
+            escape_next = false;
+            continue;
+        }
+        match ch {
+            '\\' if !in_single => escape_next = true,
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '|' if !in_single && !in_double => last_pipe = Some(i),
+            _ => {}
+        }
+    }
+
+    let pipe_pos = last_pipe?;
+
+    // Extract the first token of the stage after the pipe
+    let after_pipe = cmd[pipe_pos + 1..].trim_start();
+    let token = after_pipe
+        .split(|c: char| c.is_whitespace())
+        .next()
+        .unwrap_or("");
+
+    // Strip any path prefix so "/usr/bin/grep" matches "grep"
+    let name = token.rsplit('/').next().unwrap_or(token);
+
+    if TERMINAL_FILTERS.contains(&name) {
+        Some(pipe_pos)
+    } else {
+        None
+    }
+}
+
 /// Returns `true` when the combined output is large enough to benefit from
 /// summarization rather than raw output.
 pub fn needs_summary(stdout: &str, stderr: &str) -> bool {
@@ -638,5 +688,61 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
         );
         // Should have shown fewer than 100 lines (200-char lines can't all fit in 10KB).
         assert!(shown < 100, "expected byte truncation, shown={shown}");
+    }
+
+    // -- detect_terminal_filter --
+
+    #[test]
+    fn terminal_filter_grep() {
+        let pos = detect_terminal_filter("cargo build 2>&1 | grep error");
+        assert!(pos.is_some());
+    }
+
+    #[test]
+    fn terminal_filter_head() {
+        let pos = detect_terminal_filter("cat big_file.log | head -20");
+        assert!(pos.is_some());
+    }
+
+    #[test]
+    fn terminal_filter_tail() {
+        let pos = detect_terminal_filter("journalctl | tail -100");
+        assert!(pos.is_some());
+    }
+
+    #[test]
+    fn terminal_filter_no_pipe() {
+        assert!(detect_terminal_filter("cargo build").is_none());
+    }
+
+    #[test]
+    fn terminal_filter_non_filter_pipe() {
+        // Second stage is not a known filter
+        assert!(detect_terminal_filter("cat file | cargo install").is_none());
+    }
+
+    #[test]
+    fn terminal_filter_quoted_pipe_ignored() {
+        // Pipe inside quotes is not a real pipe
+        assert!(detect_terminal_filter("echo 'foo | bar'").is_none());
+    }
+
+    #[test]
+    fn terminal_filter_nested_filters_last_wins() {
+        // cmd | sed | grep  →  finds the grep (last) pipe
+        let cmd = "cat file | sed 's/x/y/' | grep foo";
+        let pos = detect_terminal_filter(cmd);
+        assert!(pos.is_some());
+        // The position should be the second pipe (before grep), not the first
+        let pipe_pos = pos.unwrap();
+        assert!(cmd[pipe_pos + 1..].trim_start().starts_with("grep"));
+    }
+
+    #[test]
+    fn terminal_filter_returns_pipe_position() {
+        let cmd = "cargo build | grep error";
+        let pos = detect_terminal_filter(cmd).unwrap();
+        // Character at pipe_pos should be '|'
+        assert_eq!(&cmd[pos..pos + 1], "|");
     }
 }
