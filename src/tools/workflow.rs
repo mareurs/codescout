@@ -535,7 +535,6 @@ impl Tool for Onboarding {
         Ok(vec![rmcp::model::Content::text(response)])
     }
 
-
     fn format_compact(&self, result: &Value) -> Option<String> {
         Some(format_onboarding(result))
     }
@@ -1066,9 +1065,7 @@ async fn run_command_inner(
 
                 let stdout_lines = count_lines(&raw_stdout);
                 let stderr_lines = count_lines(&raw_stderr);
-                let add_warning = !buffer_only
-                    && (security.shell_command_mode == "warn"
-                        || security.shell_command_mode.is_empty());
+                let add_warning = false;
 
                 // Rebuild with correct field order so output_id (the buffer reference
                 // the agent needs) appears before content fields (stdout/failures/first_error).
@@ -1084,21 +1081,11 @@ async fn run_command_inner(
                 Ok(summary)
             } else {
                 // Short output — return directly
-                let mut result = json!({
+                let result = json!({
                     "stdout": raw_stdout,
                     "stderr": raw_stderr,
                     "exit_code": exit_code,
                 });
-
-                // Add warning in warn mode
-                if !buffer_only
-                    && (security.shell_command_mode == "warn"
-                        || security.shell_command_mode.is_empty())
-                {
-                    result["warning"] = json!(
-                        "Shell commands execute with full user permissions. Only use for build/test commands."
-                    );
-                }
 
                 Ok(result)
             }
@@ -1352,15 +1339,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_shell_command_warn_mode_includes_warning() {
+    async fn run_command_does_not_include_warning() {
         let (_dir, ctx) = project_ctx().await;
         let result = RunCommand
             .call(json!({ "command": "echo test", "timeout_secs": 5 }), &ctx)
             .await
             .unwrap();
         assert!(
-            result["warning"].as_str().is_some(),
-            "warn mode should include warning"
+            result["warning"].is_null(),
+            "run_command should not emit a warning field"
         );
     }
 
