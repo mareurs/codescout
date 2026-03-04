@@ -94,7 +94,7 @@ impl CodeScoutServer {
             Arc::new(github::GithubFile),
             Arc::new(github::GithubRepo),
         ];
-        let output_buffer = Arc::new(crate::tools::output_buffer::OutputBuffer::new(20));
+        let output_buffer = Arc::new(crate::tools::output_buffer::OutputBuffer::new(50));
         Self {
             agent,
             lsp,
