@@ -878,7 +878,17 @@ async fn run_command_inner(
     // When the last pipe stage is a known filter (grep, head, tail, sed, awk, etc.),
     // inject `tee /tmp/codescout-unfiltered-XXXX` before the filter so the caller
     // can surface the unfiltered stream as a buffer ref without re-running the command.
-    let (effective_command, unfiltered_tmpfile): (String, Option<String>) = if !buffer_only {
+
+    // RAII guard: deletes the named tmpfile when dropped, ensuring cleanup on all
+    // exit paths (success, error, and timeout arms of the match below).
+    struct TmpfileGuard(String);
+    impl Drop for TmpfileGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    let (effective_command, unfiltered_tmpfile): (String, Option<TmpfileGuard>) = if !buffer_only {
         if let Some(pipe_pos) = detect_terminal_filter(resolved_command) {
             let nanos = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -891,7 +901,7 @@ async fn run_command_inner(
                 tmpfile,
                 resolved_command[pipe_pos + 1..].trim_start()
             );
-            (cmd, Some(tmpfile))
+            (cmd, Some(TmpfileGuard(tmpfile)))
         } else {
             (resolved_command.to_string(), None)
         }
@@ -942,8 +952,8 @@ async fn run_command_inner(
             // --- Step 6.5: Read tee capture and store as unfiltered_output ref ---
             let unfiltered_ref: Option<(String, bool)> =
                 if let Some(ref tmpfile) = unfiltered_tmpfile {
-                    let capture = std::fs::read_to_string(tmpfile).ok();
-                    let _ = std::fs::remove_file(tmpfile); // always clean up
+                    let capture = std::fs::read_to_string(&tmpfile.0).ok();
+                    // tmpfile dropped at end of enclosing match arm — TmpfileGuard::drop() removes it
                     capture.map(|content| {
                         let line_count = count_lines(&content);
                         let (stored, truncated) = if line_count > SUMMARY_LINE_THRESHOLD {
@@ -959,7 +969,7 @@ async fn run_command_inner(
                         let ref_id = ctx.output_buffer.store(
                             original_command.to_string(),
                             stored,
-                            String::new(),
+                            String::new(), // unfiltered capture is stdout-only; stderr belongs to the main buffer
                             exit_code,
                         );
                         (ref_id, truncated)
@@ -1047,6 +1057,8 @@ async fn run_command_inner(
                              Or grep 'keyword' @ref for targeted search.",
                         ));
                     }
+                    // buffer_only => tee injection was skipped entirely (unfiltered_tmpfile is None),
+                    // so no unfiltered_output field injection is needed before this early return.
                     return Ok(result);
                 }
 
@@ -2511,15 +2523,17 @@ mod tests {
 
     #[tokio::test]
     async fn unfiltered_truncated_when_over_threshold() {
+        use crate::tools::command_summary::SUMMARY_LINE_THRESHOLD;
         let (dir, ctx) = project_ctx().await;
         // Write SUMMARY_LINE_THRESHOLD + 10 lines; grep for just one
-        let content: String = (0..60).map(|i| format!("line{i}\n")).collect();
+        let line_count = SUMMARY_LINE_THRESHOLD + 10;
+        let content: String = (0..line_count).map(|i| format!("line{i}\n")).collect();
         std::fs::write(dir.path().join("big.txt"), &content).unwrap();
         let result = RunCommand
             .call(json!({ "command": "cat big.txt | grep line0" }), &ctx)
             .await
             .unwrap();
-        // truncated flag should be set (60 lines > SUMMARY_LINE_THRESHOLD=50)
+        // truncated flag should be set (SUMMARY_LINE_THRESHOLD + 10 lines > SUMMARY_LINE_THRESHOLD)
         assert_eq!(
             result["unfiltered_truncated"],
             json!(true),
