@@ -1,8 +1,35 @@
 # Changelog
 
-All notable changes to code-explorer are documented here.
+All notable changes to codescout are documented here.
 
-## [Unreleased]
+## [0.2.0] — codescout
+
+> **TL;DR:** The project was renamed from `code-explorer` to `codescout`. If you're
+> migrating, update your MCP config and any scripts that reference the old binary name.
+> [Full story and migration guide →](docs/manual/src/history.md)
+
+### Breaking changes
+
+- **Binary renamed:** `code-explorer` → `codescout`
+- **MCP server ID renamed** — update `.mcp.json` or Claude Code settings accordingly
+- **Tool renames** (API consistency):
+
+| Old name | New name |
+|---|---|
+| `get_symbols_overview` | `list_symbols` |
+| `find_referencing_symbols` | `find_references` |
+| `replace_symbol_body` | `replace_symbol` |
+| `insert_before_symbol` + `insert_after_symbol` | `insert_code` (+ `position` param) |
+| `execute_shell_command` | `run_command` |
+| `create_text_file` | `create_file` |
+| `search_for_pattern` | `search_pattern` |
+| `search_code` | `semantic_search` |
+| `index_stats` | `index_status` |
+| `get_current_config` | `get_config` |
+| `check_onboarding_performed` | `onboarding` |
+
+- **Tool consolidations** — `insert_before_symbol` + `insert_after_symbol` merged into
+  `insert_code(position)`, `is_onboarded` folded into `onboarding(force)`
 
 ### Added
 
@@ -68,22 +95,6 @@ All notable changes to code-explorer are documented here.
 
 ### Changed
 
-#### Tool renames (API consistency)
-| Old name | New name |
-|---|---|
-| `get_symbols_overview` | `list_symbols` |
-| `find_referencing_symbols` | `find_references` |
-| `replace_symbol_body` | `replace_symbol` |
-| `insert_before_symbol` + `insert_after_symbol` | `insert_code` (+ `position` param) |
-| `execute_shell_command` | `run_command` |
-| `create_text_file` | `create_file` |
-| `search_for_pattern` | `search_pattern` |
-| `search_code` | `semantic_search` |
-| `index_stats` | `index_status` |
-| `get_current_config` | `get_config` |
-| `check_onboarding_performed` | `onboarding` |
-
-#### Behaviour changes
 - `read_file` now rejects source code files (`.rs`, `.py`, `.ts`, etc.) — forces use of
   symbol tools; pass `start_line`/`end_line` only on non-source files
 - `onboarding` redesigned: produces richer project context and memory-creation guidance
