@@ -1,6 +1,6 @@
 # Tools Overview
 
-codescout exposes 23 tools organized into six categories. This page is a
+codescout exposes 28 tools organized into seven categories. This page is a
 quick map. Each category has a dedicated reference page linked from the headings
 below.
 
@@ -105,6 +105,21 @@ Project setup, shell execution, and server configuration.
 
 ---
 
+## [GitHub](github.md)
+
+Authenticated access to GitHub repositories, issues, pull requests, and files.
+Requires a GitHub token configured in your environment (`GITHUB_TOKEN`).
+
+| Tool | Description |
+|------|-------------|
+| `github_identity` | Get authenticated user profile, search users, list teams and members |
+| `github_issue` | List, search, get, create, and update issues and comments |
+| `github_pr` | List, search, get diffs, review, and merge pull requests |
+| `github_file` | Get, create, update, delete files and push multi-file commits |
+| `github_repo` | Search repos, manage branches, commits, releases, tags, and code search |
+
+---
+
 ## Which Tool Do I Use?
 
 Use this table when you know what you want but are not sure which tool to reach
@@ -130,6 +145,11 @@ for.
 | Remember a decision for the next session | `memory` with `action: "write"` |
 | Run a build or test command | `run_command` |
 | Orient yourself in a new project | `onboarding` |
+| View a GitHub issue | `github_issue` with `method: "get"` |
+| Create a GitHub issue | `github_issue` with `method: "create"` |
+| Review a pull request | `github_pr` with `method: "get_diff"` or `"get_files"` |
+| Push a file to GitHub | `github_file` with `method: "create_or_update"` |
+| Search GitHub code | `github_repo` with `method: "search_code"` |
 
 ### Choosing Between Symbol Navigation and Semantic Search
 
