@@ -31,7 +31,12 @@ use crate::agent::Agent;
 use crate::lsp::LspProvider;
 
 /// Compact JSON size above which tool output is routed through OutputBuffer.
-pub(crate) const TOOL_OUTPUT_BUFFER_THRESHOLD: usize = 10_000;
+pub(crate) const TOOL_OUTPUT_BUFFER_THRESHOLD: usize = 5_000;
+/// Soft cap for compact summaries shown alongside `@tool_*` refs.
+/// Truncation prefers whole-line boundaries. See [`truncate_compact`].
+pub(crate) const COMPACT_SUMMARY_MAX_BYTES: usize = 2_000;
+/// Hard cap — no summary will exceed this size regardless of line boundaries.
+pub(crate) const COMPACT_SUMMARY_HARD_MAX_BYTES: usize = 3_000;
 
 /// Shared context passed to every tool invocation.
 ///
@@ -169,6 +174,28 @@ pub async fn guard_worktree_write(ctx: &ToolContext) -> anyhow::Result<()> {
     .into())
 }
 
+/// Truncate a compact summary to fit within output size limits, preserving line structure.
+///
+/// Returns `text` verbatim when `text.len() <= soft_max`. Otherwise, finds the last `\n`
+/// within `hard_max` bytes and truncates there (keeping whole lines). When no newline
+/// exists within `hard_max`, truncates at `hard_max` bytes directly.
+/// Always appends `"\n… (truncated)"` when content is cut.
+fn truncate_compact(text: &str, soft_max: usize, hard_max: usize) -> String {
+    if text.len() <= soft_max {
+        return text.to_string();
+    }
+
+    // Find the last newline within hard_max bytes — prefer to break at a line boundary
+    let search_end = hard_max.min(text.len());
+    if let Some(nl_pos) = text[..search_end].rfind('\n') {
+        return format!("{}\n… (truncated)", &text[..nl_pos]);
+    }
+
+    // No newline within hard_max — hard-truncate
+    let end = hard_max.min(text.len());
+    format!("{}… (truncated)", &text[..end])
+}
+
 /// A single MCP tool exposed to the LLM.
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
@@ -218,9 +245,14 @@ pub trait Tool: Send + Sync {
         if json.len() > TOOL_OUTPUT_BUFFER_THRESHOLD {
             let json_len = json.len();
             let ref_id = ctx.output_buffer.store_tool(self.name(), json);
-            let summary = self
+            let raw_summary = self
                 .format_compact(&val)
                 .unwrap_or_else(|| format!("Result stored in {} ({} bytes)", ref_id, json_len));
+            let summary = truncate_compact(
+                &raw_summary,
+                COMPACT_SUMMARY_MAX_BYTES,
+                COMPACT_SUMMARY_HARD_MAX_BYTES,
+            );
             return Ok(vec![Content::text(format!(
                 "{}\nFull result: {}",
                 summary, ref_id
@@ -389,7 +421,7 @@ mod tests {
     #[tokio::test]
     async fn call_content_buffers_large_output() {
         let ctx = bare_ctx().await;
-        // Build a Value that serializes to > 10_000 bytes
+        // Build a Value that serializes to >> 5_000 bytes (well above the buffer threshold)
         let big_array: Vec<Value> = (0..500)
             .map(|i| {
                 serde_json::json!({
@@ -472,5 +504,186 @@ mod tests {
             text
         );
         assert!(text.contains("@tool_"), "expected ref handle in: {}", text);
+    }
+
+    // ---- threshold + summary-cap tests ----
+
+    #[tokio::test]
+    async fn call_content_buffers_at_5k_threshold() {
+        // Build a Value whose JSON is ~6 KB — above the new 5 KB threshold
+        // but below the old 10 KB threshold. With the new threshold this MUST buffer.
+        let ctx = bare_ctx().await;
+        let items: Vec<Value> = (0..75)
+            .map(|i| {
+                serde_json::json!({
+                    "file": format!("src/tools/file_{}.rs", i),
+                    "line": i,
+                    "content": format!("let x_{} = some_function_call_{};\n", i, i)
+                })
+            })
+            .collect();
+        let result = serde_json::json!({ "matches": items, "total": items.len() });
+
+        // Sanity: confirm the JSON is in the 5–10 KB range
+        let json_len = serde_json::to_string(&result).unwrap().len();
+        assert!(
+            json_len > 5_000,
+            "test data must be > 5 KB, got {} bytes",
+            json_len
+        );
+        assert!(
+            json_len < 10_000,
+            "test data must be < 10 KB, got {} bytes",
+            json_len
+        );
+
+        let tool = EchoTool {
+            result,
+            user_summary: Some("75 matches".to_string()),
+        };
+        let content = tool
+            .call_content(serde_json::json!({}), &ctx)
+            .await
+            .unwrap();
+        let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+        assert!(
+            text.contains("@tool_"),
+            "6 KB output must be buffered, got: {}",
+            &text[..text.len().min(200)]
+        );
+    }
+
+    #[tokio::test]
+    async fn call_content_does_not_buffer_under_5k() {
+        // ~2 KB result — must stay inline (no @tool_ ref)
+        let ctx = bare_ctx().await;
+        let items: Vec<Value> = (0..30)
+            .map(|i| serde_json::json!({ "file": format!("src/a_{}.rs", i), "line": i }))
+            .collect();
+        let result = serde_json::json!({ "matches": items });
+
+        let json_len = serde_json::to_string(&result).unwrap().len();
+        assert!(
+            json_len < 5_000,
+            "test data must be < 5 KB, got {} bytes",
+            json_len
+        );
+
+        let tool = EchoTool {
+            result,
+            user_summary: Some("30 matches".to_string()),
+        };
+        let content = tool
+            .call_content(serde_json::json!({}), &ctx)
+            .await
+            .unwrap();
+        let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+        assert!(
+            !text.contains("@tool_"),
+            "small output must not be buffered, got: {}",
+            &text[..text.len().min(200)]
+        );
+    }
+
+    #[tokio::test]
+    async fn call_content_caps_compact_summary() {
+        // format_compact returns a 4 KB summary — must be truncated to ≤ 3 KB (hard max)
+        let ctx = bare_ctx().await;
+        let items: Vec<Value> = (0..200)
+            .map(|i| serde_json::json!({ "idx": i, "name": "x".repeat(50) }))
+            .collect();
+        let result = serde_json::json!({ "items": items });
+
+        // Summary deliberately larger than hard cap
+        let big_summary = format!("{}\n", "summary line ".repeat(300)); // ~3.9 KB
+        assert!(
+            big_summary.len() > 3_000,
+            "summary must be > hard cap for this test"
+        );
+
+        let tool = EchoTool {
+            result,
+            user_summary: Some(big_summary),
+        };
+        let content = tool
+            .call_content(serde_json::json!({}), &ctx)
+            .await
+            .unwrap();
+        let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+        assert!(text.contains("@tool_"), "must be buffered");
+        // The inline text must be bounded; +100 slack for "Full result: @tool_xxx\n"
+        assert!(
+            text.len() <= 3_000 + 100,
+            "summary must be capped; got {} bytes",
+            text.len()
+        );
+        assert!(
+            text.contains("truncated"),
+            "must include truncation note: {}",
+            &text[..text.len().min(200)]
+        );
+    }
+
+    // ---- truncate_compact tests ----
+
+    #[test]
+    fn truncate_compact_under_soft_cap_returns_verbatim() {
+        let text = "line1\nline2\nline3";
+        assert_eq!(super::truncate_compact(text, 2_000, 3_000), text);
+    }
+
+    #[test]
+    fn truncate_compact_exact_soft_cap_returns_verbatim() {
+        // Exactly at the soft cap — no truncation
+        let text = "x".repeat(2_000);
+        assert_eq!(super::truncate_compact(&text, 2_000, 3_000), text);
+    }
+
+    #[test]
+    fn truncate_compact_at_line_boundary() {
+        // Line 1 is 1,800 bytes; line 2 is 600 bytes → total 2,401 (> soft_max=2_000)
+        // Last '\n' is at byte 1,800, which is ≤ hard_max=3_000 → truncate there
+        let line1 = "a".repeat(1_800);
+        let line2 = "b".repeat(600);
+        let text = format!("{}\n{}", line1, line2);
+
+        let result = super::truncate_compact(&text, 2_000, 3_000);
+
+        assert!(result.starts_with(&line1), "should keep line1 intact");
+        assert!(!result.contains(&line2), "should drop line2");
+        assert!(
+            result.contains("… (truncated)"),
+            "should append truncation note"
+        );
+    }
+
+    #[test]
+    fn truncate_compact_no_newlines_uses_hard_cap() {
+        // Single 5,000-byte line — no '\n' → hard-cap at 3,000 bytes
+        let text = "x".repeat(5_000);
+        let result = super::truncate_compact(&text, 2_000, 3_000);
+
+        assert!(
+            result.starts_with(&"x".repeat(3_000)),
+            "should keep first 3,000 bytes"
+        );
+        assert!(result.ends_with("… (truncated)"), "should append note");
+        // Sanity check: result is not longer than hard_max + note
+        assert!(result.len() <= 3_000 + 20);
+    }
+
+    #[test]
+    fn truncate_compact_preserves_text_exactly_at_hard_cap() {
+        // Text is 2,500 bytes (> soft) with a single newline at position 2,400.
+        // Line boundary (2,400) is between soft (2,000) and hard (3,000) — use it.
+        let line1 = "a".repeat(2_400);
+        let line2 = "b".repeat(99);
+        let text = format!("{}\n{}", line1, line2);
+
+        let result = super::truncate_compact(&text, 2_000, 3_000);
+
+        assert!(result.starts_with(&line1), "should keep line1");
+        assert!(!result.contains(&line2), "should not include line2");
+        assert!(result.contains("… (truncated)"));
     }
 }

@@ -751,6 +751,31 @@ catch the stale-LSP class of errors.
 
 ---
 
+### BUG-022 — `replace_symbol`: called twice on same symbol stacks orphaned doc comments
+
+**Date:** 2026-03-04
+**Severity:** Medium — compiles with warnings/errors; requires manual cleanup of orphaned text
+**Status:** Open
+
+**What happened:**
+Called `replace_symbol("truncate_compact", …)` twice in succession to update the function.
+Each call reported success and a replaced-lines range. The second call replaced only the
+LSP-reported body range (which excluded the doc comment), leaving the first replacement's
+doc comment block orphaned in the file above the second replacement's doc comment. Result:
+three stacked `///` blocks where only one was intended. Clippy then flagged
+`doc_lazy_continuation` on two of them.
+
+**Probable cause:**
+LSP `documentSymbol` range for a free function covers only the `fn` keyword through closing
+`}`, not the preceding `///` doc comments. So `replace_symbol` inserts a full new body
+(including doc) at the function range start, but leaves the old doc comment untouched just
+above it. On the second call the same thing happens again.
+
+**Workaround:**
+Call `replace_symbol` only once per symbol per session, or use `edit_file` with a
+sufficiently-anchored `old_string` that includes the doc comment text to be replaced.
+If duplication occurs, use `edit_file` with the full duplicated block as `old_string`.
+
 ### BUG-018 — `replace_symbol`: duplicates body instead of replacing, leaves stray tokens
 
 **Date:** 2026-03-02
