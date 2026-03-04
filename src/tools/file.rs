@@ -49,6 +49,40 @@ impl Tool for ReadFile {
                     "Provide the file path as: path=\"relative/path/to/file\"",
                 )
             })?;
+
+        // Handle buffer refs (@file_*, @cmd_*, @tool_*) — resolve from OutputBuffer
+        // instead of reading from the filesystem.
+        if path.starts_with("@file_") || path.starts_with("@cmd_") || path.starts_with("@tool_") {
+            let text = ctx
+                .output_buffer
+                .get(path)
+                .ok_or_else(|| {
+                    RecoverableError::with_hint(
+                        format!("buffer reference not found: '{}'", path),
+                        "Buffer refs expire when the session resets. Re-run the command to get a fresh ref.",
+                    )
+                })?
+                .stdout;
+            let total_lines = text.lines().count();
+            let start = input["start_line"].as_u64();
+            let end = input["end_line"].as_u64();
+            if let (Some(s), Some(e)) = (start, end) {
+                if s == 0 || e < s {
+                    return Err(RecoverableError::with_hint(
+                        format!(
+                            "invalid line range: start_line={} end_line={} (start_line must be >= 1 and end_line >= start_line)",
+                            s, e
+                        ),
+                        "Lines are 1-indexed. Example: start_line=1, end_line=50",
+                    )
+                    .into());
+                }
+                let content = extract_lines(&text, s as usize, e as usize);
+                return Ok(json!({ "content": content, "total_lines": total_lines }));
+            }
+            return Ok(json!({ "content": text, "total_lines": total_lines }));
+        }
+
         let project_root = ctx.agent.project_root().await;
         let security = ctx.agent.security_config().await;
         let resolved = crate::util::path_security::validate_read_path(
@@ -1588,6 +1622,70 @@ mod tests {
 
         assert!(result.get("overflow").is_none());
         assert_eq!(result["total_lines"], 3);
+    }
+
+    // ── ReadFile — buffer ref (@tool_*, @cmd_*, @file_*) ─────────────────────
+
+    #[tokio::test]
+    async fn read_file_tool_ref_returns_full_content() {
+        let ctx = test_ctx().await;
+        let id = ctx
+            .output_buffer
+            .store_tool("onboarding", "{\"languages\":[\"rust\"]}".to_string());
+        let result = ReadFile.call(json!({ "path": id }), &ctx).await.unwrap();
+        assert_eq!(result["content"], "{\"languages\":[\"rust\"]}");
+    }
+
+    #[tokio::test]
+    async fn read_file_cmd_ref_returns_full_content() {
+        let ctx = test_ctx().await;
+        let id = ctx.output_buffer.store(
+            "cargo test".to_string(),
+            "ok\n".to_string(),
+            String::new(),
+            0,
+        );
+        let result = ReadFile.call(json!({ "path": id }), &ctx).await.unwrap();
+        assert_eq!(result["content"], "ok\n");
+        assert_eq!(result["total_lines"], 1);
+    }
+
+    #[tokio::test]
+    async fn read_file_tool_ref_with_line_range() {
+        let ctx = test_ctx().await;
+        let content = "line1\nline2\nline3\nline4\nline5".to_string();
+        let id = ctx.output_buffer.store_tool("list_symbols", content);
+        let result = ReadFile
+            .call(json!({ "path": id, "start_line": 2, "end_line": 4 }), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["content"], "line2\nline3\nline4");
+        assert_eq!(result["total_lines"], 5);
+    }
+
+    #[tokio::test]
+    async fn read_file_tool_ref_missing_returns_error() {
+        let ctx = test_ctx().await;
+        let result = ReadFile
+            .call(json!({ "path": "@tool_deadbeef" }), &ctx)
+            .await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("buffer reference not found"), "got: {}", msg);
+    }
+
+    #[tokio::test]
+    async fn read_file_tool_ref_invalid_line_range_errors() {
+        let ctx = test_ctx().await;
+        let id = ctx
+            .output_buffer
+            .store_tool("onboarding", "a\nb\nc".to_string());
+        let result = ReadFile
+            .call(json!({ "path": id, "start_line": 5, "end_line": 2 }), &ctx)
+            .await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("invalid line range"), "got: {}", msg);
     }
 
     // ── ListDir ───────────────────────────────────────────────────────────────

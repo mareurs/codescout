@@ -695,7 +695,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn write_to_tmp_denied_even_in_deny_list() {
         // If someone adds /tmp/secret to the deny-list, it should still be blocked
