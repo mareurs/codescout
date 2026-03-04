@@ -215,6 +215,20 @@ impl Tool for DeleteMemory {
 
 pub struct Memory;
 
+fn extract_title(content: &str) -> String {
+    let first_sentence_end = content
+        .find(". ")
+        .or_else(|| content.find(".\n"))
+        .map(|i| i + 1)
+        .unwrap_or(content.len());
+    let end = first_sentence_end.min(80).min(content.len());
+    let mut title = content[..end].to_string();
+    if end < content.len() && !title.ends_with('.') {
+        title.push_str("...");
+    }
+    title
+}
+
 #[async_trait::async_trait]
 impl Tool for Memory {
     fn name(&self) -> &str {
@@ -224,7 +238,10 @@ impl Tool for Memory {
     fn description(&self) -> &str {
         "Persistent project memory — action: \"read\", \"write\", \"list\", \"delete\". \
          topic is a path-like key (e.g. 'debugging/async-patterns'). \
-         Pass private=true to use the gitignored private store."
+         Pass private=true to use the gitignored private store. \
+         Semantic memory — action: \"remember\", \"recall\", \"forget\". \
+         Stores embedded, searchable knowledge classified into buckets (code/system/preferences/unstructured). \
+         Use 'remember' to store insights, 'recall' to search by meaning, 'forget' to delete by id."
     }
 
     fn input_schema(&self) -> Value {
@@ -234,7 +251,7 @@ impl Tool for Memory {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["read", "write", "list", "delete"],
+                    "enum": ["read", "write", "list", "delete", "remember", "recall", "forget"],
                     "description": "Operation to perform"
                 },
                 "topic": {
@@ -254,6 +271,27 @@ impl Tool for Memory {
                     "type": "boolean",
                     "default": false,
                     "description": "For list: also return private topics. Returns { shared, private } instead of { topics }."
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Optional for remember. Short label for the memory. Auto-extracted from content if omitted."
+                },
+                "bucket": {
+                    "type": "string",
+                    "enum": ["code", "system", "preferences", "unstructured"],
+                    "description": "Optional for remember/recall. Memory category. Auto-classified if omitted for remember."
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Required for recall. The search query."
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Optional for recall. Max results (default 5)."
+                },
+                "id": {
+                    "type": "integer",
+                    "description": "Required for forget. The memory ID to delete."
                 }
             }
         })
@@ -324,12 +362,131 @@ impl Tool for Memory {
                     })
                     .await
             }
+            "remember" => {
+                let content = super::require_str_param(&input, "content")?;
+                let title = input["title"]
+                    .as_str()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| extract_title(content));
+                let bucket = input["bucket"]
+                    .as_str()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| {
+                        crate::memory::classify::classify_bucket(content).to_string()
+                    });
+
+                let (root, model) = {
+                    let inner = ctx.agent.inner.read().await;
+                    let p = inner.active_project.as_ref().ok_or_else(|| {
+                        super::RecoverableError::with_hint(
+                            "No active project.",
+                            "Call activate_project first.",
+                        )
+                    })?;
+                    (p.root.clone(), p.config.embeddings.model.clone())
+                };
+
+                let embedder = ctx.agent.get_or_create_embedder(&model).await?;
+                let embedding = crate::embed::embed_one(embedder.as_ref(), content).await?;
+
+                let bucket2 = bucket.clone();
+                let title2 = title.clone();
+                let content2 = content.to_string();
+                tokio::task::spawn_blocking(move || {
+                    let conn = crate::embed::index::open_db(&root)?;
+                    crate::embed::index::ensure_vec_memories(&conn)?;
+                    crate::embed::index::insert_memory(
+                        &conn, &bucket2, &title2, &content2, &embedding,
+                    )?;
+                    anyhow::Ok(())
+                })
+                .await??;
+
+                Ok(json!("ok"))
+            }
+            "recall" => {
+                let query = super::require_str_param(&input, "query")?;
+                let limit = input["limit"].as_u64().unwrap_or(5) as usize;
+                let bucket_filter = input["bucket"].as_str();
+
+                let (root, model) = {
+                    let inner = ctx.agent.inner.read().await;
+                    let p = inner.active_project.as_ref().ok_or_else(|| {
+                        super::RecoverableError::with_hint(
+                            "No active project.",
+                            "Call activate_project first.",
+                        )
+                    })?;
+                    (p.root.clone(), p.config.embeddings.model.clone())
+                };
+
+                let embedder = ctx.agent.get_or_create_embedder(&model).await?;
+                let query_embedding =
+                    crate::embed::embed_one(embedder.as_ref(), query).await?;
+
+                let bucket = bucket_filter.map(|s| s.to_string());
+                let results = tokio::task::spawn_blocking(move || {
+                    let conn = crate::embed::index::open_db(&root)?;
+                    crate::embed::index::ensure_vec_memories(&conn)?;
+                    crate::embed::index::search_memories(
+                        &conn,
+                        &query_embedding,
+                        bucket.as_deref(),
+                        limit,
+                    )
+                })
+                .await??;
+
+                let items: Vec<serde_json::Value> = results
+                    .iter()
+                    .map(|r| {
+                        json!({
+                            "id": r.id,
+                            "bucket": r.bucket,
+                            "title": r.title,
+                            "content": r.content,
+                            "similarity": format!("{:.2}", r.similarity),
+                            "created_at": r.created_at,
+                        })
+                    })
+                    .collect();
+
+                Ok(json!({ "results": items }))
+            }
+            "forget" => {
+                let id = input["id"].as_i64().ok_or_else(|| {
+                    super::RecoverableError::with_hint(
+                        "Missing required parameter 'id'",
+                        "Pass the numeric id from a recall result",
+                    )
+                })?;
+
+                let root = {
+                    let inner = ctx.agent.inner.read().await;
+                    let p = inner.active_project.as_ref().ok_or_else(|| {
+                        super::RecoverableError::with_hint(
+                            "No active project.",
+                            "Call activate_project first.",
+                        )
+                    })?;
+                    p.root.clone()
+                };
+
+                tokio::task::spawn_blocking(move || {
+                    let conn = crate::embed::index::open_db(&root)?;
+                    crate::embed::index::delete_memory(&conn, id)?;
+                    anyhow::Ok(())
+                })
+                .await??;
+
+                Ok(json!("ok"))
+            }
             _ => Err(RecoverableError::with_hint(
                 format!(
-                    "unknown action '{}'. Must be one of: read, write, list, delete",
+                    "unknown action '{}'. Must be one of: read, write, list, delete, remember, recall, forget",
                     action
                 ),
-                "Pass action: 'read', 'write', 'list', or 'delete'",
+                "Pass action: 'read', 'write', 'list', 'delete', 'remember', 'recall', or 'forget'",
             )
             .into()),
         }
@@ -804,5 +961,68 @@ mod tests {
         let result = tool.call(json!({ "action": "explode" }), &ctx).await;
         assert!(result.is_err());
         drop(dir);
+    }
+
+    #[tokio::test]
+    async fn memory_remember_requires_content() {
+        let (_dir, ctx) = test_ctx_with_project().await;
+        let tool = Memory;
+        let result = tool.call(json!({ "action": "remember" }), &ctx).await;
+        assert!(result.is_err(), "should error without content");
+    }
+
+    #[tokio::test]
+    async fn memory_recall_requires_query() {
+        let (_dir, ctx) = test_ctx_with_project().await;
+        let tool = Memory;
+        let result = tool.call(json!({ "action": "recall" }), &ctx).await;
+        assert!(result.is_err(), "should error without query");
+    }
+
+    #[tokio::test]
+    async fn memory_forget_requires_id() {
+        let (_dir, ctx) = test_ctx_with_project().await;
+        let tool = Memory;
+        let result = tool.call(json!({ "action": "forget" }), &ctx).await;
+        assert!(result.is_err(), "should error without id");
+    }
+
+    #[test]
+    fn memory_schema_has_new_actions() {
+        let schema = Memory.input_schema();
+        let actions = schema["properties"]["action"]["enum"].as_array().unwrap();
+        assert!(actions.contains(&json!("remember")));
+        assert!(actions.contains(&json!("recall")));
+        assert!(actions.contains(&json!("forget")));
+    }
+
+    #[test]
+    fn memory_schema_has_new_properties() {
+        let schema = Memory.input_schema();
+        assert!(schema["properties"]["query"].is_object());
+        assert!(schema["properties"]["bucket"].is_object());
+        assert!(schema["properties"]["title"].is_object());
+        assert!(schema["properties"]["id"].is_object());
+        assert!(schema["properties"]["limit"].is_object());
+    }
+
+    #[test]
+    fn extract_title_first_sentence() {
+        assert_eq!(
+            extract_title("Hello world. More text here."),
+            "Hello world."
+        );
+    }
+
+    #[test]
+    fn extract_title_truncates_long_content() {
+        let long = "a".repeat(200);
+        let title = extract_title(&long);
+        assert!(title.len() <= 83); // 80 + "..."
+    }
+
+    #[test]
+    fn extract_title_short_content() {
+        assert_eq!(extract_title("Short"), "Short");
     }
 }
