@@ -50,8 +50,29 @@ code chunks — same vector space, directly comparable).
 |---|---|---|
 | `code` | Patterns, conventions, API behaviors | "this module uses builder pattern", "auth uses JWT" |
 | `system` | Build/deploy/infra/config knowledge | "requires docker for tests", "CI uses GitHub Actions" |
-| `unstructured` | Catch-all for anything else | User preferences, ephemeral observations |
+| `preferences` | User preferences, coding style, conventions | "always use snake_case", "prefer composition over inheritance" |
+| `unstructured` | Catch-all for anything else | Ephemeral observations, misc notes |
 | `structured` | Implicit — auto-created when markdown memories are written | Mirrors topic-keyed .md files |
+
+### Preferences Bucket — Special Behaviors
+
+The `preferences` bucket has behaviors beyond simple storage:
+
+1. **Auto-injection:** During `onboarding`, the top preferences (by recency) are
+   automatically included in the system prompt draft. Agents start every session
+   with awareness of user preferences without explicit `recall`.
+
+2. **Explicit recall:** Agents in specific workflows can `recall(bucket="preferences")`
+   to pull workflow-relevant preferences (e.g., "how does the user want tests structured?").
+
+3. **Smart routing:** When a user says "remember this next time" or similar, the
+   classifier detects preference-like content (style rules, tool choices, workflow
+   preferences) and routes to the `preferences` bucket automatically.
+
+4. **Deviation requires confirmation:** Preferences include an implicit contract —
+   if an agent needs to deviate from a stored preference (e.g., for a critical fix
+   that requires a different approach), it should note the deviation and confirm
+   with the user rather than silently ignoring the preference.
 
 ## Classification Heuristic
 
@@ -64,6 +85,10 @@ file paths (contains `/` or language-specific extensions)
 **system triggers:** build, deploy, CI, config, environment, docker, infra, database,
 migration, permission, secret, credential, server, port, host, pipeline, test command,
 cargo, npm, pip
+
+**preferences triggers:** prefer, always, never, style, convention, habit, default to,
+use X instead of Y, "next time", "remember to", "I like", "I want", "don't use",
+snake_case, camelCase, tabs, spaces, indentation
 
 **Scoring:** Simple `content.contains()` scan. Whichever bucket gets the most keyword hits
 wins. Ties go to `unstructured`. The caller can always override with an explicit `bucket`.
