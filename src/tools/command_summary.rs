@@ -144,7 +144,14 @@ pub fn detect_terminal_filter(cmd: &str) -> Option<usize> {
             '\\' if !in_single => escape_next = true,
             '\'' if !in_double => in_single = !in_single,
             '"' if !in_single => in_double = !in_double,
-            '|' if !in_single && !in_double => last_pipe = Some(i),
+            '|' if !in_single && !in_double => {
+                // Skip `||` (logical OR) — not a pipeline pipe.
+                let next_char = cmd[i + 1..].chars().next();
+                let prev_char = if i > 0 { cmd[..i].chars().last() } else { None };
+                if next_char != Some('|') && prev_char != Some('|') {
+                    last_pipe = Some(i);
+                }
+            }
             _ => {}
         }
     }
@@ -744,5 +751,18 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
         let pos = detect_terminal_filter(cmd).unwrap();
         // Character at pipe_pos should be '|'
         assert_eq!(&cmd[pos..pos + 1], "|");
+    }
+
+    #[test]
+    fn terminal_filter_logical_or_not_a_pipe() {
+        // || is logical OR, not a pipeline — should not trigger tee injection
+        assert!(detect_terminal_filter("ls || grep foo").is_none());
+    }
+
+    #[test]
+    fn terminal_filter_path_prefixed_filter() {
+        // /usr/bin/grep should be recognized as grep
+        let pos = detect_terminal_filter("ls | /usr/bin/grep foo");
+        assert!(pos.is_some());
     }
 }
