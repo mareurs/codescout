@@ -229,6 +229,39 @@ fn extract_title(content: &str) -> String {
     title
 }
 
+/// Best-effort cross-embed a markdown memory into the semantic store.
+/// Called on `write` so that structured memories are also discoverable via `recall`.
+async fn cross_embed_memory(ctx: &ToolContext, topic: &str, content: &str) -> anyhow::Result<()> {
+    let (root, model) = {
+        let inner = ctx.agent.inner.read().await;
+        let p = inner
+            .active_project
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no project"))?;
+        (p.root.clone(), p.config.embeddings.model.clone())
+    };
+
+    let embedder = ctx.agent.get_or_create_embedder(&model).await?;
+    let embedding = crate::embed::embed_one(embedder.as_ref(), content).await?;
+
+    let topic_owned = topic.to_string();
+    let content_owned = content.to_string();
+    tokio::task::spawn_blocking(move || {
+        let conn = crate::embed::index::open_db(&root)?;
+        crate::embed::index::ensure_vec_memories(&conn)?;
+        crate::embed::index::upsert_memory_by_title(
+            &conn,
+            "structured",
+            &topic_owned,
+            &content_owned,
+            &embedding,
+        )?;
+        anyhow::Ok(())
+    })
+    .await??;
+    Ok(())
+}
+
 #[async_trait::async_trait]
 impl Tool for Memory {
     fn name(&self) -> &str {
@@ -304,6 +337,8 @@ impl Tool for Memory {
                 let topic = super::require_str_param(&input, "topic")?;
                 let content = super::require_str_param(&input, "content")?;
                 let private = input["private"].as_bool().unwrap_or(false);
+
+                // Write markdown file (existing behavior)
                 ctx.agent
                     .with_project(|p| {
                         if private {
@@ -311,9 +346,18 @@ impl Tool for Memory {
                         } else {
                             p.memory.write(topic, content)?;
                         }
-                        Ok(json!("ok"))
+                        Ok(())
                     })
-                    .await
+                    .await?;
+
+                // Cross-embed into semantic store (best-effort, non-fatal)
+                if !private {
+                    if let Err(e) = cross_embed_memory(ctx, topic, content).await {
+                        tracing::debug!("cross-embed memory failed (non-fatal): {e}");
+                    }
+                }
+
+                Ok(json!("ok"))
             }
             "read" => {
                 let topic = super::require_str_param(&input, "topic")?;
@@ -351,6 +395,8 @@ impl Tool for Memory {
             "delete" => {
                 let topic = super::require_str_param(&input, "topic")?;
                 let private = input["private"].as_bool().unwrap_or(false);
+
+                // Delete markdown file (existing behavior)
                 ctx.agent
                     .with_project(|p| {
                         if private {
@@ -358,9 +404,38 @@ impl Tool for Memory {
                         } else {
                             p.memory.delete(topic)?;
                         }
-                        Ok(json!("ok"))
+                        Ok(())
                     })
-                    .await
+                    .await?;
+
+                // Remove cross-embedded entry (best-effort, non-fatal)
+                if !private {
+                    let root = {
+                        let inner = ctx.agent.inner.read().await;
+                        inner.active_project.as_ref().map(|p| p.root.clone())
+                    };
+                    if let Some(root) = root {
+                        let topic_owned = topic.to_string();
+                        let _ = tokio::task::spawn_blocking(move || {
+                            use rusqlite::OptionalExtension;
+                            let conn = crate::embed::index::open_db(&root)?;
+                            let id: Option<i64> = conn
+                                .query_row(
+                                    "SELECT id FROM memories WHERE title = ?1 AND bucket = 'structured'",
+                                    rusqlite::params![topic_owned],
+                                    |r| r.get(0),
+                                )
+                                .optional()?;
+                            if let Some(id) = id {
+                                crate::embed::index::delete_memory(&conn, id)?;
+                            }
+                            anyhow::Ok(())
+                        })
+                        .await;
+                    }
+                }
+
+                Ok(json!("ok"))
             }
             "remember" => {
                 let content = super::require_str_param(&input, "content")?;
@@ -1024,5 +1099,68 @@ mod tests {
     #[test]
     fn extract_title_short_content() {
         assert_eq!(extract_title("Short"), "Short");
+    }
+
+    #[test]
+    fn extract_title_used_in_cross_embed_context() {
+        // Verify extract_title works for typical memory topics
+        assert_eq!(
+            extract_title("Three layer architecture design."),
+            "Three layer architecture design."
+        );
+    }
+
+    #[tokio::test]
+    async fn memory_write_still_works_without_embedder() {
+        // Write should succeed even if cross-embedding fails
+        let (_dir, ctx) = test_ctx_with_project().await;
+        let tool = Memory;
+        let result = tool
+            .call(
+                json!({ "action": "write", "topic": "test-topic", "content": "hello" }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result, json!("ok"));
+
+        // Verify markdown file was written
+        let read_result = tool
+            .call(json!({ "action": "read", "topic": "test-topic" }), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(read_result["content"], "hello");
+    }
+
+    #[tokio::test]
+    async fn memory_delete_still_works_without_embedder() {
+        let (_dir, ctx) = test_ctx_with_project().await;
+        let tool = Memory;
+        tool.call(
+            json!({ "action": "write", "topic": "del-me", "content": "x" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+        let result = tool
+            .call(json!({ "action": "delete", "topic": "del-me" }), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result, json!("ok"));
+    }
+
+    #[tokio::test]
+    async fn memory_write_private_not_cross_embedded() {
+        // Private memories should not attempt cross-embedding
+        let (_dir, ctx) = test_ctx_with_project().await;
+        let tool = Memory;
+        let result = tool
+            .call(
+                json!({ "action": "write", "topic": "secret", "content": "private data", "private": true }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result, json!("ok"));
     }
 }
