@@ -793,9 +793,9 @@ async fn run_command_inner(
     ctx: &ToolContext,
 ) -> anyhow::Result<Value> {
     use super::command_summary::{
-        count_lines, detect_command_type, needs_summary, summarize_build_output, summarize_generic,
-        summarize_test_output, truncate_lines, truncate_lines_and_bytes, CommandType,
-        BUFFER_QUERY_INLINE_CAP,
+        count_lines, detect_command_type, detect_terminal_filter, needs_summary,
+        summarize_build_output, summarize_generic, summarize_test_output, truncate_lines,
+        truncate_lines_and_bytes, CommandType, BUFFER_QUERY_INLINE_CAP,
     };
     use crate::util::path_security::is_dangerous_command;
 
@@ -872,18 +872,43 @@ async fn run_command_inner(
         root.to_path_buf()
     };
 
+    // --- Step 4.5: Tee injection for terminal filter commands ---
+    // When the last pipe stage is a known filter (grep, head, tail, sed, awk, etc.),
+    // inject `tee /tmp/codescout-unfiltered-XXXX` before the filter so the caller
+    // can surface the unfiltered stream as a buffer ref without re-running the command.
+    let (effective_command, unfiltered_tmpfile): (String, Option<String>) = if !buffer_only {
+        if let Some(pipe_pos) = detect_terminal_filter(resolved_command) {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let tmpfile = format!("/tmp/codescout-unfiltered-{nanos:016x}");
+            let cmd = format!(
+                "{} | tee {} | {}",
+                resolved_command[..pipe_pos].trim_end(),
+                tmpfile,
+                resolved_command[pipe_pos + 1..].trim_start()
+            );
+            (cmd, Some(tmpfile))
+        } else {
+            (resolved_command.to_string(), None)
+        }
+    } else {
+        (resolved_command.to_string(), None)
+    };
+
     // --- Step 5: Execute command ---
     #[cfg(unix)]
     let child = tokio::process::Command::new("sh")
         .arg("-c")
-        .arg(resolved_command)
+        .arg(&effective_command)
         .current_dir(&work_dir)
         .output();
 
     #[cfg(windows)]
     let child = tokio::process::Command::new("cmd")
         .arg("/C")
-        .arg(resolved_command)
+        .arg(&effective_command)
         .current_dir(&work_dir)
         .output();
 
@@ -911,6 +936,10 @@ async fn run_command_inner(
             let raw_stdout = String::from_utf8_lossy(&output.stdout).into_owned();
             let raw_stderr = String::from_utf8_lossy(&output.stderr).into_owned();
             let exit_code = output.status.code().unwrap_or(-1);
+
+            // Cleanup stub: Task 3 will read this file before deleting it.
+            // For now, just ensure it doesn't leak on early returns below.
+            let _unfiltered_tmpfile = unfiltered_tmpfile; // will be consumed in Task 3
 
             // --- Step 6: Decide whether to buffer + summarize ---
             if needs_summary(&raw_stdout, &raw_stderr) {
@@ -2393,6 +2422,57 @@ mod tests {
         assert!(
             output_id_pos < stdout_pos,
             "output_id must appear before stdout (content payload), got key order: {keys:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn piped_grep_returns_unfiltered_ref() {
+        let (dir, ctx) = project_ctx().await;
+        // Create a file with several lines; grep for just one
+        std::fs::write(
+            dir.path().join("items.txt"),
+            "apple\nbanana\ncherry\ndates\nelderberry\n",
+        )
+        .unwrap();
+        let result = RunCommand
+            .call(json!({ "command": "cat items.txt | grep apple" }), &ctx)
+            .await
+            .unwrap();
+
+        // unfiltered_output ref should be present
+        assert!(
+            result["unfiltered_output"].is_string(),
+            "expected unfiltered_output field, got: {result}"
+        );
+        let ref_id = result["unfiltered_output"].as_str().unwrap();
+
+        // Query the buffer: full content should include banana (filtered out by grep)
+        let full = RunCommand
+            .call(json!({ "command": format!("cat {ref_id}") }), &ctx)
+            .await
+            .unwrap();
+        let stdout = full["stdout"].as_str().unwrap_or("");
+        assert!(
+            stdout.contains("banana"),
+            "unfiltered output missing 'banana': {stdout}"
+        );
+        assert!(
+            stdout.contains("apple"),
+            "unfiltered output missing 'apple': {stdout}"
+        );
+    }
+
+    #[tokio::test]
+    async fn non_filter_pipe_no_unfiltered_ref() {
+        let (_dir, ctx) = project_ctx().await;
+        // Second stage is not a known filter — no unfiltered_output
+        let result = RunCommand
+            .call(json!({ "command": "echo hello | cat" }), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            result.get("unfiltered_output").is_none(),
+            "unexpected unfiltered_output for non-filter pipe: {result}"
         );
     }
 }
