@@ -1,9 +1,9 @@
-code-explorer MCP server: high-performance semantic code intelligence.
+codescout MCP server: high-performance semantic code intelligence.
 Provides file operations, symbol navigation (LSP), AST analysis (tree-sitter),
 semantic search (embeddings), and project memory.
 
-**Subagents and spawned agents SHOULD use code-explorer too.** If you spawn a subagent
-or delegate to another agent, instruct it to use code-explorer tools for all code
+**Subagents and spawned agents SHOULD use codescout too.** If you spawn a subagent
+or delegate to another agent, instruct it to use codescout tools for all code
 navigation — do not fall back to native Read/Grep/Glob on source files.
 
 ## Iron Laws

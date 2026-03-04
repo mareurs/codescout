@@ -5,7 +5,7 @@ You have just onboarded this project. Below you'll find pre-gathered context fro
 1. **Do NOT duplicate CLAUDE.md** — If CLAUDE.md content is provided below, it's loaded every session automatically. Memories should *supplement* it, not repeat it. If CLAUDE.md already covers dev commands, your `development-commands` memory should only add what's missing.
 2. **Be specific** — Include file paths, exact command names, concrete patterns. "Uses clean architecture" is useless. "api/ → service/ → repository/ with interface+impl pattern" is useful.
 3. **Be concise** — Each memory should be 15–40 lines. Longer means too much detail.
-4. **Explore before writing** — The gathered data gives you a head start, but use code-explorer tools to verify and fill gaps: `list_symbols("src/")` for architecture, `find_symbol` for key abstractions, `list_symbols` for API surface.
+4. **Explore before writing** — The gathered data gives you a head start, but use codescout tools to verify and fill gaps: `list_symbols("src/")` for architecture, `find_symbol` for key abstractions, `list_symbols` for API surface.
 5. **Confirm with the user** — After creating all 6 memories, summarize what you wrote and ask if anything needs correction.
 6. **Private memories** — Use `memory(action: "write", topic: ..., content: ..., private: true)` for project-local notes that should not appear in system instructions (e.g. personal debugging notes, temporary state). Standard `memory(action: "write", ...)` creates shared memories visible to all agents.
 
@@ -157,7 +157,7 @@ You have just onboarded this project. Below you'll find pre-gathered context fro
 ### 7. System Prompt — `.code-explorer/system-prompt.md`
 
 After creating the 6 memories above, synthesize a concise system prompt (15-30 lines)
-for this project. This prompt is injected into EVERY code-explorer session
+for this project. This prompt is injected into EVERY codescout session
 automatically — it must be short and high-value. Do NOT repeat information from the
 static tool guidance (how to use find_symbol, list_symbols, etc.) — that's already
 provided to you separately.
@@ -170,7 +170,7 @@ provided to you separately.
 - Project rules: conventions the AI should always follow that aren't captured by linters
 
 **What NOT to include (already covered elsewhere):**
-- How code-explorer tools work (the static tool guidance handles this)
+- How codescout tools work (the static tool guidance handles this)
 - Full architecture details (the `architecture` memory covers this)
 - Command lists, glossary, detailed conventions (memories cover these)
 - Anything over 30 lines (keep it concise — this is injected every session)
@@ -207,7 +207,7 @@ After confirming all 6 memories and the system prompt with the user, deliver thi
 
 ---
 
-**Your code-explorer setup is complete.**
+**Your codescout setup is complete.**
 
 - **System prompt** (`.code-explorer/system-prompt.md`) — always-on project guidance,
   injected into every session. Edit anytime to refine how AI navigates your codebase.
@@ -226,7 +226,7 @@ After confirming all 6 memories and the system prompt with the user, deliver thi
 
 ## Gathered Project Data
 
-The data below was collected automatically. Use it as your starting point, then explore with code-explorer tools to fill gaps.
+The data below was collected automatically. Use it as your starting point, then explore with codescout tools to fill gaps.
 
 ---
 

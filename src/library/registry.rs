@@ -4,7 +4,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// A registered external library that code-explorer can search into.
+/// A registered external library that codescout can search into.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LibraryEntry {
     pub name: String,

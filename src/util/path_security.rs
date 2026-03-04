@@ -400,7 +400,7 @@ pub fn is_dangerous_command(command: &str, config: &PathSecurityConfig) -> Optio
     None
 }
 
-/// Source file extensions that should be accessed via code-explorer tools,
+/// Source file extensions that should be accessed via codescout tools,
 /// not raw shell commands. Mirrors `crate::ast::detect_language()` minus markdown.
 const SOURCE_EXTENSIONS: &str = r"\.(rs|py|ts|tsx|js|cjs|mjs|jsx|go|java|kt|kts|c|cpp|cc|cxx|cs|rb|php|swift|scala|ex|exs|hs|lua|sh|bash)\b";
 
@@ -411,7 +411,7 @@ const SOURCE_ACCESS_COMMANDS: &str = r"\b(cat|head|tail|sed|awk|less|more|wc)\b"
 /// `None` if the command is safe to execute.
 ///
 /// Two-part heuristic: both a blocked command name AND a source file extension must be
-/// present in the command string. Use code-explorer tools instead:
+/// present in the command string. Use codescout tools instead:
 /// - `read_file`, `list_symbols`, `find_symbol` for reading
 /// - `search_pattern` for regex extraction
 ///
