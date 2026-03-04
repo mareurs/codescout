@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end MCP smoke test for code-explorer.
+# End-to-end MCP smoke test for codescout.
 # Calls the real binary over stdio via the `mcp` CLI tool.
 # Run from the project root: ./tests/mcp-smoke.sh
 set -euo pipefail
@@ -53,13 +53,13 @@ fail() {
 
 # ── Setup ────────────────────────────────────────────────────────────────────
 
-echo "Building code-explorer (release)..."
+echo "Building codescout (release)..."
 cargo build --release 2>&1 | tail -1
 echo "done"
 echo ""
 
 export PATH="$HOME/.local/bin:$PATH"
-mcp alias add ce-test ./target/release/code-explorer start --project .
+mcp alias add ce-test ./target/release/codescout start --project .
 
 # Temp files for extensions we don't have in the project
 echo "test" > _test_smoke.py
@@ -127,7 +127,7 @@ test_read_file_blocks_sh() {
 
 test_read_file_allows_toml() {
     call read_file '{"path": "Cargo.toml"}'
-    if assert_contains "code-explorer" && assert_json_has "content"; then
+    if assert_contains "codescout" && assert_json_has "content"; then
         pass 1 "read_file allows .toml files"
     else
         fail 1 "read_file allows .toml files" "content not returned"
@@ -188,7 +188,7 @@ echo "=== Symbol Navigation ==="
 
 test_symbols_overview() {
     call get_symbols_overview '{"relative_path": "src/server.rs"}'
-    if assert_contains "CodeExplorerServer" && assert_contains "from_parts"; then
+    if assert_contains "CodeScoutServer" && assert_contains "from_parts"; then
         pass 1 "get_symbols_overview finds symbols in server.rs"
     else
         fail 1 "get_symbols_overview finds symbols in server.rs" "missing expected symbols"
@@ -302,7 +302,7 @@ echo "=== Non-code Files ==="
 
 test_read_cargo_toml() {
     call read_file '{"path": "Cargo.toml"}'
-    if assert_contains "code-explorer" && assert_json_has "content"; then
+    if assert_contains "codescout" && assert_json_has "content"; then
         pass 1 "read_file returns Cargo.toml content"
     else
         fail 1 "read_file returns Cargo.toml content" "content not returned"
