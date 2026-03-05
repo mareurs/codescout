@@ -804,6 +804,36 @@ than the actual function body.
 Use `edit_file(old_string=<full function text>, new_string=<replacement>)` for test
 functions. `replace_symbol` is unreliable for functions inside `mod tests` blocks.
 
+### BUG-025 — `read_file`: start_line/end_line silently ignored + @tool_* re-buffering loop
+
+**Date:** 2026-03-05
+**Severity:** High — `start_line`/`end_line` params are completely non-functional; agents get useless re-buffered refs
+**Status:** ✅ FIXED — `as_u64_lenient` accepts string integers; proactive `@file_*` buffering for content > 5 KB
+
+**What happened:**
+`read_file("docs/ARCHITECTURE.md")` returned `@tool_bcf1509c` (buffered). Agent then called
+`read_file("@tool_bcf1509c", start_line=26, end_line=156)` expecting lines 26-156 of the file.
+Instead got ANOTHER `@tool_*` ref containing the 4-line JSON envelope.
+
+**Root cause (two compounding bugs):**
+1. **Bug A — String params silently ignored:** MCP clients sometimes send integer params as
+   strings (e.g. `"26"` not `26`). `serde_json::Value::as_u64()` returns `None` for strings.
+   Both `start_line` and `end_line` become `None`, so the code falls through to returning
+   the full text — which then gets re-buffered by `call_content` as yet another `@tool_*`.
+2. **Bug B — Architectural mismatch:** Even with correct numeric params, `read_file(@tool_*, ...)`
+   applies `start_line/end_line` to the pretty-printed JSON structure (4 lines), not the file
+   content string inside it. Lines 26-156 don't exist in a 4-line JSON → empty result.
+
+**Fix applied:**
+1. `as_u64_lenient(v)`: tries `as_u64()` then `as_str().parse::<u64>()`. Used for all
+   `start_line`/`end_line` parsing.
+2. Proactive file buffering: when `read_file` would return `{ "content": text }` with
+   `text.len() > TOOL_OUTPUT_BUFFER_THRESHOLD`, it now stores the content as `@file_*`
+   (plain text) and returns `{ "file_id": ..., "total_lines": N }`. The agent then calls
+   `read_file("@file_xxx", start_line=26)` which navigates the plain text correctly.
+
+---
+
 ### BUG-024 — `read_file`: panics on files with Unicode box-drawing chars, crashing the MCP server
 
 **Date:** 2026-03-05

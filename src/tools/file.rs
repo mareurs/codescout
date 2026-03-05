@@ -7,6 +7,13 @@ use super::format::format_overflow;
 use super::{RecoverableError, Tool, ToolContext};
 use crate::util::text::extract_lines;
 
+/// Parse a JSON value as u64, accepting both numbers and numeric strings.
+/// MCP clients (including Claude Code) sometimes send integer params as strings.
+fn as_u64_lenient(v: &Value) -> Option<u64> {
+    v.as_u64()
+        .or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok()))
+}
+
 // ── read_file ────────────────────────────────────────────────────────────────
 
 pub struct ReadFile;
@@ -109,8 +116,8 @@ impl Tool for ReadFile {
             }
 
             let total_lines = text.lines().count();
-            let start = input["start_line"].as_u64();
-            let end = input["end_line"].as_u64();
+            let start = as_u64_lenient(&input["start_line"]);
+            let end = as_u64_lenient(&input["end_line"]);
             if let (Some(s), Some(e)) = (start, end) {
                 if s == 0 || e < s {
                     return Err(RecoverableError::with_hint(
@@ -137,8 +144,8 @@ impl Tool for ReadFile {
         )?;
 
         // Extract line range (both must be present for a targeted read)
-        let start_line = input["start_line"].as_u64();
-        let end_line = input["end_line"].as_u64();
+        let start_line = as_u64_lenient(&input["start_line"]);
+        let end_line = as_u64_lenient(&input["end_line"]);
 
         // Navigation parameters
         let heading = input["heading"].as_str();
@@ -385,11 +392,27 @@ impl Tool for ReadFile {
             result["overflow"] = OutputGuard::overflow_json(&overflow);
             Ok(result)
         } else {
-            let mut result = json!({ "content": text, "total_lines": total_lines });
-            if source_tag != "project" {
-                result["source"] = json!(source_tag);
+            // Proactive file buffering: if the content would exceed the tool output
+            // buffer threshold, store as @file_* now so start_line/end_line navigation
+            // works correctly. Without this, call_content would store the JSON envelope
+            // as @tool_*, making line-range navigation useless.
+            let json_estimate = text.len() + 30; // overhead for {"content":"...","total_lines":N}
+            if json_estimate > super::TOOL_OUTPUT_BUFFER_THRESHOLD {
+                let file_id = ctx
+                    .output_buffer
+                    .store_file(resolved.to_string_lossy().to_string(), text);
+                let mut result = json!({ "file_id": file_id, "total_lines": total_lines });
+                if source_tag != "project" {
+                    result["source"] = json!(source_tag);
+                }
+                Ok(result)
+            } else {
+                let mut result = json!({ "content": text, "total_lines": total_lines });
+                if source_tag != "project" {
+                    result["source"] = json!(source_tag);
+                }
+                Ok(result)
             }
-            Ok(result)
         }
     }
 
@@ -4199,5 +4222,95 @@ mod tests {
         assert!(result.starts_with("50 lines (Markdown)\n"));
         assert!(!result.contains("Headings:"));
         assert!(result.contains("Buffer: @file_md"));
+    }
+
+    #[tokio::test]
+    async fn read_file_string_start_end_line_parsed_as_numbers() {
+        // Bug A regression: start_line/end_line sent as strings must be parsed.
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.txt");
+        std::fs::write(
+            &file,
+            "line1
+line2
+line3
+line4
+line5",
+        )
+        .unwrap();
+        let ctx = test_ctx().await;
+        let result = ReadFile
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "start_line": "2",
+                    "end_line": "4"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let content = result["content"].as_str().unwrap();
+        assert_eq!(
+            content,
+            "line2
+line3
+line4"
+        );
+    }
+
+    #[test]
+    fn as_u64_lenient_parses_numbers_and_strings() {
+        assert_eq!(super::as_u64_lenient(&json!(42)), Some(42));
+        assert_eq!(super::as_u64_lenient(&json!("42")), Some(42));
+        assert_eq!(super::as_u64_lenient(&json!("abc")), None);
+        assert_eq!(super::as_u64_lenient(&json!(null)), None);
+        assert_eq!(super::as_u64_lenient(&json!("")), None);
+    }
+
+    #[tokio::test]
+    async fn read_file_large_content_returns_file_id_not_inline() {
+        // Bug B regression: files > TOOL_OUTPUT_BUFFER_THRESHOLD (5 KB) must return
+        // a @file_* ref so start_line/end_line navigation works on the plain text,
+        // not on a @tool_* JSON envelope.
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".code-explorer")).unwrap();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let ctx = ToolContext {
+            agent,
+            lsp: std::sync::Arc::new(crate::lsp::LspManager::new()),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+        };
+        let file = dir.path().join("big.md");
+        // Create a file > 5 KB but < 200 lines (the gap where Bug B manifested)
+        let line = "x".repeat(100);
+        let lines: Vec<&str> = std::iter::repeat(line.as_str()).take(60).collect();
+        std::fs::write(
+            &file,
+            lines.join(
+                "
+",
+            ),
+        )
+        .unwrap();
+
+        let result = ReadFile
+            .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        // Must have file_id (not inline content)
+        assert!(
+            result["file_id"].as_str().is_some(),
+            "large file should return file_id, got: {}",
+            serde_json::to_string_pretty(&result).unwrap()
+        );
+        assert!(
+            result["content"].is_null(),
+            "should NOT have inline content"
+        );
     }
 }
