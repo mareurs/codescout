@@ -803,3 +803,26 @@ than the actual function body.
 **Workaround:**
 Use `edit_file(old_string=<full function text>, new_string=<replacement>)` for test
 functions. `replace_symbol` is unreliable for functions inside `mod tests` blocks.
+
+### BUG-023 — `run_command` (subagent): `git diff` without `--no-pager` hangs for 30s
+
+**Date:** 2026-03-04
+**Severity:** Medium — wastes 30s agent time before timeout, no data corruption
+**Status:** Open
+
+**What happened:**
+Subagent code reviewer ran `git diff 368ffbe..d599093 -- src/tools/workflow.rs` inside
+`run_command`. Git invoked the `less` pager even without a TTY, waiting for keyboard input
+that never arrives. The command timed out after 30s.
+
+**Reproduction:**
+`run_command("git diff HEAD~1")` — any `git diff` call without `--no-pager` in environments
+where `core.pager` is configured or git defaults to `less`.
+
+**Probable cause:**
+Git reads pager config from `~/.gitconfig` and falls back to `less` unless `GIT_PAGER=cat`
+or `--no-pager` is specified. Subprocess has no TTY but git doesn't check for one before
+invoking the pager.
+
+**Workaround:**
+Always use `git --no-pager diff` or set `GIT_PAGER=cat` prefix: `GIT_PAGER=cat git diff ...`.

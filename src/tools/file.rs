@@ -50,10 +50,23 @@ impl Tool for ReadFile {
                 )
             })?;
 
+        // LLMs sometimes wrap buffer ref paths in extra quotes, e.g. "\"@tool_abc\"".
+        // Strip them so the ref resolves correctly instead of returning "file not found".
+        let path = path
+            .strip_prefix('"')
+            .and_then(|s| s.strip_suffix('"'))
+            .filter(|s| {
+                s.starts_with("@file_")
+                    || s.starts_with("@cmd_")
+                    || s.starts_with("@tool_")
+                    || s.starts_with("@ack_")
+            })
+            .unwrap_or(path);
+
         // Handle buffer refs (@file_*, @cmd_*, @tool_*) — resolve from OutputBuffer
         // instead of reading from the filesystem.
         if path.starts_with("@file_") || path.starts_with("@cmd_") || path.starts_with("@tool_") {
-            let text = ctx
+            let raw = ctx
                 .output_buffer
                 .get(path)
                 .ok_or_else(|| {
@@ -63,6 +76,38 @@ impl Tool for ReadFile {
                     )
                 })?
                 .stdout;
+
+            // @tool_* refs contain compact single-line JSON (tool result serialized
+            // without pretty-printing).  Expand it so start_line/end_line ranges
+            // and json_path navigation are useful.  Plain-text @cmd_*/@file_* refs
+            // are used as-is.
+            let text: String = if path.starts_with("@tool_") {
+                serde_json::from_str::<serde_json::Value>(&raw)
+                    .ok()
+                    .and_then(|v| serde_json::to_string_pretty(&v).ok())
+                    .unwrap_or(raw)
+            } else {
+                raw
+            };
+
+            // json_path navigation for @tool_* (tool results are always JSON)
+            if path.starts_with("@tool_") {
+                if let Some(jp) = input["json_path"].as_str() {
+                    let (content, type_name, count) =
+                        crate::tools::file_summary::extract_json_path(&text, jp)?;
+                    let mut result = json!({
+                        "content": content,
+                        "path": jp,
+                        "type": type_name,
+                        "format": "json",
+                    });
+                    if let Some(c) = count {
+                        result["count"] = json!(c);
+                    }
+                    return Ok(result);
+                }
+            }
+
             let total_lines = text.lines().count();
             let start = input["start_line"].as_u64();
             let end = input["end_line"].as_u64();
@@ -1638,7 +1683,12 @@ mod tests {
             .output_buffer
             .store_tool("onboarding", "{\"languages\":[\"rust\"]}".to_string());
         let result = ReadFile.call(json!({ "path": id }), &ctx).await.unwrap();
-        assert_eq!(result["content"], "{\"languages\":[\"rust\"]}");
+        // @tool_* refs are pretty-printed for readability — the content is expanded JSON,
+        // not the original compact form.
+        assert_eq!(
+            result["content"],
+            "{\n  \"languages\": [\n    \"rust\"\n  ]\n}"
+        );
     }
 
     #[tokio::test]

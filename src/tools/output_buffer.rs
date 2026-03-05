@@ -419,9 +419,25 @@ impl OutputBuffer {
                 &entry.stdout
             };
 
-            // Write content to a temp file
+            // Write content to a temp file.
+            // @tool_* refs contain compact single-line JSON (tool result serialized
+            // by serde_json::to_string).  Pretty-print it before writing so that
+            // grep/sed on the temp file matches individual fields/values instead of
+            // the entire JSON blob on one line.  Non-JSON content is written as-is.
+            let pretty_content: String;
+            let write_content: &str = if base_id.starts_with("@tool_") && !is_stderr {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(content) {
+                    pretty_content = serde_json::to_string_pretty(&v)
+                        .unwrap_or_else(|_| content.to_string());
+                    &pretty_content
+                } else {
+                    content
+                }
+            } else {
+                content
+            };
             let mut tmp = NamedTempFile::new()?;
-            tmp.write_all(content.as_bytes())?;
+            tmp.write_all(write_content.as_bytes())?;
             tmp.flush()?;
 
             let path = tmp.path().to_path_buf();

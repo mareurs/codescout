@@ -1082,12 +1082,48 @@ async fn run_command_inner(
                 // the agent needs) appears before content fields (stdout/failures/first_error).
                 rebuild_buffered_summary(cmd_summary, &output_id)
             } else {
-                // Short output — return directly
-                json!({
-                    "stdout": raw_stdout,
-                    "stderr": raw_stderr,
-                    "exit_code": exit_code,
-                })
+                // Short output — but for buffer-only queries, a single grep match
+                // inside a compact-JSON @tool_* ref can be thousands of bytes even
+                // with just 1 line.  That would push the result JSON over
+                // TOOL_OUTPUT_BUFFER_THRESHOLD and cause call_content to store it
+                // as a *new* @tool_* ref, creating an infinite query loop:
+                //   grep @tool_A → giant line → @tool_B → read_file @tool_B → @tool_C…
+                // Apply the same byte budget used in the needs_summary+buffer_only
+                // path so that never happens.
+                if buffer_only
+                    && raw_stdout.len() + raw_stderr.len()
+                        > crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD
+                            .saturating_sub(300 /* JSON overhead */)
+                {
+                    const JSON_OVERHEAD: usize = 300;
+                    let byte_budget = crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD
+                        .saturating_sub(JSON_OVERHEAD)
+                        .saturating_sub(raw_stderr.len());
+                    let (stdout_out, stdout_shown, stdout_total) =
+                        truncate_lines_and_bytes(&raw_stdout, BUFFER_QUERY_INLINE_CAP, byte_budget);
+                    let mut r = json!({
+                        "stdout": stdout_out,
+                        "stderr": raw_stderr,
+                        "exit_code": exit_code,
+                    });
+                    if stdout_shown < stdout_total {
+                        r["truncated"] = json!(true);
+                        r["hint"] = json!(
+                            "Match truncated: a single grep match inside a @tool_* ref \
+                             contains compact JSON (one very long line). \
+                             Use read_file(@tool_abc, json_path=\"$.field\") to extract \
+                             a specific field, or read_file(@tool_abc, start_line=N, \
+                             end_line=M) to browse sections of the pretty-printed result."
+                        );
+                    }
+                    r
+                } else {
+                    json!({
+                        "stdout": raw_stdout,
+                        "stderr": raw_stderr,
+                        "exit_code": exit_code,
+                    })
+                }
             };
 
             // Attach unfiltered_output ref if we captured via tee
@@ -1967,6 +2003,53 @@ mod tests {
             result.get("output_id").is_none(),
             "should not be buffered: {:?}",
             result
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn run_command_buffer_only_large_single_line_does_not_rebuffer() {
+        // Regression: grep on a @tool_* ref returns the entire compact-JSON blob as
+        // one line.  Even with line count = 1 (< SUMMARY_LINE_THRESHOLD), the byte
+        // size can exceed TOOL_OUTPUT_BUFFER_THRESHOLD.  The result must be truncated
+        // inline — never stored as a new @tool_* ref (which would create an infinite
+        // query loop: grep @tool_A → @tool_B → grep @tool_B → @tool_C…).
+        let (_dir, ctx) = project_ctx().await;
+
+        // Create a @cmd_* buffer whose content is one very long line (>5 KB).
+        let long_line = "x".repeat(crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD + 1000);
+        let id = ctx
+            .output_buffer
+            .store("cmd".into(), long_line, "".into(), 0);
+
+        // cat @cmd_* triggers buffer_only; the single-line stdout exceeds the byte budget.
+        let result = RunCommand
+            .call(json!({ "command": format!("cat {}", id) }), &ctx)
+            .await
+            .expect("should return truncated inline result, not error");
+
+        // Must be inline (no output_id) and must be truncated with a hint.
+        assert!(
+            result.get("output_id").is_none(),
+            "must not create new buffer ref: {:?}",
+            result
+        );
+        assert!(
+            result.get("stdout").is_some(),
+            "must have stdout field: {:?}",
+            result
+        );
+        assert_eq!(
+            result.get("truncated").and_then(|v| v.as_bool()),
+            Some(true),
+            "must be marked truncated: {:?}",
+            result
+        );
+        let hint = result["hint"].as_str().unwrap_or("");
+        assert!(
+            hint.contains("read_file"),
+            "hint should guide to read_file: {}",
+            hint
         );
     }
 
