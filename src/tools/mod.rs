@@ -31,8 +31,19 @@ use serde_json::Value;
 use crate::agent::Agent;
 use crate::lsp::LspProvider;
 
-/// Compact JSON size above which tool output is routed through OutputBuffer.
-pub(crate) const TOOL_OUTPUT_BUFFER_THRESHOLD: usize = 5_000;
+/// Maximum estimated tokens for inline tool output.
+/// Content exceeding this is buffered and summarized.
+/// Token estimate: ~4 bytes per token.
+pub(crate) const MAX_INLINE_TOKENS: usize = 2_500;
+
+/// Byte equivalent of MAX_INLINE_TOKENS — used for byte-budget arithmetic
+/// in truncation code (run_command buffer-only paths).
+pub(crate) const TOOL_OUTPUT_BUFFER_THRESHOLD: usize = MAX_INLINE_TOKENS * 4;
+
+/// Check whether content should be buffered based on estimated token count.
+pub(crate) fn exceeds_inline_limit(text: &str) -> bool {
+    text.len() / 4 > MAX_INLINE_TOKENS
+}
 /// Soft cap for compact summaries shown alongside `@tool_*` refs.
 /// Truncation prefers whole-line boundaries. See [`truncate_compact`].
 pub(crate) const COMPACT_SUMMARY_MAX_BYTES: usize = 2_000;
@@ -268,7 +279,7 @@ pub trait Tool: Send + Sync {
         let val = self.call(input, ctx).await?;
         let json = serde_json::to_string(&val).unwrap_or_else(|_| val.to_string());
 
-        if json.len() > TOOL_OUTPUT_BUFFER_THRESHOLD {
+        if exceeds_inline_limit(&json) {
             let json_len = json.len();
             let ref_id = ctx.output_buffer.store_tool(self.name(), json);
             let raw_summary = self
@@ -549,11 +560,10 @@ mod tests {
     // ---- threshold + summary-cap tests ----
 
     #[tokio::test]
-    async fn call_content_buffers_at_5k_threshold() {
-        // Build a Value whose JSON is ~6 KB — above the new 5 KB threshold
-        // but below the old 10 KB threshold. With the new threshold this MUST buffer.
+    async fn call_content_buffers_at_token_threshold() {
+        // Build a Value whose JSON is ~12 KB — above MAX_INLINE_TOKENS (2500 tokens ≈ 10 KB).
         let ctx = bare_ctx().await;
-        let items: Vec<Value> = (0..75)
+        let items: Vec<Value> = (0..150)
             .map(|i| {
                 serde_json::json!({
                     "file": format!("src/tools/file_{}.rs", i),
@@ -564,22 +574,18 @@ mod tests {
             .collect();
         let result = serde_json::json!({ "matches": items, "total": items.len() });
 
-        // Sanity: confirm the JSON is in the 5–10 KB range
+        // Sanity: confirm the JSON exceeds the token-based threshold (~10 KB)
         let json_len = serde_json::to_string(&result).unwrap().len();
         assert!(
-            json_len > 5_000,
-            "test data must be > 5 KB, got {} bytes",
-            json_len
-        );
-        assert!(
-            json_len < 10_000,
-            "test data must be < 10 KB, got {} bytes",
+            json_len > MAX_INLINE_TOKENS * 4,
+            "test data must exceed token threshold ({} bytes), got {} bytes",
+            MAX_INLINE_TOKENS * 4,
             json_len
         );
 
         let tool = EchoTool {
             result,
-            user_summary: Some("75 matches".to_string()),
+            user_summary: Some("150 matches".to_string()),
         };
         let content = tool
             .call_content(serde_json::json!({}), &ctx)
@@ -588,14 +594,14 @@ mod tests {
         let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
         assert!(
             text.contains("@tool_"),
-            "6 KB output must be buffered, got: {}",
+            "output exceeding token limit must be buffered, got: {}",
             &text[..text.len().min(200)]
         );
     }
 
     #[tokio::test]
-    async fn call_content_does_not_buffer_under_5k() {
-        // ~2 KB result — must stay inline (no @tool_ ref)
+    async fn call_content_does_not_buffer_under_token_limit() {
+        // ~2 KB result — well under MAX_INLINE_TOKENS, must stay inline (no @tool_ ref)
         let ctx = bare_ctx().await;
         let items: Vec<Value> = (0..30)
             .map(|i| serde_json::json!({ "file": format!("src/a_{}.rs", i), "line": i }))
