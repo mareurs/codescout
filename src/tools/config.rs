@@ -213,6 +213,23 @@ impl Tool for ProjectStatus {
             }
         }
 
+        // --- Memory staleness section ---
+        let staleness_result = ctx
+            .agent
+            .with_project(|p| {
+                let memories_dir = p.root.join(".codescout").join("memories");
+                crate::memory::anchors::check_all_memories(&p.root, &memories_dir)
+            })
+            .await;
+        match staleness_result {
+            Ok(staleness) => {
+                result["memory_staleness"] = staleness;
+            }
+            Err(e) => {
+                tracing::debug!("memory staleness check failed: {e}");
+            }
+        }
+
         Ok(result)
     }
 
@@ -362,5 +379,57 @@ mod tests {
             result.get("libraries").is_some(),
             "missing libraries section"
         );
+    }
+
+    #[tokio::test]
+    async fn project_status_includes_memory_staleness() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let ctx = ToolContext {
+            agent,
+            lsp: lsp(),
+            output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+        };
+
+        // Create memories dir and a memory file
+        let memories_dir = dir.path().join(".codescout/memories");
+        std::fs::create_dir_all(&memories_dir).unwrap();
+        std::fs::write(memories_dir.join("architecture.md"), "# Arch").unwrap();
+
+        // Create anchored file and sidecar
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/server.rs"), "fn main() {}").unwrap();
+
+        let anchors =
+            crate::memory::anchors::seed_anchors(dir.path(), "Uses `src/server.rs`.").unwrap();
+        crate::memory::anchors::write_anchor_file(
+            &memories_dir.join("architecture.anchors.toml"),
+            &anchors,
+        )
+        .unwrap();
+
+        // Before change — should be fresh
+        let result = ProjectStatus.call(json!({}), &ctx).await.unwrap();
+        let staleness = &result["memory_staleness"];
+        assert!(staleness["stale"].as_array().unwrap().is_empty());
+        assert!(staleness["fresh"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("architecture")));
+
+        // Modify the anchored file
+        std::fs::write(dir.path().join("src/server.rs"), "fn changed() {}").unwrap();
+
+        let result = ProjectStatus.call(json!({}), &ctx).await.unwrap();
+        let staleness = &result["memory_staleness"];
+        let stale = staleness["stale"].as_array().unwrap();
+        assert_eq!(stale.len(), 1);
+        assert_eq!(stale[0]["topic"], "architecture");
+        assert!(stale[0]["changed_files"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("src/server.rs")));
     }
 }

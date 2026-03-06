@@ -390,6 +390,7 @@ impl Tool for Onboarding {
                 embeddings: Default::default(),
                 ignored_paths: Default::default(),
                 security: Default::default(),
+                memory: Default::default(),
             };
             let toml_str = toml::to_string_pretty(&config)?;
             std::fs::write(&config_path, &toml_str)?;

@@ -3,11 +3,28 @@
 See `docs/TODO-tool-misbehaviors.md` for the complete living log (BUG-001 through BUG-025+).
 This captures structural gotchas not listed there.
 
+## MCP Client Sends Booleans as JSON Strings (Critical)
+
+Claude Code's MCP client serializes boolean tool parameters as **JSON strings**, not native
+JSON booleans. `input["force"]` arrives as `Value::String("true")`, not `Value::Bool(true)`.
+
+**Impact:** `val.as_bool()` returns `None` for strings → silently defaults to `false`.
+
+**Fix (applied):** Use `parse_bool_param()` from `src/tools/mod.rs:159` at every boolean
+input site. Applied across all tool files (37 sites, commit `03382cc`, 2026-03-06):
+`workflow.rs`, `file.rs`, `symbol.rs`, `semantic.rs`, `library.rs`, `memory.rs`, `github.rs`.
+
+```rust
+let force = parse_bool_param(&input["force"]);
+```
+
+**Rule:** Never use `.as_bool().unwrap_or(false)` on tool inputs.
+
 ## GitHub Tools Use `gh` CLI (Not HTTP)
 
 All `github_identity`, `github_issue`, `github_pr`, `github_file`, `github_repo` tools
 shell out to the `gh` CLI (`src/tools/github.rs::run_gh()`). If `gh` is not installed or
-not authenticated, they silently return an error. Not documented in ARCHITECTURE.md.
+not authenticated, they silently return an error.
 
 ## sqlite-vec Is NOT Active
 
@@ -16,17 +33,14 @@ in `src/embed/index.rs` is commented out (TODO). Semantic search uses pure-Rust 
 similarity that loads all embeddings into memory. Large indexes can be slow/OOM.
 Verify current state: `search_pattern("is_vec0_active", path="src/embed/index.rs")`.
 
-## Tool Count Is 28, Not 23
+## `find_symbol(include_body=true)` — FIXED (was: body truncation)
 
-`CLAUDE.md` says "23 tools registered" — outdated. Check `src/server.rs::from_parts()` for
-the actual list. The discrepancy grew as GitHub tools were added without updating CLAUDE.md.
+~~`workspace/symbol` returns a single-line name position, `start_line == end_line`.~~
 
-## `find_symbol(include_body=true)` Truncation Bug
-
-`workspace/symbol` returns a single-line name position, not the full declaration range.
-Result: `start_line == end_line`, body contains only the signature.
-**Workaround:** `list_symbols(path)` for line ranges → `read_file(path, start_line, end_line)`.
-See `MEMORY.md` for the detailed workaround pattern.
+**Fixed:** `validate_symbol_range()` now detects degenerate ranges and falls back to
+`resolve_range_via_document_symbols()` to get the real declaration range from
+`textDocument/documentSymbol`. See `src/tools/symbol.rs:260` and `src/tools/symbol.rs:820`.
+No workaround needed.
 
 ## `replace_symbol` / `remove_symbol` LSP Range Quirks
 

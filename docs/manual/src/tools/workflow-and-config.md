@@ -6,7 +6,6 @@ These tools manage the agent's working context: which project is active, whether
 
 **Purpose:** Perform initial project discovery — detect languages, list the top-level directory structure, create a default config file, and write a startup memory entry.
 
-**Parameters:** None. Requires an active project (set one with `activate_project` first).
 **Parameters:**
 
 | Name | Type | Required | Default | Description |
@@ -47,55 +46,99 @@ Requires an active project (set one with `activate_project` first).
 
 ## `run_command`
 
-**Purpose:** Run a shell command in the active project root and return its stdout, stderr, and exit code.
+**Purpose:** Run a shell command in the active project root. Short output is returned inline; large output is stored in a session buffer and returned as a `@cmd_*` handle that you can query in follow-up calls.
 
 **Parameters:**
 
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `command` | string | yes | — | The shell command to run |
-| `timeout_secs` | integer | no | `30` | Maximum seconds to wait before killing the process |
+| `command` | string | yes | — | Shell command to execute. May reference output buffer handles with `@cmd_*` syntax (e.g. `grep FAILED @cmd_a1b2`). Never prefix with `cd /abs/path &&` — already in the project root. |
+| `cwd` | string | no | — | Subdirectory relative to project root to run the command in. Validated to stay within the project. |
+| `timeout_secs` | integer | no | `30` | Max execution time in seconds. Ignored when `run_in_background` is true. |
+| `acknowledge_risk` | boolean | no | `false` | Bypass the dangerous-command check directly. Prefer the `@ack_*` handle protocol — see below. |
+| `run_in_background` | boolean | no | `false` | Spawn the command detached and return immediately with a log path. Use for long-running processes or commands that background subprocesses with `&`. |
 
-**Example:**
+**Example (run a test suite):**
 
 ```json
-{ "command": "cargo test --lib 2>&1 | tail -20", "timeout_secs": 120 }
+{ "command": "cargo test", "timeout_secs": 120 }
 ```
 
-**Output (success):**
+**Example (run from a subdirectory):**
+
+```json
+{ "command": "npm test", "cwd": "frontend" }
+```
+
+---
+
+### Output shapes
+
+#### Short output (< ~50 lines) — inline
 
 ```json
 {
   "stdout": "running 42 tests\ntest result: ok. 42 passed; 0 failed",
   "stderr": "",
-  "exit_code": 0,
-  "warning": "Shell commands execute with full user permissions. Only use for build/test commands."
+  "exit_code": 0
 }
 ```
 
-**Output (timeout):**
+#### Large output — buffered
+
+When output exceeds the inline threshold, the full content is stored in a session buffer and a smart summary is returned alongside the handle:
 
 ```json
 {
-  "timed_out": true,
-  "stdout": "",
-  "stderr": "Command timed out after 30 seconds",
-  "exit_code": null
+  "output_id": "@cmd_a1b2c3",
+  "exit_code": 1,
+  "passed": 39,
+  "failed": 3,
+  "failures": ["test_foo", "test_bar", "test_baz"]
 }
 ```
 
-**Output (large output truncated):**
+Query the buffer in a follow-up call — **do not pipe**:
+
+```json
+{ "command": "grep 'FAILED\\|error' @cmd_a1b2c3" }
+```
+
+The `output_id` handle stays valid for the session (LRU, max 50 entries). Buffer queries can also use `sed -n 'N,Mp' @cmd_a1b2c3` to page through output.
+
+#### Dangerous command — pending acknowledgement
+
+Commands matching dangerous patterns (e.g. `rm -rf`, `git reset --hard`) return a `pending_ack` handle instead of executing:
 
 ```json
 {
-  "stdout": "...(first 100KB)...",
-  "stderr": "",
-  "exit_code": 0,
-  "stdout_truncated": true,
-  "stdout_total_bytes": 524288,
-  "warning": "Shell commands execute with full user permissions. Only use for build/test commands."
+  "pending_ack": "@ack_d4e5f6",
+  "message": "Dangerous command detected: rm -rf target/",
+  "command": "rm -rf target/"
 }
 ```
+
+Re-run with just the handle to confirm:
+
+```json
+{ "command": "@ack_d4e5f6" }
+```
+
+Handles expire at end of session. Alternatively, pass `acknowledge_risk: true` on the original call to skip the confirmation step.
+
+#### Background command
+
+```json
+{
+  "status": "running",
+  "log_file": "/tmp/codescout-bg-xxxx.log",
+  "ref_id": "@cmd_a1b2c3"
+}
+```
+
+Monitor with `run_command("tail -50 /tmp/codescout-bg-xxxx.log")`.
+
+---
 
 ### Security
 
@@ -108,19 +151,22 @@ Shell execution is **disabled by default**. To enable it, add to `.codescout/pro
 shell_command_mode = "warn"   # or "unrestricted"
 ```
 
-The `shell_command_mode` setting controls behaviour:
-
 | Value | Behaviour |
 |-------|-----------|
 | `"disabled"` | All calls return an error. This is the default. |
-| `"warn"` | Commands execute; output includes a reminder about permissions. |
-| `"unrestricted"` | Commands execute; no warning is added to the output. |
-
-Output is capped at `shell_output_limit_bytes` (default 102400, i.e. 100 KB) per stream. When output is truncated, the response includes `stdout_truncated: true` and `stdout_total_bytes` so you know how much was omitted. Pipe through `tail`, `head`, or `grep` inside the command to stay within the limit for verbose commands.
+| `"warn"` | Commands execute normally. |
+| `"unrestricted"` | Commands execute normally (alias for `warn`, no functional difference). |
 
 On Unix the command runs under `sh -c`. On Windows it runs under `cmd /C`.
 
-**Tips:** Use `run_command` for build, test, and lint commands where the output tells you whether your changes are correct. Increase `timeout_secs` for slow build steps like `cargo build` or full test suites. Pipe verbose output through `tail -N` to avoid hitting the output limit.
+---
+
+**Tips:**
+
+- **Never pipe inside the command to filter output** (`cargo test 2>&1 | grep FAILED`). Run the command bare, then use `grep FAILED @cmd_id` in a follow-up call. Buffer queries preserve your context window; piped commands waste it.
+- For slow build steps (`cargo build`, full test suites), increase `timeout_secs` to 120–300.
+- Use `cwd` to run commands in subdirectories rather than `cd subdir &&` prefixes.
+- For commands that background subprocesses with `&`, use `run_in_background: true` — otherwise `run_command` will hang until timeout waiting for the shell to exit.
 
 ---
 
@@ -170,7 +216,7 @@ The tool returns an error if the path does not exist or is not a directory.
 
 ## `project_status`
 
-**Purpose:** Display the full state of the active project in one call: config, semantic index health, usage telemetry summary, and library registry. Combines what was previously `get_config` and `index_status`.
+**Purpose:** Display the full state of the active project in one call: config, semantic index health, library registry, and memory staleness. Combines what was previously `get_config` and `index_status`.
 
 **Parameters:**
 
@@ -179,7 +225,6 @@ The tool returns an error if the path does not exist or is not a directory.
 | `threshold` | number | no | — | When provided, includes drift data: minimum `avg_drift` to include (0.0–1.0) |
 | `path` | string | no | — | SQL LIKE pattern to filter drift results by file path (e.g. `"src/tools/%"`) |
 | `detail_level` | string | no | `"exploring"` | Drift output detail: `"full"` includes most-drifted chunk content |
-| `window` | string | no | `"30d"` | Time window for usage summary: `"1h"`, `"24h"`, `"7d"`, or `"30d"` |
 
 **Example (basic):**
 
@@ -190,7 +235,7 @@ The tool returns an error if the path does not exist or is not a directory.
 **Example (with drift query):**
 
 ```json
-{ "threshold": 0.2, "window": "7d" }
+{ "threshold": 0.2 }
 ```
 
 **Output:**
@@ -200,18 +245,36 @@ The tool returns an error if the path does not exist or is not a directory.
   "project_root": "/home/user/projects/my-service",
   "config": {
     "project": { "name": "my-service", "languages": ["rust", "toml"] },
-    "embeddings": { "model": "sentence-transformers/all-MiniLM-L6-v2" }
+    "embeddings": { "model": "ollama:mxbai-embed-large" }
   },
   "index": {
     "indexed": true,
     "files": 47,
     "chunks": 312,
-    "model": "sentence-transformers/all-MiniLM-L6-v2",
-    "last_updated": "2025-01-15T10:30:00Z"
+    "model": "ollama:mxbai-embed-large",
+    "last_updated": "2026-03-08T10:30:00Z",
+    "git_sync": { "status": "up_to_date" }
   },
-  "libraries": { "count": 2, "indexed": 1 }
+  "libraries": { "count": 2, "indexed": 1 },
+  "memory_staleness": {
+    "stale": ["architecture", "conventions/naming"],
+    "fresh": ["onboarding", "gotchas"],
+    "untracked": ["debugging/lsp-timeouts"]
+  }
 }
 ```
+
+#### `memory_staleness` section
+
+This section is always included. It categorises memory topics by anchor health:
+
+| Key | Meaning |
+|-----|---------|
+| `stale` | Topics where anchored source files have changed since the memory was last written — the memory may be outdated |
+| `fresh` | Topics whose anchored files match the stored hashes — memory is current |
+| `untracked` | Topics with no anchor sidecars — staleness cannot be determined |
+
+When topics appear in `stale`, review them and either rewrite the memory (`action: "write"`) or confirm it is still accurate and call `memory(action: "refresh_anchors", topic: ...)` to clear the warning.
 
 **Tips:**
 

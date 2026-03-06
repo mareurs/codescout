@@ -131,6 +131,133 @@ Pass `private: true` to any action to target the gitignored private store at `.c
 
 ---
 
+## Semantic Memory Actions
+
+In addition to the file-backed key/value actions above, `memory` supports four **semantic** actions that store and retrieve memories as vector embeddings. Semantic memories are searchable by meaning rather than by exact topic name.
+
+> **Requires a configured embedding model.** Semantic actions fail gracefully if no embedding model is available. The file-backed actions (`read`/`write`/`list`/`delete`) always work regardless.
+
+### `action: "remember"`
+
+Store a piece of knowledge in the semantic memory store.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `content` | string | **yes** | The text to embed and store |
+| `title` | string | no | Short label. Auto-extracted from the first sentence of `content` if omitted |
+| `bucket` | string | no | Category: `"code"`, `"system"`, `"preferences"`, or `"unstructured"` (default). Always specify — it improves recall precision |
+
+**Bucket guide:**
+
+| Bucket | Use for |
+|--------|---------|
+| `"code"` | Functions, patterns, APIs, naming conventions, type/module knowledge |
+| `"system"` | Build/deploy/config, CI, infra, environment, credentials, migrations |
+| `"preferences"` | Style habits, things to always/never do |
+| `"unstructured"` | Decisions, context, notes (default) |
+
+**Example:**
+
+```json
+{
+  "action": "remember",
+  "content": "RecoverableError is used for expected, input-driven failures (path not found, unsupported file type). Use anyhow::bail! for genuine tool failures (LSP crash, programming error).",
+  "bucket": "code"
+}
+```
+
+**Output:** `"ok"`
+
+---
+
+### `action: "recall"`
+
+Search semantic memories by meaning.
+
+**Parameters:**
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `query` | string | **yes** | — | Natural language query |
+| `limit` | integer | no | `5` | Max results |
+| `bucket` | string | no | — | Filter to a specific bucket |
+| `detail_level` | string | no | compact | Pass `"full"` to include complete memory content instead of a truncated preview |
+
+**Example:**
+
+```json
+{ "action": "recall", "query": "how errors are handled in tools", "bucket": "code" }
+```
+
+**Output:**
+
+```json
+{
+  "results": [
+    {
+      "id": 42,
+      "bucket": "code",
+      "title": "RecoverableError vs anyhow::bail",
+      "content": "RecoverableError is used for expected...",
+      "similarity": "0.91",
+      "created_at": "2026-03-08T10:15:00Z"
+    }
+  ]
+}
+```
+
+In compact mode (default), `content` is truncated to the first line (~50 chars). Use `detail_level: "full"` to get the complete text.
+
+**Tips:** Use `recall` at the start of a session to find relevant past decisions before starting work. The `id` field is needed for `forget`.
+
+---
+
+### `action: "forget"`
+
+Delete a semantic memory by its numeric ID.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `id` | integer | **yes** | The memory ID from a `recall` result |
+
+**Example:**
+
+```json
+{ "action": "forget", "id": 42 }
+```
+
+**Output:** `"ok"`
+
+**Tips:** Use `recall` first to find the ID of the entry to remove. Forgetting an ID that does not exist is a no-op.
+
+---
+
+### `action: "refresh_anchors"`
+
+Re-hash the path anchors for a topic to clear a staleness warning without rewriting the memory content.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `topic` | string | **yes** | The memory topic to refresh |
+
+**Example:**
+
+```json
+{ "action": "refresh_anchors", "topic": "architecture" }
+```
+
+**Output:** `"ok"`
+
+**When to use:** `project_status` includes a `memory_staleness` section listing topics whose anchored source files have changed since the memory was last written. If you review the memory and confirm it is still accurate (the files changed but the memory's facts did not), call `refresh_anchors` to acknowledge — this updates the file hashes without changing the memory content. If the memory is genuinely outdated, use `write` to update it (which automatically re-anchors).
+
+---
+
 ## Using Memory Effectively
 
 ### Storage layout

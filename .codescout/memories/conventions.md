@@ -10,10 +10,39 @@ the canonical output-sizing rules. This memory captures naming and code patterns
 | Tool structs | PascalCase, noun phrase | `FindSymbol`, `ListSymbols`, `ReplaceSymbol` |
 | Tool names (MCP) | snake_case | `"find_symbol"`, `"list_symbols"` |
 | `impl Tool for X` method `name()` | matches snake_case struct | `fn name() { "find_symbol" }` |
-| Error variants | `RecoverableError::new("msg").with_hint("hint")` | path not found, unsupported type |
 | Helper fns in tool files | snake_case, descriptive | `get_lsp_client`, `collect_matching`, `symbol_to_json` |
 | Test modules | `mod tests` inline in file | all tests co-located with implementation |
 | Test helpers | descriptive snake_case | `ctx_with_mock`, `project_with_files`, `make_server` |
+
+## RecoverableError API
+
+Two separate constructors — they are NOT chainable:
+
+```rust
+// No hint:
+RecoverableError::new("path not found")
+
+// With hint (static constructor, not a builder):
+RecoverableError::with_hint("path not found", "Pass an absolute path within the project root")
+```
+
+Both are defined in `src/tools/mod.rs:86` and `src/tools/mod.rs:93`.
+
+## Boolean Parameters
+
+Claude Code's MCP client serializes boolean parameters as JSON strings (`"true"` instead
+of `true`). Use `parse_bool_param()` from `src/tools/mod.rs:159` at every boolean input site:
+
+```rust
+let force = parse_bool_param(&input["force"]);
+```
+
+This handles `Value::Bool`, `Value::String("true"/"false")`, and null gracefully.
+**Never use `.as_bool().unwrap_or(false)` on tool inputs** — it silently returns `false`
+for string-encoded booleans. The fix is applied across all tool files (37 sites, commit `03382cc`).
+
+Exception: `include_body` in `symbol.rs` uses an inline equivalent rather than the helper —
+same semantics, different form.
 
 ## Tool Implementation Pattern
 
@@ -30,7 +59,7 @@ impl Tool for MyTool {
         let path = require_str_param(&input, "path")?;        // use helpers from mod.rs
         // ... logic ...
         let (items, overflow) = guard.cap_items(results, "hint for narrowing");
-        Ok(json!({ "items": items, "overflow": overflow }))   // overflow is Option<OverflowInfo>
+        Ok(json!({ "items": items, "overflow": overflow }))
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
@@ -41,7 +70,7 @@ impl Tool for MyTool {
 
 ## Error Handling
 
-- Expected, input-driven failures → `RecoverableError::new("msg")` or `.with_hint("fix")`
+- Expected, input-driven failures → `RecoverableError::new("msg")` or `RecoverableError::with_hint("msg", "fix")`
 - Genuine tool failures (LSP crash, programming bug) → `anyhow::bail!("...")`
 - Never return `anyhow::bail!` for missing paths, unsupported types, empty results
 

@@ -36,6 +36,7 @@ ranked chunks with file path, line range, and similarity score.
 | `detail_level` | string | no | compact | `"full"` returns the complete chunk content instead of a 150-character preview |
 | `offset` | integer | no | `0` | Skip this many results (for pagination) |
 | `scope` | string | no | `"project"` | Search scope: `"project"` (default), `"lib:<name>"` for a specific library, `"libraries"` for all libraries, `"all"` for everything |
+| `include_memories` | boolean | no | `false` | If true, also search semantic memories and include them in results tagged with `"source": "memory"` |
 
 **Example:**
 
@@ -127,6 +128,7 @@ run unless `force` is set.
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
 | `force` | boolean | no | `false` | Force full reindex, ignoring cached file hashes |
+| `scope` | string | no | `"project"` | What to index: `"project"` (default) for the active project, or `"lib:<name>"` to index a registered library. Replaces the former `index_library` tool. |
 
 **Example (incremental update):**
 

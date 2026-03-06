@@ -39,14 +39,14 @@ memory files alongside code, or keep them local.
 At the start of a session:
 1. Call `onboarding` — it lists existing memories and skips heavy discovery if
    memories are already written
-2. Call `read_memory` for topics relevant to the current task
+2. Call `memory(action: "read", topic: ...)` for topics relevant to the current task
 
 During a session:
-3. Call `write_memory` when you discover something worth remembering — a
+3. Call `memory(action: "write", topic: ..., content: ...)` when you discover something worth remembering — a
    naming convention, an architectural decision, a gotcha
 
 At the end of a session:
-4. Call `write_memory` to update entries if your understanding changed
+4. Call `memory(action: "write", ...)` to update entries if your understanding changed
 
 ## What Makes a Good Memory Entry
 
@@ -72,8 +72,7 @@ write it manually.
 
 ## Further Reading
 
-- [Memory Tools](../tools/memory.md) — full reference for `write_memory`,
-  `read_memory`, `list_memories`, and `delete_memory`
+- [Memory Tools](../tools/memory.md) — full reference for `memory(action: "read/write/list/delete/remember/recall/forget/refresh_anchors")`
 - [Dashboard](dashboard.md) — the Memories page lets you browse and edit topics
   in a browser UI
 - [Workflow & Config Tools](../tools/workflow-and-config.md) — `onboarding`

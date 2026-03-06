@@ -15,6 +15,7 @@ All notable changes to codescout are documented here.
 
 ## [0.2.0] — 2026-03-09
 
+
 > **TL;DR:** The project was renamed from `code-explorer` to `codescout`. If you're
 > migrating, update your MCP config and any scripts that reference the old binary name.
 > [Full story and migration guide →](docs/manual/src/history.md)
@@ -47,11 +48,17 @@ All notable changes to codescout are documented here.
 #### New tools
 - `goto_definition` — LSP-backed jump to symbol definition; auto-discovers libraries
 - `hover` — LSP type info and doc comments at a given position
-- `edit_lines` — line-based splice edit (replace/insert/delete by 1-indexed position)
 - `insert_code` — insert code before or after a named symbol (replaces the separate
   `insert_before_symbol` / `insert_after_symbol` tools via a `position` parameter)
 - `list_libraries` — list all registered external libraries and their index status
-- `index_library` — build embedding index for a registered library
+- `memory` semantic actions — `remember`, `recall`, `forget`, `refresh_anchors` added
+  to the unified `memory` tool for vector-backed episodic memory
+- `github_identity`, `github_issue`, `github_pr`, `github_file`, `github_repo` — five
+  new GitHub tools backed by the `gh` CLI
+
+> **Note:** `edit_lines` (line-splice editing) and `index_library` (separate library
+> index tool) were drafted during this cycle but not shipped. Library indexing is covered
+> by `index_project(scope: "lib:<name>")` instead.
 
 #### Library search
 - Symbol tools (`list_symbols`, `find_symbol`, `find_references`, `goto_definition`,

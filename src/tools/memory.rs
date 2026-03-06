@@ -1,5 +1,7 @@
 //! Memory tools: persistent per-project knowledge store.
 
+use std::collections::{HashMap, HashSet};
+
 use super::{parse_bool_param, RecoverableError, Tool, ToolContext};
 use serde_json::{json, Value};
 
@@ -264,6 +266,79 @@ async fn cross_embed_memory(ctx: &ToolContext, topic: &str, content: &str) -> an
     Ok(())
 }
 
+/// Create semantic anchors for a markdown memory by embedding it and finding
+/// similar code chunks. Excludes files already covered by path anchors.
+async fn create_semantic_anchors(
+    ctx: &ToolContext,
+    topic: &str,
+    content: &str,
+    path_anchor_files: &HashSet<String>,
+) -> anyhow::Result<()> {
+    let (root, model, min_sim, top_n) = {
+        let inner = ctx.agent.inner.read().await;
+        let p = inner
+            .active_project
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no project"))?;
+        (
+            p.root.clone(),
+            p.config.embeddings.model.clone(),
+            p.config.memory.semantic_anchor_min_similarity,
+            p.config.memory.semantic_anchor_top_n,
+        )
+    };
+
+    let embedder = ctx.agent.get_or_create_embedder(&model).await?;
+    let embedding = crate::embed::embed_one(embedder.as_ref(), content).await?;
+
+    let path_anchors = path_anchor_files.clone();
+    let topic_owned = topic.to_string();
+    tokio::task::spawn_blocking(move || {
+        let conn = crate::embed::index::open_db(&root)?;
+        crate::embed::index::ensure_memory_anchors(&conn)?;
+
+        // Delete old semantic anchors for this memory
+        crate::embed::index::delete_semantic_anchors(&conn, "markdown", &topic_owned)?;
+
+        // Search for similar code chunks
+        let results = crate::embed::index::search(&conn, &embedding, top_n)?;
+
+        // Deduplicate by file, keep highest similarity
+        let mut best_per_file: HashMap<String, (f32, String)> = HashMap::new();
+        for r in &results {
+            if r.score < min_sim {
+                continue;
+            }
+            if path_anchors.contains(&r.file_path) {
+                continue;
+            }
+            let hash = crate::embed::index::get_file_hash(&conn, &r.file_path)?.unwrap_or_default();
+            best_per_file
+                .entry(r.file_path.clone())
+                .and_modify(|(old_sim, _)| {
+                    if r.score > *old_sim {
+                        *old_sim = r.score;
+                    }
+                })
+                .or_insert((r.score, hash));
+        }
+
+        for (file_path, (sim, hash)) in &best_per_file {
+            crate::embed::index::insert_semantic_anchor(
+                &conn,
+                "markdown",
+                &topic_owned,
+                file_path,
+                hash,
+                *sim,
+            )?;
+        }
+        anyhow::Ok(())
+    })
+    .await??;
+    Ok(())
+}
+
 #[async_trait::async_trait]
 impl Tool for Memory {
     fn name(&self) -> &str {
@@ -287,8 +362,8 @@ impl Tool for Memory {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["read", "write", "list", "delete", "remember", "recall", "forget"],
-                    "description": "Operation to perform"
+                    "enum": ["read", "write", "list", "delete", "remember", "recall", "forget", "refresh_anchors"],
+                    "description": "Operation to perform. refresh_anchors: re-hash anchored files for a topic to clear staleness."
                 },
                 "topic": {
                     "type": "string",
@@ -357,6 +432,39 @@ impl Tool for Memory {
                 if !private {
                     if let Err(e) = cross_embed_memory(ctx, topic, content).await {
                         tracing::debug!("cross-embed memory failed (non-fatal): {e}");
+                    }
+                }
+
+                // Seed/merge path anchors (best-effort, non-fatal)
+                if !private {
+                    if let Ok(root) = ctx.agent.require_project_root().await {
+                        let memories_dir = root.join(".codescout").join("memories");
+                        if let Err(e) = crate::memory::anchors::update_anchors_on_write(
+                            &root, &memories_dir, topic, content,
+                        ) {
+                            tracing::debug!("anchor update failed (non-fatal): {e}");
+                        }
+                    }
+                }
+
+                // Create semantic anchors (best-effort, non-fatal)
+                if !private {
+                    let path_files: HashSet<String> = {
+                        if let Ok(root) = ctx.agent.require_project_root().await {
+                            let memories_dir = root.join(".codescout").join("memories");
+                            let sidecar_path =
+                                memories_dir.join(format!("{}.anchors.toml", topic));
+                            crate::memory::anchors::read_anchor_file(&sidecar_path)
+                                .map(|af| af.anchors.into_iter().map(|a| a.path).collect())
+                                .unwrap_or_default()
+                        } else {
+                            HashSet::new()
+                        }
+                    };
+                    if let Err(e) =
+                        create_semantic_anchors(ctx, topic, content, &path_files).await
+                    {
+                        tracing::debug!("semantic anchor creation failed (non-fatal): {e}");
                     }
                 }
 
@@ -513,14 +621,26 @@ impl Tool for Memory {
                 })
                 .await??;
 
+                let guard = super::output::OutputGuard::from_input(&input);
                 let items: Vec<serde_json::Value> = results
                     .iter()
                     .map(|r| {
+                        let content = if guard.should_include_body() {
+                            r.content.clone()
+                        } else {
+                            // Exploring mode: first line only, max 50 chars
+                            let first_line = r.content.lines().next().unwrap_or("").trim();
+                            if first_line.len() > 50 {
+                                format!("{}...", &first_line[..47])
+                            } else {
+                                first_line.to_string()
+                            }
+                        };
                         json!({
                             "id": r.id,
                             "bucket": r.bucket,
                             "title": r.title,
-                            "content": r.content,
+                            "content": content,
                             "similarity": format!("{:.2}", r.similarity),
                             "created_at": r.created_at,
                         })
@@ -557,12 +677,30 @@ impl Tool for Memory {
 
                 Ok(json!("ok"))
             }
+            "refresh_anchors" => {
+                let topic = super::require_str_param(&input, "topic")?;
+                let root = ctx.agent.require_project_root().await?;
+                let memories_dir = root.join(".codescout").join("memories");
+
+                // Check that the memory topic exists
+                let topic_path = memories_dir.join(format!("{}.md", topic));
+                if !topic_path.exists() {
+                    return Err(RecoverableError::with_hint(
+                        format!("topic '{}' not found", topic),
+                        "Use memory(action='list') to see available topics",
+                    )
+                    .into());
+                }
+
+                crate::memory::anchors::refresh_hashes(&root, &memories_dir, topic)?;
+                Ok(json!("ok"))
+            }
             _ => Err(RecoverableError::with_hint(
                 format!(
-                    "unknown action '{}'. Must be one of: read, write, list, delete, remember, recall, forget",
+                    "unknown action '{}'. Must be one of: read, write, list, delete, remember, recall, forget, refresh_anchors",
                     action
                 ),
-                "Pass action: 'read', 'write', 'list', 'delete', 'remember', 'recall', or 'forget'",
+                "Pass action: 'read', 'write', 'list', 'delete', 'remember', 'recall', 'forget', or 'refresh_anchors'",
             )
             .into()),
         }
@@ -1181,5 +1319,83 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result, json!("ok"));
+    }
+
+    #[tokio::test]
+    async fn write_creates_anchor_sidecar() {
+        let (dir, ctx) = test_ctx_with_project().await;
+
+        // Create a source file in the temp project
+        std::fs::create_dir_all(dir.path().join("src/tools")).unwrap();
+        std::fs::write(dir.path().join("src/tools/mod.rs"), "pub fn tool() {}").unwrap();
+
+        let input = json!({
+            "action": "write",
+            "topic": "architecture",
+            "content": "## Tools\nThe tool trait lives in `src/tools/mod.rs`."
+        });
+        let result = Memory.call(input, &ctx).await.unwrap();
+        assert_eq!(result, json!("ok"));
+
+        // Check sidecar was created
+        let sidecar = dir
+            .path()
+            .join(".codescout/memories/architecture.anchors.toml");
+        assert!(sidecar.exists(), "anchor sidecar should be created");
+        let af = crate::memory::anchors::read_anchor_file(&sidecar).unwrap();
+        assert_eq!(af.anchors.len(), 1);
+        assert_eq!(af.anchors[0].path, "src/tools/mod.rs");
+    }
+
+    #[tokio::test]
+    async fn refresh_anchors_clears_staleness() {
+        let (dir, ctx) = test_ctx_with_project().await;
+        let memories_dir = dir.path().join(".codescout/memories");
+        std::fs::create_dir_all(&memories_dir).unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/a.rs"), "v1").unwrap();
+
+        // Write memory to create sidecar
+        Memory
+            .call(
+                json!({
+                    "action": "write",
+                    "topic": "test-topic",
+                    "content": "References `src/a.rs`."
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        // Modify file to make it stale
+        std::fs::write(dir.path().join("src/a.rs"), "v2").unwrap();
+
+        // Verify stale
+        let af =
+            crate::memory::anchors::read_anchor_file(&memories_dir.join("test-topic.anchors.toml"))
+                .unwrap();
+        let report = crate::memory::anchors::check_path_staleness(dir.path(), &af).unwrap();
+        assert!(!report.is_fresh());
+
+        // Refresh anchors
+        let result = Memory
+            .call(
+                json!({
+                    "action": "refresh_anchors",
+                    "topic": "test-topic"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result, json!("ok"));
+
+        // Verify fresh
+        let af =
+            crate::memory::anchors::read_anchor_file(&memories_dir.join("test-topic.anchors.toml"))
+                .unwrap();
+        let report = crate::memory::anchors::check_path_staleness(dir.path(), &af).unwrap();
+        assert!(report.is_fresh());
     }
 }

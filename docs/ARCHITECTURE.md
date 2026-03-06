@@ -11,7 +11,7 @@ codescout is an MCP server that gives LLMs IDE-grade code intelligence. It expos
 ```
 ┌────────────────────────────────────────────────────────┐
 │              MCP Layer (rmcp)                           │
-│   CodeScoutServer → registered tools (23)              │
+│   CodeScoutServer → registered tools (28)              │
 └────────────────────────────────────────────────────────┘
                           ↓
 ┌────────────────────────────────────────────────────────┐
@@ -26,7 +26,7 @@ codescout is an MCP server that gives LLMs IDE-grade code intelligence. It expos
           ↓                    ↓                                        ↓
 ┌────────────────────────────────────────────────────────────────────────────────┐
 │                         Storage / Index Layer                                   │
-│   SymbolIndex, EmbeddingIndex (sqlite-vec), MemoryStore, IncrementalCache      │
+│   SymbolIndex, EmbeddingIndex (SQLite/cosine), MemoryStore, IncrementalCache   │
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -94,7 +94,11 @@ Third-party library source code navigation (read-only).
 
 ### Memory (`src/memory/`)
 
-Markdown-based persistent store in `.codescout/memories/`. Supports nested topics (path-like), directory traversal protection, CRUD operations.
+Two-tier persistent store:
+
+- **File store** — Markdown files in `.codescout/memories/`. Supports nested topics (path-like), directory traversal protection, CRUD operations. Topics accessible via `memory(action: read/write/list/delete)`.
+- **Semantic store** — Vector embeddings of memory entries in `.codescout/embeddings.db` (shared with the code index). Supports natural-language recall via `memory(action: remember/recall/forget)`. Each write operation cross-embeds into this store (best-effort, non-fatal if unavailable).
+- **Anchor sidecars** — `.anchors.toml` files alongside each memory track which source files the memory references. Used by `project_status` to surface `memory_staleness`. Regenerated on each `write`; manually cleared via `memory(action: refresh_anchors)`.
 
 ### Usage Recorder (`src/usage/`)
 
@@ -115,8 +119,9 @@ Each tool implements the `Tool` trait (`name`, `description`, `input_schema`, `a
 | Symbol | `symbol.rs` | `find_symbol`, `list_symbols`, `goto_definition`, `hover`, `find_references`, `replace_symbol`, `remove_symbol`, `insert_code`, `rename_symbol` (all navigation tools support `scope` param) |
 | Semantic | `semantic.rs` | `semantic_search`, `index_project` |
 | Library | `library.rs` | `list_libraries` |
-| Memory | `memory.rs` | `memory` (dispatches `read` / `write` / `list` / `delete` via `action` param) |
+| Memory | `memory.rs` | `memory` (dispatches `read` / `write` / `list` / `delete` / `remember` / `recall` / `forget` / `refresh_anchors` via `action` param) |
 | Config | `config.rs` | `activate_project`, `project_status` |
+| GitHub | `github.rs` | `github_identity`, `github_issue`, `github_pr`, `github_file`, `github_repo` |
 
 ### Utilities (`src/util/`)
 
