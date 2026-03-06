@@ -1,39 +1,196 @@
-You have just onboarded this project. Your job is to create 6 memories that give future AI sessions deep, accurate knowledge of this codebase — not a surface-level summary of its README.
+You have just onboarded this project. Your job is to create 6 memories and a system
+prompt that give future AI sessions deep, accurate knowledge of this codebase.
 
-## ⛔ Phase 1: Explore the Code — REQUIRED BEFORE WRITING ANY MEMORIES
+## THE IRON LAW
 
-The gathered data below (README, build config, CLAUDE.md) is a **starting point, not a substitute for exploration**. Memories written from documentation alone are shallow and frequently wrong. Every future session will rely on what you write now.
+```
+NO MEMORIES WRITTEN WITHOUT COMPLETING ALL EXPLORATION STEPS FIRST
+```
 
-**Do NOT call `memory(action: "write", ...)` until you have completed the steps below and written the exploration summary.**
+**Violating the letter of this process is violating the spirit of onboarding.**
 
-### Exploration Steps
+This is a one-time setup. Every future AI session depends on the accuracy of what you
+write now. **Token efficiency is NOT a concern here. Thoroughness is the ONLY goal.**
+Be exhaustive. Read widely. When in doubt, read more.
 
-Run these in order. They apply to any project.
+<HARD-GATE>
+Do NOT call `memory(action: "write", ...)` until you have:
+1. Completed ALL 7 exploration steps below
+2. Verified EVERY item in the Phase 1 Gate Checklist
+3. Written the Exploration Summary in your response
 
-1. **Map the structure** — Review the detected top-level structure or `list_dir(".")`. Identify: where is source code? tests? architecture docs?
+These gates are non-negotiable. There are no exceptions.
+</HARD-GATE>
 
-2. **Find key abstractions** — `list_symbols` on the main source directory (e.g. `list_symbols("src/")`). Identify the 3–5 types/traits/classes that appear central.
+---
 
-3. **Read core implementations** — `find_symbol("CoreType", include_body=true)` for 2–3 of those abstractions. Understand how they actually work, not just what they're named.
+## Phase 1: Explore the Code
 
-4. **Trace one data flow** — Follow a representative path through the system (a request, command, event). Use `find_references`, `goto_definition`, or `semantic_search("how X flows")`.
+The gathered data below (README, build config, CLAUDE.md) is a **starting point, not a
+substitute for exploration**. Memories written from documentation alone are shallow,
+incomplete, and frequently wrong. Code and docs diverge — only reading the code reveals
+what's actually true.
 
-5. **Read architecture docs** — If README or CLAUDE.md references any `docs/ARCHITECTURE.md`, design docs, or ADRs, `read_file` them now.
+### Step 1: Map the Codebase Structure
 
-### Exploration Summary (write this before proceeding)
+Run ALL of these — do not skip any. See the **Key files to read** list in the
+Gathered Project Data section below for project-specific paths detected during onboarding.
 
-After completing steps 1–5, write 4–6 sentences covering:
-- What this system does (your own words, not the README's)
-- The 3–5 most important types/modules and their roles
-- How a typical operation flows through the system
+- `list_dir(".")` — top-level structure
+- `list_dir` on EACH major directory found (src/, tests/, docs/, lib/, app/, etc.)
+- `read_file` on the build config fully (Cargo.toml / package.json / pyproject.toml / go.mod / pom.xml)
+- `read_file` on CI config if present (.github/workflows/, .gitlab-ci.yml, Makefile, etc.)
+- `read_file("README.md")` fully — even if you think you know what it says
 
-**This summary is your gate to Phase 2. If you cannot write it from memory after exploring, you haven't explored enough.**
+### Step 2: Full Symbol Survey — ALL Modules
+
+Do NOT stop at a single top-level `list_symbols("src/")`. You MUST:
+
+- Run `list_symbols` on the top-level source directory
+- Run `list_symbols` on EACH subdirectory individually
+- Identify every module/package/namespace and survey its symbols
+- Continue until you have seen symbols in every non-trivial source file
+
+**Minimum:** Survey at least 5 distinct source modules or files (more for larger
+projects). If you are writing memories after surveying only 1–2 files, you have not
+done enough. Go back.
+
+### Step 3: Read Core Implementations — With Actual Bodies
+
+Signatures are not enough. You must read actual code.
+
+- Identify the 5+ most central types, traits, or classes from Step 2
+- For each: `find_symbol(name, include_body=true)`
+- If body is truncated (only the signature returned): use `list_symbols(path)` to get
+  correct line ranges, then `read_file(path, start_line=N, end_line=M)`
+- For top-level free functions in large files: use `read_file` with line ranges
+
+**Minimum:** Read the FULL body of at least 5 core implementations.
+Do not proceed from signatures alone. Signatures tell you *what*; bodies tell you *how*.
+
+### Step 4: Read ALL Architecture Documentation
+
+- `read_file("docs/ARCHITECTURE.md")` fully if it exists
+- `read_file` on any design docs, ADRs, or plans referenced in README or CLAUDE.md
+- `read_file` on any additional doc files under `docs/`
+- Read completely — do not skim headings and move on
+
+**If there are no architecture docs:** explicitly note this in your exploration summary.
+
+### Step 5: Trace TWO Complete Data Flows
+
+Documentation describes intent. Code traces reveal reality. Discrepancies hide between them.
+
+You must trace TWO paths:
+1. The most representative operation (e.g. a request, command, event processed)
+2. A second distinct path (e.g. an error path, a write vs. read, a different entry point)
+
+For each trace:
+- Start at the entry point
+- Follow with `goto_definition`, `find_references`, `find_symbol`
+- Use `semantic_search("how X flows")` to find connecting code
+- Continue until you reach the output or terminal state
+
+You cannot write an accurate `architecture` memory without doing this.
+
+### Step 6: Code Exploration by Concept — Minimum 5 Queries
+
+Search for code by concept, not just by name. Run at least 5 queries covering
+different aspects of the codebase:
+
+1. Error handling / failure paths
+2. Data flow / request lifecycle
+3. Testing approach / test helpers
+4. Configuration / initialization / startup
+5. A core domain concept specific to this project (not generic)
+
+Use `semantic_search` if the embedding index is built. If `semantic_search` returns
+empty results or errors (index not yet built), use `search_pattern` (regex) instead —
+it works without an index and still reveals how the codebase handles each concept.
+
+Do NOT run `index_project` during onboarding — it can take minutes and is not required
+for thorough exploration.
+
+Note where the code diverges from what the documentation says.
+
+### Step 7: Examine Tests and Verify Build
+
+- `list_symbols` on the test directory (`tests/`, `__tests__/`, `spec/`, or equivalent)
+- Read 2–3 test files to understand: framework used, fixtures, mock patterns, test organization
+- Find at least one test for a core abstraction and read it completely
+- Verify the development commands in CLAUDE.md actually exist in the repo
+
+---
+
+### Phase 1 Gate Checklist
+
+Before writing ANY memory, verify ALL of these are true. If any is unchecked, complete it first.
+
+- [ ] Listed top-level structure AND ran `list_dir` on each major subdirectory
+- [ ] Ran `list_symbols` on the top-level source AND on at least 4 subdirectories individually
+- [ ] Read the FULL body (not just signature) of at least 5 core types/functions
+- [ ] Read ALL architecture docs found, completely (not skimmed)
+- [ ] Traced two distinct data flows from entry point to terminal output
+- [ ] Ran at least 5 concept-level queries (`semantic_search` or `search_pattern` fallback)
+- [ ] Read 2–3 test files and understood the testing pattern
+- [ ] Verified build/dev commands against actual repo contents
+
+**If ANY item is unchecked: complete it before writing a single memory.**
+
+---
+
+### Exploration Summary
+
+After completing all steps, write this summary **in your response, before calling any
+`memory(action: "write", ...)` tool**:
+
+> **What this system does** — in your own words, not the README's
+> **The 5 most important types/modules** — name, file path, and role each plays
+> **How a typical operation flows** — concrete function/method names, not just layers
+> **What surprised you** — things the code does that documentation didn't mention
+
+If you cannot write this from what you've explored, you have not explored enough.
+Return to Phase 1.
+
+---
+
+## Red Flags — STOP and Return to Phase 1
+
+If you notice any of these thoughts, STOP. Return to Phase 1 immediately.
+
+- "I've read CLAUDE.md and the README — that's enough to write the memories"
+- "The architecture doc covers everything I need"
+- "I can infer how it works from the signatures and names"
+- "I only need to survey the main files, not every module"
+- "This project is small/simple, less exploration is fine"
+- "I'll write the memory now and add details if something is wrong later"
+- "I already understand this type of codebase"
+- You have read fewer than 5 code bodies with `include_body=true`
+- You have run `list_symbols` on fewer than 3 modules/directories
+- You have traced only one data flow
+- You have run fewer than 5 concept-level queries (semantic_search or search_pattern)
+
+**ALL of these mean: STOP. Return to Phase 1.**
+
+## Common Rationalizations
+
+| Excuse | Reality |
+|---|---|
+| "CLAUDE.md and the README give me enough context" | Docs describe intent. Code reveals reality. Discrepancies hide in the code. |
+| "I can infer implementations from names and signatures" | Assumptions about implementations produce wrong memories that mislead future sessions. |
+| "I already understand this type of system" | Pattern recognition replaces exploration. This codebase has specific wiring that differs from the pattern. |
+| "This is a small project, I can do less" | Small codebases still have gotchas. The steps scale down naturally — don't skip them. |
+| "I'll refine the memories later if something is wrong" | Wrong memories mislead every session until someone notices and fixes them. Do it right once. |
+| "Token efficiency matters here" | This is a ONE-TIME setup. Tokens spent here prevent thousands of wasted tokens in every future session. Be thorough. |
+| "I traced one flow — that's enough" | One flow shows one path. A second reveals where paths diverge and where exceptions live. |
+| "I read the docs — I understand the architecture" | Architecture docs describe the intended design. Code reveals the actual design. Read both. |
 
 ---
 
 ## Phase 2: Write the 6 Memories
 
-Now write the memories. Your Phase 1 exploration should inform every memory — especially `architecture` and `conventions`, which cannot be written accurately from documentation alone.
+Now write the memories. Your Phase 1 exploration must inform every memory — especially
+`architecture` and `conventions`, which cannot be written accurately from documentation alone.
 
 ### Rules
 
@@ -140,7 +297,7 @@ Now write the memories. Your Phase 1 exploration should inform every memory — 
 [Framework, organization, how to write a new test]
 ```
 
-**Anti-patterns:** Don't repeat CLAUDE.md's "Design Principles" section (progressive disclosure, no echo, two modes, RecoverableError) — it's already loaded. Don't copy the "Prompt Surface Consistency" or "Testing Patterns" sections either. Reference them: `"see CLAUDE.md § Design Principles"`. Write only conventions that are absent from CLAUDE.md: naming tables, code templates, file organization patterns discovered during exploration.
+**Anti-patterns:** Don't repeat CLAUDE.md's "Design Principles" section — it's already loaded. Reference it: `"see CLAUDE.md § Design Principles"`. Write only conventions that are absent from CLAUDE.md: naming tables, code templates, file organization patterns discovered during exploration.
 
 ---
 
@@ -185,7 +342,7 @@ Now write the memories. Your Phase 1 exploration should inform every memory — 
 
 **What to include:** Domain model names with specific meaning, project-specific abbreviations, concepts requiring context.
 
-**Anti-patterns:** Don't define terms that CLAUDE.md already explains (RecoverableError, OutputGuard, the two output modes, three-query sandwich, three prompt surfaces are all in CLAUDE.md). Don't copy definitions from docs — link to them. **Drift risk is high here:** glossary entries that describe specific types or APIs go stale as the code evolves. Prefer: `"OutputGuard — see src/tools/output.rs and CLAUDE.md § Design Principles"` over a full description. Only write inline definitions for concepts that exist nowhere else.
+**Anti-patterns:** Don't define terms that CLAUDE.md already explains. Don't copy definitions from docs — link to them. **Drift risk is high here:** glossary entries that describe specific types or APIs go stale as the code evolves. Prefer: `"OutputGuard — see src/tools/output.rs and CLAUDE.md § Design Principles"` over a full description. Only write inline definitions for concepts that exist nowhere else.
 
 ---
 
@@ -204,7 +361,7 @@ Now write the memories. Your Phase 1 exploration should inform every memory — 
 
 **What to include:** Config pitfalls, framework traps, build/test gotchas, flaky tests.
 
-**Anti-patterns:** Don't invent problems that don't exist. Don't re-document issues already called out in CLAUDE.md (e.g. worktree `activate_project` requirement, tool misbehavior log — those are in CLAUDE.md already). Gotchas here should be things discovered during exploration that aren't in CLAUDE.md. If nothing new was found, write: "No additional gotchas discovered during onboarding. Update as issues are found." **Note:** gotchas about specific tool behavior or config values are high drift-risk — add a note about where to verify them (e.g. the config file or source line) so they can be checked rather than blindly trusted.
+**Anti-patterns:** Don't invent problems that don't exist. Don't re-document issues already called out in CLAUDE.md. Gotchas here should be things discovered during exploration that aren't in CLAUDE.md. If nothing new was found, write: "No additional gotchas discovered during onboarding. Update as issues are found." **Note:** gotchas about specific tool behavior or config values are high drift-risk — add a note about where to verify them (e.g. the config file or source line) so they can be checked rather than blindly trusted.
 
 ---
 

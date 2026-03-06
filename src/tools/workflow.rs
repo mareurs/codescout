@@ -199,10 +199,11 @@ fn build_system_prompt_draft(
     }
     draft.push_str("- Use specific terms over generic ones (e.g., avoid 'data', 'utils')\n\n");
 
-    // Language-specific navigation hints
+    // Language-specific navigation hints — cap at 3 to keep the draft concise
     let hints: Vec<_> = languages
         .iter()
         .filter_map(|lang| language_navigation_hints(lang).map(|h| (lang.as_str(), h)))
+        .take(3)
         .collect();
     if !hints.is_empty() {
         draft.push_str("## Language Navigation\n");
@@ -227,34 +228,9 @@ fn build_system_prompt_draft(
     draft
         .push_str("5. `memory(action=\"recall\", query=\"...\")` — search memories by meaning\n\n");
 
-    // Project rules — placeholder
+    // Project rules — empty section for the LLM to fill from exploration
     draft.push_str("## Project Rules\n");
-    draft.push_str("- [Add project-specific conventions here]\n");
-
-    // Private memory rules
-    draft.push_str("\n## Private Memory Rules\n\n");
-    draft.push_str(
-        "Private memories are gitignored — personal to this developer, not shared with the team.\n\
-         They live in `.codescout/private-memories/`.\n\n\
-         **Write to the private store** (`memory(action=\"write\", topic=..., content=..., private=true)`) for:\n\
-         - Personal preferences and workflow rules for this developer\n\
-         - Machine-specific config (local ports, paths, GPU type, env quirks)\n\
-         - WIP notes and in-progress debugging context\n\
-         - Personal debugging history specific to this setup\n\n\
-         **Write to the shared store** (`memory(action=\"write\", topic=..., content=...)`) for:\n\
-         - Architecture, conventions, design patterns — knowledge useful to ALL contributors\n\
-         - When in doubt: private first, promote to shared only if universally applicable\n\n\
-         **Each session:** `memory(action=\"list\", include_private=true)` to see what's available.\n",
-    );
-
-    // Semantic memories section
-    draft.push_str("\n## Semantic Memories\n\n");
-    draft.push_str(
-        "Use `memory(action=\"remember\", content=\"...\")` to store knowledge that doesn't fit\n\
-         a named topic. Search with `memory(action=\"recall\", query=\"...\")`. Buckets:\n\
-         code, system, preferences, unstructured (auto-classified if omitted).\n\
-         Delete with `memory(action=\"forget\", id=N)` using IDs from recall results.\n",
-    );
+    draft.push_str("- [Fill from Phase 1 exploration: linting, formatting, commit conventions]\n");
 
     // Auto-inject preferences from semantic memory (best-effort)
     if let Some(root) = project_root {
@@ -276,7 +252,6 @@ fn build_system_prompt_draft(
                 if !prefs.is_empty() {
                     draft.push_str("\n## User Preferences\n\n");
                     for (title, content) in &prefs {
-                        // Use title as heading, content as body — keep it compact
                         let summary = if content.len() > 200 {
                             format!("{}...", &content[..200])
                         } else {
@@ -567,7 +542,7 @@ impl Tool for RunCommand {
                 },
                 "run_in_background": {
                     "type": "boolean",
-                    "description": "Spawn the command detached and return immediately. Output is written to a temp log file; monitor it with run_command(\"tail -50 <log>\"). Useful for long-running build or serve commands that exceed the timeout."
+                    "description": "Spawn the command detached and return immediately. Output is written to a temp log file; monitor it with run_command(\"tail -50 <log>\"). Use this for long-running commands AND whenever the command backgrounds processes with & — shell & leaves subprocesses holding the stdout pipe open so the foreground run_command hangs until timeout."
                 }
             }
         })
@@ -1217,7 +1192,8 @@ async fn run_command_inner(
             "timed_out": true,
             "stdout": "",
             "stderr": format!("Command timed out after {} seconds", timeout_secs),
-            "exit_code": null
+            "exit_code": null,
+            "hint": "If the command launches background processes (e.g. with &), use run_in_background: true — shell & leaves background processes holding the stdout pipe open, so output() never gets EOF. run_in_background spawns via a log file instead and returns immediately."
         })),
     }
 }
@@ -1408,6 +1384,11 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("timed out after 1 seconds"));
+        let hint = result["hint"].as_str().unwrap_or("");
+        assert!(
+            hint.contains("run_in_background"),
+            "timeout hint should mention run_in_background, got: {hint}"
+        );
     }
 
     #[tokio::test]
@@ -1829,6 +1810,65 @@ mod tests {
         assert!(
             err.to_string().contains("buffer queries"),
             "error should mention buffer queries, got: {err}"
+        );
+    }
+
+    /// A command that backgrounds a subprocess with `&` causes the foreground `output()` call
+    /// to hang: the background process inherits the stdout pipe FD and keeps it open until it
+    /// exits, preventing EOF.  With a short timeout this manifests as `timed_out: true`.
+    /// The hint in the response should point the caller to `run_in_background: true`.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pipe_inheritance_from_shell_background_causes_timeout() {
+        let (_dir, ctx) = project_ctx().await;
+        // `sleep 60 &` — sh forks sleep (background), sleep inherits the stdout pipe,
+        // sh exits but sleep keeps the pipe open for 60 s → output() can't get EOF.
+        let result = RunCommand
+            .call(json!({ "command": "sleep 60 &", "timeout_secs": 1 }), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(
+            result["timed_out"], true,
+            "background subprocess holding pipe should cause timeout"
+        );
+        let hint = result["hint"].as_str().unwrap_or("");
+        assert!(
+            hint.contains("run_in_background"),
+            "hint should mention run_in_background, got: {hint}"
+        );
+    }
+
+    /// `run_in_background: true` routes stdout to a log file, not a pipe, so background
+    /// subprocesses holding the log FD open does not block the caller.  Even a command
+    /// that would hang indefinitely in foreground mode returns promptly.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn run_in_background_avoids_pipe_inheritance_hang() {
+        let (_dir, ctx) = project_ctx().await;
+        // Same pattern as the timeout test, but using run_in_background: true.
+        // Should return a @bg_ handle without timing out.
+        let result = RunCommand
+            .call(
+                json!({ "command": "echo launched && sleep 60 &", "run_in_background": true }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(
+            result["timed_out"].is_null(),
+            "run_in_background should not produce timed_out, got: {:?}",
+            result["timed_out"]
+        );
+        let output_id = result["output_id"].as_str().expect("output_id missing");
+        assert!(
+            output_id.starts_with("@bg_"),
+            "expected @bg_ handle, got: {output_id}"
+        );
+        // Warm-window stdout should contain the echo output.
+        let stdout = result["stdout"].as_str().unwrap_or("");
+        assert!(
+            stdout.contains("launched"),
+            "stdout should capture echo output within warm window, got: {stdout}"
         );
     }
 
@@ -2443,31 +2483,23 @@ mod tests {
     }
 
     #[test]
-    fn system_prompt_draft_includes_private_memory_rules() {
+    #[test]
+    fn system_prompt_draft_is_concise() {
         let draft = build_system_prompt_draft(&[], &[], None);
+        // Private memory rules removed — duplicates server_instructions.md
         assert!(
-            draft.contains("Private Memory Rules"),
-            "draft should include Private Memory Rules section"
+            !draft.contains("Private Memory Rules"),
+            "draft should NOT include Private Memory Rules (covered by server_instructions)"
         );
         assert!(
-            draft.contains("private=true"),
-            "draft should mention private=true parameter"
+            !draft.contains("Semantic Memories"),
+            "draft should NOT include Semantic Memories section (covered by server_instructions)"
         );
-        assert!(
-            draft.contains("gitignored"),
-            "draft should explain that private memories are gitignored"
-        );
-        // Ensure string continuation escapes did not embed leading whitespace.
-        // Each bullet line must start with '-', not with spaces.
-        for line in draft.lines() {
-            if line.contains("Personal preferences") || line.contains("Machine-specific config") {
-                assert!(
-                    line.starts_with('-'),
-                    "bullet line must not have leading spaces; got: {:?}",
-                    line
-                );
-            }
-        }
+        // Core sections still present
+        assert!(draft.contains("## Entry Points"));
+        assert!(draft.contains("## Key Abstractions"));
+        assert!(draft.contains("## Navigation Strategy"));
+        assert!(draft.contains("## Project Rules"));
     }
 
     #[test]

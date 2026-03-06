@@ -180,8 +180,8 @@ mod tests {
 
     #[test]
     fn onboarding_prompt_contains_key_sections() {
-        assert!(ONBOARDING_PROMPT.contains("## Rules"));
-        assert!(ONBOARDING_PROMPT.contains("## Memories to Create"));
+        assert!(ONBOARDING_PROMPT.contains("### Rules"));
+        assert!(ONBOARDING_PROMPT.contains("### Memories to Create"));
         assert!(ONBOARDING_PROMPT.contains("project-overview"));
         assert!(ONBOARDING_PROMPT.contains("architecture"));
         assert!(ONBOARDING_PROMPT.contains("conventions"));
@@ -189,6 +189,11 @@ mod tests {
         assert!(ONBOARDING_PROMPT.contains("domain-glossary"));
         assert!(ONBOARDING_PROMPT.contains("gotchas"));
         assert!(ONBOARDING_PROMPT.contains("## Gathered Project Data"));
+        // Verify enforcement sections exist
+        assert!(ONBOARDING_PROMPT.contains("## THE IRON LAW"));
+        assert!(ONBOARDING_PROMPT.contains("<HARD-GATE>"));
+        assert!(ONBOARDING_PROMPT.contains("## Red Flags"));
+        assert!(ONBOARDING_PROMPT.contains("## Common Rationalizations"));
     }
 
     #[test]
