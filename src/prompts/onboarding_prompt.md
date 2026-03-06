@@ -94,9 +94,25 @@ Now write the memories. Your Phase 1 exploration should inform every memory — 
 
 ## Design Patterns
 [Only patterns actually in use: DI, repository, event-driven, etc.]
+
+## Invariants
+[Hard rules — for each candidate ask: "what *concretely* breaks if this is ignored?"]
+[If the failure mode is vague, it belongs in Strong Defaults, not here]
+[Keep to ~5 entries max — if everything is an invariant, nothing is]
+
+| Rule | Why it exists |
+|---|---|
+| [rule] | [specific failure if broken] |
+
+## Strong Defaults
+[Preferred behaviors that CAN be overridden with deliberate reason]
+
+| Default | When it's okay to break it |
+|---|---|
+| [default behavior] | [specific condition that justifies breaking it] |
 ```
 
-**Anti-patterns:** Don't repeat what CLAUDE.md's "Project Structure" or "Key Patterns" sections already say — they're loaded every session. Don't copy layer diagrams from `docs/ARCHITECTURE.md`; reference them instead (`see docs/ARCHITECTURE.md`). Focus on what's NOT in those docs: internal struct shapes, concrete data flow with actual function/method names, non-obvious wiring. Inline content here goes stale as code evolves — keep it minimal and specific.
+**Anti-patterns:** Don't repeat what CLAUDE.md's "Project Structure" or "Key Patterns" sections already say — they're loaded every session. Don't copy layer diagrams from `docs/ARCHITECTURE.md`; reference them instead (`see docs/ARCHITECTURE.md`). Focus on what's NOT in those docs: internal struct shapes, concrete data flow with actual function/method names, non-obvious wiring. Inline content here goes stale as code evolves — keep it minimal and specific. For Invariants: don't list every rule from CLAUDE.md — only the ones an agent would realistically violate. If there's no specific observable failure mode, move it to Strong Defaults. For Strong Defaults: always include the override condition — a default with no escape hatch is just an invariant written poorly.
 
 ---
 
