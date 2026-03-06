@@ -1,62 +1,82 @@
 # Architecture
 
-See `docs/ARCHITECTURE.md` for the layer diagram. This file supplements it with concrete data flow.
+See `docs/ARCHITECTURE.md` and `CLAUDE.md § Project Structure` for the full layer diagram.
+This memory captures what the code reveals beyond those docs.
 
 ## Key Abstractions
 
 | Type | File | Role |
 |---|---|---|
-| `CodeScoutServer` | `src/server.rs:38` | rmcp `ServerHandler` impl — owns `Vec<Arc<dyn Tool>>`, dispatches `call_tool`, routes errors |
-| `Agent` | `src/agent.rs:33` | Shared state behind `Arc<RwLock<AgentInner>>` — active project, config, embedder cache, memory, LSP manager |
-| `ActiveProject` | `src/agent.rs:48` | Holds `root: PathBuf`, `ProjectConfig`, `LspManager`, `LibraryRegistry` |
-| `Tool` trait | `src/tools/mod.rs:217` | Interface all 28 tools implement: `name()`, `description()`, `input_schema()`, `async call(Value, &ToolContext)` |
-| `ToolContext` | `src/tools/mod.rs:47` | Per-call context passed to every tool: `agent`, `lsp`, `output_buffer`, `progress` |
-| `LspClient` | `src/lsp/client.rs:96` | Manages one language server process via stdin/stdout JSON-RPC |
-| `LspManager` | `src/lsp/manager.rs:19` | Manages multiple `LspClient` instances, keyed by language |
-| `OutputGuard` | `src/tools/output.rs` | Enforces exploring/focused mode limits; buffers large output as `@ref` handles |
+| `Tool` trait | `src/tools/mod.rs:228` | Core tool abstraction; `call_content()` handles buffering |
+| `CodeScoutServer` | `src/server.rs` | rmcp ServerHandler; dispatches all 28 tools |
+| `Agent` / `AgentInner` | `src/agent.rs` | Project state orchestrator; RwLock-guarded |
+| `LspManager` / `LspClient` | `src/lsp/manager.rs`, `client.rs` | Per-language LSP pool |
+| `OutputGuard` | `src/tools/output.rs` | Progressive disclosure enforcer |
 
-## Tool Call Data Flow
+## Data Flow: Tool Call
 
 ```
-MCP client → CodeScoutServer::call_tool()
-  → find matching Tool in Vec<Arc<dyn Tool>>
-  → UsageRecorder wraps the call (records timing/outcome to usage.db)
-  → Tool::call(params, &ToolContext)
-      → ToolContext.agent (for config, memory, embedder)
-      → ToolContext.lsp (for LSP ops via LspManager)
-      → OutputGuard enforces compact/focused mode
-  → route_tool_error(): RecoverableError → isError:false; anyhow → isError:true
-  → strip_project_root_from_result() removes absolute path prefix
-  → response to MCP client
+MCP client → call_tool(name, args)
+  → CodeScoutServer::call_tool_inner()
+    → security check (path_security::check_tool_access)
+    → ToolContext { agent, lsp, output_buffer, progress }
+    → timeout (project.toml: tool_timeout_secs)
+    → UsageRecorder::record_content(tool_name, || tool.call_content(input, ctx))
+      → tool.call(input, ctx) → Result<Value>
+      → size check: > MAX_INLINE_TOKENS?
+          yes → OutputBuffer::store_tool() → @tool_* ref + hint JSON
+          no  → pretty-printed JSON inline
+    → route_tool_error(e):
+        RecoverableError → isError:false, {ok:false, error, hint?}
+        LSP -32800       → isError:false, specialized hint
+        other            → isError:true (fatal)
+    → strip_project_root_from_result()  ← all absolute paths removed
 ```
 
-## LSP Flow
+## Data Flow: Semantic Search
 
-`LspManager::get_or_start()` lazily spawns language servers. `LspClient` tracks an incremental request ID, sends JSON-RPC over `stdin`, reads responses from `stdout`. `did_change` notifications update the server's view of open files. `LspClientOps` trait (in `lsp/ops.rs`) is the mockable interface for tests.
+```
+SemanticSearch::call()
+  → agent.get_or_create_embedder(model)  ← cached by model name
+  → embed_one(query) → Vec<f32>
+  → embed::index::search_scoped(conn, query_vec, scope)
+      → pure-Rust cosine similarity (sqlite-vec NOT active)
+  → OutputGuard::cap_items() + staleness check
+```
 
-## Embedding Flow
+## Error Routing (3-way)
 
-`chunker::split()` → `RemoteEmbedder::embed()` → `index::insert_chunk()` into SQLite. Search via pure-Rust cosine similarity (sqlite-vec extension disabled). Change detection: git diff → mtime → SHA-256 fallback.
+`route_tool_error` in `src/server.rs:262`:
+1. `RecoverableError` → `isError:false` — sibling parallel calls NOT aborted by Claude Code
+2. LSP `code -32800` (RequestCancelled) → also `isError:false` with Kotlin-specific hint
+3. Everything else → `isError:true` (fatal)
+
+## LSP Concurrency Pattern
+
+`LspManager::get_or_start()` uses a watch-channel barrier: first caller becomes "starter"
+and sends tx, concurrent callers clone the rx and wait. On starter success, waiters read
+the cache. On failure, a waiter becomes the new starter. `StartingCleanup` RAII guard
+removes the barrier on any exit. See `src/lsp/manager.rs:78`.
+
+## Testability Seam
+
+`LspProvider` and `LspClientOps` traits (`src/lsp/ops.rs`) allow `MockLspClient` /
+`MockLspProvider` injection in tests without live LSP servers. All symbol tools receive
+`ctx.lsp: Arc<dyn LspProvider>`.
 
 ## Invariants
 
-Rules that must never be broken. Each has a specific, observable failure mode.
-
 | Rule | Why it exists |
 |---|---|
-| `OutputGuard` is the only output limiter (`src/tools/output.rs`) | Per-tool limits create inconsistency; the guard enforces both modes globally |
-| Mutation tools return `json!("ok")`, never echo content back | Caller already has what they sent — echoing wastes tokens with zero information gain |
-| `RecoverableError` for user-fixable failures; `anyhow::bail!` for real failures | Controls MCP `isError` flag — `bail!` aborts sibling parallel tool calls, `RecoverableError` does not |
-| All 3 prompt surfaces updated together on tool changes | `server_instructions.md`, `onboarding_prompt.md`, `build_system_prompt_draft()` in `workflow.rs` — silent staleness corrupts agent guidance |
-| New tools must be registered in `CodeScoutServer::new()` | Tools are matched by name string in a Vec — unregistered tools silently never run |
+| Write tools call `validate_write_path()` before any I/O | Violations must return `RecoverableError`, not crash or silently write outside project root |
+| `RecoverableError` for expected failures, `anyhow::bail!` for genuine tool failures | MCP `isError:true` aborts sibling parallel calls in Claude Code; wrong classification breaks parallel workflows |
+| All write tools return `json!("ok")` — never echo content back | Echoing wastes tokens with zero information gain (caller already sent the content) |
+| `OutputGuard` used for all variable-length output | Per-tool truncation logic diverges; `OutputGuard` is the single enforcement point |
 
 ## Strong Defaults
 
-Preferred behaviors that can be overridden with deliberate reason.
-
-| Default | When it's okay to break it |
+| Default | When to break it |
 |---|---|
-| Exploring mode (compact output) by default | Switch to `detail_level: "full"` once you know the specific symbol/file you need |
-| Lazy LSP startup — servers start on first use | Only when diagnostics are needed before the first file edit |
-| `RecoverableError` prefers a `hint` when a corrective action exists | Omit hint only when there is genuinely no corrective action |
-| Tools live in their category file (`file.rs`, `symbol.rs`, etc.) | Only when a tool genuinely spans multiple categories |
+| `detail_level: "exploring"` (compact, capped at 200) | LLM knows exactly what it wants → pass `detail_level: "full"` |
+| Absolute paths stripped from all output | Never — strip happens in `call_tool_inner`, after the tool runs |
+| System prompt from `.codescout/system-prompt.md` | Falls back to `project.toml::project.system_prompt`; TOML field exists but file takes precedence |

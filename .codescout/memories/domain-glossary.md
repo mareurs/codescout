@@ -1,23 +1,40 @@
 # Domain Glossary
 
-**OutputGuard** — The shared struct (`src/tools/output.rs`) that enforces progressive disclosure in every tool. Wraps result formatting with Exploring/Focused mode switching and overflow hint generation.
+Terms specific to codescout not fully explained in CLAUDE.md or docs.
 
-**OutputBuffer / @ref handles** — Large tool outputs stored server-side as `@cmd_*`, `@file_*`, or `@tool_*` handles. Claude queries them with shell commands (`grep FAILED @cmd_id`) rather than receiving the full text. `src/tools/output_buffer.rs`.
+**RecoverableError** — Tool error that maps to MCP `isError:false`. Agents see a JSON
+`{ok:false, error, hint?}` body and can recover without aborting sibling parallel calls.
+Use for: path not found, unsupported language, empty result. See `src/tools/mod.rs:78`.
 
-**RecoverableError** — An error type (`src/tools/mod.rs:67`) for expected, input-driven failures (bad path, unsupported file type). Routes to `isError: false` in MCP so sibling parallel calls aren't aborted. Contrasts with `anyhow::bail!` for true crashes.
+**OutputGuard** — Progressive disclosure enforcer. Created via `OutputGuard::from_input(&input)`,
+reads `detail_level`/`offset`/`limit` from tool input. See `src/tools/output.rs` and
+`CLAUDE.md § Design Principles`.
 
-**ActiveProject** — The currently active project root + config + memory store held inside `Agent` (`src/agent.rs:48`). Switchable at runtime via `activate_project` tool (needed after `EnterWorktree`).
+**OverflowInfo** — Struct attached to responses when results exceed the cap. Contains `shown`,
+`total`, `hint` (actionable narrowing advice), `by_file` (per-file match counts).
 
-**ToolContext** — The bag of shared services passed into every tool's `call()` method (`src/tools/mod.rs:47`). Contains Agent, LspManager, OutputBufferStore, ProgressReporter.
+**`@tool_*` ref** — Buffer handle for large tool output (> MAX_INLINE_TOKENS). Stored in
+`OutputBuffer` (50-slot ring, `src/tools/output_buffer.rs`). Query with `read_file("@tool_*")`.
 
-**Exploring / Focused mode** — Two output modes enforced by OutputGuard. Exploring = compact default (≤200 items). Focused = `detail_level: "full"` + offset/limit pagination. See `docs/PROGRESSIVE_DISCOVERABILITY.md`.
+**`@cmd_*` ref** — Buffer handle for `run_command` stdout. Plain text, not JSON.
+Query with `run_command("grep pattern @cmd_*")`.
 
-**Scope** — `enum Scope` in `src/library/` distinguishing `Project` (current root) vs `Lib(name)` (third-party library source indexed separately).
+**`@ack_*` ref** — Acknowledgment handle returned by `edit_file` for large edits.
+See `looks_like_ack_handle()` in `src/tools/workflow.rs`.
 
-**Drift detection** — After re-indexing, measures how much code changed in *meaning* (embedding distance), not just bytes. Exposed via `project_status`. Configurable in `.code-explorer/project.toml`.
+**ActiveProject** — The currently active project: `{root, config, memory, private_memory,
+library_registry}`. Held in `Agent::inner` behind RwLock. See `src/agent.rs:48`.
 
-**Three-query sandwich** — Testing pattern for cache invalidation: (1) baseline query, (2) mutate without notification, (3) assert stale, (4) trigger invalidation, (5) assert fresh. Two-query is insufficient — see CLAUDE.md.
+**Scope** — Parameter on symbol/semantic tools: `"project"` (default), `"lib:name"`,
+`"libraries"`, `"all"`. Parsed by `Scope` enum in `src/library/scope.rs`.
 
-**Three prompt surfaces** — `server_instructions.md`, `onboarding_prompt.md`, `build_system_prompt_draft()` — all three reference tool names and must be kept in sync when tools are renamed.
+**LspProvider / LspClientOps** — Traits in `src/lsp/ops.rs` that decouple tools from the
+concrete `LspClient`. `LspManager` implements `LspProvider`; `LspClient` implements
+`LspClientOps`. `MockLspClient` / `MockLspProvider` used in tests.
 
-**code-explorer-routing** — Companion Claude Code plugin (`../claude-plugins/code-explorer-routing/`) that hooks into every session/subagent to enforce codescout tool use and block native Read/Grep/Glob on source files.
+**drift** — Per-file embedding staleness metric: how much a file's current content
+diverges from what was indexed. `avg_drift` + `max_drift` per file. See `src/embed/drift.rs`.
+
+**`tool_timeout_secs`** — Per-project tool execution timeout (`.codescout/project.toml`,
+`ProjectSection`). Tools that skip it: `run_command`, `index_project` (see
+`tool_skips_server_timeout()` in `src/server.rs:203`).

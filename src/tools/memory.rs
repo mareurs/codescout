@@ -275,8 +275,9 @@ impl Tool for Memory {
          topic is a path-like key (e.g. 'debugging/async-patterns'). \
          Pass private=true to use the gitignored private store. \
          Semantic memory — action: \"remember\", \"recall\", \"forget\". \
-         Stores embedded, searchable knowledge classified into buckets (code/system/preferences/unstructured). \
-         Use 'remember' to store insights, 'recall' to search by meaning, 'forget' to delete by id."
+         Stores embedded, searchable knowledge in buckets (code/system/preferences/unstructured). \
+         Always specify bucket for remember — you have context keyword heuristics lack. \
+         Use 'recall' to search by meaning, 'forget' to delete by id."
     }
 
     fn input_schema(&self) -> Value {
@@ -314,7 +315,7 @@ impl Tool for Memory {
                 "bucket": {
                     "type": "string",
                     "enum": ["code", "system", "preferences", "unstructured"],
-                    "description": "Optional for remember/recall. Memory category. Auto-classified if omitted for remember."
+                    "description": "For remember: always specify — code (functions/patterns/APIs/conventions), system (build/deploy/config/infra), preferences (style/habits/always-never rules), unstructured (decisions/notes/context). For recall: optional filter."
                 },
                 "query": {
                     "type": "string",
@@ -448,9 +449,7 @@ impl Tool for Memory {
                 let bucket = input["bucket"]
                     .as_str()
                     .map(|s| s.to_string())
-                    .unwrap_or_else(|| {
-                        crate::memory::classify::classify_bucket(content).to_string()
-                    });
+                    .unwrap_or_else(|| "unstructured".to_string());
 
                 let (root, model) = {
                     let inner = ctx.agent.inner.read().await;

@@ -33,6 +33,7 @@ These are non-negotiable. Violating the letter IS violating the spirit.
 | **Nothing** (new codebase) | `list_dir(path)` → `list_symbols(file)` | `semantic_search("what does this do")` |
 | **A text pattern** (regex, error message) | `search_pattern(pattern)` | `find_symbol` on matched files |
 | **A filename** (glob pattern) | `find_file(pattern)` | `read_file` or `list_symbols` on result |
+| **A GitHub repo/issue/PR** | `github_repo` / `github_issue` / `github_pr` | drill with specific `method` parameter |
 
 ### By task
 
@@ -40,8 +41,8 @@ These are non-negotiable. Violating the letter IS violating the spirit.
 |---|---|---|
 | Read a function body | `find_symbol(name, include_body=true)` | ~~`read_file("src/foo.rs")`~~ |
 | See file structure | `list_symbols(path)` | ~~`read_file` entire file~~ |
-| Get docstrings | `list_symbols(path, include_docs=true)` | ~~removed `list_docs`~~ |
-| Get function signatures | `list_symbols(path)` | ~~removed `list_functions`~~ |
+| Get docstrings | `list_symbols(path, include_docs=true)` | — |
+| Get function signatures | `list_symbols(path)` | — |
 | Find all usages | `find_references(name_path, path)` | ~~`search_pattern`~~ |
 | Jump to definition | `goto_definition(path, line)` | — |
 | Type info / docs | `hover(path, line)` | — |
@@ -52,12 +53,12 @@ These are non-negotiable. Violating the letter IS violating the spirit.
 | Change an import/literal/comment | `edit_file(path, old_string, new_string)` | — (correct tool) |
 | Read config/markdown/data | `read_file(path)` | — (correct tool) |
 | Run a shell command | `run_command(command)` | ~~piped commands~~ |
-| Index a library | `index_project(scope="lib:name")` | ~~removed `index_library`~~ |
-| Project health check | `project_status` | ~~removed `get_config`, `index_status`, `get_usage_stats`~~ |
-| Persistent notes | `memory(action="read\|write\|list\|delete")` | ~~`write_memory`, `read_memory`, `list_memories`, `delete_memory`~~ |
+| Index a library | `index_project(scope="lib:name")` | — |
+| Project health check | `project_status` | — |
+| Persistent notes | `memory(action="read\|write\|list\|delete")` | — |
 | Search memories by meaning | `memory(action="recall", query="...")` | — |
 | Store knowledge for later | `memory(action="remember", content="...")` | — |
-| Git line history | `run_command("git blame file")` | ~~removed `git_blame` tool~~ |
+| Local git (blame, log, diff) | `run_command("git blame/log/diff ...")` | — |
 | GitHub identity / teams | `github_identity(method, ...)` | — |
 | GitHub issues | `github_issue(method, owner, repo, ...)` | — |
 | GitHub pull requests | `github_pr(method, owner, repo, ...)` | — |
@@ -79,6 +80,7 @@ These are non-negotiable. Violating the letter IS violating the spirit.
 | `run_command("cat src/lib.rs")` | `list_symbols("src/lib.rs")` or `read_file` with line range | Shell reads on source are blocked |
 | Repeat a broad `find_symbol` after overflow | Narrow with `path=`, `kind=`, or more specific pattern | Follow the overflow hint |
 | Ignore `by_file` in overflow response | Use top file from `by_file` as `path=` filter | The hint tells you exactly where to look |
+| `run_command("gh issue list")` or `run_command("gh pr ...")` | `github_issue(method, owner, repo, ...)` / `github_pr(...)` | Structured output, pagination, buffer handling built-in |
 
 **If you catch yourself rationalizing** ("I'll just quickly read the file", "this edit is
 too small for replace_symbol", "one pipe won't hurt") — that's the signal to stop and
@@ -149,7 +151,11 @@ use the right tool. Small shortcuts compound into large context waste.
   - `action="read"` — requires `topic`. Pass `private=true` for private store.
   - `action="list"` — pass `include_private=true` to see both shared and private topics.
   - `action="delete"` — requires `topic`. Pass `private=true` for private store.
-  - `action="remember"` — store a semantic memory. Requires `content`. Optional `title`, `bucket` (code/system/preferences/unstructured — auto-classified if omitted).
+  - `action="remember"` — store a semantic memory. Requires `content`. Optional `title`. Always specify `bucket`:
+    - `code` — functions, patterns, APIs, naming conventions, type/trait/module knowledge
+    - `system` — build/deploy/config, CI, infra, environment, credentials, migrations
+    - `preferences` — style preferences, habits, things to always/never do
+    - `unstructured` — decisions, context, notes (default if omitted)
   - `action="recall"` — search memories by meaning. Requires `query`. Optional `bucket` filter, `limit`.
   - `action="forget"` — delete a semantic memory. Requires `id` (from recall results).
 

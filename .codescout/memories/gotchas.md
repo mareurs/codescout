@@ -1,35 +1,52 @@
 # Gotchas & Known Issues
 
-## Tool Behavior
+See `docs/TODO-tool-misbehaviors.md` for the complete living log (BUG-001 through BUG-025+).
+This captures structural gotchas not listed there.
 
-- **`find_symbol(include_body=true)` body truncation** — LSP `workspace/symbol` returns the *name position* (single line), causing `start_line == end_line` and a body with only the signature. Workaround: use `list_symbols(path)` first to get correct ranges, then `find_symbol(name_path=..., include_body=true)`. Top-level functions in large files: use `list_symbols` spans directly.
+## GitHub Tools Use `gh` CLI (Not HTTP)
 
-- **`edit_file` blocked on source files** — Multi-line structural edits on `.rs`/`.py`/`.ts` are blocked. Use `replace_symbol`, `insert_code`, `remove_symbol` instead. `edit_file` is for imports, literals, comments, config files.
+All `github_identity`, `github_issue`, `github_pr`, `github_file`, `github_repo` tools
+shell out to the `gh` CLI (`src/tools/github.rs::run_gh()`). If `gh` is not installed or
+not authenticated, they silently return an error. Not documented in ARCHITECTURE.md.
 
-- **`run_command` piping blocked** — Never `run_command("cmd | grep X")`. Run bare, then query the `@cmd_*` buffer: `run_command("cmd")` → `run_command("grep X @cmd_id")`.
+## sqlite-vec Is NOT Active
 
-## Plugin / Hooks
+`sqlite-vec` is in `Cargo.toml` and `rusqlite` is "bundled", but the extension loading
+in `src/embed/index.rs` is commented out (TODO). Semantic search uses pure-Rust cosine
+similarity that loads all embeddings into memory. Large indexes can be slow/OOM.
+Verify current state: `search_pattern("is_vec0_active", path="src/embed/index.rs")`.
 
-- **code-explorer-routing blocks Read/Grep/Glob on source files** — Will get `PreToolUse hook error`. Use codescout MCP tools instead. Non-source files (`.md`, `.toml`, `.json`, `.sh`) are fine.
+## Tool Count Is 28, Not 23
 
-- **Bash tool fully blocked** — All Bash calls denied by `pre-tool-guard.sh`. Use `mcp__codescout__run_command` exclusively.
+`CLAUDE.md` says "23 tools registered" — outdated. Check `src/server.rs::from_parts()` for
+the actual list. The discrepancy grew as GitHub tools were added without updating CLAUDE.md.
 
-- **`block_reads` config requires string "false"** — In `.claude/code-explorer-routing.json`, set `"block_reads": "false"` (string, not boolean). jq's `//` treats boolean `false` as falsy.
+## `find_symbol(include_body=true)` Truncation Bug
 
-## Git / Worktrees
+`workspace/symbol` returns a single-line name position, not the full declaration range.
+Result: `start_line == end_line`, body contains only the signature.
+**Workaround:** `list_symbols(path)` for line ranges → `read_file(path, start_line, end_line)`.
+See `MEMORY.md` for the detailed workaround pattern.
 
-- **`activate_project` required after EnterWorktree** — Write tools silently target the main repo unless you switch the active project. Always call `activate_project(worktree_path)` after `EnterWorktree`.
+## `replace_symbol` / `remove_symbol` LSP Range Quirks
 
-- **`finishing-a-development-branch` cleanup** — Can fail when Claude's CWD is inside the worktree. Use `git worktree prune` from main repo root instead.
+LSP sometimes reports `start_line` pointing at the closing `}` of the *preceding* method.
+codescout trusts LSP ranges verbatim ("trust LSP" design decision, BUG-013 fix).
+This means replacing a symbol can eat the preceding closing brace. See `tests/symbol_lsp.rs`
+for the regression tests that document this accepted behavior.
 
-## Embedding
+## `system-prompt.md` Takes Precedence Over TOML
 
-- **Remote embeddings need API/Ollama** — Default build uses `remote-embed` feature. Needs `OPENAI_API_KEY` or Ollama running. Use `--features local-embed` to avoid external dependency.
+`.codescout/system-prompt.md` is read by `agent::project_status()` first; `project.toml`'s
+`project.system_prompt` field is only used as fallback. Confirmed in agent tests.
 
-- **`semantic_search` warns on stale index** — Warning appears when index is behind HEAD; run `index_project` to rebuild. Incremental rebuilds are fast (git diff → mtime → SHA-256).
+## Worktree Write Safety
 
-## Build
+`guard_worktree_write()` in `src/tools/mod.rs` checks that write tools aren't targeting
+a stale worktree path after `activate_project`. Must call after any `activate_project`
+in tests that write files.
 
-- **`panic = "abort"` in release** — Intentional. Panics kill the process immediately so Claude Code triggers a clean reconnect via `/mcp`. Do not remove.
+## Panic Policy: `abort` in Release
 
-- **E2E tests need real LSP servers** — Gated behind `--features e2e-rust` etc. Excluded from default `cargo test`.
+`Cargo.toml` sets `panic = "abort"` for the release profile. Any panic kills the MCP
+server immediately (no unwind). In dev/test builds, panics unwind normally.

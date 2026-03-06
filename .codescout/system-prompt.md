@@ -1,37 +1,33 @@
 # codescout — Code Explorer Guidance
 
 ## Entry Points
-- `src/server.rs:run()` — tool registration + MCP server startup
-- `src/tools/mod.rs:Tool` (L209) — the central trait every capability implements
-- `src/agent.rs:Agent` — orchestrator holding active project + config
-- `src/tools/` — one file per tool category (file, symbol, semantic, memory, workflow, github, config)
+- `src/server.rs::CodeScoutServer::from_parts` — all 28 tools registered here; start for tool inventory
+- `src/tools/mod.rs:228` — `Tool` trait definition; read before adding or modifying any tool
+- `src/agent.rs::Agent::new` — project activation and state wiring
 
 ## Key Abstractions
-- **`Tool` trait** (`src/tools/mod.rs:209`) — `name`, `description`, `input_schema`, `async call(Value, &ToolContext)`
-- **`ToolContext`** (`src/tools/mod.rs:47`) — agent + lsp + output_buffer + progress; injected into every call
-- **`Agent`** (`src/agent.rs:33`) — `Arc<RwLock<AgentInner>>`, holds `ActiveProject` (root, config, memory)
-- **`RecoverableError`** (`src/tools/mod.rs:67`) — expected failures → `isError: false`; `anyhow::bail!` → `isError: true`
-- **`OutputGuard`** (`src/tools/output.rs`) — enforces Exploring/Focused mode; do not bypass
+- `Tool` trait (`src/tools/mod.rs`) — name/description/schema/call/call_content/format_compact
+- `OutputGuard` (`src/tools/output.rs`) — progressive disclosure; every tool with variable output uses it
+- `RecoverableError` (`src/tools/mod.rs:78`) — recoverable vs fatal error routing
+- `LspProvider` / `LspClientOps` (`src/lsp/ops.rs`) — LSP abstraction; `MockLspClient` for tests
+- `Agent` / `ActiveProject` (`src/agent.rs`) — project state; all tools access via `ctx.agent.with_project()`
 
 ## Search Tips
-- `semantic_search("progressive disclosure output")` — finds OutputGuard + format patterns
-- `semantic_search("LSP symbol navigation")` — finds symbol.rs tool implementations
-- `semantic_search("embedding index incremental")` — finds embed/ change detection
-- `semantic_search("error routing recoverable")` — finds RecoverableError + route_tool_error
-- Avoid: "tool", "server", "error" alone (too broad); prefer compound terms
+- Good queries: "OutputGuard cap_items", "route_tool_error", "RecoverableError", "strip_project_root"
+- Avoid: "tool", "error", "file" (too broad)
+- For a specific tool implementation: `list_symbols("src/tools/<category>.rs")`
+- For LSP flow: `search_pattern("get_or_start", path="src/lsp")`
 
 ## Navigation Strategy
-For any new task:
-1. `memory(action="read", topic="architecture")` — orient
-2. `list_symbols("src/tools/<relevant_file>.rs")` — see what's in the tool file
-3. `semantic_search("your concept")` — find related code
-4. `find_symbol("Name", include_body=true)` — read implementation
-5. Check `docs/TODO-tool-misbehaviors.md` before starting
+1. New task on a tool → `list_symbols("src/tools/<file>.rs")` + `read_file` line ranges for bodies
+2. Cross-cutting change → `search_pattern` across `src/` + check all 3 prompt surfaces
+3. Bug in symbol editing → read `docs/TODO-tool-misbehaviors.md` first
+4. LSP behavior question → `list_symbols("src/lsp/client.rs")` then targeted `read_file`
 
 ## Project Rules
-- Read `docs/PROGRESSIVE_DISCOVERABILITY.md` before adding or modifying any tool
-- Write tools must return `json!("ok")` — never echo input back
-- When renaming tools: update all 3 prompt surfaces (`server_instructions.md`, `onboarding_prompt.md`, `build_system_prompt_draft()`)
-- Use `RecoverableError` for bad input; `anyhow::bail!` only for genuine crashes
-- `cargo fmt && cargo clippy -- -D warnings && cargo test` before completing any task
-- Log unexpected tool behavior in `docs/TODO-tool-misbehaviors.md` immediately
+- `cargo fmt && cargo clippy -- -D warnings && cargo test` before every completion
+- Write tools return `json!("ok")` only — never echo content back
+- `RecoverableError` for expected failures, `anyhow::bail!` for genuine bugs
+- Read `docs/PROGRESSIVE_DISCOVERABILITY.md` before adding any tool with variable-length output
+- When renaming tools: update all 3 prompt surfaces (see `CLAUDE.md § Prompt Surface Consistency`)
+- GitHub tools shell to `gh` CLI — not HTTP; `sqlite-vec` is present but NOT active (pure-Rust cosine)

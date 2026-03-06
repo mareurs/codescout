@@ -1,37 +1,47 @@
 # Development Commands
 
-See CLAUDE.md for primary commands. This supplements with gotchas.
+See `CLAUDE.md § Development Commands` for the canonical list. This supplements it.
 
-## Build & Run
+## Before Completing Any Task
+1. `cargo fmt`
+2. `cargo clippy -- -D warnings`
+3. `cargo test`
+All three must pass. Do not commit until they do.
+
+## Feature-Gated Builds
+
 ```bash
-cargo build                          # debug build
-cargo run -- start --project .       # run MCP server on stdio
-cargo run -- index --project .       # build embedding index
-cargo run -- dashboard --project .   # web UI (default port 8099)
+# Local embedding (downloads model on first run ~20-300MB):
+cargo build --features local-embed --no-default-features
+
+# No optional features (CI matrix "no-features"):
+cargo build --no-default-features
+
+# E2E tests (require live LSP servers installed):
+cargo test --features e2e-rust        # needs rust-analyzer
+cargo test --features e2e-python      # needs pyright-langserver
+cargo test --features e2e-typescript  # needs typescript-language-server
+cargo test --features e2e-kotlin      # needs kotlin-language-server
+cargo test --features e2e-java        # needs jdtls
 ```
 
-## Features
+## CI Checks
+
+CI runs (`.github/workflows/ci.yml`): fmt check, clippy, test (3 OS × 3 feature combos),
+tool-docs-sync (verifies every tool name in `src/tools/*.rs` has a docs page), MSRV 1.75.
+
+**Tool docs sync:** When adding a new tool, add a matching `## \`tool_name\`` section in
+`docs/manual/src/tools/`. CI will fail if the counts don't match.
+
+## Running the Server
+
 ```bash
-cargo build --features local-embed   # local ONNX embeddings (fastembed)
-cargo test --features e2e-rust       # E2E tests (requires rust-analyzer installed)
-cargo test --features e2e            # all E2E (requires all LSP servers)
+cargo run -- start --project .         # stdio transport (default)
+cargo run -- start --project . --sse   # HTTP/SSE transport
+cargo run -- index --project .         # build embedding index
+codescout dashboard --project .        # web UI (port 8099 default)
 ```
 
-## LSP Server Install
-```bash
-./scripts/install-lsp.sh --check    # what's installed
-./scripts/install-lsp.sh --all      # install all
-./scripts/install-lsp.sh rust       # specific language
-```
+## Logging
 
-## Before Completing Work
-1. `cargo fmt` — format
-2. `cargo clippy -- -D warnings` — zero warnings required
-3. `cargo test` — all tests must pass (baseline ~932)
-4. Check `docs/TODO-tool-misbehaviors.md` — log any unexpected tool behavior encountered
-
-## Gotchas
-- `panic = "abort"` in release profile — panics kill the process immediately (intentional: prevents zombie MCP state)
-- E2E tests need real LSP servers; they're excluded from default `cargo test`
-- Dashboard is behind the `dashboard` feature (enabled by default)
-- Remote embeddings need `OPENAI_API_KEY` or Ollama running; `local-embed` feature avoids this
+Set `RUST_LOG=debug` or `RUST_LOG=codescout=trace` for verbose output.

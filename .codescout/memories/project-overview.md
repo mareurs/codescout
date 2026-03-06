@@ -1,30 +1,32 @@
 # codescout
 
 ## Purpose
-Rust MCP server giving LLMs IDE-grade code intelligence: symbol-level navigation via LSP, semantic search via embeddings, persistent memory, shell integration, and GitHub integration. Built as a Claude Code companion — 28 tools total.
+Rust MCP server giving Claude Code (and any MCP-compatible LLM client) IDE-grade code
+intelligence: symbol navigation via LSP, semantic search via SQLite embeddings, structural
+code editing, git integration, and project memory. Inspired by Serena.
 
 ## Tech Stack
-- **Language:** Rust (edition 2021, MSRV 1.75)
-- **MCP SDK:** rmcp 0.1 (stdio + SSE transports)
-- **Database:** SQLite (rusqlite bundled + sqlite-vec for cosine similarity)
-- **LSP protocol:** lsp-types 0.97, JSON-RPC over stdio child process
-- **AST:** tree-sitter (Rust, Python, Go, TypeScript, Java, Kotlin)
-- **Async runtime:** Tokio full
-- **Key deps:** git2 (git blame/log), anyhow/thiserror, clap, serde_json, reqwest (remote embeddings), fastembed (local embeddings, optional), axum (dashboard, optional)
-
-## Features (28 tools)
-| Category | Count |
-|---|---|
-| Symbol Navigation (LSP-backed) | 9 |
-| File Operations | 6 |
-| Semantic Search | 2 |
-| Memory | 1 |
-| Workflow (onboarding, run_command) | 2 |
-| Config & Navigation | 3 |
-| GitHub | 5 |
+- **Language:** Rust 2021 (MSRV 1.75)
+- **MCP SDK:** rmcp 0.1 (stdio + HTTP/SSE transports)
+- **Async runtime:** tokio (full features)
+- **LSP protocol:** lsp-types 0.97 with custom JSON-RPC transport
+- **Semantic search:** rusqlite + sqlite-vec (bundled) — NOTE: sqlite-vec extension NOT loaded;
+  currently uses pure-Rust cosine similarity (see gotchas)
+- **AST parsing:** tree-sitter grammars for Rust, Python, TypeScript, Go, Java, Kotlin
+- **Git:** git2 0.19
+- **HTTP (GitHub tools):** shell `gh` CLI subprocess — not direct HTTP API
 
 ## Runtime Requirements
-- Rust toolchain (cargo build)
-- Optional: LSP servers installed per language (rust-analyzer, pyright, etc.) — `./scripts/install-lsp.sh`
-- Optional: Ollama or OpenAI-compatible API for remote embeddings; or fastembed feature for local
-- Dashboard: enabled by default via `dashboard` feature flag
+- LSP servers must be installed separately per language (rust-analyzer, pyright, etc.)
+- `gh` CLI required for GitHub tools
+- Embedding index: optional; requires an OpenAI-compatible endpoint or local fastembed
+  (`--features local-embed`) for semantic search
+- Default embed model: `mxbai-embed-large-v1`
+
+## Feature Flags
+- `remote-embed` (default): HTTP OpenAI-compatible embeddings
+- `local-embed`: fastembed ONNX Runtime (downloads ~20-300MB model on first use)
+- `dashboard` (default): Axum web UI (`codescout dashboard --project .`)
+
+## Tool Count
+28 tools registered (not 23 — CLAUDE.md is stale). See `src/server.rs::from_parts()`.
