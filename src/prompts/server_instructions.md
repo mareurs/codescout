@@ -158,12 +158,18 @@ use the right tool. Small shortcuts compound into large context waste.
     - `unstructured` — decisions, context, notes (default if omitted)
   - `action="recall"` — search memories by meaning. Requires `query`. Optional `bucket` filter, `limit`.
   - `action="forget"` — delete a semantic memory. Requires `id` (from recall results).
+  - `action="refresh_anchors"` — re-hash anchored files without changing memory content. Use after reviewing a stale memory and confirming it's still accurate. Requires `topic`.
 
 ### Project & Libraries
 
 - `activate_project(path)` — switch active project root. Required after `EnterWorktree`.
 - `project_status` — project state: config, semantic index health, usage telemetry,
   library summary. Pass `threshold` for drift scores, `window` for usage time range.
+  `memory_staleness` section shows which memories have stale path anchors:
+  - `stale` — memories where anchored source files changed since last write
+  - `fresh` — memories with all anchors matching current files
+  - `untracked` — memories without anchor sidecars
+  When memories are stale, review them and either update the memory content (re-writes anchors) or use `memory(action="refresh_anchors", topic="...")` to acknowledge "still accurate."
 - `list_libraries` — registered libraries and index status. Use `scope="lib:<name>"` in
   `semantic_search`, `find_symbol`, or `index_project` to target a library.
 

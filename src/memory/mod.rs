@@ -4,6 +4,7 @@
 //! They are organized hierarchically via path-like topics:
 //! e.g. "debugging/async-patterns" → `.codescout/memories/debugging/async-patterns.md`
 
+pub mod anchors;
 pub mod classify;
 
 use anyhow::Result;

@@ -1074,6 +1074,17 @@ pub async fn build_index(project_root: &Path, force: bool) -> Result<IndexReport
 
         tracing::debug!("indexed {} ({} chunks)", result.rel, result.chunks.len());
     }
+
+    // Reverse drift hook: mark semantic anchors stale for high-drift files
+    if config.embeddings.drift_detection_enabled {
+        ensure_memory_anchors(&conn)?;
+        let staleness_threshold = config.memory.staleness_drift_threshold;
+        for drift in &drift_results {
+            if drift.avg_drift >= staleness_threshold {
+                let _ = mark_anchors_stale_for_file(&conn, &drift.file_path);
+            }
+        }
+    }
     set_meta(&conn, "embed_model", &config.embeddings.model)?;
     set_meta(&conn, "last_indexed_at", &utc_now_display())?;
 
@@ -1259,6 +1270,7 @@ pub async fn build_library_index(
         upsert_file_hash(&conn, &result.rel, &result.hash, None)?;
         tracing::debug!("indexed {} ({} chunks)", result.rel, result.chunks.len());
     }
+
     set_meta(&conn, "embed_model", &config.embeddings.model)?;
     set_meta(&conn, "last_indexed_at", &utc_now_display())?;
     conn.execute_batch("COMMIT")?;
@@ -1588,6 +1600,105 @@ fn map_drift_row(row: &rusqlite::Row) -> rusqlite::Result<DriftReportRow> {
 pub fn clear_drift_report(conn: &Connection) -> Result<()> {
     conn.execute("DELETE FROM drift_report", [])?;
     Ok(())
+}
+
+// ── Memory anchors ─────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct SemanticAnchor {
+    pub file_path: String,
+    pub file_hash: String,
+    pub similarity: f32,
+    pub stale: bool,
+}
+
+/// Create the `memory_anchors` table if it does not exist.
+pub fn ensure_memory_anchors(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS memory_anchors (
+            id INTEGER PRIMARY KEY,
+            memory_type TEXT NOT NULL,
+            memory_key TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            file_hash TEXT NOT NULL,
+            similarity REAL NOT NULL,
+            created_at TEXT NOT NULL,
+            stale INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(memory_type, memory_key, file_path)
+        )",
+    )?;
+    Ok(())
+}
+
+/// Insert or update a semantic anchor for a memory–file pair.
+pub fn insert_semantic_anchor(
+    conn: &Connection,
+    memory_type: &str,
+    memory_key: &str,
+    file_path: &str,
+    file_hash: &str,
+    similarity: f32,
+) -> Result<()> {
+    let now = utc_now_display();
+    conn.execute(
+        "INSERT INTO memory_anchors (memory_type, memory_key, file_path, file_hash, similarity, created_at, stale)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)
+         ON CONFLICT(memory_type, memory_key, file_path) DO UPDATE SET
+            file_hash = excluded.file_hash,
+            similarity = excluded.similarity,
+            created_at = excluded.created_at,
+            stale = 0",
+        params![memory_type, memory_key, file_path, file_hash, similarity, now],
+    )?;
+    Ok(())
+}
+
+/// Get all semantic anchors for a given memory.
+pub fn get_semantic_anchors(
+    conn: &Connection,
+    memory_type: &str,
+    memory_key: &str,
+) -> Result<Vec<SemanticAnchor>> {
+    let mut stmt = conn.prepare(
+        "SELECT file_path, file_hash, similarity, stale
+         FROM memory_anchors
+         WHERE memory_type = ?1 AND memory_key = ?2",
+    )?;
+    let rows = stmt.query_map(params![memory_type, memory_key], |row| {
+        Ok(SemanticAnchor {
+            file_path: row.get(0)?,
+            file_hash: row.get(1)?,
+            similarity: row.get(2)?,
+            stale: row.get::<_, i32>(3)? != 0,
+        })
+    })?;
+    let mut anchors = Vec::new();
+    for row in rows {
+        anchors.push(row?);
+    }
+    Ok(anchors)
+}
+
+/// Delete all semantic anchors for a given memory.
+pub fn delete_semantic_anchors(
+    conn: &Connection,
+    memory_type: &str,
+    memory_key: &str,
+) -> Result<()> {
+    conn.execute(
+        "DELETE FROM memory_anchors WHERE memory_type = ?1 AND memory_key = ?2",
+        params![memory_type, memory_key],
+    )?;
+    Ok(())
+}
+
+/// Mark all anchors pointing to a file as stale. Returns count of rows affected.
+pub fn mark_anchors_stale_for_file(conn: &Connection, file_path: &str) -> Result<usize> {
+    let count = conn.execute(
+        "UPDATE memory_anchors SET stale = 1 WHERE file_path = ?1",
+        params![file_path],
+    )?;
+    Ok(count)
 }
 
 #[cfg(test)]
@@ -2968,5 +3079,88 @@ mod tests {
             err_msg.contains("not found"),
             "expected 'not found' in error: {err_msg}"
         );
+    }
+
+    #[test]
+    fn memory_anchors_table_created() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = open_db(dir.path()).unwrap();
+        ensure_memory_anchors(&conn).unwrap();
+
+        insert_semantic_anchor(
+            &conn,
+            "markdown",
+            "architecture",
+            "src/server.rs",
+            "abc123",
+            0.85,
+        )
+        .unwrap();
+        let anchors = get_semantic_anchors(&conn, "markdown", "architecture").unwrap();
+        assert_eq!(anchors.len(), 1);
+        assert_eq!(anchors[0].file_path, "src/server.rs");
+        assert!((anchors[0].similarity - 0.85).abs() < 0.01);
+        assert!(!anchors[0].stale);
+    }
+
+    #[test]
+    fn memory_anchors_upsert_on_conflict() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = open_db(dir.path()).unwrap();
+        ensure_memory_anchors(&conn).unwrap();
+
+        insert_semantic_anchor(&conn, "markdown", "arch", "src/a.rs", "h1", 0.8).unwrap();
+        insert_semantic_anchor(&conn, "markdown", "arch", "src/a.rs", "h2", 0.9).unwrap();
+
+        let anchors = get_semantic_anchors(&conn, "markdown", "arch").unwrap();
+        assert_eq!(anchors.len(), 1);
+        assert_eq!(anchors[0].file_hash, "h2");
+        assert!((anchors[0].similarity - 0.9).abs() < 0.01);
+    }
+
+    #[test]
+    fn mark_anchors_stale_for_drifted_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = open_db(dir.path()).unwrap();
+        ensure_memory_anchors(&conn).unwrap();
+
+        insert_semantic_anchor(&conn, "markdown", "arch", "src/server.rs", "h1", 0.9).unwrap();
+        insert_semantic_anchor(&conn, "markdown", "conv", "src/server.rs", "h2", 0.8).unwrap();
+        insert_semantic_anchor(&conn, "markdown", "arch", "src/other.rs", "h3", 0.7).unwrap();
+
+        let count = mark_anchors_stale_for_file(&conn, "src/server.rs").unwrap();
+        assert_eq!(count, 2);
+
+        let arch = get_semantic_anchors(&conn, "markdown", "arch").unwrap();
+        let server_anchor = arch
+            .iter()
+            .find(|a| a.file_path == "src/server.rs")
+            .unwrap();
+        assert!(server_anchor.stale);
+        let other_anchor = arch.iter().find(|a| a.file_path == "src/other.rs").unwrap();
+        assert!(!other_anchor.stale);
+    }
+
+    #[test]
+    fn delete_semantic_anchors_clears_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = open_db(dir.path()).unwrap();
+        ensure_memory_anchors(&conn).unwrap();
+
+        insert_semantic_anchor(&conn, "markdown", "arch", "src/a.rs", "h1", 0.9).unwrap();
+        insert_semantic_anchor(&conn, "markdown", "arch", "src/b.rs", "h2", 0.8).unwrap();
+
+        delete_semantic_anchors(&conn, "markdown", "arch").unwrap();
+        let anchors = get_semantic_anchors(&conn, "markdown", "arch").unwrap();
+        assert!(anchors.is_empty());
+    }
+
+    #[test]
+    fn ensure_memory_anchors_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = open_db(dir.path()).unwrap();
+        // Call twice — should not error
+        ensure_memory_anchors(&conn).unwrap();
+        ensure_memory_anchors(&conn).unwrap();
     }
 }

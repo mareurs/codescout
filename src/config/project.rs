@@ -13,6 +13,8 @@ pub struct ProjectConfig {
     pub ignored_paths: IgnoredPathsSection,
     #[serde(default)]
     pub security: SecuritySection,
+    #[serde(default)]
+    pub memory: MemorySection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,6 +179,39 @@ fn default_drift_detection_enabled() -> bool {
     true
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemorySection {
+    /// Min drift score to trigger reverse-drift staleness flag (0.0-1.0)
+    #[serde(default = "default_staleness_drift_threshold")]
+    pub staleness_drift_threshold: f32,
+    /// Min similarity for semantic anchor creation (0.0-1.0)
+    #[serde(default = "default_semantic_anchor_min_similarity")]
+    pub semantic_anchor_min_similarity: f32,
+    /// Number of top chunks to consider for semantic anchoring
+    #[serde(default = "default_semantic_anchor_top_n")]
+    pub semantic_anchor_top_n: usize,
+}
+
+fn default_staleness_drift_threshold() -> f32 {
+    0.3
+}
+fn default_semantic_anchor_min_similarity() -> f32 {
+    0.3
+}
+fn default_semantic_anchor_top_n() -> usize {
+    10
+}
+
+impl Default for MemorySection {
+    fn default() -> Self {
+        Self {
+            staleness_drift_threshold: default_staleness_drift_threshold(),
+            semantic_anchor_min_similarity: default_semantic_anchor_min_similarity(),
+            semantic_anchor_top_n: default_semantic_anchor_top_n(),
+        }
+    }
+}
+
 impl Default for EmbeddingsSection {
     fn default() -> Self {
         Self {
@@ -243,6 +278,7 @@ impl ProjectConfig {
             embeddings: EmbeddingsSection::default(),
             ignored_paths: IgnoredPathsSection::default(),
             security: SecuritySection::default(),
+            memory: MemorySection::default(),
         }
     }
 
@@ -321,5 +357,21 @@ mod tests {
             cfg.project.system_prompt.as_deref(),
             Some("Use pytest for testing.")
         );
+    }
+
+    #[test]
+    fn memory_section_defaults() {
+        let toml = "[project]\nname = \"test\"";
+        let config: ProjectConfig = toml::from_str(toml).unwrap();
+        assert!((config.memory.staleness_drift_threshold - 0.3).abs() < 0.01);
+        assert!((config.memory.semantic_anchor_min_similarity - 0.3).abs() < 0.01);
+        assert_eq!(config.memory.semantic_anchor_top_n, 10);
+    }
+
+    #[test]
+    fn memory_section_override() {
+        let toml = "[project]\nname = \"test\"\n[memory]\nstaleness_drift_threshold = 0.5\n";
+        let config: ProjectConfig = toml::from_str(toml).unwrap();
+        assert!((config.memory.staleness_drift_threshold - 0.5).abs() < 0.01);
     }
 }
