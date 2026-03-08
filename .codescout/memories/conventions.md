@@ -1,94 +1,59 @@
 # Conventions
 
-See `CLAUDE.md § Design Principles` and `docs/PROGRESSIVE_DISCOVERABILITY.md` for
-the canonical output-sizing rules. This memory captures naming and code patterns.
+See `CLAUDE.md § Design Principles` and `CLAUDE.md § Key Patterns` for core rules.
+This supplements with naming tables and testing patterns discovered in code.
 
 ## Naming
 
 | Entity | Convention | Example |
 |---|---|---|
-| Tool structs | PascalCase, noun phrase | `FindSymbol`, `ListSymbols`, `ReplaceSymbol` |
-| Tool names (MCP) | snake_case | `"find_symbol"`, `"list_symbols"` |
-| `impl Tool for X` method `name()` | matches snake_case struct | `fn name() { "find_symbol" }` |
-| Helper fns in tool files | snake_case, descriptive | `get_lsp_client`, `collect_matching`, `symbol_to_json` |
-| Test modules | `mod tests` inline in file | all tests co-located with implementation |
-| Test helpers | descriptive snake_case | `ctx_with_mock`, `project_with_files`, `make_server` |
+| Tool struct | PascalCase noun | `FindSymbol`, `ListSymbols`, `EditFile` |
+| Tool name (MCP) | snake_case verb_noun | `"find_symbol"`, `"list_symbols"`, `"edit_file"` |
+| Tool file | category noun plural | `symbol.rs`, `file.rs`, `memory.rs`, `github.rs` |
+| LSP ops trait | `*Ops` suffix | `LspClientOps` |
+| LSP provider | `*Provider` suffix | `LspProvider` |
+| Mock types | `Mock*` prefix | `MockLspClient`, `MockLspProvider` |
+| Integration test helpers | `project_with_files` | Creates `TempDir` + `ToolContext` |
+| Config files | `project.toml`, `libraries.json` | Under `.codescout/` |
+| Anchor sidecars | `.anchors.toml` | Alongside memory topic files |
 
-## RecoverableError API
-
-Two separate constructors — they are NOT chainable:
-
-```rust
-// No hint:
-RecoverableError::new("path not found")
-
-// With hint (static constructor, not a builder):
-RecoverableError::with_hint("path not found", "Pass an absolute path within the project root")
-```
-
-Both are defined in `src/tools/mod.rs:86` and `src/tools/mod.rs:93`.
-
-## Boolean Parameters
-
-Claude Code's MCP client serializes boolean parameters as JSON strings (`"true"` instead
-of `true`). Use `parse_bool_param()` from `src/tools/mod.rs:159` at every boolean input site:
+## Error Handling Pattern
 
 ```rust
-let force = parse_bool_param(&input["force"]);
+// Expected / user-fixable → RecoverableError
+return Err(RecoverableError::with_hint("message", "what to do").into());
+
+// Bug or genuine failure → anyhow
+anyhow::bail!("unexpected state: {}", e);
 ```
 
-This handles `Value::Bool`, `Value::String("true"/"false")`, and null gracefully.
-**Never use `.as_bool().unwrap_or(false)` on tool inputs** — it silently returns `false`
-for string-encoded booleans. The fix is applied across all tool files (37 sites, commit `03382cc`).
-
-Exception: `include_body` in `symbol.rs` uses an inline equivalent rather than the helper —
-same semantics, different form.
-
-## Tool Implementation Pattern
-
-```rust
-struct MyTool;
-
-impl Tool for MyTool {
-    fn name(&self) -> &str { "my_tool" }
-    fn description(&self) -> &str { "..." }
-    fn input_schema(&self) -> Value { json!({ "type": "object", "properties": { ... } }) }
-
-    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
-        let guard = OutputGuard::from_input(&input);          // always first
-        let path = require_str_param(&input, "path")?;        // use helpers from mod.rs
-        // ... logic ...
-        let (items, overflow) = guard.cap_items(results, "hint for narrowing");
-        Ok(json!({ "items": items, "overflow": overflow }))
-    }
-
-    fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(format!("..."))  // compact summary for @tool_* buffer ref line
-    }
-}
-```
-
-## Error Handling
-
-- Expected, input-driven failures → `RecoverableError::new("msg")` or `RecoverableError::with_hint("msg", "fix")`
-- Genuine tool failures (LSP crash, programming bug) → `anyhow::bail!("...")`
-- Never return `anyhow::bail!` for missing paths, unsupported types, empty results
+`RecoverableError` has two constructors: `new(msg)` and `with_hint(msg, hint)`.
+The `hint` field appears in the JSON response body — give actionable next steps.
 
 ## Testing Patterns
 
-- Framework: `tokio::test` for async, `#[test]` for sync
-- No test fixtures on disk — `tempdir()` per test, files written inline
-- Mock LSP via `MockLspClient::new().with_symbols(path, vec![sym(...)])` in `tests/symbol_lsp.rs`
-- Integration tests build a full `ToolContext` in `tests/integration.rs::project_with_files()`
-- Three-query sandwich for cache-invalidation tests (see `CLAUDE.md § Testing Patterns`)
-- E2E tests behind feature flags (`e2e-rust`, `e2e-python`, etc.) — require live LSP servers
+- **Unit tests**: inline `#[cfg(test)] mod tests` at bottom of each file
+- **Integration tests**: `tests/integration.rs` — multi-tool workflows via `project_with_files()`
+  helper that creates a `TempDir` + `ToolContext` with real `Agent` + `LspManager`
+- **LSP tests**: `tests/symbol_lsp.rs` and `tests/rename_symbol.rs` — behind `e2e-*` features
+- **Cache-invalidation tests**: three-query sandwich (see `CLAUDE.md § Testing Patterns`)
+- **Async tests**: `#[tokio::test]` throughout; integration tests are async
+- **Mock pattern**: `MockLspClient` / `MockLspProvider` (src/lsp/mock.rs) — injectable
+  via `ToolContext.lsp: Arc<dyn LspProvider>`
 
-## Code Quality Commands
+## Tool Implementation Checklist
 
-See `CLAUDE.md § Development Commands`. Always run in order: `cargo fmt` → `cargo clippy -- -D warnings` → `cargo test`.
+Adding a new tool requires 6 locations (see `MEMORY.md § New Tool Checklist`):
+1. Tool struct + `impl Tool` in `src/tools/*.rs`
+2. `Arc::new(ToolName)` in `server.rs::from_parts`
+3. Tool name in `server_registers_all_tools` test
+4. If write tool: add to `check_tool_access` match arm in `src/util/path_security.rs`
+5. If write tool: add to corresponding `*_disabled_blocks_*` security test
+6. Tool description in `src/prompts/server_instructions.md`
 
-## Prompt Surface Rule
+## Code Quality
 
-Three files must stay in sync when tools are renamed: `src/prompts/server_instructions.md`,
-`src/prompts/onboarding_prompt.md`, `src/tools/workflow.rs::build_system_prompt_draft()`.
-Grep all three when modifying tool names.
+```bash
+cargo fmt && cargo clippy -- -D warnings && cargo test
+```
+All three must pass before committing. CI enforces on ubuntu/macos/windows.

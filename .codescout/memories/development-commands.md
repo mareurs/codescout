@@ -1,51 +1,47 @@
 # Development Commands
 
-See `CLAUDE.md § Development Commands` for the canonical list. This supplements it.
+See `CLAUDE.md § Development Commands` for the primary list. Supplements below.
 
-## Before Completing Any Task
-1. `cargo fmt`
-2. `cargo clippy -- -D warnings`
-3. `cargo test`
-All three must pass. Do not commit until they do.
-
-## Testing via Live MCP Server
-
-`cargo build --release` first, then restart with `/mcp`. The MCP server runs the **release**
-binary — dev builds are not picked up.
-
-## Feature-Gated Builds
+## Extra Commands
 
 ```bash
-# Local embedding (downloads model on first run ~20-300MB):
+# Run a specific test by name
+cargo test test_name_substring
+
+# Run tests with output visible
+cargo test -- --nocapture
+
+# Run integration tests only
+cargo test --test integration
+
+# Run with local embedding backend (no Ollama needed)
 cargo build --features local-embed --no-default-features
 
-# No optional features:
+# Run with no optional features (minimal build)
 cargo build --no-default-features
 
-# E2E tests (require live LSP servers installed):
-cargo test --features e2e-rust        # needs rust-analyzer
-cargo test --features e2e-python      # needs pyright-langserver
-cargo test --features e2e-typescript  # needs typescript-language-server
-cargo test --features e2e-kotlin      # needs kotlin-language-server
-cargo test --features e2e-java        # needs jdtls
+# Check MSRV compatibility (Rust 1.75)
+rustup run 1.75 cargo check
+
+# Build and launch the dashboard (separate from MCP server)
+cargo run -- dashboard --project . --port 8099
+
+# Index the project (build embedding index)
+cargo run -- index --project .
 ```
 
-## Running the Server
+## Before Completing Work
 
-```bash
-cargo run -- start --project .         # stdio transport (default)
-cargo run -- start --project . --sse   # HTTP/SSE transport
-cargo run -- index --project .         # build embedding index
-codescout dashboard --project .        # web UI (port 8099 default)
-```
+1. `cargo fmt` — format all files
+2. `cargo clippy -- -D warnings` — no warnings allowed
+3. `cargo test` — all tests pass
+4. If changes affect tool dispatch or MCP behavior:
+   `cargo build --release && /mcp` (restart server in Claude Code)
+5. If tools were renamed: update all 3 prompt surfaces
+   (`server_instructions.md`, `onboarding_prompt.md`, `build_system_prompt_draft()`)
 
-## Logging
+## CI Matrix
 
-Set `RUST_LOG=debug` or `RUST_LOG=codescout=trace` for verbose output.
-
-## Branch Strategy
-
-- `master` is protected — only cherry-picked, tested commits land here
-- All experimental work goes on `experiments` (or a feature branch)
-- Cherry-pick to master only after: tests pass, clippy clean, verified via live MCP
-- No `.github/` CI workflows exist yet
+- ubuntu-latest / macos-latest / windows-latest
+- 3 feature variants: default, `local-embed --no-default-features`, `--no-default-features`
+- Plus: `cargo fmt --check`, `cargo clippy -- -D warnings`, MSRV 1.75, tool-docs-sync

@@ -1,82 +1,77 @@
 # Architecture
 
-See `docs/ARCHITECTURE.md` and `CLAUDE.md § Project Structure` for the full layer diagram.
-This memory captures what the code reveals beyond those docs.
+See `docs/ARCHITECTURE.md` for the full component diagram. This memory captures
+wiring details NOT covered there.
 
-## Key Abstractions
+## Tool Dispatch Pipeline (concrete flow)
 
-| Type | File | Role |
-|---|---|---|
-| `Tool` trait | `src/tools/mod.rs:228` | Core tool abstraction; `call_content()` handles buffering |
-| `CodeScoutServer` | `src/server.rs` | rmcp ServerHandler; dispatches all 28 tools |
-| `Agent` / `AgentInner` | `src/agent.rs` | Project state orchestrator; RwLock-guarded |
-| `LspManager` / `LspClient` | `src/lsp/manager.rs`, `client.rs` | Per-language LSP pool |
-| `OutputGuard` | `src/tools/output.rs` | Progressive disclosure enforcer |
+`rmcp::ServerHandler::call_tool` → `call_tool_inner` (src/server.rs):
+1. `find_tool(name)` — linear scan over `Vec<Arc<dyn Tool>>`
+2. `check_tool_access(name, &security)` — denormalized match-arm gate in
+   `src/util/path_security.rs`. Missing a write tool here bypasses access controls.
+3. Build `ToolContext { agent, lsp, output_buffer, progress }`
+4. Apply `tool_timeout_secs` from `project.toml` (skipped for `index_project`, `onboarding`)
+5. `UsageRecorder::record_content` wraps `tool.call_content()`
+6. `route_tool_error`: `RecoverableError` → `isError:false` + JSON error/hint;
+   LSP code -32800 (RequestCancelled) → recoverable with Kotlin multi-session hint;
+   other errors → `isError:true`
+7. `strip_project_root_from_result` removes absolute project prefix from all output text
 
-## Data Flow: Tool Call
+## Output Routing (Tool trait default impl)
 
-```
-MCP client → call_tool(name, args)
-  → CodeScoutServer::call_tool_inner()
-    → security check (path_security::check_tool_access)
-    → ToolContext { agent, lsp, output_buffer, progress }
-    → timeout (project.toml: tool_timeout_secs)
-    → UsageRecorder::record_content(tool_name, || tool.call_content(input, ctx))
-      → tool.call(input, ctx) → Result<Value>
-      → size check: > MAX_INLINE_TOKENS?
-          yes → OutputBuffer::store_tool() → @tool_* ref + hint JSON
-          no  → pretty-printed JSON inline
-    → route_tool_error(e):
-        RecoverableError → isError:false, {ok:false, error, hint?}
-        LSP -32800       → isError:false, specialized hint
-        other            → isError:true (fatal)
-    → strip_project_root_from_result()  ← all absolute paths removed
-```
+`call_content()` in `src/tools/mod.rs`:
+- Small output (< `MAX_INLINE_TOKENS`) → pretty-printed JSON inline
+- Large output → stored in `OutputBuffer::store_tool()` as `@tool_xxx` ref (LRU, 50 slots)
+  Returns `{ output_id, summary, hint }` where hint points to `json_path` or line range
 
-## Data Flow: Semantic Search
+`OutputGuard` (src/tools/output.rs) enforces two modes:
+- `Exploring` (default): cap at 200 items / 200 files, no body inclusion
+- `Focused` (`detail_level: "full"`): paginated via offset/limit, includes bodies
 
-```
-SemanticSearch::call()
-  → agent.get_or_create_embedder(model)  ← cached by model name
-  → embed_one(query) → Vec<f32>
-  → embed::index::search_scoped(conn, query_vec, scope)
-      → pure-Rust cosine similarity (sqlite-vec NOT active)
-  → OutputGuard::cap_items() + staleness check
-```
+## LSP Lifecycle
 
-## Error Routing (3-way)
+`LspManager::get_or_start(language, root)` (src/lsp/manager.rs):
+- Fast path: cache hit by language key, checks `is_alive()` + workspace root match
+- Slow path: watch-channel barrier prevents concurrent duplicate cold-starts for the
+  same language. First caller becomes "starter"; others wait on receiver.
+- `do_start()` registered `StartingCleanup` guard removes barrier on any exit path
+  (including async cancellation via tool timeout).
 
-`route_tool_error` in `src/server.rs:262`:
-1. `RecoverableError` → `isError:false` — sibling parallel calls NOT aborted by Claude Code
-2. LSP `code -32800` (RequestCancelled) → also `isError:false` with Kotlin-specific hint
-3. Everything else → `isError:true` (fatal)
+## Embedding Pipeline (build_index)
 
-## LSP Concurrency Pattern
+`build_index(root, force)` in `src/embed/index.rs`:
+1. `find_changed_files()`: git diff → mtime → SHA-256 fallback
+2. `ast_chunker::split_file()`: AST-aware chunking per language, respects chunk size config
+3. Concurrent embedding with semaphore cap=4 (`JoinSet` over `RemoteEmbedder::embed()`)
+4. Single SQLite transaction: delete old chunks, insert new, upsert file hash
+5. Drift detection (if enabled): cosine distance old→new embeddings → `drift_report` table
+6. High-drift files → mark memory anchors stale (shared embeddings.db)
 
-`LspManager::get_or_start()` uses a watch-channel barrier: first caller becomes "starter"
-and sends tx, concurrent callers clone the rx and wait. On starter success, waiters read
-the cache. On failure, a waiter becomes the new starter. `StartingCleanup` RAII guard
-removes the barrier on any exit. See `src/lsp/manager.rs:78`.
+**sqlite-vec**: Extension loading is commented out (TODO). Pure-Rust cosine search
+loads ALL chunk embeddings into memory for each query — known perf issue for large indexes.
 
-## Testability Seam
+## Memory Architecture (two tiers, one DB)
 
-`LspProvider` and `LspClientOps` traits (`src/lsp/ops.rs`) allow `MockLspClient` /
-`MockLspProvider` injection in tests without live LSP servers. All symbol tools receive
-`ctx.lsp: Arc<dyn LspProvider>`.
+- **File store**: Markdown in `.codescout/memories/`, CRUD via `MemoryStore`
+- **Semantic store**: Vector embeddings in `.codescout/embeddings.db` (tables separate
+  from code chunks). `remember`/`recall`/`forget` actions on the `memory` tool.
+- **Anchor sidecars**: `.anchors.toml` alongside each memory tracks source file paths
+  referenced in content. `project_status` checks SHA-256 of anchored files to surface
+  stale memories. Regenerated on each `write`; cleared via `refresh_anchors` action.
 
 ## Invariants
 
 | Rule | Why it exists |
 |---|---|
-| Write tools call `validate_write_path()` before any I/O | Violations must return `RecoverableError`, not crash or silently write outside project root |
-| `RecoverableError` for expected failures, `anyhow::bail!` for genuine tool failures | MCP `isError:true` aborts sibling parallel calls in Claude Code; wrong classification breaks parallel workflows |
-| All write tools return `json!("ok")` — never echo content back | Echoing wastes tokens with zero information gain (caller already sent the content) |
-| `OutputGuard` used for all variable-length output | Per-tool truncation logic diverges; `OutputGuard` is the single enforcement point |
+| Write tools must appear in `check_tool_access` match arm | Missing entry bypasses access gate silently |
+| `RecoverableError` for expected failures, `bail!` for bugs | Controls whether Claude Code aborts sibling parallel calls |
+| Write tools return `json!("ok")` | Echoing content wastes tokens with zero info gain (CLAUDE.md § Design Principles) |
+| `call_content()` is the MCP entry point, NOT `call()` | `call_content` handles buffer routing; `call` is the pure logic layer |
 
 ## Strong Defaults
 
 | Default | When to break it |
 |---|---|
-| `detail_level: "exploring"` (compact, capped at 200) | LLM knows exactly what it wants → pass `detail_level: "full"` |
-| Absolute paths stripped from all output | Never — strip happens in `call_tool_inner`, after the tool runs |
-| System prompt from `.codescout/system-prompt.md` | Falls back to `project.toml::project.system_prompt`; TOML field exists but file takes precedence |
+| `OutputGuard::Exploring` (200 item cap) | Use `detail_level: "full"` when you need all items |
+| LSP for symbol resolution | Use AST tools (`ListFunctions`, `ListDocs`) for offline/no-LSP scenarios |
+| Remote embeddings (Ollama) | Use `local-embed` feature when no Ollama available |

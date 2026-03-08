@@ -1,66 +1,71 @@
 # Gotchas & Known Issues
 
-See `docs/TODO-tool-misbehaviors.md` for the complete living log (BUG-001 through BUG-025+).
-This captures structural gotchas not listed there.
+## Embedding / Semantic Search
 
-## MCP Client Sends Booleans as JSON Strings (Critical)
+- **sqlite-vec loads all embeddings into memory**: `sqlite-vec` extension loading is
+  commented out in `src/embed/index.rs`. Pure-Rust cosine search scans ALL chunk
+  embeddings in memory per query. Verify current state at `src/embed/index.rs` before
+  assuming KNN is active.
 
-Claude Code's MCP client serializes boolean tool parameters as **JSON strings**, not native
-JSON booleans. `input["force"]` arrives as `Value::String("true")`, not `Value::Bool(true)`.
+- **Semantic index 7+ commits behind**: The `git_sync` warning in `semantic_search`
+  results is expected during active development. Results from existing chunks are still
+  valid; only newly added code is missing.
 
-**Impact:** `val.as_bool()` returns `None` for strings → silently defaults to `false`.
+## GitHub Tools
 
-**Fix (applied):** Use `parse_bool_param()` from `src/tools/mod.rs:159` at every boolean
-input site. Applied across all tool files (37 sites, commit `03382cc`, 2026-03-06):
-`workflow.rs`, `file.rs`, `symbol.rs`, `semantic.rs`, `library.rs`, `memory.rs`, `github.rs`.
+- **Requires `gh` CLI**: All 5 GitHub tools (`github_identity`, `github_issue`, etc.)
+  shell to `gh` via `run_gh()` in `src/tools/github.rs`. If `gh` is not installed or
+  not authenticated, every GitHub tool call fails with a non-recoverable error.
 
-```rust
-let force = parse_bool_param(&input["force"]);
-```
+## LSP
 
-**Rule:** Never use `.as_bool().unwrap_or(false)` on tool inputs.
+- **Kotlin LSP multi-session conflict**: kotlin-lsp ≤ v0.253 uses an MVStore index
+  that only allows one session. If VS Code is open on the same project, `code -32800`
+  errors occur. `route_tool_error` catches this and provides the hint. Upgrade to v261+.
 
-## GitHub Tools Use `gh` CLI (Not HTTP)
+- **LSP cold start latency**: First call for a language spawns the LSP server. This can
+  take 1–5 minutes for large projects (Kotlin/Java). The watch-channel barrier in
+  `LspManager` deduplicates concurrent starts, but the first caller still blocks.
 
-All `github_identity`, `github_issue`, `github_pr`, `github_file`, `github_repo` tools
-shell out to the `gh` CLI (`src/tools/github.rs::run_gh()`). If `gh` is not installed or
-not authenticated, they silently return an error.
+## run_command Security
 
-## sqlite-vec Is NOT Active
+- **Source file access blocked in run_command**: `check_source_file_access()` in
+  `path_security.rs` blocks commands like `cat src/foo.rs` or `grep pattern src/foo.rs`.
+  Use `read_file` / `search_pattern` / `find_symbol` instead. Check
+  `SOURCE_EXTENSIONS` constant for the current blocked extension list.
 
-`sqlite-vec` is in `Cargo.toml` and `rusqlite` is "bundled", but the extension loading
-in `src/embed/index.rs` is commented out (TODO). Semantic search uses pure-Rust cosine
-similarity that loads all embeddings into memory. Large indexes can be slow/OOM.
-Verify current state: `search_pattern("is_vec0_active", path="src/embed/index.rs")`.
+## Parallel Writes
 
-## `find_symbol(include_body=true)` — FIXED (was: body truncation)
+- **Never dispatch parallel write calls**: See `MEMORY.md § Parallel Write Safety (BUG-021)`.
+  rmcp 0.1.5 has a cancellation race that can crash the server if a parallel write is
+  denied in the permission dialog. Always wait for one write to finish before starting
+  the next.
 
-~~`workspace/symbol` returns a single-line name position, `start_line == end_line`.~~
+## OutputBuffer
 
-**Fixed:** `validate_symbol_range()` now detects degenerate ranges and falls back to
-`resolve_range_via_document_symbols()` to get the real declaration range from
-`textDocument/documentSymbol`. See `src/tools/symbol.rs:260` and `src/tools/symbol.rs:820`.
-No workaround needed.
+- **LRU eviction**: OutputBuffer holds 50 entries. In a long session with many large
+  tool calls, early `@tool_xxx` refs may be evicted. If you get "buffer not found",
+  re-run the original tool call.
 
-## `replace_symbol` / `remove_symbol` LSP Range Quirks
+## Memory Staleness
 
-LSP sometimes reports `start_line` pointing at the closing `}` of the *preceding* method.
-codescout trusts LSP ranges verbatim ("trust LSP" design decision, BUG-013 fix).
-This means replacing a symbol can eat the preceding closing brace. See `tests/symbol_lsp.rs`
-for the regression tests that document this accepted behavior.
+- **Stale memory check is opt-in**: `project_status` shows `memory_staleness` with
+  `stale`, `fresh`, and `untracked` entries. Only memories with `.anchors.toml` sidecars
+  are tracked. Old memories written before the anchor system may show as `untracked`.
 
-## `system-prompt.md` Takes Precedence Over TOML
+## Tool Docs Sync
 
-`.codescout/system-prompt.md` is read by `agent::project_status()` first; `project.toml`'s
-`project.system_prompt` field is only used as fallback. Confirmed in agent tests.
+- **CI enforces docs/manual sync**: The `tool-docs-sync` CI job diffs actual tool names
+  (from `fn name(&self)`) against `docs/manual/src/tools/*.md`. Adding a tool without
+  updating docs will fail CI.
 
-## Worktree Write Safety
+## Rust std::path
 
-`guard_worktree_write()` in `src/tools/mod.rs` checks that write tools aren't targeting
-a stale worktree path after `activate_project`. Must call after any `activate_project`
-in tests that write files.
-
-## Panic Policy: `abort` in Release
-
-`Cargo.toml` sets `panic = "abort"` for the release profile. Any panic kills the MCP
-server immediately (no unwind). In dev/test builds, panics unwind normally.
+- **`Path::file_stem()` does NOT return `None` for dotfiles**: On a path like `.hidden`,
+  Rust treats the entire name as the stem — `file_stem()` returns `Some(".hidden")` and
+  `extension()` returns `None`. `file_stem()` only returns `None` when `file_name()`
+  itself is `None` (e.g. paths ending in `..`), which never occurs in `read_dir` output.
+  Consequence: a guard like `let Some(stem) = path.file_stem() else { continue }` placed
+  after an `extension() == "md"` filter is unreachable dead code — dotfiles are already
+  excluded by the extension filter. Keep such guards with a `// Defensive: unreachable
+  from read_dir` comment rather than removing them. See `src/memory/anchors.rs:183`.

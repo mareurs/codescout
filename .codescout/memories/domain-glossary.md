@@ -1,49 +1,46 @@
 # Domain Glossary
 
-Terms specific to codescout not fully explained in CLAUDE.md or docs.
+**OutputGuard** — Progressive disclosure controller used by all variable-output tools.
+Reads `detail_level`, `offset`, `limit` from tool input and enforces item/file caps.
+See `src/tools/output.rs` and `docs/PROGRESSIVE_DISCOVERABILITY.md`.
 
-**RecoverableError** — Tool error that maps to MCP `isError:false`. Agents see a JSON
-`{ok:false, error, hint?}` body and can recover without aborting sibling parallel calls.
-Use for: path not found, unsupported language, empty result. See `src/tools/mod.rs:78`.
+**OverflowInfo** — JSON shape emitted when results are capped: `{ shown, total, hint,
+next_offset?, by_file?, by_file_overflow }`. The `by_file` array is always JSON array
+(not object) per `docs/TODO-by-file-serialization.md` decision.
 
-**OutputGuard** — Progressive disclosure enforcer. Created via `OutputGuard::from_input(&input)`,
-reads `detail_level`/`offset`/`limit` from tool input. See `src/tools/output.rs` and
-`CLAUDE.md § Design Principles`.
+**RecoverableError** — Tool error that routes to `isError: false` so Claude Code does
+not abort sibling parallel calls. See `src/tools/mod.rs:78` and `CLAUDE.md § Key Patterns`.
 
-**OverflowInfo** — Struct attached to responses when results exceed the cap. Contains `shown`,
-`total`, `hint` (actionable narrowing advice), `by_file` (per-file match counts).
+**OutputBuffer** — Session-scoped LRU buffer (50 slots) for large tool output. Assigns
+`@tool_xxx` ref IDs. Different from `@cmd_xxx` refs (run_command) and `@file_xxx` refs
+(read_file). See `src/tools/output_buffer.rs` and `MEMORY.md § run_command Redesign`.
 
-**`@tool_*` ref** — Buffer handle for large tool output (> MAX_INLINE_TOKENS). Stored in
-`OutputBuffer` (50-slot ring, `src/tools/output_buffer.rs`). Query with `read_file("@tool_*")`.
+**ActiveProject** — Struct inside `Agent` holding the project root, config, both memory
+stores, and library registry. All tools access it via `ctx.agent.with_project(|p| ...)`.
 
-**`@cmd_*` ref** — Buffer handle for `run_command` stdout. Plain text, not JSON.
-Query with `run_command("grep pattern @cmd_*")`.
+**LspProvider / LspClientOps** — Traits in `src/lsp/ops.rs` abstracting LSP access.
+`LspManager` is the production impl; `MockLspProvider` / `MockLspClient` for tests.
 
-**`@ack_*` ref** — Acknowledgment handle. Two separate uses sharing the same prefix:
-- **`edit_file`** — issued for large/risky edits that require confirmation. Stored in
-  `pending_edits` in `OutputBuffer`. Re-run as `edit_file("@ack_*")` to execute.
-- **`run_command`** — issued when a dangerous command pattern is detected (e.g. `rm -rf`).
-  Stored in `pending_dangerous` in `OutputBuffer`. Re-run as `run_command("@ack_*")` to execute.
-The two stores are separate; passing an edit ack to `run_command` (or vice versa) returns a
-targeted error, not a silent failure. See `src/tools/workflow.rs:591`.
+**StartingCleanup** — RAII guard in `LspManager::do_start` that removes the per-language
+barrier from `self.starting` on any exit path, including async cancellation.
 
-**ActiveProject** — The currently active project: `{root, config, memory, private_memory,
-library_registry}`. Held in `Agent::inner` behind RwLock. See `src/agent.rs:48`.
+**Scope** — Enum controlling which project a symbol/semantic tool searches:
+`Project` (default), `Library(name)`, `Libraries` (all registered), `All`.
+Parsed from the `scope` string parameter.
 
-**Scope** — Parameter on symbol/semantic tools: `"project"` (default), `"lib:name"`,
-`"libraries"`, `"all"`. Parsed by `Scope` enum in `src/library/scope.rs`.
+**drift** — Cosine distance score between old and new embeddings for a code chunk after
+re-indexing. High drift (≥ `staleness_drift_threshold`) triggers memory anchor staleness.
 
-**LspProvider / LspClientOps** — Traits in `src/lsp/ops.rs` that decouple tools from the
-concrete `LspClient`. `LspManager` implements `LspProvider`; `LspClient` implements
-`LspClientOps`. `MockLspClient` / `MockLspProvider` used in tests.
+**anchor sidecar** — `.anchors.toml` file alongside each memory topic. Tracks source file
+paths referenced in the memory content, with SHA-256 hashes for staleness detection.
 
-**drift** — Per-file embedding staleness metric: how much a file's current content
-diverges from what was indexed. `avg_drift` + `max_drift` per file. See `src/embed/drift.rs`.
+**name_path** — Hierarchical symbol identifier used in LSP tools: `Struct/method`,
+`impl Block/method`. The separator is `/`. Used in `find_symbol(name_path=...)`,
+`replace_symbol`, `rename_symbol`, etc.
 
-**`tool_timeout_secs`** — Per-project tool execution timeout (`.codescout/project.toml`,
-`ProjectSection`). Tools that skip it: `run_command`, `index_project` (see
-`tool_skips_server_timeout()` in `src/server.rs:203`).
+**tool_timeout_secs** — Per-project config in `.codescout/project.toml` controlling
+how long `call_tool_inner` waits before timing out a tool call. Skipped for slow tools
+like `index_project` and `onboarding` (`tool_skips_server_timeout` in server.rs).
 
-**memory_staleness** — Section in `project_status` output that classifies memory topics
-as `stale` (anchored files changed), `fresh` (hashes match), or `untracked` (no anchor
-sidecar). Anchors stored as `.codescout/memories/<topic>.anchors.toml`. See `src/memory/anchors.rs`.
+**run_gh** — Internal helper in `src/tools/github.rs` that shells to the `gh` CLI
+subprocess. All 5 GitHub tools use this — they do NOT call the GitHub REST API directly.
