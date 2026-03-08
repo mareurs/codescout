@@ -35,7 +35,11 @@ impl Tool for ActivateProject {
             )
             .into());
         }
+        // Capture before activate() — activate sets home_root on first call
+        let had_home = ctx.agent.home_root().await.is_some();
+
         ctx.agent.activate(root).await?;
+
         let config = ctx
             .agent
             .with_project(|p| {
@@ -45,7 +49,27 @@ impl Tool for ActivateProject {
                 }))
             })
             .await?;
-        Ok(json!({ "status": "ok", "activated": config }))
+
+        // Build CWD hint
+        let project_root_str = config["project_root"].as_str().unwrap_or("?");
+        let is_home = ctx.agent.is_home().await;
+        let home = ctx.agent.home_root().await;
+
+        let hint = if !had_home {
+            format!("CWD: {}", project_root_str)
+        } else if is_home {
+            format!("Returned to original project. CWD: {}", project_root_str)
+        } else {
+            format!(
+                "Switched project. CWD: {} (home: {})",
+                project_root_str,
+                home.as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default()
+            )
+        };
+
+        Ok(json!({ "status": "ok", "activated": config, "hint": hint }))
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
@@ -247,7 +271,11 @@ fn format_activate_project(result: &Value) -> String {
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or(root);
-    format!("activated · {name}")
+    if let Some(hint) = result["hint"].as_str() {
+        format!("activated · {name} · {hint}")
+    } else {
+        format!("activated · {name}")
+    }
 }
 
 fn format_project_status(result: &Value) -> String {
@@ -431,5 +459,84 @@ mod tests {
             .as_array()
             .unwrap()
             .contains(&json!("src/server.rs")));
+    }
+
+    #[tokio::test]
+    async fn activate_includes_cwd_hint() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = Agent::new(None).await.unwrap();
+        let ctx = ToolContext {
+            agent,
+            lsp: lsp(),
+            output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+        };
+        let input = json!({ "path": dir.path().to_str().unwrap() });
+        let result = ActivateProject.call(input, &ctx).await.unwrap();
+        let hint = result["hint"].as_str().unwrap();
+        assert!(
+            hint.starts_with("CWD: "),
+            "hint should start with CWD: but was: {hint}"
+        );
+        assert!(hint.contains(dir.path().to_str().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn activate_hint_shows_switched_when_away_from_home() {
+        let dir1 = tempdir().unwrap();
+        let dir2 = tempdir().unwrap();
+        std::fs::create_dir_all(dir1.path().join(".codescout")).unwrap();
+        std::fs::create_dir_all(dir2.path().join(".codescout")).unwrap();
+        let agent = Agent::new(Some(dir1.path().to_path_buf())).await.unwrap();
+        let ctx = ToolContext {
+            agent,
+            lsp: lsp(),
+            output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+        };
+        let input = json!({ "path": dir2.path().to_str().unwrap() });
+        let result = ActivateProject.call(input, &ctx).await.unwrap();
+        let hint = result["hint"].as_str().unwrap();
+        assert!(hint.starts_with("Switched project."), "hint: {hint}");
+        assert!(
+            hint.contains(dir2.path().to_str().unwrap()),
+            "should contain new path"
+        );
+        assert!(
+            hint.contains(dir1.path().to_str().unwrap()),
+            "should contain home path"
+        );
+    }
+
+    #[tokio::test]
+    async fn activate_hint_shows_returned_when_back_home() {
+        let dir1 = tempdir().unwrap();
+        let dir2 = tempdir().unwrap();
+        std::fs::create_dir_all(dir1.path().join(".codescout")).unwrap();
+        std::fs::create_dir_all(dir2.path().join(".codescout")).unwrap();
+        let agent = Agent::new(Some(dir1.path().to_path_buf())).await.unwrap();
+        let ctx = ToolContext {
+            agent,
+            lsp: lsp(),
+            output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+        };
+        // Switch away
+        ActivateProject
+            .call(json!({ "path": dir2.path().to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        // Return home
+        let result = ActivateProject
+            .call(json!({ "path": dir1.path().to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        let hint = result["hint"].as_str().unwrap();
+        assert!(
+            hint.starts_with("Returned to original project."),
+            "hint: {hint}"
+        );
+        assert!(hint.contains(dir1.path().to_str().unwrap()));
     }
 }

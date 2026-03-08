@@ -44,6 +44,7 @@ pub struct Agent {
 pub struct AgentInner {
     pub active_project: Option<ActiveProject>,
     pub project_explicitly_activated: bool,
+    pub home_root: Option<PathBuf>,
 }
 
 pub struct ActiveProject {
@@ -56,21 +57,25 @@ pub struct ActiveProject {
 
 impl Agent {
     pub async fn new(project: Option<PathBuf>) -> Result<Self> {
-        let active_project = if let Some(root) = project {
+        let (active_project, home_root) = if let Some(root) = project {
             let config = ProjectConfig::load_or_default(&root)?;
             let memory = MemoryStore::open(&root)?;
             let private_memory = MemoryStore::open_private(&root)?;
             let registry_path = root.join(".codescout").join("libraries.json");
             let library_registry = LibraryRegistry::load(&registry_path).unwrap_or_default();
-            Some(ActiveProject {
-                root,
-                config,
-                memory,
-                private_memory,
-                library_registry,
-            })
+            let home = root.clone();
+            (
+                Some(ActiveProject {
+                    root,
+                    config,
+                    memory,
+                    private_memory,
+                    library_registry,
+                }),
+                Some(home),
+            )
         } else {
-            None
+            (None, None)
         };
 
         // A project provided at startup (via --project or CWD) is treated as explicitly
@@ -81,6 +86,7 @@ impl Agent {
             inner: Arc::new(RwLock::new(AgentInner {
                 active_project,
                 project_explicitly_activated,
+                home_root,
             })),
             cached_embedder: Arc::new(tokio::sync::Mutex::new(None)),
             indexing: Arc::new(std::sync::Mutex::new(IndexingState::Idle)),
@@ -95,6 +101,9 @@ impl Agent {
         let registry_path = root.join(".codescout").join("libraries.json");
         let library_registry = LibraryRegistry::load(&registry_path).unwrap_or_default();
         let mut inner = self.inner.write().await;
+        if inner.home_root.is_none() {
+            inner.home_root = Some(root.clone());
+        }
         inner.active_project = Some(ActiveProject {
             root,
             config,
@@ -176,6 +185,21 @@ impl Agent {
 
     pub async fn is_project_explicitly_activated(&self) -> bool {
         self.inner.read().await.project_explicitly_activated
+    }
+
+    /// Return the home project root (the first project activated in this session).
+    pub async fn home_root(&self) -> Option<PathBuf> {
+        self.inner.read().await.home_root.clone()
+    }
+
+    /// True when the active project is the home project (or both are None).
+    pub async fn is_home(&self) -> bool {
+        let inner = self.inner.read().await;
+        match (&inner.active_project, &inner.home_root) {
+            (Some(project), Some(home)) => project.root == *home,
+            (None, None) => true,
+            _ => false,
+        }
     }
 
     /// Get the security config, or defaults if no project is active.
@@ -448,6 +472,72 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
         let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
         assert!(agent.is_project_explicitly_activated().await);
+    }
+
+    #[tokio::test]
+    async fn home_root_set_from_initial_project() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        assert_eq!(agent.home_root().await, Some(dir.path().to_path_buf()));
+    }
+
+    #[tokio::test]
+    async fn home_root_none_without_project() {
+        let agent = Agent::new(None).await.unwrap();
+        assert_eq!(agent.home_root().await, None);
+    }
+
+    #[tokio::test]
+    async fn home_root_set_on_first_activate() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = Agent::new(None).await.unwrap();
+        agent.activate(dir.path().to_path_buf()).await.unwrap();
+        assert_eq!(agent.home_root().await, Some(dir.path().to_path_buf()));
+    }
+
+    #[tokio::test]
+    async fn home_root_not_changed_by_second_activate() {
+        let dir1 = tempdir().unwrap();
+        let dir2 = tempdir().unwrap();
+        std::fs::create_dir_all(dir1.path().join(".codescout")).unwrap();
+        std::fs::create_dir_all(dir2.path().join(".codescout")).unwrap();
+        let agent = Agent::new(Some(dir1.path().to_path_buf())).await.unwrap();
+        agent.activate(dir2.path().to_path_buf()).await.unwrap();
+        assert_eq!(agent.home_root().await, Some(dir1.path().to_path_buf()));
+    }
+
+    #[tokio::test]
+    async fn is_home_true_when_at_home() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        assert!(agent.is_home().await);
+    }
+
+    #[tokio::test]
+    async fn is_home_false_after_switching() {
+        let dir1 = tempdir().unwrap();
+        let dir2 = tempdir().unwrap();
+        std::fs::create_dir_all(dir1.path().join(".codescout")).unwrap();
+        std::fs::create_dir_all(dir2.path().join(".codescout")).unwrap();
+        let agent = Agent::new(Some(dir1.path().to_path_buf())).await.unwrap();
+        agent.activate(dir2.path().to_path_buf()).await.unwrap();
+        assert!(!agent.is_home().await);
+    }
+
+    #[tokio::test]
+    async fn is_home_true_after_returning() {
+        let dir1 = tempdir().unwrap();
+        let dir2 = tempdir().unwrap();
+        std::fs::create_dir_all(dir1.path().join(".codescout")).unwrap();
+        std::fs::create_dir_all(dir2.path().join(".codescout")).unwrap();
+        let agent = Agent::new(Some(dir1.path().to_path_buf())).await.unwrap();
+        agent.activate(dir2.path().to_path_buf()).await.unwrap();
+        assert!(!agent.is_home().await);
+        agent.activate(dir1.path().to_path_buf()).await.unwrap();
+        assert!(agent.is_home().await);
     }
 
     #[tokio::test]
