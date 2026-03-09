@@ -2,16 +2,27 @@
 
 All notable changes to codescout are documented here.
 
-## [0.2.0] — codescout
+## [0.2.1] — 2026-03-09
 
-> **TL;DR:** The project was renamed from `codescout` to `codescout`. If you're
+### Fixed
+
+- **`github_file` schema** — `files` array parameter now includes a proper `items`
+  schema (`{ path, content }` object with required fields). VS Code and other
+  spec-compliant MCP clients rejected the tool with *"tool parameters array type must
+  have items"* because JSON Schema requires `items` on every `array` type.
+
+---
+
+## [0.2.0] — 2026-03-09
+
+> **TL;DR:** The project was renamed from `code-explorer` to `codescout`. If you're
 > migrating, update your MCP config and any scripts that reference the old binary name.
 > [Full story and migration guide →](docs/manual/src/history.md)
 
 ### Breaking changes
 
-- **Binary renamed:** `codescout` → `codescout`
-- **MCP server ID renamed** — update `.mcp.json` or Claude Code settings accordingly
+- **Binary renamed:** `code-explorer` → `codescout`
+- **MCP server ID renamed:** `code-explorer` → `codescout` — update `.mcp.json` or Claude Code settings accordingly
 - **Tool renames** (API consistency):
 
 | Old name | New name |
