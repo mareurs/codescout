@@ -116,19 +116,6 @@ The behavior described in this README — Claude consistently reaching for the r
 
 > **This is a Claude Code tool.** codescout is built for [Claude Code](https://code.claude.com/) and currently requires it as the host agent. Other MCP-capable agents may work but are not tested.
 
-**The easiest way to get started:** clone the repo and let Claude do the installation for you. It has access to the full documentation, your system, and the install scripts — it will handle everything from building the binary to registering the MCP server and installing LSP servers for your languages.
-
-```bash
-git clone https://github.com/mareurs/codescout.git
-cd codescout
-claude
-# Then ask: "Help me install and set up codescout"
-```
-
-If you prefer to install manually, follow the steps below.
-
----
-
 codescout has two components that work together:
 
 1. **MCP Server** — provides the 28 tools (symbol navigation, semantic search, memory, etc.)

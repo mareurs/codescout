@@ -43,6 +43,13 @@ This applies to ALL unexpected tool behavior: `edit_file`, `rename_symbol`, `rep
 - **Cherry-pick to `master`** only after: all tests pass, clippy clean, manually verified via MCP (`cargo build --release` + `/mcp` restart).
 - Never commit directly to `master` for in-progress or exploratory work.
 
+### Publishing to crates.io
+
+- **Always publish from `master`**, never from `experiments` or feature branches.
+- Bump the version in `Cargo.toml` on master, commit it, then run `cargo publish`.
+- Tag every release: `git tag vX.Y.Z` on the publish commit, then `git push --tags`.
+- Token is stored in `.env` (gitignored): `CARGO_REGISTRY_TOKEN=...` — load with `CARGO_REGISTRY_TOKEN=$(grep CARGO_REGISTRY_TOKEN .env | cut -d= -f2) cargo publish`.
+
 ### Commit Discipline
 
 - **Batch related changes** into a single well-tested commit rather than committing every incremental step.
