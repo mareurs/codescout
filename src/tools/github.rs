@@ -764,7 +764,18 @@ impl Tool for GithubFile {
                 "message": { "type": "string",  "description": "create_or_update/delete/push_files: commit message" },
                 "sha":     { "type": "string",  "description": "create_or_update/delete: blob SHA of existing file" },
                 "branch":  { "type": "string",  "description": "create_or_update/delete/push_files: target branch" },
-                "files":   { "type": "array",   "description": "push_files: Array of {path, content} objects. Content is plaintext (not base64) — the Trees API handles encoding." }
+                "files":   {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path":    { "type": "string" },
+                            "content": { "type": "string" }
+                        },
+                        "required": ["path", "content"]
+                    },
+                    "description": "push_files: Array of {path, content} objects. Content is plaintext (not base64) — the Trees API handles encoding."
+                }
             },
             "required": ["method"]
         })
