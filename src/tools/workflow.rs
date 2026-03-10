@@ -1003,7 +1003,13 @@ async fn run_command_inner(
                 if let Some(ref tmpfile) = unfiltered_tmpfile {
                     let capture = std::fs::read_to_string(&tmpfile.0).ok();
                     // tmpfile dropped at end of enclosing match arm — TmpfileGuard::drop() removes it
-                    capture.map(|content| {
+                    // Skip empty captures: when the terminal filter (e.g. grep) matched nothing,
+                    // both raw_stdout and the tee file are empty — surfacing a handle to an empty
+                    // buffer is misleading and offers no value to the caller.
+                    capture.and_then(|content| {
+                        if content.is_empty() {
+                            return None;
+                        }
                         let (stored, truncated) = if crate::tools::exceeds_inline_limit(&content) {
                             let mut byte_budget = crate::tools::MAX_INLINE_TOKENS * 4;
                             let capped: String = content
@@ -1027,7 +1033,7 @@ async fn run_command_inner(
                             String::new(), // unfiltered capture is stdout-only; stderr belongs to the main buffer
                             exit_code,
                         );
-                        (ref_id, truncated)
+                        Some((ref_id, truncated))
                     })
                 } else {
                     None
@@ -2831,6 +2837,45 @@ mod tests {
         assert!(
             result.get("unfiltered_output").is_none(),
             "unexpected unfiltered_output for non-filter pipe: {result}"
+        );
+    }
+
+    #[tokio::test]
+    async fn grep_no_match_suppresses_unfiltered_ref() {
+        let (dir, ctx) = project_ctx().await;
+        std::fs::write(dir.path().join("items.txt"), "apple\nbanana\ncherry\n").unwrap();
+
+        // `cat | grep | head`: tee is injected before `head`, capturing grep's output.
+        // When grep matches nothing, the tee file is empty → unfiltered_output should be
+        // suppressed (no value in surfacing a handle to an empty buffer).
+        let result = RunCommand
+            .call(
+                json!({ "command": "cat items.txt | grep zzz_no_match | head -5" }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(
+            result.get("unfiltered_output").is_none(),
+            "unfiltered_output should be absent when middle filter matches nothing, got: {result}"
+        );
+        assert!(
+            result.get("stdout").is_none(),
+            "stdout should be absent when grep matches nothing, got: {result}"
+        );
+
+        // Contrast: single-pipe `cat | grep` puts the tee before grep, capturing the full
+        // cat output — that IS useful even when grep finds nothing.
+        let result2 = RunCommand
+            .call(
+                json!({ "command": "cat items.txt | grep zzz_no_match" }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(
+            result2["unfiltered_output"].is_string(),
+            "unfiltered_output should be present for single-pipe grep (tee captures cat output): {result2}"
         );
     }
 
