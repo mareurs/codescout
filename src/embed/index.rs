@@ -17,7 +17,7 @@
 //!   3. SHA-256 hash (final arbiter)
 //!
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -146,7 +146,9 @@ pub fn maybe_migrate_to_vec0(conn: &Connection) -> Result<()> {
     use rusqlite::OptionalExtension;
 
     let dims: usize = match get_meta(conn, "embedding_dims")? {
-        Some(s) => s.parse().unwrap_or(0),
+        Some(s) => s
+            .parse()
+            .context("embedding_dims in meta is not a valid integer — DB may be corrupted")?,
         None => return Ok(()),
     };
     if dims == 0 {
@@ -205,19 +207,34 @@ pub fn maybe_migrate_to_vec0(conn: &Connection) -> Result<()> {
         _ => {} // still plain — proceed with migration
     }
 
-    conn.execute_batch("ALTER TABLE chunk_embeddings RENAME TO chunk_embeddings_v1")?;
-    conn.execute_batch(&format!(
-        "CREATE VIRTUAL TABLE chunk_embeddings USING vec0(embedding float[{dims}] distance_metric=cosine)"
-    ))?;
-    conn.execute_batch(
-        "INSERT INTO chunk_embeddings(rowid, embedding) \
-         SELECT rowid, embedding FROM chunk_embeddings_v1",
-    )?;
-    conn.execute_batch("DROP TABLE chunk_embeddings_v1")?;
-    conn.execute_batch("COMMIT")?;
+    // Run all DDL inside a closure so we can ROLLBACK on any failure.
+    // Without this guard, a mid-migration error (e.g. disk full during INSERT)
+    // would leave `chunk_embeddings` renamed to `chunk_embeddings_v1` with no
+    // replacement — an irrecoverable corruption state.
+    let migrate = || -> Result<()> {
+        conn.execute_batch("ALTER TABLE chunk_embeddings RENAME TO chunk_embeddings_v1")?;
+        conn.execute_batch(&format!(
+            "CREATE VIRTUAL TABLE chunk_embeddings USING vec0(embedding float[{dims}] distance_metric=cosine)"
+        ))?;
+        conn.execute_batch(
+            "INSERT INTO chunk_embeddings(rowid, embedding) \
+             SELECT rowid, embedding FROM chunk_embeddings_v1",
+        )?;
+        conn.execute_batch("DROP TABLE chunk_embeddings_v1")?;
+        Ok(())
+    };
 
-    tracing::info!("vec0 migration complete");
-    Ok(())
+    match migrate() {
+        Ok(()) => {
+            conn.execute_batch("COMMIT")?;
+            tracing::info!("vec0 migration complete");
+            Ok(())
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
 }
 
 /// Lazily create the `vec_memories` vec0 virtual table for semantic memory
@@ -241,7 +258,9 @@ pub fn ensure_vec_memories(conn: &Connection) -> Result<()> {
     }
 
     let dims = match get_meta(conn, "embedding_dims")? {
-        Some(s) => s.parse::<usize>().unwrap_or(0),
+        Some(s) => s
+            .parse::<usize>()
+            .context("embedding_dims in meta is not a valid integer — DB may be corrupted")?,
         None => {
             return Err(crate::tools::RecoverableError::with_hint(
                 "semantic index not built yet — cannot store memory embeddings",
@@ -344,7 +363,10 @@ pub fn search_memories(
         }
         Some(bucket) => {
             // Over-fetch from KNN (limit * 5) so that post-filtering by bucket
-            // still has enough candidates to fill the requested limit.
+            // still returns `limit` results even when memories are skewed toward
+            // other buckets. Factor of 5 is conservative: even if only 1-in-5
+            // memories belong to the requested bucket, we still fill the limit.
+            // The outer LIMIT then re-caps to the caller's requested count.
             let inner_limit = (limit * 5) as i64;
             let knn = "SELECT rowid, distance FROM vec_memories \
                        WHERE embedding MATCH vec_f32(?1) ORDER BY distance LIMIT ?2";
@@ -397,10 +419,12 @@ pub fn upsert_memory_by_title(
 ) -> Result<i64> {
     use rusqlite::OptionalExtension;
 
+    // Scope the lookup to the same bucket — two memories in different buckets
+    // with the same title are independent and must not collide.
     let existing_id: Option<i64> = conn
         .query_row(
-            "SELECT id FROM memories WHERE title = ?1",
-            params![title],
+            "SELECT id FROM memories WHERE title = ?1 AND bucket = ?2",
+            params![title, bucket],
             |r| r.get(0),
         )
         .optional()?;
@@ -409,8 +433,8 @@ pub fn upsert_memory_by_title(
         Some(id) => {
             let now = utc_now_display();
             conn.execute(
-                "UPDATE memories SET content = ?1, bucket = ?2, updated_at = ?3 WHERE id = ?4",
-                params![content, bucket, now, id],
+                "UPDATE memories SET content = ?1, updated_at = ?2 WHERE id = ?3",
+                params![content, now, id],
             )?;
             let blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
             conn.execute(
@@ -576,16 +600,34 @@ pub fn search(
 // Checked via sqlite_master DDL — O(1) index lookup.
 fn is_vec0_active(conn: &Connection) -> bool {
     use rusqlite::OptionalExtension;
-    conn.query_row(
-        "SELECT sql FROM sqlite_master WHERE type='table' AND name='chunk_embeddings'",
-        [],
-        |r| r.get::<_, String>(0),
-    )
-    .optional()
-    .ok()
-    .flatten()
-    .map(|sql| sql.contains("USING vec0"))
-    .unwrap_or(false)
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    // vec0 activation is monotonic: the DB transitions from plain → vec0 exactly
+    // once and never reverts. We cache the `true` result globally so the
+    // sqlite_master query runs at most once per process lifetime.
+    static VEC0_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+    if VEC0_ACTIVE.load(Ordering::Relaxed) {
+        return true;
+    }
+
+    let active = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='chunk_embeddings'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()
+        .ok()
+        .flatten()
+        .map(|sql| sql.contains("USING vec0"))
+        .unwrap_or(false);
+
+    if active {
+        VEC0_ACTIVE.store(true, Ordering::Relaxed);
+    }
+
+    active
 }
 
 /// Scoped cosine similarity search with optional source filtering.
@@ -693,26 +735,47 @@ fn search_scoped_vec0(
     // KNN subquery: bare `distance` column required — vec0's query planner must
     // see it to honour the LIMIT constraint. COALESCE is applied at the outer
     // SELECT level so zero-vector NULLs are mapped to 1.0 (maximum distance).
-    let knn = "SELECT rowid, distance FROM chunk_embeddings \
-               WHERE embedding MATCH vec_f32(?1) ORDER BY distance LIMIT ?2";
+    //
+    // For source-filtered paths we over-fetch from vec0 (inner_limit = limit * 4)
+    // because the WHERE clause at the outer level discards non-matching rows
+    // *after* the KNN has already capped at `limit`. Without over-fetching,
+    // a request for 10 results filtered to "lib:foo" could return fewer than 10
+    // even when more matching rows exist. The outer LIMIT then re-caps to `limit`.
+    // Factor of 4 matches the strategy already used in `search_memories`.
+    let inner_limit = (limit * 4).max(20);
 
-    let sel = format!(
+    let knn_exact = format!(
+        "SELECT rowid, distance FROM chunk_embeddings \
+         WHERE embedding MATCH vec_f32(?1) ORDER BY distance LIMIT {limit}"
+    );
+    let knn_over = format!(
+        "SELECT rowid, distance FROM chunk_embeddings \
+         WHERE embedding MATCH vec_f32(?1) ORDER BY distance LIMIT {inner_limit}"
+    );
+
+    let sel_exact = format!(
         "SELECT c.file_path, c.language, c.content, c.start_line, c.end_line, c.source, \
          COALESCE(knn.distance, 1.0) AS distance \
-         FROM chunks c JOIN ({knn}) knn ON c.id = knn.rowid"
+         FROM chunks c JOIN ({knn_exact}) knn ON c.id = knn.rowid"
+    );
+    let sel_over = format!(
+        "SELECT c.file_path, c.language, c.content, c.start_line, c.end_line, c.source, \
+         COALESCE(knn.distance, 1.0) AS distance \
+         FROM chunks c JOIN ({knn_over}) knn ON c.id = knn.rowid"
     );
 
     match source_filter {
         None => {
-            let sql = format!("{sel} ORDER BY distance ASC");
+            let sql = format!("{sel_exact} ORDER BY distance ASC");
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt
-                .query_map(params![query_blob, limit as i64], map_row)?
+                .query_map(params![query_blob], map_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         }
         Some("libraries") => {
-            let sql = format!("{sel} WHERE c.source != 'project' ORDER BY distance ASC");
+            let sql =
+                format!("{sel_over} WHERE c.source != 'project' ORDER BY distance ASC LIMIT ?2");
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt
                 .query_map(params![query_blob, limit as i64], map_row)?
@@ -720,10 +783,10 @@ fn search_scoped_vec0(
             Ok(rows)
         }
         Some(source) => {
-            let sql = format!("{sel} WHERE c.source = ?3 ORDER BY distance ASC");
+            let sql = format!("{sel_over} WHERE c.source = ?2 ORDER BY distance ASC LIMIT ?3");
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt
-                .query_map(params![query_blob, limit as i64, source], map_row)?
+                .query_map(params![query_blob, source, limit as i64], map_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         }
@@ -1829,7 +1892,7 @@ mod tests {
     }
 
     #[test]
-    fn vec0_migration_is_transactional() {
+    fn vec0_migration_ddl_preserves_data() {
         let (_dir, conn) = open_test_db();
         insert_chunk(
             &conn,
@@ -2867,21 +2930,35 @@ mod tests {
     #[test]
     fn vec0_search_scoped_filters_by_source() {
         let (_dir, conn) = open_test_db_vec0(2);
-        let mut proj = dummy_chunk_with_source("p.rs", "fn p() {}", "project");
-        insert_chunk(&conn, &proj, &[1.0_f32, 0.0]).unwrap();
-        proj = dummy_chunk_with_source("l.rs", "fn l() {}", "mylib");
-        insert_chunk(&conn, &proj, &[0.9_f32, 0.1]).unwrap();
 
-        let all = search_scoped(&conn, &[1.0_f32, 0.0], 10, None).unwrap();
-        assert_eq!(all.len(), 2);
+        // Insert 6 project chunks and 6 library chunks — enough that a naive
+        // LIMIT applied before filtering (the bug) would under-return results.
+        for i in 0..6u8 {
+            let c = dummy_chunk_with_source(&format!("p{i}.rs"), "fn p() {}", "project");
+            insert_chunk(&conn, &c, &[i as f32, 0.0_f32]).unwrap();
+            let c = dummy_chunk_with_source(&format!("l{i}.rs"), "fn l() {}", "mylib");
+            insert_chunk(&conn, &c, &[i as f32, 0.1_f32]).unwrap();
+        }
 
-        let proj_only = search_scoped(&conn, &[1.0_f32, 0.0], 10, Some("project")).unwrap();
-        assert_eq!(proj_only.len(), 1);
-        assert_eq!(proj_only[0].source, "project");
+        // No filter — all 12 chunks.
+        let all = search_scoped(&conn, &[1.0_f32, 0.0], 20, None).unwrap();
+        assert_eq!(all.len(), 12);
 
-        let libs_only = search_scoped(&conn, &[1.0_f32, 0.0], 10, Some("libraries")).unwrap();
-        assert_eq!(libs_only.len(), 1);
-        assert_eq!(libs_only[0].source, "mylib");
+        // Project-only — must return all 6 project chunks even though the KNN
+        // over-fetches from a pool that is 50% library chunks.
+        let proj_only = search_scoped(&conn, &[1.0_f32, 0.0], 6, Some("project")).unwrap();
+        assert_eq!(proj_only.len(), 6);
+        assert!(proj_only.iter().all(|r| r.source == "project"));
+
+        // Libraries — must return all 6 library chunks.
+        let libs_only = search_scoped(&conn, &[1.0_f32, 0.0], 6, Some("libraries")).unwrap();
+        assert_eq!(libs_only.len(), 6);
+        assert!(libs_only.iter().all(|r| r.source == "mylib"));
+
+        // Specific lib — must return all 6 matching chunks.
+        let mylib = search_scoped(&conn, &[1.0_f32, 0.0], 6, Some("mylib")).unwrap();
+        assert_eq!(mylib.len(), 6);
+        assert!(mylib.iter().all(|r| r.source == "mylib"));
     }
 
     #[test]
@@ -2993,6 +3070,43 @@ mod tests {
             )
             .unwrap();
         assert_eq!(content, "new content");
+    }
+
+    #[test]
+    fn upsert_memory_different_buckets_do_not_collide() {
+        // Two memories with the same title in different buckets must be stored
+        // independently — an upsert into "system" must not overwrite "code".
+        let dir = tempfile::tempdir().unwrap();
+        let conn = open_db(dir.path()).unwrap();
+        set_meta(&conn, "embedding_dims", "2").unwrap();
+        ensure_vec_memories(&conn).unwrap();
+
+        let e = vec![0.1_f32, 0.2];
+        let code_id =
+            upsert_memory_by_title(&conn, "code", "patterns", "code content", &e).unwrap();
+        let sys_id =
+            upsert_memory_by_title(&conn, "system", "patterns", "system content", &e).unwrap();
+
+        assert_ne!(
+            code_id, sys_id,
+            "different buckets must produce different rows"
+        );
+
+        // A second upsert into "system"/"patterns" updates the system row only.
+        let e2 = vec![0.3_f32, 0.4];
+        let sys_id2 =
+            upsert_memory_by_title(&conn, "system", "patterns", "updated system", &e2).unwrap();
+        assert_eq!(sys_id, sys_id2, "should update same system row");
+
+        // Verify the code memory is untouched.
+        let code_content: String = conn
+            .query_row(
+                "SELECT content FROM memories WHERE id = ?1",
+                params![code_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(code_content, "code content");
     }
 
     #[test]
