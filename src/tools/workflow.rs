@@ -959,19 +959,52 @@ async fn run_command_inner(
     };
 
     // --- Step 5: Execute command ---
+    // On Unix we spawn into a new process group (process_group(0) → PGID = child PID)
+    // so killpg() can reap the entire tree on timeout.  Without this, dropping the tokio
+    // future orphans curl/grep/tee/head and they keep running until the download finishes.
+    //
+    // We also reset SIGPIPE to SIG_DFL in pre_exec.  Claude Code's Node.js parent sets
+    // SIGPIPE=SIG_IGN; every spawned process inherits it.  With SIG_IGN, a `| head -N`
+    // pipeline never terminates via SIGPIPE: tee ignores the broken pipe from head and
+    // keeps draining curl's output into the tmpfile until the download completes.
     #[cfg(unix)]
-    let child = tokio::process::Command::new("sh")
-        .arg("-c")
-        .arg(&effective_command)
-        .current_dir(&work_dir)
-        .output();
+    let (child_output_fut, child_pgid) = {
+        let mut cmd = tokio::process::Command::new("sh");
+        cmd.arg("-c")
+            .arg(&effective_command)
+            .current_dir(&work_dir)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .process_group(0); // new process group; PGID = child PID
+                               // SAFETY: pre_exec runs in the child after fork(), before exec().
+                               // signal() is async-signal-safe (POSIX).  No locks are held at this point.
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+                Ok(())
+            });
+        }
+        let child = cmd.spawn()?;
+        let pgid: Option<i32> = child.id().map(|id| id as i32);
+        let fut: std::pin::Pin<
+            Box<dyn std::future::Future<Output = std::io::Result<std::process::Output>> + Send>,
+        > = Box::pin(child.wait_with_output());
+        (fut, pgid)
+    };
 
     #[cfg(windows)]
-    let child = tokio::process::Command::new("cmd")
-        .arg("/C")
-        .arg(&effective_command)
-        .current_dir(&work_dir)
-        .output();
+    let (child_output_fut, child_pgid) = {
+        let fut: std::pin::Pin<
+            Box<dyn std::future::Future<Output = std::io::Result<std::process::Output>> + Send>,
+        > = Box::pin(
+            tokio::process::Command::new("cmd")
+                .arg("/C")
+                .arg(&effective_command)
+                .current_dir(&work_dir)
+                .output(),
+        );
+        (fut, None::<i32>)
+    };
 
     // Heartbeat: send elapsed-seconds progress every 3s while the command runs.
     // AbortOnDrop guarantees the task is cancelled even when early `return`s fire.
@@ -992,7 +1025,12 @@ async fn run_command_inner(
         }
     }));
 
-    match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), child).await {
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(timeout_secs),
+        child_output_fut,
+    )
+    .await
+    {
         Ok(Ok(output)) => {
             let raw_stdout = String::from_utf8_lossy(&output.stdout).into_owned();
             let raw_stderr = String::from_utf8_lossy(&output.stderr).into_owned();
@@ -1207,12 +1245,23 @@ async fn run_command_inner(
         Ok(Err(e)) => {
             Err(super::RecoverableError::new(format!("command execution error: {}", e)).into())
         }
-        Err(_) => Ok(json!({
-            "timed_out": true,
-            "stderr": format!("Command timed out after {} seconds", timeout_secs),
-            "exit_code": null,
-            "hint": "If the command launches background processes (e.g. with &), use run_in_background: true — shell & leaves background processes holding the stdout pipe open, so output() never gets EOF. run_in_background spawns via a log file instead and returns immediately."
-        })),
+        Err(_) => {
+            // Kill the entire process group so orphaned children (curl, grep, tee, etc.)
+            // are reaped immediately rather than running to completion in the background.
+            #[cfg(unix)]
+            if let Some(pgid) = child_pgid {
+                // SAFETY: pgid is the process group we created with process_group(0) above.
+                // killpg with SIGKILL is the only reliable way to stop the whole pipeline
+                // tree (sh + curl + grep + tee + head) in one shot.
+                unsafe { libc::killpg(pgid, libc::SIGKILL) };
+            }
+            Ok(json!({
+                "timed_out": true,
+                "stderr": format!("Command timed out after {} seconds", timeout_secs),
+                "exit_code": null,
+                "hint": "If the command launches background processes (e.g. with &), use run_in_background: true — shell & leaves background processes holding the stdout pipe open, so output() never gets EOF. run_in_background spawns via a log file instead and returns immediately."
+            }))
+        }
     }
 }
 
