@@ -105,7 +105,7 @@ impl MemoryStore {
         Ok(())
     }
 
-    fn topic_path(&self, topic: &str) -> PathBuf {
+    pub(crate) fn topic_path(&self, topic: &str) -> PathBuf {
         // Sanitize: replace ".." components to prevent directory traversal.
         let safe = topic.replace("..", "__");
         // Strip leading path separators to prevent absolute paths from replacing

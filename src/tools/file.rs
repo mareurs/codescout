@@ -361,6 +361,23 @@ impl Tool for ReadFile {
                 .into());
             }
             let content = extract_lines(&text, start as usize, end as usize);
+            // Proactive buffering: if the extracted range exceeds the inline limit,
+            // store as plain-text @file_* so callers can navigate it by line number.
+            // Without this, call_content wraps large content in a 3-line @tool_* JSON
+            // envelope, making subsequent start_line/end_line navigation useless.
+            // Same class as BUG-025 (which fixed the no-range path); this covers the
+            // explicit-range path.
+            if crate::tools::exceeds_inline_limit(&content) {
+                let total_lines = content.lines().count();
+                let file_id = ctx
+                    .output_buffer
+                    .store_file(resolved.to_string_lossy().to_string(), content);
+                let mut result = json!({ "file_id": file_id, "total_lines": total_lines });
+                if source_tag != "project" {
+                    result["source"] = json!(source_tag);
+                }
+                return Ok(result);
+            }
             let mut result = json!({ "content": content });
             if source_tag != "project" {
                 result["source"] = json!(source_tag);
@@ -2664,6 +2681,63 @@ mod tests {
             "explicit range should never buffer"
         );
         assert!(result["content"].as_str().unwrap().contains("line 1"));
+    }
+
+    #[tokio::test]
+    async fn read_file_large_explicit_range_buffers_as_file_ref() {
+        // Regression test for BUG-025 (explicit-range path): when a line range
+        // extracts content > TOOL_OUTPUT_BUFFER_THRESHOLD, read_file must store it as
+        // a @file_* ref rather than returning {"content": "..."} inline.
+        // Without the fix, call_content wraps the large JSON in a 3-line @tool_*
+        // envelope, making subsequent start_line/end_line navigation return empty content.
+        let (dir, ctx) = project_ctx().await;
+        let path = dir.path().join("big.txt");
+        // 300 lines × ~40 chars ≈ 12 KB — above MAX_INLINE_TOKENS threshold (10 KB)
+        let content: String = (1..=300)
+            .map(|i| format!("line {:04} padding_padding_padding_padd\n", i))
+            .collect();
+        assert!(
+            content.len() > crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD,
+            "test data must exceed threshold ({} bytes), got {}",
+            crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD,
+            content.len()
+        );
+        std::fs::write(&path, &content).unwrap();
+
+        let result = ReadFile
+            .call(
+                json!({"file_path": path.to_str().unwrap(), "start_line": 1, "end_line": 300}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        // Large range: must buffer as @file_* so sub-range navigation works
+        assert!(
+            result.get("file_id").is_some(),
+            "large explicit range should buffer as @file_*; got: {}",
+            result
+        );
+        assert_eq!(
+            result["total_lines"].as_u64().unwrap(),
+            300,
+            "total_lines should reflect the extracted range"
+        );
+
+        // Verify the @file_* ref is navigable by sub-range
+        let file_id = result["file_id"].as_str().unwrap().to_string();
+        let sub = ReadFile
+            .call(
+                json!({"path": file_id, "start_line": 10, "end_line": 10}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(
+            sub["content"].as_str().unwrap_or("").contains("line 0010"),
+            "sub-range on @file_* ref should return line 10; got: {}",
+            sub
+        );
     }
 
     #[tokio::test]

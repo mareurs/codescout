@@ -481,7 +481,24 @@ impl Tool for Memory {
                             &p.memory
                         };
                         match store.read(topic)? {
-                            Some(content) => Ok(json!({ "content": content })),
+                            Some(content) => {
+                                // Proactive buffering: same class as BUG-025. If the
+                                // memory file is large, return a @file_* ref so the
+                                // caller can navigate it by line number. Without this,
+                                // call_content wraps the large {"content":"..."} in a
+                                // 3-line @tool_* envelope, making start_line/end_line
+                                // navigation useless.
+                                if crate::tools::exceeds_inline_limit(&content) {
+                                    let total_lines = content.lines().count();
+                                    let file_path =
+                                        store.topic_path(topic).to_string_lossy().to_string();
+                                    let file_id =
+                                        ctx.output_buffer.store_file(file_path, content);
+                                    Ok(json!({ "file_id": file_id, "total_lines": total_lines }))
+                                } else {
+                                    Ok(json!({ "content": content }))
+                                }
+                            }
                             None => Err(RecoverableError::with_hint(
                                 format!("topic '{}' not found", topic),
                                 "Use memory(action='list') to see available topics",
@@ -713,6 +730,14 @@ impl Tool for Memory {
             Some(format_read_memory(result))
         } else {
             None
+        }
+    }
+
+    fn json_path_hint(&self, val: &Value) -> String {
+        if val["content"].is_string() {
+            "$.content".to_string()
+        } else {
+            "$.field".to_string()
         }
     }
 }
@@ -1128,6 +1153,62 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(r["content"], json!("hello"));
+
+        drop(dir);
+    }
+
+    #[tokio::test]
+    async fn memory_large_read_buffers_as_file_ref() {
+        // Regression: memory(action="read") for large topics must return a @file_* ref
+        // rather than {"content":"..."} inline. Without this, call_content wraps the
+        // result in a 3-line @tool_* JSON envelope, making start_line/end_line useless.
+        let (dir, ctx) = test_ctx_with_project().await;
+        let tool = Memory;
+
+        // Write a topic whose content exceeds TOOL_OUTPUT_BUFFER_THRESHOLD (10 KB)
+        let big: String = (1..=300)
+            .map(|i| format!("# line {:04} padding_padding_padding_pad\n", i))
+            .collect();
+        assert!(
+            big.len() > crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD,
+            "test data must exceed threshold ({} bytes), got {}",
+            crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD,
+            big.len()
+        );
+        tool.call(
+            json!({ "action": "write", "topic": "large-topic", "content": big }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+        let result = tool
+            .call(json!({ "action": "read", "topic": "large-topic" }), &ctx)
+            .await
+            .unwrap();
+
+        // Large content: must return @file_* ref, not inline {"content": "..."}
+        assert!(
+            result.get("file_id").is_some(),
+            "large memory read should return @file_* ref; got: {}",
+            result
+        );
+        assert_eq!(result["total_lines"].as_u64().unwrap(), 300);
+
+        // Verify the @file_* ref is line-navigable
+        let file_id = result["file_id"].as_str().unwrap().to_string();
+        let sub = crate::tools::file::ReadFile
+            .call(
+                json!({"path": file_id, "start_line": 10, "end_line": 10}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(
+            sub["content"].as_str().unwrap_or("").contains("line 0010"),
+            "sub-range on @file_* ref should return line 10; got: {}",
+            sub
+        );
 
         drop(dir);
     }

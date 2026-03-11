@@ -808,7 +808,7 @@ functions. `replace_symbol` is unreliable for functions inside `mod tests` block
 
 **Date:** 2026-03-05
 **Severity:** High — `start_line`/`end_line` params are completely non-functional; agents get useless re-buffered refs
-**Status:** ✅ FIXED — `as_u64_lenient` accepts string integers; proactive `@file_*` buffering for content > 5 KB
+**Status:** ✅ FIXED (fully — explicit-range path fixed 2026-03-11)
 
 **What happened:**
 `read_file("docs/ARCHITECTURE.md")` returned `@tool_bcf1509c` (buffered). Agent then called
@@ -821,16 +821,48 @@ Instead got ANOTHER `@tool_*` ref containing the 4-line JSON envelope.
    Both `start_line` and `end_line` become `None`, so the code falls through to returning
    the full text — which then gets re-buffered by `call_content` as yet another `@tool_*`.
 2. **Bug B — Architectural mismatch:** Even with correct numeric params, `read_file(@tool_*, ...)`
-   applies `start_line/end_line` to the pretty-printed JSON structure (4 lines), not the file
+   applies `start_line/end_line` to the pretty-printed JSON structure (3–4 lines), not the file
    content string inside it. Lines 26-156 don't exist in a 4-line JSON → empty result.
 
-**Fix applied:**
+**Fix applied (2026-03-05):**
 1. `as_u64_lenient(v)`: tries `as_u64()` then `as_str().parse::<u64>()`. Used for all
    `start_line`/`end_line` parsing.
-2. Proactive file buffering: when `read_file` would return `{ "content": text }` with
-   `text.len() > TOOL_OUTPUT_BUFFER_THRESHOLD`, it now stores the content as `@file_*`
-   (plain text) and returns `{ "file_id": ..., "total_lines": N }`. The agent then calls
-   `read_file("@file_xxx", start_line=26)` which navigates the plain text correctly.
+2. Proactive file buffering (no-range path): when `read_file` would return `{ "content": text }`
+   with `text.len() > TOOL_OUTPUT_BUFFER_THRESHOLD`, it stores content as `@file_*` (plain text)
+   and returns `{ "file_id": ..., "total_lines": N }`. The agent can then navigate by line number.
+
+**Partial regression fixed (2026-03-11):**
+The 2026-03-05 fix only applied proactive buffering to the **no-range path** (`!has_partial_range`
+guard). The **explicit line-range path** still returned `{"content": "..."}` with no size check.
+For a large range (e.g. 226 lines of Rust ≈ 13 KB), `call_content` would then wrap that in a
+3-line `@tool_*` JSON envelope, making `start_line`/`end_line` navigation return empty content
+(`total_lines: 3`, `content: ""`).
+Fix: same `exceeds_inline_limit` check + `store_file` in the explicit-range branch.
+Regression test: `read_file_large_explicit_range_buffers_as_file_ref`.
+
+---
+
+### BUG-027 — `memory(action="read")`: large topics silently return empty content via @tool_* re-buffering
+
+**Date:** 2026-03-11
+**Severity:** Medium — large memory topics (> 10 KB) are buffered by `call_content` as a 3-line
+`@tool_*` JSON envelope; subsequent `start_line`/`end_line` navigation returns empty content.
+**Status:** ✅ FIXED — proactive `@file_*` buffering (same class as BUG-025); `json_path_hint`
+overridden to `"$.content"`; `MemoryStore::topic_path` made `pub(crate)` so `store_file`
+gets the real backing path (enabling mtime-based cache refresh).
+Regression test: `memory_large_read_buffers_as_file_ref`
+
+**Root cause:** `Memory::call` read action returned `{"content": "..."}` with no size check.
+Any memory file > 10 KB triggered `call_content` auto-buffering into a `@tool_*` ref whose
+pretty-printed JSON is only 3 lines. Identical class to BUG-025 explicit-range regression.
+Memory files can easily exceed 10 KB (topic files have no size cap; MEMORY.md is 200 lines
+but topic files are not bounded).
+
+**Audit performed 2026-03-11:** All other tools checked for the same pattern:
+- `run_command` — handles own buffering; returns `@cmd_*` handles (safe)
+- GitHub tools — `always_buffer`/`maybe_buffer` return bare `@tool_*` id string (safe)
+- `find_symbol` with body — `json_path_hint` returns `"$.symbols[0].body"` (correct path)
+- All other tools — use OutputGuard capping or return small structured JSON (safe)
 
 ---
 
