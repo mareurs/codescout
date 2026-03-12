@@ -167,6 +167,7 @@ pub fn check_path_staleness(
 }
 
 /// Check all memory topics in a memories directory for staleness.
+/// Check all memory topics in a memories directory for staleness.
 pub fn check_all_memories(project_root: &Path, memories_dir: &Path) -> Result<Value> {
     let mut stale = Vec::new();
     let mut fresh: Vec<Value> = Vec::new();
@@ -176,56 +177,57 @@ pub fn check_all_memories(project_root: &Path, memories_dir: &Path) -> Result<Va
         return Ok(json!({ "stale": stale, "fresh": fresh, "untracked": untracked }));
     }
 
-    for entry in std::fs::read_dir(memories_dir)? {
-        let entry = entry?;
+    for entry in walkdir::WalkDir::new(memories_dir).into_iter().flatten() {
         let path = entry.path();
-        if path.extension().is_some_and(|e| e == "md") {
-            // Defensive: unreachable from read_dir (file_name() is always Some
-            // for dir entries, and a file with extension "md" always has a stem),
-            // but guards against hypothetical non-entry paths passed in future.
-            let Some(stem) = path.file_stem() else {
-                continue;
-            };
-            let topic = stem.to_string_lossy().to_string();
-            let sidecar = anchor_path_for_topic(memories_dir, &topic);
+        // Skip directories and non-.md files.
+        if !entry.file_type().is_file() || !path.extension().is_some_and(|e| e == "md") {
+            continue;
+        }
+        // Derive topic from relative path so nested topics like
+        // "debugging/async-patterns" are included alongside flat ones.
+        let Ok(rel) = path.strip_prefix(memories_dir) else {
+            continue;
+        };
+        let topic = rel.with_extension("").to_string_lossy().replace('\\', "/");
 
-            if !sidecar.exists() {
-                untracked.push(topic);
-                continue;
+        let sidecar = anchor_path_for_topic(memories_dir, &topic);
+
+        if !sidecar.exists() {
+            untracked.push(topic);
+            continue;
+        }
+
+        let anchor_file = read_anchor_file(&sidecar)?;
+        let report = check_path_staleness(project_root, &anchor_file)?;
+
+        if report.is_fresh() {
+            fresh.push(json!(topic));
+        } else {
+            let changed: Vec<&str> = report
+                .stale_files
+                .iter()
+                .filter(|f| f.status == AnchorStatus::Changed)
+                .map(|f| f.path.as_str())
+                .collect();
+            let deleted: Vec<&str> = report
+                .stale_files
+                .iter()
+                .filter(|f| f.status == AnchorStatus::Deleted)
+                .map(|f| f.path.as_str())
+                .collect();
+            let total_anchored = anchor_file.anchors.len();
+            let total_stale = report.stale_files.len();
+            let mut entry = json!({
+                "topic": topic,
+                "reason": format!("{} of {} anchored files changed", total_stale, total_anchored),
+            });
+            if !changed.is_empty() {
+                entry["changed_files"] = json!(changed);
             }
-
-            let anchor_file = read_anchor_file(&sidecar)?;
-            let report = check_path_staleness(project_root, &anchor_file)?;
-
-            if report.is_fresh() {
-                fresh.push(json!(topic));
-            } else {
-                let changed: Vec<&str> = report
-                    .stale_files
-                    .iter()
-                    .filter(|f| f.status == AnchorStatus::Changed)
-                    .map(|f| f.path.as_str())
-                    .collect();
-                let deleted: Vec<&str> = report
-                    .stale_files
-                    .iter()
-                    .filter(|f| f.status == AnchorStatus::Deleted)
-                    .map(|f| f.path.as_str())
-                    .collect();
-                let total_anchored = anchor_file.anchors.len();
-                let total_stale = report.stale_files.len();
-                let mut entry = json!({
-                    "topic": topic,
-                    "reason": format!("{} of {} anchored files changed", total_stale, total_anchored),
-                });
-                if !changed.is_empty() {
-                    entry["changed_files"] = json!(changed);
-                }
-                if !deleted.is_empty() {
-                    entry["deleted_files"] = json!(deleted);
-                }
-                stale.push(entry);
+            if !deleted.is_empty() {
+                entry["deleted_files"] = json!(deleted);
             }
+            stale.push(entry);
         }
     }
 
@@ -519,6 +521,98 @@ mod tests {
         let stale = result["stale"].as_array().unwrap();
         assert_eq!(stale.len(), 1);
         assert_eq!(stale[0]["topic"].as_str().unwrap(), "overview");
+        let changed = stale[0]["changed_files"].as_array().unwrap();
+        assert_eq!(changed.len(), 1);
+        assert!(changed.iter().any(|v| v.as_str().unwrap() == "src/lib.rs"));
+
+        assert!(result["fresh"].as_array().unwrap().is_empty());
+        assert!(result["untracked"].as_array().unwrap().is_empty());
+    }
+
+    /// A nested topic (subdir/topic.md) with no sidecar → appears in
+    /// result["untracked"] with the full relative path as the topic name.
+    #[test]
+    fn check_all_memories_nested_untracked() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let memories_dir = root.join("memories");
+        std::fs::create_dir_all(memories_dir.join("debugging")).unwrap();
+
+        std::fs::write(memories_dir.join("debugging/async-patterns.md"), "# Async").unwrap();
+
+        let result = check_all_memories(root, &memories_dir).unwrap();
+
+        let untracked = result["untracked"].as_array().unwrap();
+        assert_eq!(untracked.len(), 1);
+        assert_eq!(untracked[0].as_str().unwrap(), "debugging/async-patterns");
+
+        assert!(result["fresh"].as_array().unwrap().is_empty());
+        assert!(result["stale"].as_array().unwrap().is_empty());
+    }
+
+    /// A nested topic with a valid sidecar whose anchored file is unchanged →
+    /// appears in result["fresh"] with the full relative path as the topic name.
+    #[test]
+    fn check_all_memories_nested_fresh() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let memories_dir = root.join("memories");
+        std::fs::create_dir_all(memories_dir.join("debugging")).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+
+        std::fs::write(root.join("src/lib.rs"), "stable content").unwrap();
+        std::fs::write(
+            memories_dir.join("debugging/async-patterns.md"),
+            "References `src/lib.rs`.",
+        )
+        .unwrap();
+
+        let anchors = seed_anchors(root, "References `src/lib.rs`.").unwrap();
+        let sidecar = anchor_path_for_topic(&memories_dir, "debugging/async-patterns");
+        write_anchor_file(&sidecar, &anchors).unwrap();
+
+        let result = check_all_memories(root, &memories_dir).unwrap();
+
+        let fresh = result["fresh"].as_array().unwrap();
+        assert_eq!(fresh.len(), 1);
+        assert_eq!(fresh[0].as_str().unwrap(), "debugging/async-patterns");
+
+        assert!(result["untracked"].as_array().unwrap().is_empty());
+        assert!(result["stale"].as_array().unwrap().is_empty());
+    }
+
+    /// A nested topic with a sidecar referencing a path that has been modified →
+    /// appears in result["stale"] with the full relative path as the topic name.
+    #[test]
+    fn check_all_memories_nested_stale() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let memories_dir = root.join("memories");
+        std::fs::create_dir_all(memories_dir.join("debugging")).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+
+        std::fs::write(root.join("src/lib.rs"), "version 1").unwrap();
+        let anchors = seed_anchors(root, "References `src/lib.rs`.").unwrap();
+
+        std::fs::write(
+            memories_dir.join("debugging/async-patterns.md"),
+            "References `src/lib.rs`.",
+        )
+        .unwrap();
+        let sidecar = anchor_path_for_topic(&memories_dir, "debugging/async-patterns");
+        write_anchor_file(&sidecar, &anchors).unwrap();
+
+        // Mutate the anchored file so the hash diverges.
+        std::fs::write(root.join("src/lib.rs"), "version 2").unwrap();
+
+        let result = check_all_memories(root, &memories_dir).unwrap();
+
+        let stale = result["stale"].as_array().unwrap();
+        assert_eq!(stale.len(), 1);
+        assert_eq!(
+            stale[0]["topic"].as_str().unwrap(),
+            "debugging/async-patterns"
+        );
         let changed = stale[0]["changed_files"].as_array().unwrap();
         assert_eq!(changed.len(), 1);
         assert!(changed.iter().any(|v| v.as_str().unwrap() == "src/lib.rs"));
