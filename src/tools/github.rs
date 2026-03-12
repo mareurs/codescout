@@ -140,7 +140,6 @@ pub struct GithubFile;
 pub struct GithubRepo;
 
 #[async_trait]
-#[async_trait]
 impl Tool for GithubIdentity {
     fn name(&self) -> &'static str {
         "github_identity"
@@ -212,8 +211,6 @@ impl Tool for GithubIdentity {
     }
 }
 
-#[async_trait]
-#[async_trait]
 #[async_trait]
 impl Tool for GithubIssue {
     fn name(&self) -> &'static str {
@@ -453,8 +450,6 @@ impl Tool for GithubIssue {
     }
 }
 
-#[async_trait]
-#[async_trait]
 #[async_trait]
 impl Tool for GithubPr {
     fn name(&self) -> &'static str {
@@ -828,7 +823,6 @@ impl Tool for GithubPr {
 }
 
 #[async_trait]
-#[async_trait]
 impl Tool for GithubFile {
     fn name(&self) -> &'static str {
         "github_file"
@@ -1081,7 +1075,6 @@ async fn push_files_via_api(
     Ok(json!({"sha": new_commit_sha, "branch": branch}))
 }
 
-#[async_trait]
 #[async_trait]
 impl Tool for GithubRepo {
     fn name(&self) -> &'static str {
@@ -1358,10 +1351,6 @@ impl Tool for GithubRepo {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-#[cfg(test)]
-#[cfg(test)]
-#[cfg(test)]
-#[cfg(test)]
 #[cfg(test)]
 mod tests {
     use super::*;
