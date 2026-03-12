@@ -944,3 +944,29 @@ invoking the pager.
 
 **Workaround:**
 Always use `git --no-pager diff` or set `GIT_PAGER=cat` prefix: `GIT_PAGER=cat git diff ...`.
+
+---
+
+### BUG-028 — `github_repo`: `list_commits`, `list_branches`, `list_tags` return 404 on valid repos
+
+**Date:** 2026-03-12
+**Severity:** High — three github_repo methods completely broken on all repos
+**Status:** ✅ FIXED — changed from `-F per_page=N` to URL query param `?per_page=N`
+
+**What happened:**
+Calling `github_repo(method="list_commits", owner="mareurs", repo="codescout")` returned
+`gh: Not Found (HTTP 404)` despite the repo being public and `gh` being authenticated.
+Same failure for `list_branches` and `list_tags`.
+
+**Root cause:**
+All three methods used `run_gh(&["api", &endpoint, "-F", &per_page])`. The `gh api` CLI
+infers the HTTP method from whether body parameters are present: `-F key=value` adds a
+typed field, which makes `gh` switch from GET to POST. GitHub's API has no POST endpoint
+for `/repos/{owner}/{repo}/commits` (or branches/tags), so it returns 404.
+
+**Fix:**
+Encode `per_page` directly in the URL as a query parameter:
+`format!("/repos/{owner}/{repo}/commits?per_page={limit}")` — no `-F` flag needed.
+
+**Also fixed:** `github_repo` `search` method used invalid `gh search repos` JSON fields
+`stars` and `isPrivate` (correct: `stargazersCount` and `visibility`).

@@ -1,4 +1,4 @@
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use tokio::process::Command;
@@ -14,11 +14,16 @@ pub(crate) struct GhOutput {
 }
 
 pub(crate) async fn run_gh(args: &[&str]) -> anyhow::Result<GhOutput> {
-    let out = Command::new("gh")
-        .args(args)
-        .output()
-        .await
-        .context("gh CLI not found — install from https://cli.github.com")?;
+    let out = Command::new("gh").args(args).output().await.map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            RecoverableError::with_hint(
+                "gh CLI not found",
+                "Install from https://cli.github.com, then run: gh auth login",
+            )
+        } else {
+            RecoverableError::new(format!("failed to run gh: {e}"))
+        }
+    })?;
     Ok(GhOutput {
         stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
@@ -48,7 +53,13 @@ pub(crate) fn check_gh_output(out: GhOutput) -> Result<String, RecoverableError>
 pub(crate) fn maybe_buffer(content: String, tool_name: &str, ctx: &ToolContext) -> Value {
     if crate::tools::exceeds_inline_limit(&content) {
         let id = ctx.output_buffer.store_tool(tool_name, content);
-        json!(id)
+        json!({
+            "output_id": id,
+            "hint": format!(
+                "read_file(\"{id}\", json_path=\"$.field\") to extract a specific field, \
+                 or read_file(\"{id}\", start_line=N, end_line=M) to browse sections"
+            )
+        })
     } else {
         serde_json::from_str(&content).unwrap_or_else(|_| json!(content))
     }
@@ -57,7 +68,45 @@ pub(crate) fn maybe_buffer(content: String, tool_name: &str, ctx: &ToolContext) 
 /// Always buffer — for known-large responses (diffs, file contents, code search).
 pub(crate) fn always_buffer(content: String, tool_name: &str, ctx: &ToolContext) -> Value {
     let id = ctx.output_buffer.store_tool(tool_name, content);
-    json!(id)
+    json!({
+        "output_id": id,
+        "hint": format!(
+            "read_file(\"{id}\", json_path=\"$.field\") to extract a specific field, \
+             or read_file(\"{id}\", start_line=N, end_line=M) to browse sections"
+        )
+    })
+}
+
+// ── Summary helpers ───────────────────────────────────────────────────────────
+
+/// Inject a summary into a buffered result (no-op if result is inline).
+fn with_summary(mut result: Value, summary: Option<String>) -> Value {
+    if let Some(s) = summary {
+        if result.get("output_id").is_some() {
+            result["summary"] = json!(s);
+        }
+    }
+    result
+}
+
+/// Summarize a JSON array by extracting a label from each item.
+fn summarize_list(
+    content: &str,
+    item_label: &str,
+    extract: impl Fn(&Value) -> Option<String>,
+) -> Option<String> {
+    let arr = serde_json::from_str::<Vec<Value>>(content).ok()?;
+    let count = arr.len();
+    if count == 0 {
+        return Some(format!("0 {item_label}"));
+    }
+    let items: Vec<String> = arr.iter().take(8).filter_map(&extract).collect();
+    let list = items.join(", ");
+    if count > 8 {
+        Some(format!("{count} {item_label}: {list}, …"))
+    } else {
+        Some(format!("{count} {item_label}: {list}"))
+    }
 }
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -236,7 +285,16 @@ impl Tool for GithubIssue {
                     args.extend(["--label", l]);
                 }
                 let out = run_gh(&args).await?;
-                Ok(maybe_buffer(check_gh_output(out)?, "github_issue", ctx))
+                let content = check_gh_output(out)?;
+                let summary = summarize_list(&content, "issues", |v| {
+                    let n = v["number"].as_u64()?;
+                    let t = v["title"].as_str()?;
+                    Some(format!("#{n} {t}"))
+                });
+                Ok(with_summary(
+                    maybe_buffer(content, "github_issue", ctx),
+                    summary,
+                ))
             }
             "search" => {
                 let q = params["query"].as_str().ok_or_else(|| {
@@ -252,7 +310,16 @@ impl Tool for GithubIssue {
                     &limit,
                 ];
                 let out = run_gh(&args).await?;
-                Ok(maybe_buffer(check_gh_output(out)?, "github_issue", ctx))
+                let content = check_gh_output(out)?;
+                let summary = summarize_list(&content, "issues", |v| {
+                    let n = v["number"].as_u64()?;
+                    let t = v["title"].as_str()?;
+                    Some(format!("#{n} {t}"))
+                });
+                Ok(with_summary(
+                    maybe_buffer(content, "github_issue", ctx),
+                    summary,
+                ))
             }
             "get" => {
                 let num = require_number(&number, "get")?;
@@ -468,7 +535,16 @@ impl Tool for GithubPr {
                     args.extend(["--state", s]);
                 }
                 let out = run_gh(&args).await?;
-                Ok(maybe_buffer(check_gh_output(out)?, "github_pr", ctx))
+                let content = check_gh_output(out)?;
+                let summary = summarize_list(&content, "PRs", |v| {
+                    let n = v["number"].as_u64()?;
+                    let t = v["title"].as_str()?;
+                    Some(format!("#{n} {t}"))
+                });
+                Ok(with_summary(
+                    maybe_buffer(content, "github_pr", ctx),
+                    summary,
+                ))
             }
             "search" => {
                 let q = params["query"].as_str().ok_or_else(|| {
@@ -484,7 +560,16 @@ impl Tool for GithubPr {
                     &limit,
                 ])
                 .await?;
-                Ok(maybe_buffer(check_gh_output(out)?, "github_pr", ctx))
+                let content = check_gh_output(out)?;
+                let summary = summarize_list(&content, "PRs", |v| {
+                    let n = v["number"].as_u64()?;
+                    let t = v["title"].as_str()?;
+                    Some(format!("#{n} {t}"))
+                });
+                Ok(with_summary(
+                    maybe_buffer(content, "github_pr", ctx),
+                    summary,
+                ))
             }
             "get" => {
                 let num = require_number(&number, "get")?;
@@ -509,7 +594,14 @@ impl Tool for GithubPr {
                     args.extend(["--repo", &repo_flag]);
                 }
                 let out = run_gh(&args).await?;
-                Ok(always_buffer(check_gh_output(out)?, "github_pr", ctx))
+                let content = check_gh_output(out)?;
+                let file_count = content.matches("\ndiff --git ").count()
+                    + usize::from(content.starts_with("diff --git "));
+                let summary = Some(format!("{file_count} files changed"));
+                Ok(with_summary(
+                    always_buffer(content, "github_pr", ctx),
+                    summary,
+                ))
             }
             "get_files" => {
                 let num = require_number(&number, "get_files")?;
@@ -1054,12 +1146,20 @@ impl Tool for GithubRepo {
                     "repos",
                     q,
                     "--json",
-                    "name,owner,description,url,stars,isPrivate",
+                    "name,owner,description,url,stargazersCount,visibility",
                     "--limit",
                     &limit,
                 ])
                 .await?;
-                Ok(maybe_buffer(check_gh_output(out)?, "github_repo", ctx))
+                let content = check_gh_output(out)?;
+                let summary = summarize_list(&content, "repos", |v| {
+                    let owner_login = v["owner"]["login"].as_str().unwrap_or("");
+                    v["name"].as_str().map(|n| format!("{owner_login}/{n}"))
+                });
+                Ok(with_summary(
+                    maybe_buffer(content, "github_repo", ctx),
+                    summary,
+                ))
             }
             "create" => {
                 let name = params["name"].as_str().ok_or_else(|| {
@@ -1087,10 +1187,16 @@ impl Tool for GithubRepo {
             }
             "list_branches" => {
                 require_owner_repo(owner, repo)?;
-                let endpoint = format!("/repos/{owner}/{repo}/branches");
-                let per_page = format!("per_page={limit}");
-                let out = run_gh(&["api", &endpoint, "-F", &per_page]).await?;
-                Ok(maybe_buffer(check_gh_output(out)?, "github_repo", ctx))
+                let endpoint = format!("/repos/{owner}/{repo}/branches?per_page={limit}");
+                let out = run_gh(&["api", &endpoint]).await?;
+                let content = check_gh_output(out)?;
+                let summary = summarize_list(&content, "branches", |v| {
+                    v["name"].as_str().map(|s| s.to_string())
+                });
+                Ok(with_summary(
+                    maybe_buffer(content, "github_repo", ctx),
+                    summary,
+                ))
             }
             "create_branch" => {
                 require_owner_repo(owner, repo)?;
@@ -1117,10 +1223,19 @@ impl Tool for GithubRepo {
             }
             "list_commits" => {
                 require_owner_repo(owner, repo)?;
-                let endpoint = format!("/repos/{owner}/{repo}/commits");
-                let per_page = format!("per_page={limit}");
-                let out = run_gh(&["api", &endpoint, "-F", &per_page]).await?;
-                Ok(maybe_buffer(check_gh_output(out)?, "github_repo", ctx))
+                let endpoint = format!("/repos/{owner}/{repo}/commits?per_page={limit}");
+                let out = run_gh(&["api", &endpoint]).await?;
+                let content = check_gh_output(out)?;
+                let summary = summarize_list(&content, "commits", |v| {
+                    v["commit"]["message"]
+                        .as_str()
+                        .and_then(|m| m.lines().next())
+                        .map(|s| s.to_string())
+                });
+                Ok(with_summary(
+                    maybe_buffer(content, "github_repo", ctx),
+                    summary,
+                ))
             }
             "get_commit" => {
                 require_owner_repo(owner, repo)?;
@@ -1129,7 +1244,16 @@ impl Tool for GithubRepo {
                 })?;
                 let endpoint = format!("/repos/{owner}/{repo}/commits/{sha}");
                 let out = run_gh(&["api", &endpoint]).await?;
-                Ok(always_buffer(check_gh_output(out)?, "github_repo", ctx))
+                let content = check_gh_output(out)?;
+                let summary = serde_json::from_str::<Value>(&content).ok().and_then(|v| {
+                    let msg = v["commit"]["message"].as_str()?.lines().next()?;
+                    let s = v["sha"].as_str().map(|s| &s[..7]).unwrap_or("?");
+                    Some(format!("{s}: {msg}"))
+                });
+                Ok(with_summary(
+                    always_buffer(content, "github_repo", ctx),
+                    summary,
+                ))
             }
             "list_releases" => {
                 let mut args = vec![
@@ -1178,10 +1302,16 @@ impl Tool for GithubRepo {
             }
             "list_tags" => {
                 require_owner_repo(owner, repo)?;
-                let endpoint = format!("/repos/{owner}/{repo}/tags");
-                let per_page = format!("per_page={limit}");
-                let out = run_gh(&["api", &endpoint, "-F", &per_page]).await?;
-                Ok(maybe_buffer(check_gh_output(out)?, "github_repo", ctx))
+                let endpoint = format!("/repos/{owner}/{repo}/tags?per_page={limit}");
+                let out = run_gh(&["api", &endpoint]).await?;
+                let content = check_gh_output(out)?;
+                let summary = summarize_list(&content, "tags", |v| {
+                    v["name"].as_str().map(|s| s.to_string())
+                });
+                Ok(with_summary(
+                    maybe_buffer(content, "github_repo", ctx),
+                    summary,
+                ))
             }
             "get_tag" => {
                 require_owner_repo(owner, repo)?;
@@ -1206,7 +1336,14 @@ impl Tool for GithubRepo {
                     &limit,
                 ])
                 .await?;
-                Ok(always_buffer(check_gh_output(out)?, "github_repo", ctx))
+                let content = check_gh_output(out)?;
+                let summary = summarize_list(&content, "results", |v| {
+                    v["path"].as_str().map(|s| s.to_string())
+                });
+                Ok(with_summary(
+                    always_buffer(content, "github_repo", ctx),
+                    summary,
+                ))
             }
             other => Err(RecoverableError::with_hint(
                 format!("unknown method: '{other}'"),
