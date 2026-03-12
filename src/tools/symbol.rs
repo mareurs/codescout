@@ -1398,6 +1398,7 @@ impl Tool for ReplaceSymbol {
 
         write_lines(&full_path, &new_lines, content.ends_with('\n'))?;
         ctx.lsp.notify_file_changed(&full_path).await;
+        ctx.agent.mark_file_dirty(full_path).await;
         Ok(json!({ "status": "ok", "replaced_lines": format!("{}-{}", start + 1, end) }))
     }
 
@@ -1469,6 +1470,7 @@ impl Tool for RemoveSymbol {
 
         write_lines(&full_path, &new_lines, content.ends_with('\n'))?;
         ctx.lsp.notify_file_changed(&full_path).await;
+        ctx.agent.mark_file_dirty(full_path).await;
         let line_count = end - start;
         let removed_range = format!("{}-{}", start + 1, end);
         Ok(json!({
@@ -1548,6 +1550,7 @@ impl Tool for InsertCode {
 
         write_lines(&full_path, &new_lines, content.ends_with('\n'))?;
         ctx.lsp.notify_file_changed(&full_path).await;
+        ctx.agent.mark_file_dirty(full_path).await;
         Ok(json!({ "status": "ok", "inserted_at_line": insert_at + 1, "position": position }))
     }
 
@@ -1802,6 +1805,7 @@ impl Tool for RenameSymbol {
         // file on disk is correct (stale textDocument cache in the LSP server).
         for path in &lsp_files {
             ctx.lsp.notify_file_changed(path).await;
+            ctx.agent.mark_file_dirty(path.clone()).await;
         }
 
         // Phase 1.5: post-edit corruption scan.

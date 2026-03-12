@@ -188,6 +188,20 @@ impl Tool for SemanticSearch {
                 });
             }
         }
+        // Warn if write tools have modified files in this session that haven't been re-indexed.
+        let dirty = ctx.agent.dirty_file_count().await;
+        if dirty > 0 {
+            result["unindexed_writes"] = json!({
+                "status": "warn",
+                "file_count": dirty,
+                "note": format!(
+                    "{} file{} modified in this session but not yet re-indexed — \
+                     run index_project() to include recent changes in semantic search.",
+                    dirty,
+                    if dirty == 1 { " was" } else { "s were" }
+                )
+            });
+        }
         Ok(result)
     }
 
@@ -318,6 +332,9 @@ impl Tool for IndexProject {
                 };
             }));
 
+        // Capture the dirty-files Arc before spawning so the task can clear it on success.
+        let dirty_files_arc = ctx.agent.dirty_files_arc().await;
+
         tokio::spawn(async move {
             let result = crate::embed::index::build_index(&root, force, progress_cb).await;
 
@@ -343,13 +360,19 @@ impl Tool for IndexProject {
                 // Drop the MutexGuard before any `.await` — MutexGuard is !Send.
                 let mut state = state_arc.lock().unwrap_or_else(|e| e.into_inner());
                 *state = match result {
-                    Ok(report) => IndexingState::Done {
-                        files_indexed: report.indexed,
-                        files_deleted: report.deleted,
-                        detail: report.skipped_msg,
-                        total_files: stats.0,
-                        total_chunks: stats.1,
-                    },
+                    Ok(report) => {
+                        // Indexing succeeded — files are now fresh, clear the dirty set.
+                        if let Some(ref arc) = dirty_files_arc {
+                            arc.lock().unwrap_or_else(|e| e.into_inner()).clear();
+                        }
+                        IndexingState::Done {
+                            files_indexed: report.indexed,
+                            files_deleted: report.deleted,
+                            detail: report.skipped_msg,
+                            total_files: stats.0,
+                            total_chunks: stats.1,
+                        }
+                    }
                     Err(e) => IndexingState::Failed(e.to_string()),
                 };
             }

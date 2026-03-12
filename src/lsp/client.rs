@@ -1,7 +1,7 @@
 //! Async LSP client: spawns a language server subprocess and communicates
 //! via JSON-RPC over stdio.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -110,11 +110,12 @@ pub struct LspClient {
     child_pid: Option<u32>,
     /// Timeout for the LSP initialize handshake.
     init_timeout: std::time::Duration,
-    /// Tracks files opened via textDocument/didOpen to prevent duplicate notifications.
-    /// The LSP spec prohibits sending didOpen for an already-open file without an
-    /// intervening didClose; some servers (e.g. kotlin-lsp) error on duplicates.
+    /// Tracks files opened via textDocument/didOpen, mapped to their current document version.
+    /// The LSP spec requires a monotonically increasing version on every didOpen/didChange.
     /// Keys are canonicalized paths to avoid symlink/relative-path aliases.
-    open_files: StdMutex<HashSet<PathBuf>>,
+    /// The spec prohibits sending didOpen for an already-open file without an
+    /// intervening didClose; some servers (e.g. kotlin-lsp) error on duplicates.
+    open_files: StdMutex<HashMap<PathBuf, i32>>,
 }
 
 impl LspClient {
@@ -247,7 +248,7 @@ impl LspClient {
             capabilities: StdMutex::new(lsp_types::ServerCapabilities::default()),
             child_pid,
             init_timeout,
-            open_files: StdMutex::new(HashSet::new()),
+            open_files: StdMutex::new(HashMap::new()),
         };
 
         // Perform the LSP initialize handshake
@@ -509,9 +510,11 @@ impl LspClient {
             .with_context(|| format!("Failed to canonicalize path for didOpen: {:?}", path))?;
         {
             let mut open_files = self.open_files.lock().unwrap_or_else(|e| e.into_inner());
-            if !open_files.insert(canonical) {
+            if open_files.contains_key(&canonical) {
                 return Ok(());
             }
+            // Version 1 is the conventional initial version per LSP spec.
+            open_files.insert(canonical, 1);
         }
 
         let content = std::fs::read_to_string(path)
@@ -524,7 +527,7 @@ impl LspClient {
                 text_document: lsp_types::TextDocumentItem {
                     uri,
                     language_id: language_id.to_string(),
-                    version: 0,
+                    version: 1,
                     text: content,
                 },
             })?,
@@ -788,21 +791,25 @@ impl LspClient {
     /// No-op if the file is not currently open in this server.
     pub async fn did_change(&self, path: &Path) -> Result<()> {
         let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-        if !self
-            .open_files
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .contains(&canonical)
-        {
-            return Ok(());
-        }
+        // Increment the per-file version counter. Returns early if the file was
+        // never opened — the LSP spec only allows didChange for open documents.
+        let version = {
+            let mut open_files = self.open_files.lock().unwrap_or_else(|e| e.into_inner());
+            match open_files.get_mut(&canonical) {
+                Some(v) => {
+                    *v += 1;
+                    *v
+                }
+                None => return Ok(()),
+            }
+        };
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read file for didChange: {:?}", path))?;
         let uri = path_to_uri(path)?;
         self.notify(
             "textDocument/didChange",
             serde_json::to_value(lsp_types::DidChangeTextDocumentParams {
-                text_document: lsp_types::VersionedTextDocumentIdentifier { uri, version: 1 },
+                text_document: lsp_types::VersionedTextDocumentIdentifier { uri, version },
                 content_changes: vec![lsp_types::TextDocumentContentChangeEvent {
                     range: None,
                     range_length: None,

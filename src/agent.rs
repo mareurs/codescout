@@ -57,6 +57,10 @@ pub struct ActiveProject {
     pub memory: MemoryStore,
     pub private_memory: MemoryStore,
     pub library_registry: LibraryRegistry,
+    /// Tracks files written by tools in this session but not yet re-indexed.
+    /// Wrapped in an Arc so index_project can capture it across a tokio::spawn
+    /// boundary and clear it on successful completion.
+    pub dirty_files: Arc<std::sync::Mutex<std::collections::HashSet<PathBuf>>>,
 }
 
 impl Agent {
@@ -75,6 +79,7 @@ impl Agent {
                     memory,
                     private_memory,
                     library_registry,
+                    dirty_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
                 }),
                 Some(home),
             )
@@ -114,6 +119,7 @@ impl Agent {
             memory,
             private_memory,
             library_registry,
+            dirty_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         });
         inner.project_explicitly_activated = true;
         // Clear cached embedder — new project may use a different model
@@ -154,6 +160,42 @@ impl Agent {
                 )
                 .into()
             })
+    }
+
+    /// Mark a file as written-but-not-yet-indexed.
+    /// Called by every write tool after modifying a source file.
+    pub async fn mark_file_dirty(&self, path: PathBuf) {
+        let inner = self.inner.read().await;
+        if let Some(p) = &inner.active_project {
+            p.dirty_files
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(path);
+        }
+    }
+
+    /// Number of files written in this session but not yet re-indexed.
+    pub async fn dirty_file_count(&self) -> usize {
+        let inner = self.inner.read().await;
+        inner
+            .active_project
+            .as_ref()
+            .map(|p| {
+                p.dirty_files
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .len()
+            })
+            .unwrap_or(0)
+    }
+
+    /// Clone the dirty-files Arc so index_project can capture it across a spawn boundary
+    /// and clear it on successful completion.
+    pub async fn dirty_files_arc(
+        &self,
+    ) -> Option<Arc<std::sync::Mutex<std::collections::HashSet<PathBuf>>>> {
+        let inner = self.inner.read().await;
+        inner.active_project.as_ref().map(|p| p.dirty_files.clone())
     }
 
     /// Get the current project status for building server instructions.

@@ -760,6 +760,7 @@ impl Tool for CreateFile {
         let resolved = crate::util::path_security::validate_write_path(path, &root, &security)?;
         crate::util::fs::write_utf8(&resolved, content)?;
         ctx.lsp.notify_file_changed(&resolved).await;
+        ctx.agent.mark_file_dirty(resolved).await;
         Ok(json!("ok"))
     }
 }
@@ -1408,6 +1409,7 @@ impl Tool for EditFile {
             };
             std::fs::write(&resolved, &new_content)?;
             ctx.lsp.notify_file_changed(&resolved).await;
+            ctx.agent.mark_file_dirty(resolved).await;
             return Ok(json!("ok"));
         }
 
@@ -1491,6 +1493,7 @@ async fn perform_edit(
     std::fs::write(&resolved, &new_content)?;
     ctx.agent.reload_config_if_project_toml(&resolved).await;
     ctx.lsp.notify_file_changed(&resolved).await;
+    ctx.agent.mark_file_dirty(resolved).await;
 
     Ok(json!("ok"))
 }
