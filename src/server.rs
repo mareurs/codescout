@@ -57,7 +57,7 @@ impl CodeScoutServer {
     pub async fn from_parts(agent: Agent, lsp: Arc<dyn LspProvider>) -> Self {
         let status = agent.project_status().await;
         let instructions = crate::prompts::build_server_instructions(status.as_ref());
-        let tools: Vec<Arc<dyn Tool>> = vec![
+        let mut tools: Vec<Arc<dyn Tool>> = vec![
             // File tools (fully implemented)
             Arc::new(ReadFile),
             Arc::new(ListDir),
@@ -89,13 +89,18 @@ impl CodeScoutServer {
             Arc::new(ProjectStatus),
             // Library tools
             Arc::new(ListLibraries),
-            // GitHub tools
-            Arc::new(github::GithubIdentity),
-            Arc::new(github::GithubIssue),
-            Arc::new(github::GithubPr),
-            Arc::new(github::GithubFile),
+            // GitHub tools — github_repo always available
             Arc::new(github::GithubRepo),
         ];
+
+        // Optional GitHub tools (identity/issue/pr/file) — opt-in via config
+        let github_enabled = agent.security_config().await.github_enabled;
+        if github_enabled {
+            tools.push(Arc::new(github::GithubIdentity));
+            tools.push(Arc::new(github::GithubIssue));
+            tools.push(Arc::new(github::GithubPr));
+            tools.push(Arc::new(github::GithubFile));
+        }
         let output_buffer = Arc::new(crate::tools::output_buffer::OutputBuffer::new(50));
         Self {
             agent,
@@ -554,10 +559,6 @@ mod tests {
             "activate_project",
             "project_status",
             "list_libraries",
-            "github_identity",
-            "github_issue",
-            "github_pr",
-            "github_file",
             "github_repo",
         ];
         assert_eq!(
@@ -572,6 +573,39 @@ mod tests {
             assert!(
                 server.find_tool(name).is_some(),
                 "tool '{}' not found in server",
+                name
+            );
+        }
+    }
+
+    async fn make_server_with_github() -> (tempfile::TempDir, CodeScoutServer) {
+        let dir = tempdir().unwrap();
+        let config_dir = dir.path().join(".codescout");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(
+            config_dir.join("project.toml"),
+            "[project]\nname = \"test\"\n\n[security]\ngithub_enabled = true\n",
+        )
+        .unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let server = CodeScoutServer::new(agent).await;
+        (dir, server)
+    }
+
+    #[tokio::test]
+    async fn server_registers_github_tools_when_enabled() {
+        let (_dir, server) = make_server_with_github().await;
+        assert_eq!(
+            server.tools.len(),
+            29,
+            "should have 29 tools with github_enabled=true, got {}\nregistered: {:?}",
+            server.tools.len(),
+            server.tools.iter().map(|t| t.name()).collect::<Vec<_>>()
+        );
+        for name in &["github_identity", "github_issue", "github_pr", "github_file"] {
+            assert!(
+                server.find_tool(name).is_some(),
+                "tool '{}' should be registered when github_enabled=true",
                 name
             );
         }
