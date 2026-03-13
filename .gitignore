@@ -13,6 +13,7 @@
 /.codescout/debug.log*
 # memories/ and system-prompt.md are intentionally tracked
 /docs/observations.md
+/docs/superpowers/
 /scripts/node_modules/
 /scripts/package-lock.json
 .codescout/private-memories/
