@@ -3,19 +3,19 @@
 
 [[anchors]]
 path = "docs/ARCHITECTURE.md"
-hash = "2d3905cf6291850ad9558b28c370cb4f1d40a165c9ff7ff6c49a1a335831945c"
+hash = "f4d4009aa623a4c50d1535b986c83d73a57eea64fbcc22e45bc70501f376b848"
 
 [[anchors]]
 path = "src/server.rs"
-hash = "87020732fd7e394c24f349ed16174d01402aae524f6dbd5be797bb580ba11c6f"
+hash = "ac6f13a9049c7db8682a087c6d4b85b4962ff166680fac0f2ed393575de85050"
 
 [[anchors]]
 path = "src/util/path_security.rs"
-hash = "609ed6259202e32a962b83366369941e67808813e91e7e77943e7cbd25112537"
+hash = "eb9a3bdfefd627517d9b4454c0472b5c6a0798034582d635f125f404351cd776"
 
 [[anchors]]
 path = "src/tools/mod.rs"
-hash = "377c1872a3b56180c6c7b8ba7c7f618ffeaeaf20a398fafc93ad3d5463d931a6"
+hash = "aeb8e462af9460d96e2af2180baa982f3d1b354f293a758050157006e554d74f"
 
 [[anchors]]
 path = "src/tools/output.rs"
@@ -23,16 +23,40 @@ hash = "e2919dd4da190482be369fe972f3666cfc58aa1f329ce78451e85df9d6f4a2f8"
 
 [[anchors]]
 path = "src/lsp/manager.rs"
-hash = "1481d5551e40220427b1130c5df8c3803e14c85d2723dd73c639c50c9b5a0fbd"
+hash = "c1cd5a6a2b257e3fb1fc8deac4170255a192e0c8a64faeed886b8e151bc4d6fc"
 
 [[anchors]]
 path = "src/embed/index.rs"
-hash = "2103c1f6a0d32b55bc7dbaf817b029716de36373ae702e884b3a2ca7b431b298"
+hash = "13b3ba166138e1a29b92d0f83db78c7c44c7571704049d315fbfd7576b20a646"
 
 [[anchors]]
 path = ".codescout/embeddings.db"
-hash = "76539d57fc465232f635a1e01e8b7a6a044291b1be7595f3d25d4ecc3c818d17"
+hash = "38bfffc40e2f1aa54cda0b6dc821685cbf8c79399833aa313dfc0c064ec866a5"
+
+[[anchors]]
+path = "src/memory/classify.rs"
+hash = "30ff0aa1b4aa14154992e63220a0a03ad18894c3c6931324377def53676877bf"
+
+[[anchors]]
+path = "src/tools/library.rs"
+hash = "5d3cdfca083800cb5ddba51d582675544923b7555a2cb9d5aeaa7d29ae90fa86"
+
+[[anchors]]
+path = "src/tools/memory.rs"
+hash = "5caddcd25689cfe172abde92f6b1eb6be1385ae191453eb6b50b6a5442b239f5"
+
+[[anchors]]
+path = "src/tools/ast.rs"
+hash = "f37dcbeb773d94ca5e85393edd5a96efddec2c5d1c7ce08d5a410938ffdf03aa"
+
+[[anchors]]
+path = "src/tools/usage.rs"
+hash = "aac582876e5d3ccef729540b2104c52e6ab41749aa9ccc6c3f368c0c00a6701f"
+
+[[anchors]]
+path = ".codescout/system-prompt.md"
+hash = "9d58f061b8b60f9b6a62b6d329612bee651d29d325039a6c997bd1f3d0b96f5b"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "1721105bda131b1c79fd2d1bc8e16fc3c3feb420363e5e3a003a33ec226a44f1"
+hash = "a8216c86f4de25681c7a4997afdac782211fe1f97c6bc3292ef68d154a865550"

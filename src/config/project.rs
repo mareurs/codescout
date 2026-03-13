@@ -326,7 +326,10 @@ mod tests {
             "indexing_enabled should default to true"
         );
         assert!(sec.shell_enabled, "shell_enabled should default to true");
-        assert!(!sec.github_enabled, "github_enabled should default to false");
+        assert!(
+            !sec.github_enabled,
+            "github_enabled should default to false"
+        );
     }
 
     #[test]

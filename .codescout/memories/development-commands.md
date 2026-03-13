@@ -14,6 +14,10 @@ cargo test -- --nocapture
 # Run integration tests only
 cargo test --test integration
 
+# Run LSP e2e tests (requires real LSP servers installed)
+cargo test --features e2e-rust --test symbol_lsp
+cargo test --features e2e-rust --test rename_symbol
+
 # Run with local embedding backend (no Ollama needed)
 cargo build --features local-embed --no-default-features
 

@@ -9,7 +9,7 @@ This supplements with naming tables and testing patterns discovered in code.
 |---|---|---|
 | Tool struct | PascalCase noun | `FindSymbol`, `ListSymbols`, `EditFile` |
 | Tool name (MCP) | snake_case verb_noun | `"find_symbol"`, `"list_symbols"`, `"edit_file"` |
-| Tool file | category noun plural | `symbol.rs`, `file.rs`, `memory.rs`, `github.rs` |
+| Tool file | category noun | `symbol.rs`, `file.rs`, `memory.rs`, `github.rs` |
 | LSP ops trait | `*Ops` suffix | `LspClientOps` |
 | LSP provider | `*Provider` suffix | `LspProvider` |
 | Mock types | `Mock*` prefix | `MockLspClient`, `MockLspProvider` |
@@ -35,7 +35,8 @@ The `hint` field appears in the JSON response body — give actionable next step
 - **Unit tests**: inline `#[cfg(test)] mod tests` at bottom of each file
 - **Integration tests**: `tests/integration.rs` — multi-tool workflows via `project_with_files()`
   helper that creates a `TempDir` + `ToolContext` with real `Agent` + `LspManager`
-- **LSP tests**: `tests/symbol_lsp.rs` and `tests/rename_symbol.rs` — behind `e2e-*` features
+- **LSP tests**: `tests/symbol_lsp.rs` and `tests/rename_symbol.rs` — behind `e2e-*` features;
+  use `MockLspClient` with pre-programmed symbol responses via `ctx_with_mock()` helper
 - **Cache-invalidation tests**: three-query sandwich (see `CLAUDE.md § Testing Patterns`)
 - **Async tests**: `#[tokio::test]` throughout; integration tests are async
 - **Mock pattern**: `MockLspClient` / `MockLspProvider` (src/lsp/mock.rs) — injectable

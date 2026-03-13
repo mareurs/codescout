@@ -16,7 +16,7 @@ not abort sibling parallel calls. See `src/tools/mod.rs:78` and `CLAUDE.md § Ke
 (read_file). See `src/tools/output_buffer.rs` and `MEMORY.md § run_command Redesign`.
 
 **ActiveProject** — Struct inside `Agent` holding the project root, config, both memory
-stores, and library registry. All tools access it via `ctx.agent.with_project(|p| ...)`.
+stores, library registry, and dirty file tracking. All tools access via `ctx.agent.with_project(|p| ...)`.
 
 **LspProvider / LspClientOps** — Traits in `src/lsp/ops.rs` abstracting LSP access.
 `LspManager` is the production impl; `MockLspProvider` / `MockLspClient` for tests.
@@ -44,3 +44,7 @@ like `index_project` and `onboarding` (`tool_skips_server_timeout` in server.rs)
 
 **run_gh** — Internal helper in `src/tools/github.rs` that shells to the `gh` CLI
 subprocess. All 5 GitHub tools use this — they do NOT call the GitHub REST API directly.
+
+**classify_bucket** — Keyword heuristic in `src/memory/classify.rs` that auto-classifies
+semantic memories into buckets (code/system/preferences/unstructured) when the agent
+doesn't specify one explicitly.

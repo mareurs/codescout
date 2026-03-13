@@ -1,8 +1,8 @@
 # codescout — Code Explorer Guidance
 
 ## Entry Points
-- `src/server.rs::CodeScoutServer::from_parts` — all 28 tools registered here; start for tool inventory
-- `src/tools/mod.rs:228` — `Tool` trait definition; read before adding or modifying any tool
+- `src/server.rs::CodeScoutServer::from_parts` — all 29 tools registered here; start for tool inventory
+- `src/tools/mod.rs:239` — `Tool` trait definition; read before adding or modifying any tool
 - `src/agent.rs::Agent::new` — project activation and state wiring
 
 ## Key Abstractions

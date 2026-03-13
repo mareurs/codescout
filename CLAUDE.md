@@ -50,6 +50,27 @@ This applies to ALL unexpected tool behavior: `edit_file`, `rename_symbol`, `rep
 - Tag every release: `git tag vX.Y.Z` on the publish commit, then `git push --tags`.
 - Token is stored in `.env` (gitignored): `CARGO_REGISTRY_TOKEN=...` — load with `CARGO_REGISTRY_TOKEN=$(grep CARGO_REGISTRY_TOKEN .env | cut -d= -f2) cargo publish`.
 
+### Standard Ship Sequence
+
+When a bug fix or tested feature on `experiments` is ready to land in `master`:
+
+```bash
+# 1. Commit on experiments (tests passing, clippy clean)
+git add <files> && git commit -m "..."
+
+# 2. Cherry-pick to master and push
+git checkout master
+git cherry-pick <commit-sha>
+git push
+
+# 3. Rebase experiments back on master (drops the cherry-picked commit automatically)
+git checkout experiments
+git rebase master
+```
+
+This is the default workflow for all completed work. The rebase step keeps `experiments`
+clean — git detects the cherry-pick and skips the duplicate commit automatically.
+
 ### Commit Discipline
 
 - **Batch related changes** into a single well-tested commit rather than committing every incremental step.

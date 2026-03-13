@@ -27,3 +27,6 @@ rather than raw shell reads on source files.
 - `default`: remote-embed + dashboard
 - `local-embed`: ONNX-based local embeddings (downloads model ~20–300MB on first use)
 - `e2e-*`: integration tests requiring real LSP servers installed
+
+## Current Version
+v0.2.2 (see `Cargo.toml`). Published to crates.io from `master` branch only.

@@ -602,7 +602,12 @@ mod tests {
             server.tools.len(),
             server.tools.iter().map(|t| t.name()).collect::<Vec<_>>()
         );
-        for name in &["github_identity", "github_issue", "github_pr", "github_file"] {
+        for name in &[
+            "github_identity",
+            "github_issue",
+            "github_pr",
+            "github_file",
+        ] {
             assert!(
                 server.find_tool(name).is_some(),
                 "tool '{}' should be registered when github_enabled=true",

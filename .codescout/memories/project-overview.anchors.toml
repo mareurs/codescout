@@ -3,4 +3,8 @@
 
 [[anchors]]
 path = ".codescout/project.toml"
-hash = "62dd7301d973ea92cc3952899f831ccbbf69684a097873ce174907054c162eca"
+hash = "3ad83f60b3f8098255e9572014c5e9c374f420563b72d32391c3c0a76d99c154"
+
+[[anchors]]
+path = "Cargo.toml"
+hash = "d373c53b694a3aef443032c0476971b52f6e68738f505cd10a847ab48c9f67be"

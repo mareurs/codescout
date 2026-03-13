@@ -3,31 +3,35 @@
 
 [[anchors]]
 path = "src/embed/index.rs"
-hash = "2103c1f6a0d32b55bc7dbaf817b029716de36373ae702e884b3a2ca7b431b298"
+hash = "13b3ba166138e1a29b92d0f83db78c7c44c7571704049d315fbfd7576b20a646"
+
+[[anchors]]
+path = ".codescout/embeddings.db"
+hash = "8b99a160385179ab4d16faf4445b8153c2a51974f1e7a8ffffbc1b854aa2ab44"
 
 [[anchors]]
 path = "src/tools/github.rs"
-hash = "49f6b306ee00ed12831121494b378a06be0ea71e5d9a2584a3390341513724bf"
+hash = "ba65cd2c2339214366191a1cdb73b4ef772adb80a64ca3eb11f31672d8ebd972"
 
 [[anchors]]
 path = "src/memory/anchors.rs"
-hash = "6a1cb7f0ce153ef8ec1b311a3ce16d56f2b09e4c4246118ff58856c6b6451eed"
+hash = "f62d493066a19f8a593739e90038c7780224f93c7e9248864fcbc7409f01e6c4"
 
 [[anchors]]
 path = "docs/TODO-tool-misbehaviors.md"
-hash = "754c7303edd1998d6456948667ebffd14b0d8772676e4cba2a51b36e8c4bb8c6"
+hash = "e972c2665989e8caf198147ab531f577eee59f41cfce6e0160dacaf3baaebf86"
 
 [[anchors]]
 path = "src/tools/mod.rs"
-hash = "377c1872a3b56180c6c7b8ba7c7f618ffeaeaf20a398fafc93ad3d5463d931a6"
+hash = "aeb8e462af9460d96e2af2180baa982f3d1b354f293a758050157006e554d74f"
 
 [[anchors]]
 path = "Cargo.toml"
-hash = "45e3228ad91db585cb11d71ae2748b5711fe844d1da6d4af9e361609491b91c4"
+hash = "d373c53b694a3aef443032c0476971b52f6e68738f505cd10a847ab48c9f67be"
 
 [[anchors]]
 path = "src/tools/symbol.rs"
-hash = "c55914eba17da6cb055ac3ced0c105abb12ae370649bcb2a0c5a3e2e62962598"
+hash = "56a8a51a80f84ad53c3010ae6b5fb4314aa3f14d71dcca5532fe711aec278435"
 
 [[anchors]]
 path = ".codescout/system-prompt.md"

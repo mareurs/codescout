@@ -7,6 +7,11 @@
   embeddings in memory per query. Verify current state at `src/embed/index.rs` before
   assuming KNN is active.
 
+- **Model mismatch blocks semantic search**: If the embedding index was built with a
+  different model than what's configured in `project.toml`, `semantic_search` returns
+  an error. Fix: delete `.codescout/embeddings.db` and rebuild with `index_project(force: true)`,
+  or update the `[embeddings] model` setting to match.
+
 - **Semantic index 7+ commits behind**: The `git_sync` warning in `semantic_search`
   results is expected during active development. Results from existing chunks are still
   valid; only newly added code is missing.
@@ -59,13 +64,15 @@
   (from `fn name(&self)`) against `docs/manual/src/tools/*.md`. Adding a tool without
   updating docs will fail CI.
 
+## Server Instructions Staleness
+
+- **Instructions pre-computed at startup (stdio)**: `build_server_instructions()` runs
+  once in `from_parts`. Changes to memories, index status, or system prompt during a
+  session are NOT reflected in `get_info()` until the server restarts. HTTP/SSE creates
+  a fresh `CodeScoutServer` per connection, so those get fresh instructions.
+
 ## Rust std::path
 
 - **`Path::file_stem()` does NOT return `None` for dotfiles**: On a path like `.hidden`,
   Rust treats the entire name as the stem — `file_stem()` returns `Some(".hidden")` and
-  `extension()` returns `None`. `file_stem()` only returns `None` when `file_name()`
-  itself is `None` (e.g. paths ending in `..`), which never occurs in `read_dir` output.
-  Consequence: a guard like `let Some(stem) = path.file_stem() else { continue }` placed
-  after an `extension() == "md"` filter is unreachable dead code — dotfiles are already
-  excluded by the extension filter. Keep such guards with a `// Defensive: unreachable
-  from read_dir` comment rather than removing them. See `src/memory/anchors.rs:183`.
+  `extension()` returns `None`. See `src/memory/anchors.rs:183` for context.
