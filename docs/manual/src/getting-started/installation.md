@@ -107,6 +107,36 @@ which codescout
 codescout --version
 ```
 
+## Running Onboarding
+
+**This is the most important step.** After registering the MCP server, you must run onboarding once for each project you want to use codescout with. Until you do, codescout has no project context — LSP servers haven't started, no system prompt has been generated, and the agent won't know which tools to use or when.
+
+In a new session in your project directory, ask your agent:
+
+```
+Run codescout onboarding
+```
+
+The `onboarding` tool will:
+
+1. **Detect your project** — languages, entry points, key files
+2. **Start LSP servers** — one per detected language (Rust analyzer, Pyright, ts-server, etc.)
+3. **Generate a system prompt** — a project-specific guidance block injected into every future session, covering tool selection rules, entry points, and navigation tips
+4. **Write `.codescout/project.toml`** — your project config file, which you can edit to customize embedding backends, ignored paths, and security settings
+
+Onboarding takes 10–30 seconds on first run (LSP server startup). Subsequent sessions reuse the running servers and load instantly.
+
+### When to re-run onboarding
+
+- After adding a new language to a project (new LSP server needed)
+- After significantly restructuring your codebase (entry points change)
+- After editing `.codescout/project.toml` manually
+- If codescout's tool guidance feels stale or wrong
+
+Re-run with `force: true` to rebuild from scratch: ask your agent `"Run codescout onboarding with force: true"`.
+
+> **Note:** If you skip onboarding, tools like `find_symbol`, `list_symbols`, and `goto_definition` will return errors — they depend on LSP servers that onboarding starts.
+
 ## Feature Flags
 
 codescout has three embedding modes, controlled at compile time via Cargo features:
