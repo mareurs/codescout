@@ -113,8 +113,9 @@ pub struct SecuritySection {
     /// Enable semantic search and indexing tools (default: true)
     #[serde(default = "default_true")]
     pub indexing_enabled: bool,
-    /// Enable GitHub tools: github_identity, github_issue, github_pr, github_file, github_repo (default: true)
-    #[serde(default = "default_true")]
+    /// Enable additional GitHub tools: github_identity, github_issue, github_pr, github_file.
+    /// github_repo is always available. (default: false)
+    #[serde(default)]
     pub github_enabled: bool,
     /// Command substrings that bypass dangerous-command detection.
     #[serde(default)]
@@ -134,7 +135,7 @@ impl Default for SecuritySection {
             shell_enabled: true,
             file_write_enabled: true,
             indexing_enabled: true,
-            github_enabled: true,
+            github_enabled: false,
             shell_allow_always: Vec::new(),
             shell_dangerous_patterns: Vec::new(),
         }
@@ -325,7 +326,7 @@ mod tests {
             "indexing_enabled should default to true"
         );
         assert!(sec.shell_enabled, "shell_enabled should default to true");
-        assert!(sec.github_enabled, "github_enabled should default to true");
+        assert!(!sec.github_enabled, "github_enabled should default to false");
     }
 
     #[test]
@@ -335,7 +336,7 @@ mod tests {
         assert!(cfg.security.file_write_enabled);
         assert!(cfg.security.indexing_enabled);
         assert!(cfg.security.shell_enabled);
-        assert!(cfg.security.github_enabled);
+        assert!(!cfg.security.github_enabled);
     }
 
     #[test]
@@ -347,7 +348,7 @@ mod tests {
         assert!(cfg.security.file_write_enabled);
         assert!(cfg.security.indexing_enabled);
         assert!(cfg.security.shell_enabled);
-        assert!(cfg.security.github_enabled);
+        assert!(!cfg.security.github_enabled);
     }
 
     #[test]

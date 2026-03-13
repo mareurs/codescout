@@ -79,7 +79,7 @@ pub struct PathSecurityConfig {
     pub file_write_enabled: bool,
     /// Enable semantic search and indexing tools (default: true)
     pub indexing_enabled: bool,
-    /// Enable GitHub tools (default: true)
+    /// Enable additional GitHub tools: identity, issue, pr, file (default: false)
     pub github_enabled: bool,
     /// Read-only library paths (registered via LibraryRegistry).
     pub library_paths: Vec<PathBuf>,
@@ -99,7 +99,7 @@ impl Default for PathSecurityConfig {
             shell_enabled: true,
             file_write_enabled: true,
             indexing_enabled: true,
-            github_enabled: true,
+            github_enabled: false,
             library_paths: Vec::new(),
             shell_allow_always: Vec::new(),
             shell_dangerous_patterns: Vec::new(),
@@ -340,13 +340,14 @@ pub fn check_tool_access(tool_name: &str, config: &PathSecurityConfig) -> Result
                 );
             }
         }
-        "github_identity" | "github_issue" | "github_pr" | "github_file" | "github_repo" => {
+        "github_identity" | "github_issue" | "github_pr" | "github_file" => {
             if !config.github_enabled {
                 bail!(
-                    "GitHub tools are disabled. Set security.github_enabled = true in .codescout/project.toml to enable."
+                    "GitHub tools (identity/issue/pr/file) are disabled. Set security.github_enabled = true in .codescout/project.toml to enable."
                 );
             }
         }
+        // github_repo: always allowed, no gate
         _ => {} // All other tools are always allowed
     }
     Ok(())
@@ -989,46 +990,65 @@ mod tests {
             err.to_string().contains("project.toml"),
             "error should mention config file"
         );
-        config.github_enabled = false;
+        config.github_enabled = false; // explicit for self-documentation
         let err = check_tool_access("github_pr", &config).unwrap_err();
         assert!(
             err.to_string().contains("github_enabled"),
             "error should mention config key"
         );
+        // github_repo should NOT be blocked
+        assert!(
+            check_tool_access("github_repo", &config).is_ok(),
+            "github_repo should not be gated"
+        );
     }
 
     #[test]
-    fn github_disabled_blocks_all_github_tools() {
+    fn github_disabled_blocks_optional_github_tools() {
         let mut config = PathSecurityConfig::default();
-        config.github_enabled = false;
+        config.github_enabled = false; // explicit for self-documentation
         for tool in &[
             "github_identity",
             "github_issue",
             "github_pr",
             "github_file",
-            "github_repo",
         ] {
             assert!(
                 check_tool_access(tool, &config).is_err(),
-                "{} should be blocked",
+                "{} should be blocked when github_enabled is false",
                 tool
             );
         }
     }
 
     #[test]
-    fn github_enabled_allows_github_tools() {
-        let config = PathSecurityConfig::default();
+    fn github_repo_always_allowed() {
+        let mut config = PathSecurityConfig::default();
+        // default is false, but github_repo should still be allowed
+        assert!(
+            check_tool_access("github_repo", &config).is_ok(),
+            "github_repo should always be allowed regardless of github_enabled"
+        );
+        config.github_enabled = true;
+        assert!(
+            check_tool_access("github_repo", &config).is_ok(),
+            "github_repo should be allowed when github_enabled is true"
+        );
+    }
+
+    #[test]
+    fn github_enabled_allows_optional_github_tools() {
+        let mut config = PathSecurityConfig::default();
+        config.github_enabled = true;
         for tool in &[
             "github_identity",
             "github_issue",
             "github_pr",
             "github_file",
-            "github_repo",
         ] {
             assert!(
                 check_tool_access(tool, &config).is_ok(),
-                "{} should be allowed by default",
+                "{} should be allowed when github_enabled is true",
                 tool
             );
         }
