@@ -204,6 +204,7 @@ impl Agent {
         let project = inner.active_project.as_ref()?;
         let memories = project.memory.list().unwrap_or_default();
         let has_index = crate::embed::index::db_path(&project.root).exists();
+        let github_enabled = project.config.security.github_enabled;
 
         // Read system prompt: file takes precedence over TOML field
         let prompt_file = project.root.join(".codescout").join("system-prompt.md");
@@ -220,6 +221,7 @@ impl Agent {
             memories,
             has_index,
             system_prompt,
+            github_enabled,
         })
     }
 

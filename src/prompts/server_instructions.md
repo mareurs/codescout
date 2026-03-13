@@ -33,7 +33,7 @@ These are non-negotiable. Violating the letter IS violating the spirit.
 | **Nothing** (new codebase) | `list_dir(path)` → `list_symbols(file)` | `semantic_search("what does this do")` |
 | **A text pattern** (regex, error message) | `search_pattern(pattern)` | `find_symbol` on matched files |
 | **A filename** (glob pattern) | `find_file(pattern)` | `read_file` or `list_symbols` on result |
-| **A GitHub repo/issue/PR** | `github_repo` / `github_issue` / `github_pr` | drill with specific `method` parameter |
+| **A GitHub repo** | `github_repo` | drill with specific `method` parameter |
 
 ### By task
 
@@ -59,10 +59,6 @@ These are non-negotiable. Violating the letter IS violating the spirit.
 | Search memories by meaning | `memory(action="recall", query="...")` | — |
 | Store knowledge for later | `memory(action="remember", content="...")` | — |
 | Local git (blame, log, diff) | `run_command("git blame/log/diff ...")` | ~~`github_repo(list_commits)`~~ — local git is faster, has full history |
-| GitHub identity / teams | `github_identity(method, ...)` | — |
-| GitHub issues | `github_issue(method, owner, repo, ...)` | — |
-| GitHub pull requests | `github_pr(method, owner, repo, ...)` | — |
-| GitHub file contents / writes | `github_file(method, owner, repo, path, ...)` | — |
 | GitHub repo / branches / releases | `github_repo(method, ...)` | — |
 
 ## Anti-Patterns — STOP if you catch yourself doing these
@@ -80,7 +76,6 @@ These are non-negotiable. Violating the letter IS violating the spirit.
 | `run_command("cat src/lib.rs")` | `list_symbols("src/lib.rs")` or `read_file` with line range | Shell reads on source are blocked |
 | Repeat a broad `find_symbol` after overflow | Narrow with `path=`, `kind=`, or more specific pattern | Follow the overflow hint |
 | Ignore `by_file` in overflow response | Use top file from `by_file` as `path=` filter | The hint tells you exactly where to look |
-| `run_command("gh issue list")` or `run_command("gh pr ...")` | `github_issue(method, owner, repo, ...)` / `github_pr(...)` | Structured output, pagination, buffer handling built-in |
 | `github_repo(list_commits)` for local file history | `run_command("git log src/foo.rs")` | Local git has full history; GitHub API is paginated and rate-limited |
 
 **If you catch yourself rationalizing** ("I'll just quickly read the file", "this edit is
@@ -176,21 +171,10 @@ use the right tool. Small shortcuts compound into large context waste.
 
 ### GitHub
 
-- `github_identity(method)` — authenticated user profile, team membership, user search.
-  - `method`: `get_me` | `search_users` (query required) | `get_teams` | `get_team_members` (org + team_slug required)
-- `github_issue(method, owner, repo, ...)` — issue read/write operations.
-  - Read: `list` | `search` | `get` | `get_comments` | `get_labels` | `get_sub_issues`
-  - Write: `create` (title required) | `update` | `add_comment` | `add_sub_issue` | `remove_sub_issue`
-  - `limit` defaults to 30 for list/search.
-- `github_pr(method, owner, repo, ...)` — pull request read/write operations.
-  - Read: `list` | `search` | `get` | `get_diff` | `get_files` | `get_comments` | `get_reviews` | `get_review_comments` | `get_status`
-  - Write: `create` | `update` | `merge` | `update_branch` | `create_review` | `submit_review` | `delete_review` | `add_review_comment` | `add_reply_to_comment`
-  - `get_diff` always returns a `@tool` buffer handle (diffs are large).
-- `github_file(method, owner, repo, path, ...)` — file contents and writes via GitHub API.
-  - `get` — fetch file at optional ref/branch (returns `@buffer` handle).
-  - `create_or_update` — create or update a single file (`sha` required when updating).
-  - `delete` — delete a file (`sha` required).
-  - `push_files` — push multiple files in a single commit.
+`github_repo` is for operations that require the GitHub API — code search across repos,
+listing releases/tags, creating branches remotely, forking. For local history (blame, log,
+diff), prefer `run_command("git ...")` — it's faster and has full history.
+
 - `github_repo(method, ...)` — repository, branch, commit, release, and code search.
   - Repo: `search` | `create` | `fork`
   - Branches: `list_branches` | `create_branch`
@@ -198,6 +182,10 @@ use the right tool. Small shortcuts compound into large context waste.
   - Releases: `list_releases` | `get_latest_release` | `get_release_by_tag`
   - Tags: `list_tags` | `get_tag`
   - Code: `search_code` (returns `@buffer` handle)
+
+Additional GitHub tools (`github_identity`, `github_issue`, `github_pr`, `github_file`)
+are available when `security.github_enabled = true` in `.codescout/project.toml`.
+Restart the server after changing this setting.
 
 ## Output System
 

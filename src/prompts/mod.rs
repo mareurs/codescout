@@ -6,6 +6,7 @@
 
 /// Static server instructions — tool reference, workflow patterns, steering rules.
 pub const SERVER_INSTRUCTIONS: &str = include_str!("server_instructions.md");
+pub const GITHUB_INSTRUCTIONS: &str = include_str!("github_instructions.md");
 
 /// Build the full server instructions string, optionally appending
 /// dynamic project status.
@@ -43,6 +44,11 @@ pub fn build_server_instructions(project_status: Option<&ProjectStatus>) -> Stri
             );
         }
 
+        if status.github_enabled {
+            instructions.push_str("\n\n");
+            instructions.push_str(GITHUB_INSTRUCTIONS);
+        }
+
         if let Some(prompt) = &status.system_prompt {
             instructions.push_str("\n\n## Custom Instructions\n\n");
             instructions.push_str(prompt);
@@ -62,6 +68,7 @@ pub struct ProjectStatus {
     pub memories: Vec<String>,
     pub has_index: bool,
     pub system_prompt: Option<String>,
+    pub github_enabled: bool,
 }
 
 /// Onboarding prompt template — instructs Claude what to explore and what memories to create.
@@ -166,6 +173,7 @@ mod tests {
             memories: vec!["architecture".into(), "conventions".into()],
             has_index: true,
             system_prompt: None,
+            github_enabled: false,
         };
         let result = build_server_instructions(Some(&status));
         assert!(result.contains("## Project Status"));
@@ -184,6 +192,7 @@ mod tests {
             memories: vec![],
             has_index: false,
             system_prompt: None,
+            github_enabled: false,
         };
         let result = build_server_instructions(Some(&status));
         assert!(result.contains("run `onboarding`"));
@@ -261,6 +270,7 @@ mod tests {
             memories: vec![],
             has_index: false,
             system_prompt: Some("Always use pytest.".into()),
+            github_enabled: false,
         };
         let result = build_server_instructions(Some(&status));
         assert!(result.contains("## Custom Instructions"));
@@ -280,9 +290,51 @@ mod tests {
             memories: vec![],
             has_index: false,
             system_prompt: None,
+            github_enabled: false,
         };
         let result = build_server_instructions(Some(&status));
         assert!(!result.contains("## Custom Instructions"));
+    }
+
+    #[test]
+    fn build_with_github_enabled_appends_github_instructions() {
+        let status = ProjectStatus {
+            name: "test".into(),
+            path: "/tmp/test".into(),
+            languages: vec![],
+            memories: vec![],
+            has_index: false,
+            system_prompt: None,
+            github_enabled: true,
+        };
+        let result = build_server_instructions(Some(&status));
+        assert!(
+            result.contains("github_identity"),
+            "should include GitHub tool docs when enabled"
+        );
+        assert!(
+            result.contains("github_pr"),
+            "should include GitHub PR docs when enabled"
+        );
+    }
+
+    #[test]
+    fn build_without_github_excludes_github_instructions() {
+        let status = ProjectStatus {
+            name: "test".into(),
+            path: "/tmp/test".into(),
+            languages: vec![],
+            memories: vec![],
+            has_index: false,
+            system_prompt: None,
+            github_enabled: false,
+        };
+        let result = build_server_instructions(Some(&status));
+        // Check for content unique to github_instructions.md (not the hint in server_instructions.md)
+        assert!(
+            !result.contains("github_identity(method)"),
+            "should NOT include optional GitHub tool reference docs when disabled"
+        );
     }
 
     #[test]
