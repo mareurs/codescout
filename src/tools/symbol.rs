@@ -50,6 +50,53 @@ async fn resolve_write_path(ctx: &ToolContext, relative_path: &str) -> anyhow::R
     crate::util::path_security::validate_write_path(relative_path, &root, &security)
 }
 
+/// Resolve which library directories to search for a given scope.
+/// Returns `(library_name, absolute_root_path)` pairs.
+async fn resolve_library_roots(
+    scope: &crate::library::scope::Scope,
+    agent: &crate::agent::Agent,
+) -> Vec<(String, PathBuf)> {
+    let registry = match agent.library_registry().await {
+        Some(r) => r,
+        None => return vec![],
+    };
+    registry
+        .all()
+        .iter()
+        .filter(|entry| scope.includes_library(&entry.name))
+        .map(|entry| (entry.name.clone(), entry.path.clone()))
+        .collect()
+}
+
+/// Format a file path relative to a library root for display.
+/// Returns `lib:<name>/<relative_path>` or the absolute path as fallback.
+fn format_library_path(lib_name: &str, lib_root: &Path, file_path: &Path) -> String {
+    file_path
+        .strip_prefix(lib_root)
+        .map(|rel| format!("lib:{}/{}", lib_name, rel.display()))
+        .unwrap_or_else(|_| file_path.display().to_string())
+}
+
+/// Classify a reference path as project, library, or external.
+/// Returns (classification_tag, display_path).
+fn classify_reference_path(
+    path: &Path,
+    project_root: &Path,
+    library_roots: &[(String, PathBuf)],
+) -> (String, String) {
+    if path.starts_with(project_root) {
+        let rel = path.strip_prefix(project_root).unwrap_or(path);
+        ("project".to_string(), rel.display().to_string())
+    } else if let Some((name, lib_root)) = library_roots.iter().find(|(_, r)| path.starts_with(r)) {
+        (
+            "lib:".to_string() + name,
+            format_library_path(name, lib_root, path),
+        )
+    } else {
+        ("external".to_string(), path.display().to_string())
+    }
+}
+
 /// Resolve a path that may be a glob pattern, returning all matching files.
 /// If the path is a literal file/directory, returns it as a single-element vec.
 /// If it contains glob metacharacters (* ? [), expands against the project root.
@@ -381,7 +428,7 @@ impl Tool for ListSymbols {
         let depth = input["depth"].as_u64().unwrap_or(1) as usize;
         let guard = OutputGuard::from_input(&input);
         let include_docs = parse_bool_param(&input["include_docs"]);
-        let _scope = crate::library::scope::Scope::parse(input["scope"].as_str());
+        let scope = crate::library::scope::Scope::parse(input["scope"].as_str());
 
         // Helper: collect docstrings for a file path as a JSON array
         let collect_docstrings = |path: &std::path::Path| -> Vec<Value> {
@@ -521,21 +568,62 @@ impl Tool for ListSymbols {
             }
             Ok(result)
         } else if full_path.is_dir() {
-            // Collect file paths from directory.
+            // Collect (display_path, abs_path) pairs from directory + libraries.
             // Project root → walk recursively so nested src/ files are found.
             // Subdirectory → shallow (depth 1) to avoid dumping entire subtrees.
-            let is_project_root = rel_path == "." || rel_path.is_empty();
-            let mut dir_files = vec![];
-            let walker = ignore::WalkBuilder::new(&full_path)
-                .max_depth(if is_project_root { None } else { Some(1) })
-                .hidden(true)
-                .git_ignore(true)
-                .build();
-            for entry in walker.flatten() {
-                if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                    continue;
+            let root = ctx.agent.require_project_root().await?;
+            let mut dir_files: Vec<(String, PathBuf)> = vec![];
+
+            // Walk project directory when scope includes project
+            if scope.includes_project() {
+                let is_project_root = rel_path == "." || rel_path.is_empty();
+                let walker = ignore::WalkBuilder::new(&full_path)
+                    .max_depth(if is_project_root { None } else { Some(1) })
+                    .hidden(true)
+                    .git_ignore(true)
+                    .build();
+                for entry in walker.flatten() {
+                    if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                        continue;
+                    }
+                    // Only include files with recognized source languages so that
+                    // non-source files (configs, build outputs) don't consume the
+                    // file cap before any real source files are seen.
+                    if ast::detect_language(entry.path()).is_none() {
+                        continue;
+                    }
+                    let abs = entry.path().to_path_buf();
+                    let display = abs
+                        .strip_prefix(&root)
+                        .unwrap_or(&abs)
+                        .display()
+                        .to_string();
+                    dir_files.push((display, abs));
                 }
-                dir_files.push(entry.path().to_path_buf());
+            }
+
+            // Walk library directories when scope includes libraries
+            let lib_roots = resolve_library_roots(&scope, &ctx.agent).await;
+            for (lib_name, lib_root) in &lib_roots {
+                // Library directories are external — don't apply the project's
+                // .gitignore (e.g. .venv/ would hide pip-installed packages).
+                // Still skip hidden dirs (.git/, __pycache__/, etc.).
+                let walker = ignore::WalkBuilder::new(lib_root)
+                    .max_depth(None)
+                    .hidden(true)
+                    .git_ignore(false)
+                    .build();
+                for entry in walker.flatten() {
+                    if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                        continue;
+                    }
+                    if ast::detect_language(entry.path()).is_none() {
+                        continue;
+                    }
+                    let abs = entry.path().to_path_buf();
+                    let display = format_library_path(lib_name, lib_root, &abs);
+                    dir_files.push((display, abs));
+                }
             }
 
             let mut guard = guard;
@@ -543,12 +631,11 @@ impl Tool for ListSymbols {
             let (dir_files, file_overflow) =
                 guard.cap_files(dir_files, "Narrow with a more specific glob or file path");
             let include_body = guard.should_include_body();
-            let root = ctx.agent.require_project_root().await?;
 
             // Aggregate symbols from capped file list
             let mut result = vec![];
-            for path in &dir_files {
-                let Some(lang) = ast::detect_language(path) else {
+            for (display_path, abs_path) in &dir_files {
+                let Some(lang) = ast::detect_language(abs_path) else {
                     continue;
                 };
                 let language_id = crate::lsp::servers::lsp_language_id(lang);
@@ -556,7 +643,7 @@ impl Tool for ListSymbols {
                 // Try LSP first, fall back to tree-sitter if unavailable
                 let mut symbols = if let Ok(client) = ctx.lsp.get_or_start(lang, &root).await {
                     client
-                        .document_symbols(path, language_id)
+                        .document_symbols(abs_path, language_id)
                         .await
                         .unwrap_or_default()
                 } else {
@@ -565,16 +652,15 @@ impl Tool for ListSymbols {
 
                 // Tree-sitter fallback when LSP is unavailable or returned nothing
                 if symbols.is_empty() {
-                    symbols = crate::ast::extract_symbols(path).unwrap_or_default();
+                    symbols = crate::ast::extract_symbols(abs_path).unwrap_or_default();
                 }
 
                 if symbols.is_empty() {
                     continue;
                 }
 
-                let rel = path.strip_prefix(&root).unwrap_or(path);
                 let source = if include_body {
-                    std::fs::read_to_string(path).ok()
+                    std::fs::read_to_string(abs_path).ok()
                 } else {
                     None
                 };
@@ -591,11 +677,11 @@ impl Tool for ListSymbols {
                     })
                     .collect();
                 let mut entry = json!({
-                    "file": rel.display().to_string(),
+                    "file": display_path,
                     "symbols": json_symbols,
                 });
                 if include_docs {
-                    entry["docstrings"] = json!(collect_docstrings(path));
+                    entry["docstrings"] = json!(collect_docstrings(abs_path));
                 }
                 result.push(entry);
             }
@@ -717,7 +803,7 @@ impl Tool for FindSymbol {
             .or_else(|| input["include_body"].as_str().and_then(|s| s.parse().ok()))
             .unwrap_or_else(|| guard.should_include_body());
         let depth = input["depth"].as_u64().unwrap_or(0) as usize;
-        let _scope = crate::library::scope::Scope::parse(input["scope"].as_str());
+        let scope = crate::library::scope::Scope::parse(input["scope"].as_str());
 
         let root = ctx.agent.require_project_root().await?;
         let pattern_lower = pattern.to_lowercase();
@@ -785,115 +871,185 @@ impl Tool for FindSymbol {
                 );
             }
         } else {
-            // Fast path: workspace/symbol — one LSP request per language instead of
-            // one textDocument/documentSymbol request per file.
-            let mut languages = std::collections::HashSet::new();
-            let walker = ignore::WalkBuilder::new(&root)
-                .hidden(true)
-                .git_ignore(true)
-                .build();
-            for entry in walker.flatten() {
-                if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                    if let Some(lang) = ast::detect_language(entry.path()) {
-                        languages.insert(lang);
-                    }
-                }
-            }
-
-            // Concurrently start/query all LSP servers so different languages
-            // (e.g. Kotlin JVM startup) don't block each other.
-            let languages: Vec<&str> = languages.into_iter().collect();
-            let mut join_set = tokio::task::JoinSet::new();
-            for lang in languages {
-                let lsp = ctx.lsp.clone();
-                let root = root.clone();
-                let pattern = pattern_lower.clone();
-                join_set.spawn(async move {
-                    let client = lsp.get_or_start(lang, &root).await?;
-                    client.workspace_symbols(&pattern).await
-                });
-            }
-            while let Some(task_result) = join_set.join_next().await {
-                let Ok(Ok(symbols)) = task_result else {
-                    continue;
-                };
-                for sym in symbols {
-                    // LSP servers may use fuzzy/prefix matching — enforce substring.
-                    let name_ok = sym.name.to_lowercase().contains(&pattern_lower)
-                        || sym.name_path.to_lowercase().contains(&pattern_lower);
-                    let kind_ok = kind_filter.map_or(true, |f| matches_kind_filter(&sym.kind, f));
-                    if name_ok && kind_ok {
-                        // When include_body is requested, validate the range. If
-                        // workspace/symbol returned a degenerate range, fall back to
-                        // document_symbols for the file to get the correct range.
-                        let sym = if include_body {
-                            match validate_symbol_range(&sym) {
-                                Ok(()) => sym,
-                                Err(validation_err) => {
-                                    match resolve_range_via_document_symbols(&sym, ctx).await {
-                                        Some(resolved) => resolved,
-                                        None => {
-                                            // document_symbols fallback failed too — propagate
-                                            // the original validation error captured above.
-                                            return Err(validation_err);
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            sym
-                        };
-                        let source = if include_body {
-                            std::fs::read_to_string(&sym.file).ok()
-                        } else {
-                            None
-                        };
-                        matches.push(symbol_to_json(
-                            &sym,
-                            include_body,
-                            source.as_deref(),
-                            depth,
-                            true,
-                        ));
-                    }
-                }
-            }
-
-            // Tree-sitter fallback: if workspace/symbol returned nothing (LSP
-            // not running, still indexing, or doesn't support workspace/symbol),
-            // walk source files and extract symbols with tree-sitter.
-            if matches.is_empty() {
+            if scope.includes_project() {
+                // Fast path: workspace/symbol — one LSP request per language instead of
+                // one textDocument/documentSymbol request per file.
+                let mut languages = std::collections::HashSet::new();
                 let walker = ignore::WalkBuilder::new(&root)
                     .hidden(true)
                     .git_ignore(true)
+                    .build();
+                for entry in walker.flatten() {
+                    if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                        if let Some(lang) = ast::detect_language(entry.path()) {
+                            languages.insert(lang);
+                        }
+                    }
+                }
+
+                // Concurrently start/query all LSP servers so different languages
+                // (e.g. Kotlin JVM startup) don't block each other.
+                let languages: Vec<&str> = languages.into_iter().collect();
+                let mut join_set = tokio::task::JoinSet::new();
+                for lang in languages {
+                    let lsp = ctx.lsp.clone();
+                    let root = root.clone();
+                    let pattern = pattern_lower.clone();
+                    join_set.spawn(async move {
+                        let client = lsp.get_or_start(lang, &root).await?;
+                        client.workspace_symbols(&pattern).await
+                    });
+                }
+                while let Some(task_result) = join_set.join_next().await {
+                    let Ok(Ok(symbols)) = task_result else {
+                        continue;
+                    };
+                    for sym in symbols {
+                        // LSP servers may use fuzzy/prefix matching — enforce substring.
+                        let name_ok = sym.name.to_lowercase().contains(&pattern_lower)
+                            || sym.name_path.to_lowercase().contains(&pattern_lower);
+                        let kind_ok =
+                            kind_filter.map_or(true, |f| matches_kind_filter(&sym.kind, f));
+                        if name_ok && kind_ok {
+                            // When include_body is requested, validate the range. If
+                            // workspace/symbol returned a degenerate range, fall back to
+                            // document_symbols for the file to get the correct range.
+                            let sym = if include_body {
+                                match validate_symbol_range(&sym) {
+                                    Ok(()) => sym,
+                                    Err(validation_err) => {
+                                        match resolve_range_via_document_symbols(&sym, ctx).await {
+                                            Some(resolved) => resolved,
+                                            None => {
+                                                // document_symbols fallback failed too — propagate
+                                                // the original validation error captured above.
+                                                return Err(validation_err);
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                sym
+                            };
+                            let source = if include_body {
+                                std::fs::read_to_string(&sym.file).ok()
+                            } else {
+                                None
+                            };
+                            matches.push(symbol_to_json(
+                                &sym,
+                                include_body,
+                                source.as_deref(),
+                                depth,
+                                true,
+                            ));
+                        }
+                    }
+                }
+
+                // Tree-sitter fallback: if workspace/symbol returned nothing (LSP
+                // not running, still indexing, or doesn't support workspace/symbol),
+                // walk source files and extract symbols with tree-sitter.
+                if matches.is_empty() {
+                    let walker = ignore::WalkBuilder::new(&root)
+                        .hidden(true)
+                        .git_ignore(true)
+                        .build();
+                    for entry in walker.flatten() {
+                        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                            continue;
+                        }
+                        let path = entry.path();
+                        if ast::detect_language(path).is_none() {
+                            continue;
+                        }
+                        if let Ok(symbols) = crate::ast::extract_symbols(path) {
+                            let source = if include_body {
+                                std::fs::read_to_string(path).ok()
+                            } else {
+                                None
+                            };
+                            collect_matching(
+                                &symbols,
+                                name_ok.as_ref(),
+                                include_body,
+                                source.as_deref(),
+                                depth,
+                                true,
+                                &mut matches,
+                                kind_filter,
+                            );
+                        }
+                        // Early cap to avoid scanning entire huge projects
+                        if matches.len() > guard.max_results {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Search library directories when scope includes them
+            let lib_roots = resolve_library_roots(&scope, &ctx.agent).await;
+            for (lib_name, lib_root) in &lib_roots {
+                if !lib_root.exists() {
+                    continue;
+                }
+                // Library directories are external — don't apply the project's
+                // .gitignore (e.g. .venv/ would hide pip-installed packages).
+                let walker = ignore::WalkBuilder::new(lib_root)
+                    .hidden(true)
+                    .git_ignore(false)
                     .build();
                 for entry in walker.flatten() {
                     if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                         continue;
                     }
                     let path = entry.path();
-                    if ast::detect_language(path).is_none() {
+                    let Some(lang) = ast::detect_language(path) else {
                         continue;
+                    };
+
+                    // Tree-sitter first for library files: it's fast and avoids blocking
+                    // on slow LSP startup (e.g. JVM-based Kotlin LSP). Only fall back to
+                    // LSP document_symbols if tree-sitter returns nothing.
+                    let mut symbols = crate::ast::extract_symbols(path).unwrap_or_default();
+                    if symbols.is_empty() {
+                        // INVARIANT: Always use project root as workspace_root, not the
+                        // library root. LspManager caches one client per language; passing
+                        // a different root kills and restarts the server.
+                        if let Ok(client) = ctx.lsp.get_or_start(lang, &root).await {
+                            let language_id = crate::lsp::servers::lsp_language_id(lang);
+                            symbols = client
+                                .document_symbols(path, language_id)
+                                .await
+                                .unwrap_or_default();
+                        }
                     }
-                    if let Ok(symbols) = crate::ast::extract_symbols(path) {
-                        let source = if include_body {
-                            std::fs::read_to_string(path).ok()
-                        } else {
-                            None
-                        };
-                        collect_matching(
-                            &symbols,
-                            name_ok.as_ref(),
-                            include_body,
-                            source.as_deref(),
-                            depth,
-                            true,
-                            &mut matches,
-                            kind_filter,
-                        );
+
+                    let source = if include_body {
+                        std::fs::read_to_string(path).ok()
+                    } else {
+                        None
+                    };
+
+                    // Collect matching symbols, rewriting file paths to lib: prefix
+                    for sym in &symbols {
+                        if name_ok(sym)
+                            && kind_filter.map_or(true, |f| matches_kind_filter(&sym.kind, f))
+                        {
+                            let mut json_val =
+                                symbol_to_json(sym, include_body, source.as_deref(), depth, true);
+                            if let Some(obj) = json_val.as_object_mut() {
+                                obj.insert(
+                                    "file".to_string(),
+                                    json!(format_library_path(lib_name, lib_root, path)),
+                                );
+                            }
+                            matches.push(json_val);
+                        }
                     }
-                    // Early cap to avoid scanning entire huge projects
-                    if matches.len() > guard.max_results {
+
+                    if matches.len() > guard.max_results * 2 {
                         break;
                     }
                 }
@@ -989,7 +1145,7 @@ impl Tool for FindReferences {
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         let name_path = super::require_str_param(&input, "name_path")?;
         let rel_path = get_path_param(&input, true)?.unwrap();
-        let _scope = crate::library::scope::Scope::parse(input["scope"].as_str());
+        let scope = crate::library::scope::Scope::parse(input["scope"].as_str());
 
         let full_path = resolve_read_path(ctx, rel_path).await?;
         let (client, lang) = get_lsp_client(ctx, &full_path).await?;
@@ -1005,6 +1161,9 @@ impl Tool for FindReferences {
 
         let root = ctx.agent.require_project_root().await?;
 
+        // Resolve all library roots for classification (Scope::All to get every lib).
+        let lib_roots = resolve_library_roots(&crate::library::scope::Scope::All, &ctx.agent).await;
+
         // Filter out references inside build-artifact directories. LSP servers often
         // index generated files (target/, node_modules/, dist/, …) and including them
         // creates noise without actionable information.
@@ -1019,12 +1178,33 @@ impl Tool for FindReferences {
             .collect();
         let excluded = total_raw - refs.len();
 
+        // Scope-filter references
+        let refs: Vec<_> = refs
+            .into_iter()
+            .filter(|loc| {
+                let Some(path) = uri_to_path(loc.uri.as_str()) else {
+                    return true; // keep references we can't resolve
+                };
+                let (classification, _) = classify_reference_path(&path, &root, &lib_roots);
+                match &scope {
+                    crate::library::scope::Scope::Project => classification == "project",
+                    crate::library::scope::Scope::Libraries => classification.starts_with("lib:"),
+                    crate::library::scope::Scope::All => true,
+                    crate::library::scope::Scope::Library(name) => {
+                        classification == format!("lib:{}", name)
+                    }
+                }
+            })
+            .collect();
+
         let locations: Vec<Value> = refs
             .iter()
             .map(|loc| {
                 let file = uri_to_path(loc.uri.as_str())
-                    .and_then(|p| p.strip_prefix(&root).ok().map(|r| r.to_path_buf()))
-                    .map(|p| p.display().to_string())
+                    .map(|p| {
+                        let (_, display) = classify_reference_path(&p, &root, &lib_roots);
+                        display
+                    })
                     .unwrap_or_else(|| loc.uri.as_str().to_string());
 
                 // Read context lines around the reference
@@ -6111,5 +6291,394 @@ fn main() {
             msg.contains("suspicious range"),
             "error should mention suspicious range; got: {msg}"
         );
+    }
+
+    // ── resolve_library_roots ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn resolve_library_roots_empty_when_no_libraries() {
+        let dir = tempdir().unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let roots = resolve_library_roots(&crate::library::scope::Scope::Libraries, &agent).await;
+        assert!(roots.is_empty());
+    }
+
+    #[tokio::test]
+    async fn resolve_library_roots_returns_registered_libraries() {
+        let dir = tempdir().unwrap();
+        let lib_dir = tempdir().unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        {
+            let mut inner = agent.inner.write().await;
+            let project = inner.active_project.as_mut().unwrap();
+            project.library_registry.register(
+                "mylib".to_string(),
+                lib_dir.path().to_path_buf(),
+                "rust".to_string(),
+                crate::library::registry::DiscoveryMethod::Manual,
+            );
+        }
+        let roots = resolve_library_roots(&crate::library::scope::Scope::Libraries, &agent).await;
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0].0, "mylib");
+        assert_eq!(roots[0].1, lib_dir.path().to_path_buf());
+    }
+
+    #[tokio::test]
+    async fn resolve_library_roots_filters_by_name() {
+        let dir = tempdir().unwrap();
+        let lib1 = tempdir().unwrap();
+        let lib2 = tempdir().unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        {
+            let mut inner = agent.inner.write().await;
+            let project = inner.active_project.as_mut().unwrap();
+            project.library_registry.register(
+                "alpha".to_string(),
+                lib1.path().to_path_buf(),
+                "rust".to_string(),
+                crate::library::registry::DiscoveryMethod::Manual,
+            );
+            project.library_registry.register(
+                "beta".to_string(),
+                lib2.path().to_path_buf(),
+                "rust".to_string(),
+                crate::library::registry::DiscoveryMethod::Manual,
+            );
+        }
+        let roots = resolve_library_roots(
+            &crate::library::scope::Scope::Library("alpha".to_string()),
+            &agent,
+        )
+        .await;
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0].0, "alpha");
+    }
+
+    #[tokio::test]
+    async fn resolve_library_roots_project_scope_returns_empty() {
+        let dir = tempdir().unwrap();
+        let lib_dir = tempdir().unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        {
+            let mut inner = agent.inner.write().await;
+            let project = inner.active_project.as_mut().unwrap();
+            project.library_registry.register(
+                "mylib".to_string(),
+                lib_dir.path().to_path_buf(),
+                "rust".to_string(),
+                crate::library::registry::DiscoveryMethod::Manual,
+            );
+        }
+        let roots = resolve_library_roots(&crate::library::scope::Scope::Project, &agent).await;
+        assert!(roots.is_empty());
+    }
+
+    #[tokio::test]
+    async fn resolve_library_roots_all_scope_returns_all() {
+        let dir = tempdir().unwrap();
+        let lib1 = tempdir().unwrap();
+        let lib2 = tempdir().unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        {
+            let mut inner = agent.inner.write().await;
+            let project = inner.active_project.as_mut().unwrap();
+            project.library_registry.register(
+                "alpha".to_string(),
+                lib1.path().to_path_buf(),
+                "rust".to_string(),
+                crate::library::registry::DiscoveryMethod::Manual,
+            );
+            project.library_registry.register(
+                "beta".to_string(),
+                lib2.path().to_path_buf(),
+                "python".to_string(),
+                crate::library::registry::DiscoveryMethod::Manual,
+            );
+        }
+        let roots = resolve_library_roots(&crate::library::scope::Scope::All, &agent).await;
+        assert_eq!(roots.len(), 2);
+    }
+
+    // ── format_library_path ──────────────────────────────────────────────────
+
+    #[test]
+    fn format_library_path_strips_root() {
+        let lib_root = PathBuf::from("/home/user/.cargo/registry/src/serde-1.0");
+        let file = PathBuf::from("/home/user/.cargo/registry/src/serde-1.0/src/lib.rs");
+        let result = format_library_path("serde", &lib_root, &file);
+        assert_eq!(result, "lib:serde/src/lib.rs");
+    }
+
+    #[test]
+    fn format_library_path_fallback_for_outside_root() {
+        let lib_root = PathBuf::from("/home/user/.cargo/registry/src/serde-1.0");
+        let file = PathBuf::from("/somewhere/else/lib.rs");
+        let result = format_library_path("serde", &lib_root, &file);
+        assert_eq!(result, "/somewhere/else/lib.rs");
+    }
+
+    // ── classify_reference_path ──────────────────────────────────────────────
+
+    #[test]
+    fn classify_reference_path_project() {
+        let root = PathBuf::from("/project");
+        let libs = vec![("mylib".to_string(), PathBuf::from("/libs/mylib"))];
+        let path = PathBuf::from("/project/src/main.rs");
+        let (classification, display) = classify_reference_path(&path, &root, &libs);
+        assert_eq!(classification, "project");
+        assert_eq!(display, "src/main.rs");
+    }
+
+    #[test]
+    fn classify_reference_path_library() {
+        let root = PathBuf::from("/project");
+        let libs = vec![("mylib".to_string(), PathBuf::from("/libs/mylib"))];
+        let path = PathBuf::from("/libs/mylib/src/lib.rs");
+        let (classification, display) = classify_reference_path(&path, &root, &libs);
+        assert_eq!(classification, "lib:mylib");
+        assert_eq!(display, "lib:mylib/src/lib.rs");
+    }
+
+    #[test]
+    fn classify_reference_path_external() {
+        let root = PathBuf::from("/project");
+        let libs = vec![("mylib".to_string(), PathBuf::from("/libs/mylib"))];
+        let path = PathBuf::from("/somewhere/else.rs");
+        let (classification, display) = classify_reference_path(&path, &root, &libs);
+        assert_eq!(classification, "external");
+        assert_eq!(display, "/somewhere/else.rs");
+    }
+
+    fn test_ctx_with_agent(agent: Agent) -> ToolContext {
+        ToolContext {
+            agent,
+            lsp: lsp(),
+            output_buffer: buf(),
+            progress: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn list_symbols_scope_libraries_includes_library_files() {
+        let project_dir = tempdir().unwrap();
+        std::fs::create_dir_all(project_dir.path().join(".codescout")).unwrap();
+        let lib_dir = tempdir().unwrap();
+        let lib_src = lib_dir.path().join("src");
+        std::fs::create_dir_all(&lib_src).unwrap();
+        std::fs::write(lib_src.join("lib.rs"), "pub fn hello() {}\n").unwrap();
+
+        let agent = Agent::new(Some(project_dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        {
+            let mut inner = agent.inner.write().await;
+            let project = inner.active_project.as_mut().unwrap();
+            project.library_registry.register(
+                "testlib".to_string(),
+                lib_dir.path().to_path_buf(),
+                "rust".to_string(),
+                crate::library::registry::DiscoveryMethod::Manual,
+            );
+        }
+
+        let ctx = test_ctx_with_agent(agent);
+        let tool = ListSymbols;
+        let result = tool
+            .call(json!({"scope": "libraries"}), &ctx)
+            .await
+            .unwrap();
+
+        let files = result["files"].as_array().unwrap();
+        assert!(!files.is_empty(), "should find library files");
+        let first_file = files[0]["file"].as_str().unwrap();
+        assert!(
+            first_file.starts_with("lib:testlib/"),
+            "library file should have lib: prefix, got: {}",
+            first_file
+        );
+    }
+
+    #[tokio::test]
+    async fn list_symbols_scope_project_excludes_libraries() {
+        let project_dir = tempdir().unwrap();
+        std::fs::create_dir_all(project_dir.path().join(".codescout")).unwrap();
+        let lib_dir = tempdir().unwrap();
+        std::fs::create_dir_all(lib_dir.path().join("src")).unwrap();
+        std::fs::write(lib_dir.path().join("src/lib.rs"), "pub fn hello() {}\n").unwrap();
+        std::fs::write(project_dir.path().join("main.rs"), "fn main() {}\n").unwrap();
+
+        let agent = Agent::new(Some(project_dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        {
+            let mut inner = agent.inner.write().await;
+            let project = inner.active_project.as_mut().unwrap();
+            project.library_registry.register(
+                "testlib".to_string(),
+                lib_dir.path().to_path_buf(),
+                "rust".to_string(),
+                crate::library::registry::DiscoveryMethod::Manual,
+            );
+        }
+
+        let ctx = test_ctx_with_agent(agent);
+        let tool = ListSymbols;
+        let result = tool.call(json!({"scope": "project"}), &ctx).await.unwrap();
+
+        let empty = vec![];
+        let files = result["files"].as_array().unwrap_or(&empty);
+        for f in files {
+            let path = f["file"].as_str().unwrap();
+            assert!(
+                !path.starts_with("lib:"),
+                "project scope should not include library files: {}",
+                path
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn find_symbol_scope_libraries_searches_library_dirs() {
+        let project_dir = tempdir().unwrap();
+        std::fs::create_dir_all(project_dir.path().join(".codescout")).unwrap();
+        let lib_dir = tempdir().unwrap();
+        std::fs::create_dir_all(lib_dir.path().join("src")).unwrap();
+        std::fs::write(
+            lib_dir.path().join("src/lib.rs"),
+            "pub fn library_unique_symbol_xyz() {}\n",
+        )
+        .unwrap();
+
+        let agent = Agent::new(Some(project_dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        {
+            let mut inner = agent.inner.write().await;
+            let project = inner.active_project.as_mut().unwrap();
+            project.library_registry.register(
+                "testlib".to_string(),
+                lib_dir.path().to_path_buf(),
+                "rust".to_string(),
+                crate::library::registry::DiscoveryMethod::Manual,
+            );
+        }
+
+        let ctx = test_ctx_with_agent(agent);
+        let tool = FindSymbol;
+        let result = tool
+            .call(
+                json!({
+                    "pattern": "library_unique_symbol_xyz",
+                    "scope": "libraries"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let symbols = result["symbols"].as_array().unwrap();
+        assert!(!symbols.is_empty(), "should find symbol in library");
+        let file = symbols[0]["file"].as_str().unwrap();
+        assert!(
+            file.starts_with("lib:testlib/"),
+            "file path should have lib: prefix: {}",
+            file
+        );
+    }
+
+    #[tokio::test]
+    async fn find_symbol_scope_all_searches_both() {
+        let project_dir = tempdir().unwrap();
+        std::fs::create_dir_all(project_dir.path().join(".codescout")).unwrap();
+        let lib_dir = tempdir().unwrap();
+        std::fs::write(project_dir.path().join("main.rs"), "fn project_func() {}\n").unwrap();
+        std::fs::create_dir_all(lib_dir.path().join("src")).unwrap();
+        std::fs::write(lib_dir.path().join("src/lib.rs"), "pub fn lib_func() {}\n").unwrap();
+
+        let agent = Agent::new(Some(project_dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        {
+            let mut inner = agent.inner.write().await;
+            let project = inner.active_project.as_mut().unwrap();
+            project.library_registry.register(
+                "testlib".to_string(),
+                lib_dir.path().to_path_buf(),
+                "rust".to_string(),
+                crate::library::registry::DiscoveryMethod::Manual,
+            );
+        }
+
+        let ctx = test_ctx_with_agent(agent);
+        let tool = FindSymbol;
+        let result = tool
+            .call(
+                json!({
+                    "pattern": "func",
+                    "scope": "all"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let symbols = result["symbols"].as_array().unwrap();
+        let files: Vec<&str> = symbols.iter().filter_map(|s| s["file"].as_str()).collect();
+        assert!(
+            files.iter().any(|f| f.starts_with("lib:testlib/")),
+            "should include library symbol"
+        );
+        assert!(
+            files.iter().any(|f| !f.starts_with("lib:")),
+            "should include project symbol"
+        );
+    }
+
+    #[tokio::test]
+    async fn find_symbol_scope_project_default_excludes_libraries() {
+        let project_dir = tempdir().unwrap();
+        std::fs::create_dir_all(project_dir.path().join(".codescout")).unwrap();
+        let lib_dir = tempdir().unwrap();
+        std::fs::write(project_dir.path().join("main.rs"), "fn my_func() {}\n").unwrap();
+        std::fs::create_dir_all(lib_dir.path().join("src")).unwrap();
+        std::fs::write(lib_dir.path().join("src/lib.rs"), "pub fn my_func() {}\n").unwrap();
+
+        let agent = Agent::new(Some(project_dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        {
+            let mut inner = agent.inner.write().await;
+            let project = inner.active_project.as_mut().unwrap();
+            project.library_registry.register(
+                "testlib".to_string(),
+                lib_dir.path().to_path_buf(),
+                "rust".to_string(),
+                crate::library::registry::DiscoveryMethod::Manual,
+            );
+        }
+
+        let ctx = test_ctx_with_agent(agent);
+        let tool = FindSymbol;
+        let result = tool
+            .call(
+                json!({
+                    "pattern": "my_func",
+                    "scope": "project"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let symbols = result["symbols"].as_array().unwrap();
+        for s in symbols {
+            let file = s["file"].as_str().unwrap();
+            assert!(
+                !file.starts_with("lib:"),
+                "project scope should not include library: {}",
+                file
+            );
+        }
     }
 }

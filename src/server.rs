@@ -21,7 +21,7 @@ use crate::tools::{
     config::{ActivateProject, ProjectStatus},
     file::{CreateFile, EditFile, FindFile, ListDir, ReadFile, SearchPattern},
     github,
-    library::ListLibraries,
+    library::{ListLibraries, RegisterLibrary},
     memory::Memory,
     progress,
     semantic::{IndexProject, IndexStatus, SemanticSearch},
@@ -89,6 +89,7 @@ impl CodeScoutServer {
             Arc::new(ProjectStatus),
             // Library tools
             Arc::new(ListLibraries),
+            Arc::new(RegisterLibrary),
             // GitHub tools — github_repo always available
             Arc::new(github::GithubRepo),
         ];
@@ -559,6 +560,7 @@ mod tests {
             "activate_project",
             "project_status",
             "list_libraries",
+            "register_library",
             "github_repo",
         ];
         assert_eq!(
@@ -597,8 +599,8 @@ mod tests {
         let (_dir, server) = make_server_with_github().await;
         assert_eq!(
             server.tools.len(),
-            29,
-            "should have 29 tools with github_enabled=true, got {}\nregistered: {:?}",
+            30,
+            "should have 30 tools with github_enabled=true, got {}\nregistered: {:?}",
             server.tools.len(),
             server.tools.iter().map(|t| t.name()).collect::<Vec<_>>()
         );
