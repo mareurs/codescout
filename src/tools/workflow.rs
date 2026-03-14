@@ -616,7 +616,34 @@ fn build_system_prompt_draft(
     if !languages.is_empty() {
         draft.push_str(&format!("- This is a {} project\n", languages.join("/")));
     }
-    draft.push_str("- Use specific terms over generic ones (e.g., avoid 'data', 'utils')\n\n");
+    draft.push_str("- Use specific terms over generic ones (e.g., avoid 'data', 'utils')\n");
+    if projects_slice.len() > 1 {
+        draft.push_str(
+            "- **Workspace mode:** always scope `semantic_search` with `project: \"<id>\"` — \
+             broad terms match all projects and return mixed results\n",
+        );
+        for p in projects_slice {
+            let example_term = if p.languages.iter().any(|l| l == "rust") {
+                "key type or trait name"
+            } else if p
+                .languages
+                .iter()
+                .any(|l| l == "typescript" || l == "javascript")
+            {
+                "handler or component name"
+            } else if p.languages.iter().any(|l| l == "python") {
+                "class or function name"
+            } else {
+                "concept specific to this project"
+            };
+            draft.push_str(&format!(
+                "  - `{}`: `semantic_search(\"<{}>\", project: \"{}\")` \
+                 — [fill in good query examples during onboarding]\n",
+                p.id, example_term, p.id
+            ));
+        }
+    }
+    draft.push('\n');
 
     // Language-specific navigation hints — cap at 3 to keep the draft concise
     let hints: Vec<_> = languages
@@ -3664,6 +3691,75 @@ mod tests {
         assert!(
             draft.contains("orient yourself to the workspace"),
             "workspace-level orient step should be present"
+        );
+    }
+
+    #[test]
+    fn system_prompt_draft_multi_project_search_tips_has_scope_warning() {
+        use crate::workspace::DiscoveredProject;
+        let projects = vec![
+            DiscoveredProject {
+                id: "backend".to_string(),
+                relative_root: std::path::PathBuf::from("backend"),
+                languages: vec!["rust".to_string()],
+                manifest: Some("Cargo.toml".to_string()),
+            },
+            DiscoveredProject {
+                id: "frontend".to_string(),
+                relative_root: std::path::PathBuf::from("frontend"),
+                languages: vec!["typescript".to_string()],
+                manifest: Some("package.json".to_string()),
+            },
+        ];
+        let draft = build_system_prompt_draft(&[], &[], None, Some(&projects), &[]);
+        assert!(
+            draft.contains("Workspace mode"),
+            "should warn about workspace scoping in Search Tips"
+        );
+        assert!(
+            draft.contains("project: \"backend\""),
+            "should include per-project example for backend"
+        );
+        assert!(
+            draft.contains("project: \"frontend\""),
+            "should include per-project example for frontend"
+        );
+    }
+
+    #[test]
+    fn system_prompt_draft_single_project_search_tips_no_scope_warning() {
+        let draft = build_system_prompt_draft(&[], &[], None, None, &[]);
+        assert!(
+            !draft.contains("Workspace mode"),
+            "single-project draft should not have workspace scoping warning"
+        );
+    }
+
+    #[test]
+    fn system_prompt_draft_multi_project_rust_search_tip_uses_type_hint() {
+        use crate::workspace::DiscoveredProject;
+        let projects = vec![
+            DiscoveredProject {
+                id: "core".to_string(),
+                relative_root: std::path::PathBuf::from("core"),
+                languages: vec!["rust".to_string()],
+                manifest: None,
+            },
+            DiscoveredProject {
+                id: "ui".to_string(),
+                relative_root: std::path::PathBuf::from("ui"),
+                languages: vec!["typescript".to_string()],
+                manifest: None,
+            },
+        ];
+        let draft = build_system_prompt_draft(&[], &[], None, Some(&projects), &[]);
+        assert!(
+            draft.contains("key type or trait name"),
+            "rust project tip should mention type/trait"
+        );
+        assert!(
+            draft.contains("handler or component name"),
+            "typescript project tip should mention handler/component"
         );
     }
 

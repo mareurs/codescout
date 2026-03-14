@@ -57,6 +57,11 @@ Use: `memory(action: "write", project: "{project_id}", topic: "...", content: ".
 4. `find_symbol(include_body=true)` on 3-5 key functions/types
 5. `semantic_search` for 3+ concepts specific to this project
 6. Read test files to understand testing patterns
+7. **Record search scope examples** in your `architecture` or `conventions` memory:
+   - 3–5 good `semantic_search(query, project: "{project_id}")` query examples
+     that are specific enough to return only results from THIS project
+   - 1–2 query terms that are too broad (would return false-positives from
+     sibling projects) and should always be scoped with `project: "{project_id}"`
 
 ## Rules
 - Be specific: file paths, function names, concrete patterns
