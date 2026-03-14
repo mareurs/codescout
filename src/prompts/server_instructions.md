@@ -162,6 +162,7 @@ use the right tool. Small shortcuts compound into large context waste.
   - `action="recall"` — search memories by meaning. Requires `query`. Optional `bucket` filter, `limit`.
   - `action="forget"` — delete a semantic memory. Requires `id` (from recall results).
   - `action="refresh_anchors"` — re-hash anchored files without changing memory content. Use after reviewing a stale memory and confirming it's still accurate. Requires `topic`.
+  - **Multi-project workspaces**: Pass `project: "<id>"` to scope operations to a specific project. Omit to use workspace-level memories. Example: `memory(action: "read", project: "backend", topic: "architecture")` 
 
 ### Project & Libraries
 

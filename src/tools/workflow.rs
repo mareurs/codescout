@@ -704,6 +704,11 @@ fn build_system_prompt_draft(
         draft.push_str(
             "Use `project: \"name\"` parameter to scope search/navigation to a specific project.\n\n",
         );
+
+        draft.push_str(
+            "**Per-project details:** Use `memory(project: \"<id>\", topic: \"architecture\")` \
+             or `memory(project: \"<id>\", topic: \"conventions\")` for project-specific knowledge.\n\n",
+        );
     }
 
     // Registered libraries — only included when at least one is registered
@@ -1058,6 +1063,32 @@ impl Tool for Onboarding {
             })
             .await?;
 
+        // Write programmatic memories for each sub-project in workspace mode.
+        if gathered.projects.len() > 1 {
+            for project in &gathered.projects {
+                let mem_dir = if project.relative_root == std::path::PathBuf::from(".") {
+                    root.join(".codescout").join("memories")
+                } else {
+                    root.join(".codescout")
+                        .join("projects")
+                        .join(&project.id)
+                        .join("memories")
+                };
+                if let Ok(store) = crate::memory::MemoryStore::from_dir(mem_dir) {
+                    let proj_summary = format!(
+                        "Languages: {}\nRoot: {}\nManifest: {}",
+                        project.languages.join(", "),
+                        project.relative_root.display(),
+                        project.manifest.as_deref().unwrap_or("none"),
+                    );
+                    let _ = store.write("onboarding", &proj_summary);
+                    if let Some(patterns) = build_language_patterns_memory(&project.languages) {
+                        let _ = store.write("language-patterns", &patterns);
+                    }
+                }
+            }
+        }
+
         // Gather protected memory state for the LLM merge flow
         let protected_memories = ctx
             .agent
@@ -1086,17 +1117,20 @@ impl Tool for Onboarding {
         }
 
         // Build the onboarding instruction prompt
-        let prompt = crate::prompts::build_onboarding_prompt(
-            &lang_list,
-            &top_level,
-            &key_files,
-            &gathered.ci_files,
-            &gathered.entry_points,
-            &gathered.test_dirs,
-            index_status["ready"].as_bool().unwrap_or(false),
-            index_status["files"].as_u64().unwrap_or(0) as usize,
-            index_status["chunks"].as_u64().unwrap_or(0) as usize,
-        );
+        let is_workspace = gathered.projects.len() > 1;
+        let prompt = crate::prompts::build_onboarding_prompt(&crate::prompts::OnboardingContext {
+            languages: &lang_list,
+            top_level: &top_level,
+            key_files: &key_files,
+            ci_files: &gathered.ci_files,
+            entry_points: &gathered.entry_points,
+            test_dirs: &gathered.test_dirs,
+            index_ready: index_status["ready"].as_bool().unwrap_or(false),
+            index_files: index_status["files"].as_u64().unwrap_or(0) as usize,
+            index_chunks: index_status["chunks"].as_u64().unwrap_or(0) as usize,
+            projects: &gathered.projects,
+            is_workspace,
+        });
 
         // Build the system prompt draft scaffold
         let libraries: Vec<crate::library::registry::LibraryEntry> = ctx
@@ -1132,6 +1166,35 @@ impl Tool for Onboarding {
              and avoid re-suggesting existing features.",
         );
 
+        // Per-project protected memory state for workspace mode.
+        let (workspace_mode, per_project_protected) = if gathered.projects.len() > 1 {
+            let protected = ctx
+                .agent
+                .with_project(|p| Ok(p.config.memory.protected.clone()))
+                .await
+                .unwrap_or_default();
+            let mut map = serde_json::Map::new();
+            for project in &gathered.projects {
+                let mem_dir = if project.relative_root == std::path::PathBuf::from(".") {
+                    root.join(".codescout").join("memories")
+                } else {
+                    root.join(".codescout")
+                        .join("projects")
+                        .join(&project.id)
+                        .join("memories")
+                };
+                let project_root = root.join(&project.relative_root);
+                if let Ok(store) = crate::memory::MemoryStore::from_dir(mem_dir.clone()) {
+                    let state =
+                        gather_protected_memory_state(&store, &mem_dir, &project_root, &protected);
+                    map.insert(project.id.clone(), state);
+                }
+            }
+            (true, Some(Value::Object(map)))
+        } else {
+            (false, None)
+        };
+
         Ok(json!({
             "languages": lang_list,
             "top_level": top_level,
@@ -1150,6 +1213,8 @@ impl Tool for Onboarding {
             "hardware": serde_json::to_value(&hw).unwrap_or(serde_json::Value::Null),
             "model_options": serde_json::to_value(&model_options).unwrap_or(serde_json::Value::Null),
             "protected_memories": protected_memories,
+            "workspace_mode": workspace_mode,
+            "per_project_protected_memories": per_project_protected.unwrap_or(json!(null)),
             "projects": discovered_projects,
         }))
     }
@@ -1185,6 +1250,16 @@ impl Tool for Onboarding {
         }
         if let Some(suggestion) = val["features_suggestion"].as_str() {
             response.push_str(&format!("\n\n> {}", suggestion));
+        }
+
+        // Surface per-project protected memory state in workspace mode
+        if val["workspace_mode"].as_bool().unwrap_or(false) {
+            if let Some(ppm) = val.get("per_project_protected_memories") {
+                if !ppm.is_null() {
+                    response.push_str("\n\n## Per-Project Protected Memories\n\n");
+                    response.push_str(&serde_json::to_string_pretty(ppm).unwrap_or_default());
+                }
+            }
         }
 
         Ok(vec![rmcp::model::Content::text(response)])
@@ -1349,7 +1424,13 @@ fn format_onboarding(result: &Value) -> String {
         .unwrap_or_else(|| "?".to_string());
     let created = result["config_created"].as_bool().unwrap_or(false);
     let config_note = if created { " · config created" } else { "" };
-    format!("[{langs}]{config_note}")
+    let workspace_note = if result["workspace_mode"].as_bool().unwrap_or(false) {
+        let count = result["projects"].as_array().map(|a| a.len()).unwrap_or(0);
+        format!(" · workspace ({count} projects)")
+    } else {
+        String::new()
+    };
+    format!("[{langs}]{config_note}{workspace_note}")
 }
 
 fn format_run_command(result: &Value) -> String {
@@ -1971,12 +2052,44 @@ fn truncate_output(output: &str, limit: usize) -> (String, bool) {
         (output.to_string(), false)
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::agent::Agent;
     use crate::tools::command_summary::BUFFER_QUERY_INLINE_CAP;
+    #[test]
+    fn system_prompt_draft_includes_per_project_memory_refs() {
+        use std::path::PathBuf;
+        let projects = vec![
+            crate::workspace::DiscoveredProject {
+                id: "api".to_string(),
+                relative_root: PathBuf::from("api"),
+                languages: vec!["rust".to_string()],
+                manifest: Some("Cargo.toml".to_string()),
+            },
+            crate::workspace::DiscoveredProject {
+                id: "web".to_string(),
+                relative_root: PathBuf::from("web"),
+                languages: vec!["typescript".to_string()],
+                manifest: Some("package.json".to_string()),
+            },
+        ];
+        let draft = build_system_prompt_draft(
+            &["rust".to_string(), "typescript".to_string()],
+            &[],
+            None,
+            Some(&projects),
+            &Vec::new(),
+        );
+        assert!(
+            draft.contains("memory(project:"),
+            "should reference per-project memories"
+        );
+        assert!(draft.contains("api"), "should mention api project");
+        assert!(draft.contains("web"), "should mention web project");
+    }
+
+    use std::path::PathBuf;
     use std::sync::Arc;
     use tempfile::tempdir;
 
@@ -2002,6 +2115,38 @@ mod tests {
                 progress: None,
             },
         )
+    }
+
+    /// Like project_ctx() but uses the given directory as the project root.
+    /// Caller is responsible for keeping the tempdir alive.
+    async fn project_ctx_at(root: &std::path::Path) -> ToolContext {
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        std::fs::write(root.join("main.rs"), "fn main() {}").unwrap();
+        let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+        ToolContext {
+            agent,
+            lsp: lsp(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+        }
+    }
+
+    /// Create a two-project workspace layout in the given directory.
+    /// Returns (api_dir, web_dir).
+    fn setup_workspace_dirs(root: &std::path::Path) -> (PathBuf, PathBuf) {
+        let api_dir = root.join("api");
+        std::fs::create_dir_all(api_dir.join("src")).unwrap();
+        std::fs::write(api_dir.join("Cargo.toml"), "[package]\nname = \"api\"").unwrap();
+        std::fs::write(api_dir.join("src/main.rs"), "fn main() {}").unwrap();
+        let web_dir = root.join("web");
+        std::fs::create_dir_all(web_dir.join("src")).unwrap();
+        std::fs::write(
+            web_dir.join("package.json"),
+            r#"{"name":"web","scripts":{"build":"tsc"}}"#,
+        )
+        .unwrap();
+        std::fs::write(web_dir.join("src/index.ts"), "console.log('hello')").unwrap();
+        (api_dir, web_dir)
     }
 
     #[tokio::test]
@@ -4208,5 +4353,149 @@ mod tests {
             !ws_path.exists(),
             "workspace.toml should NOT be created for single-project repos"
         );
+    }
+
+    #[tokio::test]
+    async fn single_project_onboarding_unchanged() {
+        let (_dir, ctx) = project_ctx().await;
+        let result = Onboarding.call(json!({}), &ctx).await.unwrap();
+
+        // Single project: no workspace_mode field or it's false
+        assert!(result.get("workspace_mode").is_none() || result["workspace_mode"] == false);
+        // Instructions should contain the standard Phase 1/Phase 2, not workspace phases
+        let instructions = result["instructions"].as_str().unwrap_or("");
+        assert!(instructions.contains("Phase 1: Explore the Code"));
+        assert!(instructions.contains("Phase 2: Write the Memories"));
+        assert!(!instructions.contains("Phase 1A"));
+        assert!(!instructions.contains("Workspace Survey"));
+    }
+
+    #[tokio::test]
+    async fn onboarding_call_content_includes_workspace_info() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        setup_workspace_dirs(root);
+
+        let ctx = project_ctx_at(root).await;
+        let content = Onboarding.call_content(json!({}), &ctx).await.unwrap();
+        let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+
+        assert!(
+            text.contains("workspace") || text.contains("Workspace"),
+            "call_content should mention workspace mode, got: {}",
+            &text[..text.len().min(200)]
+        );
+        assert!(
+            text.contains("Phase 1A") || text.contains("Workspace Survey"),
+            "call_content should include workspace instructions"
+        );
+        // Per-project protected memories should be surfaced
+        assert!(
+            text.contains("per_project_protected") || text.contains("Per-Project Protected"),
+            "call_content should surface per-project protected memory state"
+        );
+    }
+
+    #[tokio::test]
+    async fn onboarding_includes_workspace_mode_and_per_project_protected() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        setup_workspace_dirs(root);
+
+        let ctx = project_ctx_at(root).await;
+        let result = Onboarding.call(json!({}), &ctx).await.unwrap();
+
+        assert_eq!(result["workspace_mode"], true);
+        assert!(result["per_project_protected_memories"].is_object());
+        // Each discovered project should have an entry
+        let ppm = &result["per_project_protected_memories"];
+        assert!(ppm["api"].is_object(), "api protected state missing");
+        assert!(ppm["web"].is_object(), "web protected state missing");
+    }
+
+    #[tokio::test]
+    async fn onboarding_writes_per_project_programmatic_memories() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        setup_workspace_dirs(root);
+
+        let ctx = project_ctx_at(root).await;
+        Onboarding.call(json!({}), &ctx).await.unwrap();
+
+        // Per-project memory directories should exist with onboarding + language-patterns
+        let api_mem = root.join(".codescout/projects/api/memories");
+        assert!(
+            api_mem.join("onboarding.md").exists(),
+            "api onboarding memory missing"
+        );
+        assert!(
+            api_mem.join("language-patterns.md").exists(),
+            "api language-patterns missing"
+        );
+        let web_mem = root.join(".codescout/projects/web/memories");
+        assert!(
+            web_mem.join("onboarding.md").exists(),
+            "web onboarding memory missing"
+        );
+        assert!(
+            web_mem.join("language-patterns.md").exists(),
+            "web language-patterns missing"
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_onboarding_full_flow() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        setup_workspace_dirs(root);
+
+        let ctx = project_ctx_at(root).await;
+
+        // First onboarding
+        let result = Onboarding.call(json!({}), &ctx).await.unwrap();
+
+        // Workspace mode active
+        assert_eq!(result["workspace_mode"], true);
+        assert!(result["projects"].as_array().unwrap().len() >= 2);
+
+        // Per-project programmatic memories written
+        assert!(root
+            .join(".codescout/projects/api/memories/onboarding.md")
+            .exists());
+        assert!(root
+            .join(".codescout/projects/web/memories/onboarding.md")
+            .exists());
+
+        // workspace.toml created
+        assert!(root.join(".codescout/workspace.toml").exists());
+
+        // Instructions contain workspace sections
+        let instructions = result["instructions"].as_str().unwrap();
+        assert!(
+            instructions.contains("Workspace"),
+            "instructions should contain workspace content"
+        );
+        assert!(
+            instructions.contains("Phase 1A"),
+            "instructions should contain Phase 1A"
+        );
+
+        // System prompt draft references per-project memories
+        let draft = result["system_prompt_draft"].as_str().unwrap();
+        assert!(draft.contains("api"));
+        assert!(draft.contains("web"));
+        assert!(draft.contains("memory(project:"));
+
+        // call_content delivers workspace content
+        let content = Onboarding
+            .call_content(json!({ "force": true }), &ctx)
+            .await
+            .unwrap();
+        let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+        assert!(text.contains("workspace") || text.contains("Workspace"));
+
+        // format_compact shows workspace info
+        let compact = Onboarding.format_compact(&result).unwrap_or_default();
+        assert!(compact.contains("workspace"));
     }
 }
