@@ -1363,6 +1363,78 @@ impl Tool for Onboarding {
         Some(format_onboarding(result))
     }
 }
+/// Extract a u64 from a JSON value that may be a Number or a numeric String.
+fn get_timeout_u64(v: &Value) -> Option<u64> {
+    match v {
+        Value::Number(n) => n.as_u64(),
+        Value::String(s) => s.parse::<u64>().ok(),
+        _ => None,
+    }
+}
+
+/// Parse the timeout from run_command input with leniency for:
+/// - wrong key name (`timeout` instead of `timeout_secs`)
+/// - millisecond values passed as `timeout_secs` (value > 86_400)
+///
+/// Returns `(resolved_seconds, optional_hint_for_agent)`.
+fn parse_timeout_input(input: &Value) -> (u64, Option<String>) {
+    // Canonical key: timeout_secs
+    if let Some(v) = get_timeout_u64(&input["timeout_secs"]) {
+        if v == 0 {
+            return (
+                30,
+                Some("timeout_secs: 0 is invalid — using default of 30s.".to_string()),
+            );
+        }
+        if v > 86_400 {
+            let converted = v / 1_000;
+            return (
+                converted,
+                Some(format!(
+                    "timeout_secs: {v} looks like milliseconds — converted to {converted}s. \
+                     Use timeout_secs with a value in seconds."
+                )),
+            );
+        }
+        return (v, None);
+    }
+
+    // Fallback: wrong key name `timeout`
+    if let Some(v) = get_timeout_u64(&input["timeout"]) {
+        if v == 0 {
+            return (
+                30,
+                Some(
+                    "Unknown parameter 'timeout' — use timeout_secs. \
+                     Value 0 is invalid, using default of 30s."
+                        .to_string(),
+                ),
+            );
+        }
+        if v >= 1_000 {
+            let converted = v / 1_000;
+            return (
+                converted,
+                Some(format!(
+                    "Unknown parameter 'timeout' — use timeout_secs. \
+                     Converted {v}ms → {converted}s."
+                )),
+            );
+        }
+        // v < 1000 → already seconds
+        return (
+            v,
+            Some(format!(
+                "Unknown parameter 'timeout' — use timeout_secs. \
+                 Interpreted {v} as seconds."
+            )),
+        );
+    }
+
+    // Neither key present
+    (30, None)
+}
+
 #[async_trait::async_trait]
 impl Tool for RunCommand {
     fn name(&self) -> &str {
@@ -1409,11 +1481,7 @@ impl Tool for RunCommand {
         use super::output_buffer::OutputBuffer;
 
         let command = super::require_str_param(&input, "command")?;
-        let timeout_secs = match &input["timeout_secs"] {
-            serde_json::Value::Number(n) => n.as_u64().unwrap_or(30),
-            serde_json::Value::String(s) => s.parse::<u64>().unwrap_or(30),
-            _ => 30,
-        };
+        let (timeout_secs, timeout_hint) = parse_timeout_input(&input);
         let acknowledge_risk = parse_bool_param(&input["acknowledge_risk"]);
         let run_in_background = parse_bool_param(&input["run_in_background"]);
         let cwd_param = input["cwd"].as_str();
@@ -1498,6 +1566,13 @@ impl Tool for RunCommand {
             }
         }
 
+        // Attach timeout hint when the timeout parameter was auto-corrected.
+        if let Some(ref hint) = timeout_hint {
+            if let Ok(ref mut val) = result {
+                val["timeout_hint"] = json!(hint);
+            }
+        }
+
         result
     }
 
@@ -1528,7 +1603,7 @@ fn format_onboarding(result: &Value) -> String {
 }
 
 fn format_run_command(result: &Value) -> String {
-    if result["output_id"].is_string() {
+    let mut s = if result["output_id"].is_string() {
         let exit = result["exit_code"].as_i64().unwrap_or(0);
         let check = if exit == 0 { "✓" } else { "✗" };
         let output_id = result["output_id"].as_str().unwrap_or("");
@@ -1567,7 +1642,14 @@ fn format_run_command(result: &Value) -> String {
             .unwrap_or(0);
         let check = if exit == 0 { "✓" } else { "✗" };
         format!("{check} exit {exit} · {stdout_lines} lines")
+    };
+
+    // Append timeout hint after all branch logic so it covers every output shape.
+    if let Some(hint) = result["timeout_hint"].as_str() {
+        s.push_str(&format!("\n⚠ timeout: {hint}"));
     }
+
+    s
 }
 
 /// Returns true when `command` is a bare `@ack_<8hex>` handle.
@@ -4784,5 +4866,100 @@ mod tests {
         // format_compact shows workspace info
         let compact = Onboarding.format_compact(&result).unwrap_or_default();
         assert!(compact.contains("workspace"));
+    }
+
+    #[test]
+    fn parse_timeout_input_correct_key_small() {
+        let input = serde_json::json!({ "timeout_secs": 120 });
+        let (secs, hint) = parse_timeout_input(&input);
+        assert_eq!(secs, 120);
+        assert!(hint.is_none());
+    }
+
+    #[test]
+    fn parse_timeout_input_correct_key_boundary() {
+        let input = serde_json::json!({ "timeout_secs": 86400 });
+        let (secs, hint) = parse_timeout_input(&input);
+        assert_eq!(secs, 86400);
+        assert!(hint.is_none());
+    }
+
+    #[test]
+    fn parse_timeout_input_correct_key_over_boundary() {
+        let input = serde_json::json!({ "timeout_secs": 86401 });
+        let (secs, hint) = parse_timeout_input(&input);
+        assert_eq!(secs, 86);
+        let h = hint.unwrap();
+        assert!(h.contains("86401"), "hint should contain raw value: {h}");
+        assert!(
+            h.contains("86s"),
+            "hint should contain converted value: {h}"
+        );
+    }
+
+    #[test]
+    fn parse_timeout_input_correct_key_large() {
+        let input = serde_json::json!({ "timeout_secs": 120_000u64 });
+        let (secs, hint) = parse_timeout_input(&input);
+        assert_eq!(secs, 120);
+        assert!(hint.is_some());
+    }
+
+    #[test]
+    fn parse_timeout_input_correct_key_zero() {
+        let input = serde_json::json!({ "timeout_secs": 0 });
+        let (secs, hint) = parse_timeout_input(&input);
+        assert_eq!(secs, 30);
+        assert!(hint.is_some());
+    }
+
+    #[test]
+    fn parse_timeout_input_wrong_key_small() {
+        let input = serde_json::json!({ "timeout": 300 });
+        let (secs, hint) = parse_timeout_input(&input);
+        assert_eq!(secs, 300);
+        assert!(hint.is_some());
+    }
+
+    #[test]
+    fn parse_timeout_input_wrong_key_large() {
+        let input = serde_json::json!({ "timeout": 120_000u64 });
+        let (secs, hint) = parse_timeout_input(&input);
+        assert_eq!(secs, 120);
+        assert!(hint.is_some());
+    }
+
+    #[test]
+    fn parse_timeout_input_wrong_key_zero() {
+        let input = serde_json::json!({ "timeout": 0 });
+        let (secs, hint) = parse_timeout_input(&input);
+        assert_eq!(secs, 30);
+        assert!(hint.is_some());
+    }
+
+    #[test]
+    fn parse_timeout_input_neither_key() {
+        let input = serde_json::json!({});
+        let (secs, hint) = parse_timeout_input(&input);
+        assert_eq!(secs, 30);
+        assert!(hint.is_none());
+    }
+
+    #[test]
+    fn parse_timeout_input_both_keys_valid() {
+        // timeout_secs wins; timeout is silently ignored; no hint (timeout_secs value is valid)
+        let input = serde_json::json!({ "timeout_secs": 60, "timeout": 5000 });
+        let (secs, hint) = parse_timeout_input(&input);
+        assert_eq!(secs, 60);
+        assert!(hint.is_none());
+    }
+
+    #[test]
+    fn parse_timeout_input_both_keys_secs_large() {
+        // timeout_secs wins and triggers conversion hint; timeout is ignored
+        let input = serde_json::json!({ "timeout_secs": 120_000u64, "timeout": 5000 });
+        let (secs, hint) = parse_timeout_input(&input);
+        assert_eq!(secs, 120);
+        assert!(hint.is_some());
     }
 }
