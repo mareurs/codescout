@@ -159,6 +159,18 @@ full detail, paginated via offset/limit. Enforced via `OutputGuard`
 semantic search first, then drill down. Know nothing → `list_dir` +
 `list_symbols` at top level, then semantic search.
 
+**Agent-Agnostic Design** — Tool descriptions, error messages, and server
+instructions are the primary interface for LLMs. They must feel natural for
+Claude Code (our primary consumer) but work for any MCP client (Gemini CLI,
+Cursor, custom agents). In particular:
+- Error hints should name codescout tools (`replace_symbol`, `insert_code`),
+  not host-specific tools (`Edit`, `Write`). The LLM should never be tempted to
+  sidestep codescout by falling back to its host's native file editing.
+- The companion plugin (`code-explorer-routing`) adds Claude Code–specific
+  enforcement (PreToolUse hooks) but the server itself must be self-contained:
+  its gate logic, error messages, and instructions should guide any LLM toward
+  the right tool without relying on external hooks.
+
 ## Testing Patterns
 
 **Cache-invalidation tests use a three-query sandwich** — not two. The structure is:

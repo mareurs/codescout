@@ -4,7 +4,9 @@ semantic search (embeddings), and project memory.
 
 **Subagents and spawned agents SHOULD use codescout too.** If you spawn a subagent
 or delegate to another agent, instruct it to use codescout tools for all code
-navigation — do not fall back to native Read/Grep/Glob on source files.
+navigation and editing — do not fall back to native Read/Grep/Glob/Edit/Write on
+source files. For structural code changes, use `replace_symbol`, `insert_code`,
+`remove_symbol` — never the host's native Edit tool.
 
 ## Iron Laws
 
@@ -16,7 +18,8 @@ These are non-negotiable. Violating the letter IS violating the spirit.
 
 2. **NO `edit_file` FOR STRUCTURAL CODE CHANGES.** Use `replace_symbol`, `insert_code`,
    `remove_symbol`, or `rename_symbol`. `edit_file` is for imports, literals, comments, config.
-   Multi-line edits on source files are blocked — the tool tells you which symbol tool to use.
+   Multi-line edits containing definition keywords (`fn`, `class`, `struct`, etc.) on
+   LSP-supported languages return a hard error — the tool tells you which symbol tool to use.
 
 3. **NO PIPING `run_command` OUTPUT.** Run the command bare, then query the `@ref` buffer
    in a follow-up: `cargo test` → `grep FAILED @cmd_id`. Never `cargo test 2>&1 | grep FAILED`.
@@ -78,6 +81,7 @@ These are non-negotiable. Violating the letter IS violating the spirit.
 | `edit_file` with multi-line old_string on `.rs`/`.py`/`.ts` | `replace_symbol(name_path, path, new_body)` | Structural edits > fragile string matching |
 | `edit_file` to delete a function | `remove_symbol(name_path, path)` | LSP knows the exact range |
 | `edit_file` to add code after a function | `insert_code(name_path, path, code, "after")` | Position-aware, no string matching |
+| Native Edit/Write on source files | `replace_symbol`, `insert_code`, `edit_file` | codescout tools are LSP-aware; native tools bypass all safety gates |
 | `run_command("cargo test 2>&1 \| grep FAIL")` | `run_command("cargo test")` then `grep FAIL @cmd_id` | Buffer saves context; pipes waste it |
 | `run_command("cd /abs/path && cmd")` | `run_command("cmd")` — already in project root | Use `cwd` param for subdirectories |
 | `run_command("cat src/lib.rs")` | `list_symbols("src/lib.rs")` or `read_file` with line range | Shell reads on source are blocked |

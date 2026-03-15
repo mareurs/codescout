@@ -1373,70 +1373,58 @@ fn format_find_file(result: &Value) -> String {
     format!("{total} files{cap_note}")
 }
 
-const DEF_KEYWORDS: &[&str] = &[
-    "fn ",
-    "def ",
-    "func ",
-    "fun ",
-    "function ",
-    "async fn ",
-    "async def ",
-    "async function ",
-    "class ",
-    "struct ",
-    "impl ",
-    "trait ",
-    "interface ",
-    "enum ",
-    "type ",
-];
+/// Returns definition keywords for a specific language.
+/// Only includes keywords that actually introduce definitions in that language.
+fn def_keywords_for_lang(lang: &str) -> &'static [&'static str] {
+    match lang {
+        "rust" => &["fn ", "async fn ", "struct ", "impl ", "trait ", "enum "],
+        "python" => &["def ", "async def ", "class "],
+        "go" => &["func ", "struct ", "interface "],
+        "typescript" | "tsx" | "javascript" | "jsx" => &[
+            "function ",
+            "async function ",
+            "class ",
+            "interface ",
+            "enum ",
+        ],
+        "java" => &["class ", "interface ", "enum "],
+        "kotlin" => &["fun ", "class ", "interface ", "enum "],
+        "c" | "cpp" => &["struct ", "class ", "enum "],
+        "csharp" => &["class ", "struct ", "interface ", "enum "],
+        "ruby" => &["def ", "class "],
+        _ => &[],
+    }
+}
 
-/// Infers which symbol-aware tool to suggest when `edit_file` is blocked on a source file.
-/// Priority: delete (empty new_string) → structural definition keyword → insertion (new > old) → fallback.
+/// Returns the matched definition keyword for error reporting, if any.
+fn find_def_keyword(s: &str, lang: &str) -> Option<&'static str> {
+    def_keywords_for_lang(lang)
+        .iter()
+        .find(|kw| s.contains(**kw))
+        .copied()
+}
+
+/// Returns the language if the file has LSP support, None otherwise.
+fn detect_lsp_language(path: &str) -> Option<&'static str> {
+    let p = std::path::Path::new(path);
+    let lang = crate::ast::detect_language(p)?;
+    if crate::lsp::servers::has_lsp_config(lang) {
+        Some(lang)
+    } else {
+        None
+    }
+}
+
+/// Suggests the right symbol tool when `edit_file` blocks a structural source edit.
+/// Called only after the gate confirms a definition keyword is present.
 fn infer_edit_hint(old_string: &str, new_string: &str) -> &'static str {
     if new_string.is_empty() {
         return "remove_symbol(name_path, path) — deletes the symbol and its doc comments/attributes";
     }
-
-    // Detect structural definition keywords across all supported languages:
-    // Rust: fn, async fn, impl, struct, trait, enum
-    // Python: def, async def, class
-    // Go: func, type
-    // JS/TS: function, async function, class, interface, type
-    // Java/Kotlin/C#/Swift: class, interface, enum, fun, func
-    if DEF_KEYWORDS.iter().any(|kw| old_string.contains(kw)) {
-        return "replace_symbol(name_path, path, new_body) — replaces the symbol body via LSP";
-    }
-
     if new_string.len() > old_string.len() {
-        // Heuristic: comma-separated identifiers with no `(`, `=`, or `->` → likely a
-        // `use`/`import` identifier list rather than addressable symbol code.
-        // insert_code requires a name_path and is inapplicable to import lists;
-        // acknowledge_risk is the right escape hatch in that case.
-        let looks_like_import = old_string.contains(',')
-            && !old_string.contains('(')
-            && !old_string.contains('=')
-            && !old_string.contains("->");
-        if looks_like_import {
-            return "edit_file with acknowledge_risk: true — \
-                    target looks like an import list, not a named symbol";
-        }
-        let looks_like_import = old_string.contains(',')
-            && !old_string.contains('(')
-            && !old_string.contains('=')
-            && !old_string.contains("->");
-        if looks_like_import {
-            return "edit_file with acknowledge_risk: true — \
-                    target looks like an import list, not a named symbol";
-        }
         return "insert_code(name_path, path, code, position) — inserts before or after a named symbol";
     }
-
-    // Fallback: show all options
-    "use a symbol-aware tool instead:\n  \
-     replace_symbol(name_path, path, new_body) — replace a symbol body\n  \
-     insert_code(name_path, path, code, position) — insert before/after a symbol\n  \
-     remove_symbol(name_path, path) — delete a symbol entirely"
+    "replace_symbol(name_path, path, new_body) — replaces the symbol body via LSP"
 }
 
 pub struct EditFile;
@@ -1470,25 +1458,6 @@ impl Tool for EditFile {
         super::guard_worktree_write(ctx).await?;
         let path = super::require_str_param(&input, "path")?;
         let new_string = input["new_string"].as_str().unwrap_or("");
-        let acknowledge_risk = parse_bool_param(&input["acknowledge_risk"]);
-
-        // Dispatch @ack_* handle for a previously deferred multi-line source edit.
-        if path.starts_with("@ack_") {
-            let edit = ctx.output_buffer.get_pending_edit(path).ok_or_else(|| {
-                super::RecoverableError::with_hint(
-                    "ack handle expired or unknown",
-                    "Re-run the original edit_file call to get a fresh handle.",
-                )
-            })?;
-            return perform_edit(
-                &edit.path,
-                &edit.old_string,
-                &edit.new_string,
-                edit.replace_all,
-                ctx,
-            )
-            .await;
-        }
 
         // Prepend/append mode — no string match needed.
         if let Some(insert) = input["insert"].as_str() {
@@ -1524,23 +1493,21 @@ impl Tool for EditFile {
             .into());
         }
 
-        // Multi-line edits on source files: nudge toward symbol tools but allow with ack.
-        if old_string.contains('\n')
-            && crate::util::path_security::is_source_path(path)
-            && !acknowledge_risk
-        {
-            let hint = infer_edit_hint(old_string, new_string);
-            let handle = ctx.output_buffer.store_pending_edit(
-                path.to_string(),
-                old_string.to_string(),
-                new_string.to_string(),
-                replace_all,
-            );
-            return Ok(json!({
-                "pending_ack": handle,
-                "reason": "multi-line edit on source file — symbol-aware tools are safer and LSP-backed",
-                "hint": format!("Prefer {}. To bypass: re-run with acknowledge_risk: true, or pass the ack handle as the path: edit_file(\"{}\")", hint, handle)
-            }));
+        // Hard-block multi-line edits that contain definition keywords on LSP-supported languages.
+        if old_string.contains('\n') && crate::util::path_security::is_source_path(path) {
+            if let Some(lang) = detect_lsp_language(path) {
+                if let Some(keyword) = find_def_keyword(old_string, lang) {
+                    let hint = infer_edit_hint(old_string, new_string);
+                    return Err(super::RecoverableError::with_hint(
+                        format!(
+                            "multi-line edit contains a symbol definition ({keyword:?}) \
+                             — use symbol tools for structural changes"
+                        ),
+                        hint,
+                    )
+                    .into());
+                }
+            }
         }
 
         perform_edit(path, old_string, new_string, replace_all, ctx).await
@@ -3833,9 +3800,10 @@ mod tests {
 
     #[test]
     fn infer_edit_hint_replace_symbol_for_python_def() {
+        // new_string same length or shorter → replace_symbol branch
         let hint = infer_edit_hint(
             "def process(x):\n    return x",
-            "def process(x):\n    return x * 2",
+            "def process(x):\n    return y",
         );
         assert!(hint.contains("replace_symbol"), "got: {hint}");
     }
@@ -3850,145 +3818,6 @@ mod tests {
     fn infer_edit_hint_insert_code_when_new_is_longer() {
         let hint = infer_edit_hint("placeholder", "fn extra() {\n    todo!();\n}\nplaceholder");
         assert!(hint.contains("insert_code"), "got: {hint}");
-    }
-
-    #[test]
-    fn infer_edit_hint_import_list_suggests_acknowledge_risk() {
-        // Editing inside a `use {…}` block: only identifiers, commas, whitespace.
-        // No `(`, `=`, `->` → import-fragment heuristic fires; insert_code is inapplicable.
-        let old =
-            "    count_lines, detect_command_type, needs_summary,\n    summarize_build_output,";
-        let new = "    count_lines, detect_command_type, needs_summary,\n    summarize_build_output, truncate_lines_and_bytes,";
-        let hint = infer_edit_hint(old, new);
-        assert!(
-            hint.contains("acknowledge_risk"),
-            "import list edit should suggest acknowledge_risk, got: {hint}"
-        );
-        assert!(
-            !hint.contains("insert_code"),
-            "import list edit must not suggest insert_code (no name_path exists), got: {hint}"
-        );
-    }
-
-    #[test]
-    fn infer_edit_hint_insert_code_still_fires_for_real_code_insertions() {
-        // When old_string has `(` it's real code (function call / expression), not an import.
-        let old = "    let x = foo(\n        bar,\n    );";
-        let new = "    let x = foo(\n        bar,\n        baz,\n    );";
-        let hint = infer_edit_hint(old, new);
-        assert!(
-            hint.contains("insert_code"),
-            "code expression edit should still suggest insert_code, got: {hint}"
-        );
-    }
-
-    #[test]
-    fn infer_edit_hint_fallback_lists_all_tools() {
-        let hint = infer_edit_hint("old line\nother line", "new line\nother line");
-        assert!(
-            hint.contains("replace_symbol")
-                && hint.contains("insert_code")
-                && hint.contains("remove_symbol"),
-            "got: {hint}"
-        );
-    }
-
-    #[tokio::test]
-    async fn edit_file_warns_multiline_on_rust_source() {
-        let (dir, ctx) = project_ctx().await;
-        let path = dir.path().join("src/lib.rs");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "fn foo() {\n    old();\n}\n").unwrap();
-
-        let result = EditFile
-            .call(
-                json!({
-                    "path": "src/lib.rs",
-                    "old_string": "fn foo() {\n    old();\n}",
-                    "new_string": "fn foo() {\n    new();\n}"
-                }),
-                &ctx,
-            )
-            .await
-            .expect("should return Ok with pending_ack, not an error");
-
-        assert!(
-            result["pending_ack"].as_str().is_some(),
-            "expected pending_ack handle, got: {result}"
-        );
-        assert!(
-            result["hint"]
-                .as_str()
-                .unwrap_or("")
-                .contains("replace_symbol"),
-            "hint should mention replace_symbol, got: {result}"
-        );
-    }
-
-    #[tokio::test]
-    async fn edit_file_blocking_hint_always_includes_acknowledge_risk() {
-        // Bug 3 regression: the hint template previously said only
-        // "To proceed anyway: edit_file(\"@ack_xxx\")" — making acknowledge_risk: true
-        // invisible to the LLM. The hint must surface acknowledge_risk as an explicit bypass.
-        let (dir, ctx) = project_ctx().await;
-        let path = dir.path().join("src/lib.rs");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "fn foo() {\n    old();\n}\n").unwrap();
-
-        let result = EditFile
-            .call(
-                json!({
-                    "path": "src/lib.rs",
-                    "old_string": "fn foo() {\n    old();\n}",
-                    "new_string": "fn foo() {\n    new();\n}"
-                }),
-                &ctx,
-            )
-            .await
-            .expect("should return Ok with pending_ack, not an error");
-
-        let hint = result["hint"].as_str().unwrap_or("");
-        assert!(
-            hint.contains("acknowledge_risk"),
-            "blocking hint must mention acknowledge_risk so the LLM has a clear bypass, got: {hint}"
-        );
-    }
-
-    #[tokio::test]
-    async fn edit_file_import_list_hint_suggests_acknowledge_risk_not_insert_code() {
-        // Bug 2 regression (integration path): editing a multi-line use-import list triggered
-        // the length heuristic in infer_edit_hint and returned insert_code, which requires
-        // a name_path that doesn't exist for import identifiers.
-        let (dir, ctx) = project_ctx().await;
-        let path = dir.path().join("src/lib.rs");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(
-            &path,
-            "use crate::foo::{\n    count_lines,\n    needs_summary,\n};\n",
-        )
-        .unwrap();
-
-        let result = EditFile
-            .call(
-                json!({
-                    "path": "src/lib.rs",
-                    "old_string": "    count_lines,\n    needs_summary,",
-                    "new_string": "    count_lines,\n    needs_summary,\n    truncate_lines_and_bytes,"
-                }),
-                &ctx,
-            )
-            .await
-            .expect("should return Ok with pending_ack, not an error");
-
-        let hint = result["hint"].as_str().unwrap_or("");
-        assert!(
-            hint.contains("acknowledge_risk"),
-            "import list edit must suggest acknowledge_risk (no name_path exists), got: {hint}"
-        );
-        assert!(
-            !hint.contains("insert_code"),
-            "import list edit must not suggest insert_code, got: {hint}"
-        );
     }
 
     #[tokio::test]
@@ -4043,19 +3872,16 @@ mod tests {
                 json!({"path": "app.py", "old_string": "def greet():\n    print('hello')", "new_string": "def greet():\n    print('hi')"}),
                 &ctx,
             )
-            .await
-            .expect("should return Ok with pending_ack, not an error");
+            .await;
 
         assert!(
-            result["pending_ack"].as_str().is_some(),
-            "expected pending_ack handle, got: {result}"
+            result.is_err(),
+            "should hard-block structural edit on Python"
         );
+        let err = result.unwrap_err().to_string();
         assert!(
-            result["hint"]
-                .as_str()
-                .unwrap_or("")
-                .contains("replace_symbol"),
-            "hint should mention replace_symbol, got: {result}"
+            err.contains("symbol definition"),
+            "error should mention symbol definition, got: {err}"
         );
     }
 
@@ -4071,19 +3897,24 @@ mod tests {
                 json!({"path": "src/lib.rs", "old_string": "fn foo() {\n    bar();\n}", "new_string": ""}),
                 &ctx,
             )
-            .await
-            .expect("should return Ok with pending_ack, not an error");
+            .await;
 
         assert!(
-            result["pending_ack"].as_str().is_some(),
-            "expected pending_ack handle, got: {result}"
+            result.is_err(),
+            "should hard-block structural delete on LSP language"
         );
+        let err = result.unwrap_err();
+        let recoverable = err
+            .downcast_ref::<super::RecoverableError>()
+            .expect("should be RecoverableError");
         assert!(
-            result["hint"]
-                .as_str()
-                .unwrap_or("")
-                .contains("remove_symbol"),
-            "hint should mention remove_symbol, got: {result}"
+            err.to_string().contains("symbol definition"),
+            "error should mention symbol definition, got: {err}"
+        );
+        let hint = recoverable.hint.as_deref().unwrap_or("");
+        assert!(
+            hint.contains("remove_symbol"),
+            "hint should mention remove_symbol, got: {hint}"
         );
     }
 
@@ -4143,14 +3974,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn edit_file_ack_handle_executes_edit() {
+    async fn edit_file_blocks_def_keyword_on_lsp_language() {
         let (dir, ctx) = project_ctx().await;
         let path = dir.path().join("src/lib.rs");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "fn foo() {\n    old();\n}\n").unwrap();
 
-        // First call: returns pending_ack handle.
-        let warn = EditFile
+        let result = EditFile
             .call(
                 json!({
                     "path": "src/lib.rs",
@@ -4159,52 +3989,89 @@ mod tests {
                 }),
                 &ctx,
             )
-            .await
-            .expect("first call should return Ok");
-        let handle = warn["pending_ack"]
-            .as_str()
-            .expect("should have pending_ack handle")
-            .to_string();
+            .await;
 
-        // Second call: pass the ack handle as path — edit executes.
-        let result = EditFile
-            .call(json!({"path": handle, "new_string": ""}), &ctx)
-            .await
-            .expect("ack call should succeed");
-        assert_eq!(result, json!("ok"));
-
-        let written = std::fs::read_to_string(&path).unwrap();
         assert!(
-            written.contains("new()"),
-            "file should contain new() after ack: {written}"
+            result.is_err(),
+            "should hard-block structural edit on LSP language"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("symbol definition"),
+            "error should mention symbol definition, got: {err}"
         );
     }
 
     #[tokio::test]
-    async fn edit_file_acknowledge_risk_bypasses_source_check() {
+    async fn edit_file_passes_non_lsp_language() {
+        let (dir, ctx) = project_ctx().await;
+        let path = dir.path().join("script.lua");
+        std::fs::write(&path, "function greet()\n    print('hi')\nend\n").unwrap();
+
+        let result = EditFile
+            .call(
+                json!({
+                    "path": "script.lua",
+                    "old_string": "function greet()\n    print('hi')\nend",
+                    "new_string": "function greet()\n    print('hello')\nend"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "should allow structural edit on non-LSP language: {:?}",
+            result.err()
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_file_passes_no_def_keyword() {
         let (dir, ctx) = project_ctx().await;
         let path = dir.path().join("src/lib.rs");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "fn foo() {\n    old();\n}\n").unwrap();
+        std::fs::write(&path, "use crate::{\n    Foo,\n    Bar,\n};\n").unwrap();
 
         let result = EditFile
             .call(
                 json!({
                     "path": "src/lib.rs",
-                    "old_string": "fn foo() {\n    old();\n}",
-                    "new_string": "fn foo() {\n    new();\n}",
-                    "acknowledge_risk": true
+                    "old_string": "use crate::{\n    Foo,\n    Bar,\n}",
+                    "new_string": "use crate::{\n    Foo,\n    Bar,\n    Baz,\n}"
                 }),
                 &ctx,
             )
-            .await
-            .expect("acknowledge_risk should bypass the check");
-        assert_eq!(result, json!("ok"));
+            .await;
 
-        let written = std::fs::read_to_string(&path).unwrap();
         assert!(
-            written.contains("new()"),
-            "file should contain new() after direct ack: {written}"
+            result.is_ok(),
+            "should allow import list edit (no def keyword): {:?}",
+            result.err()
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_file_passes_multiline_non_source() {
+        let (dir, ctx) = project_ctx().await;
+        let path = dir.path().join("README.md");
+        std::fs::write(&path, "line one\nline two\n").unwrap();
+
+        let result = EditFile
+            .call(
+                json!({
+                    "path": "README.md",
+                    "old_string": "line one\nline two",
+                    "new_string": "updated one\nupdated two"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "should allow multi-line edit on non-source file: {:?}",
+            result.err()
         );
     }
 
@@ -4901,5 +4768,114 @@ line4"
             "large file should be buffered; got: {}",
             serde_json::to_string_pretty(&result).unwrap()
         );
+    }
+}
+
+// Additional tests at end of file for new helpers — kept outside the async test block
+// for simpler test structure (these are sync unit tests).
+#[cfg(test)]
+mod helper_tests {
+    use super::*;
+
+    /// Test helper: checks if string contains a def keyword for the given language.
+    fn contains_def_keyword(s: &str, lang: &str) -> bool {
+        find_def_keyword(s, lang).is_some()
+    }
+
+    #[test]
+    fn contains_def_keyword_detects_definitions() {
+        // Rust
+        assert!(contains_def_keyword("fn foo() {\n    body\n}", "rust"));
+        assert!(contains_def_keyword("async fn bar()", "rust"));
+        assert!(contains_def_keyword("struct Bar {\n}", "rust"));
+        assert!(contains_def_keyword("impl Foo {\n}", "rust"));
+        assert!(contains_def_keyword("trait MyTrait {\n}", "rust"));
+        assert!(contains_def_keyword("enum Color {\n}", "rust"));
+        // Python
+        assert!(contains_def_keyword("def greet():\n    pass", "python"));
+        assert!(contains_def_keyword(
+            "async def handler():\n    pass",
+            "python"
+        ));
+        assert!(contains_def_keyword("class Foo:\n    pass", "python"));
+        // Go
+        assert!(contains_def_keyword("func main() {\n}", "go"));
+        assert!(contains_def_keyword("struct Bar {\n}", "go"));
+        assert!(contains_def_keyword("interface Iface {\n}", "go"));
+        // JS/TS
+        assert!(contains_def_keyword(
+            "function handler() {\n}",
+            "typescript"
+        ));
+        assert!(contains_def_keyword(
+            "async function handler() {\n}",
+            "javascript"
+        ));
+        assert!(contains_def_keyword("class Foo {\n}", "tsx"));
+        assert!(contains_def_keyword("interface Iface {\n}", "typescript"));
+        assert!(contains_def_keyword("enum Color {\n}", "typescript"));
+        // Kotlin
+        assert!(contains_def_keyword("fun doThing() {\n}", "kotlin"));
+        assert!(contains_def_keyword("class Foo {\n}", "kotlin"));
+        // Java
+        assert!(contains_def_keyword("class Foo {\n}", "java"));
+        assert!(contains_def_keyword("interface Iface {\n}", "java"));
+        assert!(contains_def_keyword("enum Color {\n}", "java"));
+        // C/C++
+        assert!(contains_def_keyword("struct Bar {\n}", "c"));
+        assert!(contains_def_keyword("class Foo {\n}", "cpp"));
+        assert!(contains_def_keyword("enum Color {\n}", "cpp"));
+        // C#
+        assert!(contains_def_keyword("class Foo {\n}", "csharp"));
+        assert!(contains_def_keyword("struct Bar {\n}", "csharp"));
+        assert!(contains_def_keyword("interface Iface {\n}", "csharp"));
+        // Ruby
+        assert!(contains_def_keyword("def greet\n  puts 'hi'\nend", "ruby"));
+        assert!(contains_def_keyword("class Foo\nend", "ruby"));
+    }
+
+    #[test]
+    fn contains_def_keyword_rejects_non_definitions() {
+        // Import-like patterns — no def keyword in any language
+        assert!(!contains_def_keyword("use {Foo,\n    Bar}", "rust"));
+        assert!(!contains_def_keyword("import {a,\n    b}", "typescript"));
+        assert!(!contains_def_keyword("let x = 1;\nlet y = 2;", "rust"));
+        assert!(!contains_def_keyword(
+            "// this is a comment\n// another line",
+            "rust"
+        ));
+        assert!(!contains_def_keyword(
+            "\"some string\nwith newlines\"",
+            "rust"
+        ));
+        // Cross-language: "fn " is NOT a keyword in Python
+        assert!(!contains_def_keyword("fn foo() {\n    body\n}", "python"));
+        // Cross-language: "def " is NOT a keyword in Rust
+        assert!(!contains_def_keyword("def greet():\n    pass", "rust"));
+        // Cross-language: "func " is NOT a keyword in TypeScript
+        assert!(!contains_def_keyword("func main() {\n}", "typescript"));
+        // Cross-language: "fun " is NOT a keyword in Go
+        assert!(!contains_def_keyword("fun doThing() {\n}", "go"));
+        // Unknown language returns no keywords
+        assert!(!contains_def_keyword("fn foo() {}", "unknown"));
+    }
+
+    #[test]
+    fn detect_lsp_language_by_path() {
+        assert_eq!(detect_lsp_language("src/main.rs"), Some("rust"));
+        assert_eq!(detect_lsp_language("lib.py"), Some("python"));
+        assert_eq!(detect_lsp_language("index.ts"), Some("typescript"));
+        assert_eq!(detect_lsp_language("App.java"), Some("java"));
+        assert_eq!(detect_lsp_language("main.go"), Some("go"));
+        assert_eq!(detect_lsp_language("file.c"), Some("c"));
+        assert_eq!(detect_lsp_language("file.cpp"), Some("cpp"));
+        assert_eq!(detect_lsp_language("file.rb"), Some("ruby"));
+        // No LSP languages
+        assert_eq!(detect_lsp_language("script.lua"), None);
+        assert_eq!(detect_lsp_language("script.sh"), None);
+        assert_eq!(detect_lsp_language("app.swift"), None);
+        assert_eq!(detect_lsp_language("app.ex"), None);
+        assert_eq!(detect_lsp_language("README.md"), None);
+        assert_eq!(detect_lsp_language("config.toml"), None);
     }
 }

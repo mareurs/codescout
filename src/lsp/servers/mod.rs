@@ -91,3 +91,55 @@ pub fn lsp_language_id(lang: &str) -> &str {
         other => other,
     }
 }
+
+/// Returns true if we have a default LSP server config for this language.
+/// Used by `edit_file` to decide whether symbol tools are a viable alternative.
+pub fn has_lsp_config(lang: &str) -> bool {
+    matches!(
+        lang,
+        "rust"
+            | "python"
+            | "typescript"
+            | "javascript"
+            | "tsx"
+            | "jsx"
+            | "go"
+            | "java"
+            | "kotlin"
+            | "c"
+            | "cpp"
+            | "csharp"
+            | "ruby"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn has_lsp_config_covers_all_configured_languages() {
+        assert!(has_lsp_config("rust"));
+        assert!(has_lsp_config("python"));
+        assert!(has_lsp_config("typescript"));
+        assert!(has_lsp_config("javascript"));
+        assert!(has_lsp_config("tsx"));
+        assert!(has_lsp_config("jsx"));
+        assert!(has_lsp_config("go"));
+        assert!(has_lsp_config("java"));
+        assert!(has_lsp_config("kotlin"));
+        assert!(has_lsp_config("c"));
+        assert!(has_lsp_config("cpp"));
+        assert!(has_lsp_config("csharp"));
+        assert!(has_lsp_config("ruby"));
+        assert!(!has_lsp_config("php"));
+        assert!(!has_lsp_config("swift"));
+        assert!(!has_lsp_config("scala"));
+        assert!(!has_lsp_config("elixir"));
+        assert!(!has_lsp_config("haskell"));
+        assert!(!has_lsp_config("lua"));
+        assert!(!has_lsp_config("bash"));
+        assert!(!has_lsp_config("markdown"));
+        assert!(!has_lsp_config("unknown"));
+    }
+}

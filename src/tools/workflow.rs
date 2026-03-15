@@ -1481,19 +1481,6 @@ impl Tool for RunCommand {
 
         // --- Early dispatch: @ack_* handle ---
         if looks_like_ack_handle(command) {
-            // Cross-tool guard: edit_file also issues @ack_ handles (pending_edits store).
-            // If the caller passed an edit ack to run_command, give a targeted error rather
-            // than a misleading "expired" message.
-            if ctx.output_buffer.get_pending_edit(command).is_some() {
-                return Err(super::RecoverableError::with_hint(
-                    "this ack handle belongs to edit_file, not run_command",
-                    format!(
-                        "Re-run as edit_file(\"{command}\") to execute the deferred edit, \
-                         or re-issue the original edit_file call with acknowledge_risk: true"
-                    ),
-                )
-                .into());
-            }
             let stored = ctx.output_buffer.get_dangerous(command).ok_or_else(|| {
                 super::RecoverableError::with_hint(
                     "ack handle expired or unknown",
@@ -4017,34 +4004,6 @@ mod tests {
         assert!(
             err.to_string().contains("expired"),
             "error should mention 'expired', got: {err}"
-        );
-    }
-
-    #[tokio::test]
-    async fn run_command_rejects_edit_file_ack_handle_with_clear_error() {
-        // A handle stored by edit_file (pending_edits) must not silently appear "expired"
-        // when passed to run_command — it should produce a targeted cross-tool error.
-        let (_dir, ctx) = project_ctx().await;
-        let handle = ctx.output_buffer.store_pending_edit(
-            "src/lib.rs".to_string(),
-            "old\nline".to_string(),
-            "new\nline".to_string(),
-            false,
-        );
-
-        let err = RunCommand
-            .call(serde_json::json!({ "command": handle }), &ctx)
-            .await
-            .expect_err("edit_file ack passed to run_command should return Err");
-
-        let msg = err.to_string();
-        assert!(
-            msg.contains("edit_file"),
-            "error should name the correct tool, got: {msg}"
-        );
-        assert!(
-            !msg.contains("expired"),
-            "should not say 'expired' (that implies a run_command ack), got: {msg}"
         );
     }
 
