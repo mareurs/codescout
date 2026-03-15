@@ -1,5 +1,7 @@
-You have just onboarded this project. Your job is to create 6 memories and a system
+You have just onboarded this project. Your job is to create memories and a system
 prompt that give future AI sessions deep, accurate knowledge of this codebase.
+For single-project repos, this means 6 memories. For multi-project workspaces,
+see the WORKSPACE MODE section below (if present).
 
 ## THE IRON LAW
 
@@ -278,7 +280,10 @@ If you notice any of these thoughts, STOP. Return to Phase 1 immediately.
 
 ---
 
-## Phase 2: Write the 6 Memories
+## Phase 2: Write the Memories (Single-Project Mode)
+
+> **If you see a "WORKSPACE MODE" section below**, skip this section entirely and
+> follow the workspace flow instead. This section applies only to single-project repos.
 
 Now write the memories. Your Phase 1 exploration must inform every memory — especially
 `architecture` and `conventions`, which cannot be written accurately from documentation alone.
@@ -561,6 +566,18 @@ After confirming all 6 memories and the system prompt with the user, deliver thi
   2. `list_symbols("src/")` — see the module structure
   3. `semantic_search("your concept")` — find relevant code
   4. `find_symbol("Name", include_body=true)` — read the implementation
+- **Library support:**
+  - Libraries are **auto-discovered** when `goto_definition` resolves outside the project root.
+  - `list_libraries` — view all registered libraries and their index/version status.
+  - `index_project(scope="lib:<name>")` — index a specific library for semantic search.
+  - Once registered, use `scope="lib:<name>"` with `find_symbol`, `list_symbols`,
+    `search_pattern`, and `semantic_search` to navigate library code.
+
+---
+
+> **For workspace repos:** The above applies to single-project repos. For workspace repos,
+> the subagent deep dives + workspace synthesis flow replaces this section. Summarize
+> all per-project and workspace-level memories in one confirmation pass.
 
 ---
 

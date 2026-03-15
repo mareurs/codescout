@@ -27,6 +27,36 @@ impl Tool for ActivateProject {
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         let path = super::require_str_param(&input, "path")?;
+
+        // If the argument contains no path separator and matches a known project ID
+        // in the current workspace, switch focus without reinitialising.
+        if !path.contains('/') && !path.contains('\\') {
+            let is_project_id = {
+                let inner = ctx.agent.inner.read().await;
+                inner
+                    .workspace
+                    .as_ref()
+                    .map(|ws| ws.projects.iter().any(|p| p.discovered.id == path))
+                    .unwrap_or(false)
+            };
+            if is_project_id {
+                ctx.agent.switch_focus(path).await?;
+                let project_root = ctx.agent.require_project_root().await?;
+                let hint = format!(
+                    "Switched focus to '{}'. CWD: {}",
+                    path,
+                    project_root.display()
+                );
+                return Ok(json!({
+                    "status": "ok",
+                    "activated": {
+                        "project_root": project_root.display().to_string(),
+                    },
+                    "hint": hint,
+                }));
+            }
+        }
+
         let root = PathBuf::from(path);
         if !root.is_dir() {
             return Err(super::RecoverableError::with_hint(
@@ -146,7 +176,7 @@ impl Tool for ProjectStatus {
                 "hint": "Call index_status() for detailed breakdown.",
             });
         } else {
-            let db_path = crate::embed::index::db_path(&root);
+            let db_path = crate::embed::index::project_db_path(&root);
             if !db_path.exists() {
                 result["index"] = json!({
                     "status": "not_indexed",
@@ -202,6 +232,32 @@ impl Tool for ProjectStatus {
                 tracing::debug!("memory staleness check failed: {e}");
             }
         }
+
+        // --- Workspace section ---
+        let workspace_toml_path = crate::config::workspace::workspace_config_path(&root);
+        let workspace_info = if workspace_toml_path.exists() {
+            std::fs::read_to_string(&workspace_toml_path)
+                .ok()
+                .and_then(|s| toml::from_str::<crate::config::workspace::WorkspaceConfig>(&s).ok())
+                .map(|ws| {
+                    json!({
+                        "name": ws.workspace.name,
+                        "projects": ws.projects.iter().map(|p| json!({
+                            "id": p.id,
+                            "root": p.root,
+                            "languages": p.languages,
+                            "depends_on": p.depends_on,
+                        })).collect::<Vec<_>>(),
+                        "resources": {
+                            "max_lsp_clients": ws.resources.max_lsp_clients,
+                            "idle_timeout_secs": ws.resources.idle_timeout_secs,
+                        },
+                    })
+                })
+        } else {
+            None
+        };
+        result["workspace"] = json!(workspace_info);
 
         Ok(result)
     }
@@ -536,5 +592,126 @@ mod tests {
             "hint: {hint}"
         );
         assert!(hint.contains(dir1.path().to_str().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn project_status_shows_workspace_projects() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // Create multi-project structure
+        std::fs::write(root.join("build.gradle.kts"), "").unwrap();
+        let mcp = root.join("mcp-server");
+        std::fs::create_dir_all(&mcp).unwrap();
+        std::fs::write(mcp.join("package.json"), r#"{"scripts":{"build":"tsc"}}"#).unwrap();
+
+        // Create workspace.toml
+        let codescout = root.join(".codescout");
+        std::fs::create_dir_all(&codescout).unwrap();
+        std::fs::write(
+            codescout.join("workspace.toml"),
+            r#"
+[workspace]
+name = "test"
+
+[[project]]
+id = "test"
+root = "."
+languages = ["kotlin"]
+
+[[project]]
+id = "mcp-server"
+root = "mcp-server"
+languages = ["typescript"]
+depends_on = ["test"]
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            codescout.join("project.toml"),
+            "[project]\nname = \"test\"\nlanguages = [\"kotlin\"]\n",
+        )
+        .unwrap();
+
+        let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+        let ctx = ToolContext {
+            agent,
+            lsp: lsp(),
+            output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+        };
+
+        let result = ProjectStatus
+            .call(serde_json::json!({}), &ctx)
+            .await
+            .unwrap();
+        let ws = result.get("workspace");
+        assert!(
+            ws.is_some(),
+            "project_status should include workspace section"
+        );
+        let projects = ws.unwrap().get("projects").unwrap().as_array().unwrap();
+        assert_eq!(projects.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn activate_project_switches_focus_by_id() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // Create multi-project structure
+        std::fs::write(root.join("build.gradle.kts"), "").unwrap();
+        let mcp = root.join("mcp-server");
+        std::fs::create_dir_all(&mcp).unwrap();
+        std::fs::write(mcp.join("package.json"), r#"{"scripts":{"build":"tsc"}}"#).unwrap();
+
+        let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+        let ctx = ToolContext {
+            agent,
+            lsp: lsp(),
+            output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+        };
+
+        // Initially focused on root project
+        let root_path = ctx.agent.require_project_root().await.unwrap();
+        assert_eq!(root_path, root.to_path_buf());
+
+        // Switch focus to mcp-server by ID
+        let result = ActivateProject
+            .call(serde_json::json!({"path": "mcp-server"}), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["status"], "ok");
+
+        // Now focused on mcp-server
+        let new_root = ctx.agent.require_project_root().await.unwrap();
+        assert_eq!(new_root, root.join("mcp-server"));
+    }
+
+    #[tokio::test]
+    async fn activate_project_unknown_id_with_no_slash_returns_error() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("Cargo.toml"), "[package]\nname=\"test\"\n").unwrap();
+
+        let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+        let ctx = ToolContext {
+            agent,
+            lsp: lsp(),
+            output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+        };
+
+        // "unknown-project" has no slash and does not exist as a project ID or a path
+        let result = ActivateProject
+            .call(serde_json::json!({"path": "unknown-project"}), &ctx)
+            .await;
+        // Should fail: not a known project ID, and not a valid directory path
+        assert!(
+            result.is_err() || result.as_ref().unwrap().get("error").is_some(),
+            "expected error or error field, got: {:?}",
+            result
+        );
     }
 }

@@ -43,6 +43,10 @@ impl Tool for SemanticSearch {
                     "type": "boolean",
                     "default": false,
                     "description": "If true, also search semantic memories and include them in results tagged with source='memory'."
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Filter results to a specific project ID (e.g. 'mcp-server'). Default: all projects."
                 }
             }
         })
@@ -53,26 +57,28 @@ impl Tool for SemanticSearch {
         let query = super::require_str_param(&input, "query")?;
         let limit = input["limit"].as_u64().unwrap_or(10) as usize;
         let include_memories = parse_bool_param(&input["include_memories"]);
+        let project_filter = input
+            .get("project")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         let guard = OutputGuard::from_input(&input);
 
-        let (root, model) = {
+        let (root, model, library_registry) = {
             let inner = ctx.agent.inner.read().await;
-            let p = inner.active_project.as_ref().ok_or_else(|| {
+            let p = inner.active_project().ok_or_else(|| {
                 super::RecoverableError::with_hint(
                     "No active project. Use activate_project first.",
                     "Call activate_project(\"/path/to/project\") to set the active project.",
                 )
             })?;
-            (p.root.clone(), p.config.embeddings.model.clone())
+            (
+                p.root.clone(),
+                p.config.embeddings.model.clone(),
+                p.library_registry.clone(),
+            )
         };
 
         let scope = crate::library::scope::Scope::parse(input["scope"].as_str());
-        let source_filter = match &scope {
-            crate::library::scope::Scope::Project => Some("project".to_string()),
-            crate::library::scope::Scope::Library(name) => Some(format!("lib:{}", name)),
-            crate::library::scope::Scope::Libraries => Some("libraries".to_string()),
-            crate::library::scope::Scope::All => None,
-        };
 
         // Async: cached embedder + HTTP embed
         let embedder = ctx.agent.get_or_create_embedder(&model).await?;
@@ -81,29 +87,41 @@ impl Tool for SemanticSearch {
         // Sync SQLite off async runtime
         let root2 = root.clone();
         let model2 = model.clone();
+        let scope2 = scope.clone();
+        let library_registry2 = library_registry.clone();
         let (results, memory_results, staleness) = tokio::task::spawn_blocking(move || {
-            let conn = crate::embed::index::open_db(&root2)?;
             // Guard: catch model/dimension mismatch before sqlite-vec sees the
             // wrong-dimensioned query vector and emits a cryptic error.
-            crate::embed::index::check_model_mismatch(&conn, &model2).map_err(|e| {
-                super::RecoverableError::with_hint(
-                    e.to_string(),
-                    "Run index_project(force: true) to rebuild the index with the current model.",
-                )
-            })?;
-            let results = crate::embed::index::search_scoped(
-                &conn,
+            // Only applicable for project-scoped searches (library DBs may use
+            // a different model and have their own dimension validation).
+            if matches!(scope2, crate::library::scope::Scope::Project) {
+                let conn = crate::embed::index::open_db(&root2)?;
+                crate::embed::index::check_model_mismatch(&conn, &model2).map_err(|e| {
+                    super::RecoverableError::with_hint(
+                        e.to_string(),
+                        "Run index_project(force: true) to rebuild the index with the current model.",
+                    )
+                })?;
+            }
+            let results = crate::embed::index::search_multi_db(
+                &root2,
                 &query_embedding,
                 limit,
-                source_filter.as_deref(),
+                &scope2,
+                &library_registry2,
+                project_filter.as_deref(),
             )?;
             let memory_results = if include_memories {
+                let conn = crate::embed::index::open_db(&root2)?;
                 crate::embed::index::ensure_vec_memories(&conn)?;
                 crate::embed::index::search_memories(&conn, &query_embedding, None, limit)?
             } else {
                 vec![]
             };
-            let staleness = crate::embed::index::check_index_staleness(&conn, &root2).ok();
+            let staleness = {
+                let conn = crate::embed::index::open_db(&root2)?;
+                crate::embed::index::check_index_staleness(&conn, &root2).ok()
+            };
             anyhow::Ok((results, memory_results, staleness))
         })
         .await??;
@@ -202,6 +220,32 @@ impl Tool for SemanticSearch {
                 )
             });
         }
+        // Check for stale libraries
+        let stale = {
+            let inner = ctx.agent.inner.read().await;
+            if let Some(p) = inner.active_project() {
+                p.library_registry
+                    .stale_libraries()
+                    .into_iter()
+                    .map(|e| {
+                        json!({
+                            "name": e.name,
+                            "indexed": e.version_indexed,
+                            "current": e.version,
+                            "hint": format!(
+                                "{} was updated — run index_project(scope='lib:{}') to re-index",
+                                e.name, e.name
+                            )
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                vec![]
+            }
+        };
+        if !stale.is_empty() {
+            result["stale_libraries"] = json!(stale);
+        }
         Ok(result)
     }
 
@@ -244,7 +288,7 @@ impl Tool for IndexProject {
 
             let (root, lib_path) = {
                 let inner = ctx.agent.inner.read().await;
-                let project = inner.active_project.as_ref().ok_or_else(|| {
+                let project = inner.active_project().ok_or_else(|| {
                     crate::tools::RecoverableError::with_hint(
                         "No active project. Use activate_project first.",
                         "Call activate_project(\"/path/to/project\") to set the active project.",
@@ -262,14 +306,51 @@ impl Tool for IndexProject {
             let source = format!("lib:{}", lib_name);
             crate::embed::index::build_library_index(&root, &lib_path, &source, force).await?;
 
+            // Read current version from lockfile and write back
+            let versions = crate::library::versions::resolve_dependency_versions(&root);
+            let current_version = crate::library::versions::find_version(&versions, lib_name);
+            if current_version.is_none() {
+                tracing::debug!(
+                    "version tracking not available for library '{}' — unsupported lockfile ecosystem",
+                    lib_name
+                );
+            }
+
             {
                 let mut inner = ctx.agent.inner.write().await;
-                let project = inner.active_project.as_mut().unwrap();
+                let project = inner.active_project_mut().ok_or_else(|| {
+                    crate::tools::RecoverableError::with_hint(
+                        "No active project. Use activate_project first.",
+                        "Call activate_project(\"/path/to/project\") to set the active project.",
+                    )
+                })?;
                 if let Some(entry) = project.library_registry.lookup_mut(lib_name) {
                     entry.indexed = true;
+                    if let Some(ver) = &current_version {
+                        entry.version = Some(ver.clone());
+                        entry.version_indexed = Some(ver.clone());
+                        entry.nudge_dismissed = false;
+                    }
                 }
                 let registry_path = project.root.join(".codescout").join("libraries.json");
                 project.library_registry.save(&registry_path)?;
+            }
+
+            // Write version_indexed to lib_meta table
+            if let Some(ver) = &current_version {
+                let ver2 = ver.clone();
+                let root2 = root.clone();
+                let lib_name2 = lib_name.to_string();
+                tokio::task::spawn_blocking(move || {
+                    let lib_conn =
+                        crate::embed::index::open_lib_db(&root2, &lib_name2)?;
+                    lib_conn.execute(
+                        "INSERT OR REPLACE INTO lib_meta (key, value) VALUES ('version_indexed', ?)",
+                        rusqlite::params![ver2],
+                    )?;
+                    anyhow::Ok(())
+                })
+                .await??;
             }
 
             let source2 = source.clone();
@@ -425,7 +506,7 @@ impl Tool for IndexStatus {
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         let (root, model, drift_enabled) = {
             let inner = ctx.agent.inner.read().await;
-            let p = inner.active_project.as_ref().ok_or_else(|| {
+            let p = inner.active_project().ok_or_else(|| {
                 super::RecoverableError::with_hint(
                     "No active project. Use activate_project first.",
                     "Call activate_project(\"/path/to/project\") to set the active project.",
@@ -438,7 +519,7 @@ impl Tool for IndexStatus {
             )
         };
 
-        let db_path = crate::embed::index::db_path(&root);
+        let db_path = crate::embed::index::project_db_path(&root);
         if !db_path.exists() {
             return Ok(json!({
                 "indexed": false,
@@ -600,6 +681,12 @@ impl Tool for IndexStatus {
                     result["indexing"] = json!({ "status": "failed", "error": e });
                 }
             }
+        }
+
+        // Append per-library indexing states (non-idle only)
+        let lib_states = ctx.agent.library_states_summary();
+        if !lib_states.is_empty() {
+            result["libraries"] = serde_json::to_value(&lib_states)?;
         }
 
         Ok(result)
@@ -830,6 +917,7 @@ mod tests {
             end_line: 1,
             file_hash: "abc".to_string(),
             source: "project".to_string(),
+            project_id: "root".to_string(),
         };
         index::insert_chunk(&conn, &chunk, &[0.1, 0.2, 0.3]).unwrap();
         index::upsert_file_hash(&conn, "test.rs", "abc", None).unwrap();
@@ -974,6 +1062,16 @@ mod tests {
         assert_eq!(schema["properties"]["include_memories"]["type"], "boolean");
     }
 
+    #[test]
+    fn semantic_search_schema_has_project() {
+        let schema = SemanticSearch.input_schema();
+        let props = schema["properties"].as_object().unwrap();
+        assert!(
+            props.contains_key("project"),
+            "schema should have project param"
+        );
+    }
+
     #[tokio::test]
     async fn index_status_includes_by_source() {
         let (dir, ctx) = project_ctx().await;
@@ -988,6 +1086,7 @@ mod tests {
             end_line: 1,
             file_hash: "abc".to_string(),
             source: "project".to_string(),
+            project_id: "root".to_string(),
         };
         index::insert_chunk(&conn, &chunk, &[0.1, 0.2, 0.3]).unwrap();
         index::upsert_file_hash(&conn, "test.rs", "abc", None).unwrap();
@@ -1115,7 +1214,7 @@ mod tests {
         let (_dir, ctx) = drift_enabled_ctx().await;
         let root = {
             let inner = ctx.agent.inner.read().await;
-            inner.active_project.as_ref().unwrap().root.clone()
+            inner.active_project().unwrap().root.clone()
         };
         let conn = crate::embed::index::open_db(&root).unwrap();
         crate::embed::index::upsert_drift_report(&conn, "a.rs", 0.5, 0.8, Some("fn x()"), 1, 0)
@@ -1138,7 +1237,7 @@ mod tests {
         let (_dir, ctx) = drift_enabled_ctx().await;
         let root = {
             let inner = ctx.agent.inner.read().await;
-            inner.active_project.as_ref().unwrap().root.clone()
+            inner.active_project().unwrap().root.clone()
         };
         let conn = crate::embed::index::open_db(&root).unwrap();
         crate::embed::index::upsert_drift_report(&conn, "a.rs", 0.5, 0.8, None, 1, 0).unwrap();
@@ -1408,5 +1507,40 @@ mod tests {
             keys.len() - 1,
             "content must be the last field, got key order: {keys:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn semantic_search_uses_scope_for_library_search() {
+        // Scope "lib:nonexistent" should return a RecoverableError (not a panic or fatal error).
+        // Since issue #5, search_multi_db validates the scope against the registry, so an
+        // unregistered library name returns a RecoverableError before any embedder call.
+        let (_dir, ctx) = project_ctx().await;
+        let tool = SemanticSearch;
+        let result = tool
+            .call(
+                json!({"query": "runtime", "scope": "lib:nonexistent"}),
+                &ctx,
+            )
+            .await;
+        // Acceptable outcomes:
+        // 1. RecoverableError about unregistered library name
+        // 2. RecoverableError about missing embedder / model config
+        // A plain anyhow error from source_filter/search_scoped code paths would be a regression.
+        match &result {
+            Ok(val) => {
+                assert!(val["total"].as_u64().unwrap_or(0) == 0);
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(
+                    msg.contains("model")
+                        || msg.contains("embed")
+                        || msg.contains("project")
+                        || msg.contains("not registered")
+                        || msg.contains("registered"),
+                    "unexpected error (not embedder or registry-related): {msg}"
+                );
+            }
+        }
     }
 }

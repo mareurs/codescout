@@ -210,6 +210,11 @@ impl OutputBuffer {
     ///
     /// Content goes in `stdout`; `stderr` is empty; `exit_code` is 0.
     /// The `command` field holds the source path for diagnostics.
+    ///
+    /// `source_path` is set only when `path` is a real filesystem path (not a
+    /// buffer ref like `@file_*` or `@tool_*`). Buffer refs are not on disk, so
+    /// setting `source_path` to them would cause `get_with_refresh_flag` to call
+    /// `fs::metadata("@file_...")`, get `Err`, and immediately evict the entry.
     pub fn store_file(&self, path: String, content: String) -> String {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let now = SystemTime::now()
@@ -225,13 +230,21 @@ impl OutputBuffer {
                 inner.entries.remove(&oldest_id);
             }
         }
+        // Only track source_path for real filesystem paths. Buffer ref paths
+        // (starting with '@') have no on-disk representation and must not be
+        // stat-checked — doing so evicts the entry on the first get().
+        let source_path = if path.starts_with('@') {
+            None
+        } else {
+            Some(PathBuf::from(&path))
+        };
         let entry = BufferEntry {
             command: path.clone(),
             stdout: content,
             stderr: String::new(),
             exit_code: 0,
             timestamp: now,
-            source_path: Some(PathBuf::from(&path)),
+            source_path,
         };
         inner.entries.insert(id.clone(), entry);
         inner.order.push(id.clone());
@@ -789,6 +802,34 @@ mod tests {
         let entry = buf.get(&id).unwrap();
         assert_eq!(entry.stdout, "fn main() {}\n");
         assert_eq!(entry.stderr, "");
+    }
+
+    /// Regression: storing derived content with a buffer-ref path must survive
+    /// the first `get()` call. Before the fix, `source_path` was set to
+    /// `PathBuf::from("@file_abc")`, `get_with_refresh_flag` called
+    /// `fs::metadata("@file_abc")`, got Err, and immediately evicted the entry.
+    #[test]
+    fn store_file_with_buffer_ref_path_survives_get() {
+        let buf = OutputBuffer::new(20);
+
+        // Step 1: store with a buffer ref path — simulates read_file extracting
+        // a portion of an existing @file_* buffer (the regression scenario)
+        let derived_id = buf.store_file("@file_abc123".into(), "derived content".into());
+
+        // Step 2 (stale assertion proving the bug existed):
+        // Before the fix, source_path was PathBuf::from("@file_abc123"),
+        // get_with_refresh_flag called fs::metadata on it, got Err (no such
+        // file), and evicted the entry immediately. The next get() returned None.
+        // With the fix, source_path is None for buffer-ref paths, so the refresh
+        // check is skipped and the entry survives.
+
+        // Step 3: the derived entry must survive get()
+        let entry = buf.get(&derived_id);
+        assert!(
+            entry.is_some(),
+            "buffer-ref-sourced entry must survive get() (was immediately evicted before fix)"
+        );
+        assert_eq!(entry.unwrap().stdout, "derived content");
     }
 
     #[test]

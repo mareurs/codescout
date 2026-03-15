@@ -30,6 +30,250 @@ pub fn db_path(project_root: &Path) -> PathBuf {
     project_root.join(".codescout").join("embeddings.db")
 }
 
+/// Path to the project embedding database (new layout).
+pub fn project_db_path(project_root: &Path) -> PathBuf {
+    project_root
+        .join(".codescout")
+        .join("embeddings")
+        .join("project.db")
+}
+
+/// Path to a library's embedding database.
+pub fn lib_db_path(project_root: &Path, lib_name: &str) -> PathBuf {
+    project_root
+        .join(".codescout")
+        .join("embeddings")
+        .join("lib")
+        .join(format!("{}.db", sanitize_lib_name(lib_name)))
+}
+
+/// Sanitize a library name for use as a filename.
+/// Replaces `/` and `\` with `--`, always lowercases for cross-platform consistency.
+fn sanitize_lib_name(name: &str) -> String {
+    let s = name.replace(['/', '\\'], "--");
+    s.to_lowercase()
+}
+
+/// Migrate from old single-DB layout to new embeddings/ directory layout.
+/// Called from `open_db` before opening the connection.
+///
+/// Old: `.codescout/embeddings.db`
+/// New: `.codescout/embeddings/project.db` + `.codescout/embeddings/lib/`
+pub fn maybe_migrate_db_layout(project_root: &Path) -> Result<()> {
+    let old_path = db_path(project_root); // .codescout/embeddings.db
+    let new_path = project_db_path(project_root);
+
+    // Already migrated or no old DB — nothing to do
+    if new_path.exists() || !old_path.exists() {
+        // Ensure lib/ directory exists regardless
+        let lib_dir = project_root.join(".codescout/embeddings/lib");
+        if !lib_dir.exists() {
+            std::fs::create_dir_all(&lib_dir)?;
+        }
+        return Ok(());
+    }
+
+    tracing::info!("Migrating embedding storage to new layout...");
+
+    // Create new directory structure
+    std::fs::create_dir_all(new_path.parent().unwrap())?;
+    std::fs::create_dir_all(project_root.join(".codescout/embeddings/lib"))?;
+
+    // Rename old DB to new location
+    std::fs::rename(&old_path, &new_path)?;
+
+    tracing::info!(
+        "Migration complete: {} → {}",
+        old_path.display(),
+        new_path.display()
+    );
+
+    // Extract any library chunks (source LIKE 'lib:%') into per-library DBs
+    extract_library_chunks_from_project_db(project_root)?;
+
+    Ok(())
+}
+
+/// Extract all `lib:*`-tagged chunks from project.db into per-library DBs.
+///
+/// For each distinct `lib:<name>` source found in project.db:
+///   1. Copy the chunks + embeddings to `.codescout/embeddings/lib/<name>.db`
+///   2. Delete those rows from project.db
+///   3. VACUUM project.db to reclaim space
+///
+/// This is a one-time migration step called from `maybe_migrate_db_layout`.
+fn extract_library_chunks_from_project_db(project_root: &Path) -> Result<()> {
+    let proj_path = project_db_path(project_root);
+    let conn = Connection::open(&proj_path)
+        .with_context(|| format!("opening project.db at {}", proj_path.display()))?;
+
+    // Find all distinct lib:* sources present in project.db
+    let mut stmt = conn.prepare("SELECT DISTINCT source FROM chunks WHERE source LIKE 'lib:%'")?;
+    let sources: Vec<String> = stmt
+        .query_map([], |r| r.get(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    if sources.is_empty() {
+        return Ok(());
+    }
+
+    tracing::info!(
+        "Extracting {} library source(s) from project.db",
+        sources.len()
+    );
+
+    for source in &sources {
+        // Strip the "lib:" prefix to get the library name
+        let lib_name = source.strip_prefix("lib:").unwrap_or(source.as_str());
+        let lib_path = lib_db_path(project_root, lib_name);
+        if let Some(parent) = lib_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        copy_chunks_to_lib_db(&conn, &lib_path, source).with_context(|| {
+            format!(
+                "copying chunks for source '{source}' to {}",
+                lib_path.display()
+            )
+        })?;
+    }
+
+    // Delete all lib:* chunks from project.db
+    conn.execute("DELETE FROM chunks WHERE source LIKE 'lib:%'", [])?;
+    // Cascading delete for embeddings: chunk_embeddings rows whose rowid no
+    // longer matches any chunk.id.  Plain blob table — no FK cascade — so we
+    // delete orphans explicitly.
+    conn.execute(
+        "DELETE FROM chunk_embeddings WHERE rowid NOT IN (SELECT id FROM chunks)",
+        [],
+    )?;
+    conn.execute_batch("VACUUM")?;
+
+    tracing::info!("Library chunk extraction complete");
+    Ok(())
+}
+
+/// Create a library DB at `lib_path` (with the standard schema + a `lib_meta`
+/// table) and copy all chunks + embeddings for `source` from `src_conn`.
+fn copy_chunks_to_lib_db(src_conn: &Connection, lib_path: &Path, source: &str) -> Result<()> {
+    use rusqlite::OptionalExtension;
+    let lib_conn = Connection::open(lib_path)?;
+    lib_conn.busy_timeout(std::time::Duration::from_secs(5))?;
+
+    // Create the same schema as project.db
+    lib_conn.execute_batch(
+        "
+        PRAGMA journal_mode = WAL;
+
+        CREATE TABLE IF NOT EXISTS chunks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_path TEXT NOT NULL,
+            language TEXT NOT NULL,
+            content TEXT NOT NULL,
+            start_line INTEGER NOT NULL,
+            end_line INTEGER NOT NULL,
+            file_hash TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'project'
+        );
+        CREATE TABLE IF NOT EXISTS chunk_embeddings (
+            rowid INTEGER PRIMARY KEY,
+            embedding BLOB NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS files (
+            path TEXT PRIMARY KEY,
+            hash TEXT NOT NULL,
+            mtime INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS lib_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );",
+    )?;
+
+    // Collect all chunk IDs for this source — query by source, then read each
+    // row by PK to avoid cursor issues during the insert loop.
+    let mut id_stmt = src_conn.prepare("SELECT id FROM chunks WHERE source = ?1")?;
+    let ids: Vec<i64> = id_stmt
+        .query_map([source], |r| r.get(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    lib_conn.execute_batch("BEGIN")?;
+    for id in &ids {
+        // Read the full chunk row by PK
+        let row = src_conn.query_row(
+            "SELECT file_path, language, content, start_line, end_line, file_hash, source \
+             FROM chunks WHERE id = ?1",
+            [id],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, i64>(4)?,
+                    r.get::<_, String>(5)?,
+                    r.get::<_, String>(6)?,
+                ))
+            },
+        );
+        let (file_path, language, content, start_line, end_line, file_hash, src_tag) = match row {
+            Ok(r) => r,
+            Err(rusqlite::Error::QueryReturnedNoRows) => continue,
+            Err(e) => return Err(e.into()),
+        };
+
+        // Read the corresponding embedding blob (may not exist for old rows)
+        let embedding: Option<Vec<u8>> = src_conn
+            .query_row(
+                "SELECT embedding FROM chunk_embeddings WHERE rowid = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()
+            .with_context(|| format!("reading embedding for chunk id={id}"))?;
+
+        // Insert chunk, capturing the new rowid for the embedding
+        lib_conn.execute(
+            "INSERT INTO chunks \
+             (file_path, language, content, start_line, end_line, file_hash, source) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![file_path, language, content, start_line, end_line, file_hash, src_tag],
+        )?;
+        let new_rowid = lib_conn.last_insert_rowid();
+
+        if let Some(blob) = embedding {
+            lib_conn.execute(
+                "INSERT INTO chunk_embeddings (rowid, embedding) VALUES (?1, ?2)",
+                params![new_rowid, blob],
+            )?;
+        }
+    }
+    lib_conn.execute_batch("COMMIT")?;
+
+    tracing::debug!(
+        "Copied {} chunk(s) for source '{}' → {}",
+        ids.len(),
+        source,
+        lib_path.display()
+    );
+    Ok(())
+}
+
+/// Fallback for users who had library chunks stored without a `source` tag.
+/// For now this is a no-op stub — most users won't be in this state.
+#[allow(dead_code)]
+fn extract_by_file_path_fallback(project_root: &Path, _conn: &Connection) -> Result<()> {
+    // Check if libraries.json exists; if not, nothing to do.
+    let libs_json = project_root.join(".codescout/libraries.json");
+    if !libs_json.exists() {
+        return Ok(());
+    }
+    // Full implementation deferred: users with untagged library chunks will
+    // need to re-index their libraries after the migration.
+    Ok(())
+}
+
 /// Open (or create) the embedding database and apply the schema.
 /// Register sqlite-vec globally so every SQLite connection in this process
 /// gets `vec_distance_cosine`, `vec_f32`, and the `vec0` virtual table module.
@@ -59,7 +303,10 @@ pub(crate) fn init_sqlite_vec() {
 }
 
 pub fn open_db(project_root: &Path) -> Result<Connection> {
-    let path = db_path(project_root);
+    // Migrate from old layout if needed (no-op when already on new layout)
+    maybe_migrate_db_layout(project_root)?;
+
+    let path = project_db_path(project_root);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -134,8 +381,72 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
         conn.execute_batch("ALTER TABLE chunks ADD COLUMN source TEXT NOT NULL DEFAULT 'project'")?;
     }
 
+    // Migration: add project_id column (workspace multi-project support)
+    let has_project_id: bool = conn
+        .prepare("SELECT project_id FROM chunks LIMIT 0")
+        .is_ok();
+    if !has_project_id {
+        conn.execute(
+            "ALTER TABLE chunks ADD COLUMN project_id TEXT NOT NULL DEFAULT 'root'",
+            [],
+        )?;
+    }
+
     maybe_migrate_to_vec0(&conn)?;
 
+    Ok(conn)
+}
+
+/// Open (or create) the embedding database for a specific library.
+pub fn open_lib_db(project_root: &Path, lib_name: &str) -> Result<Connection> {
+    let path = lib_db_path(project_root, lib_name);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    init_sqlite_vec();
+    let conn = Connection::open(&path)?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+
+    conn.execute_batch(
+        "
+        PRAGMA journal_mode = WAL;
+
+        CREATE TABLE IF NOT EXISTS chunks (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_path  TEXT NOT NULL,
+            language   TEXT NOT NULL,
+            content    TEXT NOT NULL,
+            start_line INTEGER NOT NULL,
+            end_line   INTEGER NOT NULL,
+            file_hash  TEXT NOT NULL,
+            source     TEXT NOT NULL DEFAULT 'project'
+        );
+
+        CREATE TABLE IF NOT EXISTS chunk_embeddings (
+            rowid     INTEGER PRIMARY KEY,
+            embedding BLOB NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS files (
+            path  TEXT PRIMARY KEY,
+            hash  TEXT NOT NULL,
+            mtime INTEGER
+        );
+
+        CREATE TABLE IF NOT EXISTS meta (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS lib_meta (
+            key   TEXT PRIMARY KEY,
+            value TEXT
+        );
+    ",
+    )?;
+
+    maybe_migrate_to_vec0(&conn)?;
     Ok(conn)
 }
 
@@ -467,8 +778,8 @@ pub fn file_mtime(path: &Path) -> Result<i64> {
 /// Insert a chunk and its embedding into the database.
 pub fn insert_chunk(conn: &Connection, chunk: &CodeChunk, embedding: &[f32]) -> Result<i64> {
     conn.execute(
-        "INSERT INTO chunks (file_path, language, content, start_line, end_line, file_hash, source)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO chunks (file_path, language, content, start_line, end_line, file_hash, source, project_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             chunk.file_path,
             chunk.language,
@@ -477,6 +788,7 @@ pub fn insert_chunk(conn: &Connection, chunk: &CodeChunk, embedding: &[f32]) -> 
             chunk.end_line,
             chunk.file_hash,
             chunk.source,
+            chunk.project_id,
         ],
     )?;
     let row_id = conn.last_insert_rowid();
@@ -630,13 +942,6 @@ fn is_vec0_active(conn: &Connection) -> bool {
     active
 }
 
-/// Scoped cosine similarity search with optional source filtering.
-///
-/// `source_filter`:
-///   - `None` → all sources (no filter)
-///   - `Some("project")` → only project chunks
-///   - `Some("libraries")` → all non-project chunks
-///   - `Some("lib:<name>")` → only chunks from that specific library
 pub fn search_scoped(
     conn: &Connection,
     query_embedding: &[f32],
@@ -666,12 +971,14 @@ pub fn search_scoped(
             end_line: row.get(4)?,
             source: row.get(5)?,
             score,
+            project_id: row.get::<_, Option<String>>(7)?.unwrap_or_default(),
         })
     };
 
     // Common SELECT with sqlite-vec distance. ORDER BY + LIMIT pushed to SQLite.
     let sel = "SELECT c.file_path, c.language, c.content, c.start_line, c.end_line, c.source, \
-               COALESCE(vec_distance_cosine(vec_f32(ce.embedding), vec_f32(?1)), 1.0) AS distance \
+               COALESCE(vec_distance_cosine(vec_f32(ce.embedding), vec_f32(?1)), 1.0) AS distance, \
+               c.project_id \
                FROM chunks c JOIN chunk_embeddings ce ON c.id = ce.rowid";
 
     match source_filter {
@@ -702,9 +1009,6 @@ pub fn search_scoped(
     }
 }
 
-/// KNN search via vec0 virtual table. Called by `search_scoped` when the
-/// table has been migrated. `ORDER BY + LIMIT` must live inside the vec0
-/// subquery — this is a vec0 requirement, not a SQL convention.
 fn search_scoped_vec0(
     conn: &Connection,
     query_embedding: &[f32],
@@ -729,6 +1033,7 @@ fn search_scoped_vec0(
             end_line: row.get(4)?,
             source: row.get(5)?,
             score,
+            project_id: row.get::<_, Option<String>>(7)?.unwrap_or_default(),
         })
     };
 
@@ -755,12 +1060,12 @@ fn search_scoped_vec0(
 
     let sel_exact = format!(
         "SELECT c.file_path, c.language, c.content, c.start_line, c.end_line, c.source, \
-         COALESCE(knn.distance, 1.0) AS distance \
+         COALESCE(knn.distance, 1.0) AS distance, c.project_id \
          FROM chunks c JOIN ({knn_exact}) knn ON c.id = knn.rowid"
     );
     let sel_over = format!(
         "SELECT c.file_path, c.language, c.content, c.start_line, c.end_line, c.source, \
-         COALESCE(knn.distance, 1.0) AS distance \
+         COALESCE(knn.distance, 1.0) AS distance, c.project_id \
          FROM chunks c JOIN ({knn_over}) knn ON c.id = knn.rowid"
     );
 
@@ -791,6 +1096,115 @@ fn search_scoped_vec0(
             Ok(rows)
         }
     }
+}
+
+pub fn search_multi_db(
+    project_root: &Path,
+    query_embedding: &[f32],
+    limit: usize,
+    scope: &crate::library::scope::Scope,
+    library_registry: &crate::library::registry::LibraryRegistry,
+    project_filter: Option<&str>,
+) -> Result<Vec<SearchResult>> {
+    let mut db_paths: Vec<PathBuf> = Vec::new();
+
+    match scope {
+        crate::library::scope::Scope::Project => {
+            db_paths.push(project_db_path(project_root));
+        }
+        crate::library::scope::Scope::Library(name) => {
+            if library_registry.lookup(name).is_none() {
+                let available: Vec<&str> = library_registry
+                    .all()
+                    .iter()
+                    .map(|e| e.name.as_str())
+                    .collect();
+                let hint = if available.is_empty() {
+                    "No libraries are registered. Use register_library to add one.".to_string()
+                } else {
+                    format!(
+                        "Available libraries: {}. Use one of these as the scope.",
+                        available.join(", ")
+                    )
+                };
+                return Err(crate::tools::RecoverableError::with_hint(
+                    format!("library '{}' is not registered", name),
+                    hint,
+                )
+                .into());
+            }
+            let p = lib_db_path(project_root, name);
+            if p.exists() {
+                db_paths.push(p);
+            }
+        }
+        crate::library::scope::Scope::Libraries => {
+            let lib_dir = project_root.join(".codescout/embeddings/lib");
+            if lib_dir.is_dir() {
+                for entry in std::fs::read_dir(&lib_dir)?.flatten() {
+                    let p = entry.path();
+                    if p.extension().is_some_and(|e| e == "db") {
+                        db_paths.push(p);
+                    }
+                }
+            }
+        }
+        crate::library::scope::Scope::All => {
+            db_paths.push(project_db_path(project_root));
+            let lib_dir = project_root.join(".codescout/embeddings/lib");
+            if lib_dir.is_dir() {
+                for entry in std::fs::read_dir(&lib_dir)?.flatten() {
+                    let p = entry.path();
+                    if p.extension().is_some_and(|e| e == "db") {
+                        db_paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+
+    // When filtering by project we over-fetch from each DB so that after
+    // dropping non-matching rows there are still enough candidates to fill
+    // `limit`. Factor of 4 matches the over-fetch strategy used elsewhere.
+    let fetch_limit = if project_filter.is_some() {
+        (limit * 4).max(20)
+    } else {
+        limit
+    };
+
+    let mut all_results: Vec<SearchResult> = Vec::new();
+
+    for path in &db_paths {
+        if !path.exists() {
+            continue;
+        }
+        match Connection::open(path) {
+            Ok(conn) => match search(&conn, query_embedding, fetch_limit) {
+                Ok(results) => all_results.extend(results),
+                Err(e) => {
+                    tracing::warn!("Search failed for {}: {}", path.display(), e);
+                }
+            },
+            Err(e) => {
+                tracing::warn!("Failed to open {}: {}", path.display(), e);
+            }
+        }
+    }
+
+    // Apply project filter as a post-filter on the merged result set.
+    if let Some(proj) = project_filter {
+        all_results.retain(|r| r.project_id == proj);
+    }
+
+    // Sort by score descending, truncate to limit
+    all_results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    all_results.truncate(limit);
+
+    Ok(all_results)
 }
 
 fn bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
@@ -1003,6 +1417,9 @@ pub async fn build_index(
     // ── Phase 1: Detect changed files ─────────────────────────────────────────
     let change_set = find_changed_files(&conn, project_root, force)?;
 
+    // Discover workspace sub-projects for project_id tagging
+    let discovered_projects = crate::workspace::discover_projects(project_root, 3, &[]);
+
     struct FileWork {
         rel: String,
         hash: String,
@@ -1121,6 +1538,11 @@ pub async fn build_index(
             Vec::new()
         };
         delete_file_chunks(&conn, &result.rel)?;
+        let project_id = crate::workspace::resolve_project_id(
+            &discovered_projects,
+            project_root,
+            Path::new(&result.rel),
+        );
         for (raw, emb) in result.chunks.iter().zip(result.embeddings.iter()) {
             let chunk = CodeChunk {
                 id: None,
@@ -1131,6 +1553,7 @@ pub async fn build_index(
                 end_line: raw.end_line,
                 file_hash: result.hash.clone(),
                 source: "project".into(),
+                project_id: project_id.clone(),
             };
             insert_chunk(&conn, &chunk, emb)?;
         }
@@ -1212,7 +1635,7 @@ pub async fn build_index(
 ///
 /// Similar to `build_index` but walks `library_path` instead of the project root,
 /// and tags all chunks with the given `source` string (e.g. "lib:serde").
-/// The DB is stored under `project_root/.codescout/embeddings.db` (shared with project).
+/// The DB is stored under `project_root/.codescout/embeddings/lib/<name>.db` (per-library).
 pub async fn build_library_index(
     project_root: &Path,
     library_path: &Path,
@@ -1226,8 +1649,9 @@ pub async fn build_library_index(
     use tokio::sync::Semaphore;
     use tokio::task::JoinSet;
 
+    let lib_name = source.strip_prefix("lib:").unwrap_or(source);
     let config = ProjectConfig::load_or_default(project_root)?;
-    let conn = open_db(project_root)?;
+    let conn = open_lib_db(project_root, lib_name)?;
     if !force {
         check_model_mismatch(&conn, &config.embeddings.model)?;
     }
@@ -1360,6 +1784,7 @@ pub async fn build_library_index(
                 end_line: raw.end_line,
                 file_hash: result.hash.clone(),
                 source: source_owned.clone(),
+                project_id: "root".into(),
             };
             insert_chunk(&conn, &chunk, emb)?;
         }
@@ -1931,6 +2356,7 @@ mod tests {
             end_line: 3,
             file_hash: "testhash".to_string(),
             source: "project".into(),
+            project_id: "root".into(),
         }
     }
 
@@ -1944,6 +2370,7 @@ mod tests {
             end_line: 3,
             file_hash: "testhash".to_string(),
             source: source.to_string(),
+            project_id: "root".into(),
         }
     }
 
@@ -2226,6 +2653,23 @@ mod tests {
         let (_dir, conn) = open_test_db();
         let id = insert_chunk(&conn, &dummy_chunk("a.rs", "fn a() {}"), &[0.1, 0.2]).unwrap();
         assert!(id > 0);
+    }
+
+    #[test]
+    fn insert_chunk_stores_project_id() {
+        let (_dir, conn) = open_test_db();
+        let mut chunk = dummy_chunk("src/main.rs", "fn main() {}");
+        chunk.project_id = "my-service".to_string();
+        insert_chunk(&conn, &chunk, &[0.1]).unwrap();
+
+        let pid: String = conn
+            .query_row(
+                "SELECT project_id FROM chunks WHERE file_path = 'src/main.rs'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(pid, "my-service");
     }
 
     #[test]
@@ -3309,5 +3753,260 @@ mod tests {
         // Call twice — should not error
         ensure_memory_anchors(&conn).unwrap();
         ensure_memory_anchors(&conn).unwrap();
+    }
+
+    #[test]
+    fn project_db_path_uses_embeddings_dir() {
+        let root = Path::new("/tmp/test-project");
+        let path = project_db_path(root);
+        assert_eq!(path, root.join(".codescout/embeddings/project.db"));
+    }
+
+    #[test]
+    fn lib_db_path_basic() {
+        let root = Path::new("/tmp/test-project");
+        let path = lib_db_path(root, "tokio");
+        assert_eq!(path, root.join(".codescout/embeddings/lib/tokio.db"));
+    }
+
+    #[test]
+    fn lib_db_path_sanitizes_scoped_npm() {
+        let root = Path::new("/tmp/test-project");
+        let path = lib_db_path(root, "@scope/name");
+        assert_eq!(path, root.join(".codescout/embeddings/lib/@scope--name.db"));
+    }
+
+    #[test]
+    fn lib_db_path_sanitizes_backslash() {
+        let root = Path::new("/tmp/test-project");
+        let path = lib_db_path(root, "foo\\bar");
+        assert_eq!(path, root.join(".codescout/embeddings/lib/foo--bar.db"));
+    }
+
+    #[test]
+    fn migrate_db_layout_renames_old_db() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let old_path = root.join(".codescout/embeddings.db");
+        let new_path = project_db_path(root);
+
+        // Create a real (empty) old-style SQLite DB so the extraction step can open it
+        std::fs::create_dir_all(old_path.parent().unwrap()).unwrap();
+        {
+            let conn = Connection::open(&old_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE chunks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_path TEXT NOT NULL,
+                    language TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    start_line INTEGER NOT NULL,
+                    end_line INTEGER NOT NULL,
+                    file_hash TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'project'
+                );
+                CREATE TABLE chunk_embeddings (rowid INTEGER PRIMARY KEY, embedding BLOB NOT NULL);
+                CREATE TABLE files (path TEXT PRIMARY KEY, hash TEXT NOT NULL, mtime INTEGER);",
+            )
+            .unwrap();
+        }
+
+        assert!(!new_path.exists());
+        maybe_migrate_db_layout(root).unwrap();
+        assert!(new_path.exists());
+        assert!(!old_path.exists());
+        // lib/ directory created
+        assert!(root.join(".codescout/embeddings/lib").is_dir());
+    }
+
+    #[test]
+    fn migrate_db_layout_noop_when_new_layout_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let new_path = project_db_path(root);
+        std::fs::create_dir_all(new_path.parent().unwrap()).unwrap();
+        std::fs::write(&new_path, b"already-migrated").unwrap();
+
+        // Old file also exists (shouldn't be touched)
+        let old_path = root.join(".codescout/embeddings.db");
+        std::fs::write(&old_path, b"old-db").unwrap();
+
+        maybe_migrate_db_layout(root).unwrap();
+        // New file untouched
+        assert_eq!(std::fs::read(&new_path).unwrap(), b"already-migrated");
+    }
+
+    #[test]
+    fn migrate_extracts_library_chunks_to_separate_dbs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        // Create a real old-style DB with project + library chunks
+        let old_path = db_path(root);
+        std::fs::create_dir_all(old_path.parent().unwrap()).unwrap();
+        {
+            let conn = Connection::open(&old_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE chunks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_path TEXT NOT NULL,
+                    language TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    start_line INTEGER NOT NULL,
+                    end_line INTEGER NOT NULL,
+                    file_hash TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'project'
+                );
+                CREATE TABLE chunk_embeddings (rowid INTEGER PRIMARY KEY, embedding BLOB NOT NULL);
+                CREATE TABLE files (path TEXT PRIMARY KEY, hash TEXT NOT NULL, mtime INTEGER);
+                INSERT INTO chunks (file_path, language, content, start_line, end_line, file_hash, source)
+                    VALUES ('src/main.rs', 'rust', 'fn main() {}', 1, 1, 'aaa', 'project');
+                INSERT INTO chunks (file_path, language, content, start_line, end_line, file_hash, source)
+                    VALUES ('[lib:tokio]/src/runtime.rs', 'rust', 'pub struct Runtime', 1, 1, 'bbb', 'lib:tokio');
+                INSERT INTO chunk_embeddings (rowid, embedding) VALUES (1, X'00000000');
+                INSERT INTO chunk_embeddings (rowid, embedding) VALUES (2, X'00000000');",
+            )
+            .unwrap();
+        }
+
+        maybe_migrate_db_layout(root).unwrap();
+
+        // project.db should only have the project chunk
+        let proj_conn = Connection::open(project_db_path(root)).unwrap();
+        let count: i64 = proj_conn
+            .query_row(
+                "SELECT COUNT(*) FROM chunks WHERE source = 'project'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        let lib_count: i64 = proj_conn
+            .query_row(
+                "SELECT COUNT(*) FROM chunks WHERE source LIKE 'lib:%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(lib_count, 0);
+
+        // tokio.db should have the library chunk
+        let lib_path = lib_db_path(root, "tokio");
+        assert!(lib_path.exists(), "lib/tokio.db should exist");
+        let lib_conn = Connection::open(&lib_path).unwrap();
+        let lib_chunk_count: i64 = lib_conn
+            .query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(lib_chunk_count, 1);
+    }
+
+    #[test]
+    fn open_db_uses_new_embeddings_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let conn = open_db(root).unwrap();
+        // Verify the DB is at the new location
+        assert!(
+            project_db_path(root).exists(),
+            "project.db should be at the new location"
+        );
+        // Old location should not exist (for a fresh project)
+        assert!(
+            !db_path(root).exists(),
+            "old embeddings.db should not exist for a fresh project"
+        );
+        drop(conn);
+    }
+
+    #[test]
+    fn open_lib_db_creates_with_lib_meta_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let conn = open_lib_db(root, "tokio").unwrap();
+        // lib_meta table should exist
+        conn.execute(
+            "INSERT INTO lib_meta (key, value) VALUES ('test', 'ok')",
+            [],
+        )
+        .unwrap();
+        let val: String = conn
+            .query_row("SELECT value FROM lib_meta WHERE key = 'test'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(val, "ok");
+        // Standard tables should also exist
+        conn.execute(
+            "INSERT INTO chunks (file_path, language, content, start_line, end_line, file_hash, source) VALUES ('test.rs', 'rust', 'code', 1, 1, 'hash', 'lib:tokio')",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn search_multi_db_missing_lib_graceful() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // Create project DB (needed for directory structure)
+        let _conn = open_db(root).unwrap();
+
+        let registry = crate::library::registry::LibraryRegistry::new();
+        let query_emb = vec![0.0f32; 384]; // dummy embedding
+
+        // Search for a non-existent library — should return a RecoverableError, not Ok
+        let scope = crate::library::scope::Scope::Library("nonexistent".to_string());
+        let err = search_multi_db(root, &query_emb, 10, &scope, &registry, None).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("nonexistent"),
+            "error should name the missing library, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn search_multi_db_project_scope_uses_project_db() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let _conn = open_db(root).unwrap();
+
+        let registry = crate::library::registry::LibraryRegistry::new();
+        let query_emb = vec![0.0f32; 384];
+
+        let scope = crate::library::scope::Scope::Project;
+        // Should succeed (empty results, no embeddings in the test DB)
+        let results = search_multi_db(root, &query_emb, 10, &scope, &registry, None).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn open_db_adds_project_id_column() {
+        let dir = tempdir().unwrap();
+        let conn = open_db(dir.path()).unwrap();
+        let has_col: bool = conn
+            .prepare("SELECT project_id FROM chunks LIMIT 0")
+            .is_ok();
+        assert!(has_col, "chunks table should have project_id column");
+    }
+
+    #[test]
+    fn existing_chunks_get_default_root_project_id() {
+        let dir = tempdir().unwrap();
+        let conn = open_db(dir.path()).unwrap();
+
+        conn.execute(
+            "INSERT INTO chunks (file_path, start_line, end_line, content, language, file_hash, source)
+         VALUES ('src/main.rs', 1, 10, 'fn main() {}', 'rust', 'abc123', 'project')",
+            [],
+        )
+        .unwrap();
+
+        let pid: String = conn
+            .query_row(
+                "SELECT project_id FROM chunks WHERE file_path = 'src/main.rs'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(pid, "root");
     }
 }

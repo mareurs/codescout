@@ -190,6 +190,7 @@ fn canonicalize_write_target(path: &Path) -> PathBuf {
 /// - Relative paths are resolved against `project_root` (if available).
 /// - Absolute paths are used as-is.
 /// - The resolved path is checked against the deny-list.
+/// - Paths inside registered library roots are always allowed (read-only).
 pub fn validate_read_path(
     raw: &str,
     project_root: Option<&Path>,
@@ -326,7 +327,7 @@ pub fn check_tool_access(tool_name: &str, config: &PathSecurityConfig) -> Result
             }
         }
         "create_file" | "edit_file" | "replace_symbol" | "insert_code" | "rename_symbol"
-        | "remove_symbol" => {
+        | "remove_symbol" | "register_library" => {
             if !config.file_write_enabled {
                 bail!(
                     "File write tools are disabled. Set security.file_write_enabled = true in .codescout/project.toml to enable."
@@ -659,6 +660,28 @@ mod tests {
         }
     }
 
+    #[test]
+    fn validate_read_path_accepts_library_paths() {
+        let dir = tempdir().unwrap();
+        let lib_root = dir.path().join("libs/tokio");
+        std::fs::create_dir_all(&lib_root).unwrap();
+        let lib_file = lib_root.join("src/runtime.rs");
+        std::fs::create_dir_all(lib_file.parent().unwrap()).unwrap();
+        std::fs::write(&lib_file, "// runtime").unwrap();
+
+        let config = PathSecurityConfig {
+            library_paths: vec![lib_root.clone()],
+            ..Default::default()
+        };
+        let result = validate_read_path(
+            lib_file.to_str().unwrap(),
+            Some(Path::new("/tmp/other_project")),
+            &config,
+        );
+        // Path is inside a registered library root — should succeed.
+        assert!(result.is_ok());
+    }
+
     // ── Write validation ─────────────────────────────────────────────────
 
     #[test]
@@ -917,6 +940,7 @@ mod tests {
             "replace_symbol",
             "insert_code",
             "rename_symbol",
+            "register_library",
         ] {
             assert!(
                 check_tool_access(tool, &config).is_err(),
@@ -924,6 +948,21 @@ mod tests {
                 tool
             );
         }
+    }
+
+    #[test]
+    fn register_library_disabled_when_file_write_false() {
+        let mut config = PathSecurityConfig::default();
+        config.file_write_enabled = false;
+        assert!(
+            check_tool_access("register_library", &config).is_err(),
+            "register_library should be blocked when file_write_enabled = false"
+        );
+        config.file_write_enabled = true;
+        assert!(
+            check_tool_access("register_library", &config).is_ok(),
+            "register_library should be allowed when file_write_enabled = true"
+        );
     }
 
     #[test]

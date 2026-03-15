@@ -29,6 +29,7 @@
 - [Library Navigation](concepts/library-navigation.md)
 
 - [Memory](concepts/memory.md)
+  - [After Onboarding](concepts/after-onboarding.md)
 
 - [Dashboard](concepts/dashboard.md)
 - [Git Worktrees](concepts/worktrees.md)

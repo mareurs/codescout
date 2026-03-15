@@ -107,10 +107,15 @@ use the right tool. Small shortcuts compound into large context waste.
 
 - `find_symbol(pattern)` — locate by name substring. Accepts `name_path` (e.g.
   `MyStruct/my_method`). Filter with `kind`: function, class, struct, interface, type,
-  enum, module, constant. Pass `include_body=true` to read the implementation.
+  enum, module, constant. Pass `include_body=true` to read the implementation. **Note:** When `path` is
+  explicitly specified, the `scope` parameter is ignored — the explicit path takes precedence. Scope only
+  affects searches when no path is given (or path is `"."`). Pass `scope="lib:<name>"` to search in a
+  registered library.
 - `list_symbols(path)` — symbol tree for file/dir/glob. Pass `include_docs=true` for
   docstrings. Signatures always included. Single-file mode caps at 100 top-level symbols.
-- `find_references(name_path, path)` — find all usages of a symbol.
+- `find_references(name_path, path)` — find all usages of a symbol. **Note:** Scope filtering is limited to
+  references the project's LSP server already knows about. It cannot proactively discover references in
+  unrelated library directories.
 - `goto_definition(path, line)` — jump to definition via LSP. Auto-discovers libraries.
 - `hover(path, line)` — type info and documentation for a symbol at a position.
 
@@ -157,6 +162,7 @@ use the right tool. Small shortcuts compound into large context waste.
   - `action="recall"` — search memories by meaning. Requires `query`. Optional `bucket` filter, `limit`.
   - `action="forget"` — delete a semantic memory. Requires `id` (from recall results).
   - `action="refresh_anchors"` — re-hash anchored files without changing memory content. Use after reviewing a stale memory and confirming it's still accurate. Requires `topic`.
+  - **Multi-project workspaces**: Pass `project: "<id>"` to scope operations to a specific project. Omit to use workspace-level memories. Example: `memory(action: "read", project: "backend", topic: "architecture")` 
 
 ### Project & Libraries
 
@@ -168,8 +174,25 @@ use the right tool. Small shortcuts compound into large context waste.
   - `fresh` — memories with all anchors matching current files
   - `untracked` — memories without anchor sidecars
   When memories are stale, review them and either update the memory content (re-writes anchors) or use `memory(action="refresh_anchors", topic="...")` to acknowledge "still accurate."
-- `list_libraries` — registered libraries and index status. Use `scope="lib:<name>"` in
-  `semantic_search`, `find_symbol`, or `index_project` to target a library.
+- `list_libraries` — registered libraries and index status. Shows version, indexed state,
+  and whether the indexed version differs from the current lockfile version (staleness).
+  Use `scope="lib:<name>"` in `semantic_search`, `find_symbol`, or `index_project` to target a library.
+- `register_library(path, name?, language?)` — manually register an external library.
+  Auto-detects name and language from manifest files (Cargo.toml, package.json, pyproject.toml, go.mod).
+  After registering, use `scope="lib:<name>"` in symbol/search tools, and `index_project(scope="lib:<name>")`
+  for semantic search.
+
+**Library navigation rules:**
+- Once registered, library source code is navigable with all **read-only** tools:
+  `list_symbols`, `find_symbol`, `read_file`, `search_pattern`, `hover`, `goto_definition`.
+- Libraries are **auto-discovered** when `goto_definition` or `hover` resolves to a path
+  outside the project root — the library is registered automatically.
+- Use `scope="lib:<name>"` in `semantic_search` to search library code (requires indexing).
+- Staleness hints appear in `semantic_search` responses when a library's lockfile version
+  differs from the version that was indexed — re-run `index_project(scope="lib:<name>")` to refresh.
+- Use `index_status()` to check indexing progress for all registered libraries.
+- **Write tools** (`edit_file`, `replace_symbol`, `insert_code`, etc.) are **project-only**
+  and will be rejected for library paths.
 
 ### GitHub
 

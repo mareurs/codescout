@@ -21,6 +21,8 @@ pub struct CodeChunk {
     pub file_hash: String,
     /// Source identifier: "project" for project files, "lib:<name>" for libraries
     pub source: String,
+    /// Project identifier within a workspace (e.g. "my-service", "root")
+    pub project_id: String,
 }
 
 /// A ranked result from a semantic search query.
@@ -35,4 +37,6 @@ pub struct SearchResult {
     pub score: f32,
     /// Source identifier: "project" or "lib:<name>"
     pub source: String,
+    /// Project identifier this chunk belongs to (e.g. "mcp-server"). Empty string if unset.
+    pub project_id: String,
 }

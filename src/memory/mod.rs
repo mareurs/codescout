@@ -24,6 +24,18 @@ impl MemoryStore {
         Ok(Self { memories_dir })
     }
 
+    /// Open (or create) a memory store from an explicit directory path.
+    /// Used for per-project routing where the caller has already resolved the directory.
+    pub fn from_dir(memories_dir: PathBuf) -> Result<Self> {
+        std::fs::create_dir_all(&memories_dir)?;
+        Ok(Self { memories_dir })
+    }
+
+    /// Return the directory this store writes into.
+    pub fn dir(&self) -> &Path {
+        &self.memories_dir
+    }
+
     /// Open (or create) the private memory store for a project root.
     /// Private memories are gitignored — not shared with teammates.
     /// Automatically adds `.codescout/private-memories/` to `.gitignore`.

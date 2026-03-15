@@ -266,6 +266,8 @@ struct GatheredContext {
     test_dirs: Vec<String>,
     /// Path to FEATURES.md if found (relative to project root)
     features_md: Option<String>,
+    /// Discovered sub-projects (populated by discover_projects)
+    projects: Vec<crate::workspace::DiscoveredProject>,
 }
 
 /// Read key project files up-front so the onboarding prompt can include them.
@@ -275,7 +277,13 @@ struct GatheredContext {
 /// into the onboarding response causes "⚠ Large MCP response" warnings and
 /// duplicates CLAUDE.md that may already be in the agent's context. The agent
 /// reads these files via `read_file` during Phase 1 exploration.
-fn gather_project_context(root: &std::path::Path) -> GatheredContext {
+///
+/// `projects` is the already-discovered project list from the workspace, passed in
+/// to avoid a redundant `discover_projects` walk (the agent runs it at activation).
+fn gather_project_context(
+    root: &std::path::Path,
+    projects: Vec<crate::workspace::DiscoveredProject>,
+) -> GatheredContext {
     let mut ctx = GatheredContext::default();
 
     // README (try common names — record path but don't read content)
@@ -371,6 +379,10 @@ fn gather_project_context(root: &std::path::Path) -> GatheredContext {
             break;
         }
     }
+
+    // Use the already-discovered project list passed by the caller to avoid
+    // a redundant filesystem walk (discover_projects is run at activation time).
+    ctx.projects = projects;
 
     ctx
 }
@@ -576,9 +588,13 @@ fn build_system_prompt_draft(
     languages: &[String],
     entry_points: &[String],
     project_root: Option<&Path>,
+    projects: Option<&[crate::workspace::DiscoveredProject]>,
+    libraries: &[crate::library::registry::LibraryEntry],
 ) -> String {
     let mut draft = String::new();
     draft.push_str("# Project — Code Explorer Guidance\n\n");
+
+    let projects_slice = projects.unwrap_or(&[]);
 
     // Entry points section
     draft.push_str("## Entry Points\n");
@@ -600,7 +616,34 @@ fn build_system_prompt_draft(
     if !languages.is_empty() {
         draft.push_str(&format!("- This is a {} project\n", languages.join("/")));
     }
-    draft.push_str("- Use specific terms over generic ones (e.g., avoid 'data', 'utils')\n\n");
+    draft.push_str("- Use specific terms over generic ones (e.g., avoid 'data', 'utils')\n");
+    if projects_slice.len() > 1 {
+        draft.push_str(
+            "- **Workspace mode:** always scope `semantic_search` with `project: \"<id>\"` — \
+             broad terms match all projects and return mixed results\n",
+        );
+        for p in projects_slice {
+            let example_term = if p.languages.iter().any(|l| l == "rust") {
+                "key type or trait name"
+            } else if p
+                .languages
+                .iter()
+                .any(|l| l == "typescript" || l == "javascript")
+            {
+                "handler or component name"
+            } else if p.languages.iter().any(|l| l == "python") {
+                "class or function name"
+            } else {
+                "concept specific to this project"
+            };
+            draft.push_str(&format!(
+                "  - `{}`: `semantic_search(\"<{}>\", project: \"{}\")` \
+                 — [fill in good query examples during onboarding]\n",
+                p.id, example_term, p.id
+            ));
+        }
+    }
+    draft.push('\n');
 
     // Language-specific navigation hints — cap at 3 to keep the draft concise
     let hints: Vec<_> = languages
@@ -630,25 +673,139 @@ fn build_system_prompt_draft(
         ));
     }
 
-    // Navigation strategy
-    draft.push_str("## Navigation Strategy\n");
-    draft.push_str("1. `memory(action=\"read\", topic=\"architecture\")` — orient yourself\n");
-    if !entry_points.is_empty() {
-        draft.push_str(&format!(
-            "2. `list_symbols(\"{}\")` — see main structure\n",
-            entry_points[0]
-        ));
+    // Navigation strategy — per-project subsections for multi-project workspaces
+    if projects_slice.len() > 1 {
+        draft.push_str("## Navigation Strategy\n\n");
+        draft.push_str("1. `memory(action=\"read\", topic=\"architecture\")` — orient yourself to the workspace\n");
+        draft.push_str(
+            "2. `semantic_search(\"your concept\")` — find relevant code across projects\n",
+        );
+        draft.push_str(
+            "3. `memory(action=\"recall\", query=\"...\")` — search memories by meaning\n\n",
+        );
+        draft.push_str("**Per-project navigation:**\n\n");
+        for p in projects_slice {
+            let langs = if p.languages.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", p.languages.join(", "))
+            };
+            draft.push_str(&format!("### {}{}\n", p.id, langs));
+            draft.push_str(&format!(
+                "1. `list_symbols(\"{}\")` — [fill in entry point during onboarding]\n",
+                p.relative_root.display()
+            ));
+            draft.push_str(&format!(
+                "2. `semantic_search(\"your concept\", scope=\"project:{}\")` — search within this project\n",
+                p.id
+            ));
+            draft.push_str(&format!(
+                "3. `memory(project: \"{}\", action=\"read\", topic=\"architecture\")` — project-specific knowledge\n\n",
+                p.id
+            ));
+        }
     } else {
-        draft.push_str("2. `list_symbols(\"src/\")` — see main structure\n");
+        draft.push_str("## Navigation Strategy\n");
+        draft.push_str("1. `memory(action=\"read\", topic=\"architecture\")` — orient yourself\n");
+        if !entry_points.is_empty() {
+            draft.push_str(&format!(
+                "2. `list_symbols(\"{}\")` — see main structure\n",
+                entry_points[0]
+            ));
+        } else {
+            draft.push_str("2. `list_symbols(\"src/\")` — see main structure\n");
+        }
+        draft.push_str("3. `semantic_search(\"your concept\")` — find relevant code\n");
+        draft.push_str("4. `find_symbol(\"Name\", include_body=true)` — read implementation\n");
+        draft.push_str(
+            "5. `memory(action=\"recall\", query=\"...\")` — search memories by meaning\n\n",
+        );
     }
-    draft.push_str("3. `semantic_search(\"your concept\")` — find relevant code\n");
-    draft.push_str("4. `find_symbol(\"Name\", include_body=true)` — read implementation\n");
-    draft
-        .push_str("5. `memory(action=\"recall\", query=\"...\")` — search memories by meaning\n\n");
 
     // Project rules — empty section for the LLM to fill from exploration
     draft.push_str("## Project Rules\n");
     draft.push_str("- [Fill from Phase 1 exploration: linting, formatting, commit conventions]\n");
+
+    // Workspace projects table — only for multi-project repos
+    if projects_slice.len() > 1 {
+        draft.push_str("\n## Workspace Projects\n\n");
+        draft.push_str("| Project | Root | Languages | Build |\n");
+        draft.push_str("|---------|------|-----------|-------|\n");
+        for p in projects_slice {
+            draft.push_str(&format!(
+                "| {} | {} | {} | {} |\n",
+                p.id,
+                p.relative_root.display(),
+                p.languages.join(", "),
+                p.manifest.as_deref().unwrap_or("-"),
+            ));
+        }
+        draft.push('\n');
+
+        // Load depends_on from workspace.toml if available
+        if let Some(root) = project_root {
+            let ws_path = crate::config::workspace::workspace_config_path(root);
+            if let Ok(content) = std::fs::read_to_string(&ws_path) {
+                if let Ok(ws) =
+                    toml::from_str::<crate::config::workspace::WorkspaceConfig>(&content)
+                {
+                    let deps: Vec<_> = ws
+                        .projects
+                        .iter()
+                        .filter(|p| !p.depends_on.is_empty())
+                        .collect();
+                    if !deps.is_empty() {
+                        draft.push_str("**Cross-project dependencies:**\n");
+                        for p in deps {
+                            draft.push_str(&format!(
+                                "- {} depends on {}\n",
+                                p.id,
+                                p.depends_on.join(", "),
+                            ));
+                        }
+                        draft.push('\n');
+                    }
+                }
+            }
+        }
+
+        draft.push_str(
+            "Use `project: \"name\"` parameter to scope search/navigation to a specific project.\n\n",
+        );
+
+        draft.push_str(
+            "**Per-project details:** Use `memory(project: \"<id>\", topic: \"architecture\")` \
+             or `memory(project: \"<id>\", topic: \"conventions\")` for project-specific knowledge.\n\n",
+        );
+    }
+
+    // Registered libraries — only included when at least one is registered
+    if !libraries.is_empty() {
+        draft.push_str("\n## Registered Libraries\n\n");
+        for lib in libraries {
+            let status = if lib.indexed {
+                if lib.version.is_some()
+                    && lib.version_indexed.is_some()
+                    && lib.version != lib.version_indexed
+                {
+                    "indexed [stale]"
+                } else {
+                    "indexed"
+                }
+            } else {
+                "not indexed"
+            };
+            draft.push_str(&format!(
+                "- **{}** ({}) — {}\n",
+                lib.name, lib.language, status
+            ));
+        }
+        draft.push_str(
+            "\nUse `scope=\"lib:<name>\"` with `find_symbol`, `list_symbols`, `search_pattern`, \
+             and `semantic_search` to navigate library code. \
+             Run `index_project(scope=\"lib:<name>\")` to enable semantic search for a library.\n",
+        );
+    }
 
     // Auto-inject preferences from semantic memory (best-effort)
     if let Some(root) = project_root {
@@ -795,6 +952,8 @@ impl Tool for Onboarding {
                 .await?;
             let (has_config, has_onboarding_memory, memories, private_memories) = status;
             if has_config && has_onboarding_memory {
+                let per_project_memories = ctx.agent.workspace_project_memories().await;
+
                 let mut message = format!(
                     "Onboarding already performed. Available shared memories: {}. \
                      Use `memory(action=\"read\", topic=...)` to read relevant ones as needed for your current task. \
@@ -808,6 +967,12 @@ impl Tool for Onboarding {
                         private_memories.join(", ")
                     ));
                 }
+                if !per_project_memories.is_empty() {
+                    message.push_str(" Per-project memories (use `project: \"<id>\"` parameter):");
+                    for (id, topics) in &per_project_memories {
+                        message.push_str(&format!(" {}: {};", id, topics.join(", ")));
+                    }
+                }
                 let mut response = json!({
                     "onboarded": true,
                     "has_config": true,
@@ -817,6 +982,13 @@ impl Tool for Onboarding {
                 });
                 if !private_memories.is_empty() {
                     response["private_memories"] = json!(private_memories);
+                }
+                if !per_project_memories.is_empty() {
+                    let map: serde_json::Map<String, serde_json::Value> = per_project_memories
+                        .into_iter()
+                        .map(|(id, topics)| (id, json!(topics)))
+                        .collect();
+                    response["project_memories"] = serde_json::Value::Object(map);
                 }
                 return Ok(response);
             }
@@ -890,6 +1062,7 @@ impl Tool for Onboarding {
                 ignored_paths: Default::default(),
                 security: Default::default(),
                 memory: Default::default(),
+                libraries: Default::default(),
             };
             let toml_str = toml::to_string_pretty(&config)?;
             std::fs::write(&config_path, &toml_str)?;
@@ -898,12 +1071,52 @@ impl Tool for Onboarding {
             false
         };
 
-        // Gather rich context from well-known project files
-        let gathered = gather_project_context(&root);
+        // Gather rich context from well-known project files.
+        // Pass the already-discovered project list from the workspace to avoid a
+        // redundant discover_projects walk (the agent runs it at activation time).
+        let discovered = ctx.agent.discovered_projects().await;
+        let gathered = gather_project_context(&root, discovered);
+
+        // Create workspace.toml for multi-project repos
+        let workspace_config_path = crate::config::workspace::workspace_config_path(&root);
+        if gathered.projects.len() > 1 && !workspace_config_path.exists() {
+            let ws_config = crate::config::workspace::WorkspaceConfig {
+                workspace: crate::config::workspace::WorkspaceSection {
+                    name: root
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unnamed")
+                        .to_string(),
+                    discovery_max_depth: 3,
+                },
+                resources: Default::default(),
+                exclude_projects: vec![],
+                projects: gathered
+                    .projects
+                    .iter()
+                    .map(|p| {
+                        let project_abs = root.join(&p.relative_root);
+                        let depends_on = crate::workspace::infer_depends_on(
+                            &project_abs,
+                            &root,
+                            &gathered.projects,
+                        );
+                        crate::config::workspace::ProjectEntry {
+                            id: p.id.clone(),
+                            root: p.relative_root.to_string_lossy().to_string(),
+                            languages: p.languages.clone(),
+                            depends_on,
+                        }
+                    })
+                    .collect(),
+            };
+            let toml_str = toml::to_string_pretty(&ws_config)?;
+            std::fs::write(&workspace_config_path, &toml_str)?;
+        }
 
         // Probe embedding index status (only opens existing DB, no network)
         let index_status = {
-            let db_path = root.join(".codescout").join("embeddings.db");
+            let db_path = crate::embed::index::project_db_path(&root);
             if db_path.exists() {
                 match crate::embed::index::open_db(&root)
                     .and_then(|conn| crate::embed::index::index_stats(&conn))
@@ -944,6 +1157,32 @@ impl Tool for Onboarding {
             })
             .await?;
 
+        // Write programmatic memories for each sub-project in workspace mode.
+        if gathered.projects.len() > 1 {
+            for project in &gathered.projects {
+                let mem_dir = if project.relative_root == std::path::PathBuf::from(".") {
+                    root.join(".codescout").join("memories")
+                } else {
+                    root.join(".codescout")
+                        .join("projects")
+                        .join(&project.id)
+                        .join("memories")
+                };
+                if let Ok(store) = crate::memory::MemoryStore::from_dir(mem_dir) {
+                    let proj_summary = format!(
+                        "Languages: {}\nRoot: {}\nManifest: {}",
+                        project.languages.join(", "),
+                        project.relative_root.display(),
+                        project.manifest.as_deref().unwrap_or("none"),
+                    );
+                    let _ = store.write("onboarding", &proj_summary);
+                    if let Some(patterns) = build_language_patterns_memory(&project.languages) {
+                        let _ = store.write("language-patterns", &patterns);
+                    }
+                }
+            }
+        }
+
         // Gather protected memory state for the LLM merge flow
         let protected_memories = ctx
             .agent
@@ -972,27 +1211,83 @@ impl Tool for Onboarding {
         }
 
         // Build the onboarding instruction prompt
-        let prompt = crate::prompts::build_onboarding_prompt(
-            &lang_list,
-            &top_level,
-            &key_files,
-            &gathered.ci_files,
-            &gathered.entry_points,
-            &gathered.test_dirs,
-            index_status["ready"].as_bool().unwrap_or(false),
-            index_status["files"].as_u64().unwrap_or(0) as usize,
-            index_status["chunks"].as_u64().unwrap_or(0) as usize,
-        );
+        let is_workspace = gathered.projects.len() > 1;
+        let prompt = crate::prompts::build_onboarding_prompt(&crate::prompts::OnboardingContext {
+            languages: &lang_list,
+            top_level: &top_level,
+            key_files: &key_files,
+            ci_files: &gathered.ci_files,
+            entry_points: &gathered.entry_points,
+            test_dirs: &gathered.test_dirs,
+            index_ready: index_status["ready"].as_bool().unwrap_or(false),
+            index_files: index_status["files"].as_u64().unwrap_or(0) as usize,
+            index_chunks: index_status["chunks"].as_u64().unwrap_or(0) as usize,
+            projects: &gathered.projects,
+            is_workspace,
+        });
 
         // Build the system prompt draft scaffold
-        let system_prompt_draft =
-            build_system_prompt_draft(&lang_list, &gathered.entry_points, Some(&root));
+        let libraries: Vec<crate::library::registry::LibraryEntry> = ctx
+            .agent
+            .library_registry()
+            .await
+            .map(|r| r.all().to_vec())
+            .unwrap_or_default();
+        let system_prompt_draft = build_system_prompt_draft(
+            &lang_list,
+            &gathered.entry_points,
+            Some(&root),
+            Some(&gathered.projects),
+            &libraries,
+        );
+
+        let discovered_projects: Vec<serde_json::Value> = gathered
+            .projects
+            .iter()
+            .map(|p| {
+                serde_json::json!({
+                    "id": p.id,
+                    "root": p.relative_root.to_string_lossy(),
+                    "languages": p.languages,
+                    "manifest": p.manifest,
+                })
+            })
+            .collect();
 
         let features_suggestion = gathered.features_md.is_none().then_some(
             "No FEATURES.md found. Consider creating docs/FEATURES.md to document \
              implemented capabilities — helps agents understand what's already built \
              and avoid re-suggesting existing features.",
         );
+
+        // Per-project protected memory state for workspace mode.
+        let (workspace_mode, per_project_protected) = if gathered.projects.len() > 1 {
+            let protected = ctx
+                .agent
+                .with_project(|p| Ok(p.config.memory.protected.clone()))
+                .await
+                .unwrap_or_default();
+            let mut map = serde_json::Map::new();
+            for project in &gathered.projects {
+                let mem_dir = if project.relative_root == std::path::PathBuf::from(".") {
+                    root.join(".codescout").join("memories")
+                } else {
+                    root.join(".codescout")
+                        .join("projects")
+                        .join(&project.id)
+                        .join("memories")
+                };
+                let project_root = root.join(&project.relative_root);
+                if let Ok(store) = crate::memory::MemoryStore::from_dir(mem_dir.clone()) {
+                    let state =
+                        gather_protected_memory_state(&store, &mem_dir, &project_root, &protected);
+                    map.insert(project.id.clone(), state);
+                }
+            }
+            (true, Some(Value::Object(map)))
+        } else {
+            (false, None)
+        };
 
         Ok(json!({
             "languages": lang_list,
@@ -1012,6 +1307,9 @@ impl Tool for Onboarding {
             "hardware": serde_json::to_value(&hw).unwrap_or(serde_json::Value::Null),
             "model_options": serde_json::to_value(&model_options).unwrap_or(serde_json::Value::Null),
             "protected_memories": protected_memories,
+            "workspace_mode": workspace_mode,
+            "per_project_protected_memories": per_project_protected.unwrap_or(json!(null)),
+            "projects": discovered_projects,
         }))
     }
 
@@ -1046,6 +1344,16 @@ impl Tool for Onboarding {
         }
         if let Some(suggestion) = val["features_suggestion"].as_str() {
             response.push_str(&format!("\n\n> {}", suggestion));
+        }
+
+        // Surface per-project protected memory state in workspace mode
+        if val["workspace_mode"].as_bool().unwrap_or(false) {
+            if let Some(ppm) = val.get("per_project_protected_memories") {
+                if !ppm.is_null() {
+                    response.push_str("\n\n## Per-Project Protected Memories\n\n");
+                    response.push_str(&serde_json::to_string_pretty(ppm).unwrap_or_default());
+                }
+            }
         }
 
         Ok(vec![rmcp::model::Content::text(response)])
@@ -1210,7 +1518,13 @@ fn format_onboarding(result: &Value) -> String {
         .unwrap_or_else(|| "?".to_string());
     let created = result["config_created"].as_bool().unwrap_or(false);
     let config_note = if created { " · config created" } else { "" };
-    format!("[{langs}]{config_note}")
+    let workspace_note = if result["workspace_mode"].as_bool().unwrap_or(false) {
+        let count = result["projects"].as_array().map(|a| a.len()).unwrap_or(0);
+        format!(" · workspace ({count} projects)")
+    } else {
+        String::new()
+    };
+    format!("[{langs}]{config_note}{workspace_note}")
 }
 
 fn format_run_command(result: &Value) -> String {
@@ -1832,12 +2146,44 @@ fn truncate_output(output: &str, limit: usize) -> (String, bool) {
         (output.to_string(), false)
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::agent::Agent;
     use crate::tools::command_summary::BUFFER_QUERY_INLINE_CAP;
+    #[test]
+    fn system_prompt_draft_includes_per_project_memory_refs() {
+        use std::path::PathBuf;
+        let projects = vec![
+            crate::workspace::DiscoveredProject {
+                id: "api".to_string(),
+                relative_root: PathBuf::from("api"),
+                languages: vec!["rust".to_string()],
+                manifest: Some("Cargo.toml".to_string()),
+            },
+            crate::workspace::DiscoveredProject {
+                id: "web".to_string(),
+                relative_root: PathBuf::from("web"),
+                languages: vec!["typescript".to_string()],
+                manifest: Some("package.json".to_string()),
+            },
+        ];
+        let draft = build_system_prompt_draft(
+            &["rust".to_string(), "typescript".to_string()],
+            &[],
+            None,
+            Some(&projects),
+            &Vec::new(),
+        );
+        assert!(
+            draft.contains("memory(project:"),
+            "should reference per-project memories"
+        );
+        assert!(draft.contains("api"), "should mention api project");
+        assert!(draft.contains("web"), "should mention web project");
+    }
+
+    use std::path::PathBuf;
     use std::sync::Arc;
     use tempfile::tempdir;
 
@@ -1863,6 +2209,38 @@ mod tests {
                 progress: None,
             },
         )
+    }
+
+    /// Like project_ctx() but uses the given directory as the project root.
+    /// Caller is responsible for keeping the tempdir alive.
+    async fn project_ctx_at(root: &std::path::Path) -> ToolContext {
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        std::fs::write(root.join("main.rs"), "fn main() {}").unwrap();
+        let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+        ToolContext {
+            agent,
+            lsp: lsp(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+        }
+    }
+
+    /// Create a two-project workspace layout in the given directory.
+    /// Returns (api_dir, web_dir).
+    fn setup_workspace_dirs(root: &std::path::Path) -> (PathBuf, PathBuf) {
+        let api_dir = root.join("api");
+        std::fs::create_dir_all(api_dir.join("src")).unwrap();
+        std::fs::write(api_dir.join("Cargo.toml"), "[package]\nname = \"api\"").unwrap();
+        std::fs::write(api_dir.join("src/main.rs"), "fn main() {}").unwrap();
+        let web_dir = root.join("web");
+        std::fs::create_dir_all(web_dir.join("src")).unwrap();
+        std::fs::write(
+            web_dir.join("package.json"),
+            r#"{"name":"web","scripts":{"build":"tsc"}}"#,
+        )
+        .unwrap();
+        std::fs::write(web_dir.join("src/index.ts"), "console.log('hello')").unwrap();
+        (api_dir, web_dir)
     }
 
     #[tokio::test]
@@ -1985,6 +2363,7 @@ mod tests {
     #[tokio::test]
     async fn onboarding_call_content_delivers_message_when_already_done() {
         let (_dir, ctx) = project_ctx().await;
+
         // First call does full onboarding (creates config + writes memory)
         Onboarding.call(json!({}), &ctx).await.unwrap();
 
@@ -2003,6 +2382,44 @@ mod tests {
         assert!(
             !text.contains("[?]"),
             "call_content must not emit [?] placeholder, got: {text:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn onboarding_status_includes_per_project_memories_for_workspace() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        setup_workspace_dirs(root);
+        let ctx = project_ctx_at(root).await;
+
+        // Full workspace onboarding — writes per-project onboarding memories
+        Onboarding.call(json!({}), &ctx).await.unwrap();
+
+        // Second call hits the already-onboarded fast path
+        let result = Onboarding.call(json!({}), &ctx).await.unwrap();
+
+        assert!(result["onboarded"].as_bool().unwrap_or(false));
+
+        // project_memories field is present and non-empty
+        let pm = &result["project_memories"];
+        assert!(
+            pm.is_object(),
+            "expected project_memories object, got: {pm}"
+        );
+        assert!(
+            !pm.as_object().unwrap().is_empty(),
+            "project_memories should be non-empty after workspace onboarding"
+        );
+
+        // Message mentions per-project memories and the project: param hint
+        let msg = result["message"].as_str().unwrap();
+        assert!(
+            msg.contains("Per-project memories"),
+            "message should mention per-project memories"
+        );
+        assert!(
+            msg.contains("project:"),
+            "message should include project scoping hint"
         );
     }
 
@@ -2145,7 +2562,7 @@ mod tests {
             "[package]\nname = \"test\"\nversion = \"0.1.0\"",
         )
         .unwrap();
-        let ctx = gather_project_context(dir.path());
+        let ctx = gather_project_context(dir.path(), vec![]);
         assert_eq!(ctx.readme_path.as_deref(), Some("README.md"));
         assert_eq!(ctx.build_file_name.as_deref(), Some("Cargo.toml"));
         assert!(!ctx.claude_md_exists);
@@ -2156,7 +2573,7 @@ mod tests {
         let dir = tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".github/workflows")).unwrap();
         std::fs::write(dir.path().join(".github/workflows/ci.yml"), "name: CI").unwrap();
-        let ctx = gather_project_context(dir.path());
+        let ctx = gather_project_context(dir.path(), vec![]);
         assert_eq!(ctx.ci_files, vec![".github/workflows/ci.yml"]);
     }
 
@@ -2166,7 +2583,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
         std::fs::write(dir.path().join("src/main.rs"), "fn main() {}").unwrap();
         std::fs::create_dir_all(dir.path().join("tests")).unwrap();
-        let ctx = gather_project_context(dir.path());
+        let ctx = gather_project_context(dir.path(), vec![]);
         assert!(ctx.entry_points.contains(&"src/main.rs".to_string()));
         assert!(ctx.test_dirs.contains(&"tests".to_string()));
     }
@@ -2174,7 +2591,7 @@ mod tests {
     #[test]
     fn gather_context_handles_empty_project() {
         let dir = tempdir().unwrap();
-        let ctx = gather_project_context(dir.path());
+        let ctx = gather_project_context(dir.path(), vec![]);
         assert!(ctx.readme_path.is_none());
         assert!(ctx.build_file_name.is_none());
         assert!(!ctx.claude_md_exists);
@@ -3128,7 +3545,7 @@ mod tests {
     #[test]
     fn system_prompt_draft_includes_language_hints() {
         let langs = vec!["rust".to_string(), "python".to_string()];
-        let draft = build_system_prompt_draft(&langs, &[], None);
+        let draft = build_system_prompt_draft(&langs, &[], None, None, &[]);
         assert!(
             draft.contains("## Language Navigation"),
             "should have Language Navigation section"
@@ -3144,7 +3561,7 @@ mod tests {
     #[test]
     fn system_prompt_draft_omits_hints_for_unsupported_languages() {
         let langs = vec!["markdown".to_string()];
-        let draft = build_system_prompt_draft(&langs, &[], None);
+        let draft = build_system_prompt_draft(&langs, &[], None, None, &[]);
         assert!(
             !draft.contains("## Language Navigation"),
             "should not have Language Navigation for markdown-only"
@@ -3154,7 +3571,7 @@ mod tests {
     #[test]
     fn system_prompt_draft_isolates_hints_per_language() {
         let langs = vec!["python".to_string()];
-        let draft = build_system_prompt_draft(&langs, &[], None);
+        let draft = build_system_prompt_draft(&langs, &[], None, None, &[]);
         assert!(draft.contains("**python:**"), "should have python hints");
         assert!(
             !draft.contains("impl Trait for Type"),
@@ -3166,7 +3583,7 @@ mod tests {
     fn system_prompt_draft_includes_language_patterns_hint() {
         let langs = vec!["rust".to_string(), "python".to_string()];
         let entries = vec!["src/main.rs".to_string()];
-        let draft = build_system_prompt_draft(&langs, &entries, None);
+        let draft = build_system_prompt_draft(&langs, &entries, None, None, &[]);
         assert!(
             draft.contains("language-patterns"),
             "draft should reference language-patterns memory"
@@ -3175,7 +3592,7 @@ mod tests {
 
     #[test]
     fn system_prompt_draft_is_concise() {
-        let draft = build_system_prompt_draft(&[], &[], None);
+        let draft = build_system_prompt_draft(&[], &[], None, None, &[]);
         // Private memory rules removed — duplicates server_instructions.md
         assert!(
             !draft.contains("Private Memory Rules"),
@@ -3190,6 +3607,213 @@ mod tests {
         assert!(draft.contains("## Key Abstractions"));
         assert!(draft.contains("## Navigation Strategy"));
         assert!(draft.contains("## Project Rules"));
+    }
+
+    #[test]
+    fn system_prompt_draft_single_project_nav_strategy_unchanged() {
+        // Single project: classic numbered list under ## Navigation Strategy
+        let langs = vec!["rust".to_string()];
+        let entries = vec!["src/main.rs".to_string()];
+        let draft = build_system_prompt_draft(&langs, &entries, None, None, &[]);
+        assert!(draft.contains("## Navigation Strategy\n"));
+        assert!(
+            draft.contains("list_symbols(\"src/main.rs\")"),
+            "single-project nav should use first entry point"
+        );
+        assert!(
+            !draft.contains("### "),
+            "single-project draft should not have per-project subsections"
+        );
+    }
+
+    #[test]
+    fn system_prompt_draft_multi_project_nav_strategy_has_subsections() {
+        use crate::workspace::DiscoveredProject;
+        let projects = vec![
+            DiscoveredProject {
+                id: "backend".to_string(),
+                relative_root: std::path::PathBuf::from("backend"),
+                languages: vec!["rust".to_string()],
+                manifest: Some("Cargo.toml".to_string()),
+            },
+            DiscoveredProject {
+                id: "frontend".to_string(),
+                relative_root: std::path::PathBuf::from("frontend"),
+                languages: vec!["typescript".to_string()],
+                manifest: Some("package.json".to_string()),
+            },
+        ];
+        let draft = build_system_prompt_draft(&[], &[], None, Some(&projects), &[]);
+        assert!(
+            draft.contains("### backend (rust)"),
+            "should have backend subsection"
+        );
+        assert!(
+            draft.contains("### frontend (typescript)"),
+            "should have frontend subsection"
+        );
+        assert!(
+            draft.contains("scope=\"project:backend\""),
+            "should have scoped semantic_search for backend"
+        );
+        assert!(
+            draft.contains("scope=\"project:frontend\""),
+            "should have scoped semantic_search for frontend"
+        );
+        assert!(
+            draft.contains("memory(project: \"backend\""),
+            "should have per-project memory hint for backend"
+        );
+        assert!(
+            draft.contains("list_symbols(\"backend\")"),
+            "should use project root as placeholder entry point"
+        );
+    }
+
+    #[test]
+    fn system_prompt_draft_multi_project_workspace_level_orient_step() {
+        use crate::workspace::DiscoveredProject;
+        let projects = vec![
+            DiscoveredProject {
+                id: "a".to_string(),
+                relative_root: std::path::PathBuf::from("a"),
+                languages: vec![],
+                manifest: None,
+            },
+            DiscoveredProject {
+                id: "b".to_string(),
+                relative_root: std::path::PathBuf::from("b"),
+                languages: vec![],
+                manifest: None,
+            },
+        ];
+        let draft = build_system_prompt_draft(&[], &[], None, Some(&projects), &[]);
+        assert!(
+            draft.contains("orient yourself to the workspace"),
+            "workspace-level orient step should be present"
+        );
+    }
+
+    #[test]
+    fn system_prompt_draft_multi_project_search_tips_has_scope_warning() {
+        use crate::workspace::DiscoveredProject;
+        let projects = vec![
+            DiscoveredProject {
+                id: "backend".to_string(),
+                relative_root: std::path::PathBuf::from("backend"),
+                languages: vec!["rust".to_string()],
+                manifest: Some("Cargo.toml".to_string()),
+            },
+            DiscoveredProject {
+                id: "frontend".to_string(),
+                relative_root: std::path::PathBuf::from("frontend"),
+                languages: vec!["typescript".to_string()],
+                manifest: Some("package.json".to_string()),
+            },
+        ];
+        let draft = build_system_prompt_draft(&[], &[], None, Some(&projects), &[]);
+        assert!(
+            draft.contains("Workspace mode"),
+            "should warn about workspace scoping in Search Tips"
+        );
+        assert!(
+            draft.contains("project: \"backend\""),
+            "should include per-project example for backend"
+        );
+        assert!(
+            draft.contains("project: \"frontend\""),
+            "should include per-project example for frontend"
+        );
+    }
+
+    #[test]
+    fn system_prompt_draft_single_project_search_tips_no_scope_warning() {
+        let draft = build_system_prompt_draft(&[], &[], None, None, &[]);
+        assert!(
+            !draft.contains("Workspace mode"),
+            "single-project draft should not have workspace scoping warning"
+        );
+    }
+
+    #[test]
+    fn system_prompt_draft_multi_project_rust_search_tip_uses_type_hint() {
+        use crate::workspace::DiscoveredProject;
+        let projects = vec![
+            DiscoveredProject {
+                id: "core".to_string(),
+                relative_root: std::path::PathBuf::from("core"),
+                languages: vec!["rust".to_string()],
+                manifest: None,
+            },
+            DiscoveredProject {
+                id: "ui".to_string(),
+                relative_root: std::path::PathBuf::from("ui"),
+                languages: vec!["typescript".to_string()],
+                manifest: None,
+            },
+        ];
+        let draft = build_system_prompt_draft(&[], &[], None, Some(&projects), &[]);
+        assert!(
+            draft.contains("key type or trait name"),
+            "rust project tip should mention type/trait"
+        );
+        assert!(
+            draft.contains("handler or component name"),
+            "typescript project tip should mention handler/component"
+        );
+    }
+
+    #[tokio::test]
+    async fn onboarding_discovers_sub_projects() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // Root: Kotlin
+        std::fs::write(root.join("build.gradle.kts"), "").unwrap();
+        std::fs::create_dir_all(root.join("src/main/kotlin")).unwrap();
+        std::fs::write(root.join("src/main/kotlin/App.kt"), "fun main() {}").unwrap();
+
+        // Sub: TypeScript
+        let mcp = root.join("mcp-server");
+        std::fs::create_dir_all(mcp.join("src")).unwrap();
+        std::fs::write(mcp.join("package.json"), r#"{"scripts":{"build":"tsc"}}"#).unwrap();
+        std::fs::write(mcp.join("src/index.ts"), "").unwrap();
+
+        // Sub: Python
+        let py = root.join("python-services");
+        std::fs::create_dir_all(&py).unwrap();
+        std::fs::write(py.join("requirements.txt"), "flask\n").unwrap();
+        std::fs::write(py.join("app.py"), "").unwrap();
+
+        let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+        let ctx = ToolContext {
+            agent,
+            lsp: lsp(),
+            output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+        };
+
+        let result = Onboarding
+            .call(serde_json::json!({"force": true}), &ctx)
+            .await
+            .unwrap();
+
+        let projects = result
+            .get("projects")
+            .expect("onboarding should return projects");
+        let projects_arr = projects.as_array().unwrap();
+        assert_eq!(
+            projects_arr.len(),
+            3,
+            "should discover 3 projects (root + mcp-server + python-services), got {}",
+            projects_arr.len()
+        );
+
+        let draft = result["system_prompt_draft"].as_str().unwrap();
+        assert!(
+            draft.contains("mcp-server"),
+            "draft should mention mcp-server"
+        );
     }
 
     #[test]
@@ -3943,5 +4567,222 @@ mod tests {
             .contains("custom user gotcha"));
         // No anchor sidecar was created, so staleness should be untracked
         assert_eq!(pm["staleness"]["untracked"], true);
+    }
+
+    #[tokio::test]
+    async fn onboarding_creates_workspace_toml_for_multi_project() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // Root: Kotlin
+        std::fs::write(root.join("build.gradle.kts"), "").unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/App.kt"), "").unwrap();
+
+        // Sub: TypeScript
+        let mcp = root.join("mcp-server");
+        std::fs::create_dir_all(&mcp).unwrap();
+        std::fs::write(mcp.join("package.json"), r#"{"scripts":{"build":"tsc"}}"#).unwrap();
+
+        let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+        let ctx = ToolContext {
+            agent,
+            lsp: lsp(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+        };
+
+        Onboarding
+            .call(serde_json::json!({"force": true}), &ctx)
+            .await
+            .unwrap();
+
+        let ws_path = crate::config::workspace::workspace_config_path(&root);
+        assert!(
+            ws_path.exists(),
+            "workspace.toml should be created for multi-project repos"
+        );
+
+        let content = std::fs::read_to_string(&ws_path).unwrap();
+        let config: crate::config::workspace::WorkspaceConfig = toml::from_str(&content).unwrap();
+        assert_eq!(
+            config.projects.len(),
+            2,
+            "should have 2 projects (root + mcp-server), got: {:?}",
+            config.projects.iter().map(|p| &p.id).collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn onboarding_skips_workspace_toml_for_single_project() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        std::fs::write(root.join("Cargo.toml"), "[package]\nname = \"test\"").unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/main.rs"), "fn main() {}").unwrap();
+
+        let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+        let ctx = ToolContext {
+            agent,
+            lsp: lsp(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+        };
+
+        Onboarding
+            .call(serde_json::json!({"force": true}), &ctx)
+            .await
+            .unwrap();
+
+        let ws_path = crate::config::workspace::workspace_config_path(&root);
+        assert!(
+            !ws_path.exists(),
+            "workspace.toml should NOT be created for single-project repos"
+        );
+    }
+
+    #[tokio::test]
+    async fn single_project_onboarding_unchanged() {
+        let (_dir, ctx) = project_ctx().await;
+        let result = Onboarding.call(json!({}), &ctx).await.unwrap();
+
+        // Single project: no workspace_mode field or it's false
+        assert!(result.get("workspace_mode").is_none() || result["workspace_mode"] == false);
+        // Instructions should contain the standard Phase 1/Phase 2, not workspace phases
+        let instructions = result["instructions"].as_str().unwrap_or("");
+        assert!(instructions.contains("Phase 1: Explore the Code"));
+        assert!(instructions.contains("Phase 2: Write the Memories"));
+        assert!(!instructions.contains("Phase 1A"));
+        assert!(!instructions.contains("Workspace Survey"));
+    }
+
+    #[tokio::test]
+    async fn onboarding_call_content_includes_workspace_info() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        setup_workspace_dirs(root);
+
+        let ctx = project_ctx_at(root).await;
+        let content = Onboarding.call_content(json!({}), &ctx).await.unwrap();
+        let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+
+        assert!(
+            text.contains("workspace") || text.contains("Workspace"),
+            "call_content should mention workspace mode, got: {}",
+            &text[..text.len().min(200)]
+        );
+        assert!(
+            text.contains("Phase 1A") || text.contains("Workspace Survey"),
+            "call_content should include workspace instructions"
+        );
+        // Per-project protected memories should be surfaced
+        assert!(
+            text.contains("per_project_protected") || text.contains("Per-Project Protected"),
+            "call_content should surface per-project protected memory state"
+        );
+    }
+
+    #[tokio::test]
+    async fn onboarding_includes_workspace_mode_and_per_project_protected() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        setup_workspace_dirs(root);
+
+        let ctx = project_ctx_at(root).await;
+        let result = Onboarding.call(json!({}), &ctx).await.unwrap();
+
+        assert_eq!(result["workspace_mode"], true);
+        assert!(result["per_project_protected_memories"].is_object());
+        // Each discovered project should have an entry
+        let ppm = &result["per_project_protected_memories"];
+        assert!(ppm["api"].is_object(), "api protected state missing");
+        assert!(ppm["web"].is_object(), "web protected state missing");
+    }
+
+    #[tokio::test]
+    async fn onboarding_writes_per_project_programmatic_memories() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        setup_workspace_dirs(root);
+
+        let ctx = project_ctx_at(root).await;
+        Onboarding.call(json!({}), &ctx).await.unwrap();
+
+        // Per-project memory directories should exist with onboarding + language-patterns
+        let api_mem = root.join(".codescout/projects/api/memories");
+        assert!(
+            api_mem.join("onboarding.md").exists(),
+            "api onboarding memory missing"
+        );
+        assert!(
+            api_mem.join("language-patterns.md").exists(),
+            "api language-patterns missing"
+        );
+        let web_mem = root.join(".codescout/projects/web/memories");
+        assert!(
+            web_mem.join("onboarding.md").exists(),
+            "web onboarding memory missing"
+        );
+        assert!(
+            web_mem.join("language-patterns.md").exists(),
+            "web language-patterns missing"
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_onboarding_full_flow() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        setup_workspace_dirs(root);
+
+        let ctx = project_ctx_at(root).await;
+
+        // First onboarding
+        let result = Onboarding.call(json!({}), &ctx).await.unwrap();
+
+        // Workspace mode active
+        assert_eq!(result["workspace_mode"], true);
+        assert!(result["projects"].as_array().unwrap().len() >= 2);
+
+        // Per-project programmatic memories written
+        assert!(root
+            .join(".codescout/projects/api/memories/onboarding.md")
+            .exists());
+        assert!(root
+            .join(".codescout/projects/web/memories/onboarding.md")
+            .exists());
+
+        // workspace.toml created
+        assert!(crate::config::workspace::workspace_config_path(&root).exists());
+
+        // Instructions contain workspace sections
+        let instructions = result["instructions"].as_str().unwrap();
+        assert!(
+            instructions.contains("Workspace"),
+            "instructions should contain workspace content"
+        );
+        assert!(
+            instructions.contains("Phase 1A"),
+            "instructions should contain Phase 1A"
+        );
+
+        // System prompt draft references per-project memories
+        let draft = result["system_prompt_draft"].as_str().unwrap();
+        assert!(draft.contains("api"));
+        assert!(draft.contains("web"));
+        assert!(draft.contains("memory(project:"));
+
+        // call_content delivers workspace content
+        let content = Onboarding
+            .call_content(json!({ "force": true }), &ctx)
+            .await
+            .unwrap();
+        let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+        assert!(text.contains("workspace") || text.contains("Workspace"));
+
+        // format_compact shows workspace info
+        let compact = Onboarding.format_compact(&result).unwrap_or_default();
+        assert!(compact.contains("workspace"));
     }
 }

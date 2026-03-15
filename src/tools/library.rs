@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use super::{parse_bool_param, Tool, ToolContext};
+use super::{Tool, ToolContext};
 
 pub struct ListLibraries;
 
@@ -13,7 +13,9 @@ impl Tool for ListLibraries {
 
     fn description(&self) -> &str {
         "List registered libraries and their index status. \
-         Use scope='lib:<name>' in semantic_search, find_symbol, or index_project to target a library."
+         Use scope='lib:<name>' in semantic_search, find_symbol, or index_project to target a library. \
+         Version staleness detection currently supports Cargo.lock (Rust) and package-lock.json (npm/Node); \
+         Go, Python, and Yarn lockfiles are not yet tracked."
     }
 
     fn input_schema(&self) -> Value {
@@ -25,7 +27,7 @@ impl Tool for ListLibraries {
 
     async fn call(&self, _input: Value, ctx: &ToolContext) -> Result<Value> {
         let inner = ctx.agent.inner.read().await;
-        let project = inner.active_project.as_ref().ok_or_else(|| {
+        let project = inner.active_project().ok_or_else(|| {
             super::RecoverableError::with_hint(
                 "No active project. Use activate_project first.",
                 "Call activate_project(\"/path/to/project\") to set the active project.",
@@ -37,9 +39,15 @@ impl Tool for ListLibraries {
             .all()
             .iter()
             .map(|entry| {
+                let stale = entry.indexed
+                    && entry.version.is_some()
+                    && entry.version_indexed.is_some()
+                    && entry.version != entry.version_indexed;
                 json!({
                     "name": entry.name,
                     "version": entry.version,
+                    "version_indexed": entry.version_indexed,
+                    "stale": stale,
                     "path": entry.path.display().to_string(),
                     "language": entry.language,
                     "discovered_via": entry.discovered_via,
@@ -56,96 +64,119 @@ impl Tool for ListLibraries {
     }
 }
 
-pub struct IndexLibrary;
+pub struct RegisterLibrary;
 
 #[async_trait::async_trait]
-impl Tool for IndexLibrary {
+impl Tool for RegisterLibrary {
     fn name(&self) -> &str {
-        "index_library"
+        "register_library"
     }
 
     fn description(&self) -> &str {
-        "Build embedding index for a registered library. \
-         Library must be in the registry (discovered via goto_definition or manually registered)."
+        "Register an external library for searching with scope='lib:<name>'. \
+         Auto-detects name and language from manifest files (Cargo.toml, package.json, etc.). \
+         Use name/language params to override auto-detection."
     }
 
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
-            "required": ["name"],
+            "required": ["path"],
             "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Absolute path to the library root directory"
+                },
                 "name": {
                     "type": "string",
-                    "description": "Library name (as shown in list_libraries)"
+                    "description": "Library name (auto-detected from manifest if omitted)"
                 },
-                "force": {
-                    "type": "boolean",
-                    "description": "Re-index even if already done",
-                    "default": false
+                "language": {
+                    "type": "string",
+                    "description": "Primary language (auto-detected if omitted)"
                 }
             }
         })
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
-        let name = super::require_str_param(&input, "name")?;
-        let force = parse_bool_param(&input["force"]);
+        let raw_path = super::require_str_param(&input, "path")?;
+        let lib_path = std::path::PathBuf::from(raw_path);
 
-        let (root, lib_path) = {
-            let inner = ctx.agent.inner.read().await;
-            let project = inner.active_project.as_ref().ok_or_else(|| {
-                super::RecoverableError::with_hint(
-                    "No active project. Use activate_project first.",
-                    "Call activate_project(\"/path/to/project\") to set the active project.",
-                )
-            })?;
-            let entry = project.library_registry.lookup(name).ok_or_else(|| {
-                super::RecoverableError::with_hint(
-                    format!("Library '{}' not found in registry.", name),
-                    "Use list_libraries to see registered libraries.",
-                )
-            })?;
-            (project.root.clone(), entry.path.clone())
-        };
+        if !lib_path.exists() {
+            return Err(super::RecoverableError::with_hint(
+                format!("Path does not exist: {}", lib_path.display()),
+                "Provide an absolute path to an existing directory.",
+            )
+            .into());
+        }
+        if !lib_path.is_dir() {
+            return Err(super::RecoverableError::with_hint(
+                format!("Path is not a directory: {}", lib_path.display()),
+                "Provide a path to a directory, not a file.",
+            )
+            .into());
+        }
 
-        let source = format!("lib:{}", name);
-        crate::embed::index::build_library_index(&root, &lib_path, &source, force).await?;
+        // Auto-detect from manifest, with user overrides.
+        // IMPORTANT: discover_library_root expects a *file* path and calls .parent()
+        // to start searching. Passing a directory would skip the directory itself.
+        // We pass a synthetic file path inside the directory to work around this.
+        let discovered = crate::library::discovery::discover_library_root(&lib_path.join("_probe"));
+        let name = input["name"]
+            .as_str()
+            .map(String::from)
+            .or_else(|| discovered.as_ref().map(|d| d.name.clone()))
+            .unwrap_or_else(|| {
+                lib_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string()
+            });
+        let language = input["language"]
+            .as_str()
+            .map(String::from)
+            .or_else(|| discovered.as_ref().map(|d| d.language.clone()))
+            .unwrap_or_else(|| "unknown".to_string());
 
-        // Mark as indexed in registry and save
+        // Register and save
         {
             let mut inner = ctx.agent.inner.write().await;
-            let project = inner.active_project.as_mut().unwrap();
-            if let Some(entry) = project.library_registry.lookup_mut(name) {
-                entry.indexed = true;
-            }
+            let project = inner.active_project_mut().ok_or_else(|| {
+                super::RecoverableError::with_hint(
+                    "No active project.",
+                    "Call activate_project first.",
+                )
+            })?;
+            project.library_registry.register(
+                name.clone(),
+                lib_path.clone(),
+                language.clone(),
+                crate::library::registry::DiscoveryMethod::Manual,
+            );
             let registry_path = project.root.join(".codescout").join("libraries.json");
             project.library_registry.save(&registry_path)?;
         }
 
-        // Return stats — sync SQLite off async runtime
-        let source2 = source.clone();
-        let (file_count, chunk_count) = tokio::task::spawn_blocking(move || {
-            let conn = crate::embed::index::open_db(&root)?;
-            let by_source = crate::embed::index::index_stats_by_source(&conn)?;
-            let lib_stats = by_source.get(&source2);
-            anyhow::Ok((
-                lib_stats.map_or(0, |s| s.file_count),
-                lib_stats.map_or(0, |s| s.chunk_count),
-            ))
-        })
-        .await??;
-
         Ok(json!({
             "status": "ok",
-            "library": name,
-            "source": source,
-            "files_indexed": file_count,
-            "chunks": chunk_count,
+            "name": name,
+            "language": language,
+            "hint": format!(
+                "Use scope='lib:{}' in find_symbol/list_symbols/semantic_search. \
+                 Run index_project(scope='lib:{}') to enable semantic search.",
+                name, name
+            ),
         }))
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(format_index_library(result))
+        Some(format!(
+            "Registered library '{}' ({})",
+            result["name"].as_str().unwrap_or("?"),
+            result["language"].as_str().unwrap_or("?"),
+        ))
     }
 }
 
@@ -168,15 +199,14 @@ fn format_list_libraries(result: &Value) -> String {
         } else {
             "not indexed"
         };
-        out.push_str(&format!("\n  {name:<name_width$}  {status}"));
+        let stale_marker = if lib["stale"].as_bool().unwrap_or(false) {
+            " [stale]"
+        } else {
+            ""
+        };
+        out.push_str(&format!("\n  {name:<name_width$}  {status}{stale_marker}"));
     }
     out
-}
-
-fn format_index_library(result: &Value) -> String {
-    let name = result["library"].as_str().unwrap_or("?");
-    let chunks = result["chunks"].as_u64().unwrap_or(0);
-    format!("{name} · {chunks} chunks")
 }
 
 #[cfg(test)]
@@ -201,6 +231,15 @@ mod tests {
         }
     }
 
+    fn project_ctx_with_agent(agent: Agent) -> ToolContext {
+        ToolContext {
+            agent,
+            lsp: LspManager::new_arc(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+        }
+    }
+
     #[tokio::test]
     async fn list_libraries_empty() {
         let ctx = project_ctx().await;
@@ -215,7 +254,7 @@ mod tests {
         let ctx = project_ctx().await;
         {
             let mut inner = ctx.agent.inner.write().await;
-            let project = inner.active_project.as_mut().unwrap();
+            let project = inner.active_project_mut().unwrap();
             project.library_registry.register(
                 "serde".into(),
                 PathBuf::from("/tmp/serde"),
@@ -243,40 +282,6 @@ mod tests {
         let tool = ListLibraries;
         let result = tool.call(json!({}), &ctx).await;
         assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn index_library_errors_for_unknown() {
-        let ctx = project_ctx().await;
-        let tool = IndexLibrary;
-        let result = tool.call(json!({ "name": "nonexistent" }), &ctx).await;
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("not found"),
-            "error should mention not found: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn index_library_schema_is_valid() {
-        let tool = IndexLibrary;
-        let schema = tool.input_schema();
-        let props = schema["properties"].as_object().unwrap();
-        assert!(
-            props.contains_key("name"),
-            "schema must have 'name' property"
-        );
-        assert!(
-            props.contains_key("force"),
-            "schema must have 'force' property"
-        );
-        let required = schema["required"].as_array().unwrap();
-        assert!(
-            required.iter().any(|v| v.as_str() == Some("name")),
-            "'name' must be required"
-        );
     }
 
     // --- format_list_libraries tests ---
@@ -316,5 +321,82 @@ mod tests {
             msg.contains("nonexistent") || msg.contains("not found"),
             "error should mention the library name: {msg}"
         );
+    }
+
+    // --- RegisterLibrary tests ---
+
+    #[tokio::test]
+    async fn register_library_manual() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib_dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            lib_dir.path().join("Cargo.toml"),
+            "[package]\nname = \"mylib\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let ctx = project_ctx_with_agent(agent.clone());
+        let tool = RegisterLibrary;
+        let result = tool
+            .call(
+                json!({
+                    "path": lib_dir.path().display().to_string(),
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result["status"], "ok");
+        assert_eq!(result["name"], "mylib");
+        assert_eq!(result["language"], "rust");
+
+        let reg = agent.library_registry().await.unwrap();
+        assert_eq!(reg.all().len(), 1);
+        assert_eq!(reg.all()[0].name, "mylib");
+    }
+
+    #[tokio::test]
+    async fn register_library_with_explicit_name_and_language() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib_dir = tempfile::tempdir().unwrap();
+
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let ctx = project_ctx_with_agent(agent.clone());
+        let tool = RegisterLibrary;
+        let result = tool
+            .call(
+                json!({
+                    "path": lib_dir.path().display().to_string(),
+                    "name": "custom-name",
+                    "language": "python",
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result["status"], "ok");
+        assert_eq!(result["name"], "custom-name");
+        assert_eq!(result["language"], "python");
+    }
+
+    #[tokio::test]
+    async fn register_library_fails_for_nonexistent_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let ctx = project_ctx_with_agent(agent);
+        let tool = RegisterLibrary;
+        let result = tool
+            .call(
+                json!({
+                    "path": "/nonexistent/path/to/lib",
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
     }
 }

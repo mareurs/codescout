@@ -150,19 +150,39 @@ impl Tool for ReadFile {
                     .into());
                 }
                 let content = extract_lines(&text, s as usize, e as usize);
-                // Large extracted sections → @file_* (plain text) so the agent can
-                // grep/browse without a cascading @tool_* chain.
+                // If the extracted slice exceeds the inline limit, store it as a
+                // plain @file_* ref so call_content() never wraps it in @tool_*.
+                // @tool_* encodes newlines as JSON string escapes, so total_lines
+                // would count JSON structure lines (typically 4) rather than content
+                // lines — making subsequent start_line/end_line navigation useless.
+                // Same root cause as BUG-025 (real-file path); this covers buffer refs.
                 if crate::tools::exceeds_inline_limit(&content) {
-                    let file_id = ctx.output_buffer.store_file(path.to_string(), content);
-                    return Ok(json!({ "file_id": file_id, "total_lines": total_lines }));
+                    let content_lines = content.lines().count();
+                    let file_id = ctx
+                        .output_buffer
+                        .store_file(format!("{}[{}-{}]", path, s, e), content);
+                    return Ok(json!({
+                        "file_id": file_id,
+                        "total_lines": content_lines,
+                        "hint": format!(
+                            "Range too large for inline ({content_lines} lines). \
+                             Use read_file(\"{file_id}\", start_line=1, end_line=100) to read in chunks."
+                        ),
+                    }));
                 }
                 return Ok(json!({ "content": content, "total_lines": total_lines }));
             }
-            // Full content — store as @file_* if large so the agent can navigate it
-            // as plain text rather than triggering another @tool_* re-buffering cycle.
+            // Full buffer content — never re-buffer (circular: same content, new ID,
+            // no benefit). If too large to return inline, tell the agent to paginate.
             if crate::tools::exceeds_inline_limit(&text) {
-                let file_id = ctx.output_buffer.store_file(path.to_string(), text);
-                return Ok(json!({ "file_id": file_id, "total_lines": total_lines }));
+                return Ok(json!({
+                    "total_lines": total_lines,
+                    "hint": format!(
+                        "Buffer has {total_lines} lines. \
+                         Use start_line and end_line to read specific sections \
+                         (e.g. start_line=1, end_line=100)."
+                    ),
+                }));
             }
             return Ok(json!({ "content": text, "total_lines": total_lines }));
         }
@@ -216,7 +236,7 @@ impl Tool for ReadFile {
         // Determine source tag
         let source_tag = {
             let inner = ctx.agent.inner.read().await;
-            if let Some(project) = &inner.active_project {
+            if let Some(project) = inner.active_project() {
                 if let Some(lib) = project.library_registry.is_library_path(&resolved) {
                     format!("lib:{}", lib.name)
                 } else {
@@ -372,7 +392,14 @@ impl Tool for ReadFile {
                 let file_id = ctx
                     .output_buffer
                     .store_file(resolved.to_string_lossy().to_string(), content);
-                let mut result = json!({ "file_id": file_id, "total_lines": total_lines });
+                let mut result = json!({
+                    "file_id": file_id,
+                    "total_lines": total_lines,
+                    "hint": format!(
+                        "Range too large for inline ({total_lines} lines). \
+                         Use read_file(\"{file_id}\", start_line=1, end_line=100) to read in chunks."
+                    ),
+                });
                 if source_tag != "project" {
                     result["source"] = json!(source_tag);
                 }
@@ -482,7 +509,16 @@ impl Tool for ListDir {
             "required": ["path"],
             "properties": {
                 "path": { "type": "string" },
-                "recursive": { "type": "boolean", "default": false },
+                "recursive": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Descend into subdirectories without depth limit. In exploring mode, auto-capped at depth 3 — use max_depth to override."
+                },
+                "max_depth": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Max directory depth to descend (1 = direct children only, the default). Overrides recursive."
+                },
                 "detail_level": { "type": "string", "description": "Output detail: omit for compact (default), 'full' for all entries" },
                 "offset": { "type": "integer", "description": "Skip this many entries (focused mode pagination)" },
                 "limit": { "type": "integer", "description": "Max entries per page (focused mode, default 50)" }
@@ -502,11 +538,28 @@ impl Tool for ListDir {
             &security,
         )?;
         let recursive = parse_bool_param(&input["recursive"]);
-        let max_depth = if recursive { None } else { Some(1) };
+        let explicit_max_depth = input["max_depth"].as_u64().map(|d| d as usize);
         let guard = OutputGuard::from_input(&input);
 
+        // Determine requested depth:
+        //   explicit max_depth > recursive=true (unlimited) > default (1 level)
+        let requested_depth: Option<usize> = match explicit_max_depth {
+            Some(d) => Some(d),
+            None if recursive => None, // unlimited
+            None => Some(1),
+        };
+
+        // In exploring mode, cap unlimited recursive walks at depth 3 to
+        // avoid returning hundreds of deeply-nested paths as an unstructured flat list.
+        let depth_auto_capped = guard.mode == OutputMode::Exploring && requested_depth.is_none();
+        let walker_depth: Option<usize> = if depth_auto_capped {
+            Some(3)
+        } else {
+            requested_depth
+        };
+
         let walker = ignore::WalkBuilder::new(&path)
-            .max_depth(max_depth)
+            .max_depth(walker_depth)
             .hidden(true)
             .git_ignore(true)
             .build()
@@ -538,25 +591,34 @@ impl Tool for ListDir {
 
         let hit_early_cap = cap.is_some() && entries.len() > guard.max_results;
 
+        let overflow_hint = if depth_auto_capped {
+            "Depth auto-capped at 3 in exploring mode. Use max_depth=N for a specific depth, or detail_level='full' for unlimited depth.".to_string()
+        } else {
+            "Use a more specific path or set recursive=false".to_string()
+        };
+
         let (entries, overflow) = if hit_early_cap {
             // We collected max_results+1, truncate and report overflow
             entries.truncate(guard.max_results);
             let overflow = OverflowInfo {
                 shown: guard.max_results,
                 total: guard.max_results + 1, // at least this many
-                hint: "Use a more specific path or set recursive=false".to_string(),
+                hint: overflow_hint,
                 next_offset: None,
                 by_file: None,
                 by_file_overflow: 0,
             };
             (entries, Some(overflow))
         } else {
-            guard.cap_items(entries, "Use a more specific path or set recursive=false")
+            guard.cap_items(entries, &overflow_hint)
         };
 
         let mut result = json!({ "entries": entries });
         if let Some(ov) = overflow {
             result["overflow"] = OutputGuard::overflow_json(&ov);
+        }
+        if depth_auto_capped {
+            result["depth_capped"] = json!(3);
         }
         Ok(result)
     }
@@ -884,6 +946,20 @@ fn format_read_file(val: &Value) -> String {
         return format_read_file_summary(val, file_type);
     }
 
+    // Buffered range: file_id present but no content — the range was too large for
+    // inline and was stored as a @file_* ref.  Show total_lines + hint so the agent
+    // knows it needs to sub-range read the ref.
+    if val.get("content").is_none() {
+        if let Some(file_id) = val["file_id"].as_str() {
+            let total = val["total_lines"].as_u64().unwrap_or(0);
+            let mut out = format!("{total} lines\n\n  Buffer: {file_id}");
+            if let Some(hint) = val["hint"].as_str() {
+                out.push_str(&format!("\n  {hint}"));
+            }
+            return out;
+        }
+    }
+
     // Content mode
     let content = match val["content"].as_str() {
         Some(c) => c,
@@ -1111,25 +1187,42 @@ fn format_list_dir(val: &Value) -> String {
     };
     let mut out = format!("{} — {} entries\n", dir_display, names.len());
 
-    let max_name_len = short_names.iter().map(|n| n.len()).max().unwrap_or(0);
-    let col_width = max_name_len + 2;
-    let num_cols = (78 / col_width).max(1);
+    // Tree mode: any entry spans multiple path levels after prefix stripping.
+    // Detected by a '/' in the stripped name (excluding a lone trailing slash on dirs).
+    let is_tree = short_names
+        .iter()
+        .any(|n| n.trim_end_matches('/').contains('/'));
 
     out.push('\n');
-    for (i, name) in short_names.iter().enumerate() {
-        if i % num_cols == 0 {
-            out.push_str("  ");
-        }
-        out.push_str(name);
-        if (i + 1) % num_cols != 0 && i + 1 < short_names.len() {
-            let padding = col_width - name.len();
-            for _ in 0..padding {
-                out.push(' ');
+    if is_tree {
+        format_list_dir_tree_body(&short_names, &mut out);
+    } else {
+        let max_name_len = short_names.iter().map(|n| n.len()).max().unwrap_or(0);
+        let col_width = max_name_len + 2;
+        let num_cols = (78 / col_width).max(1);
+
+        for (i, name) in short_names.iter().enumerate() {
+            if i % num_cols == 0 {
+                out.push_str("  ");
+            }
+            out.push_str(name);
+            if (i + 1) % num_cols != 0 && i + 1 < short_names.len() {
+                let padding = col_width - name.len();
+                for _ in 0..padding {
+                    out.push(' ');
+                }
+            }
+            if (i + 1) % num_cols == 0 && i + 1 < short_names.len() {
+                out.push('\n');
             }
         }
-        if (i + 1) % num_cols == 0 && i + 1 < short_names.len() {
-            out.push('\n');
-        }
+    }
+
+    if let Some(depth) = val.get("depth_capped").and_then(|v| v.as_u64()) {
+        out.push_str(&format!(
+            "\n[depth capped at {} — use max_depth=N or detail_level='full' for deeper]\n",
+            depth
+        ));
     }
 
     if let Some(overflow) = val.get("overflow") {
@@ -1140,6 +1233,22 @@ fn format_list_dir(val: &Value) -> String {
     }
 
     out
+}
+
+/// Renders entries with indentation based on path depth when the listing
+/// spans multiple directory levels. Each level adds two spaces of indent.
+fn format_list_dir_tree_body(short_names: &[&str], out: &mut String) {
+    for name in short_names {
+        let path_part = name.trim_end_matches('/');
+        let depth = path_part.matches('/').count();
+        let indent = "  ".repeat(depth + 1);
+        let base = path_part.rsplit('/').next().unwrap_or(path_part);
+        if name.ends_with('/') {
+            out.push_str(&format!("{}{}/\n", indent, base));
+        } else {
+            out.push_str(&format!("{}{}\n", indent, base));
+        }
+    }
 }
 
 fn common_path_prefix(paths: &[&str]) -> String {
@@ -1813,6 +1922,82 @@ mod tests {
         assert!(msg.contains("invalid line range"), "got: {}", msg);
     }
 
+    #[tokio::test]
+    async fn read_file_buffer_ref_large_range_buffers_as_file_ref() {
+        // Regression test: when a line range read on a @file_* buffer ref extracts
+        // content > TOOL_OUTPUT_BUFFER_THRESHOLD, read_file must store it as a new
+        // @file_* ref rather than returning {"content": "..."} inline.
+        // Without the fix, call_content wraps the large inline JSON in a @tool_*
+        // envelope — which encodes newlines as \n escapes, so total_lines counts
+        // JSON structure lines (4) rather than content lines, and any sub-range read
+        // with start_line > 4 returns empty content.
+        let (dir, ctx) = project_ctx().await;
+
+        // Write a file large enough to exceed the inline threshold.
+        let big: String = (1..=300)
+            .map(|i| format!("line {:04} padding_padding_padding_padd\n", i))
+            .collect();
+        assert!(
+            big.len() > crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD,
+            "test data must exceed threshold ({} bytes), got {}",
+            crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD,
+            big.len()
+        );
+        let path = dir.path().join("big.txt");
+        std::fs::write(&path, &big).unwrap();
+
+        // First read: no range — large file gets buffered as @file_*.
+        let r1 = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        let file_ref = r1["file_id"]
+            .as_str()
+            .expect("large file should produce @file_* ref on first read")
+            .to_string();
+
+        // Second read: ranged read on the @file_* ref — must produce another @file_*,
+        // not inline content that call_content would wrap in @tool_*.
+        let result = ReadFile
+            .call(
+                json!({ "path": file_ref, "start_line": 1, "end_line": 300 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            result.get("file_id").is_some(),
+            "large buffer-ref range should produce a @file_* ref; got: {}",
+            result
+        );
+        assert_eq!(
+            result["total_lines"].as_u64().unwrap(),
+            300,
+            "total_lines must reflect content lines, not JSON structure lines"
+        );
+        assert!(
+            result["hint"].as_str().unwrap_or("").contains("read_file"),
+            "buffered range must include a hint guiding sub-range reads; got: {}",
+            result
+        );
+
+        // The chained @file_* ref must be navigable by sub-range.
+        let file_ref2 = result["file_id"].as_str().unwrap().to_string();
+        let sub = ReadFile
+            .call(
+                json!({ "path": file_ref2, "start_line": 50, "end_line": 50 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(
+            sub["content"].as_str().unwrap_or("").contains("line 0050"),
+            "sub-range on chained @file_* ref must return correct content; got: {}",
+            sub
+        );
+    }
+
     // ── ListDir ───────────────────────────────────────────────────────────────
 
     #[tokio::test]
@@ -1915,6 +2100,99 @@ mod tests {
         let entries = result["entries"].as_array().unwrap();
         assert_eq!(entries.len(), 5);
         assert!(result.get("overflow").is_none());
+    }
+
+    #[tokio::test]
+    async fn list_dir_max_depth_limits_descent() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        // depth1/depth2/depth3/deep.rs — should not appear with max_depth=2
+        let deep = dir.path().join("depth1").join("depth2").join("depth3");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("deep.rs"), "").unwrap();
+        std::fs::write(dir.path().join("depth1").join("shallow.rs"), "").unwrap();
+
+        let result = ListDir
+            .call(
+                json!({ "path": dir.path().to_str().unwrap(), "max_depth": 2 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let entries: Vec<&str> = result["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(entries.iter().any(|e| e.ends_with("shallow.rs")));
+        assert!(!entries.iter().any(|e| e.ends_with("deep.rs")));
+        // max_depth is explicit — no auto-cap note
+        assert!(result.get("depth_capped").is_none());
+    }
+
+    #[tokio::test]
+    async fn list_dir_recursive_exploring_caps_at_depth_3() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        // Build a 4-level deep tree
+        let deep = dir.path().join("a").join("b").join("c").join("d");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("leaf.rs"), "").unwrap();
+        std::fs::write(dir.path().join("a").join("b").join("mid.rs"), "").unwrap();
+
+        let result = ListDir
+            .call(
+                json!({ "path": dir.path().to_str().unwrap(), "recursive": true }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let entries: Vec<&str> = result["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        // depth-3 file should appear (a/b/mid.rs is at depth 3 from root)
+        assert!(entries.iter().any(|e| e.ends_with("mid.rs")));
+        // depth-4 file should be cut off (a/b/c/d/leaf.rs)
+        assert!(!entries.iter().any(|e| e.ends_with("leaf.rs")));
+        // depth_capped marker should be set
+        assert_eq!(result["depth_capped"], json!(3));
+    }
+
+    #[tokio::test]
+    async fn list_dir_recursive_focused_no_depth_cap() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        let deep = dir.path().join("a").join("b").join("c").join("d");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("leaf.rs"), "").unwrap();
+
+        let result = ListDir
+            .call(
+                json!({
+                    "path": dir.path().to_str().unwrap(),
+                    "recursive": true,
+                    "detail_level": "full"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let entries: Vec<&str> = result["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        // In focused mode no depth cap — leaf at depth 4 should appear
+        assert!(entries.iter().any(|e| e.ends_with("leaf.rs")));
+        assert!(result.get("depth_capped").is_none());
     }
 
     // ── SearchPattern ─────────────────────────────────────────────────────────
@@ -2365,6 +2643,34 @@ mod tests {
         assert!(result.is_err());
         // Error should not panic, just return Err
     }
+    // BUG-005 regression: read_file on a directory path must return RecoverableError,
+    // not a hard anyhow error. A hard error aborts sibling parallel tool calls in Claude Code.
+    #[tokio::test]
+    async fn read_file_directory_path_returns_recoverable_error() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        // Pass the directory itself as the path — not a file inside it.
+        let result = ReadFile
+            .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
+            .await;
+        let err = result.unwrap_err();
+        assert!(
+            err.downcast_ref::<RecoverableError>().is_some(),
+            "read_file on a directory must be RecoverableError (not a hard error); got: {err}"
+        );
+        let rec = err.downcast_ref::<RecoverableError>().unwrap();
+        assert!(
+            rec.message.contains("directory"),
+            "error message should mention 'directory'; got: {}",
+            rec.message
+        );
+        assert!(
+            rec.hint.as_deref().unwrap_or("").contains("list_dir"),
+            "hint should suggest list_dir; got: {:?}",
+            rec.hint
+        );
+    }
+
     #[tokio::test]
     async fn read_file_binary_content_does_not_panic() {
         let ctx = test_ctx().await;
@@ -2722,6 +3028,11 @@ mod tests {
             result["total_lines"].as_u64().unwrap(),
             300,
             "total_lines should reflect the extracted range"
+        );
+        assert!(
+            result["hint"].as_str().unwrap_or("").contains("read_file"),
+            "buffered range must include a hint guiding sub-range reads; got: {}",
+            result
         );
 
         // Verify the @file_* ref is navigable by sub-range
@@ -3236,6 +3547,67 @@ mod tests {
         assert!(
             result.get("overflow").is_some(),
             "overflow should be present when cap is hit"
+        );
+    }
+
+    #[tokio::test]
+    async fn search_pattern_accepts_library_path() {
+        use crate::library::registry::{DiscoveryMethod, LibraryRegistry};
+
+        // Create a project dir and a separate library dir.
+        let proj_dir = tempdir().unwrap();
+        let lib_dir = tempdir().unwrap();
+
+        // Write a file inside the library that contains a recognisable symbol.
+        std::fs::write(lib_dir.path().join("lib.rs"), "pub fn hello_world() {}").unwrap();
+
+        // Seed .codescout/libraries.json so the Agent loads the library on startup.
+        std::fs::create_dir_all(proj_dir.path().join(".codescout")).unwrap();
+        let mut registry = LibraryRegistry::new();
+        registry.register(
+            "fake-lib".to_string(),
+            lib_dir.path().to_path_buf(),
+            "rust".to_string(),
+            DiscoveryMethod::Manual,
+        );
+        let registry_path = proj_dir.path().join(".codescout/libraries.json");
+        registry.save(&registry_path).unwrap();
+
+        let agent = Agent::new(Some(proj_dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let ctx = ToolContext {
+            agent,
+            lsp: crate::lsp::LspManager::new_arc(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+        };
+
+        // search_pattern with a path pointing into the library — the walker must
+        // start from the library root, not the project root.
+        let result = SearchPattern
+            .call(
+                json!({
+                    "pattern": "hello_world",
+                    "path": lib_dir.path().to_str().unwrap()
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let matches = result["matches"].as_array().unwrap();
+        assert_eq!(
+            matches.len(),
+            1,
+            "expected 1 match in library, got {matches:?}"
+        );
+        assert!(
+            matches[0]["content"]
+                .as_str()
+                .unwrap()
+                .contains("hello_world"),
+            "match content should include the searched symbol"
         );
     }
 
@@ -3963,6 +4335,51 @@ mod tests {
         assert_eq!(format_list_dir(&val), "");
     }
 
+    #[test]
+    fn list_dir_tree_mode_renders_indented() {
+        let val = serde_json::json!({
+            "entries": [
+                "src/lsp/",
+                "src/lsp/client.rs",
+                "src/lsp/ops.rs",
+                "src/tools/",
+                "src/tools/file.rs",
+                "src/main.rs"
+            ]
+        });
+        let result = format_list_dir(&val);
+        assert!(result.starts_with("src — 6 entries"));
+        // Tree mode: entries on individual lines with indentation
+        assert!(result.contains("  lsp/\n"));
+        assert!(result.contains("    client.rs\n"));
+        assert!(result.contains("    ops.rs\n"));
+        assert!(result.contains("  tools/\n"));
+        assert!(result.contains("    file.rs\n"));
+        assert!(result.contains("  main.rs\n"));
+        // No full paths
+        assert!(!result.contains("src/lsp/client.rs"));
+    }
+
+    #[test]
+    fn list_dir_depth_capped_note() {
+        let val = serde_json::json!({
+            "entries": ["src/a.rs"],
+            "depth_capped": 3
+        });
+        let result = format_list_dir(&val);
+        assert!(result.contains("depth capped at 3"));
+        assert!(result.contains("max_depth"));
+    }
+
+    #[test]
+    fn list_dir_no_depth_capped_note_when_absent() {
+        let val = serde_json::json!({
+            "entries": ["src/a.rs", "src/b.rs"]
+        });
+        let result = format_list_dir(&val);
+        assert!(!result.contains("depth capped"));
+    }
+
     // --- common_path_prefix tests ---
 
     #[test]
@@ -4179,6 +4596,31 @@ mod tests {
     fn read_file_missing_content() {
         let val = serde_json::json!({});
         assert_eq!(format_read_file(&val), "");
+    }
+
+    #[test]
+    fn read_file_buffered_range_shows_hint() {
+        // When an explicit range is too large for inline, the response has
+        // file_id + total_lines + hint but no content.  format_read_file must
+        // render the buffer ref and hint so the agent knows content was deferred.
+        let val = serde_json::json!({
+            "file_id": "@file_abc123",
+            "total_lines": 311,
+            "hint": "Range too large for inline (311 lines). Use read_file(\"@file_abc123\", start_line=1, end_line=100) to read in chunks."
+        });
+        let result = format_read_file(&val);
+        assert!(
+            result.contains("311 lines"),
+            "should show total_lines; got: {result}"
+        );
+        assert!(
+            result.contains("Buffer: @file_abc123"),
+            "should show buffer ref; got: {result}"
+        );
+        assert!(
+            result.contains("read_file"),
+            "should include navigation hint; got: {result}"
+        );
     }
 
     #[test]

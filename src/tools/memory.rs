@@ -239,8 +239,7 @@ async fn cross_embed_memory(ctx: &ToolContext, topic: &str, content: &str) -> an
     let (root, model) = {
         let inner = ctx.agent.inner.read().await;
         let p = inner
-            .active_project
-            .as_ref()
+            .active_project()
             .ok_or_else(|| anyhow::anyhow!("no project"))?;
         (p.root.clone(), p.config.embeddings.model.clone())
     };
@@ -277,8 +276,7 @@ async fn create_semantic_anchors(
     let (root, model, min_sim, top_n) = {
         let inner = ctx.agent.inner.read().await;
         let p = inner
-            .active_project
-            .as_ref()
+            .active_project()
             .ok_or_else(|| anyhow::anyhow!("no project"))?;
         (
             p.root.clone(),
@@ -337,6 +335,32 @@ async fn create_semantic_anchors(
     })
     .await??;
     Ok(())
+}
+
+/// Resolve the memory directory for a `memory` tool call.
+///
+/// If the `project` parameter is provided, route to the per-project directory via
+/// `Workspace::memory_dir_for_project`. Otherwise use the focused project's memory dir.
+/// Falls back gracefully when no workspace is loaded.
+async fn resolve_memory_dir(
+    input: &Value,
+    ctx: &ToolContext,
+) -> anyhow::Result<std::path::PathBuf> {
+    let project_param = input.get("project").and_then(|v| v.as_str());
+    let inner = ctx.agent.inner.read().await;
+    if let Some(ws) = inner.workspace.as_ref() {
+        let project_id = project_param
+            .map(|s| s.to_string())
+            .or_else(|| ws.focused.clone())
+            .unwrap_or_else(|| crate::workspace::ROOT_PROJECT_ID.to_string());
+        Ok(ws.memory_dir_for_project(&project_id))
+    } else {
+        // No workspace — fall back to the active project's memory dir.
+        let p = inner.active_project().ok_or_else(|| {
+            super::RecoverableError::with_hint("No active project.", "Call activate_project first.")
+        })?;
+        Ok(p.memory.dir().to_path_buf())
+    }
 }
 
 #[async_trait::async_trait]
@@ -403,6 +427,10 @@ impl Tool for Memory {
                 "id": {
                     "type": "integer",
                     "description": "Required for forget. The memory ID to delete."
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Project ID to scope read/write/list/delete to. Default: focused project."
                 }
             }
         })
@@ -416,17 +444,18 @@ impl Tool for Memory {
                 let content = super::require_str_param(&input, "content")?;
                 let private = parse_bool_param(&input["private"]);
 
-                // Write markdown file (existing behavior)
-                ctx.agent
-                    .with_project(|p| {
-                        if private {
+                // Write markdown file — route to per-project dir when `project` param given.
+                if private {
+                    ctx.agent
+                        .with_project(|p| {
                             p.private_memory.write(topic, content)?;
-                        } else {
-                            p.memory.write(topic, content)?;
-                        }
-                        Ok(())
-                    })
-                    .await?;
+                            Ok(())
+                        })
+                        .await?;
+                } else {
+                    let memories_dir = resolve_memory_dir(&input, ctx).await?;
+                    crate::memory::MemoryStore::from_dir(memories_dir)?.write(topic, content)?;
+                }
 
                 // Cross-embed into semantic store (best-effort, non-fatal)
                 if !private {
@@ -438,7 +467,9 @@ impl Tool for Memory {
                 // Seed/merge path anchors (best-effort, non-fatal)
                 if !private {
                     if let Ok(root) = ctx.agent.require_project_root().await {
-                        let memories_dir = root.join(".codescout").join("memories");
+                        let memories_dir = resolve_memory_dir(&input, ctx).await.unwrap_or_else(
+                            |_| root.join(".codescout").join("memories"),
+                        );
                         if let Err(e) = crate::memory::anchors::update_anchors_on_write(
                             &root, &memories_dir, topic, content,
                         ) {
@@ -451,7 +482,10 @@ impl Tool for Memory {
                 if !private {
                     let path_files: HashSet<String> = {
                         if let Ok(root) = ctx.agent.require_project_root().await {
-                            let memories_dir = root.join(".codescout").join("memories");
+                            let memories_dir =
+                                resolve_memory_dir(&input, ctx).await.unwrap_or_else(|_| {
+                                    root.join(".codescout").join("memories")
+                                });
                             let sidecar_path =
                                 memories_dir.join(format!("{}.anchors.toml", topic));
                             crate::memory::anchors::read_anchor_file(&sidecar_path)
@@ -473,74 +507,99 @@ impl Tool for Memory {
             "read" => {
                 let topic = super::require_str_param(&input, "topic")?;
                 let private = parse_bool_param(&input["private"]);
-                ctx.agent
-                    .with_project(|p| {
-                        let store = if private {
-                            &p.private_memory
-                        } else {
-                            &p.memory
-                        };
-                        match store.read(topic)? {
-                            Some(content) => {
-                                // Proactive buffering: same class as BUG-025. If the
-                                // memory file is large, return a @file_* ref so the
-                                // caller can navigate it by line number. Without this,
-                                // call_content wraps the large {"content":"..."} in a
-                                // 3-line @tool_* envelope, making start_line/end_line
-                                // navigation useless.
-                                if crate::tools::exceeds_inline_limit(&content) {
-                                    let total_lines = content.lines().count();
-                                    let file_path =
-                                        store.topic_path(topic).to_string_lossy().to_string();
-                                    let file_id =
-                                        ctx.output_buffer.store_file(file_path, content);
-                                    Ok(json!({ "file_id": file_id, "total_lines": total_lines }))
-                                } else {
-                                    Ok(json!({ "content": content }))
+                if private {
+                    ctx.agent
+                        .with_project(|p| {
+                            match p.private_memory.read(topic)? {
+                                Some(content) => {
+                                    if crate::tools::exceeds_inline_limit(&content) {
+                                        let total_lines = content.lines().count();
+                                        let file_path = p
+                                            .private_memory
+                                            .topic_path(topic)
+                                            .to_string_lossy()
+                                            .to_string();
+                                        let file_id =
+                                            ctx.output_buffer.store_file(file_path, content);
+                                        Ok(json!({ "file_id": file_id, "total_lines": total_lines }))
+                                    } else {
+                                        Ok(json!({ "content": content }))
+                                    }
                                 }
+                                None => Err(RecoverableError::with_hint(
+                                    format!("topic '{}' not found", topic),
+                                    "Use memory(action='list') to see available topics",
+                                )
+                                .into()),
                             }
-                            None => Err(RecoverableError::with_hint(
-                                format!("topic '{}' not found", topic),
-                                "Use memory(action='list') to see available topics",
-                            )
-                            .into()),
+                        })
+                        .await
+                } else {
+                    let memories_dir = resolve_memory_dir(&input, ctx).await?;
+                    let store = crate::memory::MemoryStore::from_dir(memories_dir)?;
+                    match store.read(topic)? {
+                        Some(content) => {
+                            // Proactive buffering: same class as BUG-025. If the
+                            // memory file is large, return a @file_* ref so the
+                            // caller can navigate it by line number. Without this,
+                            // call_content wraps the large {"content":"..."} in a
+                            // 3-line @tool_* envelope, making start_line/end_line
+                            // navigation useless.
+                            if crate::tools::exceeds_inline_limit(&content) {
+                                let total_lines = content.lines().count();
+                                let file_path =
+                                    store.topic_path(topic).to_string_lossy().to_string();
+                                let file_id = ctx.output_buffer.store_file(file_path, content);
+                                Ok(json!({ "file_id": file_id, "total_lines": total_lines }))
+                            } else {
+                                Ok(json!({ "content": content }))
+                            }
                         }
-                    })
-                    .await
+                        None => Err(RecoverableError::with_hint(
+                            format!("topic '{}' not found", topic),
+                            "Use memory(action='list') to see available topics",
+                        )
+                        .into()),
+                    }
+                }
             }
             "list" => {
                 let include_private = parse_bool_param(&input["include_private"]);
-                ctx.agent
-                    .with_project(|p| {
-                        if include_private {
-                            Ok(json!({ "shared": p.memory.list()?, "private": p.private_memory.list()? }))
-                        } else {
-                            Ok(json!({ "topics": p.memory.list()? }))
-                        }
-                    })
-                    .await
+                if include_private {
+                    // include_private needs the private store from ActiveProject — use with_project.
+                    let memories_dir = resolve_memory_dir(&input, ctx).await?;
+                    let shared_store = crate::memory::MemoryStore::from_dir(memories_dir)?;
+                    let shared = shared_store.list()?;
+                    let private = ctx.agent.with_project(|p| p.private_memory.list()).await?;
+                    Ok(json!({ "shared": shared, "private": private }))
+                } else {
+                    let memories_dir = resolve_memory_dir(&input, ctx).await?;
+                    let topics = crate::memory::MemoryStore::from_dir(memories_dir)?.list()?;
+                    Ok(json!({ "topics": topics }))
+                }
             }
             "delete" => {
                 let topic = super::require_str_param(&input, "topic")?;
                 let private = parse_bool_param(&input["private"]);
 
-                // Delete markdown file (existing behavior)
-                ctx.agent
-                    .with_project(|p| {
-                        if private {
+                // Delete markdown file — route to per-project dir when `project` param given.
+                if private {
+                    ctx.agent
+                        .with_project(|p| {
                             p.private_memory.delete(topic)?;
-                        } else {
-                            p.memory.delete(topic)?;
-                        }
-                        Ok(())
-                    })
-                    .await?;
+                            Ok(())
+                        })
+                        .await?;
+                } else {
+                    let memories_dir = resolve_memory_dir(&input, ctx).await?;
+                    crate::memory::MemoryStore::from_dir(memories_dir)?.delete(topic)?;
+                }
 
                 // Remove cross-embedded entry (best-effort, non-fatal)
                 if !private {
                     let root = {
                         let inner = ctx.agent.inner.read().await;
-                        inner.active_project.as_ref().map(|p| p.root.clone())
+                        inner.active_project().map(|p| p.root.clone())
                     };
                     if let Some(root) = root {
                         let topic_owned = topic.to_string();
@@ -578,7 +637,7 @@ impl Tool for Memory {
 
                 let (root, model) = {
                     let inner = ctx.agent.inner.read().await;
-                    let p = inner.active_project.as_ref().ok_or_else(|| {
+                    let p = inner.active_project().ok_or_else(|| {
                         super::RecoverableError::with_hint(
                             "No active project.",
                             "Call activate_project first.",
@@ -612,7 +671,7 @@ impl Tool for Memory {
 
                 let (root, model) = {
                     let inner = ctx.agent.inner.read().await;
-                    let p = inner.active_project.as_ref().ok_or_else(|| {
+                    let p = inner.active_project().ok_or_else(|| {
                         super::RecoverableError::with_hint(
                             "No active project.",
                             "Call activate_project first.",
@@ -676,7 +735,7 @@ impl Tool for Memory {
 
                 let root = {
                     let inner = ctx.agent.inner.read().await;
-                    let p = inner.active_project.as_ref().ok_or_else(|| {
+                    let p = inner.active_project().ok_or_else(|| {
                         super::RecoverableError::with_hint(
                             "No active project.",
                             "Call activate_project first.",
@@ -697,7 +756,9 @@ impl Tool for Memory {
             "refresh_anchors" => {
                 let topic = super::require_str_param(&input, "topic")?;
                 let root = ctx.agent.require_project_root().await?;
-                let memories_dir = root.join(".codescout").join("memories");
+                let memories_dir = resolve_memory_dir(&input, ctx).await.unwrap_or_else(|_| {
+                    root.join(".codescout").join("memories")
+                });
 
                 // Check that the memory topic exists
                 let topic_path = memories_dir.join(format!("{}.md", topic));
@@ -1478,5 +1539,105 @@ mod tests {
                 .unwrap();
         let report = crate::memory::anchors::check_path_staleness(dir.path(), &af).unwrap();
         assert!(report.is_fresh());
+    }
+
+    #[tokio::test]
+    async fn memory_write_routes_to_project_dir() {
+        use crate::agent::Agent;
+        use std::sync::Arc;
+
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // Multi-project structure: root gradle project + mcp-server sub-project
+        std::fs::write(root.join("build.gradle.kts"), "").unwrap();
+        let mcp = root.join("mcp-server");
+        std::fs::create_dir_all(&mcp).unwrap();
+        std::fs::write(mcp.join("package.json"), r#"{"scripts":{"build":"tsc"}}"#).unwrap();
+        // .codescout dir needed for Agent::new
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+
+        let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+        let lsp: Arc<dyn crate::lsp::LspProvider> = crate::lsp::LspManager::new_arc();
+        let ctx = ToolContext {
+            agent,
+            lsp,
+            output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+        };
+
+        // Write memory to mcp-server project
+        Memory
+            .call(
+                json!({
+                    "action": "write",
+                    "topic": "conventions",
+                    "content": "Use camelCase",
+                    "project": "mcp-server"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        // File should be in per-project dir
+        let project_mem_path = root.join(".codescout/projects/mcp-server/memories/conventions.md");
+        assert!(
+            project_mem_path.exists(),
+            "memory should be in per-project dir: {project_mem_path:?}"
+        );
+
+        // Write memory with no project param — resolves to workspace root dir
+        Memory
+            .call(
+                json!({
+                    "action": "write",
+                    "topic": "root-conventions",
+                    "content": "Use Kotlin idioms"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        // Root memory in workspace-level dir
+        let root_mem_path = root.join(".codescout/memories/root-conventions.md");
+        assert!(
+            root_mem_path.exists(),
+            "root memory should be in workspace-level dir: {root_mem_path:?}"
+        );
+
+        // list scoped to mcp-server should only show conventions
+        let list_result = Memory
+            .call(json!({ "action": "list", "project": "mcp-server" }), &ctx)
+            .await
+            .unwrap();
+        let topics: Vec<&str> = list_result["topics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(topics, vec!["conventions"]);
+
+        // read scoped to mcp-server
+        let read_result = Memory
+            .call(
+                json!({ "action": "read", "topic": "conventions", "project": "mcp-server" }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(read_result["content"], "Use camelCase");
+
+        // delete scoped to mcp-server
+        Memory
+            .call(
+                json!({ "action": "delete", "topic": "conventions", "project": "mcp-server" }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(!project_mem_path.exists(), "memory should be deleted");
     }
 }

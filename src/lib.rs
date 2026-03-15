@@ -18,3 +18,4 @@ pub mod server;
 pub mod tools;
 pub mod usage;
 pub mod util;
+pub mod workspace;
