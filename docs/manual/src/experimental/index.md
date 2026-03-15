@@ -16,4 +16,5 @@ Then register the locally built binary in your MCP config instead of the install
 
 ## Features in development
 
-No experimental features at this time.
+- [LSP Idle TTL Eviction](lsp-idle-ttl.md) — automatically shut down idle LSP servers to
+  reclaim memory, with per-language configurable timeouts
