@@ -22,32 +22,13 @@ impl Tool for SemanticSearch {
             "type": "object",
             "required": ["query"],
             "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Natural language description or code snippet to search for"
-                },
+                "query": { "type": "string", "description": "Natural language or code snippet to search for" },
                 "limit": { "type": "integer", "default": 10 },
-                "detail_level": {
-                    "type": "string",
-                    "description": "Output detail: omit for compact preview (default), 'full' for complete chunk content"
-                },
-                "offset": {
-                    "type": "integer",
-                    "description": "Skip this many results (focused mode pagination)"
-                },
-                "scope": {
-                    "type": "string",
-                    "description": "Search scope: 'project' (default), 'libraries', 'all', or 'lib:<name>' for a specific library"
-                },
-                "include_memories": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "If true, also search semantic memories and include them in results tagged with source='memory'."
-                },
-                "project": {
-                    "type": "string",
-                    "description": "Filter results to a specific project ID (e.g. 'mcp-server'). Default: all projects."
-                }
+                "detail_level": { "type": "string", "description": "'full' for complete chunks (default: compact)" },
+                "offset": { "type": "integer", "description": "Pagination offset" },
+                "scope": { "type": "string", "description": "'project' (default), 'libraries', 'all', or 'lib:<name>'" },
+                "include_memories": { "type": "boolean", "default": false, "description": "Also search semantic memories." },
+                "project": { "type": "string", "description": "Filter to a project ID." }
             }
         })
     }

@@ -22,6 +22,13 @@ These are non-negotiable. Violating the letter IS violating the spirit.
    in a follow-up: `cargo test` → `grep FAILED @cmd_id`. Never `cargo test 2>&1 | grep FAILED`.
    The buffer system exists to save your context window — use it.
 
+4. **ALWAYS RESTORE THE ACTIVE PROJECT.** After `activate_project` to a different project,
+   you MUST `activate_project` back to the original before finishing your task. The MCP server
+   is shared state — forgetting to return silently breaks all subsequent tool calls for the
+   parent conversation. Subagents are especially dangerous: they share the server with their
+   parent. For quick cross-project lookups (1–3 calls), pass `project: "<id>"` instead of
+   switching.
+
 ## How to Choose the Right Tool
 
 ### By knowledge level
@@ -77,6 +84,8 @@ These are non-negotiable. Violating the letter IS violating the spirit.
 | Repeat a broad `find_symbol` after overflow | Narrow with `path=`, `kind=`, or more specific pattern | Follow the overflow hint |
 | Ignore `by_file` in overflow response | Use top file from `by_file` as `path=` filter | The hint tells you exactly where to look |
 | `github_repo(list_commits)` for local file history | `run_command("git log src/foo.rs")` | Local git has full history; GitHub API is paginated and rate-limited |
+| `activate_project("other")` without returning | `activate_project("other")` → work → `activate_project` back to original | Shared server state — forgetting breaks parent conversation |
+| `activate_project` for a single lookup | Pass `project: "<id>"` on the tool call | No state mutation, no risk of forgetting to return |
 
 **If you catch yourself rationalizing** ("I'll just quickly read the file", "this edit is
 too small for replace_symbol", "one pipe won't hurt") — that's the signal to stop and
@@ -194,6 +203,15 @@ use the right tool. Small shortcuts compound into large context waste.
 - **Write tools** (`edit_file`, `replace_symbol`, `insert_code`, etc.) are **project-only**
   and will be rejected for library paths.
 
+**Cross-project navigation (workspaces):**
+- **Quick lookups** (1–3 calls): pass `project: "<id>"` to scope the call — no state change.
+- **Sustained exploration** (reading memories, semantic search, many tool calls):
+  use `activate_project("<id>")`, but **always `activate_project` back to your original
+  project when done.** Forgetting to return leaves all subsequent tool calls operating
+  against the wrong project.
+- **Subagents:** the MCP server state is shared with the parent conversation. You **MUST**
+  `activate_project` back to the original project before completing your task.
+
 ### GitHub
 
 `github_repo` is for operations that require the GitHub API — code search across repos,
@@ -292,3 +310,4 @@ Instructions" — project-specific guidance. Edit the file to customize AI behav
 9. **Semantic search for "how does X work?"** Then drill into results with symbol tools.
 10. **Read `language-patterns` memory before writing or editing code.** `memory(action="read", topic="language-patterns")` contains per-language anti-patterns and correct patterns. Consult it before code changes or code review.
 11. **Prefer local git over GitHub API for local history.** `run_command("git blame/log/diff ...")` is faster and has full history. Use `github_repo` only for remote-only operations: releases, remote branches, cross-repo code search, forking.
+12. **Always restore the active project after cross-project navigation.** `activate_project` back to your original project when done. For quick lookups, use `project: "<id>"` instead of switching.

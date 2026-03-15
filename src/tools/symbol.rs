@@ -401,25 +401,19 @@ impl Tool for ListSymbols {
         "list_symbols"
     }
     fn description(&self) -> &str {
-        "Return a tree of symbols (functions, classes, methods, etc.) in a file or directory. \
-         Uses LSP for accurate results. Pass include_docs=true to also return docstrings \
-         (replaces list_docs). Signatures are always included (replaces list_functions)."
+        "Symbol tree for a file, directory, or glob. Includes signatures. Pass include_docs=true for docstrings."
     }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "path": { "type": "string", "description": "File or directory path relative to project root. Supports glob patterns (e.g. 'src/**/*.rs')" },
-                "depth": { "type": "integer", "default": 1, "description": "Depth of children to include (0=none, 1=direct children)" },
-                "detail_level": { "type": "string", "description": "Output detail: omit or 'exploring' for compact (default), 'full' for complete with bodies" },
-                "offset": { "type": "integer", "description": "Skip this many files (focused mode pagination)" },
-                "limit": { "type": "integer", "description": "Max files per page (focused mode, default 50)" },
-                "scope": { "type": "string", "description": "Search scope: 'project' (default), 'libraries', 'all', or 'lib:<name>'", "default": "project" },
-                "include_docs": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "When true, include docstrings for each file alongside symbols (tree-sitter). Replaces list_docs."
-                }
+                "path": { "type": "string", "description": "File, directory, or glob (e.g. 'src/**/*.rs')" },
+                "depth": { "type": "integer", "default": 1, "description": "Children depth (0=none, 1=direct)" },
+                "detail_level": { "type": "string", "description": "'full' for bodies (default: compact)" },
+                "offset": { "type": "integer", "description": "Pagination offset (files)" },
+                "limit": { "type": "integer", "description": "Max files per page (default 50)" },
+                "scope": { "type": "string", "description": "'project' (default), 'libraries', 'all', or 'lib:<name>'", "default": "project" },
+                "include_docs": { "type": "boolean", "default": false, "description": "Include docstrings (tree-sitter)." }
             }
         })
     }
@@ -758,19 +752,19 @@ impl Tool for FindSymbol {
             "type": "object",
             "properties": {
                 "pattern": { "type": "string", "description": "Symbol name or substring to search for" },
-                "name_path": { "type": "string", "description": "Exact name path from get_symbols_overview (e.g. 'MyStruct/my_method'). Alternative to pattern." },
-                "path": { "type": "string", "description": "Restrict search to this file or glob pattern (e.g. 'src/**/*.rs')" },
+                "name_path": { "type": "string", "description": "Exact path (e.g. 'MyStruct/my_method'). Alternative to pattern." },
+                "path": { "type": "string", "description": "File or glob to restrict search (e.g. 'src/**/*.rs')" },
                 "kind": {
                     "type": "string",
-                    "description": "Filter by symbol kind. Only applied when using 'pattern' — ignored with 'name_path'. Note: 'interface' matches Rust traits.",
+                    "description": "Filter by kind (interface = Rust traits).",
                     "enum": ["function", "class", "struct", "interface", "type", "enum", "module", "constant"]
                 },
                 "include_body": { "type": "boolean", "default": false },
-                "depth": { "type": "integer", "default": 0, "description": "Depth of children to include" },
-                "detail_level": { "type": "string", "description": "Output detail: omit for compact (default), 'full' for complete with bodies" },
-                "offset": { "type": "integer", "description": "Skip this many results (focused mode pagination)" },
-                "limit": { "type": "integer", "description": "Max results per page (focused mode, default 50)" },
-                "scope": { "type": "string", "description": "Search scope: 'project' (default), 'libraries', 'all', or 'lib:<name>'", "default": "project" }
+                "depth": { "type": "integer", "default": 0, "description": "Children depth to include" },
+                "detail_level": { "type": "string", "description": "'full' for bodies (default: compact)" },
+                "offset": { "type": "integer", "description": "Pagination offset" },
+                "limit": { "type": "integer", "description": "Max results (default 50)" },
+                "scope": { "type": "string", "description": "'project' (default), 'libraries', 'all', or 'lib:<name>'", "default": "project" }
             }
         })
     }
@@ -1125,20 +1119,19 @@ impl Tool for FindReferences {
         "find_references"
     }
     fn description(&self) -> &str {
-        "Find all locations that reference the given symbol. \
-         Requires the symbol's file and name_path to locate it."
+        "Find all usages of a symbol. Requires name_path and file."
     }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
             "required": ["name_path", "path"],
             "properties": {
-                "name_path": { "type": "string", "description": "Symbol name path (e.g. 'MyStruct/my_method')" },
+                "name_path": { "type": "string", "description": "Symbol path (e.g. 'MyStruct/my_method')" },
                 "path": { "type": "string", "description": "File containing the symbol" },
-                "detail_level": { "type": "string", "description": "Output detail: omit for compact (default), 'full' for complete with bodies" },
-                "offset": { "type": "integer", "description": "Skip this many results (focused mode pagination)" },
-                "limit": { "type": "integer", "description": "Max results per page (focused mode, default 50)" },
-                "scope": { "type": "string", "description": "Search scope: 'project' (default), 'libraries', 'all', or 'lib:<name>'", "default": "project" }
+                "detail_level": { "type": "string", "description": "'full' for bodies (default: compact)" },
+                "offset": { "type": "integer", "description": "Pagination offset" },
+                "limit": { "type": "integer", "description": "Max results (default 50)" },
+                "scope": { "type": "string", "description": "'project' (default), 'libraries', 'all', or 'lib:<name>'", "default": "project" }
             }
         })
     }

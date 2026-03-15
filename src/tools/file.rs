@@ -25,7 +25,8 @@ impl Tool for ReadFile {
     }
 
     fn description(&self) -> &str {
-        "Read the contents of a file. Optionally restrict to a line range. Large files (~2500+ tokens) are automatically buffered and returned as a summary + @file_* handle. Use start_line + end_line to read a specific range directly. For symbol-level navigation of source code, prefer symbol tools. Format-aware navigation: use heading for Markdown sections, json_path for JSON subtrees, toml_key for TOML tables or YAML sections."
+        "Read a file. Large files return a summary + @file_* handle. \
+         Format-aware: heading (Markdown), json_path (JSON), toml_key (TOML/YAML)."
     }
 
     fn input_schema(&self) -> Value {
@@ -33,13 +34,13 @@ impl Tool for ReadFile {
             "type": "object",
             "required": ["path"],
             "properties": {
-                "path": { "type": "string", "description": "File path relative to project root (also accepted: file_path)" },
+                "path": { "type": "string", "description": "File path relative to project root" },
                 "file_path": { "type": "string", "description": "Alias for path" },
-                "start_line": { "type": "integer", "description": "First line to return (1-indexed). Must be paired with end_line." },
-                "end_line": { "type": "integer", "description": "Last line to return (1-indexed, inclusive). Must be paired with start_line." },
-                "heading": { "type": "string", "description": "Extract a Markdown section by heading text (e.g. \"## Authentication\"). Returns section content with structural metadata. Mutually exclusive with start_line/end_line and other navigation params." },
-                "json_path": { "type": "string", "description": "Extract a JSON subtree by path (e.g. \"$.dependencies\", \"$.users[0]\"). Returns pretty-printed content with type info. Mutually exclusive with start_line/end_line and other navigation params." },
-                "toml_key": { "type": "string", "description": "Extract a TOML table or YAML section by key (e.g. \"dependencies\", \"database\"). Returns section content with structural metadata. Mutually exclusive with start_line/end_line and other navigation params." }
+                "start_line": { "type": "integer", "description": "First line (1-indexed). Pair with end_line." },
+                "end_line": { "type": "integer", "description": "Last line (1-indexed, inclusive). Pair with start_line." },
+                "heading": { "type": "string", "description": "Markdown section by heading (e.g. \"## Auth\")." },
+                "json_path": { "type": "string", "description": "JSON subtree by path (e.g. \"$.dependencies\")." },
+                "toml_key": { "type": "string", "description": "TOML table or YAML section by key (e.g. \"dependencies\")." }
             }
         })
     }
@@ -509,19 +510,11 @@ impl Tool for ListDir {
             "required": ["path"],
             "properties": {
                 "path": { "type": "string" },
-                "recursive": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "Descend into subdirectories without depth limit. In exploring mode, auto-capped at depth 3 — use max_depth to override."
-                },
-                "max_depth": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Max directory depth to descend (1 = direct children only, the default). Overrides recursive."
-                },
-                "detail_level": { "type": "string", "description": "Output detail: omit for compact (default), 'full' for all entries" },
-                "offset": { "type": "integer", "description": "Skip this many entries (focused mode pagination)" },
-                "limit": { "type": "integer", "description": "Max entries per page (focused mode, default 50)" }
+                "recursive": { "type": "boolean", "default": false, "description": "Descend into subdirectories (auto-capped at depth 3 in exploring mode)." },
+                "max_depth": { "type": "integer", "minimum": 1, "description": "Max depth (1=children only, default). Overrides recursive." },
+                "detail_level": { "type": "string", "description": "'full' for all entries (default: compact)" },
+                "offset": { "type": "integer", "description": "Pagination offset" },
+                "limit": { "type": "integer", "description": "Max entries per page (default 50)" }
             }
         })
     }
@@ -639,9 +632,7 @@ impl Tool for SearchPattern {
     }
 
     fn description(&self) -> &str {
-        "Search the codebase for a regex pattern. Returns matching lines with file and line number. \
-         Pass context_lines to see surrounding code — adjacent matches that share context windows \
-         are merged into one block."
+        "Regex search across files. Returns matching lines with location. Pass context_lines for surrounding code."
     }
 
     fn input_schema(&self) -> Value {
@@ -650,14 +641,10 @@ impl Tool for SearchPattern {
             "required": ["pattern"],
             "properties": {
                 "pattern": { "type": "string", "description": "Regex pattern" },
-                "path": { "type": "string", "description": "File or directory to search (default: project root)" },
-                "max_results": { "type": "integer", "default": 50, "description": "Maximum matching lines to return (in context mode this counts individual matching lines, not blocks). Alias: limit" },
+                "path": { "type": "string", "description": "File or directory (default: project root)" },
+                "max_results": { "type": "integer", "default": 50, "description": "Max matching lines. Alias: limit" },
                 "limit": { "type": "integer", "description": "Alias for max_results" },
-                "context_lines": {
-                    "type": "integer",
-                    "default": 0,
-                    "description": "Lines of context before and after each match (max 20). Adjacent matches that share context are merged into one block with a flat multiline content string. For merged blocks, match_line is the first match's line — scan content for further matches."
-                }
+                "context_lines": { "type": "integer", "default": 0, "description": "Context lines before/after each match (max 20). Adjacent matches merge." }
             }
         })
     }
@@ -1461,7 +1448,8 @@ impl Tool for EditFile {
     }
 
     fn description(&self) -> &str {
-        "Replace an exact string in a file. old_string must match the file content exactly (including whitespace/indentation). Use replace_all: true to replace every occurrence. Alternatively, use insert: \"prepend\" or \"append\" to add text at the start or end of the file without a string match."
+        "Exact string replacement in a file. Whitespace-sensitive. \
+         Use insert: \"prepend\"/\"append\" for file boundaries."
     }
 
     fn input_schema(&self) -> Value {
@@ -1470,24 +1458,10 @@ impl Tool for EditFile {
             "required": ["path", "new_string"],
             "properties": {
                 "path": { "type": "string", "description": "File path" },
-                "old_string": {
-                    "type": "string",
-                    "description": "Exact text to find (must match file content including whitespace/indentation). Required unless insert is set."
-                },
-                "new_string": {
-                    "type": "string",
-                    "description": "Replacement text. Empty string deletes the match when using old_string. The text to insert when using insert mode."
-                },
-                "replace_all": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "Replace all occurrences (default: first unique match only)"
-                },
-                "insert": {
-                    "type": "string",
-                    "enum": ["prepend", "append"],
-                    "description": "Insert new_string at the start (prepend) or end (append) of the file. When set, old_string is not required."
-                }
+                "old_string": { "type": "string", "description": "Exact text to find (whitespace-sensitive). Required unless insert is set." },
+                "new_string": { "type": "string", "description": "Replacement text (empty string = delete)." },
+                "replace_all": { "type": "boolean", "default": false, "description": "Replace all occurrences." },
+                "insert": { "type": "string", "enum": ["prepend", "append"], "description": "Insert at file start/end (old_string not required)." }
             }
         })
     }

@@ -370,13 +370,8 @@ impl Tool for Memory {
     }
 
     fn description(&self) -> &str {
-        "Persistent project memory — action: \"read\", \"write\", \"list\", \"delete\". \
-         topic is a path-like key (e.g. 'debugging/async-patterns'). \
-         Pass private=true to use the gitignored private store. \
-         Semantic memory — action: \"remember\", \"recall\", \"forget\". \
-         Stores embedded, searchable knowledge in buckets (code/system/preferences/unstructured). \
-         Always specify bucket for remember — you have context keyword heuristics lack. \
-         Use 'recall' to search by meaning, 'forget' to delete by id."
+        "Persistent project memory. Topic-based: read/write/list/delete with path-like keys. \
+         Semantic: remember/recall/forget with bucket classification and meaning-based search."
     }
 
     fn input_schema(&self) -> Value {
@@ -386,52 +381,25 @@ impl Tool for Memory {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["read", "write", "list", "delete", "remember", "recall", "forget", "refresh_anchors"],
-                    "description": "Operation to perform. refresh_anchors: re-hash anchored files for a topic to clear staleness."
+                    "enum": ["read", "write", "list", "delete", "remember", "recall", "forget", "refresh_anchors"]
                 },
                 "topic": {
                     "type": "string",
-                    "description": "Required for read/write/delete. Path-like key, e.g. 'debugging/async-patterns'."
+                    "description": "For read/write/delete/refresh_anchors. Path-like key, e.g. 'architecture'."
                 },
-                "content": {
-                    "type": "string",
-                    "description": "Required for write. The content to persist."
-                },
-                "private": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "If true, use the gitignored private store."
-                },
-                "include_private": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "For list: also return private topics. Returns { shared, private } instead of { topics }."
-                },
-                "title": {
-                    "type": "string",
-                    "description": "Optional for remember. Short label for the memory. Auto-extracted from content if omitted."
-                },
+                "content": { "type": "string", "description": "For write or remember." },
+                "private": { "type": "boolean", "default": false, "description": "Use gitignored private store." },
+                "include_private": { "type": "boolean", "default": false, "description": "For list: include private topics." },
+                "title": { "type": "string", "description": "For remember. Short label (auto-extracted if omitted)." },
                 "bucket": {
                     "type": "string",
                     "enum": ["code", "system", "preferences", "unstructured"],
-                    "description": "For remember: always specify — code (functions/patterns/APIs/conventions), system (build/deploy/config/infra), preferences (style/habits/always-never rules), unstructured (decisions/notes/context). For recall: optional filter."
+                    "description": "For remember (always specify) or recall (optional filter)."
                 },
-                "query": {
-                    "type": "string",
-                    "description": "Required for recall. The search query."
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Optional for recall. Max results (default 5)."
-                },
-                "id": {
-                    "type": "integer",
-                    "description": "Required for forget. The memory ID to delete."
-                },
-                "project": {
-                    "type": "string",
-                    "description": "Project ID to scope read/write/list/delete to. Default: focused project."
-                }
+                "query": { "type": "string", "description": "For recall. Search query." },
+                "limit": { "type": "integer", "description": "For recall. Max results (default 5)." },
+                "id": { "type": "integer", "description": "For forget. Memory ID to delete." },
+                "project": { "type": "string", "description": "Scope to a project ID. Default: focused project." }
             }
         })
     }

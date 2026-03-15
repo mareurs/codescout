@@ -704,6 +704,15 @@ fn build_system_prompt_draft(
                 p.id
             ));
         }
+
+        draft.push_str("**Cross-project navigation:**\n");
+        draft.push_str("- **Quick lookups** (1–3 calls): pass `project: \"<id>\"` to scope the call — no state change.\n");
+        draft.push_str("- **Sustained exploration** (reading memories, semantic search, many tool calls): \
+                         use `activate_project(\"<id>\")`, but **always `activate_project` back to your original \
+                         project when done.** Forgetting to return leaves all subsequent tool calls operating \
+                         against the wrong project.\n");
+        draft.push_str("- **Subagents:** the MCP server state is shared with the parent conversation. \
+                         You **MUST** `activate_project` back to the original project before completing your task.\n\n");
     } else {
         draft.push_str("## Navigation Strategy\n");
         draft.push_str("1. `memory(action=\"read\", topic=\"architecture\")` — orient yourself\n");
@@ -1441,10 +1450,7 @@ impl Tool for RunCommand {
         "run_command"
     }
     fn description(&self) -> &str {
-        "Run a shell command in the project root. Large output is buffered with a smart summary \
-         — query it with Unix tools via @output_id refs (e.g. grep pattern @cmd_abc). \
-         ALREADY IN THE PROJECT ROOT — do NOT prefix with `cd /abs/path &&`. \
-         Use the `cwd` parameter for subdirectories."
+        "Run a shell command in the project root. Large output is buffered as @cmd_* refs."
     }
     fn input_schema(&self) -> Value {
         json!({
@@ -1453,27 +1459,12 @@ impl Tool for RunCommand {
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": "Shell command to execute. NEVER prefix with `cd /abs/path &&` — already in the project root. May reference stored output buffers with @output_id syntax (e.g. grep FAILED @cmd_a1b2c3)."
+                    "description": "Shell command. May reference @cmd_* buffers (e.g. grep FAILED @cmd_abc)."
                 },
-                "timeout_secs": {
-                    "type": "integer",
-                    "default": 30,
-                    "description": "Max execution time in seconds (default: 30). Ignored when run_in_background is true."
-                },
-                "cwd": {
-                    "type": "string",
-                    "description": "Subdirectory relative to project root. Validated to stay within project."
-                },
-                "acknowledge_risk": {
-                    "type": "boolean",
-                    "description": "Bypass dangerous-command check directly. Prefer the @ack_* handle protocol: \
-                                    when a dangerous command is detected a pending_ack handle is returned — \
-                                    re-run as run_command(\"@ack_<id>\") to execute without repeating the full command."
-                },
-                "run_in_background": {
-                    "type": "boolean",
-                    "description": "Spawn the command detached and return immediately. Output is written to a temp log file; monitor it with run_command(\"tail -50 <log>\"). Use this for long-running commands AND whenever the command backgrounds processes with & — shell & leaves subprocesses holding the stdout pipe open so the foreground run_command hangs until timeout."
-                }
+                "timeout_secs": { "type": "integer", "default": 30, "description": "Max seconds (default 30)." },
+                "cwd": { "type": "string", "description": "Subdirectory relative to project root." },
+                "acknowledge_risk": { "type": "boolean", "description": "Bypass dangerous-command check. Prefer @ack_* handle from the rejected response." },
+                "run_in_background": { "type": "boolean", "description": "Detach and return immediately. Use for long-running or backgrounded (&) commands." }
             }
         })
     }

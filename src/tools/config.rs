@@ -40,13 +40,38 @@ impl Tool for ActivateProject {
                     .unwrap_or(false)
             };
             if is_project_id {
+                // Capture home state before switching so we can warn about returning
+                let home_root = ctx.agent.home_root().await;
+                let was_home = ctx.agent.is_home().await;
+
                 ctx.agent.switch_focus(path).await?;
                 let project_root = ctx.agent.require_project_root().await?;
-                let hint = format!(
-                    "Switched focus to '{}'. CWD: {}",
-                    path,
-                    project_root.display()
-                );
+
+                let hint = if was_home {
+                    if let Some(ref home) = home_root {
+                        format!(
+                            "Switched focus to '{}'. CWD: {} — ⚠ remember to \
+                             activate_project(\"{}\") when done (server state is \
+                             shared with parent conversation)",
+                            path,
+                            project_root.display(),
+                            home.display(),
+                        )
+                    } else {
+                        format!(
+                            "Switched focus to '{}'. CWD: {}",
+                            path,
+                            project_root.display()
+                        )
+                    }
+                } else {
+                    format!(
+                        "Switched focus to '{}'. CWD: {}",
+                        path,
+                        project_root.display()
+                    )
+                };
+
                 return Ok(json!({
                     "status": "ok",
                     "activated": {
@@ -90,12 +115,14 @@ impl Tool for ActivateProject {
         } else if is_home {
             format!("Returned to original project. CWD: {}", project_root_str)
         } else {
+            let home_str = home
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
             format!(
-                "Switched project. CWD: {} (home: {})",
-                project_root_str,
-                home.as_ref()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_default()
+                "Switched project. CWD: {} — ⚠ remember to activate_project(\"{}\") \
+                 when done (server state is shared with parent conversation)",
+                project_root_str, home_str,
             )
         };
 
