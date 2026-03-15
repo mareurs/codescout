@@ -150,9 +150,26 @@ impl Tool for ReadFile {
                     .into());
                 }
                 let content = extract_lines(&text, s as usize, e as usize);
-                // Buffer refs: always return inline. The slice is bounded by the
-                // requested range, and re-buffering a portion of a buffer under a new
-                // handle creates a cascading chain with no benefit.
+                // If the extracted slice exceeds the inline limit, store it as a
+                // plain @file_* ref so call_content() never wraps it in @tool_*.
+                // @tool_* encodes newlines as JSON string escapes, so total_lines
+                // would count JSON structure lines (typically 4) rather than content
+                // lines — making subsequent start_line/end_line navigation useless.
+                // Same root cause as BUG-025 (real-file path); this covers buffer refs.
+                if crate::tools::exceeds_inline_limit(&content) {
+                    let content_lines = content.lines().count();
+                    let file_id = ctx
+                        .output_buffer
+                        .store_file(format!("{}[{}-{}]", path, s, e), content);
+                    return Ok(json!({
+                        "file_id": file_id,
+                        "total_lines": content_lines,
+                        "hint": format!(
+                            "Range too large for inline ({content_lines} lines). \
+                             Use read_file(\"{file_id}\", start_line=1, end_line=100) to read in chunks."
+                        ),
+                    }));
+                }
                 return Ok(json!({ "content": content, "total_lines": total_lines }));
             }
             // Full buffer content — never re-buffer (circular: same content, new ID,
@@ -375,7 +392,14 @@ impl Tool for ReadFile {
                 let file_id = ctx
                     .output_buffer
                     .store_file(resolved.to_string_lossy().to_string(), content);
-                let mut result = json!({ "file_id": file_id, "total_lines": total_lines });
+                let mut result = json!({
+                    "file_id": file_id,
+                    "total_lines": total_lines,
+                    "hint": format!(
+                        "Range too large for inline ({total_lines} lines). \
+                         Use read_file(\"{file_id}\", start_line=1, end_line=100) to read in chunks."
+                    ),
+                });
                 if source_tag != "project" {
                     result["source"] = json!(source_tag);
                 }
@@ -920,6 +944,20 @@ fn format_read_file(val: &Value) -> String {
     // Summary modes have a "type" key
     if let Some(file_type) = val["type"].as_str() {
         return format_read_file_summary(val, file_type);
+    }
+
+    // Buffered range: file_id present but no content — the range was too large for
+    // inline and was stored as a @file_* ref.  Show total_lines + hint so the agent
+    // knows it needs to sub-range read the ref.
+    if val.get("content").is_none() {
+        if let Some(file_id) = val["file_id"].as_str() {
+            let total = val["total_lines"].as_u64().unwrap_or(0);
+            let mut out = format!("{total} lines\n\n  Buffer: {file_id}");
+            if let Some(hint) = val["hint"].as_str() {
+                out.push_str(&format!("\n  {hint}"));
+            }
+            return out;
+        }
     }
 
     // Content mode
@@ -1882,6 +1920,82 @@ mod tests {
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("invalid line range"), "got: {}", msg);
+    }
+
+    #[tokio::test]
+    async fn read_file_buffer_ref_large_range_buffers_as_file_ref() {
+        // Regression test: when a line range read on a @file_* buffer ref extracts
+        // content > TOOL_OUTPUT_BUFFER_THRESHOLD, read_file must store it as a new
+        // @file_* ref rather than returning {"content": "..."} inline.
+        // Without the fix, call_content wraps the large inline JSON in a @tool_*
+        // envelope — which encodes newlines as \n escapes, so total_lines counts
+        // JSON structure lines (4) rather than content lines, and any sub-range read
+        // with start_line > 4 returns empty content.
+        let (dir, ctx) = project_ctx().await;
+
+        // Write a file large enough to exceed the inline threshold.
+        let big: String = (1..=300)
+            .map(|i| format!("line {:04} padding_padding_padding_padd\n", i))
+            .collect();
+        assert!(
+            big.len() > crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD,
+            "test data must exceed threshold ({} bytes), got {}",
+            crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD,
+            big.len()
+        );
+        let path = dir.path().join("big.txt");
+        std::fs::write(&path, &big).unwrap();
+
+        // First read: no range — large file gets buffered as @file_*.
+        let r1 = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        let file_ref = r1["file_id"]
+            .as_str()
+            .expect("large file should produce @file_* ref on first read")
+            .to_string();
+
+        // Second read: ranged read on the @file_* ref — must produce another @file_*,
+        // not inline content that call_content would wrap in @tool_*.
+        let result = ReadFile
+            .call(
+                json!({ "path": file_ref, "start_line": 1, "end_line": 300 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            result.get("file_id").is_some(),
+            "large buffer-ref range should produce a @file_* ref; got: {}",
+            result
+        );
+        assert_eq!(
+            result["total_lines"].as_u64().unwrap(),
+            300,
+            "total_lines must reflect content lines, not JSON structure lines"
+        );
+        assert!(
+            result["hint"].as_str().unwrap_or("").contains("read_file"),
+            "buffered range must include a hint guiding sub-range reads; got: {}",
+            result
+        );
+
+        // The chained @file_* ref must be navigable by sub-range.
+        let file_ref2 = result["file_id"].as_str().unwrap().to_string();
+        let sub = ReadFile
+            .call(
+                json!({ "path": file_ref2, "start_line": 50, "end_line": 50 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(
+            sub["content"].as_str().unwrap_or("").contains("line 0050"),
+            "sub-range on chained @file_* ref must return correct content; got: {}",
+            sub
+        );
     }
 
     // ── ListDir ───────────────────────────────────────────────────────────────
@@ -2914,6 +3028,11 @@ mod tests {
             result["total_lines"].as_u64().unwrap(),
             300,
             "total_lines should reflect the extracted range"
+        );
+        assert!(
+            result["hint"].as_str().unwrap_or("").contains("read_file"),
+            "buffered range must include a hint guiding sub-range reads; got: {}",
+            result
         );
 
         // Verify the @file_* ref is navigable by sub-range
@@ -4477,6 +4596,31 @@ mod tests {
     fn read_file_missing_content() {
         let val = serde_json::json!({});
         assert_eq!(format_read_file(&val), "");
+    }
+
+    #[test]
+    fn read_file_buffered_range_shows_hint() {
+        // When an explicit range is too large for inline, the response has
+        // file_id + total_lines + hint but no content.  format_read_file must
+        // render the buffer ref and hint so the agent knows content was deferred.
+        let val = serde_json::json!({
+            "file_id": "@file_abc123",
+            "total_lines": 311,
+            "hint": "Range too large for inline (311 lines). Use read_file(\"@file_abc123\", start_line=1, end_line=100) to read in chunks."
+        });
+        let result = format_read_file(&val);
+        assert!(
+            result.contains("311 lines"),
+            "should show total_lines; got: {result}"
+        );
+        assert!(
+            result.contains("Buffer: @file_abc123"),
+            "should show buffer ref; got: {result}"
+        );
+        assert!(
+            result.contains("read_file"),
+            "should include navigation hint; got: {result}"
+        );
     }
 
     #[test]

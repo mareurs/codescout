@@ -79,6 +79,45 @@ connection (a Claude Code MCP client bug, not ours).
 
 ---
 
+### BUG-026 — `read_file`: large ranged read on `@file_*` buffer ref silently wraps in `@tool_*`, breaking line navigation
+
+**Date:** 2026-03-15
+**Severity:** High — sub-range reads on large buffer refs return empty content, silently
+**Status:** ✅ Fixed (2026-03-15)
+
+**What happened:**
+`read_file("@file_X", start_line=N, end_line=M)` where the extracted slice exceeds
+`TOOL_OUTPUT_BUFFER_THRESHOLD` (≈10 KB) would return `{"output_id": "@tool_Y", "summary":
+"511 lines...", "hint": "..."}`. Then reading `@tool_Y` with any `start_line > 4` returned
+`{"content": "", "total_lines": 4}`.
+
+**Root cause:**
+Two-layer failure:
+1. `read_file`'s buffer-ref path (`@file_*`/`@cmd_*`) returned the extracted content inline
+   via `call()` — `json!({ "content": content, "total_lines": 511 })`.
+2. `call_content()` (default `Tool` trait impl) serialized this and, because the JSON string
+   exceeded the threshold, stored it as `@tool_*` via `store_tool()`.
+3. Reading a `@tool_*` with `start_line`: the buffer content is the pretty-printed JSON
+   `{"content": "line1\nline2\n...", "total_lines": 511}` — but `serde_json::to_string_pretty`
+   keeps string values as single-line JSON with `\n` escapes, so the whole JSON is only 4
+   lines. `total_lines = 4`, and any `start_line > 4` hits out-of-range → empty string.
+
+The same root cause was fixed for the real-file explicit-range path in `BUG-025`, but the
+buffer-ref path was missed.
+
+**Reproduction:**
+1. Read any file > ~10 KB: `read_file("path/to/large.md")` → `@file_X`
+2. Range-read a large slice: `read_file("@file_X", start_line=1, end_line=300)` → `@tool_Y`
+3. `read_file("@tool_Y", start_line=70, end_line=100)` → `{"content": "", "total_lines": 4}`
+
+**Fix (src/tools/file.rs):**
+In the buffer-ref line-range path, check `exceeds_inline_limit` after extracting lines. If
+exceeded, call `output_buffer.store_file()` and return `{"file_id": "@file_Z", "total_lines":
+N}` — a small JSON that `call_content()` won't re-buffer as `@tool_*`. Regression test:
+`read_file_buffer_ref_large_range_buffers_as_file_ref`.
+
+---
+
 ## Template for new entries
 
 ```
