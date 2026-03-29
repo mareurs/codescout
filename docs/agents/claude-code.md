@@ -1,24 +1,53 @@
 # Claude Code
 
-## One-Time Setup
+## Setup
 
-Prerequisites: Rust toolchain, `cargo install codescout`. The binary lands at `~/.cargo/bin/codescout`.
+Prerequisites: Rust toolchain
 
-Register codescout as an MCP server. The recommended approach is user-level registration — edit `~/.claude/settings.json`:
+### Using `cargo install` (recommended)
+
+Install the binary:
+
+```bash
+cargo install codescout
+# lands at ~/.cargo/bin/codescout
+```
+
+For this route, we can register as a user-level MCP server via the CLI:
+
+```bash
+claude mcp add --scope user codescout ~/.cargo/bin/codescout -- start
+```
+
+This writes the entry into `~/.claude.json` (user-scoped).
+
+
+For a project-scoped alternative, place a `.mcp.json` file at the project root:
 
 ```json
 {
   "mcpServers": {
     "codescout": {
-      "command": "codescout",
-      "args": ["start"],
+      "command": "/absolute/path/to/target/release/codescout",
+      "args": ["start", "--project", "/absolute/path/to/your/project"],
       "type": "stdio"
     }
   }
 }
 ```
 
-For a project-scoped alternative, place a `.mcp.json` file at the project root with the same block.
+Claude Code detects `.mcp.json` automatically and prompts for approval on first use. 
+
+### Using a local build
+
+If you're working from source or want to pin to a specific local build:
+
+```bash
+cargo build --release
+# binary at target/release/codescout
+```
+
+If you opt for the local build, manually add to either json based on desired scope. Use absolute paths — relative paths are not reliable here.
 
 ## Workflow Skills
 

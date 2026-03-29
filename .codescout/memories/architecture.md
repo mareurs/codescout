@@ -33,7 +33,7 @@ src/
 │   ├── git.rs             #   git_blame, file_log (not registered; used by dashboard)
 │   ├── semantic.rs        #   semantic_search, index_project, index_status
 │   ├── github.rs          #   github_identity, github_issue, github_pr, github_file, github_repo
-│   ├── library.rs         #   list_libraries
+│   ├── library.rs         #   list_libraries, register_library
 │   ├── memory.rs          #   memory (action: read/write/list/delete/remember/recall/forget/refresh_anchors)
 │   ├── usage.rs           #   GetUsageStats (dashboard API; not an MCP tool)
 │   ├── ast.rs             #   list_functions, list_docs (not registered; tree-sitter offline tools)
@@ -48,7 +48,7 @@ src/
 1. `find_tool(name)` — linear scan over `Vec<Arc<dyn Tool>>`
 2. `check_tool_access(name, &security)` — denormalized match-arm gate in
    `src/util/path_security.rs`. Missing a write tool here bypasses access controls.
-3. Build `ToolContext { agent, lsp, output_buffer, progress }`
+3. Build `ToolContext { agent, lsp, output_buffer, progress, peer, section_coverage }`
 4. Apply `tool_timeout_secs` from `project.toml` (skipped for `index_project`, `onboarding`)
 5. `UsageRecorder::record_content` wraps `tool.call_content()`
 6. `route_tool_error`: `RecoverableError` → `isError:false` + JSON error/hint;
@@ -81,7 +81,8 @@ src/
 `build_index(root, force)` in `src/embed/index.rs`:
 1. `find_changed_files()`: git diff → mtime → SHA-256 fallback
 2. `ast_chunker::split_file()`: AST-aware chunking per language, respects chunk size config
-3. Concurrent embedding with semaphore cap=4 (`JoinSet` over `Embedder::embed()`)\n4. Single SQLite transaction: delete old chunks, insert new, upsert file hash
+3. Concurrent embedding with semaphore cap=4 (`JoinSet` over `Embedder::embed()`)
+4. Single SQLite transaction: delete old chunks, insert new, upsert file hash
 5. Drift detection (if enabled): cosine distance old→new embeddings → `drift_report` table
 6. High-drift files → mark memory anchors stale
 
@@ -97,6 +98,38 @@ chunk embeddings into memory for each query — known perf issue for large index
 - **Anchor sidecars**: `.anchors.toml` alongside each memory tracks source file paths
   referenced in content. `project_status` checks SHA-256 of anchored files to surface
   stale memories. Regenerated on each `write`; cleared via `refresh_anchors` action.
+
+## LSP Multiplexer (Kotlin-specific)
+
+The `mux` subcommand (`--hidden` in CLI) spawns a Unix-socket-based multiplexer for
+languages that support only one server instance per workspace (Kotlin's kotlin-lsp).
+
+Flow:
+- `LspManager::do_start(language, root)` for mux-enabled languages calls
+  `ensure_mux_running(language, root)` in `src/lsp/mux/process.rs`
+- Mux socket path: `/tmp/codescout-<lang>-mux-<workspace_hash>.sock`
+- Lock path: `/tmp/codescout-<lang>-mux-<workspace_hash>.lock`
+- Auto-terminates after `idle_timeout` (default 300s) with no connected clients
+- Multiple codescout instances share one kotlin-lsp process via the mux socket
+
+Kotlin-specific: passes `--system-path=/tmp/codescout-mux-kotlin-lsp` and
+`GRADLE_USER_HOME=/tmp/codescout-mux-gradle` to isolate from per-PID paths.
+
+## ToolContext Fields
+
+`ToolContext` (src/tools/mod.rs):
+| Field | Type | Description |
+|-------|------|-------------|
+| `agent` | `Agent` | Shared state: project config, memories, registry |
+| `lsp` | `Arc<dyn LspProvider>` | Mock-swappable LSP access |
+| `output_buffer` | `Arc<OutputBuffer>` | Session LRU store for @tool_* refs |
+| `progress` | `Option<Arc<ProgressReporter>>` | MCP progress notifications |
+| `peer` | `Option<Peer<RoleServer>>` | MCP peer for elicitation; None in tests |
+| `section_coverage` | `Arc<Mutex<SectionCoverage>>` | Tracks markdown sections read in session |
+
+`ctx.elicit::<T>(message)` sends an MCP elicitation request to the user. Returns
+`Ok(Some(T))` on response, `Ok(None)` if client doesn't support it, or
+`RecoverableError` if user declined/cancelled.
 
 ## Unregistered Tool Structs
 

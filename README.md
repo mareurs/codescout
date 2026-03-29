@@ -29,7 +29,7 @@ cargo build
 ./target/debug/codescout start --project /path/to/code
 ```
 
-Add codescout as an MCP server in Claude Code `settings.json`:
+Add codescout as an MCP server  `~/.claude.json`:
 
 ```json
 {

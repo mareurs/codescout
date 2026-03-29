@@ -41,7 +41,7 @@ pub struct CodeScoutServer {
     agent: Agent,
     lsp: Arc<dyn LspProvider>,
     output_buffer: Arc<crate::tools::output_buffer::OutputBuffer>,
-    // Arc<dyn Tool>: heterogeneous collection of 23+ different tool types dispatched by name at runtime.
+    // Arc<dyn Tool>: heterogeneous collection of 27 registered tool types dispatched by name at runtime.
     tools: Vec<Arc<dyn Tool>>,
     /// Pre-computed at construction because `get_info()` is sync.
     /// Becomes stale if project state changes mid-session (e.g. after onboarding or indexing).

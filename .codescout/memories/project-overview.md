@@ -9,7 +9,7 @@ rather than raw shell reads on source files.
 
 ## Tech Stack
 - **Language:** Rust 1.75+ (MSRV enforced in CI)
-- **MCP SDK:** `rmcp 0.1` (stdio + SSE transports)
+- **MCP SDK:** `rmcp 1.x` (stdio + HTTP transports; builder pattern for `StreamableHttpServerConfig`)
 - **LSP:** JSON-RPC clients for 9 languages via `lsp-types 0.97`
 - **AST:** `tree-sitter` with grammars for Rust/Python/TypeScript/Go/Java/Kotlin
 - **Embeddings:** SQLite via `rusqlite` (bundled); `remote-embed` (reqwest, Ollama/OpenAI-compatible) or `local-embed` (fastembed ONNX) — feature flags
@@ -29,4 +29,4 @@ rather than raw shell reads on source files.
 - `e2e-*`: integration tests requiring real LSP servers installed
 
 ## Current Version
-v0.2.2 (see `Cargo.toml`). Published to crates.io from `master` branch only.
+v0.7.2 (see `Cargo.toml`). Published to crates.io from `master` branch only.
