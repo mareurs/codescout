@@ -518,10 +518,7 @@ pub async fn run(
             let service = StreamableHttpService::new(
                 move || Ok(server.clone()),
                 LocalSessionManager::default().into(),
-                StreamableHttpServerConfig {
-                    cancellation_token: ct.child_token(),
-                    ..Default::default()
-                },
+                StreamableHttpServerConfig::default().with_cancellation_token(ct.child_token()),
             );
 
             // Bearer token auth middleware
