@@ -580,10 +580,21 @@ impl Tool for ReadFile {
             let overflow = OverflowInfo {
                 shown: max_lines,
                 total: total_lines,
-                hint: format!(
-                    "File has {} lines. Use start_line/end_line to read specific ranges",
-                    total_lines
-                ),
+                hint: if crate::tools::file_summary::detect_file_type(path)
+                    == crate::tools::file_summary::FileSummaryType::Source
+                {
+                    format!(
+                        "File has {} lines. For source code, prefer list_symbols(path) \
+                         + find_symbol(query, include_body=true) to read specific functions. \
+                         Or use offset/limit to read a line range.",
+                        total_lines
+                    )
+                } else {
+                    format!(
+                        "File has {} lines. Use offset/limit to read specific ranges.",
+                        total_lines
+                    )
+                },
                 next_offset: None,
                 by_file: None,
                 by_file_overflow: 0,
@@ -773,7 +784,7 @@ impl Tool for Grep {
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
-        let pattern = super::require_str_param(&input, "pattern")?;
+        let pattern = super::require_str_param_or(&input, "pattern", &["query", "regex"])?;
         let raw_path = input["path"].as_str().unwrap_or(".");
         let project_root = ctx.agent.project_root().await;
         let security = ctx.agent.security_config().await;
@@ -1807,7 +1818,11 @@ impl Tool for EditFile {
             return Ok(json!("ok"));
         }
 
-        let old_string = super::require_str_param(&input, "old_string")?;
+        let old_string = super::require_str_param_or(
+            &input,
+            "old_string",
+            &["old_code", "old_content", "old_text"],
+        )?;
         let replace_all = parse_bool_param(&input["replace_all"]);
 
         if old_string.is_empty() {

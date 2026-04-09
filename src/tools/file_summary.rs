@@ -10,6 +10,7 @@ pub struct SectionResult {
     pub format: String,
 }
 
+#[derive(PartialEq)]
 pub enum FileSummaryType {
     Source,
     Markdown,

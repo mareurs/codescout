@@ -182,6 +182,46 @@ pub fn require_param<'a>(
     })
 }
 
+/// Like `require_param`, but also checks common LLM aliases for the parameter.
+/// If the canonical name isn't found, tries each alias in order.
+/// Returns the value from whichever name matched first.
+pub fn require_param_or<'a>(
+    input: &'a serde_json::Value,
+    name: &str,
+    aliases: &[&str],
+) -> anyhow::Result<&'a serde_json::Value> {
+    if let Some(v) = input.get(name) {
+        return Ok(v);
+    }
+    for alias in aliases {
+        if let Some(v) = input.get(*alias) {
+            return Ok(v);
+        }
+    }
+    Err(RecoverableError::with_hint(
+        format!("missing '{}' parameter", name),
+        format!("Add the required '{}' parameter to the tool call.", name),
+    )
+    .into())
+}
+
+/// Like `require_str_param`, but also checks common LLM aliases.
+pub fn require_str_param_or<'a>(
+    input: &'a serde_json::Value,
+    name: &str,
+    aliases: &[&str],
+) -> anyhow::Result<&'a str> {
+    require_param_or(input, name, aliases)?
+        .as_str()
+        .ok_or_else(|| {
+            RecoverableError::with_hint(
+                format!("'{}' must be a string", name),
+                format!("Provide '{}' as a string value.", name),
+            )
+            .into()
+        })
+}
+
 /// Convenience: extract a required string parameter from a JSON `Value`.
 pub fn require_str_param<'a>(input: &'a serde_json::Value, name: &str) -> anyhow::Result<&'a str> {
     require_param(input, name)?.as_str().ok_or_else(|| {
