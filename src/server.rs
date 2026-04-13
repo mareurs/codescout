@@ -51,6 +51,9 @@ pub struct CodeScoutServer {
     section_coverage: Arc<std::sync::Mutex<crate::tools::section_coverage::SectionCoverage>>,
     session_id: String,
     debug: bool,
+    /// Last capabilities snapshot that was broadcast to the client via
+    /// `notifications/tools/list_changed`. Used to suppress redundant broadcasts.
+    last_broadcast_caps: Arc<std::sync::Mutex<Option<crate::tools::ToolCapabilities>>>,
 }
 
 impl CodeScoutServer {
@@ -115,11 +118,65 @@ impl CodeScoutServer {
             section_coverage,
             session_id: uuid::Uuid::new_v4().to_string(),
             debug,
+            last_broadcast_caps: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
     fn find_tool(&self, name: &str) -> Option<Arc<dyn Tool>> {
         self.tools.iter().find(|t| t.name() == name).cloned()
+    }
+
+    /// Probe the current project state and return a snapshot of its capabilities.
+    ///
+    /// All probes are non-panicking — unknown or missing state falls back to `false`.
+    /// Called by `list_tools` and by `call_tool` (to detect capability changes after
+    /// `activate_project`).
+    async fn current_capabilities(&self) -> crate::tools::ToolCapabilities {
+        // has_lsp: true when any language in the active project has a registered LSP server config.
+        let has_lsp = self
+            .agent
+            .with_project(|p| {
+                let has = p
+                    .config
+                    .project
+                    .languages
+                    .iter()
+                    .any(|lang| crate::lsp::servers::has_lsp_config(lang));
+                Ok(has)
+            })
+            .await
+            .unwrap_or(false);
+
+        // has_embeddings: compile-time guard — true whenever at least one embedding backend
+        // is compiled in. Both local-embed and remote-embed are in the default feature set.
+        // No runtime "model loaded?" check exists without actually attempting a connection,
+        // so we rely on the feature flags alone.
+        let has_embeddings = cfg!(any(feature = "local-embed", feature = "remote-embed"));
+
+        // has_git_remote: true when the active project's git repository has at least one remote.
+        let has_git_remote = self
+            .agent
+            .project_root()
+            .await
+            .and_then(|root| git2::Repository::open(&root).ok())
+            .and_then(|repo| repo.remotes().ok())
+            .map(|remotes| !remotes.is_empty())
+            .unwrap_or(false);
+
+        // has_libraries: true when at least one library is registered for the active project.
+        let has_libraries = self
+            .agent
+            .library_registry()
+            .await
+            .map(|reg| !reg.all().is_empty())
+            .unwrap_or(false);
+
+        crate::tools::ToolCapabilities {
+            has_lsp,
+            has_embeddings,
+            has_git_remote,
+            has_libraries,
+        }
     }
 
     /// Core tool dispatch, separated from the MCP trait method so tests can
@@ -272,8 +329,13 @@ fn tool_skips_server_timeout(name: &str) -> bool {
 
 impl ServerHandler for CodeScoutServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_instructions(self.instructions.clone())
+        ServerInfo::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_tool_list_changed()
+                .build(),
+        )
+        .with_instructions(self.instructions.clone())
     }
 
     async fn list_tools(
@@ -281,9 +343,11 @@ impl ServerHandler for CodeScoutServer {
         _req: Option<PaginatedRequestParams>,
         _ctx: RequestContext<RoleServer>,
     ) -> std::result::Result<ListToolsResult, McpError> {
+        let caps = self.current_capabilities().await;
         let tools = self
             .tools
             .iter()
+            .filter(|t| t.availability(&caps).is_available(&caps))
             .map(|t| {
                 let schema = t.input_schema();
                 let schema_obj = schema.as_object().cloned().unwrap_or_default();
@@ -299,18 +363,13 @@ impl ServerHandler for CodeScoutServer {
         req: CallToolRequestParams,
         req_ctx: RequestContext<RoleServer>,
     ) -> std::result::Result<CallToolResult, McpError> {
+        let is_activate = req.name == "activate_project";
         let progress = Some(progress::ProgressReporter::new(
             req_ctx.peer.clone(),
             req_ctx.id.clone(),
         ));
         let peer = Some(req_ctx.peer.clone());
-        // `req_ctx.ct` is rmcp's per-request CancellationToken. It is cancelled
-        // when the client sends a CancelledNotification (Escape in Claude Code).
-        // Hand it to call_tool_inner so the tool future can be aborted instead
-        // of running to completion and triggering a connection close.
-        let result = self
-            .call_tool_inner(req, progress, peer, req_ctx.ct.clone())
-            .await?;
+        let result = self.call_tool_inner(req, progress, peer).await?;
 
         // After a successful activate_project, check whether the capability set has
         // changed. If it has, emit notifications/tools/list_changed so the client
@@ -328,9 +387,6 @@ impl ServerHandler for CodeScoutServer {
             if caps_changed {
                 let _ = req_ctx.peer.notify_tool_list_changed().await;
             }
-
-            // Rebuild the resource registry to pick up the new memory dir.
-            self.refresh_resources().await;
         }
 
         Ok(result)
@@ -1182,6 +1238,116 @@ mod tests {
             stripped.content.len(),
             1,
             "no note should be added when nothing was stripped"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_tools_hides_lsp_tools_when_no_lsp() {
+        use crate::tools::{Availability, ToolCapabilities};
+
+        // Verify Availability filtering logic directly — no LSP config in the
+        // temp project, so has_lsp should be false and LSP tools should be hidden.
+        let caps_no_lsp = ToolCapabilities {
+            has_lsp: false,
+            has_embeddings: true,
+            has_git_remote: false,
+            has_libraries: false,
+        };
+        let caps_with_lsp = ToolCapabilities {
+            has_lsp: true,
+            has_embeddings: true,
+            has_git_remote: false,
+            has_libraries: false,
+        };
+
+        assert!(
+            !Availability::RequiresLsp.is_available(&caps_no_lsp),
+            "RequiresLsp should not be available when has_lsp=false"
+        );
+        assert!(
+            Availability::RequiresLsp.is_available(&caps_with_lsp),
+            "RequiresLsp should be available when has_lsp=true"
+        );
+
+        // Verify server-level filtering: build a server and check that the tool
+        // names returned by current_capabilities + filter match expectations.
+        let (_dir, server) = make_server().await;
+        let caps = server.current_capabilities().await;
+
+        // In a fresh temp dir with no languages configured, has_lsp should be false.
+        // LSP tools (hover, goto_definition, find_references, rename_symbol) must be hidden.
+        if !caps.has_lsp {
+            let visible: Vec<&str> = server
+                .tools
+                .iter()
+                .filter(|t| t.availability(&caps).is_available(&caps))
+                .map(|t| t.name())
+                .collect();
+            for lsp_tool in &[
+                "hover",
+                "goto_definition",
+                "find_references",
+                "rename_symbol",
+            ] {
+                assert!(
+                    !visible.contains(lsp_tool),
+                    "LSP tool '{}' should be hidden when has_lsp=false",
+                    lsp_tool
+                );
+            }
+            // Non-LSP tools must still be visible.
+            for always_tool in &["read_file", "list_dir", "memory", "activate_project"] {
+                assert!(
+                    visible.contains(always_tool),
+                    "Always-available tool '{}' should remain visible",
+                    always_tool
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn list_tools_shows_lsp_tools_when_has_lsp() {
+        use crate::tools::ToolCapabilities;
+
+        let caps_with_lsp = ToolCapabilities {
+            has_lsp: true,
+            has_embeddings: true,
+            has_git_remote: false,
+            has_libraries: false,
+        };
+
+        let (_dir, server) = make_server().await;
+        let visible: Vec<&str> = server
+            .tools
+            .iter()
+            .filter(|t| t.availability(&caps_with_lsp).is_available(&caps_with_lsp))
+            .map(|t| t.name())
+            .collect();
+
+        for lsp_tool in &[
+            "hover",
+            "goto_definition",
+            "find_references",
+            "rename_symbol",
+        ] {
+            assert!(
+                visible.contains(lsp_tool),
+                "LSP tool '{}' should be visible when has_lsp=true",
+                lsp_tool
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn current_capabilities_returns_without_panic() {
+        // Smoke test: current_capabilities must not panic even for a fresh project.
+        let (_dir, server) = make_server().await;
+        let caps = server.current_capabilities().await;
+        // has_embeddings is compile-time — must be true in default feature set.
+        assert!(
+            caps.has_embeddings,
+            "has_embeddings should be true when local-embed or remote-embed feature is active"
         );
     }
 
