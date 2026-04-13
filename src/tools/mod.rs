@@ -416,6 +416,40 @@ fn truncate_compact(text: &str, soft_max: usize, hard_max: usize) -> String {
     format!("{}… (truncated)", &text[..search_end])
 }
 
+/// Snapshot of project capabilities that tool `availability()` can inspect.
+///
+/// Built by `CodeScoutServer::current_capabilities()` at each `list_tools`
+/// call. Cheap (Copy); do not hold references.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToolCapabilities {
+    pub has_lsp: bool,
+    pub has_embeddings: bool,
+    pub has_git_remote: bool,
+    pub has_libraries: bool,
+}
+
+/// Conditional-exposure constraint for a `Tool`.
+#[derive(Debug, Clone, Copy)]
+pub enum Availability {
+    Always,
+    RequiresLsp,
+    RequiresEmbeddings,
+    RequiresGitRemote,
+    RequiresLibraries,
+}
+
+impl Availability {
+    pub fn is_available(self, c: &ToolCapabilities) -> bool {
+        match self {
+            Availability::Always => true,
+            Availability::RequiresLsp => c.has_lsp,
+            Availability::RequiresEmbeddings => c.has_embeddings,
+            Availability::RequiresGitRemote => c.has_git_remote,
+            Availability::RequiresLibraries => c.has_libraries,
+        }
+    }
+}
+
 /// A single MCP tool exposed to the LLM.
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
@@ -451,6 +485,12 @@ pub trait Tool: Send + Sync {
     /// ships.
     fn format_for_user_channel(&self, result: &Value) -> Option<String> {
         self.format_compact(result)
+    }
+
+    /// Conditional-exposure gate for `ServerHandler::list_tools`.
+    /// Defaults to `Always`; override in tools that require LSP, embeddings, etc.
+    fn availability(&self, _caps: &ToolCapabilities) -> Availability {
+        Availability::Always
     }
 
     /// Returns the JSON path to the most useful field in a buffered result.
@@ -1237,5 +1277,65 @@ mod tests {
             e.downcast_ref::<RecoverableError>().is_some(),
             "UserCancelled must be a RecoverableError so it routes to isError:false"
         );
+    }
+}
+
+#[cfg(test)]
+mod availability_tests {
+    use super::*;
+    use serde_json::Value;
+
+    struct AlwaysTool;
+    #[async_trait::async_trait]
+    impl Tool for AlwaysTool {
+        fn name(&self) -> &str {
+            "always"
+        }
+        fn description(&self) -> &str {
+            ""
+        }
+        fn input_schema(&self) -> Value {
+            serde_json::json!({})
+        }
+        async fn call(&self, _i: Value, _c: &ToolContext) -> anyhow::Result<Value> {
+            Ok(serde_json::json!({}))
+        }
+    }
+
+    #[test]
+    fn default_availability_is_always() {
+        let t = AlwaysTool;
+        let caps = ToolCapabilities {
+            has_lsp: false,
+            has_embeddings: false,
+            has_git_remote: false,
+            has_libraries: false,
+        };
+        assert!(t.availability(&caps).is_available(&ToolCapabilities {
+            has_lsp: false,
+            has_embeddings: false,
+            has_git_remote: false,
+            has_libraries: false
+        }));
+        assert!(matches!(t.availability(&caps), Availability::Always));
+    }
+
+    #[test]
+    fn availability_gates_toggle_correctly() {
+        let off = ToolCapabilities {
+            has_lsp: false,
+            has_embeddings: false,
+            has_git_remote: false,
+            has_libraries: false,
+        };
+        let on = ToolCapabilities {
+            has_lsp: true,
+            has_embeddings: true,
+            has_git_remote: true,
+            has_libraries: true,
+        };
+        assert!(!Availability::RequiresLsp.is_available(&off));
+        assert!(Availability::RequiresLsp.is_available(&on));
+        assert!(Availability::Always.is_available(&off));
     }
 }
