@@ -2256,6 +2256,39 @@ impl Tool for RunCommand {
     fn description(&self) -> &str {
         "Run a shell command in the project root. Large output is buffered as @cmd_* refs."
     }
+
+    fn long_docs(&self) -> Option<&str> {
+        Some(
+            "## Output buffering\n\
+             \n\
+             Short output (< 50 lines) is returned inline.\n\
+             Long output is stored as `@cmd_xxxx` and a smart summary is returned.\n\
+             Query the buffer in a follow-up: `run_command(\"grep FAILED @cmd_xxxx\")`.\n\
+             Never pipe output inline — use the buffer ref instead.\n\
+             \n\
+             ## Key parameters\n\
+             \n\
+             - `command`: shell command string. May reference `@cmd_*` buffer refs.\n\
+             - `cwd`: subdirectory relative to project root.\n\
+             - `timeout_secs`: default 30; raise for long builds.\n\
+             - `run_in_background=true`: detach and return immediately.\n\
+             - `interactive=true`: spawn with stdin/stdout for REPLs.\n\
+             - `acknowledge_risk=true`: bypass the dangerous-command gate (use the `@ack_*` \
+             handle from the rejection response instead).\n\
+             \n\
+             ## Dangerous commands\n\
+             \n\
+             Commands matching destructive patterns (rm -rf, dd, mkfs, …) are blocked.\n\
+             The rejection response contains an `@ack_*` handle — pass it as `acknowledge_risk` \
+             to proceed after the user confirms.\n\
+             \n\
+             ## Tips\n\
+             \n\
+             - `cargo test` → buffer ref → `grep FAILED @cmd_xxx` to find failures.\n\
+             - `cargo build` → buffer ref → `grep error @cmd_xxx` to find errors.\n\
+             - Add trusted commands to `shell_allow_always` in `project.toml [security]`.",
+        )
+    }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",

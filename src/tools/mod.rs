@@ -459,6 +459,16 @@ pub trait Tool: Send + Sync {
     /// Short description shown to the LLM
     fn description(&self) -> &str;
 
+    /// Extended usage documentation for `doc://codescout-tool-guide`.
+    ///
+    /// The short `description()` (capped at 300 chars) goes in the MCP tool list
+    /// and is re-sent every turn. Long examples and "when to use this vs. that"
+    /// prose live here and are only paid for when the agent explicitly reads the
+    /// tool-guide resource.
+    fn long_docs(&self) -> Option<&str> {
+        None
+    }
+
     /// JSON Schema for the input parameters
     fn input_schema(&self) -> Value;
 

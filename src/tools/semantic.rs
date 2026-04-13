@@ -17,6 +17,39 @@ impl Tool for SemanticSearch {
         "Find code by natural language description or code snippet. \
          Returns ranked chunks with file path, line range, and similarity score."
     }
+
+    fn long_docs(&self) -> Option<&str> {
+        Some(
+            "## When to use\n\
+             \n\
+             Use `semantic_search` when you know the *concept* but not the symbol name.\n\
+             Examples: \"retry logic\", \"parse JWT token\", \"database connection pool\".\n\
+             For known symbol names, prefer `find_symbol` (faster, exact).\n\
+             \n\
+             ## Prerequisites\n\
+             \n\
+             The project index must be built: run `index_project()` first.\n\
+             Check status with `index_status()`.\n\
+             \n\
+             ## Key parameters\n\
+             \n\
+             - `query`: natural language or a code snippet.\n\
+             - `limit`: number of results (default 10). Raise to 20-30 for broad concepts.\n\
+             - `scope`: `\"project\"` (default), `\"libraries\"`, `\"all\"`, or `\"lib:<name>\"`.\n\
+             - `include_memories=true`: also search semantic memories.\n\
+             - `project_id`: filter to a specific workspace sub-project.\n\
+             \n\
+             ## Output\n\
+             \n\
+             Each result has `file`, `start_line`, `end_line`, and `score` (0.0–1.0).\n\
+             Use `find_symbol` or `read_file(start_line=N, end_line=M)` to read the chunk body.\n\
+             \n\
+             ## Tips\n\
+             \n\
+             - Short, specific queries beat long prose.\n\
+             - Scores below 0.3 are usually noise; re-query with a different angle.",
+        )
+    }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",

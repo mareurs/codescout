@@ -424,6 +424,40 @@ impl Tool for Memory {
          Semantic: remember/recall/forget with bucket classification and meaning-based search."
     }
 
+    fn long_docs(&self) -> Option<&str> {
+        Some(
+            "## Two memory systems\n\
+             \n\
+             **Topic-based** (structured, Markdown files on disk):\n\
+             - `action=\"write\"`: save knowledge with a path-like topic key.\n\
+             - `action=\"read\"`: retrieve by exact topic.\n\
+             - `action=\"list\"`: list all topics.\n\
+             - `action=\"delete\"`: remove a topic.\n\
+             \n\
+             **Semantic** (embedded, meaning-based search):\n\
+             - `action=\"remember\"`: embed and store a free-text fact.\n\
+             - `action=\"recall\"`: search by meaning (natural language query).\n\
+             - `action=\"forget\"`: remove a semantic memory entry.\n\
+             \n\
+             ## Topic naming\n\
+             \n\
+             Topics are path-like strings: `\"architecture/overview\"`, `\"debugging/async-patterns\"`.\n\
+             Nested topics appear as sections in the memory resource.\n\
+             \n\
+             ## Sections filter\n\
+             \n\
+             Pass `sections=[\"### Heading\"]` when reading to get only matching `###` blocks.\n\
+             \n\
+             ## Private memories\n\
+             \n\
+             `private=true` routes to a gitignored store for machine-specific notes.\n\
+             \n\
+             ## Cross-project\n\
+             \n\
+             Pass `project_id` in a workspace to target a specific sub-project's memory.",
+        )
+    }
+
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",

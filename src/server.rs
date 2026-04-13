@@ -114,7 +114,7 @@ impl CodeScoutServer {
             crate::tools::section_coverage::SectionCoverage::new(),
         ));
         let resources = Arc::new(tokio::sync::RwLock::new(Arc::new(
-            build_resource_registry(&agent).await,
+            build_resource_registry(&agent, &tools).await,
         )));
         Self {
             agent,
@@ -137,7 +137,7 @@ impl CodeScoutServer {
     /// Replace the resource registry after an `activate_project` call that may have
     /// changed the active memory directory.
     async fn refresh_resources(&self) {
-        let new_rr = build_resource_registry(&self.agent).await;
+        let new_rr = build_resource_registry(&self.agent, &self.tools).await;
         *self.resources.write().await = Arc::new(new_rr);
     }
 
@@ -472,11 +472,18 @@ impl ServerHandler for CodeScoutServer {
 /// the new memory directory.  Any provider that can't be constructed (e.g. the project
 /// root is not yet set) is silently skipped — the registry is always valid even when
 /// empty.
-async fn build_resource_registry(agent: &Agent) -> crate::mcp_resources::ResourceRegistry {
+///
+/// `tools` is passed so that the tool-guide resource is always current; each
+/// `refresh_resources` call simply re-registers with the same tool slice.
+async fn build_resource_registry(
+    agent: &Agent,
+    tools: &[Arc<dyn Tool>],
+) -> crate::mcp_resources::ResourceRegistry {
     use crate::mcp_resources::{
         doc::{DocProvider, DocSource},
         memory::MemoryProvider,
         project_summary::{AgentSummarySource, ProjectSummaryProvider},
+        tool_guide::ToolGuideProvider,
         ResourceRegistry,
     };
 
@@ -514,6 +521,9 @@ async fn build_resource_registry(agent: &Agent) -> crate::mcp_resources::Resourc
     let _ = rr.try_register(Box::new(ProjectSummaryProvider::new(
         AgentSummarySource::new(agent.clone()),
     )));
+
+    // Tool guide — always registered; renders long_docs() for each registered tool.
+    let _ = rr.try_register(Box::new(ToolGuideProvider::new(tools.to_vec())));
 
     rr
 }
@@ -996,6 +1006,21 @@ mod tests {
                 server.find_tool(name).is_some(),
                 "tool '{}' not found in server",
                 name
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn tool_descriptions_stay_under_budget() {
+        let (_dir, server) = make_server().await;
+        for t in &server.tools {
+            let d = t.description();
+            assert!(
+                d.len() <= 300,
+                "tool `{}` description is {} chars (cap 300): {:?}",
+                t.name(),
+                d.len(),
+                d
             );
         }
     }

@@ -6,4 +6,4 @@
 
 ## Available Features
 
-*No experimental features at this time. Browse the [`experiments` branch](https://github.com/mareurs/codescout/tree/experiments) for work in progress.*
+- [Tool Description Diet & Tool Guide Resource](./tool-description-diet.md) — caps tool descriptions at 300 chars, exposes long-form notes via `doc://codescout-tool-guide`.
