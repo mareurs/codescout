@@ -252,6 +252,10 @@ impl Tool for SemanticSearch {
     fn format_compact(&self, result: &Value) -> Option<String> {
         Some(format_semantic_search(result))
     }
+
+    fn availability(&self, _caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
+        crate::tools::Availability::RequiresEmbeddings
+    }
 }
 
 #[async_trait::async_trait]
@@ -483,6 +487,10 @@ impl Tool for IndexProject {
     fn format_compact(&self, result: &Value) -> Option<String> {
         Some(format_index_project(result))
     }
+
+    fn availability(&self, _caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
+        crate::tools::Availability::RequiresEmbeddings
+    }
 }
 
 #[async_trait::async_trait]
@@ -707,6 +715,10 @@ impl Tool for IndexStatus {
 
     fn format_compact(&self, result: &Value) -> Option<String> {
         Some(format_index_status(result))
+    }
+
+    fn availability(&self, _caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
+        crate::tools::Availability::RequiresEmbeddings
     }
 }
 

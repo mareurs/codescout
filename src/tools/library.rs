@@ -63,6 +63,10 @@ impl Tool for ListLibraries {
     fn format_compact(&self, result: &Value) -> Option<String> {
         Some(format_list_libraries(result))
     }
+
+    fn availability(&self, _caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
+        crate::tools::Availability::RequiresLibraries
+    }
 }
 
 pub struct RegisterLibrary;
@@ -179,6 +183,10 @@ impl Tool for RegisterLibrary {
             result["name"].as_str().unwrap_or("?"),
             result["language"].as_str().unwrap_or("?"),
         ))
+    }
+
+    fn availability(&self, _caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
+        crate::tools::Availability::RequiresLibraries
     }
 }
 
