@@ -54,6 +54,10 @@ pub struct CodeScoutServer {
     /// Last capabilities snapshot that was broadcast to the client via
     /// `notifications/tools/list_changed`. Used to suppress redundant broadcasts.
     last_broadcast_caps: Arc<std::sync::Mutex<Option<crate::tools::ToolCapabilities>>>,
+    /// MCP resource registry — replaceable on `activate_project` to pick up a new
+    /// memory dir. Held behind `RwLock<Arc<...>>` so list/read only need a read lock
+    /// while replacement takes a write lock.
+    resources: Arc<tokio::sync::RwLock<Arc<crate::mcp_resources::ResourceRegistry>>>,
 }
 
 impl CodeScoutServer {
@@ -109,6 +113,9 @@ impl CodeScoutServer {
         let section_coverage = Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         ));
+        let resources = Arc::new(tokio::sync::RwLock::new(Arc::new(
+            build_resource_registry(&agent).await,
+        )));
         Self {
             agent,
             lsp,
@@ -119,11 +126,19 @@ impl CodeScoutServer {
             session_id: uuid::Uuid::new_v4().to_string(),
             debug,
             last_broadcast_caps: Arc::new(std::sync::Mutex::new(None)),
+            resources,
         }
     }
 
     fn find_tool(&self, name: &str) -> Option<Arc<dyn Tool>> {
         self.tools.iter().find(|t| t.name() == name).cloned()
+    }
+
+    /// Replace the resource registry after an `activate_project` call that may have
+    /// changed the active memory directory.
+    async fn refresh_resources(&self) {
+        let new_rr = build_resource_registry(&self.agent).await;
+        *self.resources.write().await = Arc::new(new_rr);
     }
 
     /// Probe the current project state and return a snapshot of its capabilities.
@@ -333,6 +348,7 @@ impl ServerHandler for CodeScoutServer {
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_tool_list_changed()
+                .enable_resources()
                 .build(),
         )
         .with_instructions(self.instructions.clone())
@@ -356,6 +372,60 @@ impl ServerHandler for CodeScoutServer {
             .collect();
 
         Ok(ListToolsResult::with_all_items(tools))
+    }
+
+    async fn list_resources(
+        &self,
+        _req: Option<PaginatedRequestParams>,
+        _ctx: RequestContext<RoleServer>,
+    ) -> std::result::Result<rmcp::model::ListResourcesResult, McpError> {
+        use rmcp::model::{AnnotateAble as _, RawResource};
+        let rr = self.resources.read().await.clone();
+        let resources = rr
+            .list()
+            .into_iter()
+            .map(|d| {
+                let mut raw = RawResource::new(d.uri, d.name);
+                if let Some(desc) = d.description {
+                    raw = raw.with_description(desc);
+                }
+                raw = raw.with_mime_type(d.mime_type);
+                raw.no_annotation()
+            })
+            .collect();
+        Ok(rmcp::model::ListResourcesResult {
+            meta: None,
+            resources,
+            next_cursor: None,
+        })
+    }
+
+    async fn read_resource(
+        &self,
+        req: rmcp::model::ReadResourceRequestParams,
+        _ctx: RequestContext<RoleServer>,
+    ) -> std::result::Result<rmcp::model::ReadResourceResult, McpError> {
+        use crate::mcp_resources::{ResourceBytes, ResourceError};
+        use rmcp::model::{ReadResourceResult, ResourceContents};
+        let rr = self.resources.read().await.clone();
+        match rr.read(&req.uri).await {
+            Ok(ResourceBytes::Text(t)) => {
+                Ok(ReadResourceResult::new(vec![ResourceContents::text(
+                    t, &req.uri,
+                )]))
+            }
+            // Blob resources are not yet produced by any current provider;
+            // callers should not encounter this in practice.
+            Ok(ResourceBytes::Blob(_)) => Err(McpError::internal_error(
+                "blob resource encoding not supported in this build",
+                None,
+            )),
+            Err(ResourceError::NotFound(u)) => Err(McpError::resource_not_found(
+                format!("resource not found: {u}"),
+                None,
+            )),
+            Err(e) => Err(McpError::internal_error(e.to_string(), None)),
+        }
     }
 
     async fn call_tool(
@@ -387,10 +457,65 @@ impl ServerHandler for CodeScoutServer {
             if caps_changed {
                 let _ = req_ctx.peer.notify_tool_list_changed().await;
             }
+
+            // Rebuild the resource registry to pick up the new memory dir.
+            self.refresh_resources().await;
         }
 
         Ok(result)
     }
+}
+
+/// Build a fresh [`crate::mcp_resources::ResourceRegistry`] from the current agent state.
+///
+/// Called at server construction and again after each `activate_project` to pick up
+/// the new memory directory.  Any provider that can't be constructed (e.g. the project
+/// root is not yet set) is silently skipped — the registry is always valid even when
+/// empty.
+async fn build_resource_registry(agent: &Agent) -> crate::mcp_resources::ResourceRegistry {
+    use crate::mcp_resources::{
+        doc::{DocProvider, DocSource},
+        memory::MemoryProvider,
+        project_summary::{AgentSummarySource, ProjectSummaryProvider},
+        ResourceRegistry,
+    };
+
+    let mut rr = ResourceRegistry::new();
+
+    // Static docs — register only when the project root is known so the paths exist.
+    if let Some(project_root) = agent.project_root().await {
+        let _ = rr.try_register(Box::new(DocProvider::new(vec![
+            DocSource {
+                uri: "doc://progressive-disclosure".into(),
+                name: "progressive-disclosure".into(),
+                description: Some(
+                    "Output sizing, overflow hints, agent guidance for codescout tools.".into(),
+                ),
+                path: project_root.join("docs/PROGRESSIVE_DISCOVERABILITY.md"),
+            },
+            DocSource {
+                uri: "doc://tool-misbehaviors".into(),
+                name: "tool-misbehaviors".into(),
+                description: Some("Living log of observed codescout tool bugs.".into()),
+                path: project_root.join("docs/TODO-tool-misbehaviors.md"),
+            },
+        ])));
+    }
+
+    // Memory dir — derived from the active project's MemoryStore.
+    if let Ok(memory_dir) = agent
+        .with_project(|p| Ok(p.memory.dir().to_path_buf()))
+        .await
+    {
+        let _ = rr.try_register(Box::new(MemoryProvider::new(memory_dir)));
+    }
+
+    // Project summary — always registered; falls back gracefully when no project is active.
+    let _ = rr.try_register(Box::new(ProjectSummaryProvider::new(
+        AgentSummarySource::new(agent.clone()),
+    )));
+
+    rr
 }
 
 /// Route a tool `Err(e)` to the appropriate `CallToolResult`.
@@ -1348,6 +1473,70 @@ mod tests {
         assert!(
             caps.has_embeddings,
             "has_embeddings should be true when local-embed or remote-embed feature is active"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Resource registry tests (T7)
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn list_resources_includes_doc_and_summary() {
+        let (_dir, server) = make_server().await;
+        let rr = server.resources.read().await.clone();
+        let uris: Vec<String> = rr.list().into_iter().map(|d| d.uri).collect();
+
+        assert!(
+            uris.iter().any(|u| u.starts_with("doc://")),
+            "expected at least one doc:// URI, got: {uris:?}"
+        );
+        assert!(
+            uris.contains(&"project://summary".to_string()),
+            "expected project://summary URI, got: {uris:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_resource_roundtrips_project_summary() {
+        let (_dir, server) = make_server().await;
+        let rr = server.resources.read().await.clone();
+        let bytes = rr.read("project://summary").await.unwrap();
+        let text = match bytes {
+            crate::mcp_resources::ResourceBytes::Text(t) => t,
+            _ => panic!("expected text resource"),
+        };
+        let json: serde_json::Value =
+            serde_json::from_str(&text).expect("project://summary must be valid JSON");
+        for key in ["active_project", "index_status", "language", "lsp_ready"] {
+            assert!(
+                json.get(key).is_some(),
+                "missing key '{}' in summary JSON",
+                key
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn read_resource_unknown_returns_not_found() {
+        let (_dir, server) = make_server().await;
+        let rr = server.resources.read().await.clone();
+        let err = rr
+            .read("doc://does-not-exist")
+            .await
+            .expect_err("reading unknown URI must fail");
+        assert!(
+            matches!(err, crate::mcp_resources::ResourceError::NotFound(_)),
+            "expected NotFound, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_info_advertises_resources_capability() {
+        let (_dir, server) = make_server().await;
+        let info = server.get_info();
+        assert!(
+            info.capabilities.resources.is_some(),
+            "server must advertise resources capability"
         );
     }
 
