@@ -12,6 +12,7 @@ pub mod git;
 pub mod library;
 pub mod logging;
 pub mod lsp;
+pub mod mcp_resources;
 pub mod memory;
 pub mod platform;
 pub mod prompts;
