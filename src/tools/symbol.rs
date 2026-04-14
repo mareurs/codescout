@@ -1676,8 +1676,18 @@ impl Tool for Hover {
 /// Special case (BUG-031): some LSP servers (e.g. rust-analyzer in certain configs)
 /// report `range.start` at the function signature line, skipping `///` doc comments
 /// and attributes above. When `range_start_line` points to a non-decorator line
-/// (the actual keyword like `fn`, `pub fn`, `struct`, etc.) AND the line above is a
-/// doc comment or attribute, we walk back to include them.
+/// (the actual keyword like `fn`, `pub fn`, `struct`, etc.) AND doc comments exist
+/// above (possibly with Rust attributes between them and the keyword), we walk back
+/// to include them.
+///
+/// Special case (BUG-037): `impl Trait for Type` items may have outer attributes
+/// (`#[async_trait]`, `#[cfg(...)]`) that rust-analyzer intentionally excludes from
+/// `range.start`. Walking back to include them in the editing range would silently
+/// drop them — the LLM's `new_body` starts at `impl` (matching what `find_symbol`
+/// shows) and does not include the attribute. To avoid this, we only trigger the
+/// BUG-031 walk-back when doc comments are present above the attribute block. When
+/// no doc comments are found (only `#[...]` lines), the LSP's `range.start` is
+/// returned unchanged — attributes stay in the file, untouched by the replacement.
 ///
 /// The walk-back result is **validated**: we check that we actually landed on a `/**`
 /// or `/*` opener. If not (e.g. the `*` was a dereference or multiplication, not a
@@ -1703,10 +1713,15 @@ fn editing_start_line(sym: &crate::lsp::SymbolInfo, lines: &[&str]) -> usize {
                 return r;
             }
 
-            // BUG-031: LSP range.start may point to the function keyword line, skipping
-            // `///` doc comments or attributes above. Only walk back if range_start_line
-            // itself is NOT already a doc comment/attribute/decorator — that would mean
-            // the LSP intentionally started there.
+            // BUG-031 / BUG-037: LSP range.start may point to the function keyword line,
+            // skipping `///` doc comments (and interleaved attributes) above. Only walk
+            // back if range_start_line itself is NOT already a doc comment/attribute —
+            // that would mean the LSP intentionally started there.
+            //
+            // BUG-037 guard: skip over any Rust `#[...]` attribute lines immediately above
+            // before checking for doc comments. If only attributes are found above (no docs),
+            // the LSP's placement is intentional — don't walk back, or those attributes will
+            // be silently deleted (the LLM's new_body starts at `impl`/`fn`, not at `#[...]`).
             let line_is_decorator = t.starts_with("///")
                 || t.starts_with("//!")
                 || t.starts_with("#[")
@@ -1716,13 +1731,24 @@ fn editing_start_line(sym: &crate::lsp::SymbolInfo, lines: &[&str]) -> usize {
                 || t.starts_with("*/");
 
             if !line_is_decorator && r > 0 {
-                let above = lines[r - 1].trim_start();
-                let above_is_doc_or_attr = above.starts_with("//")  // covers ///, //!, // (Go)
-                    || above.starts_with("#[")
+                // Walk up past any consecutive Rust `#[...]` attribute lines.
+                let mut doc_check = r;
+                while doc_check > 0 && lines[doc_check - 1].trim_start().starts_with("#[") {
+                    doc_check -= 1;
+                }
+                let above = if doc_check > 0 {
+                    lines[doc_check - 1].trim_start()
+                } else {
+                    ""
+                };
+                // Trigger walkback only when doc comments (or non-Rust `@` decorators)
+                // are present above the attribute block. Pure-attribute blocks above an
+                // `impl`/`fn` are left in place (BUG-037).
+                let above_is_doc_or_decorator = above.starts_with("//") // ///, //!, // (Go)
                     || above.starts_with("*/")
                     || above.starts_with("/**")
                     || above.starts_with('@');
-                if above_is_doc_or_attr {
+                if above_is_doc_or_decorator {
                     return find_insert_before_line(lines, r);
                 }
             }
@@ -5690,6 +5716,69 @@ fn main() {
         // Should stay at 3, not walk back past blank line to 1
         assert_eq!(editing_start_line(&sym, &lines), 3);
     }
+
+    /// BUG-037 regression: rust-analyzer starts `impl Trait for Type` range at
+    /// the `impl` keyword, excluding the outer `#[async_trait]` attribute.
+    /// `editing_start_line` must return the `impl` line unchanged — walking back
+    /// to include the attribute in the editing range would silently drop it, since
+    /// the LLM's `new_body` starts at `impl` (matching what `find_symbol` shows).
+    #[test]
+    fn editing_start_line_does_not_walk_back_to_outer_attribute_on_impl_block() {
+        let sym = crate::lsp::SymbolInfo {
+            name: "impl SomeTrait for SomeType".to_string(),
+            name_path: "impl SomeTrait for SomeType".to_string(),
+            kind: crate::lsp::SymbolKind::Object,
+            file: std::path::PathBuf::from("test.rs"),
+            start_line: 2,
+            end_line: 6,
+            start_col: 0,
+            children: vec![],
+            range_start_line: Some(2), // rust-analyzer starts at `impl`, not `#[async_trait]`
+            detail: None,
+        };
+        let lines = vec![
+            "}",                             // 0 ← end of a previous impl block
+            "#[async_trait::async_trait]",   // 1 ← attribute NOT in LSP range
+            "impl SomeTrait for SomeType {", // 2 ← range_start_line
+            "    async fn foo(&self) {",     // 3
+            "    }",                         // 4
+            "}",                             // 5
+        ];
+        // Must return 2 (the `impl` line) — not 1 (the attribute).
+        // Walking back to 1 would include `#[async_trait]` in the deletion range
+        // while the LLM's new_body starts at `impl`, silently dropping the attribute.
+        assert_eq!(editing_start_line(&sym, &lines), 2);
+    }
+
+    /// BUG-037 corollary: when doc comments ARE present above the attribute+impl,
+    /// walk-back is still triggered (BUG-031 behaviour) because the LLM is expected
+    /// to include docs in new_body.
+    #[test]
+    fn editing_start_line_walks_back_when_docs_exist_above_attribute_on_impl() {
+        let sym = crate::lsp::SymbolInfo {
+            name: "impl SomeTrait for SomeType".to_string(),
+            name_path: "impl SomeTrait for SomeType".to_string(),
+            kind: crate::lsp::SymbolKind::Object,
+            file: std::path::PathBuf::from("test.rs"),
+            start_line: 3,
+            end_line: 6,
+            start_col: 0,
+            children: vec![],
+            range_start_line: Some(3), // range starts at `impl`
+            detail: None,
+        };
+        let lines = vec![
+            "}",                             // 0 ← end of a previous block
+            "/// Implements SomeTrait.",     // 1 ← doc comment above the attribute
+            "#[async_trait::async_trait]",   // 2
+            "impl SomeTrait for SomeType {", // 3 ← range_start_line
+            "    async fn foo(&self) {}",    // 4
+            "}",                             // 5
+        ];
+        // Doc comment at line 1 triggers walk-back — returns 1.
+        assert_eq!(editing_start_line(&sym, &lines), 1);
+    }
+
     /// BUG-029 reproduction: editing_end_line uses AST to cap LSP end_line.
     /// For async nested functions inside `mod tests`, AST may return a different
     /// end_line, causing insert_code "after" to misplace code.

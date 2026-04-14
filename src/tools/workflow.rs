@@ -2740,7 +2740,7 @@ async fn run_command_inner(
     ctx: &ToolContext,
 ) -> anyhow::Result<Value> {
     use super::command_summary::{
-        count_lines, detect_command_type, detect_terminal_filter, needs_summary,
+        count_lines, detect_command_type, detect_terminal_filter, needs_summary, strip_ansi_codes,
         summarize_build_output, summarize_generic, summarize_test_output, truncate_lines,
         truncate_lines_and_bytes, CommandType, BUFFER_QUERY_INLINE_CAP,
     };
@@ -3005,6 +3005,23 @@ async fn run_command_inner(
             let raw_stdout = String::from_utf8_lossy(&output.stdout).into_owned();
             let raw_stderr = String::from_utf8_lossy(&output.stderr).into_owned();
             let exit_code = output.status.code().unwrap_or(-1);
+
+            // Buffer-only queries (e.g. `grep @cmd_A`, `cat @cmd_B`) display output
+            // inline as JSON text. ANSI escape codes are opaque to LLMs and bloat byte
+            // counts, causing byte-budget exhaustion that silently drops all content
+            // (stdout_shown=0). Strip them here so line/byte caps operate on visible
+            // text only. Direct command output is not stripped — callers that want
+            // clean output can pipe through `sed 's/\x1b\[[0-9;]*m//g'`.
+            let raw_stdout = if buffer_only {
+                strip_ansi_codes(&raw_stdout)
+            } else {
+                raw_stdout
+            };
+            let raw_stderr = if buffer_only {
+                strip_ansi_codes(&raw_stderr)
+            } else {
+                raw_stderr
+            };
 
             // --- Step 6.5: Read tee capture and store as unfiltered_output ref ---
             let unfiltered_ref: Option<(String, bool)> =

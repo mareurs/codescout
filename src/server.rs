@@ -642,17 +642,27 @@ pub async fn run(
 
 /// Strips the absolute project root prefix from all text content blocks in a
 /// `CallToolResult`. This normalises tool output to relative paths, reducing
-/// token usage — the prefix (e.g. "/home/user/work/project/") is identical in
-/// every response and carries no information since agents always operate within
-/// the project directory.
+/// token usage — the prefix (e.g. `"/home/user/work/project/"`) is identical
+/// in every response and carries no information since agents always operate
+/// within the project directory.
 ///
 /// `root_prefix` must end with `/`. Pass an empty string when no project is
 /// active; the replace becomes a no-op.
 ///
-/// Note: values like `"project_root": "/abs/path"` in `activate_project` / `get_config`
-/// responses are intentionally not stripped — they use a bare absolute path without a
-/// trailing slash, so they do not match `root_prefix` and pass through unchanged.
-/// Agents that need to call `activate_project` again can still use those values as-is.
+/// **Disambiguation note**: when stripping fires, a trailing content block is
+/// appended:
+///   `[codescout] paths are relative to /abs/project/root`
+/// This prevents LLMs from misreading stripped paths in file *content* (e.g.
+/// a `"statusLine"` value in `settings.json`) as evidence that the file stores
+/// a relative path. The note only appears when stripping actually changes
+/// something — navigation tools whose output never contained absolute paths
+/// get no note.
+///
+/// Note: values like `"project_root": "/abs/path"` in `activate_project` /
+/// `get_config` responses are intentionally not stripped — they use a bare
+/// absolute path without a trailing slash, so they do not match `root_prefix`
+/// and pass through unchanged. Agents that need to call `activate_project`
+/// again can still use those values as-is.
 ///
 /// Buffer content (`@tool_xxx` refs) is covered automatically: it only
 /// re-enters the pipeline through `run_command`, which also passes through
@@ -665,10 +675,26 @@ fn strip_project_root_from_result(mut result: CallToolResult, root_prefix: &str)
         root_prefix.ends_with('/'),
         "root_prefix must end with '/' to avoid stripping partial path components"
     );
+    let mut stripped = false;
     for block in &mut result.content {
         if let RawContent::Text(ref mut t) = block.raw {
-            t.text = t.text.replace(root_prefix, "");
+            let replaced = t.text.replace(root_prefix, "");
+            if replaced != t.text {
+                stripped = true;
+                t.text = replaced;
+            }
         }
+    }
+    // Append a one-liner so agents can distinguish stripped absolute paths
+    // (which appear as bare relative paths) from genuine relative path values
+    // stored in file content. Without this note, an LLM reading a config file
+    // that stores an absolute path as a string value would see a relative path
+    // and incorrectly conclude the file needs to be "fixed".
+    if stripped {
+        let root = root_prefix.trim_end_matches('/');
+        result.content.push(Content::text(format!(
+            "[codescout] paths are relative to {root}"
+        )));
     }
     result
 }
@@ -999,8 +1025,18 @@ mod tests {
             r#"{"file":"/home/user/myproject/src/foo.rs","line":1}"#,
         )]);
         let stripped = strip_project_root_from_result(result, prefix);
-        let text = extract_text(&stripped);
-        assert_eq!(text, r#"{"file":"src/foo.rs","line":1}"#);
+        // First block: prefix replaced
+        assert_eq!(extract_text(&stripped), r#"{"file":"src/foo.rs","line":1}"#);
+        // Trailing block: disambiguation note with the absolute root
+        assert_eq!(stripped.content.len(), 2);
+        let note = stripped.content[1]
+            .as_text()
+            .map(|t| t.text.as_str())
+            .unwrap_or("");
+        assert!(
+            note.contains("/home/user/myproject"),
+            "note should carry the absolute root, got: {note}"
+        );
     }
 
     #[test]
@@ -1015,7 +1051,13 @@ mod tests {
         let prefix = "/home/user/myproject/";
         let result = CallToolResult::success(vec![Content::text("no paths here")]);
         let stripped = strip_project_root_from_result(result, prefix);
+        // Content unchanged, and no disambiguation note appended since nothing was stripped
         assert_eq!(extract_text(&stripped), "no paths here");
+        assert_eq!(
+            stripped.content.len(),
+            1,
+            "no note should be added when nothing was stripped"
+        );
     }
 
     fn extract_text(result: &CallToolResult) -> String {

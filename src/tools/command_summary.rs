@@ -440,6 +440,42 @@ fn extract_error_block(lines: &[&str], start: usize) -> String {
     block.join("\n")
 }
 
+/// Strip ANSI CSI escape sequences from `s` (e.g. `\x1b[32m`, `\x1b[0m`).
+///
+/// Call this on buffered command output before byte-budget calculations. ANSI
+/// codes are opaque to LLMs and inflate byte lengths — on ANSI-colored log
+/// files a single grep match line can be several KB of escape codes around a
+/// few dozen bytes of visible text, silently exhausting the byte budget and
+/// causing `stdout_shown=0`.
+///
+/// Only CSI sequences (`ESC '['` … final ASCII letter) are removed. Other
+/// escape types (rare in log files) pass through unchanged.
+pub(crate) fn strip_ansi_codes(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' {
+            match chars.peek().copied() {
+                Some('[') => {
+                    chars.next(); // consume '['
+                    for c in chars.by_ref() {
+                        if c.is_ascii_alphabetic() {
+                            break; // final byte consumed
+                        }
+                    }
+                }
+                _ => {
+                    // Non-CSI escape — preserve; rare in structured log output.
+                    result.push(ch);
+                }
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+    result
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -449,6 +485,43 @@ mod tests {
     use super::*;
 
     // -- detect_command_type --
+
+    #[test]
+    fn strip_ansi_codes_removes_color_sequences() {
+        let input = "\x1b[32mINFO\x1b[0m some message";
+        assert_eq!(strip_ansi_codes(input), "INFO some message");
+    }
+
+    #[test]
+    fn strip_ansi_codes_removes_256_color_sequences() {
+        // 256-color and bold sequences have multiple parameters separated by ';'
+        let input = "\x1b[1;38;5;220mWARN\x1b[0m something";
+        assert_eq!(strip_ansi_codes(input), "WARN something");
+    }
+
+    #[test]
+    fn strip_ansi_codes_plain_text_unchanged() {
+        let input = "no escape codes here\nline two";
+        assert_eq!(strip_ansi_codes(input), input);
+    }
+
+    #[test]
+    fn strip_ansi_codes_preserves_newlines() {
+        let input = "\x1b[32mline1\x1b[0m\nline2\n\x1b[31mline3\x1b[0m";
+        assert_eq!(strip_ansi_codes(input), "line1\nline2\nline3");
+    }
+
+    #[test]
+    fn strip_ansi_codes_non_csi_escape_preserved() {
+        // ESC followed by non-'[' is not a CSI sequence — preserved as-is
+        let input = "\x1b=hello";
+        assert_eq!(strip_ansi_codes(input), "\x1b=hello");
+    }
+
+    #[test]
+    fn strip_ansi_codes_empty_string() {
+        assert_eq!(strip_ansi_codes(""), "");
+    }
 
     #[test]
     fn detect_test_command() {

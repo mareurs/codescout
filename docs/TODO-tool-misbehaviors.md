@@ -23,7 +23,7 @@ capture: what you did, what you expected, what actually happened, and a reproduc
 - **What happened:** Replacing `## Reading the log` whose body contained a bash code block with `# or tail the most recent:` (a shell comment). `compute_section_end` treated it as a level-1 heading, truncating the section boundary mid-code-block. Subsequent `remove` on the phantom heading swallowed the rest of the file. Subsequent heading lookups failed because the orphaned closing ` ``` ` toggled `parse_all_headings`'s `in_code_block` state, hiding all headings below.
 - **Root cause:** `compute_section_end` called `heading_level()` per-line with no fenced-code-block tracking, while `parse_all_headings` (used for heading lookup) correctly tracked `in_code_block`. Inconsistency between the two paths.
 - **Fix:** Added `in_code_block` tracking to `compute_section_end`, matching `parse_all_headings` logic. Updated existing test (`heading_inside_code_block_edit`) whose assertion was wrong (passed for the wrong reason — same-level heading coincidence). Added two regression tests: `code_block_heading_different_level_does_not_split_section` and `insert_after_section_with_code_block_heading`.
-- **Status:** FIXED (commit pending)
+- **Status:** ✅ Fixed (commit `0701f72`)
 
 ## Observed Bugs
 
@@ -204,6 +204,90 @@ New helper: `find_parent_symbol(symbols, child_name_path)` in `src/tools/symbol.
 - **Fix (2026-04-16)**: `atomic_write` now copies the original file's Unix mode onto the `.tmp` file before `rename`. Regression test `util::fs::tests::atomic_write_preserves_exec_bit` locks in 0755 survival.
 - **Scope**: fix is at the `atomic_write` layer, so `edit_file`, `replace_symbol`, `insert_code`, `remove_symbol`, `rename_symbol`, `edit_markdown`, and any other write going through it are all covered.
 - **Status**: fixed.
+
+### BUG-036 — `insert_code` with `position: "before"` and module-symbol anchor lands inside an earlier function
+
+**Date:** 2026-04-13 (during T7 of the MCP token-budget plan)
+**File:** `src/mcp_resources/project_summary.rs`
+**Tool:** `insert_code`
+
+**What happened:** Implementer called `insert_code` with `position: "before"` targeting the `tests` module symbol to add a new `AgentSummarySource` struct just above `#[cfg(test)] mod tests`. The insertion landed mid-body inside the preceding `ProjectSummaryProvider::read` method, corrupting the file. Recovered by rewriting the whole file via `run_command(cat > ...)`.
+
+**Probable cause:** The symbol anchor for a `#[cfg(test)] mod tests` block resolved to a line inside an earlier function rather than the line of the `mod` keyword. Likely the anchor points at the last non-whitespace token before the module attribute, which on a tightly packed file is the closing `}` of the previous method — and the "before" calculation landed one line further up, inside the method body.
+
+**Workaround:** When inserting above a `#[cfg(test)] mod tests` block, prefer appending at end-of-file via explicit line number, or use `create_file` to rewrite the whole file, or insert after the symbol immediately preceding the test module instead of before the test module. Related to BUG-029 (`position: "after"` landing inside function body).
+### BUG-037 — `replace_symbol` on `impl Trait for Type` blocks drops outer `#[async_trait]` attribute and leaves stray closing braces
+
+**Date:** 2026-04-13 (during `lsp_ready` / language-detection fix, commit `363591b`)
+**Files:** `src/lsp/manager.rs`, `src/mcp_resources/project_summary.rs`
+**Tool:** `replace_symbol`
+
+**What happened:** Two separate `replace_symbol` invocations on `impl SomeTrait for SomeType` blocks:
+1. `impl crate::lsp::ops::LspProvider for LspManager` — the outer `#[async_trait::async_trait]` attribute above `impl` was silently dropped from the replacement, producing a compile error ("`async fn` is not permitted in traits").
+2. `impl SummarySource for AgentSummarySource` — same attribute loss, plus the tool appeared to include part of an enclosing `impl AgentSummarySource { ... }` block in the replaced range, leaving orphaned closing braces after the new impl body.
+
+In both cases the implementer recovered by rewriting the damaged region with a shell one-liner.
+
+**Probable cause:** The LSP symbol range for an `impl` item starts at the `impl` keyword, excluding preceding attributes. `replace_symbol` uses that range verbatim, so outer `#[attribute]` lines above `impl` get dropped from the "old" selection but the corresponding attributes are also not re-emitted because they're not part of the `new_body` the caller supplies either. For nested impls (same `Type` with both inherent `impl AgentSummarySource` and trait `impl SummarySource for AgentSummarySource` adjacent to each other), the range may additionally grab the wrong brace set.
+
+**Root cause (confirmed):** `editing_start_line`'s BUG-031 walk-back checked `lines[r-1]` directly. When that line was `#[async_trait]`, it matched `above.starts_with("#[")` and triggered `find_insert_before_line`, which walked the entire attribute into the deletion range. The LLM's `new_body` (from `find_symbol`, which starts at `impl`) did not include the attribute → attribute silently dropped.
+
+**Fix (this session):** Changed the BUG-031 walk-back trigger in `editing_start_line` to skip over consecutive Rust `#[...]` lines first, then check for doc comments above them. If no doc comments are found above the attribute block, the LSP's `range_start_line` is returned unchanged — the attribute stays in the file. If doc comments ARE found above, walk-back still fires (BUG-031 behaviour preserved). Two regression tests added: `editing_start_line_does_not_walk_back_to_outer_attribute_on_impl_block` and `editing_start_line_walks_back_when_docs_exist_above_attribute_on_impl`.
+
+**Status:** ✅ Fixed
+
+**Remaining limitation:** Adjacent/nested `impl` blocks on the same type (e.g. inherent `impl Type` next to `impl Trait for Type`) can still cause range confusion — `replace_symbol` may grab the wrong brace set. Workaround: use `create_file` for those cases.
+
+### BUG-038 — `activate_project`: switching back to home project after indexing a foreign project crashes the server
+
+**Date observed:** 2026-04-14
+**Tool:** `index_project` (background task)
+**Severity:** Critical — kills the MCP server, requires `/mcp` reconnect
+**Regression:** Introduced by `bbd93dd` (progress notifications). Only on `experiments` branch.
+
+**Root cause:** MCP progress notifications (`notifications/progress` and `notifications/message`)
+sent from `index_project`'s background `tokio::spawn` task crash the connection. Claude Code 2.1.105
+closes the stdin pipe ~630ms after `index_project` returns — exactly when the first progress callback
+fires from `build_index`'s file processing loop.
+
+**Investigation trail (2026-04-14):**
+1. Initially misattributed to `activate_project` — diagnostic logs showed the crash happens during `build_index`, not project switching
+2. No panic (custom panic hook confirmed — `crash.log` never created)
+3. Stdout pollution hypothesis disproved: `StdoutGuard` (fd 1 → /dev/null) didn't help; permanent fd 1 redirect with private MCP fd didn't help
+4. 2s diagnostic sleep before `build_index` proved the crash tracks `build_index` execution, not the "started" response
+5. Disabling all progress notifications (pre-spawn `p.report()` + `progress_cb` + completion reports) fixed the crash completely
+
+**Fix (2026-04-14):** Disabled progress notifications in `index_project`'s background task.
+The `ProgressReporter` calls are commented out with `// see BUG-038` references.
+Progress should be re-enabled when Claude Code supports MCP `notifications/progress`
+from background tasks (check client capabilities for progress support).
+
+**Collateral improvements retained:**
+- `LocalEmbedder::new()` moved to `spawn_blocking` (prevents async executor starvation)
+- `show_download_progress = false` on `fastembed::InitOptions` (good hygiene)
+- Synchronous panic hook in `logging.rs` (captures crashes that `non_blocking` tracing misses under `panic = "abort"`)
+
+### BUG-039 — `run_command` buffer query: `stdout_shown=0` despite non-zero `stdout_total`
+
+**Date observed:** 2026-04-14
+**Tool:** `run_command` (buffer query mode)
+**Severity:** Medium — makes buffer query results invisible, forcing workarounds
+
+**Steps to reproduce:**
+1. `run_command("grep -in 'error\\|warn' some-log-file.log")` → returns `@cmd_xxxx` buffer
+2. `run_command("cat @cmd_xxxx")` → `{ stdout_shown: 0, stdout_total: 28, truncated: true }`
+3. `run_command("sed -n '1,28p' @cmd_xxxx")` → same: `stdout_shown: 0, stdout_total: 28`
+
+**Expected:** Buffer content displayed inline (well under the 100-line cap).
+**Actual:** `stdout_shown` is always 0. Content is confirmed present (`stdout_total > 0`) but never rendered.
+
+**Observed with:** grep output that included ANSI escape codes (log files with tracing ANSI color sequences). Plain-text buffer queries may be unaffected — not confirmed.
+
+**Root cause (confirmed):** ANSI escape codes inflate `raw_stdout` byte length. With tracing-colored log output, each line can be 200-500 bytes of escape codes around a few dozen bytes of visible text. The byte budget for inline display is 9,700 bytes (`TOOL_OUTPUT_BUFFER_THRESHOLD - JSON_OVERHEAD`). When stored `buffer_stderr` is replayed (fetched from the buffer entry), it is only line-capped (20 lines) not byte-capped — so 20 ANSI-heavy stderr lines can consume the entire budget, leaving `stdout_byte_budget ≈ 0`. `truncate_lines_and_bytes` then drops even the first stdout line (any `line.len() > 0` exceeds a 0-byte budget), giving `stdout_shown=0`.
+
+**Fix (this session):** Strip ANSI CSI sequences from `raw_stdout` and `raw_stderr` immediately after capturing them, but only for buffer-only commands. Added `strip_ansi_codes()` to `command_summary.rs`; applied in `run_command_inner` for the `buffer_only` branch. ANSI codes are opaque to LLMs and should not count toward byte budgets.
+
+**Status:** ✅ Fixed
 
 ## Template for new entries
 
