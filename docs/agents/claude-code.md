@@ -2,9 +2,40 @@
 
 ## One-Time Setup
 
-Prerequisites: Rust toolchain, `cargo install codescout`. The binary lands at `~/.cargo/bin/codescout`.
+Prerequisites: Rust toolchain.
 
-Register codescout as an MCP server. The recommended approach is user-level registration — edit `~/.claude/settings.json`:
+### 1. Install the binary
+
+**Option A — from crates.io (recommended):**
+
+```bash
+cargo install codescout
+```
+
+The binary lands at `~/.cargo/bin/codescout`.
+
+**Option B — build from source:**
+
+```bash
+git clone https://github.com/mareurs/codescout
+cd codescout
+cargo build --release
+# binary is at target/release/codescout
+# optionally copy it somewhere on your PATH:
+cp target/release/codescout ~/.local/bin/
+```
+
+### 2. Register as an MCP server
+
+**User-level** (available in all projects) — recommended:
+
+```bash
+claude mcp add --scope user --transport stdio codescout -- codescout start
+```
+
+This writes the entry to `~/.claude.json`. You can also edit that file directly if you prefer.
+
+**Project-level** — place a `.mcp.json` file at the project root:
 
 ```json
 {
@@ -18,8 +49,15 @@ Register codescout as an MCP server. The recommended approach is user-level regi
 }
 ```
 
-For a project-scoped alternative, place a `.mcp.json` file at the project root with the same block.
+### 3. Onboard your project
 
+Once the MCP server is registered, open Claude Code in your project directory and ask it to run onboarding. Onboarding performs a structured discovery pass — reads directory structure, detects languages and frameworks, probes available embedding backends, and writes memory entries so future sessions start with context already in place. It takes 10–30 seconds depending on project size.
+
+After onboarding, build the semantic search index:
+
+> Run `index_project`.
+
+See [Your First Project](../manual/src/getting-started/first-project.md) for the full walkthrough.
 ## Workflow Skills
 
 Claude Code handles workflow skills differently from Copilot/Cursor — skills are loaded via the Superpowers plugin system, not manually installed files. No manual skill file installation is needed; skills activate automatically once the companion plugin is set up. See [Superpowers workflow](../manual/src/concepts/superpowers.md) for details.
