@@ -195,6 +195,16 @@ New helper: `find_parent_symbol(symbols, child_name_path)` in `src/tools/symbol.
 **Test:** `replace_symbol_child_in_mod_tests_preserves_module_header` in `tests/symbol_lsp.rs`.
 
 ---
+### BUG-040 — `edit_file` / `replace_symbol` / `insert_code`: strips Unix exec bit on shell scripts
+
+- **What happened**: editing a `.sh` file via `edit_file` silently dropped the `+x` mode. Hook scripts became non-executable after routine edits, causing Claude Code hook infrastructure to break at next session start.
+- **Expected**: write tools preserve the target file's mode (perms, setuid, etc.). A content-level edit should never change file permissions.
+- **Observed**: after `edit_file` on `pre-tool-use.sh` with mode `0755`, resulting file had mode `0644`. Same for any write path going through `atomic_write`.
+- **Root cause**: `util::fs::atomic_write` writes a sibling `.tmp` file (default umask → `0644`) then `rename`s over the target. `rename` replaces the inode, so the original mode is lost.
+- **Fix (2026-04-16)**: `atomic_write` now copies the original file's Unix mode onto the `.tmp` file before `rename`. Regression test `util::fs::tests::atomic_write_preserves_exec_bit` locks in 0755 survival.
+- **Scope**: fix is at the `atomic_write` layer, so `edit_file`, `replace_symbol`, `insert_code`, `remove_symbol`, `rename_symbol`, `edit_markdown`, and any other write going through it are all covered.
+- **Status**: fixed.
+
 ## Template for new entries
 
 ```

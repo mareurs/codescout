@@ -45,9 +45,22 @@ pub fn read_utf8(path: &Path) -> Result<String> {
 /// Atomic write: write to a sibling `.tmp` file then rename, so a crash or
 /// disk-full condition mid-write can't leave the target in a corrupt state.
 /// The target file must have a parent directory (true for all real paths).
+///
+/// Preserves the target file's Unix permissions (e.g. exec bit) across the
+/// rename. Without this, editing a `*.sh` script would silently strip +x
+/// because the freshly-created tmp file has default 0644 perms.
 pub fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, content)?;
+
+    // Preserve original mode if the target already exists.
+    #[cfg(unix)]
+    if let Ok(meta) = std::fs::metadata(path) {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = meta.permissions().mode();
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode));
+    }
+
     std::fs::rename(&tmp, path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         e
@@ -141,5 +154,20 @@ mod tests {
     fn read_utf8_missing_file_errors() {
         let dir = tempdir().unwrap();
         assert!(read_utf8(&dir.path().join("missing.txt")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_preserves_exec_bit() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("script.sh");
+        std::fs::write(&path, "#!/bin/sh\necho old\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        atomic_write(&path, "#!/bin/sh\necho new\n").unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o755, "exec bit must survive atomic_write");
     }
 }
