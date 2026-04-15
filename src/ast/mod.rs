@@ -10,6 +10,7 @@ use anyhow::Result;
 use std::path::Path;
 
 use crate::lsp::symbols::SymbolInfo;
+pub use parser::has_syntax_errors;
 pub use parser::DocstringInfo;
 
 /// Extract top-level symbols from a file using tree-sitter.

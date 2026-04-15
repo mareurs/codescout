@@ -48,6 +48,22 @@ fn get_ts_language(lang: &str) -> Option<tree_sitter::Language> {
 // Symbol extraction
 // ---------------------------------------------------------------------------
 
+/// Returns `true` if tree-sitter detects parse errors in the source text for
+/// the given language. Returns `false` for unsupported languages so that the
+/// caller treats unknown files as clean.
+pub fn has_syntax_errors(source: &str, lang: &str) -> bool {
+    let Some(ts_lang) = get_ts_language(lang) else {
+        return false;
+    };
+    let mut parser = tree_sitter::Parser::new();
+    if parser.set_language(&ts_lang).is_err() {
+        return false;
+    }
+    parser
+        .parse(source, None)
+        .is_some_and(|tree| tree.root_node().has_error())
+}
+
 /// Extract symbols from source text using tree-sitter for the given language.
 pub fn extract_symbols_from_source(
     source: &str,

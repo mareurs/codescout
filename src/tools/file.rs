@@ -1835,6 +1835,16 @@ impl Tool for EditFile {
             }
         }
 
+        // Validate new_string is an explicit string — null/missing must error,
+        // not silently delete. Empty string "" is valid (explicit deletion).
+        if !input["new_string"].is_string() {
+            return Err(super::RecoverableError::with_hint(
+                "new_string is required",
+                "Pass new_string as a string. To delete matched text, use new_string: \"\".",
+            )
+            .into());
+        }
+
         perform_edit(path, old_string, new_string, replace_all, ctx).await
     }
 }
@@ -1886,6 +1896,16 @@ async fn perform_edit(
     ctx.agent.reload_config_if_project_toml(&resolved).await;
     ctx.lsp.notify_file_changed(&resolved).await;
     ctx.agent.mark_file_dirty(resolved.clone()).await;
+
+    // Syntax check: warn if the edit introduced parse errors (non-fatal).
+    if let Some(lang) = crate::ast::detect_language(std::path::Path::new(path)) {
+        if crate::ast::has_syntax_errors(&new_content, lang) {
+            return Ok(json!({
+                "status": "ok",
+                "warning": "syntax error detected after edit — file may be malformed. Use read_file to inspect and fix."
+            }));
+        }
+    }
 
     // Coverage hint for markdown files.
     if path.ends_with(".md") || path.ends_with(".markdown") {
@@ -4968,6 +4988,68 @@ mod tests {
             .await;
 
         assert!(result.is_ok(), "edit_file append should be allowed on .md");
+    }
+
+    #[tokio::test]
+    async fn edit_file_null_new_string_errors() {
+        // Bug: `new_string: null` was silently treated as "" (deletion) because
+        // `input["new_string"].as_str().unwrap_or("")` returns "" for JSON null.
+        // It must error instead — silent deletion is a footgun.
+        let (dir, ctx) = project_ctx().await;
+        let file = dir.path().join("test.txt");
+        std::fs::write(&file, "hello world\n").unwrap();
+
+        let err = EditFile
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "old_string": "hello",
+                    "new_string": null
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("required"),
+            "should error that new_string is required, got: {msg}"
+        );
+        // File must be untouched — no silent deletion.
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "hello world\n");
+    }
+
+    #[tokio::test]
+    async fn edit_file_warns_on_syntax_error_after_edit() {
+        // An edit that breaks syntax should not fail (non-fatal) but should
+        // return {"status":"ok","warning":"..."} so the agent immediately knows.
+        let (dir, ctx) = project_ctx().await;
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, "x = 1\ny = 2\n").unwrap();
+
+        let result = EditFile
+            .call(
+                json!({
+                    "path": path.to_str().unwrap(),
+                    "old_string": "x = 1",
+                    "new_string": "x = ("          // unclosed paren — invalid Python
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result["status"], "ok",
+            "syntax error is non-fatal; should not return Err"
+        );
+        let warning = result["warning"].as_str().unwrap_or("");
+        assert!(
+            warning.contains("syntax"),
+            "warning should mention 'syntax', got: {warning:?}"
+        );
     }
 
     // ── EditFile — batch edits ────────────────────────────────────────────────
