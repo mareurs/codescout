@@ -2931,6 +2931,13 @@ async fn run_command_inner(
     // so killpg() can reap the entire tree on timeout.  Without this, dropping the tokio
     // future orphans curl/grep/tee/head and they keep running until the download finishes.
     //
+    // `kill_on_drop(true)` is the cancellation lifeline: when the rmcp request is
+    // cancelled (user pressed Escape), call_tool_inner drops the tool future, which
+    // drops `child_output_fut`, which drops the `Child` — and tokio then SIGKILLs the
+    // immediate child.  We *also* keep the timeout-path killpg() below for the case
+    // where the future isn't dropped: SIGKILL on the lone shell wouldn't propagate to
+    // the pipeline (curl, grep, tee, etc.), but killpg() reaps the whole group.
+    //
     // We also reset SIGPIPE to SIG_DFL in pre_exec.  Claude Code's Node.js parent sets
     // SIGPIPE=SIG_IGN; every spawned process inherits it.  With SIG_IGN, a `| head -N`
     // pipeline never terminates via SIGPIPE: tee ignores the broken pipe from head and
@@ -2944,9 +2951,10 @@ async fn run_command_inner(
             .env("GIT_PAGER", "cat")
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .process_group(0); // new process group; PGID = child PID
-                               // SAFETY: pre_exec runs in the child after fork(), before exec().
-                               // signal() is async-signal-safe (POSIX).  No locks are held at this point.
+            .process_group(0) // new process group; PGID = child PID
+            .kill_on_drop(true); // SIGKILL on Drop — reaps shell on cancel
+                                 // SAFETY: pre_exec runs in the child after fork(), before exec().
+                                 // signal() is async-signal-safe (POSIX).  No locks are held at this point.
         unsafe {
             cmd.pre_exec(|| {
                 libc::signal(libc::SIGPIPE, libc::SIG_DFL);
@@ -2955,9 +2963,31 @@ async fn run_command_inner(
         }
         let child = cmd.spawn()?;
         let pgid: Option<i32> = child.id().map(|id| id as i32);
+        // Drop guard: if the future is cancelled, we want the *entire pipeline*
+        // killed — not just the shell. tokio's kill_on_drop only SIGKILLs the
+        // immediate child; killpg() walks the whole process group. We attach
+        // the guard to the future so its Drop runs on cancellation.
+        let pgid_for_guard = pgid;
         let fut: std::pin::Pin<
             Box<dyn std::future::Future<Output = std::io::Result<std::process::Output>> + Send>,
-        > = Box::pin(child.wait_with_output());
+        > = Box::pin(async move {
+            struct PgidKillGuard(Option<i32>);
+            impl Drop for PgidKillGuard {
+                fn drop(&mut self) {
+                    if let Some(pgid) = self.0 {
+                        // SAFETY: pgid was created with process_group(0); SIGKILL is
+                        // safe to send to our own group. No-op if already reaped.
+                        unsafe { libc::killpg(pgid, libc::SIGKILL) };
+                    }
+                }
+            }
+            let guard = PgidKillGuard(pgid_for_guard);
+            let result = child.wait_with_output().await;
+            // Successful completion: disarm the guard so we don't try to kill
+            // an already-reaped pgid (harmless but pointless).
+            std::mem::forget(guard);
+            result
+        });
         (fut, pgid)
     };
 
@@ -2971,6 +3001,7 @@ async fn run_command_inner(
                 .arg(&effective_command)
                 .current_dir(&work_dir)
                 .env("GIT_PAGER", "cat")
+                .kill_on_drop(true)
                 .output(),
         );
         (fut, None::<i32>)

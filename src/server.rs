@@ -124,12 +124,22 @@ impl CodeScoutServer {
 
     /// Core tool dispatch, separated from the MCP trait method so tests can
     /// call it without constructing a `RequestContext`.
+    ///
+    /// `cancel_token` carries the per-request cancellation signal from rmcp
+    /// (driven by `CancelledNotification` from the client when the user presses
+    /// Escape). When the token fires we drop the in-flight tool future, which
+    /// cascades through to `kill_on_drop` on any spawned shell child — so the
+    /// process tree is reaped instead of running to completion in the background
+    /// while Claude Code closes the MCP connection. Tests that don't care about
+    /// cancellation can pass `tokio_util::sync::CancellationToken::new()` —
+    /// a fresh token never fires.
     #[tracing::instrument(skip_all, fields(tool = %req.name))]
     async fn call_tool_inner(
         &self,
         req: CallToolRequestParams,
         progress: Option<Arc<progress::ProgressReporter>>,
         peer: Option<Peer<RoleServer>>,
+        cancel_token: tokio_util::sync::CancellationToken,
     ) -> std::result::Result<CallToolResult, McpError> {
         tracing::debug!(args = ?req.arguments, "tool call");
 
@@ -177,20 +187,21 @@ impl CodeScoutServer {
         let recorder = UsageRecorder::new(self.agent.clone(), self.debug, self.session_id.clone());
         let input_for_record = input.clone();
 
+        // Race the tool call against (a) the server-level timeout and (b) the
+        // per-request cancellation token. Cancellation is the load-bearing arm:
+        // when the user presses Escape, rmcp cancels `cancel_token`, the select!
+        // arm fires, and the tool future is dropped — which kills any spawned
+        // child via `kill_on_drop`. Without this, the future runs to completion
+        // and the late response makes Claude Code close the MCP connection.
+        let tool_call_fut = recorder.record_content(&req.name, &input_for_record, || {
+            tool.call_content(input, &ctx)
+        });
+
         let result = if let Some(secs) = timeout_secs {
             tokio::select! {
                 biased;
                 _ = cancel_token.cancelled() => {
-                    // Suppress response after cancel: Claude Code closes the MCP
-                    // stdio connection if it receives ANY response for a cancelled
-                    // request (confirmed 2026-04-16 by pending() experiment — see
-                    // docs/issues/2026-04-16-mcp-cancel-disconnect.md).
-                    //
-                    // We park the task here permanently instead. tool_call_fut was
-                    // dropped by select!, so the shell child is already reaped via
-                    // kill_on_drop + PgidKillGuard. Only this task's stack persists
-                    // until rmcp drops it when the connection closes.
-                    std::future::pending::<Result<Vec<Content>, anyhow::Error>>().await
+                    Err(anyhow::anyhow!("request cancelled by client"))
                 }
                 res = tokio::time::timeout(
                     std::time::Duration::from_secs(secs),
@@ -203,30 +214,12 @@ impl CodeScoutServer {
                         secs
                     ))
                 }),
-            )
-            .await
-            .unwrap_or_else(|_| {
-                Err(anyhow::anyhow!(
-                    "Tool '{}' timed out after {}s. \
-                     Increase tool_timeout_secs in .codescout/project.toml if needed.",
-                    req.name,
-                    secs
-                ))
-            })
+            }
         } else {
             tokio::select! {
                 biased;
                 _ = cancel_token.cancelled() => {
-                    // Suppress response after cancel: Claude Code closes the MCP
-                    // stdio connection if it receives ANY response for a cancelled
-                    // request (confirmed 2026-04-16 by pending() experiment — see
-                    // docs/issues/2026-04-16-mcp-cancel-disconnect.md).
-                    //
-                    // We park the task here permanently instead. tool_call_fut was
-                    // dropped by select!, so the shell child is already reaped via
-                    // kill_on_drop + PgidKillGuard. Only this task's stack persists
-                    // until rmcp drops it when the connection closes.
-                    std::future::pending::<Result<Vec<Content>, anyhow::Error>>().await
+                    Err(anyhow::anyhow!("request cancelled by client"))
                 }
                 res = tool_call_fut => res,
             }
@@ -311,7 +304,36 @@ impl ServerHandler for CodeScoutServer {
             req_ctx.id.clone(),
         ));
         let peer = Some(req_ctx.peer.clone());
-        self.call_tool_inner(req, progress, peer).await
+        // `req_ctx.ct` is rmcp's per-request CancellationToken. It is cancelled
+        // when the client sends a CancelledNotification (Escape in Claude Code).
+        // Hand it to call_tool_inner so the tool future can be aborted instead
+        // of running to completion and triggering a connection close.
+        let result = self
+            .call_tool_inner(req, progress, peer, req_ctx.ct.clone())
+            .await?;
+
+        // After a successful activate_project, check whether the capability set has
+        // changed. If it has, emit notifications/tools/list_changed so the client
+        // can refresh its tool list without a full reconnect.
+        if is_activate {
+            let new_caps = self.current_capabilities().await;
+            let caps_changed = {
+                let mut last = self.last_broadcast_caps.lock().unwrap();
+                let changed = last.as_ref() != Some(&new_caps);
+                if changed {
+                    *last = Some(new_caps);
+                }
+                changed
+            };
+            if caps_changed {
+                let _ = req_ctx.peer.notify_tool_list_changed().await;
+            }
+
+            // Rebuild the resource registry to pick up the new memory dir.
+            self.refresh_resources().await;
+        }
+
+        Ok(result)
     }
 }
 
@@ -1031,7 +1053,10 @@ mod tests {
 
         let req = CallToolRequestParams::new("list_dir")
             .with_arguments(serde_json::from_value(serde_json::json!({"path": "."})).unwrap());
-        let result = server.call_tool_inner(req, None, None).await.unwrap();
+        let result = server
+            .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+            .await
+            .unwrap();
 
         let text = result
             .content
@@ -1052,18 +1077,15 @@ mod tests {
     #[tokio::test]
     async fn call_tool_cancellation_kills_long_running_run_command() {
         // Regression for the "codescout disconnects after Escape on long
-        // run_command" bug.
+        // run_command" bug: when the per-request CancellationToken fires (rmcp
+        // received CancelledNotification), the tool future must drop and the
+        // spawned shell child must be reaped — instead of running to completion
+        // and triggering Claude Code to close the MCP connection.
         //
-        // When the per-request CancellationToken fires, the tool future is
-        // dropped (killing the child via kill_on_drop + PgidKillGuard) and
-        // call_tool_inner parks on pending() — no response is ever sent.
-        // Sending a response for a cancelled request causes Claude Code to
-        // close the MCP stdio connection (confirmed 2026-04-16).
-        //
-        // This test verifies the child-reaping half: run `sleep 5 && touch
-        // <marker>` with timeout_secs=30, cancel after 200ms, confirm the
-        // marker is never created (sleep was killed before reaching touch).
-        // We abort the task after checking since it parks permanently.
+        // The test runs `sleep 5 && touch <marker>` with timeout_secs=30,
+        // cancels after 200ms, asserts the call returns within ~1s, and
+        // verifies the marker file is *never* created (proving the sleep was
+        // killed before reaching `touch`).
         let (dir, server) = make_server().await;
         let marker = dir.path().join("cancel-test-marker");
         let marker_str = marker.to_string_lossy().to_string();
@@ -1087,16 +1109,33 @@ mod tests {
 
         // Let the shell child actually start before cancelling.
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let cancel_at = std::time::Instant::now();
         ct.cancel();
 
-        // Give kill_on_drop + PgidKillGuard time to reap the child, then
-        // abort the handler task (it parks on pending() by design — no
-        // response is sent for cancelled requests).
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        handle.abort();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(2), handle)
+            .await
+            .expect("call_tool_inner must return within 2s of cancel — it kept running")
+            .expect("spawned task panicked");
 
-        // Wait past the original sleep window. If the child survived the
-        // cancel, touch would have run and the marker would exist by now.
+        let elapsed = cancel_at.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_millis(1000),
+            "expected return within 1s of cancel, took {elapsed:?}"
+        );
+
+        let r = result.unwrap();
+        let body = r
+            .content
+            .iter()
+            .find_map(|c| c.as_text().map(|t| t.text.as_str()))
+            .unwrap_or("");
+        assert!(
+            body.contains("cancelled") || r.is_error == Some(true),
+            "expected cancellation indication in result, got: {body}"
+        );
+
+        // Wait past the original sleep duration — if the child wasn't killed,
+        // the marker file would now exist.
         tokio::time::sleep(std::time::Duration::from_secs(6)).await;
         assert!(
             !marker.exists(),

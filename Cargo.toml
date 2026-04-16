@@ -113,13 +113,13 @@ tempfile = "3"
 axum = { version = "0.8", features = ["json"], optional = true }
 tower-http = { version = "0.6", features = ["cors"], optional = true }
 open = { version = "5", optional = true }
-tokio-util = { version = "0.7", optional = true }
+tokio-util = "0.7"
 uuid = { version = "1.20.0", features = ["v4"] }
 
 [features]
 default = ["remote-embed", "local-embed", "dashboard", "http"]
 dashboard = ["dep:axum", "dep:tower-http", "dep:open"]
-http = ["dep:axum", "dep:tower-http", "dep:tokio-util", "rmcp/transport-streamable-http-server"]
+http = ["dep:axum", "dep:tower-http", "rmcp/transport-streamable-http-server"]
 # Remote embedding via OpenAI-compatible HTTP API (Ollama, OpenAI, etc.)
 remote-embed = ["dep:reqwest"]
 # Local CPU embedding via fastembed-rs (ONNX Runtime + HuggingFace model hub).
