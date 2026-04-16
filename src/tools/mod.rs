@@ -48,6 +48,13 @@ pub(crate) const TOOL_OUTPUT_BUFFER_THRESHOLD: usize = MAX_INLINE_TOKENS * 4;
 /// overhead (~500-1000 bytes for content/complete/next/shown_lines keys).
 pub(crate) const INLINE_BYTE_BUDGET: usize = TOOL_OUTPUT_BUFFER_THRESHOLD * 9 / 10;
 
+/// Soft line-count nudge for markdown default reads.
+///
+/// Files whose line count exceeds this threshold — but whose byte size still
+/// fits `INLINE_BYTE_BUDGET` — get full content plus a focused-read hint.
+/// Files larger than `INLINE_BYTE_BUDGET` are buffered regardless of line count.
+pub(crate) const LINE_SOFT_CAP: usize = 150;
+
 /// Check whether content should be buffered based on estimated token count.
 pub(crate) fn exceeds_inline_limit(text: &str) -> bool {
     text.len() / 4 > MAX_INLINE_TOKENS
