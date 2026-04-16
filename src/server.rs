@@ -178,10 +178,30 @@ impl CodeScoutServer {
         let input_for_record = input.clone();
 
         let result = if let Some(secs) = timeout_secs {
-            tokio::time::timeout(
-                std::time::Duration::from_secs(secs),
-                recorder.record_content(&req.name, &input_for_record, || {
-                    tool.call_content(input, &ctx)
+            tokio::select! {
+                biased;
+                _ = cancel_token.cancelled() => {
+                    // Suppress response after cancel: Claude Code closes the MCP
+                    // stdio connection if it receives ANY response for a cancelled
+                    // request (confirmed 2026-04-16 by pending() experiment — see
+                    // docs/issues/2026-04-16-mcp-cancel-disconnect.md).
+                    //
+                    // We park the task here permanently instead. tool_call_fut was
+                    // dropped by select!, so the shell child is already reaped via
+                    // kill_on_drop + PgidKillGuard. Only this task's stack persists
+                    // until rmcp drops it when the connection closes.
+                    std::future::pending::<Result<Vec<Content>, anyhow::Error>>().await
+                }
+                res = tokio::time::timeout(
+                    std::time::Duration::from_secs(secs),
+                    tool_call_fut,
+                ) => res.unwrap_or_else(|_| {
+                    Err(anyhow::anyhow!(
+                        "Tool '{}' timed out after {}s. \
+                         Increase tool_timeout_secs in .codescout/project.toml if needed.",
+                        req.name,
+                        secs
+                    ))
                 }),
             )
             .await
@@ -194,11 +214,22 @@ impl CodeScoutServer {
                 ))
             })
         } else {
-            recorder
-                .record_content(&req.name, &input_for_record, || {
-                    tool.call_content(input, &ctx)
-                })
-                .await
+            tokio::select! {
+                biased;
+                _ = cancel_token.cancelled() => {
+                    // Suppress response after cancel: Claude Code closes the MCP
+                    // stdio connection if it receives ANY response for a cancelled
+                    // request (confirmed 2026-04-16 by pending() experiment — see
+                    // docs/issues/2026-04-16-mcp-cancel-disconnect.md).
+                    //
+                    // We park the task here permanently instead. tool_call_fut was
+                    // dropped by select!, so the shell child is already reaped via
+                    // kill_on_drop + PgidKillGuard. Only this task's stack persists
+                    // until rmcp drops it when the connection closes.
+                    std::future::pending::<Result<Vec<Content>, anyhow::Error>>().await
+                }
+                res = tool_call_fut => res,
+            }
         };
 
         // Assemble the result — success or error both produce a CallToolResult
@@ -1015,6 +1046,61 @@ mod tests {
         assert!(
             !text.contains(&root),
             "Expected absolute root to be stripped, but found it in output:\n{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn call_tool_cancellation_kills_long_running_run_command() {
+        // Regression for the "codescout disconnects after Escape on long
+        // run_command" bug.
+        //
+        // When the per-request CancellationToken fires, the tool future is
+        // dropped (killing the child via kill_on_drop + PgidKillGuard) and
+        // call_tool_inner parks on pending() — no response is ever sent.
+        // Sending a response for a cancelled request causes Claude Code to
+        // close the MCP stdio connection (confirmed 2026-04-16).
+        //
+        // This test verifies the child-reaping half: run `sleep 5 && touch
+        // <marker>` with timeout_secs=30, cancel after 200ms, confirm the
+        // marker is never created (sleep was killed before reaching touch).
+        // We abort the task after checking since it parks permanently.
+        let (dir, server) = make_server().await;
+        let marker = dir.path().join("cancel-test-marker");
+        let marker_str = marker.to_string_lossy().to_string();
+
+        let req = CallToolRequestParams::new("run_command").with_arguments(
+            serde_json::from_value(serde_json::json!({
+                "command": format!("sleep 5 && touch '{}'", marker_str),
+                "timeout_secs": 30u64,
+            }))
+            .unwrap(),
+        );
+
+        let ct = tokio_util::sync::CancellationToken::new();
+        let server_clone = server.clone();
+        let ct_clone = ct.clone();
+        let handle = tokio::spawn(async move {
+            server_clone
+                .call_tool_inner(req, None, None, ct_clone)
+                .await
+        });
+
+        // Let the shell child actually start before cancelling.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        ct.cancel();
+
+        // Give kill_on_drop + PgidKillGuard time to reap the child, then
+        // abort the handler task (it parks on pending() by design — no
+        // response is sent for cancelled requests).
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        handle.abort();
+
+        // Wait past the original sleep window. If the child survived the
+        // cancel, touch would have run and the marker would exist by now.
+        tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+        assert!(
+            !marker.exists(),
+            "marker file {marker:?} exists — sleep child was NOT killed by cancel"
         );
     }
 
