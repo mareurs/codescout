@@ -18,6 +18,7 @@ pub fn default_config(language: &str, workspace_root: &Path) -> Option<LspServer
             init_timeout: None,
             mux: false,
             env: vec![],
+            idle_timeout_secs: None,
         }),
         "python" => Some(LspServerConfig {
             command: crate::platform::lsp_binary_name("pyright-langserver"),
@@ -26,6 +27,7 @@ pub fn default_config(language: &str, workspace_root: &Path) -> Option<LspServer
             init_timeout: None,
             mux: false,
             env: vec![],
+            idle_timeout_secs: None,
         }),
         "typescript" | "javascript" | "tsx" | "jsx" => Some(LspServerConfig {
             command: crate::platform::lsp_binary_name("typescript-language-server"),
@@ -34,6 +36,7 @@ pub fn default_config(language: &str, workspace_root: &Path) -> Option<LspServer
             init_timeout: None,
             mux: false,
             env: vec![],
+            idle_timeout_secs: None,
         }),
         "go" => Some(LspServerConfig {
             command: crate::platform::lsp_binary_name("gopls"),
@@ -42,6 +45,7 @@ pub fn default_config(language: &str, workspace_root: &Path) -> Option<LspServer
             init_timeout: None,
             mux: false,
             env: vec![],
+            idle_timeout_secs: None,
         }),
         "java" => Some(LspServerConfig {
             command: crate::platform::lsp_binary_name("jdtls"),
@@ -50,6 +54,7 @@ pub fn default_config(language: &str, workspace_root: &Path) -> Option<LspServer
             init_timeout: jvm_timeout,
             mux: false,
             env: vec![],
+            idle_timeout_secs: None,
         }),
         "kotlin" => {
             // With the mux, there's only one kotlin-lsp instance per workspace,
@@ -69,6 +74,7 @@ pub fn default_config(language: &str, workspace_root: &Path) -> Option<LspServer
                     "GRADLE_USER_HOME".to_string(),
                     gradle_home.to_string_lossy().to_string(),
                 )],
+                idle_timeout_secs: Some(300),
             })
         }
         "c" | "cpp" => Some(LspServerConfig {
@@ -78,6 +84,7 @@ pub fn default_config(language: &str, workspace_root: &Path) -> Option<LspServer
             init_timeout: None,
             mux: false,
             env: vec![],
+            idle_timeout_secs: None,
         }),
         "csharp" => Some(LspServerConfig {
             command: crate::platform::lsp_binary_name("OmniSharp"),
@@ -86,6 +93,7 @@ pub fn default_config(language: &str, workspace_root: &Path) -> Option<LspServer
             init_timeout: None,
             mux: false,
             env: vec![],
+            idle_timeout_secs: None,
         }),
         "ruby" => Some(LspServerConfig {
             command: crate::platform::lsp_binary_name("solargraph"),
@@ -94,6 +102,7 @@ pub fn default_config(language: &str, workspace_root: &Path) -> Option<LspServer
             init_timeout: None,
             mux: false,
             env: vec![],
+            idle_timeout_secs: None,
         }),
         "html" => Some(LspServerConfig {
             command: crate::platform::lsp_binary_name("vscode-html-language-server"),
@@ -102,6 +111,7 @@ pub fn default_config(language: &str, workspace_root: &Path) -> Option<LspServer
             init_timeout: None,
             mux: false,
             env: vec![],
+            idle_timeout_secs: None,
         }),
         "css" | "scss" | "less" => Some(LspServerConfig {
             command: crate::platform::lsp_binary_name("vscode-css-language-server"),
@@ -110,6 +120,16 @@ pub fn default_config(language: &str, workspace_root: &Path) -> Option<LspServer
             init_timeout: None,
             mux: false,
             env: vec![],
+            idle_timeout_secs: None,
+        }),
+        "bash" => Some(LspServerConfig {
+            command: crate::platform::lsp_binary_name("bash-language-server"),
+            args: vec!["start".into()],
+            workspace_root: root,
+            init_timeout: None,
+            mux: false,
+            env: vec![],
+            idle_timeout_secs: None,
         }),
         _ => None,
     }

@@ -96,6 +96,10 @@ pub struct LspServerConfig {
     pub mux: bool,
     /// Additional environment variables for the LSP server process.
     pub env: Vec<(String, String)>,
+    /// Seconds the mux process waits with no connected clients before
+    /// exiting. Only used when `mux == true`. `None` falls back to the
+    /// mux default of 300s. Ignored on the direct-process path.
+    pub idle_timeout_secs: Option<u64>,
 }
 
 /// How this LspClient is connected to its language server.
@@ -1259,6 +1263,7 @@ struct Point {
             init_timeout: None,
             mux: false,
             env: vec![],
+            idle_timeout_secs: None,
         };
 
         let client = LspClient::start(config).await.unwrap();
@@ -1284,6 +1289,7 @@ struct Point {
             init_timeout: None,
             mux: false,
             env: vec![],
+            idle_timeout_secs: None,
         };
 
         let result = LspClient::start(config).await;
@@ -1307,6 +1313,7 @@ struct Point {
             init_timeout: None,
             mux: false,
             env: vec![],
+            idle_timeout_secs: None,
         };
 
         let client = LspClient::start(config).await.unwrap();
@@ -1358,6 +1365,7 @@ struct Point {
             init_timeout: None,
             mux: false,
             env: vec![],
+            idle_timeout_secs: None,
         };
 
         let client = LspClient::start(config).await.unwrap();
@@ -1636,6 +1644,7 @@ struct Point {
             init_timeout: None,
             mux: false,
             env: vec![],
+            idle_timeout_secs: None,
         };
         let client = LspClient::start(config).await.unwrap();
         let pid = match &client.transport {
@@ -1682,6 +1691,7 @@ struct Point {
             init_timeout: None,
             mux: false,
             env: vec![],
+            idle_timeout_secs: None,
         };
         let client = LspClient::start(config).await.unwrap();
 
@@ -1745,6 +1755,7 @@ struct Point {
             init_timeout: None,
             mux: false,
             env: vec![],
+            idle_timeout_secs: None,
         };
         let client = LspClient::start(config).await.unwrap();
 
@@ -1806,6 +1817,7 @@ struct Point {
             init_timeout: Some(std::time::Duration::from_secs(5)),
             mux: false,
             env: vec![],
+            idle_timeout_secs: None,
         };
 
         let client = LspClient::start(config)
@@ -1859,6 +1871,7 @@ struct Point {
             init_timeout: Some(std::time::Duration::from_secs(5)),
             mux: false,
             env: vec![],
+            idle_timeout_secs: None,
         };
 
         let client = LspClient::start(config)
@@ -1901,5 +1914,19 @@ struct Point {
             "error should mention mux socket, got: {}",
             err_msg
         );
+    }
+
+    #[test]
+    fn lsp_server_config_has_idle_timeout_field() {
+        let cfg = LspServerConfig {
+            command: "dummy".to_string(),
+            args: vec![],
+            workspace_root: std::path::PathBuf::from("/tmp"),
+            init_timeout: None,
+            mux: false,
+            env: vec![],
+            idle_timeout_secs: Some(42),
+        };
+        assert_eq!(cfg.idle_timeout_secs, Some(42));
     }
 }

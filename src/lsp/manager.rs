@@ -873,6 +873,7 @@ mod tests {
             init_timeout: Some(std::time::Duration::from_secs(30)),
             mux: false,
             env: vec![],
+            idle_timeout_secs: None,
         })
     }
 
@@ -945,6 +946,7 @@ mod tests {
             init_timeout: Some(std::time::Duration::from_secs(30)),
             mux: false,
             env: vec![],
+            idle_timeout_secs: None,
         };
 
         // Step 2 — cancel the future after 100 ms (before initialize responds)
