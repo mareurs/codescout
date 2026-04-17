@@ -4,13 +4,14 @@
 //! The bug being regression-tested: before mux, B's direct rust-analyzer
 //! still saw the pre-write file because A's didChange only went to A's LSP.
 
-use super::test_support::two_agents_on_fixture;
 use crate::lsp::manager::LspManager;
 
 #[tokio::test]
 #[ignore = "requires rust-analyzer on PATH; gated by CI job"]
 async fn two_agents_coherent_after_edit() {
-    let (_a, _b, root, _td) = two_agents_on_fixture("rust").await;
+    let fixture =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/lsp-mux/rust");
+    let (_td, root) = super::test_support::stage_fixture(&fixture);
 
     // Each agent has its own LspManager, but both point at the same workspace.
     // With mux=true, the first `get_or_start` spawns the mux process and both
@@ -32,25 +33,50 @@ async fn two_agents_coherent_after_edit() {
     ca.did_change(&target).await.expect("A did_change initial");
     cb.did_change(&target).await.expect("B did_change initial");
 
-    // 2. A writes a new symbol to disk and notifies the shared LSP.
+    // 2. Baseline: B sees original_symbol only (fresh_symbol does not exist yet).
+    let syms_before = cb
+        .document_symbols(&target, "rust")
+        .await
+        .expect("B document_symbols before");
+    let names_before: Vec<_> = syms_before.iter().map(|s| s.name.clone()).collect();
+    assert!(
+        !names_before.iter().any(|n| n == "fresh_symbol"),
+        "fresh_symbol should not exist yet: {:?}",
+        names_before
+    );
+
+    // 3. A writes a new symbol to disk.
     let updated = "pub fn original_symbol() -> &'static str { \"original\" }\n\
                    pub fn fresh_symbol() -> &'static str { \"fresh\" }\n";
     std::fs::write(&target, updated).unwrap();
-    mgr_a.notify_file_changed(&target).await;
 
-    // 3. B queries document symbols — must see `fresh_symbol`.
-    //    Because both managers connect through the same mux socket, A's
-    //    didChange notification reaches the shared rust-analyzer, and B's
-    //    documentSymbol request reflects the updated index.
-    let syms = cb
+    // 4. Before notifying: B's view must still be stale (three-query sandwich —
+    //    proves we are not observing eager re-indexing rather than mux coherence).
+    let syms_stale = cb
         .document_symbols(&target, "rust")
         .await
-        .expect("B document_symbols");
-    let names: Vec<_> = syms.iter().map(|s| s.name.clone()).collect();
+        .expect("B document_symbols stale");
+    let names_stale: Vec<_> = syms_stale.iter().map(|s| s.name.clone()).collect();
     assert!(
-        names.iter().any(|n| n == "fresh_symbol"),
-        "Agent B's view is stale — fresh_symbol missing: {:?}",
-        names
+        !names_stale.iter().any(|n| n == "fresh_symbol"),
+        "B should not see fresh_symbol before notification: {:?}",
+        names_stale
+    );
+
+    // 5. A notifies the mux; B must now see fresh_symbol.
+    //    A's didChange reaches the shared rust-analyzer, and B's documentSymbol
+    //    request reflects the updated index.
+    mgr_a.notify_file_changed(&target).await;
+
+    let syms_after = cb
+        .document_symbols(&target, "rust")
+        .await
+        .expect("B document_symbols after");
+    let names_after: Vec<_> = syms_after.iter().map(|s| s.name.clone()).collect();
+    assert!(
+        names_after.iter().any(|n| n == "fresh_symbol"),
+        "Agent B's view stale after notification: {:?}",
+        names_after
     );
 
     mgr_a.shutdown_all().await;
