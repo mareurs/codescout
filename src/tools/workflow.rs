@@ -2176,6 +2176,572 @@ impl Tool for Onboarding {
         Some(format_onboarding(result))
     }
 }
+
+async fn handle_refresh_prompt(ctx: &ToolContext) -> anyhow::Result<Value> {
+    let status = ctx
+        .agent
+        .with_project(|p| {
+            let has_config = p.root.join(".codescout").join("project.toml").exists();
+            let memories = p.memory.list()?;
+            let has_onboarding_memory = memories.iter().any(|m| m == "onboarding");
+            Ok((has_config, has_onboarding_memory, memories))
+        })
+        .await?;
+    let (has_config, has_onboarding_memory, memories) = status;
+    if !has_config || !has_onboarding_memory {
+        return Err(super::RecoverableError::with_hint(
+            "refresh_prompt requires a fully onboarded project",
+            "Run onboarding() without any flags first to perform the initial onboarding.",
+        )
+        .into());
+    }
+
+    let (stored_version, config_languages) = ctx
+        .agent
+        .with_project(|p| {
+            Ok((
+                p.config.project.onboarding_version,
+                p.config.project.languages.clone(),
+            ))
+        })
+        .await?;
+
+    let config_path = ctx
+        .agent
+        .with_project(|p| {
+            let config_path = p.root.join(".codescout").join("project.toml");
+            if config_path.exists() {
+                let mut config = crate::config::project::ProjectConfig::load_or_default(&p.root)?;
+                config.project.onboarding_version = Some(ONBOARDING_VERSION);
+                let toml_str = toml::to_string_pretty(&config)?;
+                std::fs::write(&config_path, &toml_str)?;
+            }
+            Ok(config_path)
+        })
+        .await?;
+    ctx.agent.reload_config_if_project_toml(&config_path).await;
+
+    let subagent_prompt = build_prompt_refresh_subagent_prompt(&memories);
+
+    Ok(json!({
+        "onboarded": true,
+        "version_stale": false,
+        "explicit_refresh": true,
+        "stored_version": stored_version,
+        "current_version": ONBOARDING_VERSION,
+        "languages": config_languages,
+        "config_created": false,
+        "subagent_prompt": subagent_prompt,
+    }))
+}
+
+/// Returns `Some(response)` if the project is already onboarded (caller should return it),
+/// or `None` if onboarding hasn't been done yet (caller should proceed with full scan).
+async fn handle_already_onboarded(ctx: &ToolContext) -> anyhow::Result<Option<Value>> {
+    let status = ctx
+        .agent
+        .with_project(|p| {
+            let has_config = p.root.join(".codescout").join("project.toml").exists();
+            let memories = p.memory.list()?;
+            let has_onboarding_memory = memories.iter().any(|m| m == "onboarding");
+            let private_memories = p.private_memory.list()?;
+            Ok((
+                has_config,
+                has_onboarding_memory,
+                memories,
+                private_memories,
+            ))
+        })
+        .await?;
+    let (has_config, has_onboarding_memory, memories, private_memories) = status;
+    if !has_config || !has_onboarding_memory {
+        return Ok(None);
+    }
+
+    // --- Version check: refresh system prompt if stale ---
+    let (stored_version, config_languages) = ctx
+        .agent
+        .with_project(|p| {
+            Ok((
+                p.config.project.onboarding_version,
+                p.config.project.languages.clone(),
+            ))
+        })
+        .await?;
+
+    // Log downgrade (no action)
+    if let Some(v) = stored_version {
+        if v > ONBOARDING_VERSION {
+            tracing::warn!(
+                "stored onboarding version ({}) is newer than compiled ({}) — skipping refresh",
+                v,
+                ONBOARDING_VERSION
+            );
+        }
+    }
+
+    if onboarding_version_stale(stored_version) {
+        tracing::info!(
+            "onboarding version stale: stored={:?} current={}",
+            stored_version,
+            ONBOARDING_VERSION
+        );
+
+        // Optimistic version write to disk (prevents re-trigger across sessions)
+        let config_path = ctx
+            .agent
+            .with_project(|p| {
+                let config_path = p.root.join(".codescout").join("project.toml");
+                if config_path.exists() {
+                    let mut config =
+                        crate::config::project::ProjectConfig::load_or_default(&p.root)?;
+                    config.project.onboarding_version = Some(ONBOARDING_VERSION);
+                    let toml_str = toml::to_string_pretty(&config)?;
+                    std::fs::write(&config_path, &toml_str)?;
+                }
+                Ok(config_path)
+            })
+            .await?;
+        // Reload in-memory config so subsequent calls in the same session
+        // see the updated version (prevents re-trigger within session)
+        ctx.agent.reload_config_if_project_toml(&config_path).await;
+
+        let subagent_prompt = build_prompt_refresh_subagent_prompt(&memories);
+
+        return Ok(Some(json!({
+            "onboarded": true,
+            "version_stale": true,
+            "stored_version": stored_version,
+            "current_version": ONBOARDING_VERSION,
+            "languages": config_languages,
+            "config_created": false,
+            "subagent_prompt": subagent_prompt,
+        })));
+    }
+
+    let per_project_memories = ctx.agent.workspace_project_memories().await;
+
+    let mut message = format!(
+        "Onboarding already performed. Available shared memories: {}. \
+         Use `memory(action=\"read\", topic=...)` to read relevant ones as needed for your current task. \
+         Do not read all memories at once — only read those relevant to what you're working on. \
+         Use `memory(action=\"recall\", query=\"...\")` to search memories by meaning when the topic name isn't known.",
+        memories.join(", ")
+    );
+    if !private_memories.is_empty() {
+        message.push_str(&format!(
+            " Private memories: {}. Read with `memory(action=\"read\", topic=..., private=true)`.",
+            private_memories.join(", ")
+        ));
+    }
+    if !per_project_memories.is_empty() {
+        message.push_str(" Per-project memories (use `project: \"<id>\"` parameter):");
+        for (id, topics) in &per_project_memories {
+            message.push_str(&format!(" {}: {};", id, topics.join(", ")));
+        }
+    }
+    let mut response = json!({
+        "onboarded": true,
+        "has_config": true,
+        "has_onboarding_memory": true,
+        "memories": memories,
+        "message": message,
+    });
+    if !private_memories.is_empty() {
+        response["private_memories"] = json!(private_memories);
+    }
+    if !per_project_memories.is_empty() {
+        let map: serde_json::Map<String, serde_json::Value> = per_project_memories
+            .into_iter()
+            .map(|(id, topics)| (id, json!(topics)))
+            .collect();
+        response["project_memories"] = serde_json::Value::Object(map);
+    }
+    Ok(Some(response))
+}
+
+async fn perform_full_onboarding(
+    root: std::path::PathBuf,
+    ctx: &ToolContext,
+) -> anyhow::Result<Value> {
+    // Hardware detection runs after the file walk (Rust futures are lazy — this
+    // just creates the future; it starts executing only when .await'd below).
+    let hw_future = detect_hardware_context();
+
+    // Detect languages by walking files
+    let mut languages = std::collections::BTreeSet::new();
+    let walker = ignore::WalkBuilder::new(&root)
+        .hidden(true)
+        .git_ignore(true)
+        .build();
+    for entry in walker.flatten() {
+        if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            if let Some(lang) = crate::ast::detect_language(entry.path()) {
+                languages.insert(lang.to_string());
+            }
+        }
+    }
+
+    // List top-level entries
+    let mut top_level = vec![];
+    if let Ok(entries) = std::fs::read_dir(&root) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let suffix = if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                "/"
+            } else {
+                ""
+            };
+            top_level.push(format!("{}{}", name, suffix));
+        }
+    }
+    top_level.sort();
+
+    // Resolve hardware detection and derive model options
+    let hw = hw_future.await;
+    let model_options = model_options_for_hardware(&hw);
+    let recommended_model = model_options
+        .first()
+        .expect("model_options_for_hardware guarantees ≥1 entry")
+        .id
+        .clone();
+
+    // Create .codescout/project.toml if it doesn't exist
+    let config_dir = root.join(".codescout");
+    let config_path = config_dir.join("project.toml");
+    let created_config = if !config_path.exists() {
+        std::fs::create_dir_all(&config_dir)?;
+        let name = root
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unnamed")
+            .to_string();
+        let langs: Vec<String> = languages.iter().cloned().collect();
+        let config = crate::config::project::ProjectConfig {
+            project: crate::config::project::ProjectSection {
+                name,
+                languages: langs,
+                encoding: "utf-8".into(),
+                system_prompt: None,
+                tool_timeout_secs: 60,
+                onboarding_version: Some(ONBOARDING_VERSION),
+            },
+            embeddings: crate::config::project::EmbeddingsSection {
+                model: recommended_model,
+                ..Default::default()
+            },
+            ignored_paths: Default::default(),
+            security: Default::default(),
+            memory: Default::default(),
+            libraries: Default::default(),
+            lsp: Default::default(),
+        };
+        let toml_str = toml::to_string_pretty(&config)?;
+        std::fs::write(&config_path, &toml_str)?;
+        // Reload in-memory config so the version is visible within this session
+        ctx.agent.reload_config_if_project_toml(&config_path).await;
+        true
+    } else {
+        false
+    };
+
+    // Gather rich context from well-known project files.
+    // Pass the already-discovered project list from the workspace to avoid a
+    // redundant discover_projects walk (the agent runs it at activation time).
+    let discovered = ctx.agent.discovered_projects().await;
+    let gathered = gather_project_context(&root, discovered);
+
+    // Create workspace.toml for multi-project repos
+    let workspace_config_path = crate::config::workspace::workspace_config_path(&root);
+    if gathered.projects.len() > 1 && !workspace_config_path.exists() {
+        let ws_config = crate::config::workspace::WorkspaceConfig {
+            workspace: crate::config::workspace::WorkspaceSection {
+                name: root
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unnamed")
+                    .to_string(),
+                discovery_max_depth: 3,
+            },
+            resources: Default::default(),
+            exclude_projects: vec![],
+            projects: gathered
+                .projects
+                .iter()
+                .map(|p| {
+                    let project_abs = root.join(&p.relative_root);
+                    let depends_on =
+                        crate::workspace::infer_depends_on(&project_abs, &root, &gathered.projects);
+                    crate::config::workspace::ProjectEntry {
+                        id: p.id.clone(),
+                        root: p.relative_root.to_string_lossy().to_string(),
+                        languages: p.languages.clone(),
+                        depends_on,
+                    }
+                })
+                .collect(),
+        };
+        let toml_str = toml::to_string_pretty(&ws_config)?;
+        std::fs::write(&workspace_config_path, &toml_str)?;
+    }
+
+    // Probe embedding index status (only opens existing DB, no network)
+    let index_status = {
+        let db_path = crate::embed::index::project_db_path(&root);
+        if db_path.exists() {
+            match crate::embed::index::open_db(&root)
+                .and_then(|conn| crate::embed::index::index_stats(&conn))
+            {
+                Ok(stats) => json!({
+                    "ready": stats.chunk_count > 0,
+                    "files": stats.file_count,
+                    "chunks": stats.chunk_count,
+                }),
+                Err(_) => json!({ "ready": false, "files": 0, "chunks": 0 }),
+            }
+        } else {
+            json!({ "ready": false, "files": 0, "chunks": 0 })
+        }
+    };
+
+    // Store onboarding result in memory
+    let lang_list: Vec<String> = languages.iter().cloned().collect();
+    ctx.agent
+        .with_project(|p| {
+            let summary = format!(
+                "Languages: {}\nHas README: {}\nHas CLAUDE.md: {}\nBuild file: {}\nEntry points: {}\nTest dirs: {}",
+                lang_list.join(", "),
+                gathered.readme_path.is_some(),
+                gathered.claude_md_exists,
+                gathered.build_file_name.as_deref().unwrap_or("none"),
+                if gathered.entry_points.is_empty() {
+                    "none".to_string()
+                } else {
+                    gathered.entry_points.join(", ")
+                },
+                if gathered.test_dirs.is_empty() {
+                    "none".to_string()
+                } else {
+                    gathered.test_dirs.join(", ")
+                },
+            );
+            p.memory.write("onboarding", &summary)?;
+
+            // Write language-patterns memory (deterministic, from hardcoded content)
+            if let Some(patterns) = build_language_patterns_memory(&lang_list) {
+                p.memory.write("language-patterns", &patterns)?;
+            }
+
+            Ok(())
+        })
+        .await?;
+
+    // Write programmatic memories for each sub-project in workspace mode.
+    if gathered.projects.len() > 1 {
+        for project in &gathered.projects {
+            let mem_dir = if project.relative_root == std::path::Path::new(".") {
+                root.join(".codescout").join("memories")
+            } else {
+                root.join(".codescout")
+                    .join("projects")
+                    .join(&project.id)
+                    .join("memories")
+            };
+            if let Ok(store) = crate::memory::MemoryStore::from_dir(mem_dir) {
+                let proj_summary = format!(
+                    "Languages: {}\nRoot: {}\nManifest: {}",
+                    project.languages.join(", "),
+                    project.relative_root.display(),
+                    project.manifest.as_deref().unwrap_or("none"),
+                );
+                let _ = store.write("onboarding", &proj_summary);
+                if let Some(patterns) = build_language_patterns_memory(&project.languages) {
+                    let _ = store.write("language-patterns", &patterns);
+                }
+            }
+        }
+    }
+
+    // Gather protected memory state for the LLM merge flow
+    let protected_memories = ctx
+        .agent
+        .with_project(|p| {
+            let memories_dir = p.root.join(".codescout").join("memories");
+            let protected = &p.config.memory.protected;
+            Ok(gather_protected_memory_state(
+                &p.memory,
+                &memories_dir,
+                &p.root,
+                protected,
+            ))
+        })
+        .await?;
+
+    // Build the key-files manifest for the prompt (paths only, no content)
+    let mut key_files: Vec<String> = Vec::new();
+    if let Some(ref p) = gathered.readme_path {
+        key_files.push(p.clone());
+    }
+    if gathered.claude_md_exists {
+        key_files.push("CLAUDE.md".to_string());
+    }
+    if let Some(ref p) = gathered.build_file_name {
+        key_files.push(p.clone());
+    }
+
+    // Build the onboarding instruction prompt
+    let is_workspace = gathered.projects.len() > 1;
+    let prompt = crate::prompts::build_onboarding_prompt(&crate::prompts::OnboardingContext {
+        languages: &lang_list,
+        top_level: &top_level,
+        key_files: &key_files,
+        ci_files: &gathered.ci_files,
+        entry_points: &gathered.entry_points,
+        test_dirs: &gathered.test_dirs,
+        index_ready: index_status["ready"].as_bool().unwrap_or(false),
+        index_files: index_status["files"].as_u64().unwrap_or(0) as usize,
+        index_chunks: index_status["chunks"].as_u64().unwrap_or(0) as usize,
+        projects: &gathered.projects,
+        is_workspace,
+    });
+
+    // Build the system prompt draft scaffold
+    let libraries: Vec<crate::library::registry::LibraryEntry> = ctx
+        .agent
+        .library_registry()
+        .await
+        .map(|r| r.all().to_vec())
+        .unwrap_or_default();
+    let system_prompt_draft = build_system_prompt_draft(
+        &lang_list,
+        &gathered.entry_points,
+        Some(&root),
+        Some(&gathered.projects),
+        &libraries,
+    );
+
+    let discovered_projects: Vec<serde_json::Value> = gathered
+        .projects
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "id": p.id,
+                "root": p.relative_root.to_string_lossy(),
+                "languages": p.languages,
+                "manifest": p.manifest,
+            })
+        })
+        .collect();
+
+    let features_suggestion = gathered.features_md.is_none().then_some(
+        "No FEATURES.md found. Consider creating docs/FEATURES.md to document \
+         implemented capabilities — helps agents understand what's already built \
+         and avoid re-suggesting existing features.",
+    );
+
+    // Per-project protected memory state for workspace mode.
+    let (workspace_mode, per_project_protected) = if gathered.projects.len() > 1 {
+        let protected = ctx
+            .agent
+            .with_project(|p| Ok(p.config.memory.protected.clone()))
+            .await
+            .unwrap_or_default();
+        let mut map = serde_json::Map::new();
+        for project in &gathered.projects {
+            let mem_dir = if project.relative_root == std::path::Path::new(".") {
+                root.join(".codescout").join("memories")
+            } else {
+                root.join(".codescout")
+                    .join("projects")
+                    .join(&project.id)
+                    .join("memories")
+            };
+            let project_root = root.join(&project.relative_root);
+            if let Ok(store) = crate::memory::MemoryStore::from_dir(mem_dir.clone()) {
+                let state =
+                    gather_protected_memory_state(&store, &mem_dir, &project_root, &protected);
+                map.insert(project.id.clone(), state);
+            }
+        }
+        (true, Some(Value::Object(map)))
+    } else {
+        (false, None)
+    };
+
+    // Build the subagent prompt by concatenating preamble + onboarding prompt +
+    // system prompt draft + gathered data + epilogue
+    let subagent_prompt = {
+        let mut sp = build_subagent_preamble();
+        sp.push_str(&prompt);
+        if !system_prompt_draft.is_empty() {
+            sp.push_str("\n\n## System Prompt Draft\n\n");
+            sp.push_str(&system_prompt_draft);
+        }
+        if let Some(suggestion) = features_suggestion {
+            sp.push_str(&format!("\n\n> {suggestion}"));
+        }
+        // Append gathered data that the subagent needs
+        sp.push_str("\n\n## Gathered Data\n\n");
+        sp.push_str(&format!(
+            "**Hardware:** {}\n\n",
+            serde_json::to_string_pretty(&hw).unwrap_or_default()
+        ));
+        sp.push_str(&format!(
+            "**Model options:** {}\n\n",
+            serde_json::to_string_pretty(&model_options).unwrap_or_default()
+        ));
+        if !protected_memories.is_null() {
+            sp.push_str(&format!(
+                "**Protected memories:** {}\n\n",
+                serde_json::to_string_pretty(&protected_memories).unwrap_or_default()
+            ));
+        }
+        if workspace_mode {
+            if let Some(ref ppm) = per_project_protected {
+                if !ppm.is_null() {
+                    sp.push_str(&format!(
+                        "**Per-project protected memories:** {}\n\n",
+                        serde_json::to_string_pretty(ppm).unwrap_or_default()
+                    ));
+                }
+            }
+        }
+        sp.push_str(&build_subagent_epilogue());
+        sp
+    };
+
+    // Optimistic version write for full onboarding (force=true on existing project)
+    ctx.agent
+        .with_project(|p| {
+            let config_path = p.root.join(".codescout").join("project.toml");
+            if config_path.exists() {
+                let mut config = crate::config::project::ProjectConfig::load_or_default(&p.root)?;
+                config.project.onboarding_version = Some(ONBOARDING_VERSION);
+                let toml_str = toml::to_string_pretty(&config)?;
+                std::fs::write(&config_path, &toml_str)?;
+            }
+            Ok(())
+        })
+        .await?;
+
+    Ok(json!({
+        "languages": lang_list,
+        "top_level": top_level,
+        "config_created": created_config,
+        "has_readme": gathered.readme_path.is_some(),
+        "has_claude_md": gathered.claude_md_exists,
+        "build_file": gathered.build_file_name,
+        "entry_points": gathered.entry_points,
+        "test_dirs": gathered.test_dirs,
+        "ci_files": gathered.ci_files,
+        "features_md": gathered.features_md,
+        "index_status": index_status,
+        "workspace_mode": workspace_mode,
+        "projects": discovered_projects,
+        "subagent_prompt": subagent_prompt,
+    }))
+}
+
 /// Extract a u64 from a JSON value that may be a Number or a numeric String.
 fn get_timeout_u64(v: &Value) -> Option<u64> {
     match v {
@@ -7068,6 +7634,7 @@ mod tests {
             security: Default::default(),
             memory: Default::default(),
             libraries: Default::default(),
+            lsp: Default::default(),
         };
         let toml_str = toml::to_string_pretty(&config).unwrap();
         std::fs::write(config_dir.join("project.toml"), &toml_str).unwrap();
@@ -7123,6 +7690,7 @@ mod tests {
             security: Default::default(),
             memory: Default::default(),
             libraries: Default::default(),
+            lsp: Default::default(),
         };
         let toml_str = toml::to_string_pretty(&config).unwrap();
         std::fs::write(config_dir.join("project.toml"), &toml_str).unwrap();

@@ -17,6 +17,8 @@ pub struct ProjectConfig {
     pub memory: MemorySection,
     #[serde(default)]
     pub libraries: LibrariesSection,
+    #[serde(default)]
+    pub lsp: LspSection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,6 +227,21 @@ pub struct LibrariesSection {
     pub version_overrides: std::collections::HashMap<String, String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LspSection {
+    /// Per-language overrides, keyed by language name ("rust", "java", ...).
+    #[serde(flatten)]
+    pub langs: std::collections::HashMap<String, LspLangOverride>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LspLangOverride {
+    /// Force `mux: false` (direct-process) or `mux: true` (multiplexer).
+    /// `None` means "use the built-in default from servers::default_config".
+    #[serde(default)]
+    pub mux: Option<bool>,
+}
+
 fn default_fetch_timeout() -> u64 {
     300
 }
@@ -342,6 +359,7 @@ impl ProjectConfig {
             security: SecuritySection::default(),
             memory: MemorySection::default(),
             libraries: LibrariesSection::default(),
+            lsp: LspSection::default(),
         }
     }
 
@@ -349,6 +367,48 @@ impl ProjectConfig {
     pub fn data_dir(root: &Path) -> PathBuf {
         root.join(".codescout")
     }
+}
+
+#[test]
+fn security_section_defaults_write_lock_timeout_to_5s() {
+    let toml = "";
+    let config: SecuritySection = toml::from_str(toml).unwrap();
+    assert_eq!(config.write_lock_timeout_secs, 5);
+}
+
+#[test]
+fn security_section_accepts_custom_write_lock_timeout() {
+    let toml = "write_lock_timeout_secs = 10";
+    let config: SecuritySection = toml::from_str(toml).unwrap();
+    assert_eq!(config.write_lock_timeout_secs, 10);
+}
+
+#[test]
+fn lsp_section_parses_per_language_opt_out() {
+    let toml = r#"
+[project]
+name = "demo"
+
+[lsp.rust]
+mux = false
+
+[lsp.python]
+mux = true
+"#;
+    let cfg: ProjectConfig = toml::from_str(toml).unwrap();
+    assert_eq!(cfg.lsp.langs.get("rust").and_then(|o| o.mux), Some(false));
+    assert_eq!(cfg.lsp.langs.get("python").and_then(|o| o.mux), Some(true));
+    assert!(cfg.lsp.langs.get("go").is_none());
+}
+
+#[test]
+fn lsp_section_absent_parses_to_empty_map() {
+    let toml = r#"
+[project]
+name = "demo"
+"#;
+    let cfg: ProjectConfig = toml::from_str(toml).unwrap();
+    assert!(cfg.lsp.langs.is_empty());
 }
 
 #[cfg(test)]
