@@ -96,10 +96,22 @@ enum Commands {
         #[arg(long, default_value_t = 300)]
         idle_timeout: u64,
 
+        /// Environment variables to set on the LSP server process. Repeat
+        /// flag per variable. Format: `KEY=VAL`.
+        #[arg(long = "env", value_parser = parse_env_kv)]
+        server_env: Vec<(String, String)>,
+
         /// LSP server command and arguments (after --)
         #[arg(last = true, required = true)]
         server_cmd: Vec<String>,
     },
+}
+
+fn parse_env_kv(s: &str) -> Result<(String, String), String> {
+    let (k, v) = s
+        .split_once('=')
+        .ok_or_else(|| format!("--env expects KEY=VAL, got {s:?}"))?;
+    Ok((k.to_string(), v.to_string()))
 }
 
 #[tokio::main]
@@ -163,6 +175,7 @@ async fn main() -> Result<()> {
             lock,
             cwd,
             idle_timeout,
+            server_env,
             server_cmd,
         } => {
             codescout::lsp::mux::process::run(
@@ -172,7 +185,7 @@ async fn main() -> Result<()> {
                 idle_timeout,
                 &server_cmd[0],
                 &server_cmd[1..],
-                &[],
+                &server_env,
             )
             .await?;
         }

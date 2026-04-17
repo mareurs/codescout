@@ -120,6 +120,37 @@ impl Drop for StartingCleanup<'_> {
     }
 }
 
+/// Build the CLI argv passed to a spawned `codescout mux` child. Factored out
+/// for unit-testability; `get_or_start_via_mux` is the only caller.
+#[cfg(unix)]
+pub(super) fn build_mux_args(
+    workspace_root: &std::path::Path,
+    socket_path: &std::path::Path,
+    lock_path: &std::path::Path,
+    config: &crate::lsp::client::LspServerConfig,
+) -> Vec<String> {
+    let idle = config.idle_timeout_secs.unwrap_or(300);
+    let mut args = vec![
+        "mux".to_string(),
+        "--socket".to_string(),
+        socket_path.to_string_lossy().to_string(),
+        "--lock".to_string(),
+        lock_path.to_string_lossy().to_string(),
+        "--cwd".to_string(),
+        workspace_root.to_string_lossy().to_string(),
+        "--idle-timeout".to_string(),
+        idle.to_string(),
+    ];
+    for (k, v) in &config.env {
+        args.push("--env".to_string());
+        args.push(format!("{k}={v}"));
+    }
+    args.push("--".to_string());
+    args.push(config.command.clone());
+    args.extend(config.args.iter().cloned());
+    args
+}
+
 impl LspManager {
     /// Maximum consecutive startup failures before the circuit-breaker trips.
     const CIRCUIT_BREAKER_MAX_FAILURES: usize = 5;
@@ -373,20 +404,7 @@ impl LspManager {
             let exe =
                 std::env::current_exe().context("Failed to determine codescout binary path")?;
 
-            let mut mux_args = vec![
-                "mux".to_string(),
-                "--socket".to_string(),
-                socket_path.to_string_lossy().to_string(),
-                "--lock".to_string(),
-                lock_path.to_string_lossy().to_string(),
-                "--cwd".to_string(),
-                workspace_root.to_string_lossy().to_string(),
-                "--idle-timeout".to_string(),
-                "300".to_string(),
-                "--".to_string(),
-                config.command.clone(),
-            ];
-            mux_args.extend(config.args.iter().cloned());
+            let mux_args = build_mux_args(workspace_root, &socket_path, &lock_path, &config);
 
             // Spawn mux as a detached process — do NOT set kill_on_drop
             let mut child = tokio::process::Command::new(&exe)
@@ -1266,5 +1284,44 @@ mod tests {
             .unwrap();
         // Should still be 9100 — second call didn't overwrite
         assert_eq!(val, Some(9100));
+    }
+
+    #[test]
+    fn build_mux_args_includes_env_forwarding() {
+        use std::path::PathBuf;
+        let cfg = crate::lsp::client::LspServerConfig {
+            command: "fakelsp".into(),
+            args: vec!["--stdio".into()],
+            workspace_root: PathBuf::from("/tmp/ws"),
+            init_timeout: None,
+            mux: true,
+            env: vec![
+                ("GRADLE_USER_HOME".into(), "/tmp/g".into()),
+                ("FOO".into(), "bar".into()),
+            ],
+            idle_timeout_secs: Some(123),
+        };
+        let args = crate::lsp::manager::build_mux_args(
+            &PathBuf::from("/tmp/ws"),
+            &PathBuf::from("/tmp/sock"),
+            &PathBuf::from("/tmp/lock"),
+            &cfg,
+        );
+        // idle timeout honoured
+        let idle_idx = args.iter().position(|a| a == "--idle-timeout").unwrap();
+        assert_eq!(args[idle_idx + 1], "123");
+        // env flags appear before `--`
+        let dash_idx = args.iter().position(|a| a == "--").unwrap();
+        let env_args: Vec<_> = args[..dash_idx]
+            .iter()
+            .zip(args[1..dash_idx].iter())
+            .filter(|(a, _)| *a == "--env")
+            .map(|(_, b)| b.clone())
+            .collect();
+        assert!(env_args.contains(&"GRADLE_USER_HOME=/tmp/g".to_string()));
+        assert!(env_args.contains(&"FOO=bar".to_string()));
+        // server command is last
+        assert_eq!(args[dash_idx + 1], "fakelsp");
+        assert_eq!(args[dash_idx + 2], "--stdio");
     }
 }
