@@ -151,6 +151,11 @@ pub(super) fn build_mux_args(
     args
 }
 
+/// Resolve the effective `mux` flag. `override_` (from project config) wins; else fall back to `default`.
+pub(super) fn resolve_mux_flag(default: bool, override_: Option<bool>) -> bool {
+    override_.unwrap_or(default)
+}
+
 impl LspManager {
     /// Maximum consecutive startup failures before the circuit-breaker trips.
     const CIRCUIT_BREAKER_MAX_FAILURES: usize = 5;
@@ -186,6 +191,7 @@ impl LspManager {
         &self,
         language: &str,
         workspace_root: &Path,
+        mux_override: Option<bool>,
     ) -> Result<Arc<LspClient>> {
         let key = LspKey::new(language, workspace_root);
 
@@ -238,9 +244,12 @@ impl LspManager {
 
         // Resolve the server config early — fail fast for unknown languages
         // before touching the barrier map at all.
-        let config = servers::default_config(language, workspace_root).ok_or_else(|| {
+        let mut config = servers::default_config(language, workspace_root).ok_or_else(|| {
             anyhow::anyhow!("No LSP server configured for language: {}", language)
         })?;
+
+        // Apply per-project mux override from project config (if any).
+        config.mux = resolve_mux_flag(config.mux, mux_override);
 
         // Mux path: languages that use the multiplexer bypass the normal pool.
         // The fast-path cache check at the top of get_or_start() handles
@@ -754,8 +763,9 @@ impl crate::lsp::ops::LspProvider for LspManager {
         &self,
         language: &str,
         workspace_root: &std::path::Path,
+        mux_override: Option<bool>,
     ) -> anyhow::Result<Arc<dyn crate::lsp::ops::LspClientOps>> {
-        let client = LspManager::get_or_start(self, language, workspace_root).await?;
+        let client = LspManager::get_or_start(self, language, workspace_root, mux_override).await?;
         Ok(client as Arc<dyn crate::lsp::ops::LspClientOps>)
     }
 
@@ -906,7 +916,7 @@ mod tests {
     async fn manager_errors_for_unknown_language() {
         let mgr = LspManager::new();
         let dir = tempfile::tempdir().unwrap();
-        let result = mgr.get_or_start("brainfuck", dir.path()).await;
+        let result = mgr.get_or_start("brainfuck", dir.path(), None).await;
         assert!(result.is_err());
     }
 
@@ -930,7 +940,7 @@ mod tests {
         assert_eq!(mgr.starting_count_sync(), 0, "map should start empty");
 
         // Step 2 — unknown language fails immediately (no config exists)
-        let result = mgr.get_or_start("brainfuck", dir.path()).await;
+        let result = mgr.get_or_start("brainfuck", dir.path(), None).await;
         assert!(result.is_err());
 
         // Step 3 — cleanup guard fired on failure exit
@@ -1008,7 +1018,7 @@ mod tests {
         std::fs::write(dir.path().join("src/lib.rs"), "pub fn f() {}").unwrap();
 
         let mgr = LspManager::new();
-        let client = mgr.get_or_start("rust", dir.path()).await.unwrap();
+        let client = mgr.get_or_start("rust", dir.path(), None).await.unwrap();
         assert!(client.is_alive());
 
         mgr.shutdown_all().await;
@@ -1144,7 +1154,7 @@ mod tests {
         let mgr = LspManager::new_arc_with_ttl(ttl);
 
         // Start a real LSP client
-        mgr.get_or_start("rust", dir.path()).await.unwrap();
+        mgr.get_or_start("rust", dir.path(), None).await.unwrap();
         assert!(
             !mgr.active_languages().await.is_empty(),
             "client should be alive"
@@ -1345,5 +1355,40 @@ mod tests {
         );
         let idle_idx = args.iter().position(|a| a == "--idle-timeout").unwrap();
         assert_eq!(args[idle_idx + 1], "300");
+    }
+
+    #[test]
+    fn resolve_mux_flag_override_wins() {
+        assert_eq!(
+            crate::lsp::manager::resolve_mux_flag(true, Some(false)),
+            false
+        );
+        assert_eq!(
+            crate::lsp::manager::resolve_mux_flag(false, Some(true)),
+            true
+        );
+    }
+
+    #[test]
+    fn resolve_mux_flag_none_uses_default() {
+        assert_eq!(crate::lsp::manager::resolve_mux_flag(true, None), true);
+        assert_eq!(crate::lsp::manager::resolve_mux_flag(false, None), false);
+    }
+
+    #[tokio::test]
+    async fn project_override_forces_direct_path_for_rust() {
+        let mgr = LspManager::new();
+        let dir = tempfile::tempdir().unwrap();
+
+        let default_mux = servers::default_config("rust", dir.path())
+            .map(|c| c.mux)
+            .unwrap_or(false);
+        let effective = resolve_mux_flag(default_mux, Some(false));
+        assert!(!effective, "project opt-out must force direct-process path");
+
+        let effective_default = resolve_mux_flag(default_mux, None);
+        assert_eq!(effective_default, default_mux);
+
+        drop(mgr);
     }
 }

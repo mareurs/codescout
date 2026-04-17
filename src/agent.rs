@@ -637,6 +637,14 @@ impl Agent {
         f(project)
     }
 
+    /// Resolve the per-language `mux` override from the active project's config.
+    /// Returns `None` when no project is active or no override is set for the language.
+    pub async fn lsp_mux_override(&self, language: &str) -> Option<bool> {
+        self.with_project(|p| Ok(p.config.lsp.langs.get(language).and_then(|o| o.mux)))
+            .await
+            .unwrap_or(None)
+    }
+
     /// Get a clone of the library registry, if a project is active.
     pub async fn library_registry(&self) -> Option<LibraryRegistry> {
         self.inner

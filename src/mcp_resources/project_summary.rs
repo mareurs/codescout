@@ -133,4 +133,186 @@ mod tests {
         let err = p.read("project://other").await.unwrap_err();
         assert!(matches!(err, ResourceError::NotFound(_)));
     }
+
+    // ── detect_primary_language unit tests ────────────────────────────────────
+
+    #[test]
+    fn detect_language_cargo_in_configured() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Cargo.toml"), "").unwrap();
+        let lang = detect_primary_language(dir.path(), &["rust".into(), "bash".into()]);
+        assert_eq!(lang.as_deref(), Some("rust"));
+    }
+
+    #[test]
+    fn detect_language_cargo_not_in_configured_falls_back() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Cargo.toml"), "").unwrap();
+        // "rust" not configured → falls back to first configured language
+        let lang = detect_primary_language(dir.path(), &["bash".into()]);
+        assert_eq!(lang.as_deref(), Some("bash"));
+    }
+
+    #[test]
+    fn detect_language_no_manifest_falls_back_to_configured_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let lang = detect_primary_language(dir.path(), &["bash".into()]);
+        assert_eq!(lang.as_deref(), Some("bash"));
+    }
+
+    #[test]
+    fn detect_language_empty_configured_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let lang = detect_primary_language(dir.path(), &[]);
+        assert!(lang.is_none());
+    }
+
+    // ── lsp_ready probe tests using stub LspProvider ─────────────────────────
+
+    /// A stub LspProvider that reports `is_ready = true` for any language.
+    struct ReadyLspProvider;
+
+    #[async_trait]
+    impl crate::lsp::ops::LspProvider for ReadyLspProvider {
+        async fn get_or_start(
+            &self,
+            _language: &str,
+            _workspace_root: &std::path::Path,
+            _mux_override: Option<bool>,
+        ) -> anyhow::Result<Arc<dyn crate::lsp::ops::LspClientOps>> {
+            anyhow::bail!("not used in tests")
+        }
+
+        async fn notify_file_changed(&self, _path: &std::path::Path) {}
+
+        async fn shutdown_all(&self) {}
+
+        async fn is_ready(&self, _language: &str, _workspace_root: &std::path::Path) -> bool {
+            true
+        }
+    }
+
+    /// A stub LspProvider that always reports `is_ready = false` (uses the default impl).
+    struct NotReadyLspProvider;
+
+    #[async_trait]
+    impl crate::lsp::ops::LspProvider for NotReadyLspProvider {
+        async fn get_or_start(
+            &self,
+            _language: &str,
+            _workspace_root: &std::path::Path,
+            _mux_override: Option<bool>,
+        ) -> anyhow::Result<Arc<dyn crate::lsp::ops::LspClientOps>> {
+            anyhow::bail!("not used in tests")
+        }
+
+        async fn notify_file_changed(&self, _path: &std::path::Path) {}
+
+        async fn shutdown_all(&self) {}
+    }
+
+    /// Create a tempdir with `.codescout/project.toml` declaring `languages = ["rust"]`.
+    fn make_rust_project_dir() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        std::fs::write(
+            dir.path().join(".codescout/project.toml"),
+            "[project]\nname = \"test\"\nlanguages = [\"rust\"]\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"t\"").unwrap();
+        dir
+    }
+
+    #[tokio::test]
+    async fn agent_summary_source_lsp_ready_true_when_provider_reports_ready() {
+        let dir = make_rust_project_dir();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let lsp: Arc<dyn crate::lsp::ops::LspProvider> = Arc::new(ReadyLspProvider);
+        let source = AgentSummarySource::new(agent, lsp);
+        let snap = source.snapshot().await;
+        assert!(
+            snap.lsp_ready,
+            "expected lsp_ready=true when provider reports ready"
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_summary_source_lsp_ready_false_when_provider_not_ready() {
+        let dir = make_rust_project_dir();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let lsp: Arc<dyn crate::lsp::ops::LspProvider> = Arc::new(NotReadyLspProvider);
+        let source = AgentSummarySource::new(agent, lsp);
+        let snap = source.snapshot().await;
+        assert!(
+            !snap.lsp_ready,
+            "expected lsp_ready=false when provider not ready"
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_summary_source_index_status_idle() {
+        let dir = make_rust_project_dir();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        // default IndexingState is Idle
+        let lsp: Arc<dyn crate::lsp::ops::LspProvider> = Arc::new(NotReadyLspProvider);
+        let source = AgentSummarySource::new(agent, lsp);
+        let snap = source.snapshot().await;
+        assert_eq!(snap.index_status, "idle");
+    }
+
+    #[tokio::test]
+    async fn agent_summary_source_index_status_running() {
+        let dir = make_rust_project_dir();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        *agent.indexing.lock().unwrap() = crate::agent::IndexingState::Running {
+            done: 5,
+            total: 10,
+            eta_secs: None,
+        };
+        let lsp: Arc<dyn crate::lsp::ops::LspProvider> = Arc::new(NotReadyLspProvider);
+        let source = AgentSummarySource::new(agent, lsp);
+        let snap = source.snapshot().await;
+        assert_eq!(snap.index_status, "indexing");
+    }
+
+    #[tokio::test]
+    async fn agent_summary_source_index_status_done() {
+        let dir = make_rust_project_dir();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        *agent.indexing.lock().unwrap() = crate::agent::IndexingState::Done {
+            files_indexed: 42,
+            files_deleted: 0,
+            detail: "ok".into(),
+            total_files: 42,
+            total_chunks: 100,
+        };
+        let lsp: Arc<dyn crate::lsp::ops::LspProvider> = Arc::new(NotReadyLspProvider);
+        let source = AgentSummarySource::new(agent, lsp);
+        let snap = source.snapshot().await;
+        assert_eq!(snap.index_status, "indexed");
+    }
+
+    #[tokio::test]
+    async fn agent_summary_source_index_status_failed() {
+        let dir = make_rust_project_dir();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        *agent.indexing.lock().unwrap() = crate::agent::IndexingState::Failed("embed error".into());
+        let lsp: Arc<dyn crate::lsp::ops::LspProvider> = Arc::new(NotReadyLspProvider);
+        let source = AgentSummarySource::new(agent, lsp);
+        let snap = source.snapshot().await;
+        assert_eq!(snap.index_status, "failed");
+    }
 }

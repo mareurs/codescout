@@ -181,6 +181,7 @@ impl LspProvider for MockLspProvider {
         &self,
         _language: &str,
         _workspace_root: &Path,
+        _mux_override: Option<bool>,
     ) -> anyhow::Result<Arc<dyn LspClientOps>> {
         Ok(Arc::clone(&self.client) as Arc<dyn LspClientOps>)
     }

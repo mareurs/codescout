@@ -59,6 +59,7 @@ pub trait LspProvider: Send + Sync {
         &self,
         language: &str,
         workspace_root: &Path,
+        mux_override: Option<bool>,
     ) -> anyhow::Result<Arc<dyn LspClientOps>>;
 
     async fn notify_file_changed(&self, path: &Path);
