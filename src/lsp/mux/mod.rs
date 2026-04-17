@@ -2,6 +2,8 @@ pub mod process;
 pub mod protocol;
 
 #[cfg(test)]
+mod coherence_rust;
+#[cfg(test)]
 pub(crate) mod test_support;
 
 use std::collections::hash_map::DefaultHasher;
