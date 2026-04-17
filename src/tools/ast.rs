@@ -214,7 +214,14 @@ mod tests {
         content: &str,
     ) -> (tempfile::TempDir, ToolContext) {
         let dir = tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let codescout_dir = dir.path().join(".codescout");
+        std::fs::create_dir_all(&codescout_dir).unwrap();
+        // Opt out of mux so these unit tests don't need the codescout-mux binary on PATH.
+        std::fs::write(
+            codescout_dir.join("project.toml"),
+            "[project]\nname = \"test-project\"\n\n[lsp.rust]\nmux = false\n",
+        )
+        .unwrap();
         std::fs::write(dir.path().join(filename), content).unwrap();
         let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
         (

@@ -16,9 +16,9 @@ pub fn default_config(language: &str, workspace_root: &Path) -> Option<LspServer
             args: vec![],
             workspace_root: root,
             init_timeout: None,
-            mux: false,
+            mux: true,
             env: vec![],
-            idle_timeout_secs: None,
+            idle_timeout_secs: Some(180),
         }),
         "python" => Some(LspServerConfig {
             command: crate::platform::lsp_binary_name("pyright-langserver"),

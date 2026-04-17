@@ -1018,7 +1018,12 @@ mod tests {
         std::fs::write(dir.path().join("src/lib.rs"), "pub fn f() {}").unwrap();
 
         let mgr = LspManager::new();
-        let client = mgr.get_or_start("rust", dir.path(), None).await.unwrap();
+        // Pass Some(false) so the test uses rust-analyzer directly, without
+        // needing the codescout-mux binary on PATH (mux: true is now the default).
+        let client = mgr
+            .get_or_start("rust", dir.path(), Some(false))
+            .await
+            .unwrap();
         assert!(client.is_alive());
 
         mgr.shutdown_all().await;
@@ -1153,8 +1158,11 @@ mod tests {
         let ttl = std::time::Duration::from_millis(300);
         let mgr = LspManager::new_arc_with_ttl(ttl);
 
-        // Start a real LSP client
-        mgr.get_or_start("rust", dir.path(), None).await.unwrap();
+        // Start a real LSP client; pass Some(false) so the test uses rust-analyzer
+        // directly, without needing the codescout-mux binary on PATH.
+        mgr.get_or_start("rust", dir.path(), Some(false))
+            .await
+            .unwrap();
         assert!(
             !mgr.active_languages().await.is_empty(),
             "client should be alive"

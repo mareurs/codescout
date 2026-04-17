@@ -6,7 +6,6 @@
 
 use super::test_support::two_agents_on_fixture;
 use crate::lsp::manager::LspManager;
-use crate::lsp::ops::LspClientOps as _;
 
 #[tokio::test]
 #[ignore = "requires rust-analyzer on PATH; gated by CI job"]
