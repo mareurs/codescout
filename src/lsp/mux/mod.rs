@@ -1,6 +1,9 @@
 pub mod process;
 pub mod protocol;
 
+#[cfg(test)]
+pub(crate) mod test_support;
+
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
