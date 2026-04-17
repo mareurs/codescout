@@ -43,11 +43,11 @@ pub struct CodeScoutServer {
     output_buffer: Arc<crate::tools::output_buffer::OutputBuffer>,
     // Arc<dyn Tool>: heterogeneous collection of 23+ different tool types dispatched by name at runtime.
     tools: Vec<Arc<dyn Tool>>,
-    /// Pre-computed at construction because `get_info()` is sync.
-    /// Becomes stale if project state changes mid-session (e.g. after onboarding or indexing).
-    /// For stdio this means instructions reflect the state at server startup;
-    /// for HTTP/SSE each connection gets fresh instructions.
-    instructions: String,
+    /// Pre-computed at construction, wrapped in `Arc<RwLock<>>` so that
+    /// `activate_project` can refresh the string mid-session without
+    /// reconstructing the server. `get_info()` is sync so we read-lock;
+    /// `refresh_instructions()` write-locks after each `activate_project`.
+    instructions: Arc<std::sync::RwLock<String>>,
     section_coverage: Arc<std::sync::Mutex<crate::tools::section_coverage::SectionCoverage>>,
     session_id: String,
     debug: bool,
@@ -121,7 +121,7 @@ impl CodeScoutServer {
             lsp,
             output_buffer,
             tools,
-            instructions,
+            instructions: Arc::new(std::sync::RwLock::new(instructions)),
             section_coverage,
             session_id: uuid::Uuid::new_v4().to_string(),
             debug,
@@ -139,6 +139,15 @@ impl CodeScoutServer {
     async fn refresh_resources(&self) {
         let new_rr = build_resource_registry(&self.agent, &self.tools).await;
         *self.resources.write().await = Arc::new(new_rr);
+    }
+
+    /// Refresh the pre-computed instructions string after `activate_project`.
+    /// Keeps stdio-transport clients from seeing stale project state
+    /// (e.g. memories written by a just-completed onboarding run).
+    async fn refresh_instructions(&self) {
+        let status = self.agent.project_status().await;
+        let new_instructions = crate::prompts::build_server_instructions(status.as_ref());
+        *self.instructions.write().unwrap() = new_instructions;
     }
 
     /// Probe the current project state and return a snapshot of its capabilities.
@@ -351,7 +360,7 @@ impl ServerHandler for CodeScoutServer {
                 .enable_resources()
                 .build(),
         )
-        .with_instructions(self.instructions.clone())
+        .with_instructions(self.instructions.read().unwrap().clone())
     }
 
     async fn list_tools(
@@ -458,8 +467,10 @@ impl ServerHandler for CodeScoutServer {
                 let _ = req_ctx.peer.notify_tool_list_changed().await;
             }
 
-            // Rebuild the resource registry to pick up the new memory dir.
+            // Rebuild the resource registry to pick up the new memory dir,
+            // and refresh instructions so stdio clients see current project state.
             self.refresh_resources().await;
+            self.refresh_instructions().await;
         }
 
         Ok(result)
@@ -530,17 +541,23 @@ async fn build_resource_registry(
 
 /// Route a tool `Err(e)` to the appropriate `CallToolResult`.
 ///
-/// - [`RecoverableError`] → `isError: false` with a JSON body
-///   `{"error": "...", "hint": "..."}`.  The LLM sees the problem and a
-///   suggestion but sibling parallel calls are **not** aborted by the client.
+/// - [`RecoverableError`] → `isError: false` with a JSON body containing
+///   `"error"`, optional guidance under its variant-named key
+///   (`hint` / `warning` / `must_follow`), and any `extra` fields spliced
+///   in at the top level.  Sibling parallel calls are **not** aborted.
 /// - Any other error → `isError: true` (fatal; something truly broke).
 ///
 /// [`RecoverableError`]: crate::tools::RecoverableError
 fn route_tool_error(e: anyhow::Error) -> CallToolResult {
     if let Some(rec) = e.downcast_ref::<crate::tools::RecoverableError>() {
         let mut body = serde_json::json!({ "ok": false, "error": rec.message });
-        if let Some(hint) = &rec.hint {
-            body["hint"] = serde_json::json!(hint);
+        if let Some(g) = &rec.guidance {
+            body[g.field_name()] = serde_json::json!(g.text());
+        }
+        if let Some(obj) = body.as_object_mut() {
+            for (k, v) in &rec.extra {
+                obj.insert(k.clone(), v.clone());
+            }
         }
         let text = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
         CallToolResult::success(vec![Content::text(text)])
@@ -902,6 +919,11 @@ pub async fn run(
 /// something — navigation tools whose output never contained absolute paths
 /// get no note.
 ///
+/// **Stripping heuristic**: only occurrences preceded by a non-path character
+/// (e.g. `"`, ` `, `:`, `\n`) or at the very start of the text are replaced.
+/// This avoids mangling embedded path literals inside file content where the
+/// project root happens to appear mid-string (e.g. inside a test assertion).
+///
 /// Note: values like `"project_root": "/abs/path"` in `activate_project` /
 /// `get_config` responses are intentionally not stripped — they use a bare
 /// absolute path without a trailing slash, so they do not match `root_prefix`
@@ -922,10 +944,10 @@ fn strip_project_root_from_result(mut result: CallToolResult, root_prefix: &str)
     let mut stripped = false;
     for block in &mut result.content {
         if let RawContent::Text(ref mut t) = block.raw {
-            let replaced = t.text.replace(root_prefix, "");
-            if replaced != t.text {
+            let new_text = strip_prefix_from_text(&t.text, root_prefix);
+            if new_text != t.text {
                 stripped = true;
-                t.text = replaced;
+                t.text = new_text;
             }
         }
     }
@@ -940,6 +962,34 @@ fn strip_project_root_from_result(mut result: CallToolResult, root_prefix: &str)
             "[codescout] paths are relative to {root}"
         )));
     }
+    result
+}
+
+/// Replace occurrences of `prefix` in `text` only when they appear in a
+/// path-value context — i.e. preceded by a non-path character or at the start
+/// of the string. This avoids stripping the prefix when it appears embedded
+/// inside longer strings such as code literals or comments.
+///
+/// A "path character" here means anything that could legitimately precede a
+/// path component: `/`, alphanumerics, `-`, `_`, `.`. Everything else (quotes,
+/// spaces, colons, brackets, newlines…) signals a value boundary.
+fn strip_prefix_from_text(text: &str, prefix: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut last = 0;
+    for (pos, _) in text.match_indices(prefix) {
+        let is_value_boundary = pos == 0
+            || {
+                // SAFETY: pos is a byte offset from match_indices, so text[..pos] is valid UTF-8.
+                // next_back() returns the last char before the match.
+                let prev = text[..pos].chars().next_back();
+                !matches!(prev, Some(c) if c == '/' || c == '.' || c == '-' || c == '_' || c.is_ascii_alphanumeric())
+            };
+        if is_value_boundary {
+            result.push_str(&text[last..pos]);
+            last = pos + prefix.len();
+        }
+    }
+    result.push_str(&text[last..]);
     result
 }
 #[cfg(test)]
@@ -1192,6 +1242,56 @@ mod tests {
     }
 
     #[test]
+    fn recoverable_error_body_serializes_warning_under_warning_key() {
+        let err = anyhow::Error::new(crate::tools::RecoverableError::with_warning(
+            "too many results",
+            "narrow with path=",
+        ));
+        let result = route_tool_error(err);
+        let text = &result.content[0].as_text().unwrap().text;
+        let body: serde_json::Value = serde_json::from_str(text).unwrap();
+        assert_eq!(body["warning"], "narrow with path=");
+        assert!(body.get("hint").is_none());
+        assert!(body.get("must_follow").is_none());
+    }
+
+    #[test]
+    fn recoverable_error_body_serializes_must_follow_under_must_follow_key() {
+        let err = anyhow::Error::new(crate::tools::RecoverableError::with_must_follow(
+            "heading too large",
+            "IRON LAW #6: use @file_xxx",
+        ));
+        let result = route_tool_error(err);
+        let text = &result.content[0].as_text().unwrap().text;
+        let body: serde_json::Value = serde_json::from_str(text).unwrap();
+        assert_eq!(body["must_follow"], "IRON LAW #6: use @file_xxx");
+        assert!(body.get("hint").is_none());
+        assert!(body.get("warning").is_none());
+    }
+
+    #[test]
+    fn recoverable_error_body_splices_extra_fields_at_top_level() {
+        let err_struct = crate::tools::RecoverableError::with_must_follow(
+            "heading too large",
+            "IRON LAW #6",
+        )
+        .with_extra("file_id", serde_json::json!("@file_abc"))
+        .with_extra(
+            "section_map",
+            serde_json::json!([{"level": 2, "text": "## X", "line": 10}]),
+        );
+        let err: anyhow::Error = err_struct.into();
+        let result = route_tool_error(err);
+        let text = &result.content[0].as_text().unwrap().text;
+        let body: serde_json::Value = serde_json::from_str(text).unwrap();
+        assert_eq!(body["file_id"], "@file_abc");
+        assert_eq!(body["section_map"][0]["line"], 10);
+        assert_eq!(body["ok"], serde_json::Value::Bool(false));
+        assert_eq!(body["error"], "heading too large");
+        assert_eq!(body["must_follow"], "IRON LAW #6");
+    }
+
+    #[test]
     fn plain_anyhow_error_routes_to_is_error_true() {
         let err = anyhow::anyhow!("LSP crashed unexpectedly");
         let result = route_tool_error(err);
@@ -1389,6 +1489,48 @@ mod tests {
             1,
             "no note should be added when nothing was stripped"
         );
+    }
+
+    #[test]
+    fn strip_prefix_only_at_value_boundary() {
+        // Prefix preceded by a quote (JSON string value) — should strip.
+        let prefix = "/home/user/proj/";
+        assert_eq!(
+            strip_prefix_from_text("\"/home/user/proj/src/lib.rs\"", prefix),
+            "\"src/lib.rs\""
+        );
+        // Prefix at start of string — should strip.
+        assert_eq!(
+            strip_prefix_from_text("/home/user/proj/src/lib.rs", prefix),
+            "src/lib.rs"
+        );
+        // Prefix after a space (error message) — should strip.
+        assert_eq!(
+            strip_prefix_from_text("could not open /home/user/proj/foo.rs", prefix),
+            "could not open foo.rs"
+        );
+        // Prefix after newline — should strip.
+        assert_eq!(
+            strip_prefix_from_text("files:\n/home/user/proj/a.rs\n/home/user/proj/b.rs", prefix),
+            "files:\na.rs\nb.rs"
+        );
+    }
+
+    #[test]
+    fn strip_prefix_not_inside_longer_path() {
+        // Prefix embedded after another path component — should NOT strip.
+        // e.g. a symlink or nested repo that happens to share the suffix.
+        let prefix = "/home/user/proj/";
+        let text = "/other/home/user/proj/src/lib.rs";
+        assert_eq!(strip_prefix_from_text(text, prefix), text);
+    }
+
+    #[test]
+    fn strip_prefix_not_inside_code_string_preceded_by_path_char() {
+        // Prefix after an alphanumeric character — not a boundary, should NOT strip.
+        let prefix = "/home/user/proj/";
+        let text = "foo/home/user/proj/bar";
+        assert_eq!(strip_prefix_from_text(text, prefix), text);
     }
 
     #[tokio::test]

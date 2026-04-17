@@ -219,6 +219,22 @@ fn get_path_param(input: &Value, required: bool) -> anyhow::Result<Option<&str>>
     }
 }
 
+/// Extract a required file path parameter from input. Returns `&str` directly.
+/// Accepts "path", "relative_path", or "file" — same aliases as `get_path_param`.
+fn require_path_param(input: &Value) -> anyhow::Result<&str> {
+    input["path"]
+        .as_str()
+        .or_else(|| input["relative_path"].as_str())
+        .or_else(|| input["file"].as_str())
+        .ok_or_else(|| {
+            RecoverableError::with_hint(
+                "missing 'path' parameter",
+                "Add the required 'path' parameter to the tool call.",
+            )
+            .into()
+        })
+}
+
 /// Return a `RecoverableError` if the path looks like a markdown file,
 /// directing the caller to `edit_markdown` / `read_markdown` instead.
 fn guard_not_markdown(path: &Path) -> anyhow::Result<()> {
@@ -2381,7 +2397,7 @@ impl Tool for ReplaceSymbol {
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         super::guard_worktree_write(ctx).await?;
         let name_path = super::require_str_param(&input, "symbol")?;
-        let rel_path = get_path_param(&input, true)?.unwrap();
+        let rel_path = require_path_param(&input)?;
         let new_body =
             super::require_str_param_or(&input, "new_body", &["new_code", "new_source", "body"])?;
 

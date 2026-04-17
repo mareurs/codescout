@@ -3190,9 +3190,9 @@ mod tests {
             rec.message
         );
         assert!(
-            rec.hint.as_deref().unwrap_or("").contains("list_dir"),
+            rec.hint().unwrap_or("").contains("list_dir"),
             "hint should suggest list_dir; got: {:?}",
-            rec.hint
+            rec.hint()
         );
     }
 
@@ -4563,7 +4563,7 @@ mod tests {
         let recoverable = err
             .downcast_ref::<super::RecoverableError>()
             .expect("expected a RecoverableError");
-        let hint = recoverable.hint.as_deref().unwrap_or("");
+        let hint = recoverable.hint().unwrap_or("");
         assert!(
             hint.contains("create_file"),
             "expected error hint to mention create_file, got: {hint}"
@@ -4776,7 +4776,7 @@ mod tests {
             err.to_string().contains("symbol definition"),
             "error should mention symbol definition, got: {err}"
         );
-        let hint = recoverable.hint.as_deref().unwrap_or("");
+        let hint = recoverable.hint().unwrap_or("");
         assert!(
             hint.contains("remove_symbol"),
             "hint should mention remove_symbol, got: {hint}"

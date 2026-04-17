@@ -123,12 +123,49 @@ impl ToolContext {
     }
 }
 
+/// Severity-tagged guidance attached to a [`RecoverableError`].
+///
+/// Serialized into the response body under the variant-named key
+/// (`hint` / `warning` / `must_follow`). The field name itself carries the
+/// register — agents scan JSON responses and react to the key, not the prose.
+#[derive(Debug, Clone)]
+pub enum Guidance {
+    /// Optional narrowing — "you could try X".
+    Hint(String),
+    /// Off-golden-path — "reconsider before proceeding".
+    Warning(String),
+    /// Binding, iron-law-grade rule — violating produces wrong results or
+    /// wastes significant context. Cite the specific rule where applicable
+    /// (e.g. "IRON LAW #6: ...").
+    MustFollow(String),
+}
+
+impl Guidance {
+    /// JSON field name the variant serializes under.
+    pub fn field_name(&self) -> &'static str {
+        match self {
+            Self::Hint(_) => "hint",
+            Self::Warning(_) => "warning",
+            Self::MustFollow(_) => "must_follow",
+        }
+    }
+
+    /// The guidance text.
+    pub fn text(&self) -> &str {
+        match self {
+            Self::Hint(s) | Self::Warning(s) | Self::MustFollow(s) => s.as_str(),
+        }
+    }
+}
+
 /// A recoverable tool error: the LLM gave bad input and can self-correct.
 ///
 /// When a tool returns this error type, the MCP server serialises it as
-/// `isError: false` with a JSON body containing `"error"` and optional
-/// `"hint"` fields.  This prevents Claude Code from aborting sibling
-/// parallel tool calls (which it does when it sees `isError: true`).
+/// `isError: false` with a JSON body containing `"error"`, optional
+/// guidance (under one of `hint` / `warning` / `must_follow`), and any
+/// structured `extra` fields spliced in at the top level.  This prevents
+/// Claude Code from aborting sibling parallel tool calls (which it does
+/// when it sees `isError: true`).
 ///
 /// Use this for **expected, input-driven failures**: path not found,
 /// unsupported file type, empty glob match, no index built yet, etc.
@@ -139,22 +176,58 @@ impl ToolContext {
 pub struct RecoverableError {
     /// Human-readable description of what went wrong.
     pub message: String,
-    /// Optional LLM-facing suggestion for how to correct the call.
-    pub hint: Option<String>,
+    /// Optional severity-tagged guidance for how to correct the call.
+    pub guidance: Option<Guidance>,
+    /// Structured payload spliced into the response body at the top level
+    /// (e.g. `file_id`, `section_map`, `next_actions`).
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl RecoverableError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
-            hint: None,
+            guidance: None,
+            extra: serde_json::Map::new(),
         }
     }
 
     pub fn with_hint(message: impl Into<String>, hint: impl Into<String>) -> Self {
         Self {
             message: message.into(),
-            hint: Some(hint.into()),
+            guidance: Some(Guidance::Hint(hint.into())),
+            extra: serde_json::Map::new(),
+        }
+    }
+
+    pub fn with_warning(message: impl Into<String>, warning: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            guidance: Some(Guidance::Warning(warning.into())),
+            extra: serde_json::Map::new(),
+        }
+    }
+
+    pub fn with_must_follow(message: impl Into<String>, must_follow: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            guidance: Some(Guidance::MustFollow(must_follow.into())),
+            extra: serde_json::Map::new(),
+        }
+    }
+
+    /// Attach a structured field to the response body. Chainable.
+    pub fn with_extra(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
+        self.extra.insert(key.into(), value);
+        self
+    }
+
+    /// Back-compat accessor: returns the text of the attached `Hint` variant,
+    /// or `None` for other variants or no guidance.
+    pub fn hint(&self) -> Option<&str> {
+        match &self.guidance {
+            Some(Guidance::Hint(s)) => Some(s.as_str()),
+            _ => None,
         }
     }
 }
@@ -719,14 +792,14 @@ mod tests {
     fn recoverable_error_stores_message() {
         let e = RecoverableError::new("path not found");
         assert_eq!(e.message, "path not found");
-        assert!(e.hint.is_none());
+        assert!(e.hint().is_none());
     }
 
     #[test]
     fn recoverable_error_stores_hint() {
         let e = RecoverableError::with_hint("path not found", "use list_dir to explore");
         assert_eq!(e.message, "path not found");
-        assert_eq!(e.hint.as_deref(), Some("use list_dir to explore"));
+        assert_eq!(e.hint(), Some("use list_dir to explore"));
     }
 
     #[test]
@@ -766,6 +839,44 @@ mod tests {
             e.downcast_ref::<RecoverableError>().is_some(),
             "must be recoverable via downcast"
         );
+    }
+
+    #[test]
+    fn recoverable_error_with_warning_stores_warning_variant() {
+        let e = RecoverableError::with_warning("too many results", "narrow with path=");
+        assert_eq!(e.message, "too many results");
+        assert!(matches!(e.guidance, Some(Guidance::Warning(ref s)) if s == "narrow with path="));
+    }
+
+    #[test]
+    fn recoverable_error_with_must_follow_stores_must_follow_variant() {
+        let e = RecoverableError::with_must_follow(
+            "heading too large",
+            "IRON LAW #6: use @file_xxx",
+        );
+        assert_eq!(e.message, "heading too large");
+        assert!(
+            matches!(e.guidance, Some(Guidance::MustFollow(ref s)) if s == "IRON LAW #6: use @file_xxx")
+        );
+    }
+
+    #[test]
+    fn recoverable_error_with_hint_still_produces_hint_variant() {
+        let e = RecoverableError::with_hint("not found", "check path");
+        assert!(matches!(e.guidance, Some(Guidance::Hint(ref s)) if s == "check path"));
+        assert_eq!(e.hint(), Some("check path"));
+    }
+
+    #[test]
+    fn recoverable_error_extra_fields_roundtrip() {
+        let mut e = RecoverableError::new("heading too large");
+        e.extra.insert("file_id".into(), serde_json::json!("@file_abc"));
+        e.extra.insert(
+            "section_map".into(),
+            serde_json::json!([{"level": 2, "text": "## X", "line": 10}]),
+        );
+        assert_eq!(e.extra["file_id"], "@file_abc");
+        assert_eq!(e.extra["section_map"][0]["line"], 10);
     }
 
     #[test]

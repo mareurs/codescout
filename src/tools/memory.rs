@@ -1754,7 +1754,7 @@ mod tests {
         let rec = err
             .downcast_ref::<RecoverableError>()
             .expect("should be RecoverableError");
-        let hint = rec.hint.as_deref().unwrap_or("");
+        let hint = rec.hint().unwrap_or("");
         assert!(
             hint.contains("Rust") && hint.contains("TypeScript"),
             "hint should list available sections: {hint}"

@@ -434,9 +434,9 @@ impl OutputBuffer {
                     let perms = std::fs::Permissions::from_mode(0o444);
                     std::fs::set_permissions(tmp.path(), perms)?;
                 }
-                let temp_path = tmp.into_temp_path();
-                let path = temp_path.to_path_buf();
-                std::mem::forget(temp_path);
+                let (_, path) = tmp
+                    .keep()
+                    .map_err(|e| anyhow::anyhow!("failed to persist temp file: {e}"))?;
                 let path_str = path.to_string_lossy().to_string();
                 result = result.replace(token, &path_str);
                 temp_path_strings.push(path_str);
@@ -482,22 +482,19 @@ impl OutputBuffer {
             tmp.write_all(write_content.as_bytes())?;
             tmp.flush()?;
 
-            let path = tmp.path().to_path_buf();
-
             // Make read-only on unix
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
                 let perms = std::fs::Permissions::from_mode(0o444);
-                std::fs::set_permissions(&path, perms)?;
+                std::fs::set_permissions(tmp.path(), perms)?;
             }
 
-            // Persist the file (prevent auto-deletion when NamedTempFile drops).
-            // into_temp_path() gives us a TempPath that would delete on drop,
-            // so we forget it — the caller cleans up via cleanup_temp_files.
-            let temp_path = tmp.into_temp_path();
-            let path = temp_path.to_path_buf();
-            std::mem::forget(temp_path);
+            // Persist the file — keep() is the idiomatic alternative to
+            // into_temp_path() + mem::forget. Caller cleans up via cleanup_temp_files.
+            let (_, path) = tmp
+                .keep()
+                .map_err(|e| anyhow::anyhow!("failed to persist temp file: {e}"))?;
 
             let path_str = path.to_string_lossy().to_string();
             // Replace all occurrences of this token with the temp path
@@ -1308,7 +1305,7 @@ mod tests {
             rec.message
         );
         assert!(
-            rec.hint.as_deref().unwrap_or("").contains("session resets"),
+            rec.hint().unwrap_or("").contains("session resets"),
             "hint should mention session resets"
         );
     }
