@@ -1324,4 +1324,26 @@ mod tests {
         assert_eq!(args[dash_idx + 1], "fakelsp");
         assert_eq!(args[dash_idx + 2], "--stdio");
     }
+
+    #[test]
+    fn build_mux_args_defaults_idle_timeout_to_300_when_none() {
+        use std::path::PathBuf;
+        let cfg = crate::lsp::client::LspServerConfig {
+            command: "x".into(),
+            args: vec![],
+            workspace_root: PathBuf::from("/tmp/ws"),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+        let args = crate::lsp::manager::build_mux_args(
+            &PathBuf::from("/tmp/ws"),
+            &PathBuf::from("/tmp/sock"),
+            &PathBuf::from("/tmp/lock"),
+            &cfg,
+        );
+        let idle_idx = args.iter().position(|a| a == "--idle-timeout").unwrap();
+        assert_eq!(args[idle_idx + 1], "300");
+    }
 }
