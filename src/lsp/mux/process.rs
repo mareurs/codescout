@@ -350,10 +350,17 @@ async fn handle_client_message(
 ) -> Result<()> {
     let method = msg.get("method").and_then(|m| m.as_str()).map(String::from);
 
-    // Tag request IDs so we can route responses back
-    if let Some(id) = msg.get("id") {
-        let tagged = protocol::tag_request_id(id, tag);
-        msg["id"] = tagged;
+    // Tag the id only on REQUESTS (has both id and method) so responses can
+    // route back to this client via untag_response_id. Client-to-server
+    // RESPONSES (has id, no method) — e.g. auto-responses to server-initiated
+    // workspace/applyEdit — must forward the id UNCHANGED so the server can
+    // match it to its pending request. Tagging those caused rust-analyzer to
+    // panic with "received response for unknown request".
+    if method.is_some() {
+        if let Some(id) = msg.get("id") {
+            let tagged = protocol::tag_request_id(id, tag);
+            msg["id"] = tagged;
+        }
     }
 
     // Handle document synchronization
@@ -502,14 +509,25 @@ async fn handle_server_request(
             }
         }
         "client/registerCapability" => {
-            // Cache and broadcast to all clients
+            // Cache the capability so new clients get it in their init message.
+            // Do NOT broadcast: broadcast would make connected clients auto-respond
+            // via dispatch_lsp_message, producing a duplicate response with the
+            // server's original id, which crashes rust-analyzer with
+            // "received response for unknown request".
             {
                 let mut st = state.lock().await;
                 st.cached_capabilities.push(msg.clone());
             }
-            broadcast_to_clients(msg, state).await;
-            // Auto-respond to the server
-            send_auto_response(&id, server_writer, true).await;
+            // Auto-respond with null — `client/registerCapability` spec response is void.
+            let response = json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": null,
+            });
+            let mut w = server_writer.lock().await;
+            if let Err(e) = write_message(&mut *w, &response).await {
+                error!("failed to send auto-response to server: {e}");
+            }
         }
         _ => {
             // Unknown server request — auto-respond with null
