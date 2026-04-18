@@ -202,7 +202,7 @@ async fn resolve_glob(ctx: &ToolContext, path_or_glob: &str) -> anyhow::Result<V
     Ok(matches)
 }
 
-/// Extract a file path parameter from input, accepting "path", "relative_path", or "file".
+/// Extract an optional file path parameter from input, accepting "path", "relative_path", or "file".
 fn get_path_param(input: &Value, required: bool) -> anyhow::Result<Option<&str>> {
     match input["path"]
         .as_str()
@@ -217,6 +217,38 @@ fn get_path_param(input: &Value, required: bool) -> anyhow::Result<Option<&str>>
         .into()),
         None => Ok(None),
     }
+}
+
+/// Extract a required file path parameter from input. Returns `&str` directly.
+/// Accepts "path", "relative_path", or "file" — same aliases as `get_path_param`.
+fn require_path_param(input: &Value) -> anyhow::Result<&str> {
+    input["path"]
+        .as_str()
+        .or_else(|| input["relative_path"].as_str())
+        .or_else(|| input["file"].as_str())
+        .ok_or_else(|| {
+            RecoverableError::with_hint(
+                "missing 'path' parameter",
+                "Add the required 'path' parameter to the tool call.",
+            )
+            .into()
+        })
+}
+
+/// Return a `RecoverableError` if the path looks like a markdown file,
+/// directing the caller to `edit_markdown` / `read_markdown` instead.
+fn guard_not_markdown(path: &Path) -> anyhow::Result<()> {
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        if ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown") {
+            return Err(RecoverableError::with_hint(
+                "symbol tools do not support markdown files",
+                "Use edit_markdown(path, heading, action, content) for section-level edits, \
+                 or edit_file for literal string replacements in markdown.",
+            )
+            .into());
+        }
+    }
+    Ok(())
 }
 
 /// Detect language from path and get an LSP client, or error if unavailable.
@@ -236,7 +268,8 @@ async fn get_lsp_client(
         )
     })?;
     let root = ctx.agent.require_project_root().await?;
-    let client = ctx.lsp.get_or_start(lang, &root).await?;
+    let mux_override = ctx.agent.lsp_mux_override(lang).await;
+    let client = ctx.lsp.get_or_start(lang, &root, mux_override).await?;
     let language_id = crate::lsp::servers::lsp_language_id(lang);
     Ok((client, language_id.to_string()))
 }
@@ -257,6 +290,28 @@ fn matches_kind_filter(kind: &crate::lsp::SymbolKind, filter: &str) -> bool {
         "constant" => matches!(kind, K::Constant),
         _ => true,
     }
+}
+
+/// Remove `Variable`-kind symbols at every level of the tree.
+/// bash-language-server reports all local variables as children of their enclosing
+/// function, flooding the output with low-signal noise. Stripping them leaves only
+/// functions and other structural symbols.
+fn filter_variable_symbols(symbols: Vec<Value>) -> Vec<Value> {
+    symbols
+        .into_iter()
+        .filter(|s| s["kind"].as_str() != Some("Variable"))
+        .map(|mut s| {
+            if let Some(children) = s["children"].as_array().cloned() {
+                let filtered = filter_variable_symbols(children);
+                if filtered.is_empty() {
+                    s.as_object_mut().unwrap().remove("children");
+                } else {
+                    s["children"] = json!(filtered);
+                }
+            }
+            s
+        })
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -447,6 +502,72 @@ fn find_ast_end_line_in(symbols: &[SymbolInfo], name: &str, lsp_start: u32) -> O
     None
 }
 
+/// Fetch a symbol by `name_path` with automatic retry on stale LSP positions.
+///
+/// BUG-041: `textDocument/didChange` is a fire-and-forget notification. After
+/// a large write, rust-analyzer (and peers) can take tens of milliseconds to
+/// reindex. The next `documentSymbol` query may return pre-write positions,
+/// and a write based on those offsets corrupts the file.
+///
+/// Strategy: fetch, validate, and retry on failure. Between attempts, fire a
+/// fresh `did_change` (flushes any pending state) and sleep briefly so the
+/// server has a chance to catch up. Caps at `MAX_RETRIES` attempts.
+///
+/// Returns the validated `SymbolInfo` and the full `document_symbols` list it
+/// came from (the caller needs the list for sibling/parent lookups).
+async fn fetch_validated_symbol(
+    client: &std::sync::Arc<dyn crate::lsp::LspClientOps>,
+    path: &std::path::Path,
+    lang: &str,
+    name_path: &str,
+) -> anyhow::Result<(SymbolInfo, Vec<SymbolInfo>)> {
+    const MAX_RETRIES: u32 = 3;
+    let mut last_err: Option<anyhow::Error> = None;
+
+    for attempt in 0..MAX_RETRIES {
+        let attempt_result = async {
+            let symbols = client.document_symbols(path, lang).await?;
+            let sym = find_unique_symbol_by_name_path(&symbols, name_path)?.clone();
+            validate_symbol_range(&sym)?;
+            let content = std::fs::read_to_string(path)?;
+            let lines: Vec<&str> = content.lines().collect();
+            validate_symbol_position(&sym, &lines)?;
+            anyhow::Ok((sym, symbols))
+        }
+        .await;
+
+        match attempt_result {
+            Ok(pair) => return Ok(pair),
+            Err(e) => {
+                last_err = Some(e);
+                if attempt < MAX_RETRIES - 1 {
+                    // Flush any pending state on the server, then wait briefly
+                    // before retrying. Backoff grows so the last attempt has
+                    // the longest window (useful on cold LSPs).
+                    let _ = client.did_change(path).await;
+                    let backoff_ms = 50u64 * (attempt as u64 + 1);
+                    tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                }
+            }
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("fetch_validated_symbol: no error recorded")))
+}
+
+/// Recursively count how many symbols in `symbols` (walking `children` subtrees)
+/// have the exact `name_path`. Returns 0 or 1 for well-formed source; higher
+/// counts indicate genuine duplicates (e.g. same method in two `impl` blocks).
+fn count_symbols_by_name_path(symbols: &[SymbolInfo], name_path: &str) -> usize {
+    symbols
+        .iter()
+        .map(|s| {
+            let self_hit = if s.name_path == name_path { 1 } else { 0 };
+            self_hit + count_symbols_by_name_path(&s.children, name_path)
+        })
+        .sum()
+}
+
 /// When `workspace/symbol` returns a degenerate range, attempt to resolve the
 /// correct range by querying `textDocument/documentSymbol` for the symbol's file.
 /// Returns the corrected SymbolInfo if found, None otherwise.
@@ -457,7 +578,8 @@ async fn resolve_range_via_document_symbols(
     let lang = crate::ast::detect_language(&sym.file)?;
     let language_id = crate::lsp::servers::lsp_language_id(lang);
     let root = ctx.agent.require_project_root().await.ok()?;
-    let client = ctx.lsp.get_or_start(lang, &root).await.ok()?;
+    let mux_override = ctx.agent.lsp_mux_override(lang).await;
+    let client = ctx.lsp.get_or_start(lang, &root, mux_override).await.ok()?;
     let doc_symbols = client.document_symbols(&sym.file, language_id).await.ok()?;
     find_matching_symbol(&doc_symbols, &sym.name, sym.start_line)
 }
@@ -488,12 +610,164 @@ const LIST_SYMBOLS_SINGLE_FILE_CAP: usize = 100;
 /// flat budget prevents depth-1 output from ballooning even on rich files.
 const LIST_SYMBOLS_SINGLE_FILE_FLAT_CAP: usize = 150;
 
+/// File count below which directory mode returns full symbols (recursive walk).
+const LIST_SYMBOLS_RECURSE_SMALL: usize = 30;
+/// File count below which directory mode returns AST class names per subdir.
+const LIST_SYMBOLS_RECURSE_MEDIUM: usize = 80;
+/// Max immediate subdirectories shown in directory_map mode.
+const LIST_SYMBOLS_MAX_SUBDIRS: usize = 15;
+
 /// Count top-level symbols plus their direct children (depth-1 children).
 fn flat_symbol_count(symbols: &[Value]) -> usize {
     symbols
         .iter()
         .map(|s| 1 + s["children"].as_array().map(|c| c.len()).unwrap_or(0))
         .sum()
+}
+
+/// Collapse single-child pass-through directories to find the first meaningful
+/// branch point. A pass-through dir has zero direct source files and exactly one
+/// immediate subdirectory. Stops when multiple children, direct files present,
+/// or max depth (10) reached.
+fn find_split_point(dir: &Path) -> PathBuf {
+    fn is_code_file(path: &Path) -> bool {
+        matches!(
+            ast::detect_language(path),
+            Some(lang) if lang != "markdown"
+        )
+    }
+
+    fn inner(dir: &Path, depth: usize) -> PathBuf {
+        if depth > 10 {
+            return dir.to_path_buf();
+        }
+        let direct_files = ignore::WalkBuilder::new(dir)
+            .max_depth(Some(1))
+            .hidden(true)
+            .git_ignore(true)
+            .build()
+            .flatten()
+            .filter(|e| {
+                e.file_type().map(|t| t.is_file()).unwrap_or(false) && is_code_file(e.path())
+            })
+            .count();
+
+        if direct_files > 0 {
+            return dir.to_path_buf();
+        }
+
+        let subdirs: Vec<PathBuf> = ignore::WalkBuilder::new(dir)
+            .max_depth(Some(1))
+            .hidden(true)
+            .git_ignore(true)
+            .build()
+            .flatten()
+            .filter(|e| e.depth() == 1 && e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+            .map(|e| e.path().to_path_buf())
+            .collect();
+
+        if subdirs.len() == 1 {
+            inner(&subdirs[0], depth + 1)
+        } else {
+            dir.to_path_buf()
+        }
+    }
+    inner(dir, 0)
+}
+
+/// Count source files in `dir` recursively, grouped by immediate subdirectory
+/// of the meaningful split point (see `find_split_point`).
+/// Returns `(total, Vec<(display_path, count)>)` sorted descending by count.
+/// Files directly in the split point contribute to total but not to subdirs.
+fn count_files_by_subdir(project_root: &Path, dir: &Path) -> (usize, Vec<(String, usize)>) {
+    let split = find_split_point(dir);
+
+    let walker = ignore::WalkBuilder::new(&split)
+        .max_depth(None)
+        .hidden(true)
+        .git_ignore(true)
+        .build();
+
+    let mut total = 0usize;
+    let mut subdir_counts: std::collections::HashMap<PathBuf, usize> =
+        std::collections::HashMap::new();
+
+    for entry in walker.flatten() {
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        match ast::detect_language(entry.path()) {
+            Some(lang) if lang != "markdown" => {}
+            _ => continue,
+        }
+        total += 1;
+        let abs = entry.path().to_path_buf();
+        if let Ok(rel) = abs.strip_prefix(&split) {
+            let components: Vec<_> = rel.components().collect();
+            if components.len() > 1 {
+                let first = split.join(components[0].as_os_str());
+                *subdir_counts.entry(first).or_insert(0) += 1;
+            }
+        }
+    }
+
+    let mut subdirs: Vec<(String, usize)> = subdir_counts
+        .into_iter()
+        .map(|(abs_path, count)| {
+            let display = abs_path
+                .strip_prefix(project_root)
+                .unwrap_or(&abs_path)
+                .display()
+                .to_string();
+            (display, count)
+        })
+        .collect();
+    subdirs.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+
+    (total, subdirs)
+}
+
+/// Extract top-level class-like symbol names from source files directly in `dir`
+/// (depth 1, no recursion). Uses tree-sitter AST only — no LSP.
+/// Kinds included: Class, Struct, Interface, Enum, Object.
+/// Returns sorted, deduplicated names.
+fn ast_class_names_for_dir(dir: &Path) -> Vec<String> {
+    use crate::lsp::symbols::SymbolKind;
+
+    let walker = ignore::WalkBuilder::new(dir)
+        .max_depth(Some(1))
+        .hidden(true)
+        .git_ignore(true)
+        .build();
+
+    let mut names: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for entry in walker.flatten() {
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        if ast::detect_language(entry.path()).is_none() {
+            continue;
+        }
+        if let Ok(symbols) = ast::extract_symbols(entry.path()) {
+            for sym in &symbols {
+                match sym.kind {
+                    SymbolKind::Class
+                    | SymbolKind::Struct
+                    | SymbolKind::Interface
+                    | SymbolKind::Enum
+                    | SymbolKind::Object => {
+                        names.insert(sym.name.clone());
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    let mut result: Vec<String> = names.into_iter().collect();
+    result.sort();
+    result
 }
 
 pub struct ListSymbols;
@@ -506,6 +780,33 @@ impl Tool for ListSymbols {
     fn description(&self) -> &str {
         "Symbol tree for a file, directory, or glob. Includes signatures. Pass include_docs=true for docstrings."
     }
+
+    fn long_docs(&self) -> Option<&str> {
+        Some(
+            "## When to use\n\
+             \n\
+             - Browse a file's structure → `list_symbols(path=\"src/foo.rs\")`.\n\
+             - Explore an entire directory → `list_symbols(path=\"src/tools\")`.\n\
+             - Need full bodies → `detail_level=\"full\"`; paginate with `offset`/`limit`.\n\
+             \n\
+             ## Key parameters\n\
+             \n\
+             - `path`: file, directory, or glob (e.g. `\"src/**/*.rs\"`). Defaults to `.`.\n\
+             - `depth`: how many levels of children to include (0=none, 1=direct, default 1).\n\
+             - `include_docs=true`: attach tree-sitter docstrings to each symbol.\n\
+             - `scope`: `\"project\"` (default), `\"libraries\"`, `\"all\"`, or `\"lib:<name>\"`.\n\
+             \n\
+             ## Output\n\
+             \n\
+             Returns a file-by-file symbol tree with name, kind, and line range.\n\
+             Single-file mode caps at 100 top-level symbols; use `offset`/`limit` to page.\n\
+             \n\
+             ## Tip\n\
+             \n\
+             After `list_symbols`, use `find_symbol(symbol=\"Struct/method\", include_body=true)` \
+             to read a specific method body.",
+        )
+    }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -516,7 +817,12 @@ impl Tool for ListSymbols {
                 "offset": { "type": "integer", "description": "Pagination offset (files)" },
                 "limit": { "type": "integer", "description": "Max files per page (default 50)" },
                 "scope": { "type": "string", "description": "'project' (default), 'libraries', 'all', or 'lib:<name>'", "default": "project" },
-                "include_docs": { "type": "boolean", "default": false, "description": "Include docstrings (tree-sitter)." }
+                "include_docs": { "type": "boolean", "default": false, "description": "Include docstrings (tree-sitter)." },
+                "force_mode": {
+                    "type": "string",
+                    "enum": ["auto", "symbols"],
+                    "description": "Override mode selection. 'symbols' forces full symbol output regardless of directory size. Default: 'auto'."
+                }
             }
         })
     }
@@ -558,7 +864,8 @@ impl Tool for ListSymbols {
                     continue;
                 };
                 let language_id = crate::lsp::servers::lsp_language_id(lang);
-                if let Ok(client) = ctx.lsp.get_or_start(lang, &root).await {
+                let mux_override = ctx.agent.lsp_mux_override(lang).await;
+                if let Ok(client) = ctx.lsp.get_or_start(lang, &root, mux_override).await {
                     let timer = LspTimer::start();
                     if let Ok(symbols) = client.document_symbols(file_path, language_id).await {
                         timer.record(ctx, lang, &root).await;
@@ -574,6 +881,11 @@ impl Tool for ListSymbols {
                                 symbol_to_json(s, include_body, source.as_deref(), depth, false)
                             })
                             .collect();
+                        let json_symbols = if lang == "bash" {
+                            filter_variable_symbols(json_symbols)
+                        } else {
+                            json_symbols
+                        };
                         let mut entry = json!({
                             "file": rel.display().to_string(),
                             "symbols": json_symbols,
@@ -612,6 +924,11 @@ impl Tool for ListSymbols {
                 .iter()
                 .map(|s| symbol_to_json(s, include_body, source.as_deref(), depth, false))
                 .collect();
+            let json_symbols = if raw_lang == "bash" {
+                filter_variable_symbols(json_symbols)
+            } else {
+                json_symbols
+            };
 
             // Cap single-file results to prevent large files blowing the context window.
             // Primary check: flat count (top-level + depth-1 children combined).
@@ -672,133 +989,200 @@ impl Tool for ListSymbols {
             }
             Ok(result)
         } else if full_path.is_dir() {
-            // Collect (display_path, abs_path) pairs from directory + libraries.
-            // Project root → walk recursively so nested src/ files are found.
-            // Subdirectory → shallow (depth 1) to avoid dumping entire subtrees.
             let root = ctx.agent.require_project_root().await?;
-            let mut dir_files: Vec<(String, PathBuf)> = vec![];
+            let force_symbols = input["force_mode"].as_str() == Some("symbols");
+            let (total_files, subdir_counts) = count_files_by_subdir(&root, &full_path);
 
-            // Walk project directory when scope includes project
-            if scope.includes_project() {
-                let is_project_root = rel_path == "." || rel_path.is_empty();
-                let walker = ignore::WalkBuilder::new(&full_path)
-                    .max_depth(if is_project_root { None } else { Some(1) })
-                    .hidden(true)
-                    .git_ignore(true)
-                    .build();
-                for entry in walker.flatten() {
-                    if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                        continue;
+            // Flat dir, small tree, or forced → full symbol mode
+            let use_symbol_mode = force_symbols
+                || total_files == 0
+                || total_files <= LIST_SYMBOLS_RECURSE_SMALL
+                || subdir_counts.is_empty();
+
+            if use_symbol_mode {
+                let mut dir_files: Vec<(String, PathBuf)> = vec![];
+
+                if scope.includes_project() {
+                    let walker = ignore::WalkBuilder::new(&full_path)
+                        .max_depth(None)
+                        .hidden(true)
+                        .git_ignore(true)
+                        .build();
+                    for entry in walker.flatten() {
+                        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                            continue;
+                        }
+                        if ast::detect_language(entry.path()).is_none() {
+                            continue;
+                        }
+                        let abs = entry.path().to_path_buf();
+                        let display = abs
+                            .strip_prefix(&root)
+                            .unwrap_or(&abs)
+                            .display()
+                            .to_string();
+                        dir_files.push((display, abs));
                     }
-                    // Only include files with recognized source languages so that
-                    // non-source files (configs, build outputs) don't consume the
-                    // file cap before any real source files are seen.
-                    if ast::detect_language(entry.path()).is_none() {
-                        continue;
-                    }
-                    let abs = entry.path().to_path_buf();
-                    let display = abs
-                        .strip_prefix(&root)
-                        .unwrap_or(&abs)
-                        .display()
-                        .to_string();
-                    dir_files.push((display, abs));
                 }
+
+                let lib_roots = resolve_library_roots(&scope, &ctx.agent).await?;
+                for (lib_name, lib_root) in &lib_roots {
+                    let walker = ignore::WalkBuilder::new(lib_root)
+                        .max_depth(None)
+                        .hidden(true)
+                        .git_ignore(false)
+                        .build();
+                    for entry in walker.flatten() {
+                        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                            continue;
+                        }
+                        if ast::detect_language(entry.path()).is_none() {
+                            continue;
+                        }
+                        let abs = entry.path().to_path_buf();
+                        let display = format_library_path(lib_name, lib_root, &abs);
+                        dir_files.push((display, abs));
+                    }
+                }
+
+                let mut guard = guard;
+                guard.max_files = guard.max_files.min(LIST_SYMBOLS_MAX_FILES);
+                let (dir_files, file_overflow) =
+                    guard.cap_files(dir_files, "Narrow with a more specific glob or file path");
+                let include_body = guard.should_include_body();
+
+                let mut result = vec![];
+                for (display_path, abs_path) in &dir_files {
+                    let Some(lang) = ast::detect_language(abs_path) else {
+                        continue;
+                    };
+                    let language_id = crate::lsp::servers::lsp_language_id(lang);
+
+                    let mux_override = ctx.agent.lsp_mux_override(lang).await;
+                    let mut symbols =
+                        if let Ok(client) = ctx.lsp.get_or_start(lang, &root, mux_override).await {
+                            let timer = LspTimer::start();
+                            let syms = client
+                                .document_symbols(abs_path, language_id)
+                                .await
+                                .unwrap_or_default();
+                            if !syms.is_empty() {
+                                timer.record(ctx, lang, &root).await;
+                            }
+                            syms
+                        } else {
+                            vec![]
+                        };
+
+                    if symbols.is_empty() {
+                        symbols = crate::ast::extract_symbols(abs_path).unwrap_or_default();
+                    }
+
+                    if symbols.is_empty() {
+                        continue;
+                    }
+
+                    let source = if include_body {
+                        std::fs::read_to_string(abs_path).ok()
+                    } else {
+                        None
+                    };
+                    let json_symbols: Vec<Value> = symbols
+                        .iter()
+                        .map(|s| {
+                            symbol_to_json(
+                                s,
+                                include_body,
+                                source.as_deref(),
+                                depth.saturating_sub(1),
+                                false,
+                            )
+                        })
+                        .collect();
+                    let mut entry = json!({
+                        "file": display_path,
+                        "symbols": json_symbols,
+                    });
+                    if include_docs {
+                        entry["docstrings"] = json!(collect_docstrings(abs_path));
+                    }
+                    result.push(entry);
+                }
+                let mut result_json = json!({ "directory": rel_path, "files": result });
+                if let Some(ov) = file_overflow {
+                    result_json["overflow"] = OutputGuard::overflow_json(&ov);
+                }
+                return Ok(result_json);
             }
 
-            // Walk library directories when scope includes libraries
-            let lib_roots = resolve_library_roots(&scope, &ctx.agent).await?;
-            for (lib_name, lib_root) in &lib_roots {
-                // Library directories are external — don't apply the project's
-                // .gitignore (e.g. .venv/ would hide pip-installed packages).
-                // Still skip hidden dirs (.git/, __pycache__/, etc.).
-                let walker = ignore::WalkBuilder::new(lib_root)
-                    .max_depth(None)
-                    .hidden(true)
-                    .git_ignore(false)
-                    .build();
-                for entry in walker.flatten() {
-                    if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                        continue;
-                    }
-                    if ast::detect_language(entry.path()).is_none() {
-                        continue;
-                    }
-                    let abs = entry.path().to_path_buf();
-                    let display = format_library_path(lib_name, lib_root, &abs);
-                    dir_files.push((display, abs));
-                }
-            }
-
-            let mut guard = guard;
-            guard.max_files = guard.max_files.min(LIST_SYMBOLS_MAX_FILES);
-            let (dir_files, file_overflow) =
-                guard.cap_files(dir_files, "Narrow with a more specific glob or file path");
-            let include_body = guard.should_include_body();
-
-            // Aggregate symbols from capped file list
-            let mut result = vec![];
-            for (display_path, abs_path) in &dir_files {
-                let Some(lang) = ast::detect_language(abs_path) else {
-                    continue;
-                };
-                let language_id = crate::lsp::servers::lsp_language_id(lang);
-
-                // Try LSP first, fall back to tree-sitter if unavailable
-                let mut symbols = if let Ok(client) = ctx.lsp.get_or_start(lang, &root).await {
-                    let timer = LspTimer::start();
-                    let syms = client
-                        .document_symbols(abs_path, language_id)
-                        .await
-                        .unwrap_or_default();
-                    if !syms.is_empty() {
-                        timer.record(ctx, lang, &root).await;
-                    }
-                    syms
-                } else {
-                    vec![]
-                };
-
-                // Tree-sitter fallback when LSP is unavailable or returned nothing
-                if symbols.is_empty() {
-                    symbols = crate::ast::extract_symbols(abs_path).unwrap_or_default();
-                }
-
-                if symbols.is_empty() {
-                    continue;
-                }
-
-                let source = if include_body {
-                    std::fs::read_to_string(abs_path).ok()
-                } else {
-                    None
-                };
-                let json_symbols: Vec<Value> = symbols
+            // class_overview mode: 31–80 files, has subdirs
+            if total_files <= LIST_SYMBOLS_RECURSE_MEDIUM {
+                let subdirs_json: Vec<Value> = subdir_counts
                     .iter()
-                    .map(|s| {
-                        symbol_to_json(
-                            s,
-                            include_body,
-                            source.as_deref(),
-                            depth.saturating_sub(1),
-                            false,
-                        )
+                    .map(|(path, count)| {
+                        let subdir_abs = root.join(path);
+                        let classes = ast_class_names_for_dir(&subdir_abs);
+                        json!({
+                            "path": path,
+                            "file_count": count,
+                            "classes": classes,
+                        })
                     })
                     .collect();
-                let mut entry = json!({
-                    "file": display_path,
-                    "symbols": json_symbols,
-                });
-                if include_docs {
-                    entry["docstrings"] = json!(collect_docstrings(abs_path));
-                }
-                result.push(entry);
+                let hint = format!(
+                    "Found {total_files} files across {} directories — showing top-level classes (AST). \
+                     Drill down with list_symbols('<subdir>') for full symbols, or \
+                     list_symbols('{rel_path}/**/*') to scan the full tree.",
+                    subdir_counts.len()
+                );
+                return Ok(json!({
+                    "directory": rel_path,
+                    "mode": "class_overview",
+                    "subdirectories": subdirs_json,
+                    "total_files": total_files,
+                    "hint": hint,
+                }));
             }
-            let mut result_json = json!({ "directory": rel_path, "files": result });
-            if let Some(ov) = file_overflow {
-                result_json["overflow"] = OutputGuard::overflow_json(&ov);
+
+            // directory_map mode: > 80 files
+            let shown_subdirs: Vec<Value> = subdir_counts
+                .iter()
+                .take(LIST_SYMBOLS_MAX_SUBDIRS)
+                .map(|(path, count)| json!({ "path": path, "file_count": count }))
+                .collect();
+
+            let overflow = if subdir_counts.len() > LIST_SYMBOLS_MAX_SUBDIRS {
+                Some(json!({
+                    "shown": LIST_SYMBOLS_MAX_SUBDIRS,
+                    "total": subdir_counts.len(),
+                    "hint": format!(
+                        "Showing {} of {} directories (largest first).",
+                        LIST_SYMBOLS_MAX_SUBDIRS,
+                        subdir_counts.len()
+                    ),
+                }))
+            } else {
+                None
+            };
+
+            let hint = format!(
+                "Found {total_files} files across {} directories — too large for symbol overview. \
+                 Drill down with list_symbols('<subdir>') or use \
+                 list_symbols('{rel_path}/**/*') to scan the full tree with file cap.",
+                subdir_counts.len()
+            );
+
+            let mut result = json!({
+                "directory": rel_path,
+                "mode": "directory_map",
+                "subdirectories": shown_subdirs,
+                "total_files": total_files,
+                "hint": hint,
+            });
+            if let Some(ov) = overflow {
+                result["overflow"] = ov;
             }
-            Ok(result_json)
+            Ok(result)
         } else {
             Err(RecoverableError::with_hint(
                 format!(
@@ -862,6 +1246,35 @@ impl Tool for FindSymbol {
     fn description(&self) -> &str {
         "Find symbols by name pattern across the project. Returns matching symbols with location."
     }
+
+    fn long_docs(&self) -> Option<&str> {
+        Some(
+            "## When to use\n\
+             \n\
+             - Know the name → use `find_symbol` (substring match on symbol names).\n\
+             - Know the concept → use `semantic_search` first, then drill into symbols.\n\
+             - Need all symbols in a file → use `list_symbols` instead.\n\
+             \n\
+             ## Key parameters\n\
+             \n\
+             - `query`: substring match (e.g. `\"handle\"` finds `handle_request`, `handle_error`).\n\
+             - `symbol`: exact name-path (e.g. `\"MyStruct/my_method\"`) — skips substring search, ignores `kind`.\n\
+             - `kind`: filter to `function`, `struct`, `interface`, `enum`, `module`, `constant`, `type`, `class`.\n\
+             - `include_body=true`: returns full source of each match.\n\
+             - `path`: restrict to a file or glob (e.g. `\"src/tools/**/*.rs\"`).\n\
+             \n\
+             ## Output and pagination\n\
+             \n\
+             Exploring mode returns up to 50 results with a `by_file` distribution map.\n\
+             Use `detail_level=\"full\"` + `offset`/`limit` to page through large result sets.\n\
+             \n\
+             ## Gotchas\n\
+             \n\
+             - Regex patterns are rejected — use plain substrings. Use `grep` for text search.\n\
+             - `kind` is ignored when `symbol` (name-path) is provided.\n\
+             - LSP must be running for body extraction; tree-sitter fallback gives signatures only.",
+        )
+    }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -887,9 +1300,22 @@ impl Tool for FindSymbol {
         let pattern = input["query"]
             .as_str()
             .or_else(|| input["symbol"].as_str())
+            .or_else(|| input["name"].as_str()) // common LLM alias
             .ok_or_else(|| {
+                // List the keys the LLM actually sent so it can self-correct.
+                let got_keys: Vec<&str> = input
+                    .as_object()
+                    .map(|o| o.keys().map(|k| k.as_str()).collect())
+                    .unwrap_or_default();
                 RecoverableError::with_hint(
-                    "missing required parameter",
+                    format!(
+                        "missing 'query' or 'symbol' parameter (received keys: {})",
+                        if got_keys.is_empty() {
+                            "(none)".to_string()
+                        } else {
+                            got_keys.join(", ")
+                        }
+                    ),
                     "Provide 'query' (substring search) or 'symbol' (exact identifier, e.g. 'MyStruct/my_method')",
                 )
             })?;
@@ -979,7 +1405,8 @@ impl Tool for FindSymbol {
                     continue;
                 };
                 let language_id = crate::lsp::servers::lsp_language_id(lang);
-                let Ok(client) = ctx.lsp.get_or_start(lang, &root).await else {
+                let mux_override = ctx.agent.lsp_mux_override(lang).await;
+                let Ok(client) = ctx.lsp.get_or_start(lang, &root, mux_override).await else {
                     continue;
                 };
                 let timer = LspTimer::start();
@@ -1028,8 +1455,9 @@ impl Tool for FindSymbol {
                     let lsp = ctx.lsp.clone();
                     let root = root.clone();
                     let pattern = pattern_lower.clone();
+                    let mux_override = ctx.agent.lsp_mux_override(lang).await;
                     join_set.spawn(async move {
-                        let client = lsp.get_or_start(lang, &root).await?;
+                        let client = lsp.get_or_start(lang, &root, mux_override).await?;
                         client.workspace_symbols(&pattern).await
                     });
                 }
@@ -1150,7 +1578,8 @@ impl Tool for FindSymbol {
                         // INVARIANT: Always use project root as workspace_root, not the
                         // library root. LspManager caches one client per language; passing
                         // a different root kills and restarts the server.
-                        if let Ok(client) = ctx.lsp.get_or_start(lang, &root).await {
+                        let mux_override = ctx.agent.lsp_mux_override(lang).await;
+                        if let Ok(client) = ctx.lsp.get_or_start(lang, &root, mux_override).await {
                             let language_id = crate::lsp::servers::lsp_language_id(lang);
                             symbols = client
                                 .document_symbols(path, language_id)
@@ -1276,7 +1705,7 @@ impl Tool for FindReferences {
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         let name_path = super::require_str_param(&input, "symbol")?;
-        let rel_path = get_path_param(&input, true)?.unwrap();
+        let rel_path = require_path_param(&input)?;
         let scope = crate::library::scope::Scope::parse(input["scope"].as_str());
 
         let full_path = resolve_read_path(ctx, rel_path).await?;
@@ -1378,6 +1807,10 @@ impl Tool for FindReferences {
     fn format_compact(&self, result: &Value) -> Option<String> {
         Some(format_find_references(result))
     }
+
+    fn availability(&self, _caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
+        crate::tools::Availability::RequiresLsp
+    }
 }
 
 pub struct GotoDefinition;
@@ -1392,6 +1825,19 @@ impl Tool for GotoDefinition {
          Resolves types via LSP — handles method calls, trait impls, and cross-crate navigation. \
          Auto-discovers library dependencies when definitions are outside the project."
     }
+
+    fn long_docs(&self) -> Option<&str> {
+        Some(
+            "### Workflow: Dependency Tracing — \"How does data flow from A to B?\"\n\n\
+             | Step | Tool | Purpose |\n\
+             |------|------|---------|\n\
+             | 1 | `find_symbol(entry_point)` | Locate starting function |\n\
+             | 2 | `goto_definition` on called functions | Follow the call chain forward |\n\
+             | 3 | `hover` on parameters/return values | See resolved types at each stage |\n\
+             | 4 | `find_references` at destination | Confirm which callers reach this point |",
+        )
+    }
+
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -1404,7 +1850,7 @@ impl Tool for GotoDefinition {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let rel_path = get_path_param(&input, true)?.unwrap();
+        let rel_path = require_path_param(&input)?;
         let line_1 = super::require_u64_param(&input, "line")? as u32;
         if line_1 == 0 {
             return Err(RecoverableError::with_hint(
@@ -1521,6 +1967,10 @@ impl Tool for GotoDefinition {
     fn format_compact(&self, result: &Value) -> Option<String> {
         Some(format_goto_definition(result))
     }
+
+    fn availability(&self, _caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
+        crate::tools::Availability::RequiresLsp
+    }
 }
 
 const HOVER_SKIP_TOKENS: &[&str] = &[
@@ -1579,7 +2029,7 @@ impl Tool for Hover {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let rel_path = get_path_param(&input, true)?.unwrap();
+        let rel_path = require_path_param(&input)?;
         let line_1 = super::require_u64_param(&input, "line")? as u32;
         if line_1 == 0 {
             return Err(RecoverableError::with_hint(
@@ -1659,6 +2109,10 @@ impl Tool for Hover {
 
     fn format_compact(&self, result: &Value) -> Option<String> {
         Some(format_hover(result))
+    }
+
+    fn availability(&self, _caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
+        crate::tools::Availability::RequiresLsp
     }
 }
 
@@ -1879,24 +2333,22 @@ impl Tool for ReplaceSymbol {
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         super::guard_worktree_write(ctx).await?;
         let name_path = super::require_str_param(&input, "symbol")?;
-        let rel_path = get_path_param(&input, true)?.unwrap();
-        let new_body = super::require_str_param(&input, "new_body")?;
+        let rel_path = require_path_param(&input)?;
+        let new_body =
+            super::require_str_param_or(&input, "new_body", &["new_code", "new_source", "body"])?;
 
         let full_path = resolve_write_path(ctx, rel_path).await?;
+        guard_not_markdown(&full_path)?;
         let (client, lang) = get_lsp_client(ctx, &full_path).await?;
 
-        let symbols = client.document_symbols(&full_path, &lang).await?;
-        let sym = find_unique_symbol_by_name_path(&symbols, name_path)?;
-
-        // Validate: catch degenerate LSP ranges (start == end for multi-line symbols)
-        validate_symbol_range(sym)?;
+        // BUG-041: fetch + validate with auto-retry on stale LSP positions.
+        let (sym, symbols) = fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
 
         let content = std::fs::read_to_string(&full_path)?;
         let lines: Vec<&str> = content.lines().collect();
-        validate_symbol_position(sym, &lines)?;
 
-        let mut start = editing_start_line(sym, &lines);
-        let end = (editing_end_line(sym) as usize + 1).min(lines.len());
+        let mut start = editing_start_line(&sym, &lines);
+        let end = (editing_end_line(&sym) as usize + 1).min(lines.len());
 
         // BUG-034 guard: if this is a nested symbol, don't let the editing range
         // extend above the parent's body start. Stale LSP data can report the
@@ -1921,12 +2373,47 @@ impl Tool for ReplaceSymbol {
             .into());
         }
 
+        // Pre-write AST snapshot: count how many symbols with this exact name_path
+        // exist now. Used after the write to detect if the symbol was silently dropped.
+        // Walks the full AST tree (not just top level) so nested methods in Java,
+        // Kotlin, Python, TypeScript class bodies are also protected.
+        let pre_count = crate::ast::extract_symbols(&full_path)
+            .map(|syms| count_symbols_by_name_path(&syms, &sym.name_path))
+            .unwrap_or(0);
+
         let mut new_lines = Vec::new();
         new_lines.extend_from_slice(&lines[..start]);
         new_lines.extend(new_body.lines());
         new_lines.extend_from_slice(&lines[end..]);
 
         write_lines(&full_path, &new_lines, content.ends_with('\n'))?;
+
+        // Post-write integrity check: if AST found the symbol before the write (pre_count > 0)
+        // but cannot find it after, the replacement dropped the declaration.
+        // This catches the common mistake of passing body-only code to replace_symbol.
+        // We use AST (tree-sitter, synchronous) — no LSP round-trip needed.
+        if pre_count > 0 {
+            let post_count = crate::ast::extract_symbols(&full_path)
+                .map(|syms| count_symbols_by_name_path(&syms, &sym.name_path))
+                .unwrap_or(pre_count); // if AST fails post-write, trust the write
+
+            if post_count == 0 {
+                // Roll back before notifying LSP so the server never sees the broken state.
+                write_lines(&full_path, &lines, content.ends_with('\n'))?;
+                ctx.lsp.notify_file_changed(&full_path).await;
+                ctx.agent.mark_file_dirty(full_path).await;
+                return Err(RecoverableError::with_hint(
+                    format!(
+                        "replace_symbol('{name_path}') dropped the symbol definition — \
+                         new_body must be the complete declaration (attributes, doc comments, \
+                         signature, and body), not just body statements. File restored."
+                    ),
+                    "Use find_symbol(symbol, include_body=true) to see the expected format.",
+                )
+                .into());
+            }
+        }
+
         ctx.lsp.notify_file_changed(&full_path).await;
         ctx.agent.mark_file_dirty(full_path).await;
         Ok(json!({ "status": "ok", "replaced_lines": format!("{}-{}", start + 1, end) }))
@@ -1965,23 +2452,20 @@ impl Tool for RemoveSymbol {
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         super::guard_worktree_write(ctx).await?;
         let name_path = super::require_str_param(&input, "symbol")?;
-        let rel_path = get_path_param(&input, true)?.unwrap();
+        let rel_path = require_path_param(&input)?;
 
         let full_path = resolve_write_path(ctx, rel_path).await?;
+        guard_not_markdown(&full_path)?;
         let (client, lang) = get_lsp_client(ctx, &full_path).await?;
 
-        let symbols = client.document_symbols(&full_path, &lang).await?;
-        let sym = find_unique_symbol_by_name_path(&symbols, name_path)?;
-
-        // Validate: catch degenerate LSP ranges
-        validate_symbol_range(sym)?;
+        // BUG-041: fetch + validate with auto-retry on stale LSP positions.
+        let (sym, symbols) = fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
 
         let content = std::fs::read_to_string(&full_path)?;
         let lines: Vec<&str> = content.lines().collect();
-        validate_symbol_position(sym, &lines)?;
 
-        let mut start = editing_start_line(sym, &lines);
-        let end = (editing_end_line(sym) as usize + 1).min(lines.len());
+        let mut start = editing_start_line(&sym, &lines);
+        let end = (editing_end_line(&sym) as usize + 1).min(lines.len());
 
         // BUG-034 guard: same as replace_symbol — clamp to parent boundary.
         if let Some(parent) = find_parent_symbol(&symbols, &sym.name_path) {
@@ -2055,24 +2539,23 @@ impl Tool for InsertCode {
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         super::guard_worktree_write(ctx).await?;
         let name_path = super::require_str_param(&input, "symbol")?;
-        let rel_path = get_path_param(&input, true)?.unwrap();
+        let rel_path = require_path_param(&input)?;
         let code = super::require_str_param(&input, "code")?;
         let position = input["position"].as_str().unwrap_or("after");
 
         let full_path = resolve_write_path(ctx, rel_path).await?;
+        guard_not_markdown(&full_path)?;
         let (client, lang) = get_lsp_client(ctx, &full_path).await?;
 
-        let symbols = client.document_symbols(&full_path, &lang).await?;
-        let sym = find_unique_symbol_by_name_path(&symbols, name_path)?;
+        // BUG-041: fetch + validate with auto-retry on stale LSP positions.
+        let (sym, _symbols) = fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
 
-        validate_symbol_range(sym)?;
         let content = std::fs::read_to_string(&full_path)?;
         let lines: Vec<&str> = content.lines().collect();
-        validate_symbol_position(sym, &lines)?;
         let code_lines: Vec<&str> = code.lines().collect();
         let insert_at = match position {
-            "before" => editing_start_line(sym, &lines),
-            _ => (editing_end_line(sym) as usize + 1).min(lines.len()),
+            "before" => editing_start_line(&sym, &lines),
+            _ => (editing_end_line(&sym) as usize + 1).min(lines.len()),
         };
 
         let mut new_lines = Vec::new();
@@ -2234,10 +2717,11 @@ impl Tool for RenameSymbol {
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         super::guard_worktree_write(ctx).await?;
         let name_path = super::require_str_param(&input, "symbol")?;
-        let rel_path = get_path_param(&input, true)?.unwrap();
+        let rel_path = require_path_param(&input)?;
         let new_name = super::require_str_param(&input, "new_name")?;
 
         let full_path = resolve_write_path(ctx, rel_path).await?;
+        guard_not_markdown(&full_path)?;
         let (client, lang) = get_lsp_client(ctx, &full_path).await?;
 
         // Find the symbol to get its position
@@ -2454,6 +2938,10 @@ impl Tool for RenameSymbol {
     fn format_compact(&self, result: &Value) -> Option<String> {
         Some(format_rename_symbol(result))
     }
+
+    fn availability(&self, _caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
+        crate::tools::Availability::RequiresLsp
+    }
 }
 
 // ── format_compact helpers ────────────────────────────────────────────────────
@@ -2660,6 +3148,41 @@ fn format_list_symbols(val: &Value) -> String {
             out.push('\n');
             out.push_str(&format_overflow(overflow));
         }
+        return out;
+    }
+
+    // class_overview / directory_map mode
+    if let Some(mode) = val["mode"].as_str() {
+        let dir = val["directory"].as_str().unwrap_or(".");
+        let total = val["total_files"].as_u64().unwrap_or(0);
+        let empty: Vec<Value> = vec![];
+        let subdirs = val["subdirectories"].as_array().unwrap_or(&empty);
+
+        let mut out = format!("{dir} — {total} files\n");
+
+        for subdir in subdirs {
+            let path = subdir["path"].as_str().unwrap_or("?");
+            let count = subdir["file_count"].as_u64().unwrap_or(0);
+            out.push_str(&format!("\n  {path} ({count} files)"));
+            if mode == "class_overview" {
+                let empty_arr: Vec<Value> = vec![];
+                let classes = subdir["classes"].as_array().unwrap_or(&empty_arr);
+                if !classes.is_empty() {
+                    let names: Vec<&str> = classes.iter().filter_map(|v| v.as_str()).collect();
+                    out.push_str(&format!("\n    {}", names.join(", ")));
+                }
+            }
+        }
+
+        if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
+            out.push('\n');
+            out.push_str(&format_overflow(overflow));
+        }
+
+        if let Some(hint) = val["hint"].as_str() {
+            out.push_str(&format!("\n\n{hint}"));
+        }
+
         return out;
     }
 
@@ -2936,19 +3459,34 @@ fn find_parent_symbol<'a>(
 /// - No symbol matches (not found)
 /// - Multiple symbols match (ambiguous bare name) — the error lists all
 ///   full `name_path`s so the caller can supply a more specific query.
+///
+/// When multiple candidates match but exactly one has an exact `name_path`
+/// match (e.g. class `Book` vs constructor `Book/Book(...)`), the exact match
+/// wins without raising an ambiguity error.
 fn find_unique_symbol_by_name_path<'a>(
     symbols: &'a [SymbolInfo],
     name_path: &str,
 ) -> anyhow::Result<&'a SymbolInfo> {
-    let mut matches = collect_matching_symbols(symbols, name_path);
+    let matches = collect_matching_symbols(symbols, name_path);
     match matches.len() {
         0 => Err(RecoverableError::with_hint(
             format!("symbol not found: {name_path}"),
             "Use list_symbols(path) to see available symbols, or check the name_path spelling.",
         )
         .into()),
-        1 => Ok(matches.remove(0)),
+        1 => Ok(matches.into_iter().next().unwrap()),
         _ => {
+            // Prefer exact name_path match over bare-name match (e.g. class "Book"
+            // vs constructor "Book/Book(...)"). If exactly one candidate has an exact
+            // name_path match, return it without an ambiguity error.
+            let exact: Vec<_> = matches
+                .iter()
+                .copied()
+                .filter(|s| s.name_path == name_path)
+                .collect();
+            if exact.len() == 1 {
+                return Ok(exact.into_iter().next().unwrap());
+            }
             let paths: Vec<String> = matches.iter().map(|s| s.name_path.clone()).collect();
             Err(RecoverableError::with_hint(
                 format!(
@@ -3120,6 +3658,66 @@ async fn tag_external_path(
     }
 }
 
+#[test]
+fn format_list_symbols_class_overview_mode() {
+    let val = serde_json::json!({
+        "directory": "src/main/kotlin",
+        "mode": "class_overview",
+        "subdirectories": [
+            { "path": "src/main/kotlin/api",    "file_count": 12, "classes": ["CourseController", "PlannerApi"] },
+            { "path": "src/main/kotlin/domain", "file_count": 8,  "classes": ["Course", "Student"] }
+        ],
+        "total_files": 45,
+        "hint": "Found 45 files — drill down with list_symbols('<subdir>')."
+    });
+    let result = format_list_symbols(&val);
+    assert!(result.contains("src/main/kotlin"));
+    assert!(result.contains("45 files"));
+    assert!(result.contains("api"));
+    assert!(result.contains("12"));
+    assert!(result.contains("CourseController"));
+    assert!(result.contains("domain"));
+    assert!(result.contains("Course"));
+    assert!(result.contains("drill down"), "hint shown");
+}
+
+#[test]
+fn format_list_symbols_directory_map_mode() {
+    let val = serde_json::json!({
+        "directory": "ktor-server/src",
+        "mode": "directory_map",
+        "subdirectories": [
+            { "path": "ktor-server/src/main", "file_count": 80 },
+            { "path": "ktor-server/src/test", "file_count": 40 }
+        ],
+        "total_files": 120,
+        "hint": "Found 120 files — too large for symbol overview."
+    });
+    let result = format_list_symbols(&val);
+    assert!(result.contains("ktor-server/src"));
+    assert!(result.contains("120 files"));
+    assert!(result.contains("src/main"));
+    assert!(result.contains("80"));
+    assert!(result.contains("too large"));
+}
+
+#[test]
+fn format_list_symbols_directory_map_with_overflow() {
+    let subdirs: Vec<serde_json::Value> = (0..15)
+        .map(|i| serde_json::json!({ "path": format!("sub/{i}"), "file_count": 10 }))
+        .collect();
+    let val = serde_json::json!({
+        "directory": "big",
+        "mode": "directory_map",
+        "subdirectories": subdirs,
+        "total_files": 300,
+        "overflow": { "shown": 15, "total": 23, "hint": "Showing 15 of 23 directories (largest first)." },
+        "hint": "Found 300 files."
+    });
+    let result = format_list_symbols(&val);
+    assert!(result.contains("Showing 15 of 23"));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3166,7 +3764,15 @@ edition = "2021"
         )
         .unwrap();
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
-        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let codescout_dir = dir.path().join(".codescout");
+        std::fs::create_dir_all(&codescout_dir).unwrap();
+        // Opt out of mux so these unit tests use rust-analyzer directly,
+        // without needing the codescout-mux binary on PATH.
+        std::fs::write(
+            codescout_dir.join("project.toml"),
+            "[project]\nname = \"test-project\"\n\n[lsp.rust]\nmux = false\n",
+        )
+        .unwrap();
         std::fs::write(
             dir.path().join("src/main.rs"),
             r#"fn main() {
@@ -3713,9 +4319,9 @@ impl Point {
             .downcast_ref::<crate::tools::RecoverableError>()
             .expect("should be RecoverableError");
         assert!(
-            rec.hint.as_deref().unwrap_or("").contains("list_dir"),
+            rec.hint().unwrap_or("").contains("list_dir"),
             "hint should mention list_dir, got: {:?}",
-            rec.hint
+            rec.hint()
         );
     }
 
@@ -3902,8 +4508,9 @@ impl Point {
     }
 
     #[tokio::test]
-    async fn get_symbols_overview_subdir_stays_shallow() {
-        // When targeting a specific subdirectory (not root), should NOT recurse.
+    async fn list_symbols_small_tree_recurses_fully() {
+        // When targeting a specific subdirectory with a small file count (≤ RECURSE_SMALL),
+        // the new three-mode dispatch recurses fully to give complete symbol output.
         let dir = tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("src/deep/nested")).unwrap();
         std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
@@ -3926,7 +4533,7 @@ impl Point {
             )),
         };
 
-        // Target "src" specifically — should be shallow (depth 1)
+        // Target "src" specifically — small tree (2 files) → full recursive symbol mode
         let result = ListSymbols
             .call(json!({ "path": "src" }), &ctx)
             .await
@@ -3936,13 +4543,13 @@ impl Point {
         let file_names: Vec<&str> = files.iter().map(|f| f["file"].as_str().unwrap()).collect();
         assert!(
             file_names.iter().any(|f| f.contains("top.rs")),
-            "should find src/top.rs in shallow walk, got: {:?}",
+            "should find src/top.rs, got: {:?}",
             file_names
         );
-        // The deeply nested file should NOT appear with shallow walk
+        // Small tree (≤ RECURSE_SMALL) → full recursive walk includes deeply nested files
         assert!(
-            !file_names.iter().any(|f| f.contains("hidden.rs")),
-            "should NOT find deeply nested file with shallow walk, got: {:?}",
+            file_names.iter().any(|f| f.contains("hidden.rs")),
+            "small tree should recurse fully and find nested file, got: {:?}",
             file_names
         );
     }
@@ -4535,7 +5142,15 @@ fn main() {
         let dir = tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("src/utils")).unwrap();
         std::fs::create_dir_all(dir.path().join("src/empty")).unwrap();
-        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let codescout_dir = dir.path().join(".codescout");
+        std::fs::create_dir_all(&codescout_dir).unwrap();
+        // Opt out of mux so these unit tests use rust-analyzer directly,
+        // without needing the codescout-mux binary on PATH.
+        std::fs::write(
+            codescout_dir.join("project.toml"),
+            "[project]\nname = \"test-project\"\n\n[lsp.rust]\nmux = false\n",
+        )
+        .unwrap();
         std::fs::write(
             dir.path().join("Cargo.toml"),
             "[package]\nname = \"test-project\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
@@ -4749,6 +5364,53 @@ fn main() {
         assert!(matches_kind_filter(&SymbolKind::Constructor, "function"));
         assert!(!matches_kind_filter(&SymbolKind::Variable, "function"));
         assert!(!matches_kind_filter(&SymbolKind::Class, "function"));
+    }
+
+    #[test]
+    fn filter_variable_symbols_removes_variables_at_all_levels() {
+        let input = json!([
+            { "name": "PASS", "kind": "Variable", "start_line": 1, "end_line": 1 },
+            {
+                "name": "call",
+                "kind": "Function",
+                "start_line": 5,
+                "end_line": 10,
+                "children": [
+                    { "name": "tool", "kind": "Variable", "start_line": 6, "end_line": 6 },
+                    { "name": "params", "kind": "Variable", "start_line": 6, "end_line": 6 }
+                ]
+            },
+            { "name": "assert_contains", "kind": "Function", "start_line": 12, "end_line": 14 }
+        ]);
+        let result = filter_variable_symbols(input.as_array().unwrap().to_vec());
+        assert_eq!(result.len(), 2, "top-level Variable removed");
+        assert_eq!(result[0]["name"], "call");
+        assert!(
+            !result[0].as_object().unwrap().contains_key("children"),
+            "empty children stripped"
+        );
+        assert_eq!(result[1]["name"], "assert_contains");
+    }
+
+    #[test]
+    fn filter_variable_symbols_preserves_non_variable_children() {
+        let input = json!([
+            {
+                "name": "outer",
+                "kind": "Function",
+                "start_line": 1,
+                "end_line": 10,
+                "children": [
+                    { "name": "inner", "kind": "Function", "start_line": 3, "end_line": 5 },
+                    { "name": "local_var", "kind": "Variable", "start_line": 6, "end_line": 6 }
+                ]
+            }
+        ]);
+        let result = filter_variable_symbols(input.as_array().unwrap().to_vec());
+        assert_eq!(result.len(), 1);
+        let children = result[0]["children"].as_array().unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0]["name"], "inner");
     }
 
     #[test]
@@ -5095,8 +5757,10 @@ fn main() {
             "File has {total} symbols. Use depth=1 for top-level overview, \
              or find_symbol(name_path='ClassName/methodName', include_body=true) for a specific symbol."
         );
-        let mut g = OutputGuard::default();
-        g.max_results = SINGLE_FILE_CAP;
+        let g = OutputGuard {
+            max_results: SINGLE_FILE_CAP,
+            ..OutputGuard::default()
+        };
         let (kept, overflow) = g.cap_items(symbols, &hint);
 
         assert_eq!(kept.len(), 100);
@@ -5118,8 +5782,10 @@ fn main() {
             .map(|i| json!({ "name": format!("sym{i}") }))
             .collect();
 
-        let mut g = OutputGuard::default();
-        g.max_results = 100;
+        let g = OutputGuard {
+            max_results: 100,
+            ..OutputGuard::default()
+        };
         let (kept, overflow) = g.cap_items(symbols, "hint");
 
         assert_eq!(kept.len(), 40);
@@ -6454,6 +7120,23 @@ fn foo() {
         let t = tool.format_compact(&r).unwrap();
         assert!(t.contains("201"), "got: {t}");
         assert!(t.contains("14"), "got: {t}");
+    }
+
+    #[test]
+    fn hover_requires_lsp() {
+        let off = crate::tools::ToolCapabilities {
+            has_lsp: false,
+            has_embeddings: false,
+            has_git_remote: false,
+            has_libraries: false,
+        };
+        let on = crate::tools::ToolCapabilities {
+            has_lsp: true,
+            ..off
+        };
+        let t = Hover;
+        assert!(!t.availability(&off).is_available(&off));
+        assert!(t.availability(&on).is_available(&on));
     }
 
     // --- format_goto_definition tests ---
@@ -7797,9 +8480,9 @@ fn foo() {
             rec.message
         );
         assert!(
-            rec.hint.as_deref().unwrap_or("").contains("grep"),
+            rec.hint().unwrap_or("").contains("grep"),
             "hint should mention grep, got: {:?}",
-            rec.hint
+            rec.hint()
         );
     }
 
@@ -7848,5 +8531,213 @@ fn foo() {
             "name_path should skip regex check, got err: {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn find_split_point_collapses_single_child_chain() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        // a/ → b/ → c/ (three files directly in c/) — should collapse to c/
+        std::fs::create_dir_all(root.join("a/b/c")).unwrap();
+        for i in 0..3 {
+            std::fs::write(root.join(format!("a/b/c/file{i}.rs")), "").unwrap();
+        }
+        let split = find_split_point(root);
+        assert_eq!(split, root.join("a/b/c"));
+    }
+
+    #[test]
+    fn find_split_point_stops_at_branch() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("a/b")).unwrap();
+        std::fs::create_dir_all(root.join("a/c")).unwrap();
+        std::fs::write(root.join("a/b/file.rs"), "").unwrap();
+        std::fs::write(root.join("a/c/file.rs"), "").unwrap();
+        let split = find_split_point(root);
+        assert_eq!(split, root.join("a"), "should stop at branching dir");
+    }
+
+    #[test]
+    fn find_split_point_stops_when_dir_has_direct_files() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        // a/ has one child b/ but also a direct source file — stop here
+        std::fs::create_dir_all(root.join("a/b")).unwrap();
+        std::fs::write(root.join("a/root.rs"), "").unwrap();
+        std::fs::write(root.join("a/b/file.rs"), "").unwrap();
+        let split = find_split_point(root);
+        assert_eq!(split, root.join("a"), "mixed dir stops descent");
+    }
+
+    #[test]
+    fn count_files_by_subdir_groups_and_sorts() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("sub_a")).unwrap();
+        for i in 0..3 {
+            std::fs::write(root.join(format!("sub_a/file{i}.rs")), "").unwrap();
+        }
+        std::fs::create_dir_all(root.join("sub_b")).unwrap();
+        for i in 0..5 {
+            std::fs::write(root.join(format!("sub_b/file{i}.rs")), "").unwrap();
+        }
+        // 1 file directly in root (counted in total, not in subdirs)
+        std::fs::write(root.join("root.rs"), "").unwrap();
+
+        let (total, subdirs) = count_files_by_subdir(root, root);
+
+        assert_eq!(total, 9);
+        assert_eq!(subdirs.len(), 2);
+        assert!(subdirs[0].0.contains("sub_b"), "largest subdir first");
+        assert_eq!(subdirs[0].1, 5);
+        assert!(subdirs[1].0.contains("sub_a"));
+        assert_eq!(subdirs[1].1, 3);
+    }
+
+    #[test]
+    fn count_files_by_subdir_collapses_passthrough() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        // kotlin/ → edu/ → planner/ → [api/(3), domain/(2)]
+        for (sub, n) in &[("api", 3usize), ("domain", 2)] {
+            std::fs::create_dir_all(root.join(format!("kotlin/edu/planner/{sub}"))).unwrap();
+            for i in 0..*n {
+                std::fs::write(root.join(format!("kotlin/edu/planner/{sub}/f{i}.rs")), "").unwrap();
+            }
+        }
+        let (total, subdirs) = count_files_by_subdir(root, &root.join("kotlin"));
+        assert_eq!(total, 5);
+        assert_eq!(subdirs.len(), 2, "collapsed to planner/ children, not edu/");
+        assert!(subdirs[0].0.contains("api"), "api (3) before domain (2)");
+        assert_eq!(subdirs[0].1, 3);
+    }
+
+    #[test]
+    fn count_files_by_subdir_flat_dir_returns_empty_subdirs() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        for i in 0..4 {
+            std::fs::write(root.join(format!("file{i}.rs")), "").unwrap();
+        }
+        let (total, subdirs) = count_files_by_subdir(root, root);
+        assert_eq!(total, 4);
+        assert!(subdirs.is_empty());
+    }
+
+    #[test]
+    fn count_files_by_subdir_ignores_non_source_files() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::write(root.join("sub/README.md"), "").unwrap(); // ignored
+        std::fs::write(root.join("sub/build.rs"), "").unwrap(); // counted
+        let (total, _subdirs) = count_files_by_subdir(root, root);
+        assert_eq!(total, 1, "markdown should not be counted as source");
+    }
+
+    #[test]
+    fn ast_class_names_for_dir_extracts_class_like_symbols() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("types.rs"),
+            r#"
+struct Foo { x: i32 }
+struct Bar;
+enum Baz { A, B }
+fn not_a_class() {}
+const SKIP: i32 = 1;
+"#,
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("README.md"), "# hi").unwrap();
+
+        let names = ast_class_names_for_dir(dir.path());
+
+        assert!(names.contains(&"Foo".to_string()));
+        assert!(names.contains(&"Bar".to_string()));
+        assert!(names.contains(&"Baz".to_string()));
+        assert!(!names.contains(&"not_a_class".to_string()));
+        assert!(!names.contains(&"SKIP".to_string()));
+        // sorted
+        assert_eq!(names, {
+            let mut v = names.clone();
+            v.sort();
+            v
+        });
+    }
+
+    #[test]
+    fn ast_class_names_for_dir_does_not_recurse_into_subdirs() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub/deep.rs"), "struct DeepClass;").unwrap();
+        std::fs::write(dir.path().join("top.rs"), "struct TopClass;").unwrap();
+
+        let names = ast_class_names_for_dir(dir.path());
+
+        assert!(names.contains(&"TopClass".to_string()));
+        assert!(!names.contains(&"DeepClass".to_string()));
+    }
+
+    #[tokio::test]
+    async fn list_symbols_nested_dir_returns_overview_mode() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        // sub_a and sub_b each with 20 Rust files (total=40 > RECURSE_SMALL=30)
+        for sub in &["sub_a", "sub_b"] {
+            std::fs::create_dir_all(root.join(sub)).unwrap();
+            for i in 0..20 {
+                std::fs::write(root.join(format!("{sub}/f{i}.rs")), "pub struct S;").unwrap();
+            }
+        }
+        let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+        let ctx = test_ctx_with_agent(agent);
+        let result = ListSymbols
+            .call(json!({ "path": "." }), &ctx)
+            .await
+            .unwrap();
+
+        // 40 files in two subdirs → class_overview (31–80 range)
+        assert_eq!(result["mode"].as_str(), Some("class_overview"));
+        let subdirs = result["subdirectories"].as_array().unwrap();
+        assert_eq!(subdirs.len(), 2);
+        assert_eq!(result["total_files"].as_u64(), Some(40));
+        let sub_a = subdirs
+            .iter()
+            .find(|s| s["path"].as_str().unwrap_or("").contains("sub_a"))
+            .unwrap();
+        assert!(
+            sub_a["classes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c.as_str() == Some("S")),
+            "AST class names extracted"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_symbols_force_mode_symbols_bypasses_threshold() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        for sub in &["sub_a", "sub_b"] {
+            std::fs::create_dir_all(root.join(sub)).unwrap();
+            for i in 0..20 {
+                std::fs::write(root.join(format!("{sub}/f{i}.rs")), "pub struct S;").unwrap();
+            }
+        }
+        let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+        let ctx = test_ctx_with_agent(agent);
+        let result = ListSymbols
+            .call(json!({ "path": ".", "force_mode": "symbols" }), &ctx)
+            .await
+            .unwrap();
+
+        // force_mode: "symbols" → no "mode" key, returns files array
+        assert!(result["mode"].is_null(), "no mode field in symbols output");
+        assert!(result["files"].is_array(), "files array present");
     }
 }

@@ -539,6 +539,192 @@ async fn replace_symbol_round_trip_no_attributes() {
     assert_eq!(result.lines().count(), src.lines().count());
 }
 
+/// Guard: replace_symbol with body-only code (missing signature) is detected,
+/// rejected, and the file is restored automatically.
+#[tokio::test]
+async fn replace_symbol_rejects_body_only_new_body_and_restores_file() {
+    let src = "fn target() {\n    original_body();\n}\n";
+
+    let (dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
+        let file = root.join("src/lib.rs");
+        MockLspClient::new()
+            .with_symbols(file.clone(), vec![sym_with_range("target", 0, 2, 0, file)])
+    })
+    .await;
+
+    // Pass body-only code — no `fn target()` signature.
+    let body_only = "    new_body();\n";
+    let err = ReplaceSymbol
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "symbol": "target",
+                "new_body": body_only
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("dropped the symbol definition"),
+        "error must mention dropped symbol; got: {msg}"
+    );
+
+    // File must be restored to original content.
+    let result = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
+    assert_eq!(
+        result, src,
+        "file must be restored to original after rollback"
+    );
+}
+
+/// BUG-042 extension: body-only rejection must work for NESTED symbols too.
+/// The original fix (2026-04-16) counted pre/post symbols at the flat top
+/// level of the AST tree. That caught top-level Rust fns — and Rust `impl`
+/// methods because `extract_rust_symbols` flattens them to top level — but
+/// MISSED languages where class members stay in the `children` array:
+/// Java, Kotlin, Python, TypeScript. This test uses Java, whose parser keeps
+/// methods nested under the class.
+#[tokio::test]
+async fn replace_symbol_rejects_body_only_for_nested_method() {
+    let src = "\
+class Foo {
+    void target() {
+        originalBody();
+    }
+}
+";
+
+    let (dir, ctx) = ctx_with_mock(&[("src/Foo.java", src)], |root| {
+        let file = root.join("src/Foo.java");
+        // LSP reports the method as Foo/target (nested under the class).
+        let mut sym = sym_with_range("target", 1, 3, 1, file.clone());
+        sym.name_path = "Foo/target".to_string();
+        MockLspClient::new().with_symbols(file, vec![sym])
+    })
+    .await;
+
+    // Pass body-only code — no `void target()` signature.
+    let body_only = "        newBody();\n";
+    let err = ReplaceSymbol
+        .call(
+            json!({
+                "path": "src/Foo.java",
+                "symbol": "Foo/target",
+                "new_body": body_only
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("dropped the symbol definition"),
+        "nested method body-only must be caught; got: {msg}"
+    );
+
+    // File must be restored.
+    let result = std::fs::read_to_string(dir.path().join("src/Foo.java")).unwrap();
+    assert_eq!(
+        result, src,
+        "file must be restored to original after rollback"
+    );
+}
+
+/// BUG-041: `textDocument/didChange` is a fire-and-forget notification, so the
+/// LSP may still be reindexing when the next `documentSymbol` query arrives.
+/// That query returns stale positions and any write based on them corrupts
+/// the file. replace_symbol must detect staleness (name not found in the
+/// reported range), fire a fresh `did_change`, and retry — the second fetch
+/// sees the fresh positions and the write succeeds.
+#[tokio::test]
+async fn replace_symbol_retries_on_stale_lsp_positions_until_fresh() {
+    let src = "\
+fn filler1() { one(); }
+fn filler2() { two(); }
+fn target() {
+    original();
+}
+";
+
+    let (dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
+        let file = root.join("src/lib.rs");
+        // Stale: LSP reports target at line 0 (filler1's spot). `target` is
+        // not in that range, so validate_symbol_position rejects it as stale.
+        let stale = vec![sym_with_range("target", 0, 0, 0, file.clone())];
+        // Fresh: LSP caught up; target is on line 2.
+        let fresh = vec![sym_with_range("target", 2, 4, 2, file.clone())];
+        MockLspClient::new().with_symbols_sequence(file, vec![stale, fresh])
+    })
+    .await;
+
+    ReplaceSymbol
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "symbol": "target",
+                "new_body": "fn target() {\n    new_body();\n}"
+            }),
+            &ctx,
+        )
+        .await
+        .expect("retry must recover from a single stale LSP response");
+
+    let result = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
+    assert!(
+        result.contains("new_body()"),
+        "edit must apply; got:\n{result}"
+    );
+    assert!(
+        !result.contains("original()"),
+        "old body must be gone; got:\n{result}"
+    );
+}
+
+/// If the LSP keeps returning stale positions across every retry, the tool
+/// must surface a RecoverableError — don't silently fall through to a write
+/// using stale offsets (which BUG-041 originally did).
+#[tokio::test]
+async fn replace_symbol_surfaces_stale_error_after_max_retries() {
+    let src = "\
+fn filler1() { one(); }
+fn filler2() { two(); }
+fn target() {
+    original();
+}
+";
+
+    let (_dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
+        let file = root.join("src/lib.rs");
+        // Every call returns stale. did_change pops the queue but once a single
+        // entry remains it sticks — so retries never see fresh data.
+        let stale = vec![sym_with_range("target", 0, 0, 0, file.clone())];
+        MockLspClient::new().with_symbols_sequence(file, vec![stale])
+    })
+    .await;
+
+    let err = ReplaceSymbol
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "symbol": "target",
+                "new_body": "fn target() {\n    new_body();\n}"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("stale"),
+        "error must still mention staleness when retries are exhausted; got: {msg}"
+    );
+}
+
 /// Agent changes the attribute: #[test] → #[tokio::test]
 #[tokio::test]
 async fn replace_symbol_round_trip_agent_changes_attribute() {

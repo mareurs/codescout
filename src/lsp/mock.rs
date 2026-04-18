@@ -11,6 +11,12 @@ use crate::lsp::SymbolInfo;
 
 pub struct MockLspClient {
     symbols: HashMap<PathBuf, Vec<SymbolInfo>>,
+    /// BUG-041 test infra: when set for a path, `document_symbols` returns the
+    /// FRONT of the queue (without popping), and `did_change` pops the front
+    /// (unless only one entry remains, which then sticks). Simulates an LSP
+    /// that serves stale positions until `textDocument/didChange` has propagated.
+    symbols_sequence:
+        std::sync::Mutex<HashMap<PathBuf, std::collections::VecDeque<Vec<SymbolInfo>>>>,
     definitions: HashMap<(u32, u32), Vec<lsp_types::Location>>,
     workspace_results: Vec<SymbolInfo>,
 }
@@ -19,6 +25,7 @@ impl MockLspClient {
     pub fn new() -> Self {
         Self {
             symbols: HashMap::new(),
+            symbols_sequence: std::sync::Mutex::new(HashMap::new()),
             definitions: HashMap::new(),
             workspace_results: vec![],
         }
@@ -28,6 +35,23 @@ impl MockLspClient {
     /// The path must match exactly what the tool passes to `document_symbols`.
     pub fn with_symbols(mut self, path: impl Into<PathBuf>, syms: Vec<SymbolInfo>) -> Self {
         self.symbols.insert(path.into(), syms);
+        self
+    }
+
+    /// Pre-load a QUEUE of symbol results for a path. Useful for simulating
+    /// LSP staleness (BUG-041): the first element is returned by `document_symbols`,
+    /// and `did_change` advances to the next. The final element sticks once
+    /// reached. An empty sequence behaves like no sequence at all and falls
+    /// back to `with_symbols` (if set) or an empty Vec.
+    pub fn with_symbols_sequence(
+        self,
+        path: impl Into<PathBuf>,
+        sequence: Vec<Vec<SymbolInfo>>,
+    ) -> Self {
+        self.symbols_sequence
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(path.into(), sequence.into());
         self
     }
 
@@ -63,6 +87,15 @@ impl LspClientOps for MockLspClient {
         path: &Path,
         _language_id: &str,
     ) -> anyhow::Result<Vec<SymbolInfo>> {
+        if let Some(front) = self
+            .symbols_sequence
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(path)
+            .and_then(|q| q.front().cloned())
+        {
+            return Ok(front);
+        }
         Ok(self.symbols.get(path).cloned().unwrap_or_default())
     }
 
@@ -115,7 +148,17 @@ impl LspClientOps for MockLspClient {
         Ok(lsp_types::WorkspaceEdit::default())
     }
 
-    async fn did_change(&self, _path: &Path) -> anyhow::Result<()> {
+    async fn did_change(&self, path: &Path) -> anyhow::Result<()> {
+        if let Some(q) = self
+            .symbols_sequence
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_mut(path)
+        {
+            if q.len() > 1 {
+                q.pop_front();
+            }
+        }
         Ok(())
     }
 }

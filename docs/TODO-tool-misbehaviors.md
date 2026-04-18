@@ -27,7 +27,64 @@ capture: what you did, what you expected, what actually happened, and a reproduc
 
 ## Observed Bugs
 
-### BUG-021 — `edit_file`: parallel calls cause partial state + MCP server "crash"
+### BUG-041 — `insert_code` / `replace_symbol`: stale LSP positions after large edits cause "symbol not found"
+
+**Date:** 2026-04-16
+
+**What I did:** During I7 refactor, inserted ~600 lines of helpers at line 1645 via `insert_code`. Then called `replace_symbol("run_command_inner")` and `insert_code(before: "run_command_inner")`.
+
+**Expected:** Symbol found, edit applied.
+
+**What happened:** Both calls failed — "symbol expected in lines X–Y but not found in file content." The LSP-cached `start_line` for `run_command_inner` was 6 lines off (stale pre-insertion position).
+
+**Root cause:** LSP does not re-index synchronously after write. The `-3` line tolerance in range validation is insufficient when the stale offset is larger or when the fn signature spans multiple lines (fn keyword above cached `start_line`).
+
+**Workaround:** `/mcp` reconnect forces LSP re-index. Always verify with `find_symbol(include_body: false)` before any write following a large insertion — if `start_line` doesn't match actual fn keyword line, reconnect first.
+
+**Fix direction:** Widen pre-validation tolerance, or force `did_change` notification after writes to flush stale positions.
+
+**Fix (2026-04-18):** `replace_symbol`, `insert_code`, and `remove_symbol` now route symbol lookup through a new `fetch_validated_symbol` helper. It runs up to 3 attempts: fetch `documentSymbol`, validate range + position. On staleness, fires a fresh `did_change`, sleeps with linear backoff (50 / 100 ms), and retries. If all retries exhaust, surfaces the existing `RecoverableError` so the user still sees a clear signal (can `/mcp` restart). Test infra: `MockLspClient::with_symbols_sequence` stages a queue of responses; `did_change` advances the queue. Regression tests: `replace_symbol_retries_on_stale_lsp_positions_until_fresh` + `replace_symbol_surfaces_stale_error_after_max_retries`.
+
+### BUG-042 — `replace_symbol`: body-only `new_body` silently drops the function signature
+
+**Date:** 2026-04-16
+
+**What I did:** Called `replace_symbol("run_command_inner", <body-only code without fn signature>)` — intended to replace just the function body.
+
+**Expected:** Error or the signature preserved.
+
+**What happened:** `replace_symbol` replaces the ENTIRE symbol (attributes + signature + body). Passing body-only code dropped the function definition, leaving orphaned statements at module scope. No error was returned.
+
+**Root cause:** The tool description says `new_body` must include the full declaration, but no validation enforced this. The old name `replace_symbol_body` reinforced the (wrong) mental model that it replaces just the body.
+
+**Fix (2026-04-16):** Post-write AST check (pre_count vs post_count). If the symbol existed before the write (tree-sitter indexed it) but disappears after, the file is restored and a `RecoverableError` is returned. Test: `replace_symbol_rejects_body_only_new_body_and_restores_file`.
+
+**Scope (original 2026-04-16 fix):** Only caught symbols tree-sitter indexes at the flat level (top-level Rust fns; Rust `impl` methods happen to land flat because `extract_rust_symbols` merges them into the parent). Methods kept in `children` (Java/Kotlin/Python/TypeScript classes) had `pre_count == 0` so the check was skipped for them.
+
+**Fix extended (2026-04-18):** Count is now recursive over `SymbolInfo.children` and matches by full `name_path` (e.g. `Foo/target`) instead of short name. Covers nested methods in every language the AST parser emits hierarchically. Also eliminates short-name ambiguity (two `impl` blocks each with `fn new` used to leave a false-negative gap). Regression test: `replace_symbol_rejects_body_only_for_nested_method`.
+
+### BUG-043 — `edit_markdown`: `replace` on a heading whose section extends to EOF wipes entire file tail
+
+**Date:** 2026-04-16
+**Tool:** `edit_markdown`
+**Action:** `replace`
+**Severity:** High — silent data loss
+
+**What happened:**
+Called `edit_markdown(path, heading="## File Map", action="replace", content=<new content>)` on a plan file. The `## File Map` section was the only level-2 heading; all subsequent content was level-3 (`###` task headings). The tool computed the section as running from `## File Map` to end-of-file and replaced everything — 860 lines of tasks wiped, leaving only the 20-line header + new File Map content.
+
+**Expected:** Replace only the body of the `## File Map` section (between its heading and the next `###` heading).
+
+**Actual:** Section end computed as EOF because no subsequent `##` or `#` heading exists. All `###` task headings treated as children of the section, not as siblings.
+
+**Workaround:**
+- Use `action="edit"` with `old_string`/`new_string` for targeted in-section edits instead of `replace`.
+- Or ensure plan/spec files have a closing `##` sentinel heading (e.g. `## End`) so sections don't extend to EOF.
+- `create_file` for full rewrites when structural damage occurs.
+
+**Related:** BUG-035 (`compute_section_end` ignores fenced code blocks) — same `compute_section_end` function responsible for both.
+
+**Fix (2026-04-18):** `EditMarkdown::call` now runs a pre-flight guard on `action="replace"`. If the target section contains any deeper-level sub-headings, the call is rejected with a `RecoverableError` naming every would-be-wiped heading and the `include_subsections: true` opt-in. `perform_section_edit` semantics unchanged — the guard lives at the tool layer, so the underlying CommonMark behaviour (level-3 is child of level-2) is preserved for explicit opt-in. New schema field: `include_subsections`. Regression tests: `find_consumed_subsections_*` + `bug043_edit_markdown_replace_*`.### BUG-021 — `edit_file`: parallel calls cause partial state + MCP server "crash"
 
 **Date:** 2026-03-03
 **Severity:** High — leaves files in inconsistent partial state; server exit requires `/mcp` restart
@@ -288,6 +345,16 @@ from background tasks (check client capabilities for progress support).
 **Fix (this session):** Strip ANSI CSI sequences from `raw_stdout` and `raw_stderr` immediately after capturing them, but only for buffer-only commands. Added `strip_ansi_codes()` to `command_summary.rs`; applied in `run_command_inner` for the `buffer_only` branch. ANSI codes are opaque to LLMs and should not count toward byte budgets.
 
 **Status:** ✅ Fixed
+
+### BUG-040 — `edit_file` / `replace_symbol` / `insert_code`: strips Unix exec bit on shell scripts
+
+- **What happened**: editing a `.sh` file via `edit_file` silently dropped the `+x` mode. Hook scripts became non-executable after routine edits, causing Claude Code hook infrastructure to break at next session start.
+- **Expected**: write tools preserve the target file's mode (perms, setuid, etc.). A content-level edit should never change file permissions.
+- **Observed**: after `edit_file` on `pre-tool-use.sh` with mode `0755`, resulting file had mode `0644`. Same for any write path going through `atomic_write`.
+- **Root cause**: `util::fs::atomic_write` writes a sibling `.tmp` file (default umask → `0644`) then `rename`s over the target. `rename` replaces the inode, so the original mode is lost.
+- **Fix (2026-04-16)**: `atomic_write` now copies the original file's Unix mode onto the `.tmp` file before `rename`. Regression test `util::fs::tests::atomic_write_preserves_exec_bit` locks in 0755 survival.
+- **Scope**: fix is at the `atomic_write` layer, so `edit_file`, `replace_symbol`, `insert_code`, `remove_symbol`, `rename_symbol`, `edit_markdown`, and any other write going through it are all covered.
+- **Status**: fixed.
 
 ## Template for new entries
 
