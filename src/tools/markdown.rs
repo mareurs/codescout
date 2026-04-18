@@ -46,43 +46,63 @@ impl Tool for ReadMarkdown {
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
-        use super::output::{OutputGuard, OutputMode, OverflowInfo};
-
         let path = super::require_str_param(&input, "path")?;
 
-        // Gate: .md files only
-        if !path.ends_with(".md") && !path.ends_with(".markdown") {
-            return Err(RecoverableError::with_hint(
-                "read_markdown only supports .md files",
-                "Use read_file for non-markdown files.",
-            )
-            .into());
-        }
+        // Resolve path → (resolved PathBuf, text String).
+        // Buffer-ref branch loads from the output buffer and falls through to
+        // the shared heading-nav / line-range logic below. Disk-read branch
+        // validates, stats, and reads the file.
+        let (resolved, text) = if path.starts_with("@file_") {
+            let buf = ctx
+                .output_buffer
+                .get(path)
+                .ok_or_else(|| {
+                    RecoverableError::with_hint(
+                        format!("buffer reference not found: '{}'", path),
+                        "Buffer refs expire when the session resets. Re-run read_markdown on the file to get a fresh ref.",
+                    )
+                })?;
+            let resolved = buf
+                .source_path
+                .clone()
+                .unwrap_or_else(|| std::path::PathBuf::from(path));
+            (resolved, buf.stdout.clone())
+        } else {
+            // Gate: .md files only
+            if !path.ends_with(".md") && !path.ends_with(".markdown") {
+                return Err(RecoverableError::with_hint(
+                    "read_markdown only supports .md files",
+                    "Use read_file for non-markdown files.",
+                )
+                .into());
+            }
 
-        let project_root = ctx.agent.project_root().await;
-        let security = ctx.agent.security_config().await;
-        let resolved = crate::util::path_security::validate_read_path(
-            path,
-            project_root.as_deref(),
-            &security,
-        )?;
+            let project_root = ctx.agent.project_root().await;
+            let security = ctx.agent.security_config().await;
+            let resolved = crate::util::path_security::validate_read_path(
+                path,
+                project_root.as_deref(),
+                &security,
+            )?;
 
-        if resolved.is_dir() {
-            return Err(RecoverableError::with_hint(
-                format!("'{}' is a directory, not a file", path),
-                "Use list_dir to browse directory contents, or provide a specific file path",
-            )
-            .into());
-        }
+            if resolved.is_dir() {
+                return Err(RecoverableError::with_hint(
+                    format!("'{}' is a directory, not a file", path),
+                    "Use list_dir to browse directory contents, or provide a specific file path",
+                )
+                .into());
+            }
 
-        let text = std::fs::read_to_string(&resolved).map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => RecoverableError::with_hint(
-                format!("file not found: '{}'", path),
-                "Check the path with list_dir, or use find_file to locate the file",
-            )
-            .into(),
-            _ => anyhow::anyhow!("failed to read {}: {}", resolved.display(), e),
-        })?;
+            let text = std::fs::read_to_string(&resolved).map_err(|e| match e.kind() {
+                std::io::ErrorKind::NotFound => RecoverableError::with_hint(
+                    format!("file not found: '{}'", path),
+                    "Check the path with list_dir, or use find_file to locate the file",
+                )
+                .into(),
+                _ => anyhow::anyhow!("failed to read {}: {}", resolved.display(), e),
+            })?;
+            (resolved, text)
+        };
 
         // Extract params
         let heading = input["heading"].as_str();
@@ -142,6 +162,36 @@ impl Tool for ReadMarkdown {
 
             let content = sections.join("\n\n");
 
+            // Oversized multi-heading join — fall back to must_follow.
+            if crate::tools::exceeds_inline_limit(&content) {
+                let file_id = ctx
+                    .output_buffer
+                    .store_file(resolved.to_string_lossy().to_string(), content.clone());
+                let lines = content.lines().count();
+                let must_follow = format!(
+                    "IRON LAW #6: The combined section content is too large to return inline. \
+                     Use {:?} for subsequent reads — NOT the original path. \
+                     Request one heading at a time, or slice with start_line/end_line.",
+                    file_id
+                );
+                let next_actions: Vec<String> = seen_headings
+                    .iter()
+                    .take(3)
+                    .map(|h| format!("read_markdown({:?}, heading={})", file_id, h))
+                    .collect();
+                let err = crate::tools::RecoverableError::with_must_follow(
+                    format!(
+                        "combined headings span {} lines — exceeds inline threshold",
+                        lines
+                    ),
+                    must_follow,
+                )
+                .with_extra("file_id", serde_json::json!(file_id))
+                .with_extra("requested_headings", serde_json::json!(seen_headings))
+                .with_extra("next_actions", serde_json::json!(next_actions));
+                return Err(err.into());
+            }
+
             // Record coverage
             if !seen_headings.is_empty() {
                 if let Ok(mut cov) = ctx.section_coverage.lock() {
@@ -180,23 +230,65 @@ impl Tool for ReadMarkdown {
                 crate::tools::file_summary::extract_markdown_section(&text, heading_query)?;
             let cov = super::file::markdown_coverage(&text, &resolved, ctx, heading, None, None);
 
-            // Buffer large sections
+            // Oversized match — return ok:false with must_follow + nested section_map
+            // + next_actions. The agent must pick a sub-heading or a line range, not
+            // retry against the original path.
             if crate::tools::exceeds_inline_limit(&section_result.content) {
                 let file_id = ctx.output_buffer.store_file(
                     resolved.to_string_lossy().to_string(),
                     section_result.content.clone(),
                 );
-                let mut val = json!({
-                    "line_range": [section_result.line_range.0, section_result.line_range.1],
-                    "breadcrumb": section_result.breadcrumb,
-                    "siblings": section_result.siblings,
-                    "format": "markdown",
-                    "file_id": file_id,
-                });
-                if let Some(c) = cov {
-                    val["coverage"] = c;
-                }
-                return Ok(val);
+                let section_lines = section_result.content.lines().count();
+
+                let (start_ln, end_ln) = section_result.line_range;
+                let all_headings = crate::tools::file_summary::parse_all_headings(&text);
+                let nested: Vec<serde_json::Value> = all_headings
+                    .iter()
+                    .filter(|h| h.line > start_ln && h.line <= end_ln)
+                    .map(|h| json!({"level": h.level, "text": h.text, "line": h.line}))
+                    .collect();
+
+                let heading_label = section_result
+                    .breadcrumb
+                    .last()
+                    .cloned()
+                    .unwrap_or_else(|| heading_query.to_string());
+
+                let must_follow = format!(
+                    "IRON LAW #6: Use {:?} for subsequent reads — NOT the original path. \
+                     Pick a sub-heading from section_map OR use read_markdown({:?}, start_line=N, end_line=M).",
+                    file_id, file_id
+                );
+
+                let next_actions: Vec<String> = {
+                    let mut actions = Vec::new();
+                    if let Some(first) = nested.first() {
+                        if let Some(h) = first.get("text").and_then(|v| v.as_str()) {
+                            actions.push(format!("read_markdown({:?}, heading={})", file_id, h));
+                        }
+                    }
+                    actions.push(format!(
+                        "read_markdown({:?}, start_line={}, end_line={})",
+                        file_id,
+                        start_ln,
+                        start_ln + 100.min(section_lines)
+                    ));
+                    actions
+                };
+
+                let err = crate::tools::RecoverableError::with_must_follow(
+                    format!(
+                        "heading {:?} spans {} lines — exceeds inline threshold",
+                        heading_label, section_lines
+                    ),
+                    must_follow,
+                )
+                .with_extra("file_id", serde_json::json!(file_id))
+                .with_extra("section_map", serde_json::json!(nested))
+                .with_extra("next_actions", serde_json::json!(next_actions))
+                .with_extra("breadcrumb", serde_json::json!(section_result.breadcrumb))
+                .with_extra("line_range", serde_json::json!([start_ln, end_ln]));
+                return Err(err.into());
             }
 
             let mut val = json!({
@@ -271,56 +363,104 @@ impl Tool for ReadMarkdown {
             return Ok(result);
         }
 
-        // ── Default: heading map ─────────────────────────────────────────
+        // ── Default branch: adaptive tiers ────────────────────────────────────
+        let total_bytes = text.len();
         let total_lines = text.lines().count();
+        let oversized = crate::tools::exceeds_inline_limit(&text);
 
-        // Buffer large files
-        if crate::tools::exceeds_inline_limit(&text) {
+        let md_cov = super::file::markdown_coverage(&text, &resolved, ctx, None, None, None);
+
+        // ── Tier 3: large — heading map + must_follow, no body ────────────
+        if oversized {
+            let all_headings = crate::tools::file_summary::parse_all_headings(&text);
+            let heading_count = all_headings.len();
+            let heading_map: Vec<Value> = all_headings
+                .iter()
+                .map(|h| {
+                    json!({
+                        "level": h.level,
+                        "text": h.text,
+                        "line": h.line,
+                    })
+                })
+                .collect();
+
             let file_id = ctx
                 .output_buffer
                 .store_file(resolved.to_string_lossy().to_string(), text.clone());
-            let mut summary = crate::tools::file_summary::summarize_markdown(&text);
-            summary["file_id"] = json!(file_id);
-            if let Some(c) = super::file::markdown_coverage(&text, &resolved, ctx, None, None, None)
-            {
-                summary["coverage"] = c;
-            }
-            return Ok(summary);
-        }
 
-        // Small file: return content with exploring-mode cap
-        let md_cov = super::file::markdown_coverage(&text, &resolved, ctx, None, None, None);
-
-        let guard = OutputGuard::from_input(&input);
-        let max_lines = guard.max_results;
-
-        if guard.mode == OutputMode::Exploring && total_lines > max_lines {
-            let content = extract_lines(&text, 1, max_lines);
-            let overflow = OverflowInfo {
-                shown: max_lines,
-                total: total_lines,
-                hint: format!(
-                    "File has {} lines. Use start_line/end_line for ranges, \
-                     or heading/headings for sections",
-                    total_lines
-                ),
-                next_offset: None,
-                by_file: None,
-                by_file_overflow: 0,
+            let must_follow = if heading_count == 0 {
+                format!(
+                    "IRON LAW #6: For subsequent reads, use {:?} (NOT the original path). \
+                     Slice with read_markdown({:?}, start_line=N, end_line=M).",
+                    file_id, file_id
+                )
+            } else {
+                format!(
+                    "IRON LAW #6: For subsequent reads, use {:?} (NOT the original path). \
+                     Pick a heading: read_markdown({:?}, heading=## Section). \
+                     Or slice: read_markdown({:?}, start_line=N, end_line=M).",
+                    file_id, file_id, file_id
+                )
             };
-            let mut result = json!({ "content": content, "total_lines": total_lines });
-            result["overflow"] = OutputGuard::overflow_json(&overflow);
+
+            let mut result = json!({
+                "format": "markdown",
+                "total_lines": total_lines,
+                "total_bytes": total_bytes,
+                "heading_count": heading_count,
+                "heading_map": heading_map,
+                "file_id": file_id,
+                "must_follow": must_follow,
+            });
             if let Some(c) = md_cov {
                 result["coverage"] = c;
             }
-            Ok(result)
-        } else {
-            let mut result = json!({ "content": text, "total_lines": total_lines });
-            if let Some(c) = md_cov {
-                result["coverage"] = c;
-            }
-            Ok(result)
+            return Ok(result);
         }
+
+        // ── Tier 2: medium — full content + soft hint ─────────────────────
+        if total_lines > crate::tools::LINE_SOFT_CAP {
+            let all_headings = crate::tools::file_summary::parse_all_headings(&text);
+            let heading_count = all_headings.len();
+            let hint = if heading_count == 0 {
+                format!(
+                    "{} lines, no headings. For focused reads: read_markdown(path, start_line=N, end_line=M).",
+                    total_lines
+                )
+            } else {
+                format!(
+                    "{} lines, {} sections. For focused reads: read_markdown(path, heading=## Section).",
+                    total_lines, heading_count
+                )
+            };
+
+            let mut result = json!({
+                "format": "markdown",
+                "content": text,
+                "total_lines": total_lines,
+                "heading_count": heading_count,
+                "hint": hint,
+            });
+            if let Some(c) = md_cov {
+                result["coverage"] = c;
+            }
+            return Ok(result);
+        }
+
+        // ── Tier 1: small — full content only ─────────────────────────────
+        let all_headings = crate::tools::file_summary::parse_all_headings(&text);
+        let heading_count = all_headings.len();
+        let mut result = json!({
+            "format": "markdown",
+            "content": text,
+            "total_lines": total_lines,
+            "heading_count": heading_count,
+        });
+        if let Some(c) = md_cov {
+            result["coverage"] = c;
+        }
+        Ok(result)
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
@@ -453,6 +593,67 @@ fn compute_section_end(lines: &[&str], start_idx: usize, level: usize) -> usize 
     lines.len()
 }
 
+/// List the sub-heading texts that a `replace` on `heading_query` would wipe.
+///
+/// BUG-043: when a section has nested sub-headings (deeper heading levels than
+/// the target), `replace` silently consumes them. For plan/spec files whose
+/// `##` sections contain dozens of `###` tasks, this causes catastrophic data
+/// loss. Callers check this before `replace` and refuse unless the user opts
+/// in via `include_subsections: true`.
+///
+/// Returns the headings with their `#` prefix intact so the error message can
+/// echo them verbatim. Empty vec means the section has no children and `replace`
+/// is safe.
+pub fn find_consumed_subsections(content: &str, heading_query: &str) -> Result<Vec<String>> {
+    use crate::tools::file_summary::{heading_level, resolve_section_range};
+
+    let range =
+        resolve_section_range(content, heading_query).map_err(|e| anyhow::anyhow!("{}", e))?;
+
+    let lines: Vec<&str> = content.split('\n').collect();
+    let heading_idx = (range.heading_line - 1) as usize;
+    let end_idx = compute_section_end(&lines, heading_idx + 1, range.level);
+
+    let mut in_code_block = false;
+    let mut out = Vec::new();
+    for &line in &lines[heading_idx + 1..end_idx] {
+        if line.starts_with("```") {
+            in_code_block = !in_code_block;
+            continue;
+        }
+        if in_code_block {
+            continue;
+        }
+        if heading_level(line).is_some() {
+            out.push(line.trim_end().to_string());
+        }
+    }
+    Ok(out)
+}
+
+/// Format the BUG-043 guard error. The message itself names `include_subsections`
+/// so the opt-in is visible to any caller that only inspects the error text.
+fn subsection_guard_error(
+    batch_idx: Option<usize>,
+    heading: &str,
+    victims: &[String],
+) -> RecoverableError {
+    let prefix = match batch_idx {
+        Some(i) => format!("edits[{i}]: "),
+        None => String::new(),
+    };
+    RecoverableError::with_hint(
+        format!(
+            "{prefix}replace on '{heading}' would wipe {n} nested heading(s): {list}. \
+             Pass include_subsections: true to opt into consuming children.",
+            n = victims.len(),
+            list = victims.join(", "),
+        ),
+        "Prefer action=\"edit\" with old_string/new_string to target text \
+         inside the section without touching its subsections.",
+    )
+}
+
 /// Join a non-tail slice of lines back into a string.
 /// Always appends a '\n' after the last element to act as a separator.
 fn join_lines(lines: &[&str]) -> String {
@@ -548,22 +749,36 @@ impl Tool for EditMarkdown {
          remove, edit. Supports batch mode via edits array."
     }
 
+    fn long_docs(&self) -> Option<&str> {
+        Some(
+            "### Workflow: Editing a Markdown Document\n\n\
+             | Step | Tool | Purpose |\n\
+             |------|------|---------|\n\
+             | 1 | `read_markdown(path)` | Get heading map — see all sections |\n\
+             | 2 | `read_markdown(path, headings=[...])` | Read target sections (one call, multiple sections) |\n\
+             | 3a | `edit_markdown(path, heading, action, content)` | Whole-section: replace (body only — heading preserved), insert, remove |\n\
+             | 3b | `edit_markdown(path, heading, action=\"edit\", old_string, new_string)` | Surgical: scoped string replacement within a section |\n\
+             | 3c | `edit_markdown(path, edits=[...])` | Batch: multiple edits across sections, atomic |"
+        )
+    }
+
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
             "required": ["path"],
             "properties": {
                 "path": { "type": "string", "description": "Markdown file path" },
-                "heading": { "type": "string", "description": "Target section heading (fuzzy matched)" },
+                "heading": { "type": "string", "description": "Target section heading (fuzzy matched). Required unless using edits[] batch mode." },
                 "action": {
                     "type": "string",
                     "enum": ["replace", "insert_before", "insert_after", "remove", "edit"],
-                    "description": "Operation to perform"
+                    "description": "Operation to perform. Required unless using edits[] batch mode."
                 },
                 "content": { "type": "string", "description": "New content for replace/insert actions (body only — heading preserved on replace)" },
                 "old_string": { "type": "string", "description": "For action='edit': exact text to find within section" },
                 "new_string": { "type": "string", "description": "For action='edit': replacement text" },
                 "replace_all": { "type": "boolean", "default": false, "description": "For action='edit': replace all occurrences" },
+                "include_subsections": { "type": "boolean", "default": false, "description": "For action='replace': opt in to consuming nested sub-headings (deeper levels). Default refuses to wipe children — see BUG-043." },
                 "edits": {
                     "type": "array",
                     "items": {
@@ -575,7 +790,8 @@ impl Tool for EditMarkdown {
                             "content": { "type": "string" },
                             "old_string": { "type": "string" },
                             "new_string": { "type": "string" },
-                            "replace_all": { "type": "boolean" }
+                            "replace_all": { "type": "boolean" },
+                            "include_subsections": { "type": "boolean" }
                         }
                     },
                     "description": "Batch mode: array of edit operations applied atomically. Mutually exclusive with top-level heading/action."
@@ -644,6 +860,17 @@ impl Tool for EditMarkdown {
                         })?
                 } else {
                     let edit_content = edit["content"].as_str();
+                    if action == "replace"
+                        && !edit["include_subsections"].as_bool().unwrap_or(false)
+                    {
+                        if let Ok(victims) = find_consumed_subsections(&content, heading) {
+                            if !victims.is_empty() {
+                                return Err(
+                                    subsection_guard_error(Some(i), heading, &victims).into()
+                                );
+                            }
+                        }
+                    }
                     perform_section_edit(&content, heading, action, edit_content).map_err(|e| {
                         RecoverableError::with_hint(
                             format!("edits[{}]: {}", i, e),
@@ -675,6 +902,13 @@ impl Tool for EditMarkdown {
                 })?
             } else {
                 let content = input["content"].as_str();
+                if action == "replace" && !input["include_subsections"].as_bool().unwrap_or(false) {
+                    if let Ok(victims) = find_consumed_subsections(&file_content, heading) {
+                        if !victims.is_empty() {
+                            return Err(subsection_guard_error(None, heading, &victims).into());
+                        }
+                    }
+                }
                 perform_section_edit(&file_content, heading, action, content).map_err(|e| {
                     RecoverableError::with_hint(e.to_string(), "Check heading name and action.")
                 })?
@@ -712,9 +946,336 @@ impl Tool for EditMarkdown {
 
 #[cfg(test)]
 mod tests {
+
+    #[tokio::test]
+    async fn read_markdown_empty_file_returns_small_tier() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("empty.md");
+        std::fs::write(&file, "").unwrap();
+
+        let out = super::ReadMarkdown
+            .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(out["content"].as_str(), Some(""));
+        assert_eq!(out["total_lines"].as_u64(), Some(0));
+        assert!(out.get("hint").is_none());
+        assert!(out.get("file_id").is_none());
+    }
+
+    #[tokio::test]
+    async fn read_markdown_large_no_headings_must_follow_pivots_to_line_ranges() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("flat.md");
+        // ~100KB of plain lines, no headings.
+        let content: String = (0..10_000).map(|i| format!("line {}\n", i)).collect();
+        std::fs::write(&file, &content).unwrap();
+
+        let out = super::ReadMarkdown
+            .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        assert!(out.get("file_id").is_some(), "still large tier");
+        assert_eq!(out["heading_count"].as_u64(), Some(0));
+        assert_eq!(out["heading_map"].as_array().map(|a| a.len()), Some(0));
+        let mf = out["must_follow"].as_str().unwrap();
+        assert!(
+            mf.contains("start_line"),
+            "must_follow must mention start_line; got: {mf}"
+        );
+        assert!(
+            !mf.contains("heading=\""),
+            "must_follow must not suggest heading nav when there are no headings; got: {mf}"
+        );
+    }
+
     use super::*;
 
     // ── perform_section_edit tests (moved from section_edit.rs) ──────────
+
+    use crate::agent::Agent;
+    use crate::lsp::LspManager;
+    use serde_json::json;
+    use tempfile::tempdir;
+
+    async fn test_ctx() -> crate::tools::ToolContext {
+        crate::tools::ToolContext {
+            agent: Agent::new(None).await.unwrap(),
+            lsp: LspManager::new_arc(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+        }
+    }
+
+    /// Synthesize markdown content with `lines` total lines and `sections` H2 sections.
+    fn synth_md(lines: usize, sections: usize) -> String {
+        let mut out = String::from("# Title\n\n");
+        let per_section = (lines.saturating_sub(2) / sections.max(1)).max(1);
+        for i in 0..sections {
+            out.push_str(&format!("## Section {}\n\n", i + 1));
+            for _ in 0..per_section {
+                out.push_str("body line\n");
+            }
+        }
+        out
+    }
+
+    #[tokio::test]
+    async fn read_markdown_small_returns_full_content_no_hint() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("small.md");
+        std::fs::write(&file, synth_md(30, 2)).unwrap();
+
+        let out = super::ReadMarkdown
+            .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        assert!(
+            out.get("content").is_some(),
+            "small tier must include content"
+        );
+        assert!(
+            out.get("hint").is_none(),
+            "small tier must not include hint"
+        );
+        assert!(out.get("file_id").is_none(), "small tier must not buffer");
+        assert!(
+            out.get("heading_map").is_none(),
+            "small tier has no heading_map"
+        );
+        assert!(
+            out.get("heading_count").is_some(),
+            "small tier must report heading_count"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_markdown_medium_returns_content_with_hint() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("medium.md");
+        // 300 lines: > LINE_SOFT_CAP (150) but well under INLINE_BYTE_BUDGET.
+        std::fs::write(&file, synth_md(300, 6)).unwrap();
+
+        let out = super::ReadMarkdown
+            .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        assert!(out.get("content").is_some(), "medium tier includes content");
+        assert!(out.get("hint").is_some(), "medium tier includes hint");
+        assert!(
+            out.get("heading_count").is_some(),
+            "medium tier reports heading_count"
+        );
+        assert!(out.get("file_id").is_none(), "medium tier does not buffer");
+        let hint = out["hint"].as_str().unwrap();
+        assert!(
+            hint.contains("heading="),
+            "hint must reference heading-nav recipe"
+        );
+        assert!(
+            !hint.contains("heading=\""),
+            "hint must not wrap heading in quotes; got: {hint}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_markdown_large_returns_summary_no_content() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("large.md");
+        // Force byte size above INLINE_BYTE_BUDGET. Each "body line\n" = 10 bytes;
+        // 10_000 lines ≈ 100KB, comfortably above typical INLINE_BYTE_BUDGET.
+        std::fs::write(&file, synth_md(10_000, 20)).unwrap();
+
+        let out = super::ReadMarkdown
+            .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        assert!(
+            out.get("content").is_none(),
+            "large tier must NOT include content"
+        );
+        assert!(
+            out.get("file_id").is_some(),
+            "large tier buffers with file_id"
+        );
+        assert!(
+            out.get("heading_map").is_some(),
+            "large tier includes heading_map"
+        );
+        assert!(
+            out.get("must_follow").is_some(),
+            "large tier includes must_follow citing IRON LAW #6"
+        );
+        assert!(
+            out.get("recipe").is_none(),
+            "large tier no longer uses the recipe field — must_follow supersedes it"
+        );
+        assert!(out.get("total_lines").is_some());
+        assert!(out.get("total_bytes").is_some());
+        assert!(out.get("heading_count").is_some());
+        let mf = out["must_follow"].as_str().unwrap();
+        assert!(mf.contains("IRON LAW #6"), "must_follow cites IRON LAW #6");
+        assert!(mf.contains("heading="), "must_follow mentions heading nav");
+        assert!(
+            !mf.contains("heading=\""),
+            "must_follow must not wrap heading in quotes; got: {mf}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_markdown_large_includes_must_follow_citing_iron_law_6() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("big.md");
+        std::fs::write(&file, synth_md(10_000, 20)).unwrap();
+
+        let out = super::ReadMarkdown
+            .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        let mf = out["must_follow"]
+            .as_str()
+            .expect("large-tier response must include must_follow");
+        assert!(
+            mf.contains("IRON LAW #6"),
+            "must_follow must cite IRON LAW #6, got: {mf}"
+        );
+        assert!(
+            mf.contains("@file_"),
+            "must_follow must reference the file_id to steer reuse, got: {mf}"
+        );
+    }
+
+    #[tokio::test]
+    async fn heading_on_large_section_returns_ok_false_with_must_follow_and_section_map() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("big.md");
+        // One H1 containing many H2 subsections — H1 match will be oversized.
+        let mut body = String::from("# Root\n\n");
+        for i in 0..200 {
+            body.push_str(&format!("## Sub {i}\n\n"));
+            body.push_str(&"word ".repeat(500));
+            body.push_str("\n\n");
+        }
+        std::fs::write(&file, &body).unwrap();
+
+        let err = super::ReadMarkdown
+            .call(
+                json!({ "path": file.to_str().unwrap(), "heading": "# Root" }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .expect("oversized heading must be RecoverableError (isError:false)");
+        assert!(
+            rec.message.contains("too large") || rec.message.contains("exceeds"),
+            "error message should explain oversize; got: {}",
+            rec.message
+        );
+        match &rec.guidance {
+            Some(crate::tools::Guidance::MustFollow(s)) => {
+                assert!(
+                    s.contains("IRON LAW #6"),
+                    "must_follow must cite IRON LAW #6; got: {s}"
+                );
+            }
+            other => panic!("expected MustFollow guidance, got {:?}", other),
+        }
+        assert!(
+            rec.extra.get("file_id").is_some(),
+            "extra must include file_id for subsequent buffer-ref reads"
+        );
+        let sm = rec
+            .extra
+            .get("section_map")
+            .expect("extra must include nested section_map");
+        let arr = sm.as_array().expect("section_map is an array");
+        assert!(
+            !arr.is_empty(),
+            "section_map must list nested sub-headings (H2s under H1)"
+        );
+        assert!(
+            rec.extra.get("next_actions").is_some(),
+            "extra must include concrete next_actions"
+        );
+    }
+
+    // ── BUG-043: subsection-consumption detection ──────────────────────────
+
+    /// `find_consumed_subsections` returns empty when the section has no nested
+    /// sub-headings — safe to `replace` without losing structure.
+    #[test]
+    fn find_consumed_subsections_empty_for_leaf_section() {
+        let content = "# Title\n## Setup\nsome content\n## Usage\nuse it\n";
+        let result = super::find_consumed_subsections(content, "## Setup").unwrap();
+        assert!(
+            result.is_empty(),
+            "leaf section has no subsections to consume: {result:?}"
+        );
+    }
+
+    /// Core BUG-043 repro: `## File Map` is the only level-2 heading and is
+    /// followed only by level-3 task headings. Its section extends to EOF,
+    /// so `replace` would wipe every `###` task. `find_consumed_subsections`
+    /// must return those `###` headings so the tool can refuse the edit.
+    #[test]
+    fn find_consumed_subsections_lists_level3_children_under_level2() {
+        let content = "\
+# Plan
+intro
+
+## File Map
+map body
+
+### Task A
+work
+### Task B
+more work
+### Task C
+even more
+";
+        let result = super::find_consumed_subsections(content, "## File Map").unwrap();
+        assert_eq!(
+            result,
+            vec![
+                "### Task A".to_string(),
+                "### Task B".to_string(),
+                "### Task C".to_string(),
+            ],
+            "must list every heading that would be wiped by replace"
+        );
+    }
+
+    /// Sibling `##` heading is NOT a child — doesn't count as consumed.
+    #[test]
+    fn find_consumed_subsections_stops_at_sibling_heading() {
+        let content = "# Title\n## Setup\n### Step 1\ndo it\n## Usage\nuse it\n";
+        let result = super::find_consumed_subsections(content, "## Setup").unwrap();
+        assert_eq!(
+            result,
+            vec!["### Step 1".to_string()],
+            "only the ### under ## Setup is consumed; ## Usage is a sibling"
+        );
+    }
 
     #[test]
     fn replace_body_only() {
@@ -1331,5 +1892,84 @@ mod tests {
         assert!(result.contains("## Next"));
         assert!(!result.contains("### Child"));
         assert!(!result.contains("# shell comment"));
+    }
+
+    #[tokio::test]
+    async fn read_markdown_accepts_file_id_buffer_ref_for_line_range() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("large.md");
+        std::fs::write(&file, synth_md(10_000, 20)).unwrap();
+
+        // First call: populate the buffer via the large tier.
+        let first = super::ReadMarkdown
+            .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        let file_id = first["file_id"].as_str().unwrap().to_string();
+
+        // Second call: use the buffer ref for a line slice.
+        let slice = super::ReadMarkdown
+            .call(
+                json!({ "path": file_id, "start_line": 1, "end_line": 5 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let content = slice["content"].as_str().unwrap();
+        assert!(content.lines().count() <= 5);
+    }
+
+    #[tokio::test]
+    async fn buffer_ref_accepts_single_heading_nav() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("big.md");
+        std::fs::write(&file, synth_md(10_000, 20)).unwrap();
+
+        let first = super::ReadMarkdown
+            .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        let fid = first["file_id"].as_str().unwrap().to_string();
+
+        let second = super::ReadMarkdown
+            .call(json!({ "path": fid, "heading": "## Section 5" }), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            second.get("content").is_some() || second.get("file_id").is_some(),
+            "heading nav on @file_* must return content or a nested buffer, got: {second}"
+        );
+    }
+
+    #[tokio::test]
+    async fn buffer_ref_accepts_multi_heading_nav() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("big.md");
+        // 500 sections keeps each section small (~20 lines) so combining two
+        // doesn't overflow the inline limit, while the file total (~100KB) still
+        // triggers Tier-3 and returns a file_id.
+        std::fs::write(&file, synth_md(10_000, 500)).unwrap();
+
+        let first = super::ReadMarkdown
+            .call(json!({ "path": file.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        let fid = first["file_id"].as_str().unwrap().to_string();
+
+        let second = super::ReadMarkdown
+            .call(
+                json!({
+                    "path": fid,
+                    "headings": ["## Section 3", "## Section 5"],
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(second["sections_returned"], 2);
     }
 }

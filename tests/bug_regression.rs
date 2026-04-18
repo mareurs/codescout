@@ -12,6 +12,7 @@
 
 use codescout::agent::Agent;
 use codescout::lsp::LspManager;
+use codescout::tools::markdown::EditMarkdown;
 use codescout::tools::output_buffer::OutputBuffer;
 use codescout::tools::symbol::{InsertCode, RemoveSymbol, ReplaceSymbol};
 use codescout::tools::{Tool, ToolContext};
@@ -623,4 +624,88 @@ def helper() -> str:
             );
         }
     }
+}
+
+/// BUG-043: `replace` on a heading whose section contains sub-headings used to
+/// silently wipe them. Guard rejects unless caller opts in with
+/// `include_subsections: true`.
+#[tokio::test]
+async fn bug043_edit_markdown_replace_rejects_when_section_has_subsections() {
+    let plan = "\
+# Plan
+
+## File Map
+short map body
+
+### Task A
+work
+### Task B
+more work
+### Task C
+even more
+";
+    let (dir, ctx) = project_with_files(&[("plan.md", plan)]).await;
+
+    let err = EditMarkdown
+        .call(
+            json!({
+                "path": "plan.md",
+                "heading": "## File Map",
+                "action": "replace",
+                "content": "new short map body\n"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("### Task A") && msg.contains("### Task B") && msg.contains("### Task C"),
+        "error must list the would-be-consumed subsections; got: {msg}"
+    );
+    assert!(
+        msg.contains("include_subsections"),
+        "error must point to the opt-in flag; got: {msg}"
+    );
+
+    // File must be unchanged on disk.
+    let on_disk = std::fs::read_to_string(dir.path().join("plan.md")).unwrap();
+    assert_eq!(on_disk, plan, "file must be untouched when guard fires");
+}
+
+/// `include_subsections: true` bypasses the BUG-043 guard — user explicitly
+/// asked for the consume-children semantics.
+#[tokio::test]
+async fn bug043_edit_markdown_replace_allows_subsection_consumption_on_opt_in() {
+    let plan = "\
+# Plan
+
+## File Map
+old
+### Task A
+work
+";
+    let (dir, ctx) = project_with_files(&[("plan.md", plan)]).await;
+
+    EditMarkdown
+        .call(
+            json!({
+                "path": "plan.md",
+                "heading": "## File Map",
+                "action": "replace",
+                "content": "new body\n",
+                "include_subsections": true
+            }),
+            &ctx,
+        )
+        .await
+        .expect("opt-in must succeed");
+
+    let on_disk = std::fs::read_to_string(dir.path().join("plan.md")).unwrap();
+    assert!(on_disk.contains("new body"));
+    assert!(
+        !on_disk.contains("### Task A"),
+        "opt-in truly consumes subsections: {on_disk}"
+    );
 }

@@ -502,59 +502,6 @@ fn find_ast_end_line_in(symbols: &[SymbolInfo], name: &str, lsp_start: u32) -> O
     None
 }
 
-/// Fetch a symbol by `name_path` with automatic retry on stale LSP positions.
-///
-/// BUG-041: `textDocument/didChange` is a fire-and-forget notification. After
-/// a large write, rust-analyzer (and peers) can take tens of milliseconds to
-/// reindex. The next `documentSymbol` query may return pre-write positions,
-/// and a write based on those offsets corrupts the file.
-///
-/// Strategy: fetch, validate, and retry on failure. Between attempts, fire a
-/// fresh `did_change` (flushes any pending state) and sleep briefly so the
-/// server has a chance to catch up. Caps at `MAX_RETRIES` attempts.
-///
-/// Returns the validated `SymbolInfo` and the full `document_symbols` list it
-/// came from (the caller needs the list for sibling/parent lookups).
-async fn fetch_validated_symbol(
-    client: &std::sync::Arc<dyn crate::lsp::LspClientOps>,
-    path: &std::path::Path,
-    lang: &str,
-    name_path: &str,
-) -> anyhow::Result<(SymbolInfo, Vec<SymbolInfo>)> {
-    const MAX_RETRIES: u32 = 3;
-    let mut last_err: Option<anyhow::Error> = None;
-
-    for attempt in 0..MAX_RETRIES {
-        let attempt_result = async {
-            let symbols = client.document_symbols(path, lang).await?;
-            let sym = find_unique_symbol_by_name_path(&symbols, name_path)?.clone();
-            validate_symbol_range(&sym)?;
-            let content = std::fs::read_to_string(path)?;
-            let lines: Vec<&str> = content.lines().collect();
-            validate_symbol_position(&sym, &lines)?;
-            anyhow::Ok((sym, symbols))
-        }
-        .await;
-
-        match attempt_result {
-            Ok(pair) => return Ok(pair),
-            Err(e) => {
-                last_err = Some(e);
-                if attempt < MAX_RETRIES - 1 {
-                    // Flush any pending state on the server, then wait briefly
-                    // before retrying. Backoff grows so the last attempt has
-                    // the longest window (useful on cold LSPs).
-                    let _ = client.did_change(path).await;
-                    let backoff_ms = 50u64 * (attempt as u64 + 1);
-                    tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
-                }
-            }
-        }
-    }
-
-    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("fetch_validated_symbol: no error recorded")))
-}
-
 /// Recursively count how many symbols in `symbols` (walking `children` subtrees)
 /// have the exact `name_path`. Returns 0 or 1 for well-formed source; higher
 /// counts indicate genuine duplicates (e.g. same method in two `impl` blocks).
@@ -2341,14 +2288,18 @@ impl Tool for ReplaceSymbol {
         guard_not_markdown(&full_path)?;
         let (client, lang) = get_lsp_client(ctx, &full_path).await?;
 
-        // BUG-041: fetch + validate with auto-retry on stale LSP positions.
-        let (sym, symbols) = fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
+        let symbols = client.document_symbols(&full_path, &lang).await?;
+        let sym = find_unique_symbol_by_name_path(&symbols, name_path)?;
+
+        // Validate: catch degenerate LSP ranges (start == end for multi-line symbols)
+        validate_symbol_range(sym)?;
 
         let content = std::fs::read_to_string(&full_path)?;
         let lines: Vec<&str> = content.lines().collect();
+        validate_symbol_position(sym, &lines)?;
 
-        let mut start = editing_start_line(&sym, &lines);
-        let end = (editing_end_line(&sym) as usize + 1).min(lines.len());
+        let mut start = editing_start_line(sym, &lines);
+        let end = (editing_end_line(sym) as usize + 1).min(lines.len());
 
         // BUG-034 guard: if this is a nested symbol, don't let the editing range
         // extend above the parent's body start. Stale LSP data can report the
@@ -2458,14 +2409,18 @@ impl Tool for RemoveSymbol {
         guard_not_markdown(&full_path)?;
         let (client, lang) = get_lsp_client(ctx, &full_path).await?;
 
-        // BUG-041: fetch + validate with auto-retry on stale LSP positions.
-        let (sym, symbols) = fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
+        let symbols = client.document_symbols(&full_path, &lang).await?;
+        let sym = find_unique_symbol_by_name_path(&symbols, name_path)?;
+
+        // Validate: catch degenerate LSP ranges
+        validate_symbol_range(sym)?;
 
         let content = std::fs::read_to_string(&full_path)?;
         let lines: Vec<&str> = content.lines().collect();
+        validate_symbol_position(sym, &lines)?;
 
-        let mut start = editing_start_line(&sym, &lines);
-        let end = (editing_end_line(&sym) as usize + 1).min(lines.len());
+        let mut start = editing_start_line(sym, &lines);
+        let end = (editing_end_line(sym) as usize + 1).min(lines.len());
 
         // BUG-034 guard: same as replace_symbol — clamp to parent boundary.
         if let Some(parent) = find_parent_symbol(&symbols, &sym.name_path) {
@@ -2547,15 +2502,17 @@ impl Tool for InsertCode {
         guard_not_markdown(&full_path)?;
         let (client, lang) = get_lsp_client(ctx, &full_path).await?;
 
-        // BUG-041: fetch + validate with auto-retry on stale LSP positions.
-        let (sym, _symbols) = fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
+        let symbols = client.document_symbols(&full_path, &lang).await?;
+        let sym = find_unique_symbol_by_name_path(&symbols, name_path)?;
 
+        validate_symbol_range(sym)?;
         let content = std::fs::read_to_string(&full_path)?;
         let lines: Vec<&str> = content.lines().collect();
+        validate_symbol_position(sym, &lines)?;
         let code_lines: Vec<&str> = code.lines().collect();
         let insert_at = match position {
-            "before" => editing_start_line(&sym, &lines),
-            _ => (editing_end_line(&sym) as usize + 1).min(lines.len()),
+            "before" => editing_start_line(sym, &lines),
+            _ => (editing_end_line(sym) as usize + 1).min(lines.len()),
         };
 
         let mut new_lines = Vec::new();
