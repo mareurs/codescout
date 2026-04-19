@@ -295,6 +295,12 @@ New helper: `find_parent_symbol(symbols, child_name_path)` in `src/tools/symbol.
 **Probable cause:** The symbol anchor for a `#[cfg(test)] mod tests` block resolved to a line inside an earlier function rather than the line of the `mod` keyword. Likely the anchor points at the last non-whitespace token before the module attribute, which on a tightly packed file is the closing `}` of the previous method — and the "before" calculation landed one line further up, inside the method body.
 
 **Workaround:** When inserting above a `#[cfg(test)] mod tests` block, prefer appending at end-of-file via explicit line number, or use `create_file` to rewrite the whole file, or insert after the symbol immediately preceding the test module instead of before the test module. Related to BUG-029 (`position: "after"` landing inside function body).
+
+**Root cause (confirmed):** `validate_symbol_position` checked whether the symbol name appeared anywhere in `[range_start..end_line]`. If `start_line` was stale and pointed inside the preceding function, the name still appeared at the true declaration line later in the window — validation passed, no retry fired, stale position reached `editing_start_line`, which inserted at the wrong line.
+
+**Fix (2026-04-19):** `validate_symbol_position` now checks `[start_line..start_line+3]` instead of `[range_start..end_line]`. Declaration keywords (fn, mod, struct, …) always place the name on `start_line` or within two lines below (multi-line signatures). A stale `start_line` inside a preceding function body won't contain the name — validation fails, BUG-041's retry fires. Regression test: `validate_symbol_position_catches_start_line_inside_preceding_function`.
+
+**Status:** ✅ Fixed
 ### BUG-037 — `replace_symbol` on `impl Trait for Type` blocks drops outer `#[async_trait]` attribute and leaves stray closing braces
 
 **Date:** 2026-04-13 (during `lsp_ready` / language-detection fix, commit `363591b`)

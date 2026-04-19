@@ -441,10 +441,21 @@ fn validate_symbol_range(sym: &SymbolInfo) -> anyhow::Result<()> {
 }
 /// Validate that the LSP symbol position matches the actual file content.
 ///
-/// After a mutation (remove_symbol, replace_symbol), the LSP may return stale
-/// positions for subsequent calls on the same file (BUG-032). This function
-/// checks that the symbol's name appears somewhere within its reported range.
-/// If not, the LSP data is stale and the caller should retry.
+/// LSP `start_line` (selectionRange.start) should point at the line containing
+/// the symbol's identifier. Two acceptable cases:
+///
+/// 1. **Happy path** — the name appears on `start_line` directly.
+/// 2. **Lead-in** — `start_line` is on whitespace, closing brackets, comments,
+///    or decorators/attributes (common when an LSP returns a range that begins
+///    a few lines before the actual declaration — see `replace_symbol_trusts_
+///    lsp_start_line` and `…with_paren_close` regression tests). The name must
+///    then appear within a small window below.
+///
+/// **Stale signal (BUG-036):** real code on `start_line` that doesn't contain
+/// the name. Returns `RecoverableError` so `fetch_validated_symbol` retries with
+/// a fresh `did_change`. The old check searched the entire `[range_start..end_line]`
+/// window, which masked staleness when the true declaration appeared later in
+/// the same range.
 fn validate_symbol_position(sym: &SymbolInfo, lines: &[&str]) -> anyhow::Result<()> {
     let sl = sym.start_line as usize;
     if sl >= lines.len() {
@@ -460,25 +471,39 @@ fn validate_symbol_position(sym: &SymbolInfo, lines: &[&str]) -> anyhow::Result<
         )
         .into());
     }
-    // Check the symbol's full range (with some slack) for the name.
-    // range_start_line may be before start_line (attributes/docs).
-    let range_start = sym
-        .range_start_line
-        .map(|r| r as usize)
-        .unwrap_or(sl)
-        .min(sl);
-    let range_end = (sym.end_line as usize + 1).min(lines.len());
-    let name_found = lines[range_start..range_end]
-        .iter()
-        .any(|line| line.contains(&*sym.name));
-    if !name_found {
+    let start_text = lines[sl];
+    if start_text.contains(&*sym.name) {
+        return Ok(());
+    }
+    // No name on start_line. Acceptable only if start_line is "lead-in" content
+    // (the LSP range began a few lines above the real declaration). Real code
+    // here without the name indicates stale positions.
+    if !is_lead_in_line(start_text) {
         return Err(RecoverableError::with_hint(
             format!(
-                "symbol '{}' expected in lines {}-{} but not found in file content — \
+                "symbol '{}' expected near line {} but that line is unrelated code — \
                  LSP positions are likely stale after a prior edit",
                 sym.name,
-                range_start + 1,
-                range_end,
+                sl + 1,
+            ),
+            "The file was recently modified and the LSP hasn't re-indexed yet. \
+             Call list_symbols(path) to refresh, then retry the operation.",
+        )
+        .into());
+    }
+    // Lead-in: scan a small window below for the name. Six lines covers the
+    // typical `})\n}\n\nfn …` chain plus a comment or blank line of slack.
+    let check_end = (sl + 6).min(lines.len());
+    let found = lines[sl..check_end]
+        .iter()
+        .any(|l| l.contains(&*sym.name));
+    if !found {
+        return Err(RecoverableError::with_hint(
+            format!(
+                "symbol '{}' expected within 6 lines of line {} but not found — \
+                 LSP positions are likely stale after a prior edit",
+                sym.name,
+                sl + 1,
             ),
             "The file was recently modified and the LSP hasn't re-indexed yet. \
              Call list_symbols(path) to refresh, then retry the operation.",
@@ -486,6 +511,35 @@ fn validate_symbol_position(sym: &SymbolInfo, lines: &[&str]) -> anyhow::Result<
         .into());
     }
     Ok(())
+}
+
+/// A line is "lead-in" if it cannot reasonably be the declaration site of a symbol —
+/// pure punctuation closers from the preceding symbol, blank lines, comments, or
+/// attributes/decorators above the real keyword line. Used by
+/// `validate_symbol_position` to distinguish acceptable LSP range over-extension
+/// from stale positions pointing at unrelated code.
+fn is_lead_in_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    // Comments (line, block, KDoc continuation lines starting with `*`)
+    if trimmed.starts_with("//")
+        || trimmed.starts_with("/*")
+        || trimmed.starts_with('*')
+        || trimmed == "*/"
+    {
+        return true;
+    }
+    // Decorators (Python `@`, Java/Kotlin `@`) and Rust attributes (`#[…]`)
+    if trimmed.starts_with('@') || trimmed.starts_with("#[") || trimmed.starts_with("#!") {
+        return true;
+    }
+    // Pure closing punctuation (`}`, `)`, `]`, `;`, `,`, `?`, `>`) — lead-in from
+    // a preceding declaration's tail (`})`, `});`, `})?;`, `},`, etc.).
+    trimmed
+        .chars()
+        .all(|c| matches!(c, '}' | ')' | ']' | ';' | ',' | '?' | '>' | ' ' | '\t'))
 }
 
 /// Recursively search `symbols` for a symbol with the given name whose
@@ -6877,6 +6931,288 @@ fn foo() {
             msg.contains("stale"),
             "error should mention stale; got: {msg}"
         );
+    }
+    /// BUG-036: validate_symbol_position catches stale start_line inside preceding function.
+    /// insert_code before: mod tests can land inside the preceding function when the LSP
+    /// returns a start_line that points inside that function's body (stale after a large
+    /// insertion above). The old check (name anywhere in [range_start..end_line]) missed
+    /// this because the name still appeared at the true declaration line later in the window.
+    /// The tighter [start_line..start_line+3] window catches it.
+    #[test]
+    fn validate_symbol_position_catches_start_line_inside_preceding_function() {
+        let lines = vec![
+            "pub fn read(&self) -> Result<Summary> {", // 0
+            "    let data = self.load()?;",            // 1
+            "    Ok(Summary { data })",                // 2
+            "}",                                       // 3
+            "",                                        // 4
+            "#[cfg(test)]",                            // 5
+            "mod tests {",                             // 6
+            "    use super::*;",                       // 7
+            "    #[test]",                             // 8
+            "    fn test_read() {}",                   // 9
+            "}",                                       // 10
+        ];
+
+        // Correct position: start_line=6, range_start_line=5
+        let sym_correct = crate::lsp::SymbolInfo {
+            name: "tests".to_string(),
+            name_path: "tests".to_string(),
+            kind: crate::lsp::SymbolKind::Module,
+            file: std::path::PathBuf::from("test.rs"),
+            start_line: 6,
+            end_line: 10,
+            start_col: 0,
+            children: vec![],
+            range_start_line: Some(5),
+            detail: None,
+        };
+        assert!(
+            validate_symbol_position(&sym_correct, &lines).is_ok(),
+            "correct position should validate"
+        );
+
+        // Stale position: start_line=2 (inside preceding function body).
+        // Old check: "tests" appears at line 6 which is within [min(5,2)..11] → passes WRONGLY.
+        // New check: [2..5] does not contain "tests" → correctly detected as stale.
+        let sym_stale = crate::lsp::SymbolInfo {
+            name: "tests".to_string(),
+            name_path: "tests".to_string(),
+            kind: crate::lsp::SymbolKind::Module,
+            file: std::path::PathBuf::from("test.rs"),
+            start_line: 2, // stale — points inside `read` method body
+            end_line: 10,
+            start_col: 0,
+            children: vec![],
+            range_start_line: Some(2),
+            detail: None,
+        };
+        let result = validate_symbol_position(&sym_stale, &lines);
+        assert!(
+            result.is_err(),
+            "stale start_line inside preceding function should be detected"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("stale"), "error should mention stale; got: {msg}");
+    }
+    /// Lead-in case: LSP returns start_line at a closing `})` of preceding macro,
+    /// real symbol is 3 lines below. Must accept (matches existing
+    /// `replace_symbol_trusts_lsp_start_with_paren_close` expectation).
+    #[test]
+    fn validate_symbol_position_accepts_lead_in_paren_close() {
+        let lines = vec![
+            "        })",            // 0 — start_line (lead-in: closing paren of preceding macro)
+            "    }",                 // 1 — closing brace of preceding method
+            "",                      // 2 — blank line
+            "    fn target() {",     // 3 — actual declaration
+            "        old_body();",   // 4
+            "    }",                 // 5
+        ];
+        let sym = crate::lsp::SymbolInfo {
+            name: "target".to_string(),
+            name_path: "target".to_string(),
+            kind: crate::lsp::SymbolKind::Function,
+            file: std::path::PathBuf::from("test.rs"),
+            start_line: 0,
+            end_line: 5,
+            start_col: 0,
+            children: vec![],
+            range_start_line: None,
+            detail: None,
+        };
+        assert!(
+            validate_symbol_position(&sym, &lines).is_ok(),
+            "lead-in `}})` at start_line should be accepted"
+        );
+    }
+
+    /// Lead-in case: start_line on a blank line, name a few lines below.
+    #[test]
+    fn validate_symbol_position_accepts_lead_in_blank_line() {
+        let lines = vec![
+            "",                  // 0 — start_line (blank)
+            "fn target() {",     // 1
+            "    body();",       // 2
+            "}",                 // 3
+        ];
+        let sym = crate::lsp::SymbolInfo {
+            name: "target".to_string(),
+            name_path: "target".to_string(),
+            kind: crate::lsp::SymbolKind::Function,
+            file: std::path::PathBuf::from("test.rs"),
+            start_line: 0,
+            end_line: 3,
+            start_col: 0,
+            children: vec![],
+            range_start_line: None,
+            detail: None,
+        };
+        assert!(validate_symbol_position(&sym, &lines).is_ok());
+    }
+
+    /// Lead-in case: start_line on a `#[cfg(test)]` attribute, name below.
+    #[test]
+    fn validate_symbol_position_accepts_lead_in_rust_attribute() {
+        let lines = vec![
+            "#[cfg(test)]",  // 0 — start_line (attribute)
+            "mod tests {",   // 1
+            "}",             // 2
+        ];
+        let sym = crate::lsp::SymbolInfo {
+            name: "tests".to_string(),
+            name_path: "tests".to_string(),
+            kind: crate::lsp::SymbolKind::Module,
+            file: std::path::PathBuf::from("test.rs"),
+            start_line: 0,
+            end_line: 2,
+            start_col: 0,
+            children: vec![],
+            range_start_line: Some(0),
+            detail: None,
+        };
+        assert!(validate_symbol_position(&sym, &lines).is_ok());
+    }
+
+    /// Lead-in case: start_line on a Python `@decorator`, name on def line below.
+    #[test]
+    fn validate_symbol_position_accepts_lead_in_python_decorator() {
+        let lines = vec![
+            "@decorator",       // 0 — start_line (decorator)
+            "def my_func():",   // 1
+            "    pass",         // 2
+        ];
+        let sym = crate::lsp::SymbolInfo {
+            name: "my_func".to_string(),
+            name_path: "my_func".to_string(),
+            kind: crate::lsp::SymbolKind::Function,
+            file: std::path::PathBuf::from("test.py"),
+            start_line: 0,
+            end_line: 2,
+            start_col: 0,
+            children: vec![],
+            range_start_line: Some(0),
+            detail: None,
+        };
+        assert!(validate_symbol_position(&sym, &lines).is_ok());
+    }
+
+    /// Lead-in case: KDoc continuation line (Kotlin LSP BUG-027 quirk where
+    /// range.start lands on a `* @param` line inside a `/** */` block).
+    /// `start_line` could land on a `*` continuation line — name on the actual
+    /// `fun` declaration a few lines below.
+    #[test]
+    fn validate_symbol_position_accepts_lead_in_kdoc_continuation() {
+        let lines = vec![
+            "/**",                       // 0
+            " * @param x the param",     // 1 — start_line (KDoc continuation)
+            " */",                       // 2
+            "fun target() {}",           // 3
+        ];
+        let sym = crate::lsp::SymbolInfo {
+            name: "target".to_string(),
+            name_path: "target".to_string(),
+            kind: crate::lsp::SymbolKind::Function,
+            file: std::path::PathBuf::from("test.kt"),
+            start_line: 1,
+            end_line: 3,
+            start_col: 0,
+            children: vec![],
+            range_start_line: Some(1),
+            detail: None,
+        };
+        assert!(validate_symbol_position(&sym, &lines).is_ok());
+    }
+
+    /// BUG-036 variant: lead-in claim but name not within window — still stale.
+    /// start_line on a blank line, but the actual symbol is 10+ lines below
+    /// (way beyond the lead-in window).
+    #[test]
+    fn validate_symbol_position_catches_lead_in_with_distant_name() {
+        let lines = vec![
+            "",                       // 0 — start_line (lead-in)
+            "fn unrelated_one() {",   // 1
+            "    do_thing();",        // 2
+            "}",                      // 3
+            "",                       // 4
+            "fn unrelated_two() {",   // 5
+            "    do_other();",        // 6
+            "}",                      // 7
+            "",                       // 8
+            "fn target() {}",         // 9 — too far for the 6-line window
+        ];
+        let sym = crate::lsp::SymbolInfo {
+            name: "target".to_string(),
+            name_path: "target".to_string(),
+            kind: crate::lsp::SymbolKind::Function,
+            file: std::path::PathBuf::from("test.rs"),
+            start_line: 0,
+            end_line: 9,
+            start_col: 0,
+            children: vec![],
+            range_start_line: None,
+            detail: None,
+        };
+        let result = validate_symbol_position(&sym, &lines);
+        assert!(result.is_err(), "name 9 lines below lead-in should be detected as stale");
+        assert!(result.unwrap_err().to_string().contains("stale"));
+    }
+
+    /// Multi-line Rust signature: name on start_line, args wrapped below.
+    #[test]
+    fn validate_symbol_position_accepts_multiline_signature() {
+        let lines = vec![
+            "pub fn long_name(",  // 0 — start_line, name here
+            "    arg1: T,",       // 1
+            "    arg2: U,",       // 2
+            ") -> R {",           // 3
+            "    body()",         // 4
+            "}",                  // 5
+        ];
+        let sym = crate::lsp::SymbolInfo {
+            name: "long_name".to_string(),
+            name_path: "long_name".to_string(),
+            kind: crate::lsp::SymbolKind::Function,
+            file: std::path::PathBuf::from("test.rs"),
+            start_line: 0,
+            end_line: 5,
+            start_col: 0,
+            children: vec![],
+            range_start_line: Some(0),
+            detail: None,
+        };
+        assert!(validate_symbol_position(&sym, &lines).is_ok());
+    }
+
+    /// `is_lead_in_line` unit cases — boundary behaviour.
+    #[test]
+    fn is_lead_in_line_classification() {
+        // True (lead-in)
+        assert!(is_lead_in_line(""));
+        assert!(is_lead_in_line("    "));
+        assert!(is_lead_in_line("}"));
+        assert!(is_lead_in_line("    }"));
+        assert!(is_lead_in_line("})"));
+        assert!(is_lead_in_line("        })"));
+        assert!(is_lead_in_line("});"));
+        assert!(is_lead_in_line("})?;"));
+        assert!(is_lead_in_line("},"));
+        assert!(is_lead_in_line("// a comment"));
+        assert!(is_lead_in_line("/// doc comment"));
+        assert!(is_lead_in_line("/* block */"));
+        assert!(is_lead_in_line(" * KDoc continuation"));
+        assert!(is_lead_in_line("*/"));
+        assert!(is_lead_in_line("@decorator"));
+        assert!(is_lead_in_line("@Override"));
+        assert!(is_lead_in_line("#[cfg(test)]"));
+        assert!(is_lead_in_line("#![allow(unused)]"));
+
+        // False (real code)
+        assert!(!is_lead_in_line("fn foo() {"));
+        assert!(!is_lead_in_line("    let x = 1;"));
+        assert!(!is_lead_in_line("class Foo {"));
+        assert!(!is_lead_in_line("def bar():"));
+        assert!(!is_lead_in_line("    return value"));
+        assert!(!is_lead_in_line("pub mod tests;"));
     }
 
     /// validate_symbol_position accepts valid positions within ±2 line window.
