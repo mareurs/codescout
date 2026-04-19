@@ -36,6 +36,7 @@ name = "codescout"
 path = "src/main.rs"
 
 [dependencies]
+tikv-jemallocator = "0.6"
 fs2 = "0.4"
 # Async runtime
 tokio = { version = "1", features = ["full"] }
