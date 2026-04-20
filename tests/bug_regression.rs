@@ -709,3 +709,119 @@ work
         "opt-in truly consumes subsections: {on_disk}"
     );
 }
+
+// ===========================================================================
+// BUG-044: replace_symbol on a method inside an impl/class must not drop
+// sibling methods, even when LSP ranges overshoot.
+// ===========================================================================
+
+/// Rust (rust-analyzer): impl block with two sibling methods. Replacing one
+/// must leave the other intact.
+#[tokio::test]
+#[ignore] // requires rust-analyzer
+async fn bug044_replace_symbol_preserves_sibling_method_rust() {
+    if !lsp_available("rust-analyzer") {
+        eprintln!("Skipping: rust-analyzer not installed");
+        return;
+    }
+
+    let manifest = r#"[package]
+name = "test-project"
+version = "0.1.0"
+edition = "2021"
+"#;
+    let code = r#"pub struct Foo;
+
+impl Foo {
+    pub fn alpha(&self) -> i32 {
+        1
+    }
+
+    pub fn beta(&self) -> i32 {
+        2
+    }
+}
+"#;
+
+    let (dir, ctx) = project_with_files(&[("Cargo.toml", manifest), ("src/lib.rs", code)]).await;
+
+    let new_body = r#"    pub fn alpha(&self) -> i32 {
+        99
+    }"#;
+
+    ReplaceSymbol
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "symbol": "impl Foo/alpha",
+                "new_body": new_body
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let result = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
+    assert!(
+        result.contains("99"),
+        "alpha must be replaced with new body; got:\n{result}"
+    );
+    assert!(
+        result.contains("pub fn beta"),
+        "sibling beta must survive the replacement; got:\n{result}"
+    );
+    assert!(
+        result.contains('2'),
+        "beta's body must survive; got:\n{result}"
+    );
+}
+
+/// Python (pyright): class with two sibling methods. Replacing one must
+/// leave the other intact.
+#[tokio::test]
+#[ignore] // requires pyright-langserver
+async fn bug044_replace_symbol_preserves_sibling_method_python() {
+    if !lsp_available("pyright-langserver") {
+        eprintln!("Skipping: pyright-langserver not installed");
+        return;
+    }
+
+    let code = "\
+class Foo:
+    def alpha(self) -> int:
+        return 1
+
+    def beta(self) -> int:
+        return 2
+";
+
+    let (dir, ctx) = project_with_files(&[("main.py", code)]).await;
+
+    let new_body = "    def alpha(self) -> int:\n        return 99";
+
+    ReplaceSymbol
+        .call(
+            json!({
+                "path": "main.py",
+                "symbol": "Foo/alpha",
+                "new_body": new_body
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let result = std::fs::read_to_string(dir.path().join("main.py")).unwrap();
+    assert!(
+        result.contains("return 99"),
+        "alpha must be replaced; got:\n{result}"
+    );
+    assert!(
+        result.contains("def beta"),
+        "sibling beta must survive; got:\n{result}"
+    );
+    assert!(
+        result.contains("return 2"),
+        "beta's body must survive; got:\n{result}"
+    );
+}
