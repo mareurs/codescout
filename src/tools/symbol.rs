@@ -2177,6 +2177,69 @@ fn editing_end_line(sym: &crate::lsp::SymbolInfo) -> u32 {
     sym.end_line
 }
 
+/// Clamp a child symbol's editing range to its parent container's body.
+///
+/// The parent's header line (`impl Foo {`, `class Foo:`, `mod tests {`) and its
+/// closer line (`}`, dedent, `end`) both belong to the parent, not to any child.
+/// Any `start`/`end` drift in the child's LSP range that crosses either boundary
+/// silently corrupts the parent or its siblings (BUG-030, BUG-034, BUG-037, BUG-044).
+///
+/// `parent_body_start` = first line **inside** the parent body (i.e., `parent.start_line + 1`).
+/// `parent_body_end_exclusive` = first line **not** inside the parent body (i.e., `parent.end_line`,
+/// the closer line itself — excluded from the child range).
+///
+/// Returns the clamped `(start, end)` where `end` is an exclusive upper bound
+/// suitable for `lines[start..end]` slicing.
+fn clamp_range_to_parent(
+    start: usize,
+    end: usize,
+    parent_body_start: usize,
+    parent_body_end_exclusive: usize,
+) -> (usize, usize) {
+    let clamped_start = start.max(parent_body_start);
+    let clamped_end = end.min(parent_body_end_exclusive);
+    // Preserve the invariant start <= end even when clamping collapses the range.
+    let clamped_end = clamped_end.max(clamped_start);
+    (clamped_start, clamped_end)
+}
+
+/// Collect every `name_path` in an AST symbol tree, recursing into children.
+///
+/// Used by `replace_symbol` / `remove_symbol` to compare pre- vs post-write
+/// symbol sets and detect dropped siblings (BUG-044).
+fn collect_all_name_paths(syms: &[crate::lsp::SymbolInfo]) -> std::collections::HashSet<String> {
+    fn walk(syms: &[crate::lsp::SymbolInfo], out: &mut std::collections::HashSet<String>) {
+        for s in syms {
+            out.insert(s.name_path.clone());
+            walk(&s.children, out);
+        }
+    }
+    let mut out = std::collections::HashSet::new();
+    walk(syms, &mut out);
+    out
+}
+
+/// Locate the AST `name_path` of the symbol matching `lsp_name` at `lsp_start` (±1 line).
+///
+/// LSP and AST name_paths diverge on Rust impl blocks (LSP: `impl Type/m`, AST: `Type/m`),
+/// so we cannot match by `name_path` directly. Matching by simple name + start-line is
+/// the same heuristic used by `find_ast_end_line_in`.
+fn find_ast_name_path(
+    ast_syms: &[crate::lsp::SymbolInfo],
+    lsp_name: &str,
+    lsp_start: u32,
+) -> Option<String> {
+    for s in ast_syms {
+        if s.name == lsp_name && s.start_line.abs_diff(lsp_start) <= 1 {
+            return Some(s.name_path.clone());
+        }
+        if let Some(found) = find_ast_name_path(&s.children, lsp_name, lsp_start) {
+            return Some(found);
+        }
+    }
+    None
+}
+
 /// Walk backwards from `symbol_start` past attributes, decorators, and doc comments.
 ///
 /// This is the **fallback** heuristic used when the LSP doesn't provide a separate
@@ -2298,19 +2361,21 @@ impl Tool for ReplaceSymbol {
         let lines: Vec<&str> = content.lines().collect();
         validate_symbol_position(sym, &lines)?;
 
-        let mut start = editing_start_line(sym, &lines);
-        let end = (editing_end_line(sym) as usize + 1).min(lines.len());
+        let start0 = editing_start_line(&sym, &lines);
+        let end0 = (editing_end_line(&sym) as usize + 1).min(lines.len());
 
-        // BUG-034 guard: if this is a nested symbol, don't let the editing range
-        // extend above the parent's body start. Stale LSP data can report the
-        // child's range_start_line as the parent's attribute line, eating the
-        // parent's header (e.g. `#[cfg(test)]\nmod tests {`).
-        if let Some(parent) = find_parent_symbol(&symbols, &sym.name_path) {
+        // BUG-030/034/037/044 guard: clamp both start and end to the parent
+        // container's body range when `sym` is nested. Stale LSP data can report
+        // a child's `range_start_line` as the parent's attribute line (eating the
+        // parent header) or its `range.end` as overshooting into a sibling
+        // (dropping the sibling body).
+        let (start, end) = if let Some(parent) = find_parent_symbol(&symbols, &sym.name_path) {
             let parent_body_start = parent.start_line as usize + 1;
-            if start < parent_body_start {
-                start = parent_body_start;
-            }
-        }
+            let parent_body_end_exclusive = parent.end_line as usize;
+            clamp_range_to_parent(start0, end0, parent_body_start, parent_body_end_exclusive)
+        } else {
+            (start0, end0)
+        };
 
         if start >= lines.len() {
             return Err(RecoverableError::with_hint(
@@ -2328,9 +2393,20 @@ impl Tool for ReplaceSymbol {
         // exist now. Used after the write to detect if the symbol was silently dropped.
         // Walks the full AST tree (not just top level) so nested methods in Java,
         // Kotlin, Python, TypeScript class bodies are also protected.
-        let pre_count = crate::ast::extract_symbols(&full_path)
-            .map(|syms| count_symbols_by_name_path(&syms, &sym.name_path))
+        let pre_ast = crate::ast::extract_symbols(&full_path).ok();
+        let pre_count = pre_ast
+            .as_ref()
+            .map(|syms| count_symbols_by_name_path(syms, &sym.name_path))
             .unwrap_or(0);
+        // BUG-044: also snapshot the *set* of name_paths, so we can detect
+        // sibling symbols that vanish after the write (e.g. `impl Type/method_a`
+        // is replaced but `impl Type/method_b` gets eaten by an overshooting range).
+        let pre_set = pre_ast.as_ref().map(|s| collect_all_name_paths(s));
+        // Target symbol's equivalent in the AST namespace — used to subtract
+        // the intentionally-replaced symbol from the "dropped" diff.
+        let target_ast_name_path = pre_ast
+            .as_ref()
+            .and_then(|s| find_ast_name_path(s, &sym.name, sym.start_line));
 
         let mut new_lines = Vec::new();
         new_lines.extend_from_slice(&lines[..start]);
@@ -2343,9 +2419,11 @@ impl Tool for ReplaceSymbol {
         // but cannot find it after, the replacement dropped the declaration.
         // This catches the common mistake of passing body-only code to replace_symbol.
         // We use AST (tree-sitter, synchronous) — no LSP round-trip needed.
+        let post_ast = crate::ast::extract_symbols(&full_path).ok();
         if pre_count > 0 {
-            let post_count = crate::ast::extract_symbols(&full_path)
-                .map(|syms| count_symbols_by_name_path(&syms, &sym.name_path))
+            let post_count = post_ast
+                .as_ref()
+                .map(|syms| count_symbols_by_name_path(syms, &sym.name_path))
                 .unwrap_or(pre_count); // if AST fails post-write, trust the write
 
             if post_count == 0 {
@@ -2360,6 +2438,35 @@ impl Tool for ReplaceSymbol {
                          signature, and body), not just body statements. File restored."
                     ),
                     "Use find_symbol(symbol, include_body=true) to see the expected format.",
+                )
+                .into());
+            }
+        }
+
+        // BUG-044 guard: compare pre/post AST `name_path` sets. Any symbol that
+        // existed pre-write but not post-write, other than the intentionally-edited
+        // target, was eaten by the write — almost always an overshooting LSP
+        // `range.end` into a sibling. Roll back to avoid silent corruption.
+        if let (Some(pre), Some(post)) = (pre_set.as_ref(), post_ast.as_ref()) {
+            let post_set = collect_all_name_paths(post);
+            let dropped: Vec<String> = pre
+                .difference(&post_set)
+                .filter(|np| target_ast_name_path.as_deref() != Some(np.as_str()))
+                .cloned()
+                .collect();
+            if !dropped.is_empty() {
+                write_lines(&full_path, &lines, content.ends_with('\n'))?;
+                ctx.lsp.notify_file_changed(&full_path).await;
+                ctx.agent.mark_file_dirty(full_path).await;
+                return Err(RecoverableError::with_hint(
+                    format!(
+                        "replace_symbol('{name_path}') would have dropped sibling symbols: {}. \
+                         The edit range overshot into adjacent code (likely a stale LSP range). \
+                         File restored.",
+                        dropped.join(", ")
+                    ),
+                    "Try list_symbols(path) to refresh, then retry; or narrow the edit via \
+                     edit_file with unique anchors.",
                 )
                 .into());
             }
@@ -2419,16 +2526,17 @@ impl Tool for RemoveSymbol {
         let lines: Vec<&str> = content.lines().collect();
         validate_symbol_position(sym, &lines)?;
 
-        let mut start = editing_start_line(sym, &lines);
-        let end = (editing_end_line(sym) as usize + 1).min(lines.len());
+        let start0 = editing_start_line(&sym, &lines);
+        let end0 = (editing_end_line(&sym) as usize + 1).min(lines.len());
 
-        // BUG-034 guard: same as replace_symbol — clamp to parent boundary.
-        if let Some(parent) = find_parent_symbol(&symbols, &sym.name_path) {
+        // BUG-030/034/037/044 guard: symmetric parent clamp on both start and end.
+        let (start, end) = if let Some(parent) = find_parent_symbol(&symbols, &sym.name_path) {
             let parent_body_start = parent.start_line as usize + 1;
-            if start < parent_body_start {
-                start = parent_body_start;
-            }
-        }
+            let parent_body_end_exclusive = parent.end_line as usize;
+            clamp_range_to_parent(start0, end0, parent_body_start, parent_body_end_exclusive)
+        } else {
+            (start0, end0)
+        };
 
         if start >= lines.len() {
             return Err(RecoverableError::with_hint(
@@ -2502,17 +2610,31 @@ impl Tool for InsertCode {
         guard_not_markdown(&full_path)?;
         let (client, lang) = get_lsp_client(ctx, &full_path).await?;
 
-        let symbols = client.document_symbols(&full_path, &lang).await?;
-        let sym = find_unique_symbol_by_name_path(&symbols, name_path)?;
+        // BUG-041: fetch + validate with auto-retry on stale LSP positions.
+        let (sym, symbols) = fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
 
         validate_symbol_range(sym)?;
         let content = std::fs::read_to_string(&full_path)?;
         let lines: Vec<&str> = content.lines().collect();
         validate_symbol_position(sym, &lines)?;
         let code_lines: Vec<&str> = code.lines().collect();
-        let insert_at = match position {
-            "before" => editing_start_line(sym, &lines),
-            _ => (editing_end_line(sym) as usize + 1).min(lines.len()),
+        let insert_at0 = match position {
+            "before" => editing_start_line(&sym, &lines),
+            _ => (editing_end_line(&sym) as usize + 1).min(lines.len()),
+        };
+
+        // BUG-029/036 guard: clamp insertion point to the parent container's body
+        // when `sym` is nested. `position="before"` must not land above the parent
+        // header (eats the header); `position="after"` must not land past the
+        // parent's closer (moves the inserted code outside the parent block).
+        let insert_at = if let Some(parent) = find_parent_symbol(&symbols, &sym.name_path) {
+            let parent_body_start = parent.start_line as usize + 1;
+            let parent_body_end_exclusive = parent.end_line as usize;
+            insert_at0
+                .max(parent_body_start)
+                .min(parent_body_end_exclusive)
+        } else {
+            insert_at0
         };
 
         let mut new_lines = Vec::new();
@@ -6518,6 +6640,73 @@ fn foo() {
             "editing_end_line should correct short LSP end to AST end (4), got {end}"
         );
     }
+
+    // ── clamp_range_to_parent: T1 unit tests ─────────────────────────────
+    // These are pure-logic tests (no LSP, no filesystem) that pin down the
+    // symmetric parent clamp added for BUG-030/034/037/044.
+
+    #[test]
+    fn clamp_range_to_parent_caps_end_at_parent_closer() {
+        // Child range overshoots into parent's closer (or beyond).
+        // parent body occupies lines 1..20 (exclusive end = 20, the `}` line).
+        let (s, e) = clamp_range_to_parent(5, 26, 1, 20);
+        assert_eq!((s, e), (5, 20), "end must be capped at parent closer line");
+    }
+
+    #[test]
+    fn clamp_range_to_parent_lifts_start_to_parent_body_start() {
+        // Child range starts above parent body (e.g. stale LSP points at parent's
+        // attribute line).
+        let (s, e) = clamp_range_to_parent(0, 10, 1, 20);
+        assert_eq!((s, e), (1, 10), "start must be lifted to parent body start");
+    }
+
+    #[test]
+    fn clamp_range_to_parent_passthrough_when_within_bounds() {
+        let (s, e) = clamp_range_to_parent(5, 10, 1, 20);
+        assert_eq!((s, e), (5, 10), "well-formed ranges must pass through");
+    }
+
+    #[test]
+    fn clamp_range_to_parent_preserves_start_le_end_invariant_on_collapse() {
+        // Pathological input: start > parent body end. Clamp must not produce
+        // end < start (would panic on `lines[start..end]`).
+        let (s, e) = clamp_range_to_parent(25, 30, 1, 20);
+        assert!(s <= e, "start must remain <= end after clamp, got {s}..{e}");
+    }
+
+    #[test]
+    fn clamp_range_to_parent_exact_fit_is_identity() {
+        // Child exactly fills parent body.
+        let (s, e) = clamp_range_to_parent(1, 20, 1, 20);
+        assert_eq!((s, e), (1, 20));
+    }
+
+    #[test]
+    fn clamp_range_to_parent_simulates_bug_044_impl_method_overshoot() {
+        // BUG-044 repro at the pure-logic layer:
+        //   impl LeafOp {        // line 0
+        //       fn parse(...)    // lines 1–9
+        //       fn sql(...)      // lines 10–18
+        //   }                    // line 19 (parent closer)
+        //
+        // Suppose LSP reports `parse` with range end_line = 18 (overshooting
+        // into `sql`). Without the clamp the replacement eats `sql`. With the
+        // clamp we stop at the method's own `}` — but that requires an AST
+        // correction too. The clamp's role here is to make sure we never
+        // *exceed* the parent closer even if AST also misfires.
+        //
+        // Simulating the worst case: end overshoots past the parent closer.
+        let parent_body_start = 1;
+        let parent_body_end_exclusive = 19; // `}` of impl LeafOp
+        let (s, e) = clamp_range_to_parent(1, 22, parent_body_start, parent_body_end_exclusive);
+        assert_eq!(
+            e, 19,
+            "must not extend past parent closer even under extreme overshoot"
+        );
+        assert_eq!(s, 1);
+    }
+
     /// BUG-030 reproduction: replace_symbol on `mod tests` eats the preceding
     /// function. editing_start_line with range_start_line pointing to `#[cfg(test)]`
     /// should NOT walk back past the blank line into `write_message`'s closing `}`.

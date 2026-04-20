@@ -147,6 +147,28 @@ connection (a Claude Code MCP client bug, not ours).
 
 ---
 
+### BUG-044 — `replace_symbol` with nested method path replaces entire outer `impl` block
+
+**Date:** 2026-04-20
+**Status:** ✅ Fixed (2026-04-20)
+
+**What I did:** While refactoring `LeafOp::parse` → `FromStr` impl in `crates/librarian-mcp/src/filter.rs`, called `replace_symbol(symbol="impl LeafOp/parse", new_body=<FromStr impl block>)`. The intent was to replace only the `parse` method inside `impl LeafOp { ... }`, keeping the sibling `sql` method intact.
+
+**Expected:** Just the `parse` fn inside the `impl LeafOp` block gets replaced; `sql` method preserved.
+
+**What happened:** The tool interpreted the path as targeting the entire outer `impl LeafOp` block and wrote the new content in its place. The `sql` method was dropped. A duplicate fragment was also left. `cargo build` failed with "cannot find method `sql`".
+
+**Recovery:** Used `replace_symbol(symbol="impl LeafOp", new_body=<only sql method>)` to normalize the block back to a single method, then `insert_code(before="impl LeafOp", new_code=<FromStr impl>)` to prepend the `FromStr` impl as a sibling impl block. Two writes + one build retry.
+
+**Root cause (confirmed):** Asymmetric parent clamp. The fix for BUG-034 clamped the *start* of a child's edit range to the parent container's body, but the *end* was unclamped. When the LSP (or AST-fallback) range for the target method overshot into a sibling, `replace_symbol` silently ate the sibling.
+
+**Fix (2026-04-20, spec `docs/superpowers/specs/2026-04-20-impl-block-symbol-cluster-fix.md`):**
+1. Symmetric `clamp_range_to_parent` applied to both start and end in `replace_symbol` and `remove_symbol` (symbol.rs).
+2. Pre/post-write AST `name_path` set diff. Any sibling symbol that existed pre-write but not post-write (excluding the intentionally-edited target) triggers a rollback with a `RecoverableError` that names the dropped siblings.
+3. Parent clamp also applied to `insert_code` (position `before`/`after`) so insertion points cannot escape the parent container body.
+4. Helpers: `clamp_range_to_parent`, `collect_all_name_paths`, `find_ast_name_path`. Six pure-logic unit tests + one mock-LSP integration test (`replace_symbol_rolls_back_when_sibling_method_would_be_dropped`) + one for `insert_code` (`insert_code_after_clamps_to_parent_body_end`).
+
+**Related (now covered by the same fix):** BUG-030, BUG-034, BUG-037. The cluster root cause was the same asymmetric clamp + missing sibling-drop guard.
 ### BUG-026 — `read_file`: large ranged read on `@file_*` buffer ref silently wraps in `@tool_*`, breaking line navigation
 
 **Date:** 2026-03-15

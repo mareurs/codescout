@@ -634,6 +634,213 @@ class Foo {
     );
 }
 
+/// BUG-044 regression: if the LSP reports a child method's `range.end` as
+/// overshooting into a sibling method inside the same `impl` block, the
+/// symmetric parent clamp alone does not save us — the overshoot stops at the
+/// parent's closer but still eats the sibling. The sibling-drop post-write
+/// guard compares AST `name_path` sets pre/post-write and rolls back when a
+/// sibling vanishes.
+///
+/// To keep the test deterministic we use a scenario in which `editing_end_line`
+/// cannot correct the overshoot via AST: the LSP reports method names that do
+/// not appear in the actual source (e.g. post-rename stale data). This leaves
+/// the overshooting LSP `range.end` intact and exercises the sibling-drop
+/// rollback path directly.
+#[tokio::test]
+async fn replace_symbol_rolls_back_when_sibling_method_would_be_dropped() {
+    let src = "\
+struct Foo;
+
+impl Foo {
+    fn alpha(&self) -> i32 {
+        1
+    }
+
+    fn beta(&self) -> i32 {
+        2
+    }
+}
+";
+    // Line indices (0-based):
+    //   0 struct Foo;
+    //   1
+    //   2 impl Foo {
+    //   3     fn alpha(&self) -> i32 {
+    //   4         1
+    //   5     }
+    //   6
+    //   7     fn beta(&self) -> i32 {
+    //   8         2
+    //   9     }
+    //  10 }
+
+    let (dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
+        let file = root.join("src/lib.rs");
+        // Stale LSP: reports old names (`a`/`b`) that don't match the real source
+        // (`alpha`/`beta`). This defeats AST end-line correction, leaving the
+        // LSP-reported `range.end` of 9 (overshoot into beta) in place.
+        let a = SymbolInfo {
+            name: "a".to_string(),
+            name_path: "impl Foo/a".to_string(),
+            kind: SymbolKind::Function,
+            file: file.clone(),
+            start_line: 3,
+            end_line: 9, // overshoot — truthful end is 5
+            start_col: 4,
+            children: vec![],
+            range_start_line: Some(3),
+            detail: None,
+        };
+        let b = SymbolInfo {
+            name: "b".to_string(),
+            name_path: "impl Foo/b".to_string(),
+            kind: SymbolKind::Function,
+            file: file.clone(),
+            start_line: 7,
+            end_line: 9,
+            start_col: 4,
+            children: vec![],
+            range_start_line: Some(7),
+            detail: None,
+        };
+        let impl_block = SymbolInfo {
+            name: "impl Foo".to_string(),
+            name_path: "impl Foo".to_string(),
+            kind: SymbolKind::Class,
+            file: file.clone(),
+            start_line: 2,
+            end_line: 10,
+            start_col: 0,
+            children: vec![a, b],
+            range_start_line: Some(2),
+            detail: None,
+        };
+        MockLspClient::new().with_symbols(file, vec![impl_block])
+    })
+    .await;
+
+    let new_body = "    fn a(&self) -> i32 {\n        99\n    }";
+    let err = ReplaceSymbol
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "symbol": "impl Foo/a",
+                "new_body": new_body
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("dropped sibling symbols") || msg.contains("overshot"),
+        "sibling-drop error expected; got: {msg}"
+    );
+    assert!(
+        msg.contains("Foo/beta") || msg.contains("Foo/alpha"),
+        "error must name the dropped sibling(s); got: {msg}"
+    );
+
+    // File must be untouched.
+    let result = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
+    assert_eq!(
+        result, src,
+        "file must be restored after sibling-drop rollback"
+    );
+}
+
+/// BUG-041: `textDocument/didChange` is a fire-and-forget notification, so the
+/// LSP may still be reindexing when the next `documentSymbol` query arrives.
+/// That query returns stale positions and any write based on them corrupts
+/// the file. replace_symbol must detect staleness (name not found in the
+/// reported range), fire a fresh `did_change`, and retry — the second fetch
+/// sees the fresh positions and the write succeeds.
+#[tokio::test]
+async fn replace_symbol_retries_on_stale_lsp_positions_until_fresh() {
+    let src = "\
+fn filler1() { one(); }
+fn filler2() { two(); }
+fn target() {
+    original();
+}
+";
+
+    let (dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
+        let file = root.join("src/lib.rs");
+        // Stale: LSP reports target at line 0 (filler1's spot). `target` is
+        // not in that range, so validate_symbol_position rejects it as stale.
+        let stale = vec![sym_with_range("target", 0, 0, 0, file.clone())];
+        // Fresh: LSP caught up; target is on line 2.
+        let fresh = vec![sym_with_range("target", 2, 4, 2, file.clone())];
+        MockLspClient::new().with_symbols_sequence(file, vec![stale, fresh])
+    })
+    .await;
+
+    ReplaceSymbol
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "symbol": "target",
+                "new_body": "fn target() {\n    new_body();\n}"
+            }),
+            &ctx,
+        )
+        .await
+        .expect("retry must recover from a single stale LSP response");
+
+    let result = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
+    assert!(
+        result.contains("new_body()"),
+        "edit must apply; got:\n{result}"
+    );
+    assert!(
+        !result.contains("original()"),
+        "old body must be gone; got:\n{result}"
+    );
+}
+
+/// If the LSP keeps returning stale positions across every retry, the tool
+/// must surface a RecoverableError — don't silently fall through to a write
+/// using stale offsets (which BUG-041 originally did).
+#[tokio::test]
+async fn replace_symbol_surfaces_stale_error_after_max_retries() {
+    let src = "\
+fn filler1() { one(); }
+fn filler2() { two(); }
+fn target() {
+    original();
+}
+";
+
+    let (_dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
+        let file = root.join("src/lib.rs");
+        // Every call returns stale. did_change pops the queue but once a single
+        // entry remains it sticks — so retries never see fresh data.
+        let stale = vec![sym_with_range("target", 0, 0, 0, file.clone())];
+        MockLspClient::new().with_symbols_sequence(file, vec![stale])
+    })
+    .await;
+
+    let err = ReplaceSymbol
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "symbol": "target",
+                "new_body": "fn target() {\n    new_body();\n}"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("stale"),
+        "error must still mention staleness when retries are exhausted; got: {msg}"
+    );
+}
+
 /// Agent changes the attribute: #[test] → #[tokio::test]
 #[tokio::test]
 async fn replace_symbol_round_trip_agent_changes_attribute() {
@@ -1145,6 +1352,86 @@ async fn insert_code_after_rejects_truncated_end_in_nested_fn() {
     assert!(
         msg.contains("suspicious range"),
         "error should mention suspicious range; got: {msg}"
+    );
+}
+
+/// BUG-029/036 regression for the parent clamp on `insert_code`.
+///
+/// Scenario: LSP reports a nested method's `end_line` as overshooting past the
+/// parent `impl` block's closer (stale or wrong range). Without the parent
+/// clamp, `insert_code(position="after", symbol="impl Foo/alpha")` would land
+/// *outside* the `impl Foo { ... }` block. With the clamp, it lands at
+/// `parent.end_line` — i.e., just before the impl's closing `}`.
+#[tokio::test]
+async fn insert_code_after_clamps_to_parent_body_end() {
+    let src = "\
+struct Foo;
+
+impl Foo {
+    fn alpha(&self) {}
+}
+";
+    // Line indices (0-based):
+    //   0 struct Foo;
+    //   1
+    //   2 impl Foo {
+    //   3     fn alpha(&self) {}
+    //   4 }
+
+    let (dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
+        let file = root.join("src/lib.rs");
+        // Stale LSP: alpha's end_line overshoots to line 10 (well past the impl).
+        // Use a name the AST can't match ("a" vs real "alpha") so editing_end_line
+        // falls back to LSP's overshoot.
+        let alpha = SymbolInfo {
+            name: "a".to_string(),
+            name_path: "impl Foo/a".to_string(),
+            kind: SymbolKind::Function,
+            file: file.clone(),
+            start_line: 3,
+            end_line: 10,
+            start_col: 4,
+            children: vec![],
+            range_start_line: Some(3),
+            detail: None,
+        };
+        let impl_block = SymbolInfo {
+            name: "impl Foo".to_string(),
+            name_path: "impl Foo".to_string(),
+            kind: SymbolKind::Class,
+            file: file.clone(),
+            start_line: 2,
+            end_line: 4,
+            start_col: 0,
+            children: vec![alpha],
+            range_start_line: Some(2),
+            detail: None,
+        };
+        MockLspClient::new().with_symbols(file, vec![impl_block])
+    })
+    .await;
+
+    InsertCode
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "symbol": "impl Foo/a",
+                "position": "after",
+                "code": "    fn beta(&self) {}\n"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let result = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
+    // The insertion must be inside the impl block — i.e., before the impl's `}`
+    // line, not after it.
+    let beta_pos = result.find("fn beta").expect("beta must be inserted");
+    let impl_closer = result.rfind("\n}\n").expect("impl closer must be present");
+    assert!(
+        beta_pos < impl_closer,
+        "insertion must land inside `impl Foo`, before its closing brace; got:\n{result}"
     );
 }
 
