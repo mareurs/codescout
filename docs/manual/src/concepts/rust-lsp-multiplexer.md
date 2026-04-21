@@ -1,7 +1,4 @@
 # Rust LSP multiplexer
-
-> ⚠ Experimental — may change without notice.
-
 ## What it does
 
 When two `codescout` instances open the same Rust project, they now share a

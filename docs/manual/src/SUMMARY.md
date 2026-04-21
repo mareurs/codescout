@@ -32,6 +32,11 @@
   - [Auto-Registration](concepts/multi-ecosystem-auto-registration.md)
 - [Multi-Project Workspaces](concepts/multi-project-workspace.md)
   - [activate_project Output](concepts/activate-project-output-optimization.md)
+  - [Project Hints](concepts/project-hints.md)
+
+- [MCP Resources](concepts/mcp-resources.md)
+  - [Tool Description Diet](concepts/tool-description-diet.md)
+  - [Tool Usage Doctor](concepts/tool-usage-doctor.md)
 - [LSP Idle TTL](concepts/lsp-idle-ttl.md)
 
 - [Memory](concepts/memory.md)
@@ -46,6 +51,7 @@
   - [Security Profiles](concepts/security-profiles.md)
   - [Compact Schemas & `activate_project` Safety](concepts/compact-schemas-and-activate-project-safety.md)
   - [PostCompact Cache Flush](concepts/post-compact-cache-flush.md)
+  - [Cross-Process Write Serialization](concepts/cross-process-write-serialization.md)
 
 - [Routing Plugin](concepts/routing-plugin.md)
   - [Superpowers Workflow](concepts/superpowers.md)
@@ -56,20 +62,25 @@
     - [Model Comparison](configuration/embedding-model-comparison.md)
 
 - [Language Support](language-support.md)
+  - [Bash](concepts/bash-language-support.md)
   - [Kotlin LSP Multiplexer](concepts/kotlin-lsp-multiplexer.md)
+  - [Rust LSP Multiplexer](concepts/rust-lsp-multiplexer.md)
 
 # Tool Reference
 
 - [Tools Overview](tools/overview.md)
   - [API Naming Reference](tools/api-redesign.md)
   - [Symbol Navigation](tools/symbol-navigation.md)
+    - [Progressive Directory Overview](tools/list-symbols-progressive.md)
   - [File Operations](tools/file-operations.md)
     - [grep: Literal Fallback](tools/search-pattern-literal-fallback.md)
   - [Editing](tools/editing.md)
     - [Structural Edit Gate](tools/edit-file-structural-gate.md)
     - [Document Section Editing](tools/document-section-editing.md)
     - [Markdown Tools](tools/markdown-tools.md)
+    - [read_markdown](tools/read-markdown.md)
   - [Semantic Search](tools/semantic-search.md)
+    - [File-Diversity Re-Rank](tools/semantic-search-diversity.md)
   - [Library Navigation](tools/library-navigation.md)
   - [Git](tools/git.md)
   - [AST Analysis](tools/ast.md)
@@ -84,20 +95,10 @@
 
 - [Experimental Features](experimental/index.md)
   - [Asymmetric query prefix](experimental/asymmetric-query-prefix.md)
-  - [Bash language support](experimental/bash-language-support.md)
-  - [Cross-process write serialization](experimental/cross-process-write-serialization.md)
-  - [File-diversity re-rank](experimental/file-diversity-rerank.md)
   - [Global config](experimental/global-config.md)
   - [Index scope guard](experimental/index-scope-guard.md)
   - [librarian-mcp](experimental/librarian-mcp.md)
-  - [list_symbols progressive directory](experimental/list-symbols-progressive-dir.md)
-  - [MCP resources, tool diet, progress](experimental/mcp-resources.md)
   - [Metadata-enriched chunks](experimental/metadata-enriched-chunks.md)
-  - [Project hints](experimental/project-hints.md)
-  - [read_markdown improvements](experimental/read-markdown-improvements.md)
-  - [Rust LSP multiplexer](experimental/mux-rust.md)
-  - [Tool description diet](experimental/tool-description-diet.md)
-  - [Tool usage doctor](experimental/tool-usage-doctor.md)
 
 # Development
 

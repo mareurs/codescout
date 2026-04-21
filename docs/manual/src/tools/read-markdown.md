@@ -1,7 +1,4 @@
 # `read_markdown` improvements
-
-> ⚠ Experimental — may change without notice.
-
 ## What changed
 
 Three related improvements landed together:

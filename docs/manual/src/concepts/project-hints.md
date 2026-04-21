@@ -1,7 +1,4 @@
 # Project Hints
-
-> ⚠ Experimental — may change without notice.
-
 `activate_project` now returns a `project_hints` field with manifest-derived
 context so agents have useful information even when `onboarding` has never been
 run.

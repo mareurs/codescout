@@ -1,7 +1,4 @@
 # Tool Usage Doctor
-
-> ⚠ Experimental — may change without notice.
-
 The `doctor://tool-usage` MCP resource surfaces per-tool call statistics and
 prune candidates, so codescout maintainers can quantify what the current
 token-diet actually bought us and identify rarely-used tools for the next

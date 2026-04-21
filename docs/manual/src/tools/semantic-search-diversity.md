@@ -1,7 +1,4 @@
 # File-Diversity Re-Rank for `semantic_search`
-
-> ⚠ Experimental — may change without notice.
-
 `semantic_search` applies a per-file cap to its results before returning them,
 so a single highly-relevant file cannot saturate the top-K and crowd out
 sibling files that the query is also about.

@@ -1,7 +1,4 @@
 # Bash language support
-
-> ⚠ Experimental — may change without notice.
-
 ## What it does
 
 Bash and shell scripts (`.sh`, `.bash`) now receive full language support:

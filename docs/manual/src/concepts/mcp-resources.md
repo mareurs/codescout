@@ -1,7 +1,4 @@
 # MCP resources, tool diet, and progress notifications
-
-> ⚠ Experimental — may change without notice.
-
 Codescout now exposes three mechanisms to reduce per-turn token overhead and
 surface activity from long-running operations. They ship together because they
 share one thesis: **pay tokens only when the model asks**.

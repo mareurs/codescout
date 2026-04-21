@@ -1,7 +1,4 @@
 # Cross-Process Write Serialization
-
-> ⚠ Experimental — may change without notice.
-
 When multiple codescout MCP server instances run against the same project directory simultaneously (e.g. two IDE windows, two Claude Code sessions, or a background indexer alongside an active session), write-tool calls are now serialized so they cannot corrupt each other.
 
 ## How It Works

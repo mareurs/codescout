@@ -1,7 +1,4 @@
 # `list_symbols` progressive directory overview
-
-> ⚠ Experimental — may change without notice.
-
 ## What it does
 
 When `list_symbols` is called on a directory (rather than a single file), it

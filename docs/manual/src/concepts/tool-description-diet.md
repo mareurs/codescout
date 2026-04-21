@@ -1,4 +1,3 @@
-> ⚠ Experimental — may change without notice.
 
 # Tool Description Diet & Tool Guide Resource
 
