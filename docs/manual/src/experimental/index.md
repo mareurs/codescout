@@ -1,8 +1,8 @@
 # Experimental Features
 
-> Features on this page are available on the [`experiments` branch](https://github.com/mareurs/codescout/tree/experiments)
-> and may change without notice. When a feature graduates to stable, its page
-> moves into the main manual.
+> These features are available on `master` and the `experiments` branch.
+> APIs and behaviour may change without notice. When a feature graduates to
+> stable, its page moves into the main manual.
 
 ## Available Features
 
@@ -20,3 +20,5 @@
 - [File-Diversity Re-Rank for `semantic_search`](./file-diversity-rerank.md) — per-file cap on semantic search results prevents a single file from saturating the top-K; overfetch-then-filter preserves score ordering.
 
 - [librarian-mcp — workspace artifact registry](./librarian-mcp.md) — sibling MCP server that indexes markdown artifacts (specs, plans, memories, ADRs, docs) across every repo in a workspace, with filter AST, link graph, and semantic search.
+- [Tool description diet & tool guide resource](./tool-description-diet.md) — caps tool descriptions at 300 characters; full usage notes served on demand via `doc://codescout-tool-guide` resource.
+- [Global config](./global-config.md) — `~/.config/codescout/config.toml` (XDG) merged with per-project `.codescout/config.toml`; set workspace-wide defaults without touching every project.

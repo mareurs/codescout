@@ -80,6 +80,25 @@
     - [Onboarding Improvements](concepts/onboarding-improvements.md)
   - [GitHub](tools/github.md)
 
+# Experimental
+
+- [Experimental Features](experimental/index.md)
+  - [Asymmetric query prefix](experimental/asymmetric-query-prefix.md)
+  - [Bash language support](experimental/bash-language-support.md)
+  - [Cross-process write serialization](experimental/cross-process-write-serialization.md)
+  - [File-diversity re-rank](experimental/file-diversity-rerank.md)
+  - [Global config](experimental/global-config.md)
+  - [Index scope guard](experimental/index-scope-guard.md)
+  - [librarian-mcp](experimental/librarian-mcp.md)
+  - [list_symbols progressive directory](experimental/list-symbols-progressive-dir.md)
+  - [MCP resources, tool diet, progress](experimental/mcp-resources.md)
+  - [Metadata-enriched chunks](experimental/metadata-enriched-chunks.md)
+  - [Project hints](experimental/project-hints.md)
+  - [read_markdown improvements](experimental/read-markdown-improvements.md)
+  - [Rust LSP multiplexer](experimental/mux-rust.md)
+  - [Tool description diet](experimental/tool-description-diet.md)
+  - [Tool usage doctor](experimental/tool-usage-doctor.md)
+
 # Development
 
 - [Architecture](architecture.md)
