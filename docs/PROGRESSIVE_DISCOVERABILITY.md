@@ -168,7 +168,32 @@ Good:
 This pattern is already established in the codebase (`RecoverableError::with_hint`). Extend it to
 every recoverable failure.
 
-### Pattern 6: Never Exceed MCP Output Limits
+### Pattern 5a: Severity-Tagged Guidance — `hint` / `warning` / `must_follow`
+
+Tool responses carry guidance under one of three field names. The field name
+itself is the prompt: agents scanning JSON react to the key, not to prose
+severity markers buried inside a generic `hint` string.
+
+| Field | Severity | When to use |
+|---|---|---|
+| `hint` | take-it-or-leave-it | Optional narrowing ("you could use `json_path` to extract one field"). Agent can ignore without consequence. |
+| `warning` | off-golden-path | Result is suboptimal but valid. Reconsider before proceeding ("returned 50 of 401 — narrow before paginating"). |
+| `must_follow` | binding, iron-law-grade | Violating produces wrong results or wastes significant context. Cite the specific rule ("IRON LAW #6: use `@file_abc` for subsequent reads — NOT the original path"). |
+
+The three fields are mutually exclusive — at most one appears on any response.
+
+**When to pick `must_follow`:**
+
+- Violating the guidance produces **wrong results** (not just suboptimal).
+- The rule is already in the Iron Laws — cite it by number.
+- The agent has been observed to silently drift past the `hint` register.
+
+`must_follow` is rare by construction. If every tool response carries one, the
+register loses its weight. Aim for <10% of recoverable-error responses.
+
+**Rust API:** `RecoverableError::with_must_follow(message, text)`. Attach
+structured context with `.with_extra("file_id", json!(...))`; extras are
+spliced into the response body at the top level.### Pattern 6: Never Exceed MCP Output Limits
 
 Claude Code warns at 10,000 tokens and hard-caps at 25,000 tokens (configurable via
 `MAX_MCP_OUTPUT_TOKENS`). A tool that regularly exceeds this is broken, even if the data is valid.

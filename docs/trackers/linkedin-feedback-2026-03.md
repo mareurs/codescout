@@ -20,21 +20,22 @@ and document results.
 
 ## Active
 
-### Restore HTTP transport (rmcp 1.x migration)
-HTTP transport broke during rmcp 1.x migration. Need to: enable
-`transport-streamable-http-server` feature in Cargo.toml, update server setup
-code for new rmcp API, handle per-connection session model, update docs.
-Currently returns a helpful error at runtime. Not urgent — stdio covers all
-primary use cases (Claude Code, Gemini CLI). HTTP unlocks remote/shared
-deployments and web-based clients.
-
-### Improve onboarding skip behavior
-If onboarding is skipped, tools still work but the agent lacks project context.
-Improve fallback: auto-detect language from file extensions, infer basic project
-structure from build files (Cargo.toml, package.json), provide minimal
-navigation hints even without explicit onboarding. Make it feel like a
-"strongly recommended first step" rather than a hard requirement.
+_(none)_
 
 ## Resolved
 
-_(none yet)_
+### Restore HTTP transport (rmcp 1.x migration)
+Already working. Verified 2026-04-15 via smoke test: `codescout start
+--transport http --port 39991 --auth-token X`, `curl POST /mcp initialize`
+returns a full response with tools list. `http` is enabled in default features;
+`rmcp/transport-streamable-http-server` is wired in `src/server.rs`. Tracker
+entry was stale — the migration landed before this tracker was opened.
+
+### Improve onboarding skip behavior
+Implemented 2026-04-15 as `project_hints` field in the `activate_project`
+response. New module `src/mcp_resources/project_hints.rs` probes manifest
+files at the project root (Cargo.toml, package.json, pyproject.toml, go.mod,
+pom.xml, build.gradle{,.kts}) and returns `primary_language`, `manifest`,
+`entry_points`, `build_commands`, and `onboarded` flag. Agents that never call
+the `onboarding` tool still get meaningful project context. Experimental doc:
+`docs/manual/src/experimental/project-hints.md`.

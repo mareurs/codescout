@@ -384,6 +384,49 @@ from background tasks (check client capabilities for progress support).
 - **Scope**: fix is at the `atomic_write` layer, so `edit_file`, `replace_symbol`, `insert_code`, `remove_symbol`, `rename_symbol`, `edit_markdown`, and any other write going through it are all covered.
 - **Status**: fixed.
 
+### BUG-045 — `librarian_reindex`: `UNIQUE constraint failed on artifact_vec` aborts reindex
+
+**Date:** 2026-04-20
+**Severity:** Medium
+**Status:** Fixed (2026-04-21)
+
+**What happened:**
+Called `librarian_reindex` after adding new classification rules to `~/.config/librarian/workspace.toml`. Tool returned `error: UNIQUE constraint failed on artifact_vec primary key: Error code 1: SQL logic error` and aborted. No files were reclassified.
+
+**Reproduction hint:**
+Run `librarian_reindex` against a catalog that already has embeddings populated for existing artifacts. Fires when re-embedding an artifact whose vec row already exists under the same `id`.
+
+**Root cause:**
+`write_embeddings` used `INSERT OR REPLACE` against the `artifact_vec` sqlite-vec `vec0` virtual table. `vec0` silently ignores conflict resolution clauses — `OR REPLACE` treated as plain `INSERT`, causing UNIQUE constraint violation on any re-embed.
+
+**Fix:**
+Changed `write_embeddings` to `DELETE FROM artifact_vec WHERE id = ?1` followed by `INSERT INTO artifact_vec` for each row. Regression test added: `write_embeddings_is_idempotent_on_same_id`.
+
+---
+
+### BUG-046 — `librarian_reindex`: unchanged-SHA shortcut skips re-classification after rule changes
+
+**Date:** 2026-04-20
+**Severity:** Medium
+**Status:** Fixed (2026-04-21)
+
+**What happened:**
+Added new `[[rule]]` entries mapping `**/docs/trackers/**/*.md` to `kind=tracker` in `~/.config/librarian/workspace.toml`. Ran `librarian_reindex`. Existing rows kept their previous `kind=unknown` classification — rule change had no effect on pre-existing files. Had to manually `UPDATE artifact SET kind='tracker', status='active' WHERE ...` via `sqlite3` to apply the new rule retroactively.
+
+**Reproduction hint:**
+1. Index a repo where some files don't match any rule (→ `kind=unknown`).
+2. Add a `[[rule]]` that would now match those files.
+3. Run `librarian_reindex`.
+4. Observe that matching rows still have `kind=unknown`.
+
+**Root cause:**
+`index_repo_sync` short-circuited on `ex.file_sha256 == sha` before re-running `classify()`. SHA check conflated "content unchanged" with "classification unchanged" — a rules-file change invalidates all existing classifications regardless of content.
+
+**Fix:**
+Moved classification before SHA check. Compute full meta tuple (kind, status, time_scope, title, owners, tags, topic, confidence); skip upsert only when both content AND meta are unchanged. Skip embed queue when content unchanged. Regression test added: `rule_change_reclassifies_existing_rows_without_content_change`.
+
+---
+
 ## Template for new entries
 
 ```

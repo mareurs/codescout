@@ -18,13 +18,14 @@ available for a given language.
 
 | Language   | Extensions              | LSP Server                   | Support Level |
 |------------|-------------------------|------------------------------|---------------|
-| Rust       | `.rs`                   | `rust-analyzer`              | Full          |
-| Python     | `.py`                   | `pyright-langserver`         | Full          |
-| TypeScript | `.ts`                   | `typescript-language-server` | Full          |
-| TSX        | `.tsx`                  | `typescript-language-server` | Full          |
+| Bash       | `.sh`, `.bash`          | `bash-language-server`       | Full          |
 | Go         | `.go`                   | `gopls`                      | Full          |
 | Java       | `.java`                 | `jdtls`                      | Full          |
 | Kotlin     | `.kt`, `.kts`           | `kotlin-lsp` (JetBrains)     | Full          |
+| Python     | `.py`                   | `pyright-langserver`         | Full          |
+| Rust       | `.rs`                   | `rust-analyzer`              | Full          |
+| TypeScript | `.ts`                   | `typescript-language-server` | Full          |
+| TSX        | `.tsx`                  | `typescript-language-server` | Full          |
 | JavaScript | `.js`                   | `typescript-language-server` | LSP only      |
 | JSX        | `.jsx`                  | `typescript-language-server` | LSP only      |
 | C          | `.c`                    | `clangd`                     | LSP only      |
@@ -49,7 +50,6 @@ is configured and no tree-sitter grammar is bundled.
 | Elixir   | `.ex`, `.exs`   |
 | Haskell  | `.hs`           |
 | Lua      | `.lua`          |
-| Bash     | `.sh`, `.bash`  |
 | Markdown | `.md`           |
 
 ---
@@ -182,7 +182,19 @@ npm install -g vscode-langservers-extracted
 ```
 
 One package installs both servers. Binaries: `vscode-html-language-server` (HTML)
-and `vscode-css-language-server` (CSS, SCSS, Less), each invoked with `--stdio`.## Known Quirks
+and `vscode-css-language-server` (CSS, SCSS, Less), each invoked with `--stdio`.
+
+### Bash
+
+```bash
+npm install -g bash-language-server
+```
+
+Binary: `bash-language-server`, invoked with `start` (positional argument — not `--stdio`).
+
+---
+
+## Known Quirks
 
 **jdtls** requires a data/workspace directory for project indexes. Some wrapper
 scripts accept `--data` to specify this path. If symbol tools return empty
@@ -216,8 +228,3 @@ TypeScript and TSX. The LSP `languageId` sent for TSX files is
 internally and requires no configuration.
 
 ---
-
-## Overriding LSP Server Configuration
-
-The defaults above can be overridden per-project in `.codescout/project.toml`.
-See [Project Configuration](configuration/project-toml.md) for details.
