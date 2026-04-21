@@ -1,7 +1,4 @@
 # Metadata-Enriched Chunks
-
-> ⚠ Experimental — may change without notice.
-
 Every code chunk stored in the semantic index now carries a short searchable header prepended to its embedding input. Headers encode file path, container context, and symbol name:
 
     src/embed/index.rs :: impl IndexStore :: fn build_index(force: bool)

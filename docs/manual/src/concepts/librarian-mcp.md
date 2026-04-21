@@ -1,7 +1,4 @@
 # librarian-mcp — workspace artifact registry
-
-> ⚠ Experimental — may change without notice.
-
 Codescout's sister MCP server. Indexes markdown artifacts (specs, plans,
 runbooks, ADRs, memories, audits, handoffs, roadmaps, user docs) across **every
 repo in a workspace**, stores metadata + link graph in SQLite, and exposes MCP

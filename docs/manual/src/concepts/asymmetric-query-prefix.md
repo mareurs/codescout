@@ -1,7 +1,4 @@
 # Asymmetric Query Prefix for Embedding Models
-
-> ⚠ Experimental — may change without notice.
-
 Some embedding models are trained **asymmetrically**: documents and queries use
 different input conventions. The canonical example is **CodeRankEmbed**, which
 expects every query to be prefixed with:

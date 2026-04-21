@@ -1,7 +1,4 @@
 # Index Scope Guard
-
-> ⚠ Experimental — may change without notice.
-
 Before `index_project` commits to walking and embedding a directory, codescout
 checks whether the scope looks broad enough to be accidental, and requires
 explicit human confirmation via an MCP elicitation dialog before proceeding.

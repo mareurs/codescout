@@ -27,6 +27,9 @@
 
 - [Semantic Search](concepts/semantic-search.md)
   - [Setup Guide](semantic-search-guide.md)
+  - [Asymmetric Query Prefix](concepts/asymmetric-query-prefix.md)
+  - [Metadata-Enriched Chunks](concepts/metadata-enriched-chunks.md)
+  - [Index Scope Guard](concepts/index-scope-guard.md)
 
 - [Library Navigation](concepts/library-navigation.md)
   - [Auto-Registration](concepts/multi-ecosystem-auto-registration.md)
@@ -37,6 +40,8 @@
 - [MCP Resources](concepts/mcp-resources.md)
   - [Tool Description Diet](concepts/tool-description-diet.md)
   - [Tool Usage Doctor](concepts/tool-usage-doctor.md)
+
+- [librarian-mcp](concepts/librarian-mcp.md)
 - [LSP Idle TTL](concepts/lsp-idle-ttl.md)
 
 - [Memory](concepts/memory.md)
@@ -57,6 +62,7 @@
   - [Superpowers Workflow](concepts/superpowers.md)
 
 - [Project Configuration](configuration/project-toml.md)
+  - [Global Config](configuration/global-config.md)
   - [Embedding Backends](configuration/embedding-backends.md)
   - [Embeddings](configuration/embeddings.md)
     - [Model Comparison](configuration/embedding-model-comparison.md)
@@ -94,11 +100,6 @@
 # Experimental
 
 - [Experimental Features](experimental/index.md)
-  - [Asymmetric query prefix](experimental/asymmetric-query-prefix.md)
-  - [Global config](experimental/global-config.md)
-  - [Index scope guard](experimental/index-scope-guard.md)
-  - [librarian-mcp](experimental/librarian-mcp.md)
-  - [Metadata-enriched chunks](experimental/metadata-enriched-chunks.md)
 
 # Development
 

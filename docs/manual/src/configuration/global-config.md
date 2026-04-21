@@ -1,4 +1,3 @@
-> ⚠ Experimental — may change without notice.
 
 # Global Config
 
