@@ -48,51 +48,119 @@ impl<S: SummarySource + 'static> ResourceProvider for ProjectSummaryProvider<S> 
     }
 }
 
+/// Detect the primary language of a project using manifest-file heuristics.
+///
+/// Priority:
+/// 1. A canonical manifest at the project root (Cargo.toml → rust,
+///    package.json → typescript/javascript, pyproject.toml/setup.py → python,
+///    go.mod → go, pom.xml → java, build.gradle.kts/build.gradle → kotlin).
+///    The manifest's language is accepted only when it also appears in the
+///    `configured` list — that keeps us honest to the user's own configuration.
+/// 2. Fall back to `configured.first()` if no manifest matches.
+///
+/// For `package.json`: returns `"typescript"` when a `tsconfig.json` also exists,
+/// otherwise returns `"javascript"`.
+fn detect_primary_language(
+    project_root: &std::path::Path,
+    configured: &[String],
+) -> Option<String> {
+    let configured_contains = |lang: &str| configured.iter().any(|l| l.eq_ignore_ascii_case(lang));
+
+    // package.json: typescript when tsconfig.json is also present, else javascript.
+    if project_root.join("package.json").exists() {
+        let lang = if project_root.join("tsconfig.json").exists() {
+            "typescript"
+        } else {
+            "javascript"
+        };
+        if configured_contains(lang) {
+            return Some(lang.to_string());
+        }
+    }
+
+    const MANIFESTS: &[(&str, &str)] = &[
+        ("Cargo.toml", "rust"),
+        ("pyproject.toml", "python"),
+        ("setup.py", "python"),
+        ("go.mod", "go"),
+        ("pom.xml", "java"),
+        ("build.gradle.kts", "kotlin"),
+        ("build.gradle", "kotlin"),
+    ];
+
+    for (manifest, lang) in MANIFESTS {
+        if project_root.join(manifest).exists() && configured_contains(lang) {
+            return Some((*lang).to_string());
+        }
+    }
+
+    configured.first().cloned().filter(|s| !s.is_empty())
+}
+
 /// Adapter that fills [`SummarySnapshot`] from live [`crate::agent::Agent`] state.
 ///
 /// All probes are best-effort — any field that can't be determined falls back to
 /// `None` / `"unknown"` / `false` rather than propagating an error.
 pub struct AgentSummarySource {
     agent: crate::agent::Agent,
+    lsp: std::sync::Arc<dyn crate::lsp::ops::LspProvider>,
 }
 
 impl AgentSummarySource {
-    pub fn new(agent: crate::agent::Agent) -> Self {
-        Self { agent }
+    pub fn new(
+        agent: crate::agent::Agent,
+        lsp: std::sync::Arc<dyn crate::lsp::ops::LspProvider>,
+    ) -> Self {
+        Self { agent, lsp }
     }
 }
 
 #[async_trait]
 impl SummarySource for AgentSummarySource {
     async fn snapshot(&self) -> SummarySnapshot {
-        let active_project = self
-            .agent
-            .project_root()
-            .await
-            .map(|p| p.display().to_string());
+        let root = self.agent.project_root().await;
 
-        let language = self
-            .agent
-            .with_project(|p| {
-                Ok(p.config
-                    .project
-                    .languages
-                    .first()
-                    .cloned()
-                    .unwrap_or_default())
-            })
-            .await
-            .ok()
-            .filter(|s: &String| !s.is_empty());
+        let active_project = root.as_ref().map(|p| p.display().to_string());
 
-        // No runtime freshness API — leave as "unknown".
-        let index_status = "unknown".to_string();
+        let configured: Vec<String> = self
+            .agent
+            .with_project(|p| Ok(p.config.project.languages.clone()))
+            .await
+            .unwrap_or_default();
+
+        let language = root
+            .as_deref()
+            .and_then(|r| detect_primary_language(r, &configured))
+            .or_else(|| configured.first().cloned().filter(|s| !s.is_empty()));
+
+        let index_status = self.agent.index_status_label();
+
+        // Probe configured languages; fall back to the detected language when
+        // configured list is empty (e.g. no project.toml yet).
+        let probe_langs: Vec<&str> = if configured.is_empty() {
+            language.as_deref().into_iter().collect()
+        } else {
+            configured.iter().map(String::as_str).collect()
+        };
+
+        let lsp_ready = if let Some(ref r) = root {
+            let mut any = false;
+            for lang in &probe_langs {
+                if self.lsp.is_ready(lang, r).await {
+                    any = true;
+                    break;
+                }
+            }
+            any
+        } else {
+            false
+        };
 
         SummarySnapshot {
             active_project,
             index_status,
             language,
-            lsp_ready: false,
+            lsp_ready,
         }
     }
 }
@@ -100,6 +168,7 @@ impl SummarySource for AgentSummarySource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     struct StubSource;
     #[async_trait]

@@ -245,7 +245,7 @@ async fn cross_embed_memory(ctx: &ToolContext, topic: &str, content: &str) -> an
     };
 
     let embedder = ctx.agent.get_or_create_embedder(&model).await?;
-    let embedding = crate::embed::embed_one(embedder.as_ref(), content).await?;
+    let embedding = codescout_embed::embed_one(embedder.as_ref(), content).await?;
 
     let topic_owned = topic.to_string();
     let content_owned = content.to_string();
@@ -287,7 +287,7 @@ async fn create_semantic_anchors(
     };
 
     let embedder = ctx.agent.get_or_create_embedder(&model).await?;
-    let embedding = crate::embed::embed_one(embedder.as_ref(), content).await?;
+    let embedding = codescout_embed::embed_one(embedder.as_ref(), content).await?;
 
     let path_anchors = path_anchor_files.clone();
     let topic_owned = topic.to_string();
@@ -686,7 +686,7 @@ impl Tool for Memory {
                 };
 
                 let embedder = ctx.agent.get_or_create_embedder(&model).await?;
-                let embedding = crate::embed::embed_one(embedder.as_ref(), content).await?;
+                let embedding = codescout_embed::embed_one(embedder.as_ref(), content).await?;
 
                 let bucket2 = bucket.clone();
                 let title2 = title.clone();
@@ -721,7 +721,7 @@ impl Tool for Memory {
 
                 let embedder = ctx.agent.get_or_create_embedder(&model).await?;
                 let query_embedding =
-                    crate::embed::embed_one(embedder.as_ref(), query).await?;
+                    codescout_embed::embed_one(embedder.as_ref(), query).await?;
 
                 let bucket = bucket_filter.map(|s| s.to_string());
                 let results = tokio::task::spawn_blocking(move || {

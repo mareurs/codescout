@@ -134,7 +134,10 @@ pub async fn run(
                     "references": { "dynamicRegistration": true },
                     "hover": { "dynamicRegistration": true },
                     "rename": { "dynamicRegistration": true },
-                    "documentSymbol": { "dynamicRegistration": true },
+                    "documentSymbol": {
+                        "dynamicRegistration": true,
+                        "hierarchicalDocumentSymbolSupport": true
+                    },
                     "completion": { "dynamicRegistration": true }
                 },
                 "workspace": {

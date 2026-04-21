@@ -5,16 +5,22 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 
 pub struct ActivateProject;
+impl ActivateProject {
+    pub const NAME: &'static str = "activate_project";
+}
+
 pub struct ProjectStatus;
 
 #[async_trait::async_trait]
 impl Tool for ActivateProject {
     fn name(&self) -> &str {
-        "activate_project"
+        Self::NAME
     }
     fn description(&self) -> &str {
         "Switch the active project to the given path. All subsequent tool calls \
-         operate relative to this project root."
+         operate relative to this project root. Response includes `project_hints` \
+         (primary language, manifest, entry points, build commands) so agents have \
+         context even without running onboarding."
     }
     fn input_schema(&self) -> Value {
         json!({
@@ -282,7 +288,16 @@ async fn build_activation_response(
     scenario: HintScenario,
     auto_registered: &[crate::library::auto_register::RegisteredDep],
 ) -> anyhow::Result<Value> {
-    let (project_name, project_root, languages, read_only, memories, has_index, security) = ctx
+    let (
+        project_name,
+        project_root_str,
+        project_root_path,
+        languages,
+        read_only,
+        memories,
+        has_index,
+        security,
+    ) = ctx
         .agent
         .with_project(|p| {
             let memories = p.memory.list().unwrap_or_default();
@@ -299,6 +314,7 @@ async fn build_activation_response(
             Ok((
                 p.config.project.name.clone(),
                 p.root.display().to_string(),
+                p.root.clone(),
                 p.config.project.languages.clone(),
                 p.read_only,
                 memories,
@@ -333,11 +349,11 @@ async fn build_activation_response(
     let hint = match scenario {
         HintScenario::FirstActivation => format!(
             "CWD: {}. Run project_status() for health checks and memory staleness.",
-            project_root
+            project_root_str
         ),
         HintScenario::ReturnToHome => format!(
             "Returned to home project. CWD: {}. Run project_status() to check memory staleness.",
-            project_root
+            project_root_str
         ),
         HintScenario::SwitchAway if read_only => {
             let home_str = home_root
@@ -346,7 +362,7 @@ async fn build_activation_response(
                 .unwrap_or_default();
             format!(
                 "Browsing {} (read-only). CWD: {} — remember to activate_project(\"{}\") when done.",
-                project_name, project_root, home_str,
+                project_name, project_root_str, home_str,
             )
         }
         HintScenario::SwitchAway => {
@@ -356,19 +372,27 @@ async fn build_activation_response(
                 .unwrap_or_default();
             format!(
                 "Switched project (read-write). CWD: {} — remember to activate_project(\"{}\") when done.",
-                project_root, home_str,
+                project_root_str, home_str,
             )
         }
     };
 
+    // Manifest-derived hints so agents that never call `onboarding` still have
+    // project context (primary language, entry points, build commands). When
+    // an `onboarding` memory is present these are redundant but cheap enough
+    // to always include.
+    let hints =
+        crate::mcp_resources::project_hints::probe_project_hints(&project_root_path, &memories);
+
     let mut result = json!({
         "status": "ok",
         "project": project_name,
-        "project_root": project_root,
+        "project_root": project_root_str,
         "read_only": read_only,
         "languages": languages,
         "index": index,
         "memories": memories,
+        "project_hints": hints,
         "hint": hint,
     });
 
@@ -496,9 +520,83 @@ mod tests {
 
         // Now project_status works
         let status = ProjectStatus.call(json!({}), &ctx).await.unwrap();
-        assert!(status["project_root"].as_str().unwrap().len() > 0);
+        assert!(!status["project_root"].as_str().unwrap().is_empty());
         assert!(status["languages"].is_array());
         assert!(status["embeddings_model"].is_string());
+    }
+
+    #[tokio::test]
+    async fn activate_surfaces_project_hints_from_cargo_toml() {
+        // Agents that never call `onboarding` should still see primary language,
+        // manifest, entry points, and build commands in the activate response.
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/main.rs"), "fn main() {}").unwrap();
+
+        let ctx = ToolContext {
+            agent: Agent::new(None).await.unwrap(),
+            lsp: lsp(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+        };
+
+        let result = ActivateProject
+            .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        let hints = &result["project_hints"];
+        assert_eq!(hints["primary_language"], "rust");
+        assert_eq!(hints["manifest"], "Cargo.toml");
+        assert_eq!(hints["entry_points"], json!(["src/main.rs"]));
+        assert!(
+            hints["build_commands"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v == "cargo test"),
+            "hints must include cargo test: {hints:?}"
+        );
+        assert_eq!(hints["onboarded"], false);
+    }
+
+    #[tokio::test]
+    async fn activate_hints_empty_for_unrecognised_project() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        // No manifest file.
+
+        let ctx = ToolContext {
+            agent: Agent::new(None).await.unwrap(),
+            lsp: lsp(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+        };
+
+        let result = ActivateProject
+            .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        let hints = &result["project_hints"];
+        assert!(hints["primary_language"].is_null());
+        assert!(hints["manifest"].is_null());
+        assert_eq!(hints["entry_points"], json!([]));
+        assert_eq!(hints["build_commands"], json!([]));
     }
 
     #[tokio::test]

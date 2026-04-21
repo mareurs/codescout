@@ -66,6 +66,13 @@ pub trait LspProvider: Send + Sync {
 
     async fn shutdown_all(&self);
 
+    /// Returns `true` if there is already a live LSP client for the given language
+    /// in the given workspace root. Must NOT start a new client — this is a
+    /// non-blocking readiness probe used by diagnostic/summary tools.
+    async fn is_ready(&self, _language: &str, _workspace_root: &Path) -> bool {
+        false
+    }
+
     /// Record the first real LSP response time for a cold-started client.
     /// Default implementation is a no-op — only `LspManager` does real work.
     /// Best-effort: implementations must never propagate errors.

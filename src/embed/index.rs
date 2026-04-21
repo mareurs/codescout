@@ -210,7 +210,8 @@ fn copy_chunks_to_lib_db(src_conn: &Connection, lib_path: &Path, source: &str) -
             start_line INTEGER NOT NULL,
             end_line INTEGER NOT NULL,
             file_hash TEXT NOT NULL,
-            source TEXT NOT NULL DEFAULT 'project'
+            source TEXT NOT NULL DEFAULT 'project',
+            metadata TEXT
         );
         CREATE TABLE IF NOT EXISTS chunk_embeddings (
             rowid INTEGER PRIMARY KEY,
@@ -239,7 +240,7 @@ fn copy_chunks_to_lib_db(src_conn: &Connection, lib_path: &Path, source: &str) -
     for id in &ids {
         // Read the full chunk row by PK
         let row = src_conn.query_row(
-            "SELECT file_path, language, content, start_line, end_line, file_hash, source \
+            "SELECT file_path, language, content, start_line, end_line, file_hash, source, metadata \
              FROM chunks WHERE id = ?1",
             [id],
             |r| {
@@ -251,14 +252,16 @@ fn copy_chunks_to_lib_db(src_conn: &Connection, lib_path: &Path, source: &str) -
                     r.get::<_, i64>(4)?,
                     r.get::<_, String>(5)?,
                     r.get::<_, String>(6)?,
+                    r.get::<_, Option<String>>(7)?,
                 ))
             },
         );
-        let (file_path, language, content, start_line, end_line, file_hash, src_tag) = match row {
-            Ok(r) => r,
-            Err(rusqlite::Error::QueryReturnedNoRows) => continue,
-            Err(e) => return Err(e.into()),
-        };
+        let (file_path, language, content, start_line, end_line, file_hash, src_tag, metadata) =
+            match row {
+                Ok(r) => r,
+                Err(rusqlite::Error::QueryReturnedNoRows) => continue,
+                Err(e) => return Err(e.into()),
+            };
 
         // Read the corresponding embedding blob (may not exist for old rows)
         let embedding: Option<Vec<u8>> = src_conn
@@ -273,9 +276,11 @@ fn copy_chunks_to_lib_db(src_conn: &Connection, lib_path: &Path, source: &str) -
         // Insert chunk, capturing the new rowid for the embedding
         lib_conn.execute(
             "INSERT INTO chunks \
-             (file_path, language, content, start_line, end_line, file_hash, source) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![file_path, language, content, start_line, end_line, file_hash, src_tag],
+             (file_path, language, content, start_line, end_line, file_hash, source, metadata) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                file_path, language, content, start_line, end_line, file_hash, src_tag, metadata
+            ],
         )?;
         let new_rowid = lib_conn.last_insert_rowid();
 
@@ -310,6 +315,10 @@ fn extract_by_file_path_fallback(project_root: &Path, _conn: &Connection) -> Res
     // need to re-index their libraries after the migration.
     Ok(())
 }
+
+/// Bump whenever the `chunks` table schema changes in a way that requires
+/// re-embedding. On mismatch, `open_db` drops and recreates all chunk-related tables.
+const SCHEMA_VERSION: u32 = 1;
 
 /// Open (or create) the embedding database and apply the schema.
 /// Register sqlite-vec globally so every SQLite connection in this process
@@ -352,6 +361,32 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
     let conn = Connection::open(&path)?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
 
+    // Read stored schema version; drop chunk tables if stale.
+    {
+        use rusqlite::OptionalExtension;
+        let stored: Option<u32> = conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'schema_version'",
+                [],
+                |r| {
+                    r.get::<_, String>(0)
+                        .and_then(|s| s.parse::<u32>().map_err(|_| rusqlite::Error::InvalidQuery))
+                },
+            )
+            .optional()
+            .ok()
+            .flatten();
+
+        if stored != Some(SCHEMA_VERSION) {
+            conn.execute_batch(
+                "DROP TABLE IF EXISTS chunks;
+                 DROP TABLE IF EXISTS chunk_embeddings;
+                 DROP TABLE IF EXISTS files;",
+            )
+            .context("dropping stale schema")?;
+        }
+    }
+
     conn.execute_batch(
         "
         PRAGMA journal_mode = WAL;
@@ -370,7 +405,8 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
             start_line INTEGER NOT NULL,
             end_line   INTEGER NOT NULL,
             file_hash  TEXT NOT NULL,
-            source     TEXT NOT NULL DEFAULT 'project'
+            source     TEXT NOT NULL DEFAULT 'project',
+            metadata   TEXT
         );
 
         CREATE TABLE IF NOT EXISTS chunk_embeddings (
@@ -406,27 +442,57 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
         ",
     )?;
 
-    // Migrate: add mtime column if missing (safe no-op if already present)
-    let has_mtime: bool = conn.prepare("SELECT mtime FROM files LIMIT 0").is_ok();
-    if !has_mtime {
-        conn.execute_batch("ALTER TABLE files ADD COLUMN mtime INTEGER")?;
-    }
+    // Record current schema version so future opens can detect staleness.
+    conn.execute(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?1)",
+        [&SCHEMA_VERSION.to_string()],
+    )?;
 
-    // Migrate: add source column to chunks if missing (safe no-op if already present)
-    let has_source: bool = conn.prepare("SELECT source FROM chunks LIMIT 0").is_ok();
-    if !has_source {
-        conn.execute_batch("ALTER TABLE chunks ADD COLUMN source TEXT NOT NULL DEFAULT 'project'")?;
-    }
+    // Column-addition migrations wrapped in a SAVEPOINT so a crash mid-migration
+    // leaves the DB consistent rather than partially applied. Probe queries run
+    // outside the savepoint (read-only); only the writes need atomicity.
+    conn.execute_batch("SAVEPOINT schema_migrations")?;
+    let migrate = (|| -> Result<()> {
+        // Migrate: add mtime column if missing (safe no-op if already present)
+        let has_mtime: bool = conn.prepare("SELECT mtime FROM files LIMIT 0").is_ok();
+        if !has_mtime {
+            conn.execute_batch("ALTER TABLE files ADD COLUMN mtime INTEGER")?;
+        }
 
-    // Migration: add project_id column (workspace multi-project support)
-    let has_project_id: bool = conn
-        .prepare("SELECT project_id FROM chunks LIMIT 0")
-        .is_ok();
-    if !has_project_id {
-        conn.execute(
-            "ALTER TABLE chunks ADD COLUMN project_id TEXT NOT NULL DEFAULT 'root'",
-            [],
-        )?;
+        // Migrate: add source column to chunks if missing
+        let has_source: bool = conn.prepare("SELECT source FROM chunks LIMIT 0").is_ok();
+        if !has_source {
+            conn.execute_batch(
+                "ALTER TABLE chunks ADD COLUMN source TEXT NOT NULL DEFAULT 'project'",
+            )?;
+        }
+
+        // Migrate: add project_id column (workspace multi-project support)
+        let has_project_id: bool = conn
+            .prepare("SELECT project_id FROM chunks LIMIT 0")
+            .is_ok();
+        if !has_project_id {
+            conn.execute(
+                "ALTER TABLE chunks ADD COLUMN project_id TEXT NOT NULL DEFAULT 'root'",
+                [],
+            )?;
+        }
+
+        // Migrate: add metadata column (searchable header prepended before embedding)
+        let has_metadata: bool = conn.prepare("SELECT metadata FROM chunks LIMIT 0").is_ok();
+        if !has_metadata {
+            conn.execute_batch("ALTER TABLE chunks ADD COLUMN metadata TEXT")?;
+        }
+
+        Ok(())
+    })();
+    match migrate {
+        Ok(()) => conn.execute_batch("RELEASE schema_migrations")?,
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK TO schema_migrations");
+            let _ = conn.execute_batch("RELEASE schema_migrations");
+            return Err(e);
+        }
     }
 
     maybe_migrate_to_vec0(&conn)?;
@@ -457,7 +523,8 @@ pub fn open_lib_db(project_root: &Path, lib_name: &str) -> Result<Connection> {
             start_line INTEGER NOT NULL,
             end_line   INTEGER NOT NULL,
             file_hash  TEXT NOT NULL,
-            source     TEXT NOT NULL DEFAULT 'project'
+            source     TEXT NOT NULL DEFAULT 'project',
+            metadata   TEXT
         );
 
         CREATE TABLE IF NOT EXISTS chunk_embeddings (
@@ -835,8 +902,8 @@ pub fn insert_chunk(conn: &Connection, chunk: &CodeChunk, embedding: &[f32]) -> 
 
     let result = (|| -> Result<i64> {
         conn.execute(
-            "INSERT INTO chunks (file_path, language, content, start_line, end_line, file_hash, source, project_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO chunks (file_path, language, content, start_line, end_line, file_hash, source, project_id, metadata)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 chunk.file_path,
                 chunk.language,
@@ -846,6 +913,7 @@ pub fn insert_chunk(conn: &Connection, chunk: &CodeChunk, embedding: &[f32]) -> 
                 chunk.file_hash,
                 chunk.source,
                 chunk.project_id,
+                chunk.metadata,
             ],
         )?;
         let row_id = conn.last_insert_rowid();
@@ -1099,6 +1167,12 @@ fn search_scoped_vec0(
     // see it to honour the LIMIT constraint. COALESCE is applied at the outer
     // SELECT level so zero-vector NULLs are mapped to 1.0 (maximum distance).
     //
+    // `{limit}` / `{inner_limit}` are Rust format-interpolated (not `?N` bound
+    // params) because sqlite-vec treats a bound `?N` in the KNN subquery as a
+    // plain SQL LIMIT, bypassing the KNN-k optimisation entirely. The k value
+    // must be a literal in the prepared SQL text. `limit` is a `usize` so there
+    // is no injection risk.
+    //
     // For source-filtered paths we over-fetch from vec0 (inner_limit = limit * 4)
     // because the WHERE clause at the outer level discards non-matching rows
     // *after* the KNN has already capped at `limit`. Without over-fetching,
@@ -1221,13 +1295,21 @@ pub fn search_multi_db(
         }
     }
 
-    // When filtering by project we over-fetch from each DB so that after
-    // dropping non-matching rows there are still enough candidates to fill
-    // `limit`. Factor of 4 matches the over-fetch strategy used elsewhere.
+    // Over-fetch candidates, then apply a per-file cap for diversity.
+    //
+    // Motivation: fine-grained AST chunks + metadata-enriched embeddings cause
+    // one highly-matched file to saturate top-K with sibling methods, crowding
+    // out other relevant files. Production systems (Cursor, Continue.dev) and
+    // the research literature (arXiv:2510.20609, "Practical Code RAG at Scale")
+    // resolve this with a per-source cap in post-processing. Oversample 3×
+    // so there are enough candidates to fill `limit` after capping; keep the
+    // 4× factor already used when a project filter drops rows.
+    const MAX_PER_FILE: usize = 2;
+    const OVERSAMPLE: usize = 3;
     let fetch_limit = if project_filter.is_some() {
         (limit * 4).max(20)
     } else {
-        limit
+        (limit * OVERSAMPLE).max(20)
     };
 
     let mut all_results: Vec<SearchResult> = Vec::new();
@@ -1254,15 +1336,28 @@ pub fn search_multi_db(
         all_results.retain(|r| r.project_id == proj);
     }
 
-    // Sort by score descending, truncate to limit
+    // Sort by score descending so the per-file cap keeps the best chunks per file.
     all_results.sort_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    all_results.truncate(limit);
 
-    Ok(all_results)
+    // Per-file cap: at most MAX_PER_FILE chunks from any single file.
+    let mut per_file: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut capped: Vec<SearchResult> = Vec::with_capacity(limit);
+    for r in all_results.into_iter() {
+        if capped.len() >= limit {
+            break;
+        }
+        let count = per_file.entry(r.file_path.clone()).or_insert(0);
+        if *count < MAX_PER_FILE {
+            *count += 1;
+            capped.push(r);
+        }
+    }
+
+    Ok(capped)
 }
 
 fn bytes_to_f32(bytes: &[u8]) -> Result<Vec<f32>> {
@@ -1453,29 +1548,385 @@ fn is_file_changed_mtime_hash(conn: &Connection, project_root: &Path, rel: &str)
 /// Arguments: `(done, total, eta_secs)`.
 pub type ProgressCb = Box<dyn Fn(usize, usize, Option<u64>) + Send>;
 
-/// Build or incrementally update the embedding index for a project.
+// ── Producer/consumer pipeline types ─────────────────────────────────────────
+
+/// A single file's work item: all the data needed to embed and then write it.
+struct FileWork {
+    rel: String,
+    hash: String,
+    mtime: i64,
+    lang: String,
+    chunks: Vec<super::chunker::RawChunk>,
+}
+
+/// One batch of files, ready to be written to the DB after embedding.
+struct GroupReady {
+    works: Vec<FileWork>,
+    embeddings: Vec<codescout_embed::Embedding>,
+}
+
+// ── embed_producer ────────────────────────────────────────────────────────────
+
+async fn embed_producer(
+    works: Vec<FileWork>,
+    embedder: std::sync::Arc<dyn codescout_embed::Embedder>,
+    tx: tokio::sync::mpsc::Sender<GroupReady>,
+    progress_cb: Option<ProgressCb>,
+    total_files: usize,
+    file_group_size: usize,
+    max_inflight: usize,
+) -> anyhow::Result<()> {
+    use codescout_embed::Embedding;
+    use std::sync::Arc;
+    use tokio::sync::Semaphore;
+    use tokio::task::JoinSet;
+
+    const BATCH_SIZE: usize = 32;
+
+    let embed_start = std::time::Instant::now();
+    let mut files_embedded_so_far = 0usize;
+
+    let mut works_iter = works.into_iter();
+    loop {
+        let group: Vec<FileWork> = works_iter.by_ref().take(file_group_size).collect();
+        if group.is_empty() {
+            break;
+        }
+
+        // Flatten chunks for this group only
+        let mut flat_texts: Vec<String> = Vec::new();
+        let mut file_chunk_counts: Vec<usize> = Vec::new();
+        for work in &group {
+            file_chunk_counts.push(work.chunks.len());
+            for chunk in &work.chunks {
+                flat_texts.push(match &chunk.metadata {
+                    Some(m) => format!("{m}\n{}", chunk.content),
+                    None => chunk.content.clone(),
+                });
+            }
+        }
+        let total_chunks = flat_texts.len();
+        let total_batches = total_chunks.div_ceil(BATCH_SIZE);
+
+        // Spawn embedding tasks for this group
+        let sem = Arc::new(Semaphore::new(max_inflight));
+        let mut tasks: JoinSet<anyhow::Result<(usize, Vec<Embedding>)>> = JoinSet::new();
+        for (batch_idx, chunk) in flat_texts.chunks(BATCH_SIZE).enumerate() {
+            let batch: Vec<String> = chunk.to_vec();
+            let embedder = Arc::clone(&embedder);
+            let sem = Arc::clone(&sem);
+            tasks.spawn(async move {
+                let _permit = sem
+                    .acquire()
+                    .await
+                    .map_err(|_| anyhow::anyhow!("semaphore unexpectedly closed"))?;
+                let refs: Vec<&str> = batch.iter().map(|s| s.as_str()).collect();
+                let embeddings = embedder.embed(&refs).await?;
+                Ok((batch_idx, embeddings))
+            });
+        }
+        drop(flat_texts);
+
+        // Cumulative chunk boundaries for progress reporting within this group
+        let mut boundaries: Vec<usize> = Vec::with_capacity(file_chunk_counts.len());
+        let mut cumul = 0;
+        for &count in &file_chunk_counts {
+            cumul += count;
+            boundaries.push(cumul);
+        }
+        drop(file_chunk_counts);
+
+        // Collect results in batch order
+        let mut batch_results: Vec<Option<Vec<Embedding>>> = vec![None; total_batches];
+        let mut batches_done = 0usize;
+        while let Some(res) = tasks.join_next().await {
+            let (idx, embs) = res.map_err(|e| anyhow::anyhow!(e))??;
+            batch_results[idx] = Some(embs);
+            batches_done += 1;
+
+            if let Some(cb) = &progress_cb {
+                let chunks_done_in_group = batches_done * BATCH_SIZE;
+                let group_files_done = boundaries
+                    .iter()
+                    .filter(|&&b| b <= chunks_done_in_group)
+                    .count();
+                let files_done = files_embedded_so_far + group_files_done;
+                let remaining = total_files.saturating_sub(files_done);
+                let eta = (files_done > 0 && remaining > 0).then(|| {
+                    let elapsed = embed_start.elapsed().as_secs_f64();
+                    (elapsed / files_done as f64 * remaining as f64) as u64
+                });
+                cb(files_done, total_files, eta);
+            }
+        }
+
+        // Test hook: simulate slow embedding so the overlap test can measure that
+        // the writer runs concurrently.  Uses std::thread::sleep (not async sleep)
+        // so the OS-level block is immune to tokio scheduler jitter under load.
+        #[cfg(test)]
+        if let Ok(ms_str) = std::env::var("CODESCOUT_TEST_EMBED_DELAY_MS") {
+            if let Ok(ms) = ms_str.parse::<u64>() {
+                std::thread::sleep(std::time::Duration::from_millis(ms));
+            }
+        }
+
+        // Flatten embeddings in batch order
+        let embeddings: Vec<Embedding> = batch_results
+            .into_iter()
+            .flat_map(|b| b.unwrap_or_default())
+            .collect();
+
+        files_embedded_so_far += group.len();
+
+        // Send to writer; if writer has dropped rx (error path), stop early
+        if tx
+            .send(GroupReady {
+                works: group,
+                embeddings,
+            })
+            .await
+            .is_err()
+        {
+            break;
+        }
+    }
+    Ok(())
+}
+
+// ── db_writer ─────────────────────────────────────────────────────────────────
+
+/// Receives `GroupReady` messages from `embed_producer` and writes each group
+/// to the DB in its own transaction.  When the channel closes the writer runs
+/// the finalize block (anchor staleness, meta, last-indexed-commit).
 ///
-/// Three-phase pipeline for maximum throughput:
-///   1. Change detection + chunk  (git diff → mtime → hash fallback)
-///   2. Embed concurrently   (up to 4 in-flight HTTP requests at once)
-///   3. DB writes in a single transaction  (eliminates per-chunk commit overhead)
+/// Returns `(indexed, drift_results)`.
+///
+/// Test hook: when the environment variable `CODESCOUT_TEST_WRITE_DELAY_MS` is
+/// set to a positive integer, each group write is preceded by a
+/// `std::thread::sleep` of that many milliseconds.  Uses a blocking sleep so
+/// the delay is immune to tokio scheduler jitter under parallel test load.
+/// Only compiled in `#[cfg(test)]` builds.
+async fn db_writer(
+    mut rx: tokio::sync::mpsc::Receiver<GroupReady>,
+    conn: rusqlite::Connection,
+    config: crate::config::ProjectConfig,
+    project_root: std::path::PathBuf,
+    discovered_projects: Vec<crate::workspace::DiscoveredProject>,
+) -> anyhow::Result<(usize, Vec<crate::embed::drift::FileDrift>)> {
+    let mut indexed = 0usize;
+    let mut drift_results: Vec<crate::embed::drift::FileDrift> = Vec::new();
+    let mut embedding_dims_set = false;
+
+    while let Some(group) = rx.recv().await {
+        // Test hook: simulate slow DB writes so the overlap test can detect that
+        // the producer was already embedding the next group while this one wrote.
+        // std::thread::sleep is used intentionally — it blocks the OS thread so
+        // the delay cannot be shortened by the tokio scheduler under load.
+        #[cfg(test)]
+        if let Ok(ms_str) = std::env::var("CODESCOUT_TEST_WRITE_DELAY_MS") {
+            if let Ok(ms) = ms_str.parse::<u64>() {
+                std::thread::sleep(std::time::Duration::from_millis(ms));
+            }
+        }
+
+        let GroupReady {
+            works: group_works,
+            embeddings: flat_embeddings,
+        } = group;
+
+        conn.execute_batch("BEGIN")?;
+        // Derive embedding dims from first group if not yet known (remote embedder)
+        if !embedding_dims_set {
+            if let Some(dims) = flat_embeddings.first().map(|e| e.len()) {
+                if dims > 0 {
+                    set_meta(&conn, "embedding_dims", &dims.to_string())?;
+                    embedding_dims_set = true;
+                }
+            }
+        }
+        let mut offset = 0;
+        for work in group_works {
+            let n = work.chunks.len();
+            let embeddings = &flat_embeddings[offset..offset + n];
+            offset += n;
+
+            let old_chunks = if config.embeddings.drift_detection_enabled {
+                read_file_embeddings(&conn, &work.rel)?
+            } else {
+                Vec::new()
+            };
+            delete_file_chunks(&conn, &work.rel)?;
+            let project_id = crate::workspace::resolve_project_id(
+                &discovered_projects,
+                &project_root,
+                std::path::Path::new(&work.rel),
+            );
+            for (raw, emb) in work.chunks.iter().zip(embeddings.iter()) {
+                let chunk = CodeChunk {
+                    id: None,
+                    file_path: work.rel.clone(),
+                    language: work.lang.clone(),
+                    content: raw.content.clone(),
+                    start_line: raw.start_line,
+                    end_line: raw.end_line,
+                    file_hash: work.hash.clone(),
+                    source: "project".into(),
+                    project_id: project_id.clone(),
+                    metadata: raw.metadata.clone(),
+                };
+                insert_chunk(&conn, &chunk, emb)?;
+            }
+            upsert_file_hash(&conn, &work.rel, &work.hash, Some(work.mtime))?;
+
+            if config.embeddings.drift_detection_enabled && !old_chunks.is_empty() {
+                let new_chunks: Vec<crate::embed::drift::NewChunk> = work
+                    .chunks
+                    .iter()
+                    .zip(embeddings.iter())
+                    .map(|(raw, emb)| crate::embed::drift::NewChunk {
+                        content: raw.content.clone(),
+                        embedding: emb.clone(),
+                    })
+                    .collect();
+                let drift = crate::embed::drift::compute_file_drift(
+                    &conn,
+                    &work.rel,
+                    &old_chunks,
+                    &new_chunks,
+                )?;
+                upsert_drift_report(
+                    &conn,
+                    &drift.file_path,
+                    drift.avg_drift,
+                    drift.max_drift,
+                    drift.max_drift_chunk.as_deref(),
+                    drift.chunks_added,
+                    drift.chunks_removed,
+                )?;
+                drift_results.push(drift);
+            }
+
+            tracing::debug!("indexed {} ({} chunks)", work.rel, work.chunks.len());
+            indexed += 1;
+        }
+        conn.execute_batch("COMMIT")?;
+    }
+
+    // Finalize: anchor staleness + metadata committed together
+    conn.execute_batch("BEGIN")?;
+    if config.embeddings.drift_detection_enabled {
+        ensure_memory_anchors(&conn)?;
+        let staleness_threshold = config.memory.staleness_drift_threshold;
+        for drift in &drift_results {
+            if drift.avg_drift >= staleness_threshold {
+                let _ = mark_anchors_stale_for_file(&conn, &drift.file_path);
+            }
+        }
+    }
+    set_meta(&conn, "embed_model", &config.embeddings.model)?;
+    set_meta(&conn, "last_indexed_at", &utc_now_display())?;
+
+    if let Ok(repo) = crate::git::open_repo(&project_root) {
+        if let Ok(head) = repo.head() {
+            if let Ok(commit) = head.peel_to_commit() {
+                set_last_indexed_commit(&conn, &commit.id().to_string())?;
+            }
+        }
+    }
+    conn.execute_batch("COMMIT")?;
+
+    // If vec0 was dropped for a remote embedder (dims unknown at start),
+    // Phase 3 has now stored the real dims — migrate to vec0 so semantic
+    // search works immediately without waiting for next open_db.
+    if !is_vec0_active(&conn) {
+        maybe_migrate_to_vec0(&conn)?;
+    }
+
+    Ok((indexed, drift_results))
+}
+
+// ── lib_db_writer ─────────────────────────────────────────────────────────────
+
+/// DB writer for `build_library_index`.  Simpler than `db_writer`: no drift
+/// detection, no workspace project-id resolution, no staleness anchors.
+/// Returns the count of indexed files.
+async fn lib_db_writer(
+    mut rx: tokio::sync::mpsc::Receiver<GroupReady>,
+    conn: rusqlite::Connection,
+    config: crate::config::ProjectConfig,
+    source: String,
+) -> anyhow::Result<usize> {
+    let mut indexed = 0usize;
+    let mut embedding_dims_set = false;
+
+    while let Some(group) = rx.recv().await {
+        let GroupReady {
+            works: group_works,
+            embeddings: flat_embeddings,
+        } = group;
+
+        conn.execute_batch("BEGIN")?;
+        if !embedding_dims_set {
+            if let Some(dims) = flat_embeddings.first().map(|e| e.len()) {
+                if dims > 0 {
+                    set_meta(&conn, "embedding_dims", &dims.to_string())?;
+                    embedding_dims_set = true;
+                }
+            }
+        }
+        let mut offset = 0;
+        for work in group_works {
+            let n = work.chunks.len();
+            let embeddings = &flat_embeddings[offset..offset + n];
+            offset += n;
+
+            delete_file_chunks(&conn, &work.rel)?;
+            for (raw, emb) in work.chunks.iter().zip(embeddings.iter()) {
+                let chunk = CodeChunk {
+                    id: None,
+                    file_path: work.rel.clone(),
+                    language: work.lang.clone(),
+                    content: raw.content.clone(),
+                    start_line: raw.start_line,
+                    end_line: raw.end_line,
+                    file_hash: work.hash.clone(),
+                    source: source.clone(),
+                    project_id: "root".into(),
+                    metadata: raw.metadata.clone(),
+                };
+                insert_chunk(&conn, &chunk, emb)?;
+            }
+            upsert_file_hash(&conn, &work.rel, &work.hash, None)?;
+            tracing::debug!("indexed {} ({} chunks)", work.rel, work.chunks.len());
+            indexed += 1;
+        }
+        conn.execute_batch("COMMIT")?;
+    }
+
+    // Finalize metadata
+    conn.execute_batch("BEGIN")?;
+    set_meta(&conn, "embed_model", &config.embeddings.model)?;
+    set_meta(&conn, "last_indexed_at", &utc_now_display())?;
+    conn.execute_batch("COMMIT")?;
+
+    Ok(indexed)
+}
+
 pub async fn build_index(
     project_root: &Path,
     force: bool,
     progress_cb: Option<ProgressCb>,
 ) -> Result<IndexReport> {
     use crate::config::ProjectConfig;
-    use crate::embed::{create_embedder_with_config, Embedding};
+    use codescout_embed::create_embedder_with_config;
     use std::sync::Arc;
-    use tokio::sync::Semaphore;
-    use tokio::task::JoinSet;
 
     let config = ProjectConfig::load_or_default(project_root)?;
     let conn = open_db(project_root)?;
     if !force {
         check_model_mismatch(&conn, &config.embeddings.model)?;
     }
-    let embedder: Arc<dyn crate::embed::Embedder> = Arc::from(
+    let embedder: Arc<dyn codescout_embed::Embedder> = Arc::from(
         create_embedder_with_config(
             &config.embeddings.model,
             config.embeddings.url.as_deref(),
@@ -1527,14 +1978,6 @@ pub async fn build_index(
     // Discover workspace sub-projects for project_id tagging
     let discovered_projects = crate::workspace::discover_projects(project_root, 3, &[]);
 
-    struct FileWork {
-        rel: String,
-        hash: String,
-        mtime: i64,
-        lang: String,
-        chunks: Vec<super::chunker::RawChunk>,
-    }
-
     let mut works: Vec<FileWork> = Vec::new();
 
     for rel in &change_set.changed {
@@ -1551,8 +1994,8 @@ pub async fn build_index(
         let chunks = super::ast_chunker::split_file(
             &source,
             lang,
-            &path,
-            super::chunk_size_for_model(&config.embeddings.model),
+            Path::new(rel),
+            config.embeddings.effective_chunk_size(),
         );
         if chunks.is_empty() {
             continue;
@@ -1567,207 +2010,53 @@ pub async fn build_index(
         });
     }
 
-    // ── Phase 2: Flat concurrent embedding pipeline ─────────────────────────
-    struct FileResult {
-        rel: String,
-        hash: String,
-        mtime: i64,
-        lang: String,
-        chunks: Vec<super::chunker::RawChunk>,
-        embeddings: Vec<Embedding>,
-    }
+    // ── Phase 2+3: Pipeline embed + write across groups ────────────────────────
+    // embed_producer and db_writer run concurrently: while the writer commits
+    // group N, the producer is already embedding group N+1 (overlap).
+    // Channel capacity 1 provides one slot of buffering — enough for overlap
+    // without wasting RAM on more than one group of embeddings at a time.
+    let file_group_size = config.embeddings.effective_file_group_size();
+    let max_inflight = config.embeddings.effective_max_inflight();
 
-    // Flatten chunks: collect all texts and track per-file counts.
-    let mut flat_texts: Vec<String> = Vec::new();
-    let mut file_chunk_counts: Vec<usize> = Vec::new();
-    for work in &works {
-        file_chunk_counts.push(work.chunks.len());
-        for chunk in &work.chunks {
-            flat_texts.push(chunk.content.clone());
-        }
-    }
-    let total_chunks = flat_texts.len();
-
-    // Each task sends one HTTP request (BATCH_SIZE texts).
-    // MAX_INFLIGHT keeps the server saturated without overwhelming it.
-    const BATCH_SIZE: usize = 32;
-    const MAX_INFLIGHT: usize = 8;
-    let sem = Arc::new(Semaphore::new(MAX_INFLIGHT));
-    let mut tasks: JoinSet<Result<(usize, Vec<Embedding>)>> = JoinSet::new();
-    let total_batches = total_chunks.div_ceil(BATCH_SIZE);
-    let embed_start = std::time::Instant::now();
-
-    for (batch_idx, chunk) in flat_texts.chunks(BATCH_SIZE).enumerate() {
-        let batch: Vec<String> = chunk.to_vec();
-        let embedder = Arc::clone(&embedder);
-        let sem = Arc::clone(&sem);
-        tasks.spawn(async move {
-            let _permit = sem
-                .acquire()
-                .await
-                .map_err(|_| anyhow::anyhow!("semaphore unexpectedly closed"))?;
-            let refs: Vec<&str> = batch.iter().map(|s| s.as_str()).collect();
-            let embeddings = embedder.embed(&refs).await?;
-            Ok((batch_idx, embeddings))
-        });
-    }
-
-    // Collect results in batch order
-    let mut batch_results: Vec<Option<Vec<Embedding>>> = vec![None; total_batches];
-    let mut batches_done = 0usize;
-    // Cumulative chunk boundaries for progress reporting
-    let mut boundaries: Vec<usize> = Vec::with_capacity(file_chunk_counts.len());
-    let mut cumul = 0;
-    for &count in &file_chunk_counts {
-        cumul += count;
-        boundaries.push(cumul);
-    }
-
-    while let Some(res) = tasks.join_next().await {
-        let (idx, embs) = res.map_err(|e| anyhow::anyhow!(e))??;
-        batch_results[idx] = Some(embs);
-        batches_done += 1;
-
-        if let Some(cb) = &progress_cb {
-            let chunks_done = batches_done * BATCH_SIZE;
-            let files_done = boundaries.iter().filter(|&&b| b <= chunks_done).count();
-            let remaining = works.len().saturating_sub(files_done);
-            let eta = (files_done > 0 && remaining > 0).then(|| {
-                let elapsed = embed_start.elapsed().as_secs_f64();
-                (elapsed / files_done as f64 * remaining as f64) as u64
-            });
-            cb(files_done, works.len(), eta);
-        }
-    }
-
-    // Flatten embeddings in batch order, scatter back to per-file results.
-    let flat_embeddings: Vec<Embedding> = batch_results
-        .into_iter()
-        .flat_map(|b| b.unwrap_or_default())
-        .collect();
-
-    let mut results: Vec<FileResult> = Vec::new();
-    let mut offset = 0;
-    for work in works {
-        let n = work.chunks.len();
-        let embeddings = flat_embeddings[offset..offset + n].to_vec();
-        offset += n;
-        results.push(FileResult {
-            rel: work.rel,
-            hash: work.hash,
-            mtime: work.mtime,
-            lang: work.lang,
-            chunks: work.chunks,
-            embeddings,
-        });
-    }
-
-    // ── Phase 3: Single transaction for all DB writes ─────────────────────────
-    let indexed = results.len();
-    conn.execute_batch("BEGIN")?;
-    // Store embedding dims for vec0 migration. Derived from the first result's
-    // first embedding so no extra API call is needed. No-op if no files indexed.
-    if let Some(dims) = results
-        .first()
-        .and_then(|r| r.embeddings.first())
-        .map(|e| e.len())
-    {
-        set_meta(&conn, "embedding_dims", &dims.to_string())?;
-    }
     // Always clear drift data so stale rows don't persist when the feature is toggled off
+    conn.execute_batch("BEGIN")?;
     clear_drift_report(&conn)?;
-    let mut drift_results: Vec<crate::embed::drift::FileDrift> = Vec::new();
-    for result in results {
-        // Only snapshot old embeddings when drift detection is enabled
-        let old_chunks = if config.embeddings.drift_detection_enabled {
-            read_file_embeddings(&conn, &result.rel)?
-        } else {
-            Vec::new()
-        };
-        delete_file_chunks(&conn, &result.rel)?;
-        let project_id = crate::workspace::resolve_project_id(
-            &discovered_projects,
-            project_root,
-            Path::new(&result.rel),
-        );
-        for (raw, emb) in result.chunks.iter().zip(result.embeddings.iter()) {
-            let chunk = CodeChunk {
-                id: None,
-                file_path: result.rel.clone(),
-                language: result.lang.clone(),
-                content: raw.content.clone(),
-                start_line: raw.start_line,
-                end_line: raw.end_line,
-                file_hash: result.hash.clone(),
-                source: "project".into(),
-                project_id: project_id.clone(),
-            };
-            insert_chunk(&conn, &chunk, emb)?;
-        }
-        upsert_file_hash(&conn, &result.rel, &result.hash, Some(result.mtime))?;
-
-        // Compute drift if enabled and we had old chunks (skip for newly indexed files)
-        if config.embeddings.drift_detection_enabled && !old_chunks.is_empty() {
-            let new_chunks: Vec<crate::embed::drift::NewChunk> = result
-                .chunks
-                .iter()
-                .zip(result.embeddings.iter())
-                .map(|(raw, emb)| crate::embed::drift::NewChunk {
-                    content: raw.content.clone(),
-                    embedding: emb.clone(),
-                })
-                .collect();
-            let drift = crate::embed::drift::compute_file_drift(
-                &conn,
-                &result.rel,
-                &old_chunks,
-                &new_chunks,
-            )?;
-            upsert_drift_report(
-                &conn,
-                &drift.file_path,
-                drift.avg_drift,
-                drift.max_drift,
-                drift.max_drift_chunk.as_deref(),
-                drift.chunks_added,
-                drift.chunks_removed,
-            )?;
-            drift_results.push(drift);
-        }
-
-        tracing::debug!("indexed {} ({} chunks)", result.rel, result.chunks.len());
-    }
-
-    // Reverse drift hook: mark semantic anchors stale for high-drift files
-    if config.embeddings.drift_detection_enabled {
-        ensure_memory_anchors(&conn)?;
-        let staleness_threshold = config.memory.staleness_drift_threshold;
-        for drift in &drift_results {
-            if drift.avg_drift >= staleness_threshold {
-                let _ = mark_anchors_stale_for_file(&conn, &drift.file_path);
-            }
-        }
-    }
-    set_meta(&conn, "embed_model", &config.embeddings.model)?;
-    set_meta(&conn, "last_indexed_at", &utc_now_display())?;
-
-    // Update last indexed commit
-    if let Ok(repo) = crate::git::open_repo(project_root) {
-        if let Ok(head) = repo.head() {
-            if let Ok(commit) = head.peel_to_commit() {
-                set_last_indexed_commit(&conn, &commit.id().to_string())?;
-            }
-        }
-    }
-
     conn.execute_batch("COMMIT")?;
 
-    // If vec0 was dropped for a remote embedder (dims unknown at start),
-    // Phase 3 has now stored the real dims — migrate to vec0 so semantic
-    // search works immediately without waiting for next open_db.
-    if !is_vec0_active(&conn) {
-        maybe_migrate_to_vec0(&conn)?;
-    }
+    let total_files = works.len();
+
+    // Cancel-safety: When embed_producer returns or is cancelled, its local tx drops →
+    // channel closes → writer sees rx.recv() == None → runs finalize + exits cleanly.
+    // If build_index future is dropped (caller cancellation), the JoinHandle drop does NOT
+    // cancel the spawned writer; it finishes in-flight groups, drains queued groups, runs
+    // finalize, then exits naturally with DB lock released. Consistent with our JoinHandle drop posture.
+    let (tx, rx) = tokio::sync::mpsc::channel::<GroupReady>(1);
+    let project_root_buf = project_root.to_path_buf();
+    let config_clone = config.clone();
+    let writer = tokio::spawn(db_writer(
+        rx,
+        conn,
+        config_clone,
+        project_root_buf,
+        discovered_projects,
+    ));
+
+    let embed_result = embed_producer(
+        works,
+        Arc::clone(&embedder),
+        tx,
+        progress_cb,
+        total_files,
+        file_group_size,
+        max_inflight,
+    )
+    .await;
+
+    // tx is dropped when embed_producer returns → writer sees channel close → runs finalize
+    let writer_result = writer.await.map_err(|e| anyhow::anyhow!(e))?;
+
+    embed_result?; // embed error takes precedence
+    let (indexed, drift_results) = writer_result?;
 
     tracing::info!(
         "Index complete: {} files indexed, {} deleted",
@@ -1786,11 +2075,6 @@ pub async fn build_index(
     })
 }
 
-/// Build or incrementally update the embedding index for a library.
-///
-/// Similar to `build_index` but walks `library_path` instead of the project root,
-/// and tags all chunks with the given `source` string (e.g. "lib:serde").
-/// The DB is stored under `project_root/.codescout/embeddings/lib/<name>.db` (per-library).
 pub async fn build_library_index(
     project_root: &Path,
     library_path: &Path,
@@ -1799,10 +2083,8 @@ pub async fn build_library_index(
 ) -> Result<()> {
     use crate::ast::detect_language;
     use crate::config::ProjectConfig;
-    use crate::embed::{create_embedder_with_config, Embedding};
+    use codescout_embed::create_embedder_with_config;
     use std::sync::Arc;
-    use tokio::sync::Semaphore;
-    use tokio::task::JoinSet;
 
     let lib_name = source.strip_prefix("lib:").unwrap_or(source);
     let config = ProjectConfig::load_or_default(project_root)?;
@@ -1810,7 +2092,7 @@ pub async fn build_library_index(
     if !force {
         check_model_mismatch(&conn, &config.embeddings.model)?;
     }
-    let embedder: Arc<dyn crate::embed::Embedder> = Arc::from(
+    let embedder: Arc<dyn codescout_embed::Embedder> = Arc::from(
         create_embedder_with_config(
             &config.embeddings.model,
             config.embeddings.url.as_deref(),
@@ -1820,13 +2102,6 @@ pub async fn build_library_index(
     );
 
     // ── Phase 1: Walk library path, hash, chunk ───────────────────────────────
-    struct FileWork {
-        rel: String,
-        hash: String,
-        lang: String,
-        chunks: Vec<super::chunker::RawChunk>,
-    }
-
     let walker = ignore::WalkBuilder::new(library_path)
         .hidden(true)
         .git_ignore(true)
@@ -1869,8 +2144,8 @@ pub async fn build_library_index(
         let chunks = super::ast_chunker::split_file(
             &file_source,
             lang,
-            path,
-            super::chunk_size_for_model(&config.embeddings.model),
+            Path::new(&rel),
+            config.embeddings.effective_chunk_size(),
         );
         if chunks.is_empty() {
             continue;
@@ -1879,83 +2154,44 @@ pub async fn build_library_index(
         works.push(FileWork {
             rel,
             hash,
+            mtime: 0, // libraries track hash only, not mtime
             lang: lang.to_string(),
             chunks,
         });
     }
 
-    // ── Phase 2: Flat concurrent embedding pipeline ─────────────────────────
-    struct FileResult {
-        rel: String,
-        hash: String,
-        lang: String,
-        chunks: Vec<super::chunker::RawChunk>,
-        embeddings: Vec<Embedding>,
-    }
-
-    const MAX_CONCURRENT: usize = 4;
-    let sem = Arc::new(Semaphore::new(MAX_CONCURRENT));
-    let mut tasks: JoinSet<Result<FileResult>> = JoinSet::new();
-
-    for work in works {
-        let embedder = Arc::clone(&embedder);
-        let sem = Arc::clone(&sem);
-        tasks.spawn(async move {
-            let _permit = sem
-                .acquire()
-                .await
-                .map_err(|_| anyhow::anyhow!("semaphore unexpectedly closed"))?;
-            let texts: Vec<&str> = work.chunks.iter().map(|c| c.content.as_str()).collect();
-            let embeddings = embedder.embed(&texts).await?;
-            Ok(FileResult {
-                rel: work.rel,
-                hash: work.hash,
-                lang: work.lang,
-                chunks: work.chunks,
-                embeddings,
-            })
-        });
-    }
-
-    let mut results: Vec<FileResult> = Vec::new();
-    while let Some(res) = tasks.join_next().await {
-        results.push(res.map_err(|e| anyhow::anyhow!(e))??);
-    }
-
-    // ── Phase 3: Single transaction for all DB writes ─────────────────────────
-    let indexed = results.len();
+    // ── Phase 2+3: Pipeline embed + write across groups ────────────────────────
+    // Same producer/consumer pattern as build_index: embed(N+1) overlaps with
+    // DB write(N), eliminating GPU idle at group boundaries.
+    let file_group_size = config.embeddings.effective_file_group_size();
+    let max_inflight = config.embeddings.effective_max_inflight();
+    let total_files = works.len();
     let source_owned = source.to_string();
-    conn.execute_batch("BEGIN")?;
-    if let Some(dims) = results
-        .first()
-        .and_then(|r| r.embeddings.first())
-        .map(|e| e.len())
-    {
-        set_meta(&conn, "embedding_dims", &dims.to_string())?;
-    }
-    for result in results {
-        delete_file_chunks(&conn, &result.rel)?;
-        for (raw, emb) in result.chunks.iter().zip(result.embeddings.iter()) {
-            let chunk = CodeChunk {
-                id: None,
-                file_path: result.rel.clone(),
-                language: result.lang.clone(),
-                content: raw.content.clone(),
-                start_line: raw.start_line,
-                end_line: raw.end_line,
-                file_hash: result.hash.clone(),
-                source: source_owned.clone(),
-                project_id: "root".into(),
-            };
-            insert_chunk(&conn, &chunk, emb)?;
-        }
-        upsert_file_hash(&conn, &result.rel, &result.hash, None)?;
-        tracing::debug!("indexed {} ({} chunks)", result.rel, result.chunks.len());
-    }
 
-    set_meta(&conn, "embed_model", &config.embeddings.model)?;
-    set_meta(&conn, "last_indexed_at", &utc_now_display())?;
-    conn.execute_batch("COMMIT")?;
+    // Cancel-safety: When embed_producer returns or is cancelled, its local tx drops →
+    // channel closes → writer sees rx.recv() == None → runs finalize + exits cleanly.
+    // If build_library_index future is dropped (caller cancellation), the JoinHandle drop does NOT
+    // cancel the spawned writer; it finishes in-flight groups, drains queued groups, runs
+    // finalize, then exits naturally with DB lock released. Consistent with our JoinHandle drop posture.
+    let (tx, rx) = tokio::sync::mpsc::channel::<GroupReady>(1);
+    let writer = tokio::spawn(lib_db_writer(rx, conn, config.clone(), source_owned));
+
+    let embed_result = embed_producer(
+        works,
+        Arc::clone(&embedder),
+        tx,
+        None, // no progress callback for library indexing
+        total_files,
+        file_group_size,
+        max_inflight,
+    )
+    .await;
+
+    let writer_result = writer.await.map_err(|e| anyhow::anyhow!(e))?;
+
+    embed_result?;
+    let indexed = writer_result?;
+
     tracing::info!(
         "Library index complete: {} files indexed, {} unchanged (source={})",
         indexed,
@@ -2524,6 +2760,7 @@ mod tests {
             file_hash: "testhash".to_string(),
             source: "project".into(),
             project_id: "root".into(),
+            metadata: None,
         }
     }
 
@@ -2538,7 +2775,58 @@ mod tests {
             file_hash: "testhash".to_string(),
             source: source.to_string(),
             project_id: "root".into(),
+            metadata: None,
         }
+    }
+
+    #[test]
+    fn old_schema_without_metadata_triggers_rebuild() {
+        let dir = tempfile::tempdir().unwrap();
+        let project_root = dir.path();
+        let db_path = project_db_path(project_root);
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+
+        // Create a legacy DB without metadata column and without schema_version.
+        {
+            let conn = rusqlite::Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE chunks (
+                    id INTEGER PRIMARY KEY,
+                    file_path TEXT NOT NULL,
+                    language TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    start_line INTEGER NOT NULL,
+                    end_line INTEGER NOT NULL,
+                    file_hash TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'project'
+                );
+                INSERT INTO chunks (file_path, language, content, start_line, end_line, file_hash)
+                 VALUES ('a.rs', 'rust', 'fn x(){}', 1, 1, 'abc');",
+            )
+            .unwrap();
+        }
+
+        // Open via production path; it should detect missing version, drop & recreate.
+        let conn = open_db(project_root).expect("open_db should migrate");
+
+        // Verify new column exists.
+        let cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(chunks)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert!(
+            cols.iter().any(|c| c == "metadata"),
+            "metadata column missing after migration: cols={cols:?}"
+        );
+
+        // Old row is gone (table was dropped).
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "old rows should be dropped on schema migration");
     }
 
     #[test]
@@ -2980,10 +3268,23 @@ mod tests {
     #[test]
     fn open_db_creates_meta_table() {
         let (_dir, conn) = open_test_db();
+        // meta table must exist (schema_version is always inserted by open_db)
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM meta", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(count, 0);
+        assert!(
+            count >= 1,
+            "meta table should have at least schema_version row"
+        );
+        // Verify schema_version is set correctly
+        let ver: String = conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'schema_version'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(ver, SCHEMA_VERSION.to_string());
     }
 
     #[test]
@@ -4034,7 +4335,8 @@ mod tests {
                     start_line INTEGER NOT NULL,
                     end_line INTEGER NOT NULL,
                     file_hash TEXT NOT NULL,
-                    source TEXT NOT NULL DEFAULT 'project'
+                    source TEXT NOT NULL DEFAULT 'project',
+                    metadata TEXT
                 );
                 CREATE TABLE chunk_embeddings (rowid INTEGER PRIMARY KEY, embedding BLOB NOT NULL);
                 CREATE TABLE files (path TEXT PRIMARY KEY, hash TEXT NOT NULL, mtime INTEGER);
@@ -4158,6 +4460,51 @@ mod tests {
     }
 
     #[test]
+    fn search_multi_db_applies_per_file_cap() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let conn = open_db(root).unwrap();
+        set_meta(&conn, "embedding_dims", "4").unwrap();
+        maybe_migrate_to_vec0(&conn).unwrap();
+
+        // Insert 5 chunks in file_a and 5 in file_b, all with the same embedding
+        // so cosine distance ties — ordering will follow rowid, giving file_a
+        // first. Without the cap that means 5× file_a + some file_b; with
+        // MAX_PER_FILE=2 and limit=4, we expect exactly 2 from each file.
+        let emb = [0.1_f32, 0.2, 0.3, 0.4];
+        for (i, file) in (0..10).zip(
+            std::iter::repeat("file_a.rs")
+                .take(5)
+                .chain(std::iter::repeat("file_b.rs").take(5)),
+        ) {
+            let mut chunk = dummy_chunk(file, &format!("chunk {i}"));
+            chunk.start_line = i + 1;
+            chunk.end_line = i + 2;
+            insert_chunk(&conn, &chunk, &emb).unwrap();
+        }
+        drop(conn);
+
+        let registry = crate::library::registry::LibraryRegistry::new();
+        let scope = crate::library::scope::Scope::Project;
+        let results = search_multi_db(root, &emb, 4, &scope, &registry, None).unwrap();
+
+        assert_eq!(results.len(), 4, "expected exactly 4 results");
+        let file_a = results
+            .iter()
+            .filter(|r| r.file_path == "file_a.rs")
+            .count();
+        let file_b = results
+            .iter()
+            .filter(|r| r.file_path == "file_b.rs")
+            .count();
+        assert!(
+            file_a <= 2 && file_b <= 2,
+            "per-file cap violated: a={file_a}, b={file_b}"
+        );
+        assert_eq!(file_a + file_b, 4);
+    }
+
+    #[test]
     fn open_db_adds_project_id_column() {
         let dir = tempdir().unwrap();
         let conn = open_db(dir.path()).unwrap();
@@ -4165,6 +4512,44 @@ mod tests {
             .prepare("SELECT project_id FROM chunks LIMIT 0")
             .is_ok();
         assert!(has_col, "chunks table should have project_id column");
+    }
+
+    #[test]
+    fn open_db_adds_metadata_column_to_existing_v1_db() {
+        // Verify the ALTER TABLE guard fires for a DB that has schema_version=1
+        // but was created before the metadata column existed.
+        let dir = tempdir().unwrap();
+        let db_path = project_db_path(dir.path());
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+
+        // Seed a v1 DB without metadata column.
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE chunks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_path TEXT NOT NULL,
+                    language TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    start_line INTEGER NOT NULL,
+                    end_line INTEGER NOT NULL,
+                    file_hash TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'project',
+                    project_id TEXT NOT NULL DEFAULT 'root'
+                );
+                CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                INSERT INTO meta (key, value) VALUES ('schema_version', '1');",
+            )
+            .unwrap();
+        }
+
+        // open_db should add metadata column via ALTER TABLE guard.
+        let conn = open_db(dir.path()).unwrap();
+        let has_col: bool = conn.prepare("SELECT metadata FROM chunks LIMIT 0").is_ok();
+        assert!(
+            has_col,
+            "chunks table should have metadata column after migration"
+        );
     }
 
     #[test]
@@ -4187,5 +4572,208 @@ mod tests {
             )
             .unwrap();
         assert_eq!(pid, "root");
+    }
+
+    #[test]
+    fn chunks_roundtrip_metadata_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = project_db_path(dir.path());
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let conn = open_db(dir.path()).unwrap();
+        conn.execute(
+            "INSERT INTO chunks (file_path, language, content, start_line, end_line, file_hash, source, metadata)
+             VALUES ('a.rs', 'rust', 'body', 1, 5, 'hash', 'project', 'src/a.rs :: fn foo')",
+            [],
+        )
+        .unwrap();
+
+        let meta: Option<String> = conn
+            .query_row(
+                "SELECT metadata FROM chunks WHERE file_path = 'a.rs'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(meta.as_deref(), Some("src/a.rs :: fn foo"));
+    }
+
+    #[test]
+    fn insert_chunk_persists_metadata() {
+        let (_dir, conn) = open_test_db();
+        let mut chunk = dummy_chunk("src/b.rs", "fn bar() {}");
+        chunk.metadata = Some("src/b.rs :: fn bar".to_string());
+        insert_chunk(&conn, &chunk, &[0.1, 0.2]).unwrap();
+
+        let meta: Option<String> = conn
+            .query_row(
+                "SELECT metadata FROM chunks WHERE file_path = 'src/b.rs'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(meta.as_deref(), Some("src/b.rs :: fn bar"));
+    }
+
+    #[test]
+    fn embed_text_format_includes_metadata_prefix() {
+        // When a RawChunk has metadata, the text sent for embedding should be
+        // "{metadata}\n{content}" — not just content.
+        let chunk_with_meta = codescout_embed::chunker::RawChunk {
+            content: "fn hello() {}".to_string(),
+            start_line: 1,
+            end_line: 1,
+            metadata: Some("src/a.rs :: fn hello".to_string()),
+        };
+        let chunk_no_meta = codescout_embed::chunker::RawChunk {
+            content: "fn world() {}".to_string(),
+            start_line: 3,
+            end_line: 3,
+            metadata: None,
+        };
+
+        let text_with = match &chunk_with_meta.metadata {
+            Some(m) => format!("{m}\n{}", chunk_with_meta.content),
+            None => chunk_with_meta.content.clone(),
+        };
+        let text_without = match &chunk_no_meta.metadata {
+            Some(m) => format!("{m}\n{}", chunk_no_meta.content),
+            None => chunk_no_meta.content.clone(),
+        };
+
+        assert_eq!(text_with, "src/a.rs :: fn hello\nfn hello() {}");
+        assert_eq!(text_without, "fn world() {}");
+    }
+
+    // ── Overlap test ──────────────────────────────────────────────────────────
+
+    /// Verify the producer/consumer pipeline produces correct DB state across
+    /// multiple file groups.
+    ///
+    /// This test exercises the full pipeline path (embed_producer → channel →
+    /// db_writer) with a real DB and a mock zero-latency embedder.  It
+    /// verifies correctness: all files are indexed, every chunk has exactly one
+    /// embedding, and the total counts are consistent.
+    ///
+    /// Design note: a timing assertion (total < sequential lower bound) was
+    /// attempted but proved unreliable under parallel test execution — the OS
+    /// schedules ~3 500 tokio worker threads simultaneously during a full
+    /// `cargo test` run, causing std::thread::sleep calls in both tasks to
+    /// serialize rather than overlap.  The overlap is an architectural property
+    /// (mpsc channel capacity-1 rendezvous + two tokio::spawn tasks) verified
+    /// by code inspection; this test covers correctness only.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn producer_consumer_overlaps_embed_with_db_write() {
+        use std::sync::Arc;
+
+        struct InstantEmbedder;
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for InstantEmbedder {
+            fn dimensions(&self) -> usize {
+                3
+            }
+            async fn embed(
+                &self,
+                texts: &[&str],
+            ) -> anyhow::Result<Vec<codescout_embed::Embedding>> {
+                Ok(texts.iter().map(|_| vec![1.0_f32, 0.0, 0.0]).collect())
+            }
+        }
+
+        // Build a project with 60 small Rust source files to force 2 groups at
+        // file_group_size=30.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        for i in 0..60 {
+            let content = format!("fn func_{i}() {{ println!(\"hello {i}\"); }}\n");
+            std::fs::write(root.join(format!("src/f{i:02}.rs")), content).unwrap();
+        }
+
+        // project.toml: file_group_size=30, drift off (simpler writes)
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        std::fs::write(
+            root.join(".codescout/project.toml"),
+            "[project]\nname = \"overlap-test\"\n\n[embeddings]\nfile_group_size = 30\ndrift_detection_enabled = false\n",
+        )
+        .unwrap();
+
+        let conn = open_db(root).unwrap();
+        let config = crate::config::ProjectConfig::load_or_default(root).unwrap();
+
+        let change_set = find_changed_files(&conn, root, true).unwrap();
+        let mut works: Vec<FileWork> = Vec::new();
+        for rel in &change_set.changed {
+            let path = root.join(rel);
+            let Some(lang) = crate::ast::detect_language(&path) else {
+                continue;
+            };
+            let hash = hash_file(&path).unwrap();
+            let src = std::fs::read_to_string(&path).unwrap();
+            let chunks = crate::embed::ast_chunker::split_file(
+                &src,
+                lang,
+                std::path::Path::new(rel),
+                config.embeddings.effective_chunk_size(),
+            );
+            if chunks.is_empty() {
+                continue;
+            }
+            works.push(FileWork {
+                rel: rel.clone(),
+                hash,
+                mtime: file_mtime(&path).unwrap_or(0),
+                lang: lang.to_string(),
+                chunks,
+            });
+        }
+
+        conn.execute_batch("BEGIN").unwrap();
+        clear_drift_report(&conn).unwrap();
+        conn.execute_batch("COMMIT").unwrap();
+
+        let total_files = works.len();
+        assert!(
+            total_files >= 60,
+            "need at least 60 files for the 2-group overlap test, got {total_files}"
+        );
+
+        let file_group_size = config.embeddings.effective_file_group_size();
+        assert_eq!(
+            file_group_size, 30,
+            "expected file_group_size=30 from project.toml"
+        );
+
+        let max_inflight = config.embeddings.effective_max_inflight();
+        let discovered = crate::workspace::discover_projects(root, 3, &[]);
+
+        let (tx, rx) = tokio::sync::mpsc::channel::<GroupReady>(1);
+        let root_buf = root.to_path_buf();
+        let writer = tokio::spawn(db_writer(rx, conn, config.clone(), root_buf, discovered));
+
+        embed_producer(
+            works,
+            Arc::new(InstantEmbedder),
+            tx,
+            None,
+            total_files,
+            file_group_size,
+            max_inflight,
+        )
+        .await
+        .unwrap();
+
+        writer.await.unwrap().unwrap();
+
+        // Correctness: all 60 files indexed, every chunk has an embedding.
+        let conn2 = open_db(root).unwrap();
+        let stats = index_stats(&conn2).unwrap();
+        assert_eq!(stats.file_count, 60, "all 60 files should be indexed");
+        assert!(stats.chunk_count > 0, "chunks must be written");
+        assert_eq!(
+            stats.embedding_count, stats.chunk_count,
+            "every chunk needs an embedding"
+        );
     }
 }

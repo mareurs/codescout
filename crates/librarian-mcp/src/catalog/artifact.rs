@@ -1,0 +1,231 @@
+use anyhow::Result;
+use rusqlite::{params, OptionalExtension};
+use serde::{Deserialize, Serialize};
+
+use super::Catalog;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArtifactRow {
+    pub id: String,
+    pub repo: String,
+    pub rel_path: String,
+    pub kind: String,
+    pub status: String,
+    pub title: Option<String>,
+    pub owners: Vec<String>,
+    pub tags: Vec<String>,
+    pub topic: Option<String>,
+    pub time_scope: Option<String>,
+    pub source: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub file_mtime: i64,
+    pub file_sha256: String,
+    pub confidence: f64,
+}
+
+pub fn upsert(cat: &Catalog, row: &ArtifactRow) -> Result<()> {
+    cat.conn.execute(
+        "INSERT INTO artifact (id, repo, rel_path, kind, status, title, owners, tags,
+            topic, time_scope, source, created_at, updated_at, file_mtime, file_sha256, confidence)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+         ON CONFLICT(id) DO UPDATE SET
+            repo=excluded.repo, rel_path=excluded.rel_path,
+            kind=excluded.kind, status=excluded.status,
+            title=excluded.title, owners=excluded.owners, tags=excluded.tags,
+            topic=excluded.topic, time_scope=excluded.time_scope,
+            source=excluded.source, updated_at=excluded.updated_at,
+            file_mtime=excluded.file_mtime, file_sha256=excluded.file_sha256,
+            confidence=excluded.confidence",
+        params![
+            row.id,
+            row.repo,
+            row.rel_path,
+            row.kind,
+            row.status,
+            row.title,
+            serde_json::to_string(&row.owners)?,
+            serde_json::to_string(&row.tags)?,
+            row.topic,
+            row.time_scope,
+            row.source,
+            row.created_at,
+            row.updated_at,
+            row.file_mtime,
+            row.file_sha256,
+            row.confidence,
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn get(cat: &Catalog, id: &str) -> Result<Option<ArtifactRow>> {
+    cat.conn
+        .prepare("SELECT id, repo, rel_path, kind, status, title, owners, tags,
+                  topic, time_scope, source, created_at, updated_at, file_mtime, file_sha256, confidence
+                  FROM artifact WHERE id = ?1")?
+        .query_row(params![id], row_from_sql)
+        .optional()
+        .map_err(Into::into)
+}
+
+pub fn delete(cat: &Catalog, id: &str) -> Result<bool> {
+    Ok(cat
+        .conn
+        .execute("DELETE FROM artifact WHERE id = ?1", params![id])?
+        > 0)
+}
+
+/// Delete all rows whose `repo` is not in `active`. Returns number of rows removed.
+pub fn delete_orphan_repos(cat: &Catalog, active: &[&str]) -> Result<usize> {
+    if active.is_empty() {
+        let n = cat.conn.execute("DELETE FROM artifact", [])?;
+        return Ok(n);
+    }
+    let placeholders = (1..=active.len())
+        .map(|i| format!("?{i}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!("DELETE FROM artifact WHERE repo NOT IN ({placeholders})");
+    let params: Vec<&dyn rusqlite::ToSql> =
+        active.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+    let n = cat
+        .conn
+        .execute(&sql, rusqlite::params_from_iter(params.iter().copied()))?;
+    Ok(n)
+}
+
+pub(crate) fn row_from_sql(r: &rusqlite::Row<'_>) -> rusqlite::Result<ArtifactRow> {
+    let owners_s: String = r.get(6)?;
+    let tags_s: String = r.get(7)?;
+    let owners: Vec<String> = serde_json::from_str(&owners_s).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(e))
+    })?;
+    let tags: Vec<String> = serde_json::from_str(&tags_s).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(7, rusqlite::types::Type::Text, Box::new(e))
+    })?;
+    Ok(ArtifactRow {
+        id: r.get(0)?,
+        repo: r.get(1)?,
+        rel_path: r.get(2)?,
+        kind: r.get(3)?,
+        status: r.get(4)?,
+        title: r.get(5)?,
+        owners,
+        tags,
+        topic: r.get(8)?,
+        time_scope: r.get(9)?,
+        source: r.get(10)?,
+        created_at: r.get(11)?,
+        updated_at: r.get(12)?,
+        file_mtime: r.get(13)?,
+        file_sha256: r.get(14)?,
+        confidence: r.get(15)?,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample(id: &str) -> ArtifactRow {
+        ArtifactRow {
+            id: id.into(),
+            repo: "r".into(),
+            rel_path: "p.md".into(),
+            kind: "spec".into(),
+            status: "active".into(),
+            title: Some("T".into()),
+            owners: vec!["marius".into()],
+            tags: vec!["a".into(), "b".into()],
+            topic: None,
+            time_scope: None,
+            source: Some("repo".into()),
+            created_at: 1,
+            updated_at: 2,
+            file_mtime: 3,
+            file_sha256: "abc".into(),
+            confidence: 1.0,
+        }
+    }
+
+    #[test]
+    fn upsert_and_get_roundtrip() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let row = sample("id1");
+        upsert(&cat, &row).unwrap();
+        let fetched = get(&cat, "id1").unwrap().unwrap();
+        assert_eq!(fetched, row);
+    }
+
+    #[test]
+    fn upsert_updates_on_conflict() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let mut row = sample("id1");
+        upsert(&cat, &row).unwrap();
+        row.status = "archived".into();
+        row.updated_at = 99;
+        upsert(&cat, &row).unwrap();
+        let fetched = get(&cat, "id1").unwrap().unwrap();
+        assert_eq!(fetched.status, "archived");
+        assert_eq!(fetched.updated_at, 99);
+    }
+
+    #[test]
+    fn delete_removes_row() {
+        let cat = Catalog::open_in_memory().unwrap();
+        upsert(&cat, &sample("id1")).unwrap();
+        assert!(delete(&cat, "id1").unwrap());
+        assert!(get(&cat, "id1").unwrap().is_none());
+    }
+
+    #[test]
+    fn delete_orphan_repos_drops_inactive() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let mut a = sample("a1");
+        a.repo = "alive".into();
+        a.rel_path = "a.md".into();
+        let mut b = sample("b1");
+        b.repo = "alive".into();
+        b.rel_path = "b.md".into();
+        let mut c = sample("c1");
+        c.repo = "ghost".into();
+        c.rel_path = "c.md".into();
+        for r in [&a, &b, &c] {
+            upsert(&cat, r).unwrap();
+        }
+        let removed = delete_orphan_repos(&cat, &["alive"]).unwrap();
+        assert_eq!(removed, 1);
+        assert!(get(&cat, "c1").unwrap().is_none());
+        assert!(get(&cat, "a1").unwrap().is_some());
+    }
+
+    #[test]
+    fn delete_orphan_repos_empty_active_wipes_all() {
+        let cat = Catalog::open_in_memory().unwrap();
+        upsert(&cat, &sample("x")).unwrap();
+        let n = delete_orphan_repos(&cat, &[]).unwrap();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn get_surfaces_malformed_tags_json() {
+        let cat = Catalog::open_in_memory().unwrap();
+        // Insert a row bypassing upsert, with malformed tags JSON.
+        cat.conn
+            .execute(
+                "INSERT INTO artifact (id, repo, rel_path, kind, status, owners, tags,
+                 created_at, updated_at, file_mtime, file_sha256, confidence)
+                 VALUES ('bad', 'r', 'x.md', 'spec', 'active', '[]',
+                         '{not valid json',
+                         0, 0, 0, 'sha', 1.0)",
+                [],
+            )
+            .unwrap();
+        let err = get(&cat, "bad").unwrap_err();
+        assert!(
+            err.to_string().to_lowercase().contains("conversion")
+                || err.to_string().contains("json")
+        );
+    }
+}

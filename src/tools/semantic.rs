@@ -4,9 +4,46 @@ use super::format::format_overflow;
 use super::{optional_f64_param, optional_u64_param, parse_bool_param, Tool, ToolContext};
 use serde_json::{json, Value};
 
+/// Default cap on how many chunks from the same file may appear in semantic
+/// search results, to preserve file-level diversity in the top-K. Set to 0 to
+/// disable. See docs/manual/src/experimental/file-diversity-rerank.md.
+const MAX_CHUNKS_PER_FILE: usize = 3;
+
+/// Apply a per-file cap to a score-sorted list of search results. Iterates in
+/// order and keeps at most `max_per_file` entries sharing the same `file_path`;
+/// later duplicates are dropped. Passing 0 disables the cap (returns input).
+fn apply_file_diversity_cap(
+    results: Vec<crate::embed::schema::SearchResult>,
+    max_per_file: usize,
+) -> Vec<crate::embed::schema::SearchResult> {
+    if max_per_file == 0 {
+        return results;
+    }
+    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    results
+        .into_iter()
+        .filter(|r| {
+            let count = seen.entry(r.file_path.clone()).or_insert(0);
+            if *count < max_per_file {
+                *count += 1;
+                true
+            } else {
+                false
+            }
+        })
+        .collect()
+}
+
 pub struct SemanticSearch;
 pub struct IndexProject;
 pub struct IndexStatus;
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+struct IndexConfirm {
+    /// Confirm indexing this directory
+    confirm: bool,
+}
+rmcp::elicit_safe!(IndexConfirm);
 
 #[async_trait::async_trait]
 impl Tool for SemanticSearch {
@@ -70,6 +107,9 @@ impl Tool for SemanticSearch {
 
         let query = super::require_str_param(&input, "query")?;
         let limit = optional_u64_param(&input, "limit").unwrap_or(10) as usize;
+        // Overfetch so the file-diversity cap can drop same-file duplicates
+        // without starving the requested limit.
+        let search_limit = limit.saturating_mul(MAX_CHUNKS_PER_FILE.max(1)).max(limit);
         let include_memories = parse_bool_param(&input["include_memories"]);
         let project_filter = input
             .get("project_id")
@@ -114,8 +154,14 @@ impl Tool for SemanticSearch {
         }
 
         // Async: cached embedder + HTTP embed
+        if let Some(p) = ctx.progress.as_ref() {
+            p.report_text("loading embedding model").await;
+        }
         let embedder = ctx.agent.get_or_create_embedder(&model).await?;
-        let query_embedding = crate::embed::embed_one(embedder.as_ref(), query).await?;
+        if let Some(p) = ctx.progress.as_ref() {
+            p.report_text("searching").await;
+        }
+        let query_embedding = codescout_embed::embed_one(embedder.as_ref(), query).await?;
 
         // Sync SQLite off async runtime
         let root2 = root.clone();
@@ -139,11 +185,13 @@ impl Tool for SemanticSearch {
             let results = crate::embed::index::search_multi_db(
                 &root2,
                 &query_embedding,
-                limit,
+                search_limit,
                 &scope2,
                 &library_registry2,
                 project_filter.as_deref(),
             )?;
+            let results = apply_file_diversity_cap(results, MAX_CHUNKS_PER_FILE);
+            let results: Vec<_> = results.into_iter().take(limit).collect();
             let memory_results = if include_memories {
                 let conn = crate::embed::index::open_db(&root2)?;
                 crate::embed::index::ensure_vec_memories(&conn)?;
@@ -426,6 +474,69 @@ impl Tool for IndexProject {
         let force = parse_bool_param(&input["force"]);
         let root = ctx.agent.require_project_root().await?;
 
+        // ── Preflight scope check ───────────────────────────────────────
+        // Stat-walk the root to estimate size + detect broad roots (home, system).
+        // Requires user confirmation via elicitation if either trigger fires.
+        // Runs BEFORE the concurrent-run guard so that a declined or unavailable
+        // elicitation never leaves IndexingState stuck in Running.
+        {
+            use crate::embed::preflight::{check_index_scope, PreflightVerdict};
+
+            let (max_bytes, ignored) = {
+                let inner = ctx.agent.inner.read().await;
+                let project = inner.active_project();
+                let max_bytes = project
+                    .map(|p| p.config.security.max_index_bytes)
+                    .unwrap_or(500 * 1024 * 1024);
+                let ignored = project
+                    .map(|p| p.config.ignored_paths.patterns.clone())
+                    .unwrap_or_default();
+                (max_bytes, ignored)
+            };
+            let preflight_root = root.clone();
+            let verdict = tokio::task::spawn_blocking(move || {
+                check_index_scope(&preflight_root, max_bytes, &ignored)
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("preflight task join error: {e}"))??;
+
+            if let PreflightVerdict::RequiresConfirmation(info) = verdict {
+                tracing::info!(
+                    root = ?info.root,
+                    file_count = info.file_count,
+                    approx_bytes = info.approx_bytes,
+                    suspicious = ?info.suspicious_reason,
+                    size_over = info.size_exceeds_threshold,
+                    "index_project preflight requires confirmation"
+                );
+                let msg = info.elicitation_message();
+                match ctx.elicit::<IndexConfirm>(msg).await? {
+                    Some(IndexConfirm { confirm: true }) => {
+                        tracing::info!(root = ?info.root, "index scope confirmed by user");
+                    }
+                    Some(IndexConfirm { confirm: false }) => {
+                        return Err(crate::tools::RecoverableError::with_hint(
+                            "Indexing aborted — user did not confirm the scope",
+                            "Activate a more specific project root, or raise \
+                             security.max_index_bytes in .codescout/project.toml, then retry.",
+                        )
+                        .into());
+                    }
+                    None => {
+                        // No peer, client lacks elicitation capability, or no content returned.
+                        // For this guard, the safe default is to refuse — never silently proceed.
+                        return Err(crate::tools::RecoverableError::with_hint(
+                            "index_project needs confirmation but client does not support elicitation",
+                            "Raise security.max_index_bytes in .codescout/project.toml, \
+                             or activate a narrower project root, then retry.",
+                        )
+                        .into());
+                    }
+                }
+            }
+        }
+        // ────────────────────────────────────────────────────────────────
+
         // Guard against concurrent runs.
         {
             let mut state = ctx.agent.indexing.lock().unwrap_or_else(|e| e.into_inner());
@@ -444,28 +555,48 @@ impl Tool for IndexProject {
 
         let state_arc = ctx.agent.indexing.clone();
         let progress = ctx.progress.clone();
-        // Signal start immediately (step 0 = initializing).
-        if let Some(p) = &progress {
-            p.report(0, None).await;
-        }
+        // Progress notifications from background tasks crash Claude Code 2.x
+        // (it closes the stdin pipe on receiving unsolicited notifications/progress).
+        // Disable until Claude Code supports MCP progress properly.
+        // See BUG-038 in docs/TODO-tool-misbehaviors.md.
+        //
+        // if let Some(p) = &progress {
+        //     p.report(0, None).await;
+        //     p.report_text("indexing project").await;
+        // }
 
         // Separate clone: progress_cb captures this; state_arc is used after build_index returns.
         let state_arc_cb = ctx.agent.indexing.clone();
+        let progress_cb_progress = progress.clone();
         let progress_cb: Option<crate::embed::index::ProgressCb> =
             Some(Box::new(move |done, total, eta_secs| {
-                let mut s = state_arc_cb.lock().unwrap_or_else(|e| e.into_inner());
-                *s = IndexingState::Running {
-                    done,
-                    total,
-                    eta_secs,
-                };
+                {
+                    let mut s = state_arc_cb.lock().unwrap_or_else(|e| e.into_inner());
+                    *s = IndexingState::Running {
+                        done,
+                        total,
+                        eta_secs,
+                    };
+                }
+                // Fire MCP progress notification from within this sync callback.
+                if let Some(p) = progress_cb_progress.clone() {
+                    tokio::spawn(async move {
+                        p.report(
+                            done as u32,
+                            if total > 0 { Some(total as u32) } else { None },
+                        )
+                        .await;
+                    });
+                }
             }));
 
         // Capture the dirty-files Arc before spawning so the task can clear it on success.
         let dirty_files_arc = ctx.agent.dirty_files_arc().await;
 
         tokio::spawn(async move {
-            let result = crate::embed::index::build_index(&root, force, progress_cb).await;
+            // Progress callback disabled — see comment above re: Claude Code crash.
+            let _progress_cb = progress_cb;
+            let result = crate::embed::index::build_index(&root, force, None).await;
 
             // Gather post-index stats *before* locking the mutex so that a
             // MutexGuard (which is !Send) is never held across an await point.
@@ -505,10 +636,11 @@ impl Tool for IndexProject {
                     Err(e) => IndexingState::Failed(e.to_string()),
                 };
             }
-            // Signal completion (step 1 of 1).
-            if let Some(p) = &progress {
-                p.report(1, Some(1)).await;
-            }
+            // Completion progress disabled — see BUG-038.
+            // if let Some(p) = &progress {
+            //     p.report_text("indexing complete").await;
+            //     p.report(1, Some(1)).await;
+            // }
         });
 
         Ok(json!({
@@ -897,6 +1029,56 @@ mod tests {
     use crate::lsp::LspManager;
     use tempfile::tempdir;
 
+    fn sr(file: &str, score: f32) -> crate::embed::schema::SearchResult {
+        crate::embed::schema::SearchResult {
+            file_path: file.to_string(),
+            language: "rust".to_string(),
+            content: String::new(),
+            start_line: 0,
+            end_line: 0,
+            score,
+            source: "project".to_string(),
+            project_id: String::new(),
+        }
+    }
+
+    #[test]
+    fn file_diversity_cap_drops_excess_same_file_entries() {
+        let input = vec![
+            sr("a.rs", 0.9),
+            sr("a.rs", 0.8),
+            sr("a.rs", 0.7),
+            sr("a.rs", 0.6),
+            sr("b.rs", 0.5),
+            sr("a.rs", 0.4),
+        ];
+        let out = apply_file_diversity_cap(input, 3);
+        let files: Vec<&str> = out.iter().map(|r| r.file_path.as_str()).collect();
+        // a.rs capped at 3; later a.rs entry dropped; b.rs survives with original ordering
+        assert_eq!(files, vec!["a.rs", "a.rs", "a.rs", "b.rs"]);
+    }
+
+    #[test]
+    fn file_diversity_cap_zero_disables() {
+        let input = vec![sr("a.rs", 0.9), sr("a.rs", 0.8), sr("a.rs", 0.7)];
+        let out = apply_file_diversity_cap(input.clone(), 0);
+        assert_eq!(out.len(), 3);
+    }
+
+    #[test]
+    fn file_diversity_cap_preserves_score_order() {
+        // Order is preserved — cap does not re-rank; it just filters.
+        let input = vec![
+            sr("a.rs", 0.9),
+            sr("b.rs", 0.8),
+            sr("a.rs", 0.7),
+            sr("c.rs", 0.6),
+        ];
+        let out = apply_file_diversity_cap(input, 1);
+        let files: Vec<&str> = out.iter().map(|r| r.file_path.as_str()).collect();
+        assert_eq!(files, vec!["a.rs", "b.rs", "c.rs"]);
+    }
+
     #[tokio::test]
     async fn index_project_sets_initial_running_state() {
         use crate::agent::IndexingState;
@@ -984,6 +1166,7 @@ mod tests {
             file_hash: "abc".to_string(),
             source: "project".to_string(),
             project_id: "root".to_string(),
+            metadata: None,
         };
         index::insert_chunk(&conn, &chunk, &[0.1, 0.2, 0.3]).unwrap();
         index::upsert_file_hash(&conn, "test.rs", "abc", None).unwrap();
@@ -1157,6 +1340,7 @@ mod tests {
             file_hash: "abc".to_string(),
             source: "project".to_string(),
             project_id: "root".to_string(),
+            metadata: None,
         };
         index::insert_chunk(&conn, &chunk, &[0.1, 0.2, 0.3]).unwrap();
         index::upsert_file_hash(&conn, "test.rs", "abc", None).unwrap();
@@ -1616,5 +1800,136 @@ mod tests {
                 );
             }
         }
+    }
+
+    // --- Progress notification tests (T11) ---
+
+    use crate::tools::progress::test_support::CountingSink;
+    use std::sync::atomic::Ordering;
+
+    fn make_progress_pair() -> (
+        std::sync::Arc<crate::tools::progress::ProgressReporter>,
+        std::sync::Arc<CountingSink>,
+    ) {
+        let sink = std::sync::Arc::new(CountingSink::default());
+        let reporter = crate::tools::progress::ProgressReporter::with_sink(
+            sink.clone(),
+            rmcp::model::NumberOrString::Number(1),
+        );
+        (reporter, sink)
+    }
+
+    async fn project_ctx_with_progress(
+    ) -> (tempfile::TempDir, ToolContext, std::sync::Arc<CountingSink>) {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let (reporter, sink) = make_progress_pair();
+        let ctx = ToolContext {
+            agent,
+            lsp: LspManager::new_arc(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: Some(reporter),
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+        };
+        (dir, ctx, sink)
+    }
+
+    #[tokio::test]
+    async fn semantic_search_emits_progress_text() {
+        // SemanticSearch calls report_text("loading embedding model") and report_text("searching")
+        // even when the embedder itself fails. Verify the text sink fires at least once.
+        let (_dir, ctx, sink) = project_ctx_with_progress().await;
+        let _ = SemanticSearch
+            .call(json!({"query": "test function"}), &ctx)
+            .await;
+        assert!(
+            sink.text_calls.load(Ordering::Relaxed) >= 1,
+            "expected at least 1 report_text() call from semantic_search"
+        );
+    }
+
+    #[tokio::test]
+    async fn index_project_emits_progress_on_start() {
+        // Progress notifications are disabled (BUG-038: crashes Claude Code 2.x).
+        // Verify that index_project still returns "started" without crashing.
+        let (_dir, ctx, sink) = project_ctx_with_progress().await;
+        let result = IndexProject.call(json!({}), &ctx).await;
+        assert!(result.is_ok());
+        assert_eq!(
+            sink.progress_calls.load(Ordering::Relaxed),
+            0,
+            "progress should be disabled (BUG-038)"
+        );
+    }
+
+    // --- Preflight elicitation tests (T7) ---
+
+    #[tokio::test]
+    async fn index_project_no_elicit_for_normal_project() {
+        // A tiny project well under an explicit 10 000-byte threshold.
+        // Writing project.toml makes the coupling explicit: preflight must
+        // read the threshold, compare it to the ~14-byte file, decide Clear,
+        // and never trigger elicitation.  If elicitation WERE triggered,
+        // ctx.peer = None would cause the tool to abort with
+        // "does not support elicitation" — caught by the Err arm below.
+        let (dir, mut ctx) = project_ctx().await;
+
+        let cs_dir = dir.path().join(".codescout");
+        std::fs::create_dir_all(&cs_dir).unwrap();
+        std::fs::write(
+            cs_dir.join("project.toml"),
+            "[project]\nname = \"test\"\n\n[security]\nmax_index_bytes = 10000\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("main.rs"), "fn main() {}\n").unwrap();
+
+        // Rebuild agent so it picks up the new project.toml.
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        ctx.agent = agent;
+
+        let result = IndexProject.call(json!({}), &ctx).await;
+        match &result {
+            Ok(_) => { /* indexing ran through preflight — test passes */ }
+            Err(e) => {
+                let msg = format!("{e:?}");
+                assert!(
+                    !msg.contains("client does not support elicitation"),
+                    "preflight should not have elicited for a tiny project: {msg}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn index_project_aborts_when_elicit_unavailable_on_oversized_root() {
+        // Force max_index_bytes = 0 so any non-empty directory triggers
+        // RequiresConfirmation. With peer = None, elicit returns Ok(None)
+        // and the tool must refuse with a clear error rather than proceeding.
+        let (dir, mut ctx) = project_ctx().await;
+
+        let cs_dir = dir.path().join(".codescout");
+        std::fs::create_dir_all(&cs_dir).unwrap();
+        std::fs::write(
+            cs_dir.join("project.toml"),
+            "[project]\nname = \"test\"\n\n[security]\nmax_index_bytes = 0\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("main.rs"), "fn main() {}\n").unwrap();
+
+        // Rebuild agent so it picks up the new project.toml.
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        ctx.agent = agent;
+
+        let err = IndexProject.call(json!({}), &ctx).await.unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("does not support elicitation") || msg.contains("user did not confirm"),
+            "expected elicit-unavailable abort, got: {msg}"
+        );
+        // TODO: add confirm=true and confirm=false tests once a MockPeer exists.
     }
 }

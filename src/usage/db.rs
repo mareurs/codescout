@@ -805,13 +805,14 @@ mod tests {
             [],
         )
         .unwrap();
-        let (cs, ps, sid, inp, out): (
+        type Row = (
             Option<String>,
             Option<String>,
             Option<String>,
             Option<String>,
             Option<String>,
-        ) = conn
+        );
+        let (cs, ps, sid, inp, out): Row = conn
             .query_row(
                 "SELECT codescout_sha, project_sha, session_id, input_json, output_json FROM tool_calls",
                 [],

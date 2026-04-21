@@ -36,7 +36,7 @@ pub fn read_anchor_file(path: &Path) -> Result<AnchorFile> {
 pub fn write_anchor_file(path: &Path, anchor_file: &AnchorFile) -> Result<()> {
     let body = toml::to_string_pretty(anchor_file)?;
     let content = format!("{HEADER_COMMENT}{body}");
-    std::fs::write(path, content)?;
+    crate::util::fs::atomic_write(path, &content)?;
     Ok(())
 }
 

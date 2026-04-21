@@ -9,7 +9,6 @@ pub mod config;
 pub mod file;
 pub mod file_summary;
 pub(crate) mod format;
-pub mod github;
 pub mod library;
 pub mod memory;
 pub mod output;
@@ -186,8 +185,9 @@ pub struct RecoverableError {
     /// Optional severity-tagged guidance for how to correct the call.
     pub guidance: Option<Guidance>,
     /// Structured payload spliced into the response body at the top level
-    /// (e.g. `file_id`, `section_map`, `next_actions`).
-    pub extra: serde_json::Map<String, serde_json::Value>,
+    /// (e.g. `file_id`, `section_map`, `next_actions`). Boxed to keep the
+    /// struct size below clippy's `result_large_err` threshold.
+    pub extra: Box<serde_json::Map<String, serde_json::Value>>,
 }
 
 impl RecoverableError {
@@ -195,7 +195,7 @@ impl RecoverableError {
         Self {
             message: message.into(),
             guidance: None,
-            extra: serde_json::Map::new(),
+            extra: Box::new(serde_json::Map::new()),
         }
     }
 
@@ -203,7 +203,7 @@ impl RecoverableError {
         Self {
             message: message.into(),
             guidance: Some(Guidance::Hint(hint.into())),
-            extra: serde_json::Map::new(),
+            extra: Box::new(serde_json::Map::new()),
         }
     }
 
@@ -211,7 +211,7 @@ impl RecoverableError {
         Self {
             message: message.into(),
             guidance: Some(Guidance::Warning(warning.into())),
-            extra: serde_json::Map::new(),
+            extra: Box::new(serde_json::Map::new()),
         }
     }
 
@@ -219,7 +219,7 @@ impl RecoverableError {
         Self {
             message: message.into(),
             guidance: Some(Guidance::MustFollow(must_follow.into())),
-            extra: serde_json::Map::new(),
+            extra: Box::new(serde_json::Map::new()),
         }
     }
 
@@ -857,10 +857,8 @@ mod tests {
 
     #[test]
     fn recoverable_error_with_must_follow_stores_must_follow_variant() {
-        let e = RecoverableError::with_must_follow(
-            "heading too large",
-            "IRON LAW #6: use @file_xxx",
-        );
+        let e =
+            RecoverableError::with_must_follow("heading too large", "IRON LAW #6: use @file_xxx");
         assert_eq!(e.message, "heading too large");
         assert!(
             matches!(e.guidance, Some(Guidance::MustFollow(ref s)) if s == "IRON LAW #6: use @file_xxx")
@@ -877,7 +875,8 @@ mod tests {
     #[test]
     fn recoverable_error_extra_fields_roundtrip() {
         let mut e = RecoverableError::new("heading too large");
-        e.extra.insert("file_id".into(), serde_json::json!("@file_abc"));
+        e.extra
+            .insert("file_id".into(), serde_json::json!("@file_abc"));
         e.extra.insert(
             "section_map".into(),
             serde_json::json!([{"level": 2, "text": "## X", "line": 10}]),
@@ -1325,7 +1324,7 @@ mod tests {
         // Regression test for the read_file crash on docs/ARCHITECTURE.md.
         // Box-drawing chars (─, │, ┌, etc.) are 3 bytes each in UTF-8.
         // A hard_max that lands mid-char must NOT cause a panic.
-        let box_line: String = std::iter::repeat('─').take(700).collect(); // 2100 bytes
+        let box_line: String = "─".repeat(700); // 2100 bytes
         let prefix = "x".repeat(100);
         let text = format!("{}\n{}", prefix, box_line); // >2000 bytes, no newline after 101
 

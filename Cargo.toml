@@ -1,5 +1,5 @@
 [workspace]
-members = ["."]
+members = [".", "crates/codescout-embed", "crates/librarian-mcp"]
 resolver = "2"
 
 [workspace.package]
@@ -38,6 +38,7 @@ path = "src/main.rs"
 [dependencies]
 tikv-jemallocator = "0.6"
 fs2 = "0.4"
+fs4 = "0.12"
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
@@ -54,6 +55,9 @@ toml = "1"
 anyhow = "1"
 thiserror = "2"
 async-trait = "0.1"
+
+# Sibling crates
+codescout-embed = { path = "crates/codescout-embed" }
 
 # Logging / tracing
 tracing = "0.1"
@@ -92,10 +96,7 @@ url = "2"
 # AST parsing (tree-sitter)
 tree-sitter = "0.26"
 
-# HTTP client (remote embeddings — OpenAI-compatible APIs, Ollama, etc.)
-reqwest = { version = "0.13", features = ["json"], optional = true }
-# Local CPU embeddings via ONNX Runtime (fastembed model hub)
-fastembed = { version = "5", optional = true }
+# HTTP client and local ONNX embeddings are now provided by the codescout-embed crate.
 tree-sitter-rust = "0.24.0"
 tree-sitter-python = "0.25.0"
 tree-sitter-go = "0.25.0"
@@ -104,6 +105,7 @@ tree-sitter-java = "0.23.5"
 tree-sitter-kotlin-ng = "1.1.0"
 tree-sitter-html = "0.23"
 tree-sitter-css = "0.23"
+tree-sitter-bash = "0.23"
 libc = "0.2.182"
 
 # Temp files (buffer reference resolution in run_command)
@@ -121,10 +123,10 @@ default = ["remote-embed", "local-embed", "dashboard", "http"]
 dashboard = ["dep:axum", "dep:tower-http", "dep:open"]
 http = ["dep:axum", "dep:tower-http", "rmcp/transport-streamable-http-server"]
 # Remote embedding via OpenAI-compatible HTTP API (Ollama, OpenAI, etc.)
-remote-embed = ["dep:reqwest"]
+remote-embed = ["codescout-embed/remote-embed"]
 # Local CPU embedding via fastembed-rs (ONNX Runtime + HuggingFace model hub).
 # First use downloads the chosen model (~20-300MB) to ~/.cache/huggingface/hub/.
-local-embed = ["dep:fastembed"]
+local-embed = ["codescout-embed/local-embed"]
 # Local embedding via candle (HuggingFace Rust ML — adds significant compile time)
 # candle-embed = ["dep:candle-core", "dep:candle-transformers", "dep:candle-nn", "dep:hf-hub", "dep:tokenizers"]
 
@@ -150,3 +152,4 @@ panic = "abort"
 tempfile = "3"
 tower = "0.5"
 filetime = "0.2"
+tokio = { version = "1", features = ["test-util"] }

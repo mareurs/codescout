@@ -127,4 +127,32 @@ mod tests {
         let result = p.read("doc://something-else").await;
         assert!(matches!(result, Err(ResourceError::NotFound(_))));
     }
+
+    #[tokio::test]
+    async fn tool_guide_includes_markdown_editing_workflow() {
+        use crate::tools::markdown::EditMarkdown;
+        let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(EditMarkdown)];
+        let p = ToolGuideProvider::new(tools);
+        let bytes = p.read("doc://codescout-tool-guide").await.unwrap();
+        match bytes {
+            ResourceBytes::Text(s) => {
+                assert!(s.contains("Editing a Markdown Document"));
+            }
+            _ => panic!("expected text"),
+        }
+    }
+
+    #[tokio::test]
+    async fn tool_guide_includes_dependency_tracing_workflow() {
+        use crate::tools::symbol::GotoDefinition;
+        let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(GotoDefinition)];
+        let p = ToolGuideProvider::new(tools);
+        let bytes = p.read("doc://codescout-tool-guide").await.unwrap();
+        match bytes {
+            ResourceBytes::Text(s) => {
+                assert!(s.contains("Dependency Tracing"));
+            }
+            _ => panic!("expected text"),
+        }
+    }
 }

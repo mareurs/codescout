@@ -158,6 +158,7 @@ pub fn lsp_language_id(lang: &str) -> &str {
         "css" => "css",
         "scss" => "scss",
         "less" => "less",
+        "bash" => "shellscript",
         other => other,
     }
 }
@@ -184,6 +185,7 @@ pub fn has_lsp_config(lang: &str) -> bool {
             | "css"
             | "scss"
             | "less"
+            | "bash"
     )
 }
 
@@ -210,13 +212,13 @@ mod tests {
         assert!(has_lsp_config("css"));
         assert!(has_lsp_config("scss"));
         assert!(has_lsp_config("less"));
+        assert!(has_lsp_config("bash"));
         assert!(!has_lsp_config("php"));
         assert!(!has_lsp_config("swift"));
         assert!(!has_lsp_config("scala"));
         assert!(!has_lsp_config("elixir"));
         assert!(!has_lsp_config("haskell"));
         assert!(!has_lsp_config("lua"));
-        assert!(!has_lsp_config("bash"));
         assert!(!has_lsp_config("markdown"));
         assert!(!has_lsp_config("unknown"));
     }

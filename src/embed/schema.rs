@@ -23,6 +23,9 @@ pub struct CodeChunk {
     pub source: String,
     /// Project identifier within a workspace (e.g. "my-service", "root")
     pub project_id: String,
+    /// Searchable header prepended before embedding. NULL for non-AST chunks
+    /// (markdown, plain text). NOT returned in semantic_search results.
+    pub metadata: Option<String>,
 }
 
 /// A ranked result from a semantic search query.

@@ -1,6 +1,10 @@
 //! Central orchestrator: manages projects, tool registry, and shared state.
 
-use anyhow::Result;
+mod write_guard;
+#[allow(unused_imports)]
+pub(crate) use write_guard::{acquire as acquire_write_guard, open_lock_file, WriteGuard};
+
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -14,7 +18,7 @@ use crate::workspace::{discover_projects, DiscoveredProject, Project, ProjectSta
 /// Shared agent state — cloned into each tool invocation.
 /// Cached embedder: `(model_name, embedder)` — invalidated on model change.
 /// `Arc<dyn Embedder>`: concrete type selected at runtime from a config string (e.g. `"openai"`, `"ollama"`); generics cannot express this.
-type CachedEmbedder = Arc<tokio::sync::Mutex<Option<(String, Arc<dyn crate::embed::Embedder>)>>>;
+type CachedEmbedder = Arc<tokio::sync::Mutex<Option<(String, Arc<dyn codescout_embed::Embedder>)>>>;
 
 /// State of the background index-build task spawned by `index_project`.
 #[derive(Default, Clone)]
@@ -87,19 +91,27 @@ impl AgentInner {
 
 #[derive(Clone)]
 pub struct ActiveProject {
-    pub root: PathBuf,
-    pub config: ProjectConfig,
-    pub memory: MemoryStore,
-    pub private_memory: MemoryStore,
-    pub library_registry: LibraryRegistry,
+    pub(crate) root: PathBuf,
+    pub(crate) config: ProjectConfig,
+    pub(crate) memory: MemoryStore,
+    pub(crate) private_memory: MemoryStore,
+    pub(crate) library_registry: LibraryRegistry,
     /// Tracks files written by tools in this session but not yet re-indexed.
     /// Wrapped in an Arc so index_project can capture it across a tokio::spawn
     /// boundary and clear it on successful completion.
-    pub dirty_files: Arc<std::sync::Mutex<std::collections::HashSet<PathBuf>>>,
+    pub(crate) dirty_files: Arc<std::sync::Mutex<std::collections::HashSet<PathBuf>>>,
     /// When true, file writes are disabled regardless of security config.
-    pub read_only: bool,
+    pub(crate) read_only: bool,
     /// Git HEAD SHA of the project at activation time. None for non-git projects.
-    pub head_sha: Option<String>,
+    pub(crate) head_sha: Option<String>,
+    /// Async mutex serializing writes within this process.
+    /// Acquired FIRST in the write-lock order (see agent::write_guard).
+    pub(crate) write_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Shared file descriptor for the cross-process advisory lock at
+    /// `.codescout/write.lock`. The flock is per-open-file-description, so a
+    /// single File handle shared by every tool call in this process (via Arc)
+    /// is sufficient — in-process ordering is handled by `write_lock` above.
+    pub(crate) file_lock: Arc<std::fs::File>,
 }
 
 /// Read `workspace.toml` (if present) and return the discovery depth and exclude list.
@@ -150,6 +162,9 @@ impl Agent {
                 dirty_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
                 read_only: false,
                 head_sha: resolve_head_sha(&root),
+                write_lock: Arc::new(tokio::sync::Mutex::new(())),
+                file_lock: open_lock_file(&root)
+                    .with_context(|| format!("failed to open write.lock for {}", root.display()))?,
             };
 
             // Discover sub-projects; root project is always included.
@@ -215,71 +230,84 @@ impl Agent {
 
     /// Activate a project by path, replacing the current workspace.
     pub async fn activate(&self, root: PathBuf, read_only: Option<bool>) -> Result<()> {
-        let is_home = {
-            let inner = self.inner.read().await;
-            inner.home_root.as_ref().map(|h| *h == root).unwrap_or(true)
-        };
-
-        let effective_read_only = match read_only {
-            Some(false) => false,
-            _ if is_home => false,
-            _ => true,
-        };
-
+        // Load all resources outside any lock — I/O is independent of is_home.
         let config = ProjectConfig::load_or_default(&root)?;
         let memory = MemoryStore::open(&root)?;
         let private_memory = MemoryStore::open_private(&root)?;
         let registry_path = root.join(".codescout").join("libraries.json");
         let library_registry = LibraryRegistry::load(&registry_path).unwrap_or_default();
+        let head_sha = resolve_head_sha(&root);
 
-        let active = ActiveProject {
-            root: root.clone(),
-            config,
-            memory,
-            private_memory,
-            library_registry,
-            dirty_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-            read_only: effective_read_only,
-            head_sha: resolve_head_sha(&root),
-        };
-
-        // Discover sub-projects.
+        // Discover sub-projects before acquiring the write lock.
         // Respect depth and exclude settings from workspace.toml if it exists.
         let (discover_depth, discover_exclude) = load_discover_settings(&root);
         let discovered = discover_projects(&root, discover_depth, &discover_exclude);
-        let mut projects: Vec<Project> = Vec::new();
-        let mut root_found = false;
-        for dp in discovered {
-            if dp.relative_root == std::path::Path::new(".") {
-                root_found = true;
-                projects.push(Project {
-                    discovered: dp,
-                    state: ProjectState::Activated(Box::new(active.clone())),
-                });
-            } else {
-                projects.push(Project::new_dormant(dp));
-            }
-        }
-        if !root_found {
-            let root_dp = DiscoveredProject {
-                id: crate::workspace::ROOT_PROJECT_ID.to_string(),
-                relative_root: PathBuf::from("."),
-                languages: vec![],
-                manifest: None,
-            };
-            projects.insert(
-                0,
-                Project {
-                    discovered: root_dp,
-                    state: ProjectState::Activated(Box::new(active)),
-                },
-            );
-        }
 
-        let ws = Workspace::new(root.clone(), projects);
+        // Open the lock file before acquiring the write lock — involves blocking
+        // fs I/O (create_dir_all + OpenOptions::open) that must not run on the
+        // async executor while holding a write guard.
+        let file_lock = write_guard::open_lock_file(&root)
+            .with_context(|| format!("failed to open write.lock for {}", root.display()))?;
 
         {
             let mut inner = self.inner.write().await;
+
+            // Compute is_home and effective_read_only under the write lock so
+            // there is no TOCTOU window between checking home_root and using the
+            // result.  (Previously is_home was read under a short read lock, then
+            // the lock was dropped while I/O ran, then a write lock was acquired —
+            // a concurrent activate() could have changed home_root in between.)
+            let is_home = inner.home_root.as_ref().map(|h| *h == root).unwrap_or(true);
+            let effective_read_only = match read_only {
+                Some(false) => false,
+                _ if is_home => false,
+                _ => true,
+            };
+
+            let active = ActiveProject {
+                root: root.clone(),
+                config,
+                memory,
+                private_memory,
+                library_registry,
+                dirty_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+                read_only: effective_read_only,
+                head_sha,
+                write_lock: Arc::new(tokio::sync::Mutex::new(())),
+                file_lock,
+            };
+
+            let mut projects: Vec<Project> = Vec::new();
+            let mut root_found = false;
+            for dp in discovered {
+                if dp.relative_root == std::path::Path::new(".") {
+                    root_found = true;
+                    projects.push(Project {
+                        discovered: dp,
+                        state: ProjectState::Activated(Box::new(active.clone())),
+                    });
+                } else {
+                    projects.push(Project::new_dormant(dp));
+                }
+            }
+            if !root_found {
+                let root_dp = DiscoveredProject {
+                    id: crate::workspace::ROOT_PROJECT_ID.to_string(),
+                    relative_root: PathBuf::from("."),
+                    languages: vec![],
+                    manifest: None,
+                };
+                projects.insert(
+                    0,
+                    Project {
+                        discovered: root_dp,
+                        state: ProjectState::Activated(Box::new(active)),
+                    },
+                );
+            }
+
+            let ws = Workspace::new(root.clone(), projects);
+
             if inner.home_root.is_none() {
                 inner.home_root = Some(root);
             }
@@ -298,7 +326,7 @@ impl Agent {
     pub async fn get_or_create_embedder(
         &self,
         model: &str,
-    ) -> anyhow::Result<Arc<dyn crate::embed::Embedder>> {
+    ) -> anyhow::Result<Arc<dyn codescout_embed::Embedder>> {
         // Read url and api_key from project config
         let (url, api_key) = self
             .with_project(|p| {
@@ -321,8 +349,8 @@ impl Agent {
                 return Ok(Arc::clone(embedder));
             }
         }
-        let embedder: Arc<dyn crate::embed::Embedder> = Arc::from(
-            crate::embed::create_embedder_with_config(model, url.as_deref(), api_key).await?,
+        let embedder: Arc<dyn codescout_embed::Embedder> = Arc::from(
+            codescout_embed::create_embedder_with_config(model, url.as_deref(), api_key).await?,
         );
         *guard = Some((cache_key, Arc::clone(&embedder)));
         Ok(embedder)
@@ -368,6 +396,47 @@ impl Agent {
         project_id: &str,
         read_only: Option<bool>,
     ) -> Result<()> {
+        // --- Phase 1: read-only pass to resolve abs_root and check early-return ---
+        // Use a read lock so we don't block other readers while doing the
+        // lookup.  We'll re-check under the write lock below.
+        let (abs_root, home_root_snapshot) = {
+            let inner = self.inner.read().await;
+            let ws = inner
+                .workspace
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("No active workspace"))?;
+            let relative_root = ws
+                .projects
+                .iter()
+                .find(|p| p.discovered.id == project_id)
+                .map(|p| p.discovered.relative_root.clone())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Project '{}' not found in workspace", project_id)
+                })?;
+            (ws.root.join(&relative_root), inner.home_root.clone())
+        };
+
+        // --- Phase 2: blocking I/O outside any lock ---
+        // Determine read_only using the snapshot; the write lock below will
+        // re-derive this from the live state, so a race here is harmless.
+        let is_home_snapshot = home_root_snapshot
+            .as_ref()
+            .map(|h| *h == abs_root)
+            .unwrap_or(false);
+        let effective_read_only_snapshot = match read_only {
+            Some(false) => false,
+            _ if is_home_snapshot => false,
+            _ => true,
+        };
+        let _ = effective_read_only_snapshot; // recomputed under write lock below
+
+        // Open the lock file before acquiring the write lock — involves blocking
+        // fs I/O (create_dir_all + OpenOptions::open) that must not run on the
+        // async executor while holding a write guard.
+        let file_lock = write_guard::open_lock_file(&abs_root)
+            .with_context(|| format!("failed to open write.lock for {}", abs_root.display()))?;
+
+        // --- Phase 3: write lock to mutate workspace state ---
         let mut inner = self.inner.write().await;
 
         // Clone home_root before taking a mutable reference into inner.workspace,
@@ -379,7 +448,8 @@ impl Agent {
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("No active workspace"))?;
 
-        // Find the project and resolve its root
+        // Re-resolve root under the write lock to guard against concurrent
+        // activate() calls that could have replaced the workspace.
         let relative_root = ws
             .projects
             .iter()
@@ -423,7 +493,7 @@ impl Agent {
         let head_sha = resolve_head_sha(&abs_root);
 
         let active = ActiveProject {
-            root: abs_root,
+            root: abs_root.clone(),
             config,
             memory,
             private_memory,
@@ -431,6 +501,8 @@ impl Agent {
             dirty_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
             read_only: effective_read_only,
             head_sha,
+            write_lock: Arc::new(tokio::sync::Mutex::new(())),
+            file_lock,
         };
 
         // Promote in-place
@@ -537,6 +609,17 @@ impl Agent {
             github_enabled,
             workspace,
         })
+    }
+
+    /// Map current `IndexingState` to a short label for external consumers
+    /// (e.g. the `project://summary` MCP resource).
+    pub fn index_status_label(&self) -> String {
+        match &*self.indexing.lock().unwrap() {
+            IndexingState::Idle => "idle".into(),
+            IndexingState::Running { .. } => "indexing".into(),
+            IndexingState::Done { .. } => "indexed".into(),
+            IndexingState::Failed(_) => "failed".into(),
+        }
     }
 
     /// Build workspace project summaries for multi-project repos.
@@ -1453,6 +1536,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[tokio::test]
     async fn activate_populates_head_sha() {
         let dir = tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();

@@ -1,6 +1,14 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
+
+/// Directory containing `.codescout/` for the current project.
+/// Set once during `init()`, read by the panic hook.
+static CODESCOUT_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Path to the current diagnostic log file (when `--diagnostic` is active).
+static DIAGNOSTIC_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 /// Rotate log files in `dir`: keep last 3 numbered backups.
 /// debug.log.3 → deleted
@@ -71,6 +79,50 @@ pub struct LoggingGuards {
     pub instance_id: Option<String>,
 }
 
+/// Install a panic hook that persists crash info to disk via synchronous I/O.
+///
+/// With `panic = "abort"` in release builds, `Drop` impls never run on panic —
+/// the `non_blocking` tracing writer's buffer is silently lost.  This hook runs
+/// *before* the abort, writing directly to `.codescout/crash.log` (and the
+/// diagnostic log if active).  Synchronous writes bypass the non-blocking
+/// pipeline entirely, so the crash message reaches disk even under abort.
+fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let epoch = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let msg = format!("epoch={epoch}  PANIC  {info}\n");
+
+        // Write to .codescout/crash.log (always attempted)
+        if let Some(dir) = CODESCOUT_DIR.get() {
+            sync_append(&dir.join("crash.log"), &msg);
+        }
+        // Also append to current diagnostic log if diagnostic mode is active
+        if let Some(path) = DIAGNOSTIC_PATH.get() {
+            sync_append(path, &msg);
+        }
+        // Default hook: prints to stderr
+        default_hook(info);
+    }));
+}
+
+/// Append `msg` to `path` synchronously.  Failures are silently ignored —
+/// we're already in a panic handler; there's nothing useful to do with an
+/// I/O error here.
+fn sync_append(path: &Path, msg: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = f.write_all(msg.as_bytes());
+        let _ = f.flush();
+    }
+}
+
 /// Initialise tracing.
 ///
 /// - `debug`: enables both DEBUG-level file logging to `.codescout/debug.log`
@@ -88,6 +140,9 @@ pub fn init(debug: bool) -> LoggingGuards {
     let log_dir = std::env::current_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
         .join(".codescout");
+
+    // Store for the panic hook — even when debug is off, crash.log is useful.
+    CODESCOUT_DIR.set(log_dir.clone()).ok();
 
     if debug {
         if let Err(e) = std::fs::create_dir_all(&log_dir) {
@@ -138,6 +193,7 @@ pub fn init(debug: bool) -> LoggingGuards {
             Ok(file) => {
                 let (non_blocking, guard) = tracing_appender::non_blocking(file);
                 guards.push(guard);
+                DIAGNOSTIC_PATH.set(log_dir.join(&filename)).ok();
                 instance_id = Some(id);
                 Some(
                     tracing_subscriber::fmt::layer()
@@ -155,12 +211,19 @@ pub fn init(debug: bool) -> LoggingGuards {
         None
     };
 
-    tracing_subscriber::registry()
+    // try_init returns Err when a global subscriber is already set (common in tests
+    // where multiple test threads each call init). Surface any failure to stderr so
+    // production startups don't silently lose all tracing.
+    if let Err(e) = tracing_subscriber::registry()
         .with(stderr_layer)
         .with(debug_layer)
         .with(diagnostic_layer)
         .try_init()
-        .ok();
+    {
+        eprintln!("codescout: failed to initialize tracing: {e}");
+    }
+
+    install_panic_hook();
 
     LoggingGuards {
         guards,
@@ -299,5 +362,25 @@ mod tests {
             std::fs::read_to_string(p.join("debug.log.1")).unwrap(),
             "hello"
         );
+    }
+
+    #[test]
+    fn sync_append_creates_and_appends() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("crash.log");
+
+        // First write creates the file
+        sync_append(&path, "line 1\n");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "line 1\n");
+
+        // Second write appends
+        sync_append(&path, "line 2\n");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "line 1\nline 2\n");
+    }
+
+    #[test]
+    fn sync_append_silently_ignores_bad_path() {
+        // Should not panic on a non-existent directory
+        sync_append(Path::new("/nonexistent/dir/crash.log"), "test\n");
     }
 }

@@ -6,8 +6,10 @@ use std::collections::HashMap;
 
 pub mod doc;
 pub mod memory;
+pub mod project_hints;
 pub mod project_summary;
 pub mod tool_guide;
+pub mod tool_usage;
 
 #[derive(Debug, Clone)]
 pub struct ResourceDescriptor {
@@ -51,13 +53,14 @@ impl ResourceRegistry {
     }
 
     pub fn try_register(&mut self, p: Box<dyn ResourceProvider>) -> anyhow::Result<()> {
-        for d in p.descriptors() {
+        let descriptors = p.descriptors();
+        for d in &descriptors {
             if self.index.contains_key(&d.uri) {
                 anyhow::bail!("duplicate resource URI: {}", d.uri);
             }
         }
         let idx = self.providers.len();
-        for d in p.descriptors() {
+        for d in descriptors {
             self.index.insert(d.uri, idx);
         }
         self.providers.push(p);
@@ -107,6 +110,14 @@ mod tests {
             .await
             .expect_err("unknown URI must error");
         assert!(matches!(err, ResourceError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn registry_read_returns_provider_bytes() {
+        let mut reg = ResourceRegistry::new();
+        reg.register(Box::new(StubProvider::new("doc://ok")));
+        let bytes = reg.read("doc://ok").await.unwrap();
+        assert!(matches!(bytes, ResourceBytes::Text(_)));
     }
 
     struct StubProvider {

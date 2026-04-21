@@ -27,3 +27,6 @@ tests/fixtures/*/.codescout/
 /.claude/
 /.fastembed_cache/
 /.codescout/tmp/
+/.buddy/
+# Cross-process write lock file (per-project; recreated on activate)
+.codescout/write.lock

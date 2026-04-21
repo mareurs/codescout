@@ -32,20 +32,13 @@ impl Tool for ReadFile {
                 "start_line": { "type": "integer", "description": "First line (1-indexed). Pair with end_line." },
                 "end_line": { "type": "integer", "description": "Last line (1-indexed, inclusive). Pair with start_line." },
                 "json_path": { "type": "string", "description": "JSON subtree by path (e.g. \"$.dependencies\")." },
-                "toml_key": { "type": "string", "description": "TOML table or YAML section by key (e.g. \"dependencies\")." },
-                "mode": {
-                    "type": "string",
-                    "enum": ["complete"],
-                    "description": "Read mode. 'complete' returns entire file inline (plan files only, bypasses buffer)."
-                }
+                "toml_key": { "type": "string", "description": "TOML table or YAML section by key (e.g. \"dependencies\")." }
             }
         })
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
-        use super::output::{OutputGuard, OutputMode, OverflowInfo};
-
-        let path = input["path"]
+        let raw_path = input["path"]
             .as_str()
             .or_else(|| input["file_path"].as_str())
             .ok_or_else(|| {
@@ -54,168 +47,11 @@ impl Tool for ReadFile {
                     "Provide the file path as: path=\"relative/path/to/file\"",
                 )
             })?;
+        let path = strip_buffer_ref_quotes(raw_path);
 
-        // LLMs sometimes wrap buffer ref paths in extra quotes, e.g. "\"@tool_abc\"".
-        // Strip them so the ref resolves correctly instead of returning "file not found".
-        let path = path
-            .strip_prefix('"')
-            .and_then(|s| s.strip_suffix('"'))
-            .filter(|s| {
-                s.starts_with("@file_")
-                    || s.starts_with("@cmd_")
-                    || s.starts_with("@tool_")
-                    || s.starts_with("@ack_")
-            })
-            .unwrap_or(path);
-
-        // Handle buffer refs (@file_*, @cmd_*, @tool_*) — resolve from OutputBuffer
-        // instead of reading from the filesystem.
+        // Buffer refs bypass the filesystem entirely.
         if path.starts_with("@file_") || path.starts_with("@cmd_") || path.starts_with("@tool_") {
-            let raw = ctx
-                .output_buffer
-                .get(path)
-                .ok_or_else(|| {
-                    RecoverableError::with_hint(
-                        format!("buffer reference not found: '{}'", path),
-                        "Buffer refs expire when the session resets. Re-run the command to get a fresh ref.",
-                    )
-                })?
-                .stdout;
-
-            // @tool_* refs contain compact single-line JSON (tool result serialized
-            // without pretty-printing).  Expand it so start_line/end_line ranges
-            // and json_path navigation are useful.  Plain-text @cmd_*/@file_* refs
-            // are used as-is.
-            let text: String = if path.starts_with("@tool_") {
-                serde_json::from_str::<serde_json::Value>(&raw)
-                    .ok()
-                    .and_then(|v| serde_json::to_string_pretty(&v).ok())
-                    .unwrap_or(raw)
-            } else {
-                raw
-            };
-
-            // json_path navigation for @tool_* (tool results are always JSON)
-            if path.starts_with("@tool_") {
-                if let Some(jp) = input["json_path"].as_str() {
-                    let (content, type_name, count) =
-                        crate::tools::file_summary::extract_json_path(&text, jp)?;
-                    // Large extracted content (e.g. a function body) is stored as a
-                    // plain-text @file_* ref so the agent can grep/browse it without
-                    // triggering another @tool_* re-buffering cycle.
-                    let mut result = if crate::tools::exceeds_inline_limit(&content) {
-                        let file_id = ctx
-                            .output_buffer
-                            .store_file(format!("{path}:{jp}"), content);
-                        json!({
-                            "file_id": file_id,
-                            "path": jp,
-                            "type": type_name,
-                            "format": "json",
-                            "hint": format!(
-                                "Content stored as plain-text @file_* ref. \
-                                 run_command(\"grep pattern {file_id}\") to search, \
-                                 or read_file(\"{file_id}\", start_line=N, end_line=M) to browse."
-                            ),
-                        })
-                    } else {
-                        json!({
-                            "content": content,
-                            "path": jp,
-                            "type": type_name,
-                            "format": "json",
-                        })
-                    };
-                    if let Some(c) = count {
-                        result["count"] = json!(c);
-                    }
-                    return Ok(result);
-                }
-            }
-
-            let total_lines = text.lines().count();
-            let start = optional_u64_param(&input, "start_line");
-            let end = optional_u64_param(&input, "end_line");
-            if let (Some(s), Some(e)) = (start, end) {
-                if s == 0 || e < s {
-                    return Err(RecoverableError::with_hint(
-                        format!(
-                            "invalid line range: start_line={} end_line={} (start_line must be >= 1 and end_line >= start_line)",
-                            s, e
-                        ),
-                        "Lines are 1-indexed. Example: start_line=1, end_line=50",
-                    )
-                    .into());
-                }
-                let content = extract_lines(&text, s as usize, e as usize);
-                // If the extracted slice exceeds the inline limit, store it as a
-                // plain @file_* ref so call_content() never wraps it in @tool_*.
-                // @tool_* encodes newlines as JSON string escapes, so total_lines
-                // would count JSON structure lines (typically 4) rather than content
-                // lines — making subsequent start_line/end_line navigation useless.
-                // Same root cause as BUG-025 (real-file path); this covers buffer refs.
-                if crate::tools::exceeds_inline_limit(&content) {
-                    let content_total = content.lines().count();
-                    let file_id = ctx
-                        .output_buffer
-                        .store_file(format!("{}[{}-{}]", path, s, e), content.clone());
-
-                    // Auto-chunk: extract as much as fits the inline budget.
-                    // content is already the sub-range, so we work in sub-buffer line space (1-based).
-                    let (chunk, lines_shown, complete) = crate::util::text::extract_lines_to_budget(
-                        &content,
-                        1,
-                        usize::MAX,
-                        crate::tools::INLINE_BYTE_BUDGET,
-                    );
-                    // shown_lines reports original file line numbers for agent context
-                    let orig_start = s as usize;
-                    let orig_end = orig_start + lines_shown.saturating_sub(1);
-                    let mut result = json!({
-                        "content": chunk,
-                        "file_id": file_id,
-                        "total_lines": content_total,
-                        "shown_lines": [orig_start, orig_end],
-                        "complete": complete,
-                    });
-                    if !complete {
-                        // next uses sub-buffer line numbers (file_id contains the sub-range)
-                        let buf_next_start = lines_shown + 1;
-                        let buf_next_end = (buf_next_start + lines_shown - 1).min(content_total);
-                        result["next"] = json!(format!(
-                            "read_file(\"{file_id}\", start_line={buf_next_start}, end_line={buf_next_end})"
-                        ));
-                    }
-                    return Ok(result);
-                }
-                return Ok(json!({ "content": content, "total_lines": total_lines }));
-            }
-            // Full buffer content — never re-buffer (circular: same content, new ID,
-            // no benefit). If too large to return inline, tell the agent to paginate.
-            if crate::tools::exceeds_inline_limit(&text) {
-                let (chunk, lines_shown, complete) = crate::util::text::extract_lines_to_budget(
-                    &text,
-                    1,
-                    usize::MAX,
-                    crate::tools::INLINE_BYTE_BUDGET,
-                );
-                let mut result = json!({
-                    "content": chunk,
-                    "total_lines": total_lines,
-                    "shown_lines": [1, lines_shown],
-                    "complete": complete,
-                });
-                if !complete {
-                    let next_start = lines_shown + 1;
-                    let next_end = (next_start + lines_shown - 1).min(total_lines);
-                    // Reference the SAME buffer path — do not re-buffer
-                    result["next"] = json!(format!(
-                        "read_file(\"{path}\", start_line={next_start}, end_line={next_end})"
-                    ));
-                }
-                return Ok(result);
-            }
-            return Ok(json!({ "content": text, "total_lines": total_lines }));
+            return read_from_buffer(path, &input, ctx);
         }
 
         let project_root = ctx.agent.project_root().await;
@@ -227,68 +63,19 @@ impl Tool for ReadFile {
         )?;
 
         // Gate: redirect .md files to read_markdown
-        // Exempt: buffer refs (@file_*), and mode="complete" (plan files)
-        let is_buffer_ref = path.starts_with('@');
-        let is_complete_mode = input["mode"].as_str() == Some("complete");
-        if !is_buffer_ref && !is_complete_mode && resolved.extension().is_some_and(|e| e == "md") {
+        if resolved.extension().is_some_and(|e| e == "md") {
             return Err(RecoverableError::with_hint(
                 "Use read_markdown for markdown files",
-                "read_markdown provides heading-based navigation for .md files.",
+                "read_markdown provides heading-based navigation, size-adaptive output, and buffer-ref slicing for .md files.",
             )
             .into());
         }
 
-        // Extract line range (both must be present for a targeted read)
         let start_line = optional_u64_param(&input, "start_line");
         let end_line = optional_u64_param(&input, "end_line");
+        validate_read_nav_params(&input, start_line, end_line)?;
 
-        // Both start_line and end_line must be provided together
-        if start_line.is_some() != end_line.is_some() {
-            return Err(RecoverableError::with_hint(
-                "both start_line and end_line are required",
-                "Provide both start_line and end_line for a line range, e.g. start_line=1, end_line=50",
-            )
-            .into());
-        }
-
-        // Navigation parameters
-        let json_path = input["json_path"].as_str();
-        let toml_key = input["toml_key"].as_str();
-
-        let nav_param_count = [json_path.is_some(), toml_key.is_some()]
-            .iter()
-            .filter(|&&x| x)
-            .count();
-
-        if nav_param_count > 1 {
-            return Err(RecoverableError::with_hint(
-                "only one navigation parameter allowed at a time",
-                "Use json_path OR toml_key, not both",
-            )
-            .into());
-        }
-
-        if nav_param_count > 0 && (start_line.is_some() || end_line.is_some()) {
-            return Err(RecoverableError::with_hint(
-                "navigation parameters are mutually exclusive with start_line/end_line",
-                "Use either json_path/toml_key OR start_line+end_line",
-            )
-            .into());
-        }
-
-        // Determine source tag
-        let source_tag = {
-            let inner = ctx.agent.inner.read().await;
-            if let Some(project) = inner.active_project() {
-                if let Some(lib) = project.library_registry.is_library_path(&resolved) {
-                    format!("lib:{}", lib.name)
-                } else {
-                    "project".to_string()
-                }
-            } else {
-                "project".to_string()
-            }
-        };
+        let source_tag = compute_source_tag(&resolved, ctx).await;
 
         if resolved.is_dir() {
             return Err(RecoverableError::with_hint(
@@ -298,331 +85,478 @@ impl Tool for ReadFile {
             .into());
         }
 
-        let text = std::fs::read_to_string(&resolved).map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => RecoverableError::with_hint(
-                format!("file not found: '{}'", path),
-                "Check the path with list_dir, or use glob to locate the file",
-            )
-            .into(),
-            std::io::ErrorKind::InvalidData => RecoverableError::with_hint(
-                "file contains non-UTF-8 data (binary file?)",
-                "read_file only works with text files. Use list_dir to check file types.",
-            )
-            .into(),
-            _ => anyhow::anyhow!("failed to read {}: {}", resolved.display(), e),
-        })?;
+        let text = read_file_text(path, &resolved)?;
 
-        // Handle mode=complete: return entire file inline with delivery receipt
-        let mode = input["mode"].as_str();
-        if mode == Some("complete") {
-            // Mutual exclusivity with all other navigation params
-            if start_line.is_some()
-                || end_line.is_some()
-                || json_path.is_some()
-                || toml_key.is_some()
-            {
-                return Err(super::RecoverableError::with_hint(
-                    "mode=complete is mutually exclusive with start_line, end_line, json_path, toml_key",
-                    "Use mode=complete alone to read the entire plan file.",
-                )
-                .into());
-            }
-
-            // Scope restriction: only plans/ directories
-            if !path.contains("/plans/") && !path.starts_with("plans/") {
-                return Err(super::RecoverableError::with_hint(
-                    "mode=complete is restricted to plan files (paths containing /plans/)",
-                    "Use read_markdown for markdown files, or json_path/toml_key for structured data files.",
-                )
-                .into());
-            }
-
-            let line_count = text.lines().count();
-
-            // Parse headings for receipt and coverage
-            let all_headings = crate::tools::file_summary::parse_all_headings(&text);
-            let heading_texts: Vec<String> = all_headings.iter().map(|h| h.text.clone()).collect();
-
-            // Count checkboxes
-            let done_count = text
-                .lines()
-                .filter(|l| {
-                    let trimmed = l.trim_start();
-                    trimmed.starts_with("- [x]") || trimmed.starts_with("- [X]")
-                })
-                .count();
-            let pending_count = text
-                .lines()
-                .filter(|l| {
-                    let trimmed = l.trim_start();
-                    trimmed.starts_with("- [ ]")
-                })
-                .count();
-            let total_checkboxes = done_count + pending_count;
-
-            // Build delivery receipt
-            let section_list = heading_texts.join(", ");
-            let receipt = format!(
-                "\n\n--- delivery receipt ---\nFile: {path}\nLines: {line_count} | Sections: {} | Checkboxes: {total_checkboxes} ({done_count} done, {pending_count} pending)\nSections delivered: [{section_list}]\n",
-                all_headings.len()
-            );
-
-            // Record all sections as seen in coverage
-            if !heading_texts.is_empty() {
-                if let Ok(mut cov) = ctx.section_coverage.lock() {
-                    cov.mark_seen(&resolved, &heading_texts);
-                }
-            }
-
-            let mut content = text;
-            content.push_str(&receipt);
-
-            return Ok(json!({
-                "content": content,
-                "complete": true,
-                "line_count": line_count,
-            }));
+        if let Some(jp) = input["json_path"].as_str() {
+            return read_json_path_nav(&text, &resolved, jp);
         }
-
-        // Handle json_path navigation
-        if let Some(jp) = json_path {
-            let file_type =
-                crate::tools::file_summary::detect_file_type(&resolved.to_string_lossy());
-            if !matches!(file_type, crate::tools::file_summary::FileSummaryType::Json) {
-                return Err(RecoverableError::with_hint(
-                    "json_path parameter is only supported for JSON files",
-                    "For Markdown files use read_markdown, for TOML/YAML use toml_key",
-                )
-                .into());
-            }
-            let (content, type_name, count) =
-                crate::tools::file_summary::extract_json_path(&text, jp)?;
-            let mut result = json!({
-                "content": content,
-                "path": jp,
-                "type": type_name,
-                "format": "json",
-            });
-            if let Some(c) = count {
-                result["count"] = json!(c);
-            }
-            return Ok(result);
+        if let Some(tk) = input["toml_key"].as_str() {
+            return read_toml_yaml_key(&text, &resolved, tk);
         }
-
-        // Handle toml_key navigation
-        if let Some(tk) = toml_key {
-            let file_type =
-                crate::tools::file_summary::detect_file_type(&resolved.to_string_lossy());
-            match file_type {
-                crate::tools::file_summary::FileSummaryType::Toml => {
-                    let result = crate::tools::file_summary::extract_toml_key(&text, tk)?;
-                    return Ok(json!({
-                        "content": result.content,
-                        "line_range": [result.line_range.0, result.line_range.1],
-                        "breadcrumb": result.breadcrumb,
-                        "siblings": result.siblings,
-                        "format": "toml",
-                    }));
-                }
-                crate::tools::file_summary::FileSummaryType::Yaml => {
-                    let result = crate::tools::file_summary::extract_yaml_key(&text, tk)?;
-                    return Ok(json!({
-                        "content": result.content,
-                        "line_range": [result.line_range.0, result.line_range.1],
-                        "breadcrumb": result.breadcrumb,
-                        "siblings": result.siblings,
-                        "format": "yaml",
-                    }));
-                }
-                _ => {
-                    return Err(RecoverableError::with_hint(
-                        "toml_key parameter is only supported for TOML and YAML files",
-                        "For Markdown files use read_markdown, for JSON use json_path",
-                    )
-                    .into());
-                }
-            }
-        }
-
-        // If explicit line range given, validate then use it directly (no capping, no buffering)
         if let (Some(start), Some(end)) = (start_line, end_line) {
-            if start == 0 || end < start {
-                return Err(RecoverableError::with_hint(
-                    format!(
-                        "invalid line range: start_line={} end_line={} (start_line must be >= 1 and end_line >= start_line)",
-                        start, end
-                    ),
-                    "Lines are 1-indexed. Example: start_line=1, end_line=50",
-                )
-                .into());
-            }
-            let content = extract_lines(&text, start as usize, end as usize);
-            // Record markdown coverage for line-range reads.
-            let is_md = path.ends_with(".md") || path.ends_with(".markdown");
-            let md_cov = if is_md {
-                markdown_coverage(&text, &resolved, ctx, None, start_line, end_line)
-            } else {
-                None
-            };
-            // Proactive buffering: if the extracted range exceeds the inline limit,
-            // store as plain-text @file_* so callers can navigate it by line number.
-            // Without this, call_content wraps large content in a 3-line @tool_* JSON
-            // envelope, making subsequent start_line/end_line navigation useless.
-            // Same class as BUG-025 (which fixed the no-range path); this covers the
-            // explicit-range path.
-            if crate::tools::exceeds_inline_limit(&content) {
-                let content_total = content.lines().count();
-                let file_id = ctx
-                    .output_buffer
-                    .store_file(resolved.to_string_lossy().to_string(), content.clone());
-
-                let (chunk, lines_shown, complete) = crate::util::text::extract_lines_to_budget(
-                    &content,
-                    1,
-                    usize::MAX,
-                    crate::tools::INLINE_BYTE_BUDGET,
-                );
-                let orig_start = start as usize;
-                let orig_end = orig_start + lines_shown.saturating_sub(1);
-                let mut result = json!({
-                    "content": chunk,
-                    "file_id": file_id,
-                    "total_lines": content_total,
-                    "shown_lines": [orig_start, orig_end],
-                    "complete": complete,
-                });
-                if !complete {
-                    let buf_next_start = lines_shown + 1;
-                    let buf_next_end = (buf_next_start + lines_shown - 1).min(content_total);
-                    result["next"] = json!(format!(
-                        "read_file(\"{file_id}\", start_line={buf_next_start}, end_line={buf_next_end})"
-                    ));
-                }
-                if source_tag != "project" {
-                    result["source"] = json!(source_tag);
-                }
-                if let Some(c) = md_cov {
-                    result["coverage"] = c;
-                }
-                return Ok(result);
-            }
-            let mut result = json!({ "content": content });
-            if source_tag != "project" {
-                result["source"] = json!(source_tag);
-            }
-            if let Some(c) = md_cov {
-                result["coverage"] = c;
-            }
-            return Ok(result);
+            return read_with_line_range(path, &text, &resolved, start, end, &source_tag, ctx);
         }
-
-        // No explicit range: buffer large files instead of truncating or erroring
-        // If only one bound supplied (degenerate input), skip buffering.
-        let has_partial_range = start_line.is_some() || end_line.is_some();
-        if !has_partial_range && crate::tools::exceeds_inline_limit(&text) {
-            let file_id = ctx
-                .output_buffer
-                .store_file(resolved.to_string_lossy().to_string(), text.clone());
-            let summary =
-                match crate::tools::file_summary::detect_file_type(&resolved.to_string_lossy()) {
-                    crate::tools::file_summary::FileSummaryType::Source => {
-                        crate::tools::file_summary::summarize_source(
-                            &resolved.to_string_lossy(),
-                            &text,
-                        )
-                    }
-                    crate::tools::file_summary::FileSummaryType::Markdown => {
-                        crate::tools::file_summary::summarize_markdown(&text)
-                    }
-                    crate::tools::file_summary::FileSummaryType::Json => {
-                        crate::tools::file_summary::summarize_json(&text)
-                    }
-                    crate::tools::file_summary::FileSummaryType::Yaml => {
-                        crate::tools::file_summary::summarize_yaml(&text)
-                    }
-                    crate::tools::file_summary::FileSummaryType::Toml => {
-                        crate::tools::file_summary::summarize_toml(&text)
-                    }
-                    crate::tools::file_summary::FileSummaryType::Config => {
-                        crate::tools::file_summary::summarize_config(&text)
-                    }
-                    crate::tools::file_summary::FileSummaryType::Generic => {
-                        crate::tools::file_summary::summarize_generic_file(&text)
-                    }
-                };
-            let mut result = summary;
-            result["file_id"] = json!(file_id);
-            // For large markdown files that return a summary, record all headings as
-            // seen (the agent received the full heading list via the summary).
-            if path.ends_with(".md") || path.ends_with(".markdown") {
-                if let Some(c) = markdown_coverage(&text, &resolved, ctx, None, None, None) {
-                    result["coverage"] = c;
-                }
-            }
-            return Ok(result);
-        }
-
-        // Record markdown coverage for full-file reads (no range, no heading param).
-        let is_md = path.ends_with(".md") || path.ends_with(".markdown");
-        let md_cov = if is_md {
-            markdown_coverage(&text, &resolved, ctx, None, None, None)
-        } else {
-            None
-        };
-
-        // No line range: cap in exploring mode
-        let guard = OutputGuard::from_input(&input);
-        let total_lines = text.lines().count();
-        let max_lines = guard.max_results; // 200 by default
-
-        if guard.mode == OutputMode::Exploring && total_lines > max_lines {
-            let content = extract_lines(&text, 1, max_lines);
-            let overflow = OverflowInfo {
-                shown: max_lines,
-                total: total_lines,
-                hint: if crate::tools::file_summary::detect_file_type(path)
-                    == crate::tools::file_summary::FileSummaryType::Source
-                {
-                    format!(
-                        "File has {} lines. For source code, prefer list_symbols(path) \
-                         + find_symbol(query, include_body=true) to read specific functions. \
-                         Or use offset/limit to read a line range.",
-                        total_lines
-                    )
-                } else {
-                    format!(
-                        "File has {} lines. Use offset/limit to read specific ranges.",
-                        total_lines
-                    )
-                },
-                next_offset: None,
-                by_file: None,
-                by_file_overflow: 0,
-            };
-            let mut result = json!({ "content": content, "total_lines": total_lines });
-            if source_tag != "project" {
-                result["source"] = json!(source_tag);
-            }
-            result["overflow"] = OutputGuard::overflow_json(&overflow);
-            if let Some(c) = md_cov {
-                result["coverage"] = c;
-            }
-            Ok(result)
-        } else {
-            let mut result = json!({ "content": text, "total_lines": total_lines });
-            if source_tag != "project" {
-                result["source"] = json!(source_tag);
-            }
-            if let Some(c) = md_cov {
-                result["coverage"] = c;
-            }
-            Ok(result)
-        }
+        read_full_file(path, &text, &resolved, &input, &source_tag, ctx)
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
         Some(format_read_file(result))
     }
+}
+
+/// Strip surrounding quotes from buffer ref paths.
+///
+/// LLMs sometimes wrap @ref paths in extra quotes, e.g. `"@tool_abc"`.
+/// Stripping them here lets the ref resolve correctly.
+fn strip_buffer_ref_quotes(path: &str) -> &str {
+    path.strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .filter(|s| {
+            s.starts_with("@file_")
+                || s.starts_with("@cmd_")
+                || s.starts_with("@tool_")
+                || s.starts_with("@ack_")
+        })
+        .unwrap_or(path)
+}
+
+/// Read from an output buffer ref (`@file_*`, `@cmd_*`, `@tool_*`).
+///
+/// Handles json_path navigation for `@tool_*` refs and line-range slicing.
+/// Never re-buffers — returns inline or, for oversized content, paginates
+/// via `shown_lines` / `next`.
+fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Value> {
+    let raw = ctx
+        .output_buffer
+        .get(path)
+        .ok_or_else(|| {
+            RecoverableError::with_hint(
+                format!("buffer reference not found: '{}'", path),
+                "Buffer refs expire when the session resets. Re-run the command to get a fresh ref.",
+            )
+        })?
+        .stdout;
+
+    // @tool_* refs contain compact single-line JSON — pretty-print so
+    // start_line/end_line navigation and json_path extraction are useful.
+    let text: String = if path.starts_with("@tool_") {
+        serde_json::from_str::<serde_json::Value>(&raw)
+            .ok()
+            .and_then(|v| serde_json::to_string_pretty(&v).ok())
+            .unwrap_or(raw)
+    } else {
+        raw
+    };
+
+    // json_path navigation is only meaningful for @tool_* (always JSON).
+    if path.starts_with("@tool_") {
+        if let Some(jp) = input["json_path"].as_str() {
+            let (content, type_name, count) =
+                crate::tools::file_summary::extract_json_path(&text, jp)?;
+            let mut result = if crate::tools::exceeds_inline_limit(&content) {
+                let file_id = ctx
+                    .output_buffer
+                    .store_file(format!("{path}:{jp}"), content);
+                json!({
+                    "file_id": file_id,
+                    "path": jp,
+                    "type": type_name,
+                    "format": "json",
+                    "hint": format!(
+                        "Content stored as plain-text @file_* ref. \
+                         run_command(\"grep pattern {file_id}\") to search, \
+                         or read_file(\"{file_id}\", start_line=N, end_line=M) to browse."
+                    ),
+                })
+            } else {
+                json!({
+                    "content": content,
+                    "path": jp,
+                    "type": type_name,
+                    "format": "json",
+                })
+            };
+            if let Some(c) = count {
+                result["count"] = json!(c);
+            }
+            return Ok(result);
+        }
+    }
+
+    let total_lines = text.lines().count();
+    let start = optional_u64_param(input, "start_line");
+    let end = optional_u64_param(input, "end_line");
+
+    if let (Some(s), Some(e)) = (start, end) {
+        if s == 0 || e < s {
+            return Err(RecoverableError::with_hint(
+                format!(
+                    "invalid line range: start_line={} end_line={} \
+                     (start_line must be >= 1 and end_line >= start_line)",
+                    s, e
+                ),
+                "Lines are 1-indexed. Example: start_line=1, end_line=50",
+            )
+            .into());
+        }
+        let content = extract_lines(&text, s as usize, e as usize);
+        if crate::tools::exceeds_inline_limit(&content) {
+            let content_total = content.lines().count();
+            let file_id = ctx
+                .output_buffer
+                .store_file(format!("{}[{}-{}]", path, s, e), content.clone());
+            let (chunk, lines_shown, complete) = crate::util::text::extract_lines_to_budget(
+                &content,
+                1,
+                usize::MAX,
+                crate::tools::INLINE_BYTE_BUDGET,
+            );
+            let orig_start = s as usize;
+            let orig_end = orig_start + lines_shown.saturating_sub(1);
+            let mut result = json!({
+                "content": chunk,
+                "file_id": file_id,
+                "total_lines": content_total,
+                "shown_lines": [orig_start, orig_end],
+                "complete": complete,
+            });
+            if !complete {
+                let buf_next_start = lines_shown + 1;
+                let buf_next_end = (buf_next_start + lines_shown - 1).min(content_total);
+                result["next"] = json!(format!(
+                    "read_file(\"{file_id}\", start_line={buf_next_start}, end_line={buf_next_end})"
+                ));
+            }
+            return Ok(result);
+        }
+        return Ok(json!({ "content": content, "total_lines": total_lines }));
+    }
+
+    // Full buffer: paginate if over the inline limit. Never re-buffer.
+    if crate::tools::exceeds_inline_limit(&text) {
+        let (chunk, lines_shown, complete) = crate::util::text::extract_lines_to_budget(
+            &text,
+            1,
+            usize::MAX,
+            crate::tools::INLINE_BYTE_BUDGET,
+        );
+        let mut result = json!({
+            "content": chunk,
+            "total_lines": total_lines,
+            "shown_lines": [1, lines_shown],
+            "complete": complete,
+        });
+        if !complete {
+            let next_start = lines_shown + 1;
+            let next_end = (next_start + lines_shown - 1).min(total_lines);
+            result["next"] = json!(format!(
+                "read_file(\"{path}\", start_line={next_start}, end_line={next_end})"
+            ));
+        }
+        return Ok(result);
+    }
+    Ok(json!({ "content": text, "total_lines": total_lines }))
+}
+
+/// Validate navigation parameter combinations for real-file reads.
+fn validate_read_nav_params(
+    input: &Value,
+    start_line: Option<u64>,
+    end_line: Option<u64>,
+) -> Result<()> {
+    if start_line.is_some() != end_line.is_some() {
+        return Err(RecoverableError::with_hint(
+            "both start_line and end_line are required",
+            "Provide both start_line and end_line for a line range, e.g. start_line=1, end_line=50",
+        )
+        .into());
+    }
+    let json_path = input["json_path"].as_str();
+    let toml_key = input["toml_key"].as_str();
+    let nav_count = usize::from(json_path.is_some()) + usize::from(toml_key.is_some());
+    if nav_count > 1 {
+        return Err(RecoverableError::with_hint(
+            "only one navigation parameter allowed at a time",
+            "Use json_path OR toml_key, not both",
+        )
+        .into());
+    }
+    if nav_count > 0 && (start_line.is_some() || end_line.is_some()) {
+        return Err(RecoverableError::with_hint(
+            "navigation parameters are mutually exclusive with start_line/end_line",
+            "Use either json_path/toml_key OR start_line+end_line",
+        )
+        .into());
+    }
+    Ok(())
+}
+
+/// Resolve the library source tag for a file (`"project"` or `"lib:<name>"`).
+async fn compute_source_tag(resolved: &std::path::Path, ctx: &ToolContext) -> String {
+    let inner = ctx.agent.inner.read().await;
+    if let Some(project) = inner.active_project() {
+        if let Some(lib) = project.library_registry.is_library_path(resolved) {
+            return format!("lib:{}", lib.name);
+        }
+    }
+    "project".to_string()
+}
+
+/// Read file contents with user-friendly error messages.
+fn read_file_text(path: &str, resolved: &std::path::PathBuf) -> Result<String> {
+    std::fs::read_to_string(resolved).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => RecoverableError::with_hint(
+            format!("file not found: '{}'", path),
+            "Check the path with list_dir, or use glob to locate the file",
+        )
+        .into(),
+        std::io::ErrorKind::InvalidData => RecoverableError::with_hint(
+            "file contains non-UTF-8 data (binary file?)",
+            "read_file only works with text files. Use list_dir to check file types.",
+        )
+        .into(),
+        _ => anyhow::anyhow!("failed to read {}: {}", resolved.display(), e),
+    })
+}
+
+/// Handle `json_path` navigation for JSON files.
+fn read_json_path_nav(text: &str, resolved: &std::path::Path, jp: &str) -> Result<Value> {
+    let file_type = crate::tools::file_summary::detect_file_type(&resolved.to_string_lossy());
+    if !matches!(file_type, crate::tools::file_summary::FileSummaryType::Json) {
+        return Err(RecoverableError::with_hint(
+            "json_path parameter is only supported for JSON files",
+            "For Markdown files use read_markdown, for TOML/YAML use toml_key",
+        )
+        .into());
+    }
+    let (content, type_name, count) = crate::tools::file_summary::extract_json_path(text, jp)?;
+    let mut result = json!({
+        "content": content,
+        "path": jp,
+        "type": type_name,
+        "format": "json",
+    });
+    if let Some(c) = count {
+        result["count"] = json!(c);
+    }
+    Ok(result)
+}
+
+/// Handle `toml_key` navigation for TOML and YAML files.
+fn read_toml_yaml_key(text: &str, resolved: &std::path::Path, tk: &str) -> Result<Value> {
+    let file_type = crate::tools::file_summary::detect_file_type(&resolved.to_string_lossy());
+    match file_type {
+        crate::tools::file_summary::FileSummaryType::Toml => {
+            let result = crate::tools::file_summary::extract_toml_key(text, tk)?;
+            Ok(json!({
+                "content": result.content,
+                "line_range": [result.line_range.0, result.line_range.1],
+                "breadcrumb": result.breadcrumb,
+                "siblings": result.siblings,
+                "format": "toml",
+            }))
+        }
+        crate::tools::file_summary::FileSummaryType::Yaml => {
+            let result = crate::tools::file_summary::extract_yaml_key(text, tk)?;
+            Ok(json!({
+                "content": result.content,
+                "line_range": [result.line_range.0, result.line_range.1],
+                "breadcrumb": result.breadcrumb,
+                "siblings": result.siblings,
+                "format": "yaml",
+            }))
+        }
+        _ => Err(RecoverableError::with_hint(
+            "toml_key parameter is only supported for TOML and YAML files",
+            "For Markdown files use read_markdown, for JSON use json_path",
+        )
+        .into()),
+    }
+}
+
+/// Handle an explicit `start_line`+`end_line` range read from a real file.
+fn read_with_line_range(
+    path: &str,
+    text: &str,
+    resolved: &std::path::PathBuf,
+    start: u64,
+    end: u64,
+    source_tag: &str,
+    ctx: &ToolContext,
+) -> Result<Value> {
+    if start == 0 || end < start {
+        return Err(RecoverableError::with_hint(
+            format!(
+                "invalid line range: start_line={} end_line={} \
+                 (start_line must be >= 1 and end_line >= start_line)",
+                start, end
+            ),
+            "Lines are 1-indexed. Example: start_line=1, end_line=50",
+        )
+        .into());
+    }
+    let content = extract_lines(text, start as usize, end as usize);
+
+    let is_md = path.ends_with(".md") || path.ends_with(".markdown");
+    let md_cov = if is_md {
+        markdown_coverage(text, resolved, ctx, None, Some(start), Some(end))
+    } else {
+        None
+    };
+
+    // Proactive buffering: oversized extracted ranges are stored as @file_* refs
+    // so callers can navigate by line number (BUG-025 class).
+    if crate::tools::exceeds_inline_limit(&content) {
+        let content_total = content.lines().count();
+        let file_id = ctx
+            .output_buffer
+            .store_file(resolved.to_string_lossy().to_string(), content.clone());
+        let (chunk, lines_shown, complete) = crate::util::text::extract_lines_to_budget(
+            &content,
+            1,
+            usize::MAX,
+            crate::tools::INLINE_BYTE_BUDGET,
+        );
+        let orig_start = start as usize;
+        let orig_end = orig_start + lines_shown.saturating_sub(1);
+        let mut result = json!({
+            "content": chunk,
+            "file_id": file_id,
+            "total_lines": content_total,
+            "shown_lines": [orig_start, orig_end],
+            "complete": complete,
+        });
+        if !complete {
+            let buf_next_start = lines_shown + 1;
+            let buf_next_end = (buf_next_start + lines_shown - 1).min(content_total);
+            result["next"] = json!(format!(
+                "read_file(\"{file_id}\", start_line={buf_next_start}, end_line={buf_next_end})"
+            ));
+        }
+        if source_tag != "project" {
+            result["source"] = json!(source_tag);
+        }
+        if let Some(c) = md_cov {
+            result["coverage"] = c;
+        }
+        return Ok(result);
+    }
+
+    let mut result = json!({ "content": content });
+    if source_tag != "project" {
+        result["source"] = json!(source_tag);
+    }
+    if let Some(c) = md_cov {
+        result["coverage"] = c;
+    }
+    Ok(result)
+}
+
+/// Handle a full-file read (no range, no navigation param).
+///
+/// Large files are summarised and buffered. Small files are returned inline,
+/// capped at `max_results` lines in exploring mode.
+fn read_full_file(
+    path: &str,
+    text: &str,
+    resolved: &std::path::PathBuf,
+    input: &Value,
+    source_tag: &str,
+    ctx: &ToolContext,
+) -> Result<Value> {
+    use super::output::{OutputGuard, OutputMode, OverflowInfo};
+
+    if crate::tools::exceeds_inline_limit(text) {
+        let file_id = ctx
+            .output_buffer
+            .store_file(resolved.to_string_lossy().to_string(), text.to_string());
+        let mut result =
+            match crate::tools::file_summary::detect_file_type(&resolved.to_string_lossy()) {
+                crate::tools::file_summary::FileSummaryType::Source => {
+                    crate::tools::file_summary::summarize_source(&resolved.to_string_lossy(), text)
+                }
+                crate::tools::file_summary::FileSummaryType::Markdown => {
+                    crate::tools::file_summary::summarize_markdown(text)
+                }
+                crate::tools::file_summary::FileSummaryType::Json => {
+                    crate::tools::file_summary::summarize_json(text)
+                }
+                crate::tools::file_summary::FileSummaryType::Yaml => {
+                    crate::tools::file_summary::summarize_yaml(text)
+                }
+                crate::tools::file_summary::FileSummaryType::Toml => {
+                    crate::tools::file_summary::summarize_toml(text)
+                }
+                crate::tools::file_summary::FileSummaryType::Config => {
+                    crate::tools::file_summary::summarize_config(text)
+                }
+                crate::tools::file_summary::FileSummaryType::Generic => {
+                    crate::tools::file_summary::summarize_generic_file(text)
+                }
+            };
+        result["file_id"] = json!(file_id);
+        if path.ends_with(".md") || path.ends_with(".markdown") {
+            if let Some(c) = markdown_coverage(text, resolved, ctx, None, None, None) {
+                result["coverage"] = c;
+            }
+        }
+        return Ok(result);
+    }
+
+    let is_md = path.ends_with(".md") || path.ends_with(".markdown");
+    let md_cov = if is_md {
+        markdown_coverage(text, resolved, ctx, None, None, None)
+    } else {
+        None
+    };
+
+    let guard = OutputGuard::from_input(input);
+    let total_lines = text.lines().count();
+    let max_lines = guard.max_results;
+
+    if guard.mode == OutputMode::Exploring && total_lines > max_lines {
+        let content = extract_lines(text, 1, max_lines);
+        let overflow = OverflowInfo {
+            shown: max_lines,
+            total: total_lines,
+            hint: if crate::tools::file_summary::detect_file_type(path)
+                == crate::tools::file_summary::FileSummaryType::Source
+            {
+                format!(
+                    "File has {} lines. For source code, prefer list_symbols(path) \
+                     + find_symbol(query, include_body=true) to read specific functions. \
+                     Or use offset/limit to read a line range.",
+                    total_lines
+                )
+            } else {
+                format!(
+                    "File has {} lines. Use offset/limit to read specific ranges.",
+                    total_lines
+                )
+            },
+            next_offset: None,
+            by_file: None,
+            by_file_overflow: 0,
+        };
+        let mut result = json!({ "content": content, "total_lines": total_lines });
+        if source_tag != "project" {
+            result["source"] = json!(source_tag);
+        }
+        result["overflow"] = OutputGuard::overflow_json(&overflow);
+        if let Some(c) = md_cov {
+            result["coverage"] = c;
+        }
+        return Ok(result);
+    }
+
+    let mut result = json!({ "content": text, "total_lines": total_lines });
+    if source_tag != "project" {
+        result["source"] = json!(source_tag);
+    }
+    if let Some(c) = md_cov {
+        result["coverage"] = c;
+    }
+    Ok(result)
 }
 
 // ── list_dir ────────────────────────────────────────────────────────────────
@@ -689,7 +623,10 @@ impl Tool for ListDir {
         let walker = ignore::WalkBuilder::new(&path)
             .max_depth(walker_depth)
             .hidden(true)
-            .git_ignore(true)
+            .git_ignore(false)
+            .git_exclude(false)
+            .git_global(false)
+            .ignore(false)
             .build()
             .flatten()
             .filter(|e| e.depth() > 0);
@@ -1692,11 +1629,11 @@ impl Tool for EditFile {
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
-            "required": ["path", "new_string"],
+            "required": ["path"],
             "properties": {
                 "path": { "type": "string", "description": "File path" },
-                "old_string": { "type": "string", "description": "Exact text to find (whitespace-sensitive). Required unless insert is set." },
-                "new_string": { "type": "string", "description": "Replacement text (empty string = delete)." },
+                "old_string": { "type": "string", "description": "Exact text to find (whitespace-sensitive). Required unless insert or edits is set." },
+                "new_string": { "type": "string", "description": "Replacement text (empty string = delete). Required for single-edit and insert modes." },
                 "replace_all": { "type": "boolean", "default": false, "description": "Replace all occurrences." },
                 "insert": { "type": "string", "enum": ["prepend", "append"], "description": "Insert at file start/end (old_string not required)." },
                 "edits": {
@@ -1710,7 +1647,7 @@ impl Tool for EditFile {
                         },
                         "required": ["old_string", "new_string"]
                     },
-                    "description": "Batch mode: array of edit operations applied atomically."
+                    "description": "Batch mode: array of edit operations applied atomically. Top-level new_string not used."
                 }
             }
         })
@@ -1797,6 +1734,13 @@ impl Tool for EditFile {
 
         // Prepend/append mode — no string match needed.
         if let Some(insert) = input["insert"].as_str() {
+            if !input["new_string"].is_string() {
+                return Err(super::RecoverableError::with_hint(
+                    "new_string is required",
+                    "Pass new_string as a string. To insert nothing, use new_string: \"\".",
+                )
+                .into());
+            }
             let root = ctx.agent.require_project_root().await?;
             let security = ctx.agent.security_config().await;
             let resolved = crate::util::path_security::validate_write_path(path, &root, &security)?;
@@ -1930,8 +1874,7 @@ async fn perform_edit(
         }
 
         // If unread sections exist, return a hint alongside the ok status.
-        let written = std::fs::read_to_string(&resolved).unwrap_or_default();
-        let all_headings = crate::tools::file_summary::parse_all_headings(&written);
+        let all_headings = crate::tools::file_summary::parse_all_headings(&new_content);
         if !all_headings.is_empty() {
             let heading_texts: Vec<String> = all_headings.iter().map(|h| h.text.clone()).collect();
             if let Ok(mut cov) = ctx.section_coverage.lock() {
@@ -3291,7 +3234,7 @@ mod tests {
     #[tokio::test]
     async fn read_file_denies_ssh_key() {
         let ctx = test_ctx().await;
-        if let Some(home) = std::env::var("HOME").ok() {
+        if let Ok(home) = std::env::var("HOME") {
             let ssh_path = format!("{}/.ssh/id_rsa", home);
             let result = ReadFile.call(json!({ "path": &ssh_path }), &ctx).await;
             assert!(result.is_err(), "read of ~/.ssh/id_rsa should be denied");
@@ -3557,9 +3500,8 @@ mod tests {
             "large explicit range should buffer as @file_* for navigation; got: {}",
             result
         );
-        assert_eq!(
-            result["complete"].as_bool().unwrap_or(true),
-            false,
+        assert!(
+            !result["complete"].as_bool().unwrap_or(true),
             "large explicit range should be incomplete (more chunks follow); got: {}",
             result
         );
@@ -4220,202 +4162,6 @@ mod tests {
     }
 
     // ── ReadFile — multi-heading (headings param) ─────────────────────────────
-
-    // ── ReadFile — mode=complete ───────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn complete_mode_returns_full_content() {
-        let ctx = test_ctx().await;
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("plans")).unwrap();
-        let plan = dir.path().join("plans/test-plan.md");
-        let mut content = String::from("# Plan\n");
-        for i in 1..=10 {
-            content.push_str(&format!(
-                "## Task {i}\n- [ ] Step 1\n- [x] Step 2\ncontent {i}\n\n"
-            ));
-        }
-        std::fs::write(&plan, &content).unwrap();
-        ctx.agent
-            .activate(dir.path().to_path_buf(), Some(false))
-            .await
-            .unwrap();
-
-        let result = ReadFile
-            .call(
-                json!({
-                    "path": "plans/test-plan.md",
-                    "mode": "complete"
-                }),
-                &ctx,
-            )
-            .await
-            .unwrap();
-
-        let text = result["content"].as_str().unwrap();
-        assert!(text.contains("## Task 1"));
-        assert!(text.contains("## Task 10"));
-        assert!(!text.contains("@file_"));
-    }
-
-    #[tokio::test]
-    async fn complete_mode_delivery_receipt() {
-        let ctx = test_ctx().await;
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("plans")).unwrap();
-        std::fs::write(
-            dir.path().join("plans/test-plan.md"),
-            "# Plan\n## Task 1\n- [ ] Step A\n- [x] Step B\n## Task 2\n- [ ] Step C\n",
-        )
-        .unwrap();
-        ctx.agent
-            .activate(dir.path().to_path_buf(), Some(false))
-            .await
-            .unwrap();
-
-        let result = ReadFile
-            .call(
-                json!({
-                    "path": "plans/test-plan.md",
-                    "mode": "complete"
-                }),
-                &ctx,
-            )
-            .await
-            .unwrap();
-
-        let text = result["content"].as_str().unwrap();
-        assert!(text.contains("--- delivery receipt ---"));
-        assert!(text.contains("Sections: 3"));
-        assert!(text.contains("Checkboxes:"));
-    }
-
-    #[tokio::test]
-    async fn complete_mode_marks_all_seen() {
-        let ctx = test_ctx().await;
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("plans")).unwrap();
-        std::fs::write(
-            dir.path().join("plans/test-plan.md"),
-            "# Plan\n## A\ntext\n## B\ntext\n## C\ntext\n",
-        )
-        .unwrap();
-        ctx.agent
-            .activate(dir.path().to_path_buf(), Some(false))
-            .await
-            .unwrap();
-
-        let _ = ReadFile
-            .call(
-                json!({
-                    "path": "plans/test-plan.md",
-                    "mode": "complete"
-                }),
-                &ctx,
-            )
-            .await
-            .unwrap();
-
-        let resolved = dir
-            .path()
-            .join("plans/test-plan.md")
-            .canonicalize()
-            .unwrap();
-        let all = vec![
-            "# Plan".to_string(),
-            "## A".to_string(),
-            "## B".to_string(),
-            "## C".to_string(),
-        ];
-        let status = ctx
-            .section_coverage
-            .lock()
-            .unwrap()
-            .status(&resolved, &all)
-            .unwrap();
-        assert_eq!(status.read_count, 4);
-        assert!(status.unread.is_empty());
-    }
-
-    #[tokio::test]
-    async fn complete_mode_rejects_non_plan_path() {
-        let ctx = test_ctx().await;
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("README.md"), "# Big file\n").unwrap();
-        ctx.agent
-            .activate(dir.path().to_path_buf(), Some(false))
-            .await
-            .unwrap();
-
-        let result = ReadFile
-            .call(
-                json!({
-                    "path": "README.md",
-                    "mode": "complete"
-                }),
-                &ctx,
-            )
-            .await;
-
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn complete_mode_mutual_exclusivity() {
-        let ctx = test_ctx().await;
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("plans")).unwrap();
-        std::fs::write(dir.path().join("plans/p.md"), "# Plan\n").unwrap();
-        ctx.agent
-            .activate(dir.path().to_path_buf(), Some(false))
-            .await
-            .unwrap();
-
-        let result = ReadFile
-            .call(
-                json!({
-                    "path": "plans/p.md",
-                    "mode": "complete",
-                    "start_line": 1,
-                    "end_line": 5
-                }),
-                &ctx,
-            )
-            .await;
-
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn complete_mode_nested_plans_dir() {
-        let ctx = test_ctx().await;
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("docs/superpowers/plans")).unwrap();
-        std::fs::write(
-            dir.path().join("docs/superpowers/plans/feature.md"),
-            "# Plan\n## Task 1\ncontent\n",
-        )
-        .unwrap();
-        ctx.agent
-            .activate(dir.path().to_path_buf(), Some(false))
-            .await
-            .unwrap();
-
-        let result = ReadFile
-            .call(
-                json!({
-                    "path": "docs/superpowers/plans/feature.md",
-                    "mode": "complete"
-                }),
-                &ctx,
-            )
-            .await
-            .unwrap();
-
-        let text = result["content"].as_str().unwrap();
-        assert!(text.contains("## Task 1"));
-        assert!(text.contains("--- delivery receipt ---"));
-    }
 
     // ── EditFile ──────────────────────────────────────────────────────────────
 
@@ -5897,7 +5643,7 @@ line4"
             "{{\"id\":1,\"data\":\"{}\"}}\n",
             "x".repeat(550) // ~570 bytes per line
         );
-        let content: String = std::iter::repeat(line.as_str()).take(10).collect();
+        let content: String = line.as_str().repeat(10);
         assert!(
             content.len() > 5_000,
             "test file must exceed old 5KB threshold"
@@ -5934,7 +5680,7 @@ line4"
         let file = dir.path().join("big.py");
         // 150 lines × 100 bytes = 15KB ≈ 3750 tokens → exceeds limit
         let line = format!("# {}\n", "x".repeat(95));
-        let content: String = std::iter::repeat(line.as_str()).take(150).collect();
+        let content: String = line.as_str().repeat(150);
         assert!(
             content.len() / 4 > crate::tools::MAX_INLINE_TOKENS,
             "test file must exceed token threshold"

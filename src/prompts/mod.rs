@@ -8,6 +8,17 @@
 pub const SERVER_INSTRUCTIONS: &str = include_str!("server_instructions.md");
 pub const GITHUB_INSTRUCTIONS: &str = include_str!("github_instructions.md");
 
+/// Kotlin-specific known issues — only injected for projects with Kotlin.
+const KOTLIN_KNOWN_ISSUES: &str = "\n\n## Language Support — Known Issues\n\n\
+### Kotlin (kotlin-lsp)\n\n\
+kotlin-lsp (JetBrains) has a **single workspace session** limitation: only one \
+kotlin-lsp process can serve a given project directory at a time. If another \
+codescout instance or editor is already running kotlin-lsp for the same project, \
+new instances will fail with:\n\n\
+> \"Multiple editing sessions for one workspace are not supported yet\"\n\n\
+codescout detects this and fails fast with a clear error. **Workaround:** close \
+the other session first, or use a single codescout instance for Kotlin projects.";
+
 /// Build the full server instructions string, optionally appending
 /// dynamic project status.
 pub fn build_server_instructions(project_status: Option<&ProjectStatus>) -> String {
@@ -70,6 +81,11 @@ pub fn build_server_instructions(project_status: Option<&ProjectStatus>) -> Stri
                     "\nUse `project: \"<id>\"` in `find_symbol` / `semantic_search` / `memory` to scope to a specific project.\n",
                 );
             }
+        }
+
+        // Language-specific warnings — only injected when the project uses the language.
+        if status.languages.iter().any(|l| l == "kotlin") {
+            instructions.push_str(KOTLIN_KNOWN_ISSUES);
         }
 
         if status.github_enabled {
@@ -224,7 +240,7 @@ mod tests {
 
     #[test]
     fn static_instructions_contain_key_sections() {
-        assert!(SERVER_INSTRUCTIONS.contains("## How to Choose the Right Tool"));
+        assert!(SERVER_INSTRUCTIONS.contains("## Tool Routing & Gotchas"));
         assert!(SERVER_INSTRUCTIONS.contains("## Output System"));
         assert!(SERVER_INSTRUCTIONS.contains("## Rules"));
     }
@@ -571,5 +587,43 @@ mod tests {
         assert!(prompt.contains("Workspace Survey"));
         assert!(prompt.contains("api"));
         assert!(prompt.contains("frontend"));
+    }
+
+    #[test]
+    fn build_with_kotlin_project_includes_kotlin_warnings() {
+        let status = ProjectStatus {
+            name: "test".into(),
+            path: "/tmp/test".into(),
+            languages: vec!["kotlin".into(), "java".into()],
+            memories: vec![],
+            has_index: false,
+            system_prompt: None,
+            github_enabled: false,
+            workspace: None,
+        };
+        let result = build_server_instructions(Some(&status));
+        assert!(
+            result.contains("kotlin-lsp"),
+            "Kotlin project must include Kotlin known issues"
+        );
+    }
+
+    #[test]
+    fn build_without_kotlin_excludes_kotlin_warnings() {
+        let status = ProjectStatus {
+            name: "test".into(),
+            path: "/tmp/test".into(),
+            languages: vec!["rust".into()],
+            memories: vec![],
+            has_index: false,
+            system_prompt: None,
+            github_enabled: false,
+            workspace: None,
+        };
+        let result = build_server_instructions(Some(&status));
+        assert!(
+            !result.contains("kotlin-lsp"),
+            "Non-Kotlin project must not include Kotlin known issues"
+        );
     }
 }

@@ -37,6 +37,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
 /// Spawn two agents on the same workspace, both pointed at the same mux.
 /// Returns `(agent_a, agent_b, workspace_root, _tempdir)`. Drop the tempdir
 /// to remove the workspace.
+#[allow(dead_code)]
 pub(crate) async fn two_agents_on_fixture(
     fixture_rel: &str,
 ) -> (

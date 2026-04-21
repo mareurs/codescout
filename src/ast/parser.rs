@@ -26,24 +26,6 @@ pub struct DocstringInfo {
 // Language resolution
 // ---------------------------------------------------------------------------
 
-/// Get the tree-sitter Language for a language name.
-fn get_ts_language(lang: &str) -> Option<tree_sitter::Language> {
-    match lang {
-        "rust" => Some(tree_sitter_rust::LANGUAGE.into()),
-        "python" => Some(tree_sitter_python::LANGUAGE.into()),
-        "go" => Some(tree_sitter_go::LANGUAGE.into()),
-        "typescript" => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
-        "tsx" => Some(tree_sitter_typescript::LANGUAGE_TSX.into()),
-        "javascript" => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
-        "jsx" => Some(tree_sitter_typescript::LANGUAGE_TSX.into()),
-        "java" => Some(tree_sitter_java::LANGUAGE.into()),
-        "kotlin" => Some(tree_sitter_kotlin_ng::LANGUAGE.into()),
-        "html" => Some(tree_sitter_html::LANGUAGE.into()),
-        "css" | "scss" | "less" => Some(tree_sitter_css::LANGUAGE.into()),
-        _ => None,
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Symbol extraction
 // ---------------------------------------------------------------------------
@@ -52,7 +34,7 @@ fn get_ts_language(lang: &str) -> Option<tree_sitter::Language> {
 /// the given language. Returns `false` for unsupported languages so that the
 /// caller treats unknown files as clean.
 pub fn has_syntax_errors(source: &str, lang: &str) -> bool {
-    let Some(ts_lang) = get_ts_language(lang) else {
+    let Some(ts_lang) = crate::ast::get_ts_language(lang) else {
         return false;
     };
     let mut parser = tree_sitter::Parser::new();
@@ -71,8 +53,8 @@ pub fn extract_symbols_from_source(
     path: &Path,
 ) -> Result<Vec<SymbolInfo>> {
     let lang = language.ok_or_else(|| anyhow!("Unknown language for {:?}", path))?;
-    let ts_lang =
-        get_ts_language(lang).ok_or_else(|| anyhow!("No tree-sitter grammar for '{}'", lang))?;
+    let ts_lang = crate::ast::get_ts_language(lang)
+        .ok_or_else(|| anyhow!("No tree-sitter grammar for '{}'", lang))?;
 
     let mut parser = Parser::new();
     parser.set_language(&ts_lang)?;
@@ -92,6 +74,7 @@ pub fn extract_symbols_from_source(
         }
         "java" => Ok(extract_java_symbols(root, source, &file, "")),
         "kotlin" => Ok(extract_kotlin_symbols(root, source, &file, "")),
+        "bash" => Ok(extract_bash_symbols(root, source, &file, "")),
         _ => Ok(vec![]),
     }
 }
@@ -107,8 +90,8 @@ pub fn extract_docstrings_from_source(
     path: &Path,
 ) -> Result<Vec<DocstringInfo>> {
     let lang = language.ok_or_else(|| anyhow!("Unknown language for {:?}", path))?;
-    let ts_lang =
-        get_ts_language(lang).ok_or_else(|| anyhow!("No tree-sitter grammar for '{}'", lang))?;
+    let ts_lang = crate::ast::get_ts_language(lang)
+        .ok_or_else(|| anyhow!("No tree-sitter grammar for '{}'", lang))?;
 
     let mut parser = Parser::new();
     parser.set_language(&ts_lang)?;
@@ -1156,6 +1139,30 @@ fn extract_kotlin_class_members(
     }
 
     members
+}
+
+fn extract_bash_symbols(node: Node, source: &str, file: &Path, prefix: &str) -> Vec<SymbolInfo> {
+    let mut symbols = Vec::new();
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "function_definition" {
+            if let Some(name) = child_name(child, source, "name") {
+                symbols.push(SymbolInfo {
+                    name_path: make_name_path(prefix, &name),
+                    name,
+                    kind: SymbolKind::Function,
+                    file: file.to_path_buf(),
+                    start_line: child.start_position().row as u32,
+                    end_line: child.end_position().row as u32,
+                    range_start_line: None,
+                    start_col: child.start_position().column as u32,
+                    children: vec![],
+                    detail: None,
+                });
+            }
+        }
+    }
+    symbols
 }
 
 // ---------------------------------------------------------------------------
@@ -2386,5 +2393,57 @@ class Animal {
             .find(|d| d.symbol_name.as_deref() == Some("greet"))
             .unwrap();
         assert!(greet_doc.content.contains("Greet someone"));
+    }
+
+    #[test]
+    fn get_ts_language_bash() {
+        assert!(
+            crate::ast::get_ts_language("bash").is_some(),
+            "bash should have a tree-sitter grammar"
+        );
+    }
+
+    #[test]
+    fn extract_bash_symbols_function_def() {
+        use std::path::Path;
+
+        // POSIX style: foo() { }
+        let src_posix = "foo() {\n  echo hi\n}\n";
+        let syms =
+            extract_symbols_from_source(src_posix, Some("bash"), Path::new("script.sh")).unwrap();
+        assert_eq!(syms.len(), 1, "expected 1 symbol from POSIX-style function");
+        assert_eq!(syms[0].name, "foo");
+
+        // keyword style: function bar { }
+        let src_keyword = "function bar {\n  echo hi\n}\n";
+        let syms =
+            extract_symbols_from_source(src_keyword, Some("bash"), Path::new("script.sh")).unwrap();
+        assert_eq!(
+            syms.len(),
+            1,
+            "expected 1 symbol from keyword-style function"
+        );
+        assert_eq!(syms[0].name, "bar");
+    }
+
+    #[test]
+    fn extract_bash_symbols_no_functions() {
+        use std::path::Path;
+        let src = "FOO=bar\nexport BAZ=qux\necho hello\n";
+        let syms = extract_symbols_from_source(src, Some("bash"), Path::new("script.sh")).unwrap();
+        assert!(
+            syms.is_empty(),
+            "plain script with no functions should yield no symbols"
+        );
+    }
+
+    #[test]
+    fn extract_bash_symbols_nested_not_double_counted() {
+        use std::path::Path;
+        // Nested function definition — only top-level should appear
+        let src = "outer() {\n  inner() { echo nested; }\n  inner\n}\n";
+        let syms = extract_symbols_from_source(src, Some("bash"), Path::new("script.sh")).unwrap();
+        assert_eq!(syms.len(), 1, "only top-level function should be extracted");
+        assert_eq!(syms[0].name, "outer");
     }
 }

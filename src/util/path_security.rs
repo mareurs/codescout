@@ -85,6 +85,8 @@ pub struct PathSecurityConfig {
     pub library_paths: Vec<PathBuf>,
     /// Additional regex patterns to flag as dangerous commands.
     pub shell_dangerous_patterns: Vec<String>,
+    /// Approx raw source-byte threshold above which `index_project` requires confirmation.
+    pub max_index_bytes: u64,
 }
 
 impl Default for PathSecurityConfig {
@@ -100,6 +102,7 @@ impl Default for PathSecurityConfig {
             github_enabled: false,
             library_paths: Vec::new(),
             shell_dangerous_patterns: Vec::new(),
+            max_index_bytes: 500 * 1024 * 1024,
         }
     }
 }
@@ -264,6 +267,21 @@ pub fn validate_write_path(
 
     // For write targets the file may not exist yet, canonicalize via parent.
     let resolved = canonicalize_write_target(&resolved);
+
+    // If canonicalization couldn't resolve `..` components (because an
+    // intermediate directory doesn't exist), the path still contains them.
+    // `starts_with` is component-wise and would match the project root prefix
+    // even though `..` would escape it at the OS level.  Reject early.
+    if resolved
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        bail!(
+            "write denied: '{}' contains '..' that could not be resolved",
+            raw
+        );
+    }
+
     let project_root = best_effort_canonicalize(project_root);
 
     // Check deny-list first (blocks writes to ~/.ssh even if somehow under
@@ -283,8 +301,16 @@ pub fn validate_write_path(
     // project directory, so this covers the case where an absolute path
     // targets the user's working directory even when --project points
     // elsewhere (e.g. a companion tool project).
+    //
+    // Guard: skip overly broad roots (`/` and `$HOME`).  If CWD happens to be
+    // one of these, adding it as a write root would allow writes anywhere on
+    // the filesystem or inside the entire home directory.
     if let Ok(cwd) = std::env::current_dir() {
-        allowed.push(best_effort_canonicalize(&cwd));
+        let cwd_canon = best_effort_canonicalize(&cwd);
+        let is_broad = cwd_canon == Path::new("/") || home_dir().is_some_and(|h| cwd_canon == h);
+        if !is_broad {
+            allowed.push(cwd_canon);
+        }
     }
     for extra in &config.extra_write_roots {
         allowed.push(best_effort_canonicalize(extra));
@@ -755,6 +781,38 @@ mod tests {
     }
 
     #[test]
+    fn write_traversal_via_nonexistent_dir_rejected() {
+        // Regression test for: when an intermediate directory does not exist,
+        // best_effort_canonicalize falls back to the raw path (with `..`).
+        // `starts_with` is component-wise and matches the project root prefix
+        // even though `..` would escape it at the OS level.
+        //
+        // Example: "nonexistent/../../var/evil.rs" with project root /tmp/X
+        // canonicalize_write_target: parent = /tmp/X/nonexistent/..
+        //   -> canonicalize fails (nonexistent/ does not exist)
+        //   -> returns /tmp/X/nonexistent/.. as-is
+        //   -> resolved = /tmp/X/nonexistent/../../var/evil.rs
+        // starts_with(/tmp/X) is TRUE (prefix matches before .. escapes)
+        // Without the ParentDir check this would be allowed.
+        let project = tempdir().unwrap();
+        // Do NOT create "nonexistent/" — that's the point of this test.
+        let result = validate_write_path(
+            "nonexistent/../../var/evil.rs",
+            project.path(),
+            &default_config(),
+        );
+        assert!(
+            result.is_err(),
+            "traversal via non-existent dir must be rejected"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("'..'"),
+            "error should mention '..', got: {msg}"
+        );
+    }
+
+    #[test]
     fn write_extra_root_allowed() {
         let project = tempdir().unwrap();
         let extra = tempdir().unwrap();
@@ -915,8 +973,10 @@ mod tests {
 
     #[test]
     fn shell_disabled_when_configured() {
-        let mut config = PathSecurityConfig::default();
-        config.shell_enabled = false;
+        let config = PathSecurityConfig {
+            shell_enabled: false,
+            ..PathSecurityConfig::default()
+        };
         assert!(check_tool_access("run_command", &config).is_err());
     }
 
@@ -930,8 +990,10 @@ mod tests {
 
     #[test]
     fn file_write_disabled_blocks_all_write_tools() {
-        let mut config = PathSecurityConfig::default();
-        config.file_write_enabled = false;
+        let config = PathSecurityConfig {
+            file_write_enabled: false,
+            ..PathSecurityConfig::default()
+        };
         for tool in &[
             "create_file",
             "edit_file",
@@ -951,13 +1013,18 @@ mod tests {
 
     #[test]
     fn register_library_disabled_when_file_write_false() {
-        let mut config = PathSecurityConfig::default();
-        config.file_write_enabled = false;
+        let config = PathSecurityConfig {
+            file_write_enabled: false,
+            ..PathSecurityConfig::default()
+        };
         assert!(
             check_tool_access("register_library", &config).is_err(),
             "register_library should be blocked when file_write_enabled = false"
         );
-        config.file_write_enabled = true;
+        let config = PathSecurityConfig {
+            file_write_enabled: true,
+            ..PathSecurityConfig::default()
+        };
         assert!(
             check_tool_access("register_library", &config).is_ok(),
             "register_library should be allowed when file_write_enabled = true"
@@ -966,8 +1033,10 @@ mod tests {
 
     #[test]
     fn indexing_disabled_blocks_search_tools() {
-        let mut config = PathSecurityConfig::default();
-        config.indexing_enabled = false;
+        let config = PathSecurityConfig {
+            indexing_enabled: false,
+            ..PathSecurityConfig::default()
+        };
         for tool in &["semantic_search", "index_project"] {
             assert!(
                 check_tool_access(tool, &config).is_err(),
@@ -979,11 +1048,13 @@ mod tests {
 
     #[test]
     fn read_tools_always_allowed() {
-        let mut config = PathSecurityConfig::default();
-        config.shell_enabled = false;
-        config.file_write_enabled = false;
-        config.indexing_enabled = false;
-        config.github_enabled = false;
+        let config = PathSecurityConfig {
+            shell_enabled: false,
+            file_write_enabled: false,
+            indexing_enabled: false,
+            github_enabled: false,
+            ..PathSecurityConfig::default()
+        };
         // Read tools should always work
         for tool in &[
             "read_file",
@@ -1018,8 +1089,10 @@ mod tests {
 
     #[test]
     fn check_tool_access_error_message_includes_config_hint() {
-        let mut config = PathSecurityConfig::default();
-        config.shell_enabled = false;
+        let config = PathSecurityConfig {
+            shell_enabled: false,
+            ..PathSecurityConfig::default()
+        };
         let err = check_tool_access("run_command", &config).unwrap_err();
         assert!(
             err.to_string().contains("shell_enabled"),
@@ -1029,7 +1102,11 @@ mod tests {
             err.to_string().contains("project.toml"),
             "error should mention config file"
         );
-        config.github_enabled = false; // explicit for self-documentation
+        // github_enabled is false by default; use a separate config for clarity
+        let config = PathSecurityConfig {
+            github_enabled: false,
+            ..PathSecurityConfig::default()
+        };
         let err = check_tool_access("github_pr", &config).unwrap_err();
         assert!(
             err.to_string().contains("github_enabled"),
@@ -1044,8 +1121,10 @@ mod tests {
 
     #[test]
     fn github_disabled_blocks_optional_github_tools() {
-        let mut config = PathSecurityConfig::default();
-        config.github_enabled = false; // explicit for self-documentation
+        let config = PathSecurityConfig {
+            github_enabled: false,
+            ..PathSecurityConfig::default()
+        };
         for tool in &[
             "github_identity",
             "github_issue",
@@ -1077,8 +1156,10 @@ mod tests {
 
     #[test]
     fn github_enabled_allows_optional_github_tools() {
-        let mut config = PathSecurityConfig::default();
-        config.github_enabled = true;
+        let config = PathSecurityConfig {
+            github_enabled: true,
+            ..PathSecurityConfig::default()
+        };
         for tool in &[
             "github_identity",
             "github_issue",
@@ -1168,8 +1249,10 @@ mod tests {
 
     #[test]
     fn custom_dangerous_patterns() {
-        let mut config = PathSecurityConfig::default();
-        config.shell_dangerous_patterns = vec!["kubectl delete".to_string()];
+        let config = PathSecurityConfig {
+            shell_dangerous_patterns: vec!["kubectl delete".to_string()],
+            ..PathSecurityConfig::default()
+        };
         assert!(is_dangerous_command("kubectl delete pod nginx", &config).is_some());
     }
 
@@ -1427,8 +1510,10 @@ mod tests {
         let key_file = ssh_dir.join("id_rsa");
         std::fs::write(&key_file, "secret").unwrap();
 
-        let mut config = PathSecurityConfig::default();
-        config.profile = SecurityProfile::Root;
+        let config = PathSecurityConfig {
+            profile: SecurityProfile::Root,
+            ..PathSecurityConfig::default()
+        };
 
         let result = validate_read_path(key_file.to_str().unwrap(), Some(dir.path()), &config);
         assert!(result.is_ok(), "root profile should bypass read deny-list");
@@ -1444,8 +1529,10 @@ mod tests {
         let project_root = dir.path().join("project");
         std::fs::create_dir_all(&project_root).unwrap();
 
-        let mut config = PathSecurityConfig::default();
-        config.profile = SecurityProfile::Root;
+        let config = PathSecurityConfig {
+            profile: SecurityProfile::Root,
+            ..PathSecurityConfig::default()
+        };
 
         let result = validate_write_path(target.to_str().unwrap(), &project_root, &config);
         assert!(result.is_ok(), "root profile should bypass write boundary");
@@ -1453,8 +1540,10 @@ mod tests {
 
     #[test]
     fn root_profile_bypasses_dangerous_command_check() {
-        let mut config = PathSecurityConfig::default();
-        config.profile = SecurityProfile::Root;
+        let config = PathSecurityConfig {
+            profile: SecurityProfile::Root,
+            ..PathSecurityConfig::default()
+        };
 
         let result = is_dangerous_command("rm -rf /", &config);
         assert!(

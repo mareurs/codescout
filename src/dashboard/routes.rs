@@ -7,7 +7,7 @@ use axum::{
     Json, Router,
 };
 use std::path::{Path, PathBuf};
-use tower_http::cors::{AllowOrigin, CorsLayer};
+use tower_http::cors::CorsLayer;
 
 use super::api;
 
@@ -17,10 +17,19 @@ pub struct DashboardState {
     pub project_root: PathBuf,
 }
 
-pub fn build_router(project_root: &Path) -> Result<Router> {
+pub fn build_router(project_root: &Path, port: u16) -> Result<Router> {
     let state = DashboardState {
         project_root: project_root.to_path_buf(),
     };
+
+    // Restrict CORS to the exact port the dashboard is bound to. Allowing any
+    // localhost port would let any local web app call memory write/delete endpoints.
+    let localhost = format!("http://localhost:{port}");
+    let loopback = format!("http://127.0.0.1:{port}");
+    let allowed: Vec<HeaderValue> = [localhost, loopback]
+        .into_iter()
+        .filter_map(|s| s.parse().ok())
+        .collect();
 
     let router = Router::new()
         .route("/", get(serve_index))
@@ -44,11 +53,7 @@ pub fn build_router(project_root: &Path) -> Result<Router> {
         .route("/api/libraries", get(api::libraries::get_libraries))
         .layer(
             CorsLayer::new()
-                .allow_origin(AllowOrigin::predicate(|origin: &HeaderValue, _| {
-                    origin.to_str().is_ok_and(|s| {
-                        s.starts_with("http://localhost:") || s.starts_with("http://127.0.0.1:")
-                    })
-                }))
+                .allow_origin(allowed)
                 .allow_methods([
                     axum::http::Method::GET,
                     axum::http::Method::POST,
@@ -109,7 +114,7 @@ mod tests {
     use tower::util::ServiceExt;
 
     fn test_router(root: &std::path::Path) -> Router {
-        build_router(root).unwrap()
+        build_router(root, 3000).unwrap()
     }
 
     #[tokio::test]
@@ -303,5 +308,28 @@ mod tests {
         assert!(!response
             .headers()
             .contains_key("access-control-allow-origin"));
+    }
+
+    #[tokio::test]
+    async fn cors_rejects_wrong_port() {
+        let root = tempfile::TempDir::new().unwrap();
+        // Router bound to port 3000 — a request from port 9999 must be rejected.
+        let app = test_router(root.path());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/health")
+                    .header("Origin", "http://localhost:9999")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            !response
+                .headers()
+                .contains_key("access-control-allow-origin"),
+            "wrong-port localhost must be rejected"
+        );
     }
 }

@@ -1103,7 +1103,7 @@ mod tests {
     #[test]
     fn extract_markdown_section_stripped_match() {
         let content = "# Title\n## The `auth` Module\ndetails here\n";
-        let result = extract_markdown_section(&content, "## The auth Module").unwrap();
+        let result = extract_markdown_section(content, "## The auth Module").unwrap();
         assert!(result.content.contains("details here"));
     }
 

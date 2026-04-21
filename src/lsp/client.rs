@@ -14,7 +14,19 @@ use tokio::process::Command;
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 
+/// Pending outbound request map: request ID → response channel.
+type PendingRequests = Arc<StdMutex<HashMap<i64, oneshot::Sender<Result<Value>>>>>;
+
 use super::transport;
+
+/// Maximum number of stderr lines retained in the shared buffer.
+///
+/// Only error/exception/fatal lines are buffered (others are debug-logged and
+/// dropped). The buffer is checked during `initialize()` to detect fatal
+/// conditions (e.g. kotlin-lsp "Multiple editing sessions"). Older lines are
+/// evicted once the cap is reached to prevent unbounded growth for long-lived
+/// or unusually noisy server processes.
+const MAX_STDERR_LINES: usize = 200;
 
 /// Convert an LSP `file://` URI back to a filesystem path.
 ///
@@ -138,9 +150,71 @@ pub struct LspClient {
     /// Collects stderr lines from the server process. Checked during init retries
     /// to detect fatal errors (e.g. kotlin-lsp "Multiple editing sessions").
     stderr_lines: Arc<StdMutex<Vec<String>>>,
+    /// Wall-clock instant when the LSP initialize handshake completed. Used by
+    /// `request()` to apply a more patient retry window during the cold-start
+    /// indexing phase (e.g. Gradle import for kotlin-lsp can take 1–5 minutes).
+    pub(crate) started_at: std::time::Instant,
 }
 
 impl LspClient {
+    /// Dispatch a single incoming LSP message to the appropriate pending sender,
+    /// or auto-respond null to server-to-client requests.
+    ///
+    /// Shared by the reader tasks in [`LspClient::start`] (process transport) and
+    /// [`LspClient::connect`] (socket/mux transport). Both loops are structurally
+    /// identical in the `Ok` branch; they differ only in error handling (process
+    /// exit diagnostics vs. mux disconnection).
+    ///
+    /// `request_label` and `notification_label` control the tracing output so log
+    /// lines identify the transport in use.
+    async fn dispatch_lsp_message(
+        msg: Value,
+        pending: &PendingRequests,
+        writer: &Arc<Mutex<Box<dyn AsyncWrite + Unpin + Send>>>,
+        request_label: &str,
+        notification_label: &str,
+    ) {
+        if let Some(id) = msg.get("id").and_then(|v| v.as_i64()) {
+            if msg.get("method").is_some() {
+                // Server-to-client request. Auto-respond null so the server doesn't stall.
+                tracing::debug!(
+                    "{} (id={}): {} — auto-responding null",
+                    request_label,
+                    id,
+                    msg["method"]
+                );
+                let response = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": null,
+                });
+                let mut w = writer.lock().await;
+                let _ = transport::write_message(&mut *w, &response).await;
+            } else {
+                // Response to one of our outbound requests.
+                if let Some(sender) = pending
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&id)
+                {
+                    if let Some(error) = msg.get("error") {
+                        let err_msg = error["message"].as_str().unwrap_or("unknown LSP error");
+                        let _ = sender.send(Err(anyhow::anyhow!(
+                            "LSP error (code {}): {}",
+                            error["code"],
+                            err_msg
+                        )));
+                    } else {
+                        let result = msg.get("result").cloned().unwrap_or(Value::Null);
+                        let _ = sender.send(Ok(result));
+                    }
+                }
+            }
+        } else if let Some(method) = msg.get("method").and_then(|v| v.as_str()) {
+            tracing::debug!("{}: {}", notification_label, method);
+        }
+    }
+
     /// Start a language server process and perform the LSP initialize handshake.
     /// Start a language server process and perform the LSP initialize handshake.
     pub async fn start(config: LspServerConfig) -> Result<Self> {
@@ -202,10 +276,12 @@ impl LspClient {
                             || lower.contains("fatal")
                         {
                             tracing::warn!(target: "lsp_stderr", "{}", trimmed);
-                            stderr_lines_clone
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .push(trimmed.to_string());
+                            let mut buf =
+                                stderr_lines_clone.lock().unwrap_or_else(|e| e.into_inner());
+                            if buf.len() >= MAX_STDERR_LINES {
+                                buf.remove(0);
+                            }
+                            buf.push(trimmed.to_string());
                         } else {
                             tracing::debug!(target: "lsp_stderr", "{}", trimmed);
                         }
@@ -224,49 +300,14 @@ impl LspClient {
             loop {
                 match transport::read_message(&mut reader).await {
                     Ok(msg) => {
-                        if let Some(id) = msg.get("id").and_then(|v| v.as_i64()) {
-                            if msg.get("method").is_some() {
-                                // Server-to-client request (e.g. client/registerCapability,
-                                // workspace/configuration). Respond with null so the server
-                                // doesn't stall waiting for an acknowledgement.
-                                tracing::debug!(
-                                    "LSP server request (id={}): {} — auto-responding null",
-                                    id,
-                                    msg["method"]
-                                );
-                                let response = serde_json::json!({
-                                    "jsonrpc": "2.0",
-                                    "id": id,
-                                    "result": null,
-                                });
-                                let mut w = writer_clone.lock().await;
-                                let _ = transport::write_message(&mut *w, &response).await;
-                            } else {
-                                // Response to our request
-                                if let Some(sender) = pending_clone
-                                    .lock()
-                                    .unwrap_or_else(|e| e.into_inner())
-                                    .remove(&id)
-                                {
-                                    if let Some(error) = msg.get("error") {
-                                        let err_msg = error["message"]
-                                            .as_str()
-                                            .unwrap_or("unknown LSP error");
-                                        let _ = sender.send(Err(anyhow::anyhow!(
-                                            "LSP error (code {}): {}",
-                                            error["code"],
-                                            err_msg
-                                        )));
-                                    } else {
-                                        let result =
-                                            msg.get("result").cloned().unwrap_or(Value::Null);
-                                        let _ = sender.send(Ok(result));
-                                    }
-                                }
-                            }
-                        } else if let Some(method) = msg.get("method").and_then(|v| v.as_str()) {
-                            tracing::debug!("LSP notification: {}", method);
-                        }
+                        Self::dispatch_lsp_message(
+                            msg,
+                            &pending_clone,
+                            &writer_clone,
+                            "LSP server request",
+                            "LSP notification",
+                        )
+                        .await;
                     }
                     Err(read_err) => {
                         // EOF or read error — server crashed or exited
@@ -314,6 +355,7 @@ impl LspClient {
             init_timeout,
             open_files: StdMutex::new(HashMap::new()),
             stderr_lines,
+            started_at: std::time::Instant::now(),
         };
 
         // Perform the LSP initialize handshake
@@ -373,48 +415,14 @@ impl LspClient {
             loop {
                 match transport::read_message(&mut reader).await {
                     Ok(msg) => {
-                        if let Some(id) = msg.get("id").and_then(|v| v.as_i64()) {
-                            if msg.get("method").is_some() {
-                                // Server-to-client request forwarded through mux.
-                                // Auto-respond null so the server doesn't stall.
-                                tracing::debug!(
-                                    "mux forwarded server request (id={}): {} — auto-responding null",
-                                    id,
-                                    msg["method"]
-                                );
-                                let response = json!({
-                                    "jsonrpc": "2.0",
-                                    "id": id,
-                                    "result": null,
-                                });
-                                let mut w = writer_clone.lock().await;
-                                let _ = transport::write_message(&mut *w, &response).await;
-                            } else {
-                                // Response to our request
-                                if let Some(sender) = pending_clone
-                                    .lock()
-                                    .unwrap_or_else(|e| e.into_inner())
-                                    .remove(&id)
-                                {
-                                    if let Some(error) = msg.get("error") {
-                                        let err_msg = error["message"]
-                                            .as_str()
-                                            .unwrap_or("unknown LSP error");
-                                        let _ = sender.send(Err(anyhow::anyhow!(
-                                            "LSP error (code {}): {}",
-                                            error["code"],
-                                            err_msg
-                                        )));
-                                    } else {
-                                        let result =
-                                            msg.get("result").cloned().unwrap_or(Value::Null);
-                                        let _ = sender.send(Ok(result));
-                                    }
-                                }
-                            }
-                        } else if let Some(method) = msg.get("method").and_then(|v| v.as_str()) {
-                            tracing::debug!("LSP notification from mux: {}", method);
-                        }
+                        Self::dispatch_lsp_message(
+                            msg,
+                            &pending_clone,
+                            &writer_clone,
+                            "mux forwarded server request",
+                            "LSP notification from mux",
+                        )
+                        .await;
                     }
                     Err(_) => {
                         alive_clone.store(false, Ordering::SeqCst);
@@ -442,27 +450,42 @@ impl LspClient {
             init_timeout: std::time::Duration::from_secs(30),
             open_files: StdMutex::new(HashMap::new()),
             stderr_lines: Arc::new(StdMutex::new(Vec::new())),
+            started_at: std::time::Instant::now(),
         })
     }
 
     /// Send a JSON-RPC request and await the response.
     pub async fn request(&self, method: &str, params: Value) -> Result<Value> {
-        // Retry on -32800 (RequestCancelled) — disabled for now; re-enable if
-        // empirical evidence shows retries help more than they delay failure reporting.
-        const RETRY_ON_CANCELLED: bool = true;
-        const MAX_RETRIES: usize = 3;
-        const RETRY_DELAY_MS: u64 = 300;
+        // During the cold-start indexing window (e.g. Gradle import for kotlin-lsp),
+        // the server returns -32800 (RequestCancelled) for every query. We use a
+        // patient retry window while fresh, and a short one once warm.
+        //
+        // Cold: 10 retries × 3 s linear backoff ≈ 45 s max wait.
+        // Warm:  3 retries × 300 ms linear backoff ≈ 1.2 s max wait.
+        const COLD_START_WINDOW: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+        const MAX_RETRIES_COLD: usize = 10;
+        const RETRY_DELAY_COLD_MS: u64 = 3_000;
+        const MAX_RETRIES_WARM: usize = 3;
+        const RETRY_DELAY_WARM_MS: u64 = 300;
+
+        let in_cold_start = self.started_at.elapsed() < COLD_START_WINDOW;
+        let (max_retries, retry_delay_ms) = if in_cold_start {
+            (MAX_RETRIES_COLD, RETRY_DELAY_COLD_MS)
+        } else {
+            (MAX_RETRIES_WARM, RETRY_DELAY_WARM_MS)
+        };
 
         let mut last_err = None;
-        for attempt in 0..=MAX_RETRIES {
+        for attempt in 0..=max_retries {
             if attempt > 0 {
-                let delay = std::time::Duration::from_millis(RETRY_DELAY_MS * attempt as u64);
+                let delay = std::time::Duration::from_millis(retry_delay_ms * attempt as u64);
                 tokio::time::sleep(delay).await;
                 tracing::debug!(
-                    "LSP request cancelled, retrying {}/{}: {}",
+                    "LSP request cancelled, retrying {}/{}: {} (cold_start={})",
                     attempt,
-                    MAX_RETRIES,
-                    method
+                    max_retries,
+                    method,
+                    in_cold_start,
                 );
             }
             match self
@@ -470,7 +493,7 @@ impl LspClient {
                 .await
             {
                 Ok(result) => return Ok(result),
-                Err(e) if RETRY_ON_CANCELLED && e.to_string().contains("code -32800") => {
+                Err(e) if e.to_string().contains("code -32800") => {
                     last_err = Some(e);
                 }
                 Err(e) => return Err(e),
@@ -1075,10 +1098,13 @@ impl LspClient {
             //
             // The guard is scoped strictly to the inner block so it drops before any await
             // point — StdMutex guards are not Send and cannot be held across awaits.
+            //
+            // wrapping_add: i32 overflow in debug builds panics; wrap is harmless in practice
+            // (sessions never reach 2 billion edits) and keeps the LSP protocol happy.
             let maybe_version = {
                 let mut open_files = self.open_files.lock().unwrap_or_else(|e| e.into_inner());
                 open_files.get_mut(&canonical).map(|v| {
-                    *v += 1;
+                    *v = v.wrapping_add(1);
                     *v
                 })
             }; // guard drops here
@@ -1270,10 +1296,11 @@ struct Point {
         assert!(client.is_alive());
 
         // Verify we got capabilities
-        let caps = client.capabilities.lock().unwrap();
-        // rust-analyzer should support document symbols
-        assert!(caps.document_symbol_provider.is_some());
-        drop(caps);
+        {
+            let caps = client.capabilities.lock().unwrap();
+            // rust-analyzer should support document symbols
+            assert!(caps.document_symbol_provider.is_some());
+        }
 
         client.shutdown().await.unwrap();
         assert!(!client.is_alive());
@@ -1535,7 +1562,7 @@ struct Point {
         } else {
             "file:///tmp/test.rb".parse().unwrap()
         };
-        let infos = vec![
+        let infos = [
             SymbolInformation {
                 name: "MyClass".to_string(),
                 kind: LspSymbolKind::CLASS,

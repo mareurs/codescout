@@ -177,14 +177,27 @@ static LANGUAGE_REGISTRY: &[RegistryEntry] = &[
             inner_node_types: &["function_declaration", "property_declaration"],
         },
     },
+    RegistryEntry {
+        name: "bash",
+        spec: LanguageSpec {
+            node_types: &["function_definition"],
+            doc_prefixes: &["#"],
+            inner_node_types: &[],
+        },
+    },
 ];
 
 /// A located AST node to be turned into a chunk.
+#[derive(Debug, Clone)]
 pub(crate) struct AstNode {
     /// 0-indexed start line.
     pub(crate) start_line: usize,
     /// 0-indexed end line (inclusive).
     pub(crate) end_line: usize,
+    /// tree-sitter node kind (e.g. "function_item", "impl_item")
+    pub(crate) kind: String,
+    /// identifier child name extracted from the node (e.g. "foo", "MyStore")
+    pub(crate) name: Option<String>,
 }
 
 /// Look up the language spec for the given language name (case-insensitive).
@@ -207,24 +220,11 @@ fn is_markdown(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Maps language name to tree-sitter grammar (case-insensitive).
-///
-/// JavaScript and JSX reuse the TypeScript/TSX grammars respectively —
-/// TypeScript is a superset of JavaScript so the parse trees are compatible.
-/// SCSS and Less reuse the CSS grammar for chunking purposes.
-fn get_ts_language(lang: &str) -> Option<tree_sitter::Language> {
-    match lang.to_ascii_lowercase().as_str() {
-        "rust" => Some(tree_sitter_rust::LANGUAGE.into()),
-        "python" => Some(tree_sitter_python::LANGUAGE.into()),
-        "go" => Some(tree_sitter_go::LANGUAGE.into()),
-        "typescript" | "javascript" => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
-        "tsx" | "jsx" => Some(tree_sitter_typescript::LANGUAGE_TSX.into()),
-        "java" => Some(tree_sitter_java::LANGUAGE.into()),
-        "kotlin" => Some(tree_sitter_kotlin_ng::LANGUAGE.into()),
-        "html" => Some(tree_sitter_html::LANGUAGE.into()),
-        "css" | "scss" | "less" => Some(tree_sitter_css::LANGUAGE.into()),
-        _ => None,
-    }
+/// Extract the identifier name from a tree-sitter node by looking for a `name` field.
+fn extract_node_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    node.child_by_field_name("name")
+        .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+        .map(|s| s.to_string())
 }
 
 /// Parses source with tree-sitter and extracts top-level AST nodes.
@@ -262,6 +262,8 @@ pub(crate) fn extract_ast_nodes(
             nodes.push(AstNode {
                 start_line: child.start_position().row,
                 end_line: child.end_position().row,
+                kind: child.kind().to_string(),
+                name: extract_node_name(&child, source),
             });
         }
     }
@@ -274,29 +276,35 @@ fn has_named_child(node: Node) -> bool {
     result
 }
 
-/// Converts AST nodes to RawChunks, handling gaps and doc expansion.
 /// Recursively collect nodes matching `inner_types` from a tree-sitter subtree.
 ///
 /// Recurses into non-matching nodes (e.g. `declaration_list`, `block`) but stops
 /// when it finds a match — this avoids capturing nested lambdas or inner functions
 /// inside methods while still finding methods at any depth inside a body node.
+///
+/// Stores each matched node's `start_line` as the AST node's actual start row
+/// (not the doc-comment-expanded row). The caller re-expands via
+/// `expand_doc_comment_start` when needed for content extent, while signature
+/// extraction reads directly from `start_line` to get the real `fn …` line.
 fn collect_inner_nodes(
     node: tree_sitter::Node,
     inner_types: &[&str],
     source_lines: &[&str],
     doc_prefixes: &[&str],
     line_offset: usize,
+    source: &str,
     result: &mut Vec<AstNode>,
 ) {
+    let _ = (source_lines, doc_prefixes);
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if inner_types.contains(&child.kind()) {
-            // Expand doc comment upward within the container's local line space.
             let local_start = child.start_position().row;
-            let expanded_local = expand_doc_comment_start(source_lines, local_start, doc_prefixes);
             result.push(AstNode {
-                start_line: line_offset + expanded_local,
+                start_line: line_offset + local_start,
                 end_line: line_offset + child.end_position().row,
+                kind: child.kind().to_string(),
+                name: extract_node_name(&child, source),
             });
             // Do NOT recurse into matched nodes — prevents picking up nested
             // lambdas or inner functions inside method bodies.
@@ -307,18 +315,20 @@ fn collect_inner_nodes(
                 source_lines,
                 doc_prefixes,
                 line_offset,
+                source,
                 result,
             );
         }
     }
 }
 
-/// Attempt to extract inner declarations from a container node that is too large
-/// to embed as a single chunk.
+/// Extract inner declarations from a container node (impl block, class, etc.).
 ///
 /// Re-parses the container's source text with tree-sitter and walks the resulting
 /// tree to collect child nodes matching `inner_types`. Returns `None` if no inner
-/// nodes are found (e.g. the container is a huge single function with no structure).
+/// nodes are found (e.g. an empty impl block or a node with no structured children).
+/// Called unconditionally for containers — each method gets its own chunk with
+/// correct container context in its metadata header.
 fn try_extract_inner_nodes(
     source_lines: &[&str],
     node: &AstNode,
@@ -346,6 +356,7 @@ fn try_extract_inner_nodes(
         &node_lines,
         doc_prefixes,
         node.start_line,
+        &node_source,
         &mut result,
     );
 
@@ -390,19 +401,150 @@ fn extract_container_header(
         content: node_lines[..sig_end].join("\n"),
         start_line: start + 1,
         end_line: start + sig_end,
+        metadata: None,
     }
+}
+
+/// Extract a compact signature from the first line of a node body.
+///
+/// Truncates at the first of: `{`, `:` (Python-style body delimiter),
+/// `=>` (arrow function), or 100 chars. Designed for header metadata;
+/// signature fidelity is not critical — only keyword matchability.
+fn extract_signature(first_line: &str) -> String {
+    const MAX_LEN: usize = 100;
+    let trimmed = first_line.trim_end();
+
+    let mut end = trimmed.len();
+    for delim in ["{", "=>"] {
+        if let Some(i) = trimmed.find(delim) {
+            end = end.min(i);
+        }
+    }
+    // Python `def foo(): ` — truncate at trailing `:` (but not inside type annotations)
+    if let Some(i) = trimmed.rfind(':') {
+        // Only truncate if the colon is near the end (Python body delimiter)
+        if i >= trimmed.len().saturating_sub(2) {
+            end = end.min(i);
+        }
+    }
+
+    let sliced = trimmed[..end].trim_end();
+    if sliced.chars().count() > MAX_LEN {
+        sliced.chars().take(MAX_LEN).collect::<String>()
+    } else {
+        sliced.to_string()
+    }
+}
+
+/// Map a tree-sitter node kind to a short header keyword for a given language.
+/// Used in chunk metadata headers. Returns `None` for unknown lang/node pairs.
+fn kind_keyword_for_node(lang: &str, node_kind: &str) -> Option<&'static str> {
+    match (lang, node_kind) {
+        ("rust", "function_item") => Some("fn"),
+        ("rust", "struct_item") => Some("struct"),
+        ("rust", "enum_item") => Some("enum"),
+        ("rust", "trait_item") => Some("trait"),
+        ("rust", "impl_item") => Some("impl"),
+        ("rust", "mod_item") => Some("mod"),
+        ("rust", "type_item") => Some("type"),
+        ("rust", "const_item") => Some("const"),
+        ("rust", "static_item") => Some("static"),
+        ("rust", "macro_definition") => Some("macro"),
+
+        ("python", "function_definition") => Some("def"),
+        ("python", "async_function_definition") => Some("async def"),
+        ("python", "class_definition") => Some("class"),
+        ("python", "decorated_definition") => Some("def"),
+
+        ("typescript" | "tsx", "function_declaration") => Some("function"),
+        ("typescript" | "tsx", "class_declaration") => Some("class"),
+        ("typescript" | "tsx", "method_definition") => Some("method"),
+        ("typescript" | "tsx", "interface_declaration") => Some("interface"),
+        ("typescript" | "tsx", "type_alias_declaration") => Some("type"),
+        ("typescript" | "tsx", "export_statement") => Some("export"),
+
+        ("javascript" | "jsx", "function_declaration") => Some("function"),
+        ("javascript" | "jsx", "class_declaration") => Some("class"),
+        ("javascript" | "jsx", "method_definition") => Some("method"),
+        ("javascript" | "jsx", "export_statement") => Some("export"),
+
+        ("java", "method_declaration") => Some("method"),
+        ("java", "class_declaration") => Some("class"),
+        ("java", "interface_declaration") => Some("interface"),
+        ("java", "constructor_declaration") => Some("constructor"),
+        ("java", "enum_declaration") => Some("enum"),
+
+        ("kotlin", "function_declaration") => Some("fun"),
+        ("kotlin", "class_declaration") => Some("class"),
+        ("kotlin", "object_declaration") => Some("object"),
+        ("kotlin", "property_declaration") => Some("property"),
+
+        ("go", "function_declaration") => Some("func"),
+        ("go", "method_declaration") => Some("method"),
+        ("go", "type_declaration") => Some("type"),
+        ("go", "var_declaration") => Some("var"),
+        ("go", "const_declaration") => Some("const"),
+
+        ("bash", "function_definition") => Some("function"),
+
+        _ => None,
+    }
+}
+
+/// Build a chunk metadata header.
+///
+/// Format: `{file_path} :: {container_1} :: ... :: {signature_or_kind_name}`
+///
+/// - `signature` is used as-is when present (it already includes the kind keyword).
+/// - If `signature` is None but `kind` and `name` are present, formats as `{kind} {name}`.
+/// - If only `name` is present, uses name alone.
+/// - If all of kind/name/signature are None: returns just `file_path` (or path + containers).
+/// - If `file_path` is empty, returns None.
+fn build_metadata_header(
+    file_path: &str,
+    container_path: &[&str],
+    kind: Option<&str>,
+    name: Option<&str>,
+    signature: Option<&str>,
+) -> Option<String> {
+    if file_path.is_empty() {
+        return None;
+    }
+
+    let mut parts: Vec<String> = Vec::with_capacity(container_path.len() + 2);
+    parts.push(file_path.to_string());
+
+    for c in container_path {
+        parts.push((*c).to_string());
+    }
+
+    let node_part = match (kind, name, signature) {
+        (_, _, Some(sig)) => Some(sig.to_string()),
+        (Some(k), Some(n), None) => Some(format!("{k} {n}")),
+        (None, Some(n), None) => Some(n.to_string()),
+        _ => None,
+    };
+    if let Some(np) = node_part {
+        parts.push(np);
+    }
+
+    Some(parts.join(" :: "))
 }
 
 /// Converts AST nodes to RawChunks, handling gaps and doc expansion.
 ///
-/// When a node exceeds `chunk_size` and the language spec defines
-/// `inner_node_types`, the node is recursed into to produce one chunk per inner
-/// declaration (method, constructor, etc.) plus a header chunk for the container
-/// signature. Oversized nodes with no inner structure (e.g. a huge `main()`) fall
-/// back to `sub_split_node` for plain-text line splitting.
+/// When a node can be decomposed into inner declarations (methods, constructors,
+/// etc.) via `inner_node_types`, it is always recursed into — regardless of size —
+/// producing one chunk per inner declaration plus a header chunk for the container
+/// signature. This gives each method its own embedding with correct container
+/// context, improving retrieval precision.
+///
+/// Oversized nodes with no inner structure (e.g. a huge `main()`) fall back to
+/// `sub_split_node` for plain-text line splitting.
 ///
 /// Pass `ts_lang: None` to disable the recursive inner-node path (used for the
 /// single-level recursion limit — inner calls never recurse further).
+#[allow(clippy::too_many_arguments)]
 fn nodes_to_chunks(
     source: &str,
     nodes: &[AstNode],
@@ -410,6 +552,9 @@ fn nodes_to_chunks(
     doc_prefixes: &[&str],
     ts_lang: Option<&tree_sitter::Language>,
     spec: Option<&LanguageSpec>,
+    lang: &str,
+    file_path: &str,
+    container_path: &[String],
 ) -> Vec<RawChunk> {
     let lines: Vec<&str> = source.lines().collect();
     let mut chunks = Vec::new();
@@ -429,6 +574,7 @@ fn nodes_to_chunks(
                         // prev_end is 0-indexed, so adding gives correct 1-indexed file lines.
                         sc.start_line += prev_end;
                         sc.end_line += prev_end;
+                        sc.metadata = Some(file_path.to_string());
                         chunks.push(sc);
                     }
                 } else {
@@ -436,6 +582,7 @@ fn nodes_to_chunks(
                         content: gap_content,
                         start_line: prev_end + 1,
                         end_line: expanded_start,
+                        metadata: Some(file_path.to_string()),
                     });
                 }
             }
@@ -445,39 +592,103 @@ fn nodes_to_chunks(
         let node_end = (node.end_line + 1).min(lines.len());
         let content = lines[expanded_start..node_end].join("\n");
 
-        if content.len() <= chunk_size {
+        // Build per-node metadata helpers (used in all non-container paths).
+        // Use `node.start_line` (not `expanded_start`) so the signature comes from
+        // the actual AST node — otherwise doc comments get picked up as the signature.
+        let kind_kw = kind_keyword_for_node(lang, &node.kind);
+        let first_line = lines.get(node.start_line).copied().unwrap_or("");
+        let sig_str = extract_signature(first_line);
+        let sig_opt: Option<&str> = if sig_str.is_empty() {
+            None
+        } else {
+            Some(&sig_str)
+        };
+        let container_refs: Vec<&str> = container_path.iter().map(|s| s.as_str()).collect();
+
+        // Try inner-node decomposition FIRST (regardless of size) — any container
+        // with extractable inner nodes is always split so methods get their own chunks.
+        let inner_nodes = spec
+            .filter(|s| !s.inner_node_types.is_empty())
+            .zip(ts_lang)
+            .and_then(|(s, ts)| {
+                try_extract_inner_nodes(&lines, node, ts, s.inner_node_types, doc_prefixes)
+            });
+
+        if let Some(inner) = inner_nodes {
+            // Build a container descriptor for child metadata context.
+            // Prefer the signature (e.g. "impl MyStore") over a plain kind+name fallback.
+            let container_desc = if !sig_str.is_empty() {
+                sig_str.clone()
+            } else if let (Some(k), Some(n)) = (kind_kw, node.name.as_deref()) {
+                format!("{k} {n}")
+            } else if let Some(n) = node.name.as_deref() {
+                n.to_string()
+            } else {
+                node.kind.clone()
+            };
+
+            // Emit a header chunk (impl/class signature) for embedding context.
+            let mut header =
+                extract_container_header(&lines, expanded_start, node_end, doc_prefixes);
+            if !header.content.trim().is_empty() {
+                header.metadata = build_metadata_header(
+                    file_path,
+                    &container_refs,
+                    None,
+                    Some(&container_desc),
+                    None,
+                );
+                chunks.push(header);
+            }
+
+            // Recursively chunk inner nodes with this container in the path.
+            // Pass None/None for ts_lang/spec to prevent further recursion —
+            // oversized inner methods fall through to sub_split_node.
+            let mut inner_container = container_path.to_vec();
+            inner_container.push(container_desc);
+            let inner_chunks = nodes_to_chunks(
+                source,
+                &inner,
+                chunk_size,
+                doc_prefixes,
+                None,
+                None,
+                lang,
+                file_path,
+                &inner_container,
+            );
+            chunks.extend(inner_chunks);
+        } else if content.len() <= chunk_size {
+            // Single symbol chunk — fits in one chunk, no inner structure.
+            let metadata = build_metadata_header(
+                file_path,
+                &container_refs,
+                kind_kw,
+                node.name.as_deref(),
+                sig_opt,
+            );
             chunks.push(RawChunk {
                 content,
                 start_line: expanded_start + 1,
                 end_line: node_end,
+                metadata,
             });
         } else {
-            // Oversized node: try recursive inner-node extraction first.
-            let inner_nodes = spec
-                .filter(|s| !s.inner_node_types.is_empty())
-                .zip(ts_lang)
-                .and_then(|(s, ts)| {
-                    try_extract_inner_nodes(&lines, node, ts, s.inner_node_types, doc_prefixes)
-                });
-
-            if let Some(inner) = inner_nodes {
-                // Emit a header chunk (impl/class signature) for embedding context.
-                let header =
-                    extract_container_header(&lines, expanded_start, node_end, doc_prefixes);
-                if !header.content.trim().is_empty() {
-                    chunks.push(header);
-                }
-                // Recursively chunk inner nodes. Pass None/None to prevent further
-                // recursion — oversized inner methods fall through to sub_split_node.
-                let inner_chunks =
-                    nodes_to_chunks(source, &inner, chunk_size, doc_prefixes, None, None);
-                chunks.extend(inner_chunks);
-            } else {
-                // No inner structure — fall back to prefix + plain-text sub-splitting.
-                let sub =
-                    sub_split_node(&lines, expanded_start, node_end, chunk_size, doc_prefixes);
-                chunks.extend(sub);
+            // Oversized node with no inner structure — fall back to prefix +
+            // plain-text sub-splitting. All pieces share the parent symbol's metadata.
+            let sub_metadata = build_metadata_header(
+                file_path,
+                &container_refs,
+                kind_kw,
+                node.name.as_deref(),
+                sig_opt,
+            );
+            let mut sub =
+                sub_split_node(&lines, expanded_start, node_end, chunk_size, doc_prefixes);
+            for c in &mut sub {
+                c.metadata = sub_metadata.clone();
             }
+            chunks.extend(sub);
         }
 
         prev_end = node_end;
@@ -492,6 +703,7 @@ fn nodes_to_chunks(
                 for mut sc in sub {
                     sc.start_line += prev_end;
                     sc.end_line += prev_end;
+                    sc.metadata = Some(file_path.to_string());
                     chunks.push(sc);
                 }
             } else {
@@ -499,6 +711,7 @@ fn nodes_to_chunks(
                     content: gap_content,
                     start_line: prev_end + 1,
                     end_line: lines.len(),
+                    metadata: Some(file_path.to_string()),
                 });
             }
         }
@@ -554,6 +767,7 @@ fn sub_split_node(
             content: node_lines.join("\n"),
             start_line: start + 1,
             end_line: end,
+            metadata: None,
         }];
     }
 
@@ -595,6 +809,7 @@ fn sub_split_node(
                 content,
                 start_line,
                 end_line,
+                metadata: None,
             }
         })
         .collect()
@@ -617,8 +832,12 @@ const AST_CHUNK_TARGET: usize = 3000;
 /// - Returns empty for empty source.
 /// - Delegates to `split_markdown` for markdown files.
 /// - Uses AST-based splitting for registered languages, with recursive inner-node
-///   extraction for oversized container nodes (impl blocks, classes, etc.).
+///   extraction for container nodes (impl blocks, classes, etc.) regardless of size.
 /// - Falls through to the plain text `split` for unrecognised languages.
+/// - **Post-pass:** any chunk still larger than `target` (e.g. an indivisible
+///   AST node like a single large function body) is line-split via the plain-text
+///   chunker so no chunk ever exceeds the configured size. This protects remote
+///   embedders whose physical batch size caps the per-input token count.
 ///
 /// `chunk_overlap` has been removed: AST chunks have clean semantic boundaries,
 /// so overlap is meaningless. The plain-text fallback paths also use 0 overlap.
@@ -631,23 +850,121 @@ pub fn split_file(source: &str, lang: &str, path: &Path, chunk_size: usize) -> V
     // embeddings for retrieval regardless of file type.
     let target = chunk_size.min(AST_CHUNK_TARGET);
 
-    if is_markdown(path) {
-        return super::chunker::split_markdown(source, target, 0);
-    }
+    let file_path_str = path.to_string_lossy();
+    let container_path: Vec<String> = Vec::new();
 
-    // Try AST-based splitting
-    let spec = get_language_spec(lang);
-    if let Some(ts_lang) = get_ts_language(lang) {
+    let chunks = if is_markdown(path) {
+        super::chunker::split_markdown(source, target, 0)
+    } else if let Some(ts_lang) = crate::ast::get_ts_language(lang) {
+        let spec = get_language_spec(lang);
         if let Ok(nodes) = extract_ast_nodes(source, &ts_lang, spec) {
             if !nodes.is_empty() {
                 let doc_prefixes = spec.map(|s| s.doc_prefixes).unwrap_or(&["//"] as &[&str]);
-                return nodes_to_chunks(source, &nodes, target, doc_prefixes, Some(&ts_lang), spec);
+                nodes_to_chunks(
+                    source,
+                    &nodes,
+                    target,
+                    doc_prefixes,
+                    Some(&ts_lang),
+                    spec,
+                    lang,
+                    &file_path_str,
+                    &container_path,
+                )
+            } else {
+                super::chunker::split(source, target, 0)
+            }
+        } else {
+            super::chunker::split(source, target, 0)
+        }
+    } else {
+        // Fallback to line-based splitting
+        super::chunker::split(source, target, 0)
+    };
+
+    enforce_max_chunk_size(chunks, target)
+}
+
+/// Post-process pass: split any chunk whose content exceeds `target` chars.
+///
+/// AST chunkers can emit a single chunk per indivisible node (e.g. a big
+/// function body with no inner splittable structure). Without this guard,
+/// such chunks reach the embedder at their natural size, which on remote
+/// embedders with a small `--ubatch-size` produces HTTP 500 errors.
+///
+/// Splitting strategy (in order):
+///   1. Line-based via `chunker::split` — preserves AST/line semantics.
+///   2. Char-based slice on UTF-8 boundaries — last-resort for content
+///      that's a single long line (minified JS, base64 blobs, generated
+///      code without newlines). Without this fallback, line-based splitting
+///      cannot reduce a 10K-char single-line chunk and the embedder still
+///      OOMs.
+///
+/// Sub-chunk line numbers are computed relative to the parent chunk's
+/// `start_line` so absolute file positions are preserved.
+fn enforce_max_chunk_size(chunks: Vec<RawChunk>, target: usize) -> Vec<RawChunk> {
+    let mut out = Vec::with_capacity(chunks.len());
+    for chunk in chunks {
+        if chunk.content.len() <= target {
+            out.push(chunk);
+            continue;
+        }
+        let parent_offset = chunk.start_line.saturating_sub(1);
+        for sub in super::chunker::split(&chunk.content, target, 0) {
+            if sub.content.len() <= target {
+                out.push(RawChunk {
+                    content: sub.content,
+                    start_line: sub.start_line + parent_offset,
+                    end_line: sub.end_line + parent_offset,
+                    metadata: None,
+                });
+                continue;
+            }
+            // Line-based split couldn't reduce — single line longer than
+            // target. Slice on UTF-8 char boundaries as last resort. All
+            // slices land on the same line range as the original sub-chunk.
+            let abs_start = sub.start_line + parent_offset;
+            let abs_end = sub.end_line + parent_offset;
+            for piece in slice_on_char_boundary(&sub.content, target) {
+                out.push(RawChunk {
+                    content: piece,
+                    start_line: abs_start,
+                    end_line: abs_end,
+                    metadata: None,
+                });
             }
         }
     }
+    out
+}
 
-    // Fallback to line-based splitting
-    super::chunker::split(source, target, 0)
+/// Slice `s` into pieces no larger than `max_bytes`, cutting only on UTF-8
+/// character boundaries (never mid-codepoint).
+fn slice_on_char_boundary(s: &str, max_bytes: usize) -> Vec<String> {
+    if max_bytes == 0 || s.is_empty() {
+        return vec![s.to_string()];
+    }
+    let mut pieces = Vec::new();
+    let bytes = s.as_bytes();
+    let mut start = 0;
+    while start < bytes.len() {
+        let mut end = (start + max_bytes).min(bytes.len());
+        // Walk back to the nearest char boundary.
+        while end > start && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        if end == start {
+            // Single codepoint larger than max_bytes — emit it whole rather
+            // than infinite-loop. Pathological input only.
+            end = (start + max_bytes).min(bytes.len());
+            while end < bytes.len() && !s.is_char_boundary(end) {
+                end += 1;
+            }
+        }
+        pieces.push(s[start..end].to_string());
+        start = end;
+    }
+    pieces
 }
 
 /// Returns `true` if the given line is a doc comment line.
@@ -731,6 +1048,7 @@ mod tests {
             "jsx",
             "java",
             "kotlin",
+            "bash",
         ];
         for lang in &languages {
             let spec = get_language_spec(lang);
@@ -803,6 +1121,141 @@ mod tests {
         let chunks = split_file(source, "unknown_lang", Path::new("file.xyz"), 4000);
         assert!(!chunks.is_empty());
         assert_eq!(chunks[0].start_line, 1);
+    }
+    /// Indivisible AST node larger than `chunk_size` must be split by the
+    /// post-pass — protects remote embedders with small physical batch limits.
+    #[test]
+    fn split_file_enforces_max_chunk_size_on_oversized_node() {
+        // Large Rust function with no inner splittable structure — would
+        // produce one giant chunk without the post-pass cap.
+        let mut body = String::from("pub fn huge() -> i32 {\n");
+        for i in 0..200 {
+            body.push_str(&format!("    let v{i} = {i};\n"));
+        }
+        body.push_str("    0\n}\n");
+        let chunks = split_file(&body, "rust", Path::new("lib.rs"), 800);
+        assert!(!chunks.is_empty());
+        for c in &chunks {
+            assert!(
+                c.content.len() <= 800,
+                "chunk len {} exceeds target 800; chunks={}",
+                c.content.len(),
+                chunks.len()
+            );
+        }
+        // Should produce multiple chunks (~200 lines / 800 chars).
+        assert!(
+            chunks.len() >= 2,
+            "expected post-pass split, got {} chunks",
+            chunks.len()
+        );
+    }
+
+    /// Post-pass preserves absolute file line numbers when sub-splitting.
+    #[test]
+    fn split_file_post_pass_preserves_absolute_line_numbers() {
+        let mut src = String::new();
+        // Pad with 50 leading non-AST lines so the function starts at line 51.
+        for i in 0..50 {
+            src.push_str(&format!("// preamble {i}\n"));
+        }
+        src.push_str("pub fn big() {\n");
+        for i in 0..200 {
+            src.push_str(&format!("    let v{i} = {i};\n"));
+        }
+        src.push_str("}\n");
+        let chunks = split_file(&src, "rust", Path::new("lib.rs"), 800);
+        assert!(chunks.len() >= 2);
+        // Every chunk's lines must lie within the file (1..=total_lines).
+        let total_lines = src.lines().count();
+        for c in &chunks {
+            assert!(
+                c.start_line >= 1 && c.end_line <= total_lines,
+                "chunk lines {}-{} out of file range 1-{}",
+                c.start_line,
+                c.end_line,
+                total_lines
+            );
+            assert!(
+                c.start_line <= c.end_line,
+                "chunk start {} > end {}",
+                c.start_line,
+                c.end_line
+            );
+        }
+    }
+
+    /// Plain-text fallback path (unknown language) also honors the cap.
+    #[test]
+    fn split_file_post_pass_applies_to_plain_text_path() {
+        // Single long line that the line-based splitter alone would emit as
+        // one chunk regardless of size.
+        let src = "x".repeat(5000) + "\n";
+        let chunks = split_file(&src, "unknown_xyz", Path::new("a.xyz"), 1000);
+        for c in &chunks {
+            assert!(
+                c.content.len() <= 1000,
+                "plain-text chunk len {} exceeds target",
+                c.content.len()
+            );
+        }
+    }
+
+    /// `enforce_max_chunk_size` is idempotent — chunks already under the cap
+    /// pass through unchanged.
+    #[test]
+    fn enforce_max_chunk_size_is_noop_for_small_chunks() {
+        let small = vec![
+            RawChunk {
+                content: "fn a() {}".into(),
+                start_line: 1,
+                end_line: 1,
+                metadata: None,
+            },
+            RawChunk {
+                content: "fn b() {}".into(),
+                start_line: 3,
+                end_line: 3,
+                metadata: None,
+            },
+        ];
+        let out = enforce_max_chunk_size(small.clone(), 1000);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].content, small[0].content);
+        assert_eq!(out[0].start_line, 1);
+        assert_eq!(out[1].start_line, 3);
+    }
+    /// `slice_on_char_boundary` never splits a UTF-8 codepoint mid-byte.
+    #[test]
+    fn slice_on_char_boundary_respects_utf8() {
+        // Each emoji is 4 bytes; max 5 bytes per slice forces a boundary split.
+        let s = "🦀🦀🦀🦀";
+        let pieces = slice_on_char_boundary(s, 5);
+        // All pieces must be valid UTF-8 (already guaranteed by &str return type)
+        // and every char count must be > 0.
+        assert!(!pieces.is_empty());
+        let total: String = pieces.join("");
+        assert_eq!(total, s, "round-trip must equal original");
+        for p in &pieces {
+            assert!(!p.is_empty());
+            // Each piece must be ≤ max_bytes OR contain a single oversized codepoint.
+            assert!(
+                p.len() <= 5 || p.chars().count() == 1,
+                "piece {p:?} ({} bytes) violates cap",
+                p.len()
+            );
+        }
+    }
+
+    /// Ascii-only round-trip — basic correctness check.
+    #[test]
+    fn slice_on_char_boundary_ascii_round_trip() {
+        let s = "hello world this is a long string";
+        let pieces = slice_on_char_boundary(s, 7);
+        assert_eq!(pieces.join(""), s);
+        for p in &pieces {
+            assert!(p.len() <= 7);
+        }
     }
 
     #[test]
@@ -1355,6 +1808,287 @@ mod tests {
             gap_chunks.len(),
             1,
             "use statements should appear in exactly one chunk, not duplicated by overlap"
+        );
+    }
+
+    #[test]
+    fn ast_split_bash_two_functions() {
+        let source = "foo() {\n  echo foo\n}\n\nbar() {\n  echo bar\n}\n";
+        let chunks = split_file(source, "bash", Path::new("script.sh"), 4000);
+        // Two functions → at least 2 chunks (one per function)
+        assert!(
+            chunks.len() >= 2,
+            "expected at least 2 chunks for a 2-function bash script, got {}",
+            chunks.len()
+        );
+        assert!(chunks.iter().any(|c| c.content.contains("foo")));
+        assert!(chunks.iter().any(|c| c.content.contains("bar")));
+    }
+
+    #[test]
+    fn extract_signature_rust_fn() {
+        let s = extract_signature("pub fn foo(x: i32) -> Result<String> {");
+        assert_eq!(s, "pub fn foo(x: i32) -> Result<String>");
+    }
+
+    #[test]
+    fn extract_signature_python_def() {
+        let s = extract_signature("def bar(self, token: str) -> bool:");
+        assert_eq!(s, "def bar(self, token: str) -> bool");
+    }
+
+    #[test]
+    fn extract_signature_arrow_fn() {
+        let s = extract_signature("const foo = (x) => {");
+        assert_eq!(s, "const foo = (x)");
+    }
+
+    #[test]
+    fn extract_signature_truncates_at_100_chars() {
+        let long = "pub fn a_very_long_name_with_lots_of_generic_parameters<T: Clone + Send + Sync + Debug + Display + PartialEq>(x: T) -> Result<T> {";
+        let s = extract_signature(long);
+        assert!(
+            s.chars().count() <= 100,
+            "expected <=100 chars, got {}: {s}",
+            s.chars().count()
+        );
+    }
+
+    #[test]
+    fn extract_signature_no_block_start() {
+        let s = extract_signature("pub const X: i32 = 5;");
+        assert_eq!(s, "pub const X: i32 = 5;");
+    }
+
+    #[test]
+    fn kind_keyword_rust_function() {
+        assert_eq!(kind_keyword_for_node("rust", "function_item"), Some("fn"));
+    }
+
+    #[test]
+    fn kind_keyword_rust_struct() {
+        assert_eq!(kind_keyword_for_node("rust", "struct_item"), Some("struct"));
+    }
+
+    #[test]
+    fn kind_keyword_rust_impl() {
+        assert_eq!(kind_keyword_for_node("rust", "impl_item"), Some("impl"));
+    }
+
+    #[test]
+    fn kind_keyword_python_class() {
+        assert_eq!(
+            kind_keyword_for_node("python", "class_definition"),
+            Some("class")
+        );
+    }
+
+    #[test]
+    fn kind_keyword_python_async() {
+        assert_eq!(
+            kind_keyword_for_node("python", "async_function_definition"),
+            Some("async def")
+        );
+    }
+
+    #[test]
+    fn kind_keyword_typescript_method() {
+        assert_eq!(
+            kind_keyword_for_node("typescript", "method_definition"),
+            Some("method")
+        );
+    }
+
+    #[test]
+    fn kind_keyword_unknown_returns_none() {
+        assert_eq!(kind_keyword_for_node("rust", "weird_node"), None);
+        assert_eq!(kind_keyword_for_node("klingon", "function_item"), None);
+    }
+
+    #[test]
+    fn metadata_header_top_level_rust_fn() {
+        let h = build_metadata_header(
+            "src/foo.rs",
+            &[],
+            Some("fn"),
+            Some("foo"),
+            Some("fn foo(x: i32)"),
+        );
+        assert_eq!(h.as_deref(), Some("src/foo.rs :: fn foo(x: i32)"));
+    }
+
+    #[test]
+    fn metadata_header_rust_method_in_impl() {
+        let h = build_metadata_header(
+            "src/embed/index.rs",
+            &["impl IndexStore"],
+            Some("fn"),
+            Some("build_index"),
+            Some("fn build_index(force: bool)"),
+        );
+        assert_eq!(
+            h.as_deref(),
+            Some("src/embed/index.rs :: impl IndexStore :: fn build_index(force: bool)")
+        );
+    }
+
+    #[test]
+    fn metadata_header_struct_no_signature() {
+        let h = build_metadata_header("src/foo.rs", &[], Some("struct"), Some("Bar"), None);
+        assert_eq!(h.as_deref(), Some("src/foo.rs :: struct Bar"));
+    }
+
+    #[test]
+    fn metadata_header_gap_file_only() {
+        let h = build_metadata_header("src/foo.rs", &[], None, None, None);
+        assert_eq!(h.as_deref(), Some("src/foo.rs"));
+    }
+
+    #[test]
+    fn metadata_header_container_only() {
+        let h = build_metadata_header("src/foo.rs", &["impl Bar"], None, None, None);
+        assert_eq!(h.as_deref(), Some("src/foo.rs :: impl Bar"));
+    }
+
+    #[test]
+    fn metadata_header_kind_without_signature_uses_name() {
+        let h = build_metadata_header("src/foo.rs", &[], Some("fn"), Some("bar"), None);
+        assert_eq!(h.as_deref(), Some("src/foo.rs :: fn bar"));
+    }
+
+    #[test]
+    fn metadata_header_name_only_no_kind_no_sig() {
+        let h = build_metadata_header("src/foo.rs", &[], None, Some("orphan_name"), None);
+        assert_eq!(h.as_deref(), Some("src/foo.rs :: orphan_name"));
+    }
+
+    #[test]
+    fn metadata_header_nested_container() {
+        let h = build_metadata_header(
+            "src/x.rs",
+            &["mod inner", "impl Foo"],
+            Some("fn"),
+            Some("baz"),
+            Some("fn baz()"),
+        );
+        assert_eq!(
+            h.as_deref(),
+            Some("src/x.rs :: mod inner :: impl Foo :: fn baz()")
+        );
+    }
+
+    #[test]
+    fn split_file_rust_populates_metadata_headers() {
+        use std::path::Path;
+        let src = r#"
+pub fn top_level() {
+    println!("hi");
+}
+
+pub struct MyStore;
+
+impl MyStore {
+    pub fn build(&self) {
+        // body
+    }
+}
+"#;
+        let chunks = split_file(src, "rust", Path::new("src/mystore.rs"), 4000);
+
+        // Find chunk containing top_level
+        let top = chunks
+            .iter()
+            .find(|c| c.content.contains("top_level"))
+            .expect("top_level chunk");
+        let meta = top.metadata.as_deref().expect("top_level has metadata");
+        assert!(meta.contains("src/mystore.rs"), "meta missing path: {meta}");
+        assert!(meta.contains("fn"), "meta missing kind fn: {meta}");
+        assert!(meta.contains("top_level"), "meta missing name: {meta}");
+
+        // build method should carry the impl container in its header
+        let build = chunks
+            .iter()
+            .find(|c| c.content.contains("fn build"))
+            .expect("build chunk");
+        let bmeta = build.metadata.as_deref().expect("build has metadata");
+        assert!(
+            bmeta.contains("impl MyStore"),
+            "build metadata missing impl container: {bmeta}"
+        );
+        assert!(
+            bmeta.contains("fn") && bmeta.contains("build"),
+            "build metadata incomplete: {bmeta}"
+        );
+    }
+
+    #[test]
+    fn split_file_signature_skips_doc_comments() {
+        use std::path::Path;
+        // Function with a multi-line doc comment — the signature should come
+        // from the `pub fn` line, not the `///` lines. Regression guard for
+        // the `expanded_start` vs `node.start_line` bug.
+        let src = r#"
+/// Compute the answer.
+/// A second line of documentation.
+pub fn compute(x: i32) -> i32 {
+    x + 1
+}
+"#;
+        let chunks = split_file(src, "rust", Path::new("src/math.rs"), 4000);
+        let chunk = chunks
+            .iter()
+            .find(|c| c.content.contains("pub fn compute"))
+            .expect("compute chunk");
+        let meta = chunk.metadata.as_deref().expect("metadata present");
+        assert!(
+            meta.contains("compute"),
+            "signature missing symbol name: {meta}"
+        );
+        assert!(
+            !meta.contains("///"),
+            "doc comment leaked into signature: {meta}"
+        );
+        assert!(
+            !meta.contains("Compute the answer"),
+            "doc body leaked into signature: {meta}"
+        );
+    }
+
+    #[test]
+    fn inner_method_signature_skips_doc_comments() {
+        use std::path::Path;
+        // Inner method inside an impl block — regression guard for the
+        // collect_inner_nodes bug where start_line was stored as the
+        // doc-comment-expanded row, causing signature extraction to read
+        // the `///` line instead of the `fn …` line.
+        let src = r#"
+pub struct Foo;
+
+impl Foo {
+    /// Compute the answer.
+    /// A second line of documentation.
+    pub fn compute(&self, x: i32) -> i32 {
+        x + 1
+    }
+}
+"#;
+        let chunks = split_file(src, "rust", Path::new("src/foo.rs"), 4000);
+        let chunk = chunks
+            .iter()
+            .find(|c| c.content.contains("pub fn compute"))
+            .expect("compute chunk");
+        let meta = chunk.metadata.as_deref().expect("metadata present");
+        assert!(
+            meta.contains("compute"),
+            "signature missing symbol name: {meta}"
+        );
+        assert!(
+            !meta.contains("///"),
+            "doc comment leaked into inner-method signature: {meta}"
+        );
+        assert!(
+            !meta.contains("Compute the answer"),
+            "doc body leaked into inner-method signature: {meta}"
         );
     }
 }

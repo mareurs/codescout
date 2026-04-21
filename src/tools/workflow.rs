@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 /// Bump this when system prompt surfaces change significantly.
 /// Missing or lower stored version triggers auto-refresh of the system prompt.
 /// See CLAUDE.md § "Onboarding Version" for when to bump.
-const ONBOARDING_VERSION: u32 = 3;
+const ONBOARDING_VERSION: u32 = 8;
 
 /// Returns true if the stored onboarding version is stale (needs refresh).
 /// `None` means pre-versioning project — always stale.
@@ -716,6 +716,12 @@ fn build_system_prompt_draft(
                          against the wrong project.\n");
         draft.push_str("- **Subagents:** the MCP server state is shared with the parent conversation. \
                          You **MUST** `activate_project` back to the original project before completing your task.\n\n");
+        draft.push_str(
+            "**Markdown files** (memories, plans, docs): \
+             `read_markdown(\"path\")` — returns heading map + `@file_ref` for large files. \
+             **IRON LAW #6:** subsequent reads MUST use `@file_ref` (not the original path): \
+             `read_markdown(\"@file_ref\", heading=\"## Section\")` or `start_line=/end_line=`.\n\n",
+        );
     } else {
         draft.push_str("## Navigation Strategy\n");
         draft.push_str("1. `memory(action=\"read\", topic=\"architecture\")` — orient yourself\n");
@@ -733,7 +739,23 @@ fn build_system_prompt_draft(
         draft.push_str(
             "5. `memory(action=\"recall\", query=\"...\")` — search memories by meaning\n\n",
         );
+        draft.push_str(
+            "6. `read_markdown(\"path/to/file.md\")` — returns heading map + `@file_ref` for large files. \
+             **IRON LAW #6:** subsequent reads MUST use `@file_ref` (not the original path): \
+             `read_markdown(\"@file_ref\", heading=\"## Section\")` or `start_line=/end_line=`.\n\n",
+        );
     }
+
+    // MCP resource pointers — always included so agents know where to get extended docs
+    draft.push_str("## MCP Resources\n");
+    draft.push_str(
+        "Extended docs and project context are available via MCP resources (`resources/read <uri>`):\n",
+    );
+    draft.push_str("- `doc://codescout-tool-guide` — long-form usage notes for every tool (examples, tradeoffs)\n");
+    draft.push_str(
+        "- `memory://<name>` — project memory files (architecture, conventions, gotchas)\n",
+    );
+    draft.push_str("- `project://summary` — active project + index + LSP snapshot\n\n");
 
     // Project rules — empty section for the LLM to fill from exploration
     draft.push_str("## Project Rules\n");
@@ -1465,562 +1487,17 @@ impl Tool for Onboarding {
         let force = parse_bool_param(&input["force"]);
         let refresh_prompt = parse_bool_param(&input["refresh_prompt"]);
 
-        // Explicit prompt refresh: regenerate system-prompt.md from memories without re-exploring.
-        // Takes effect only when not doing a full force re-scan.
         if refresh_prompt && !force {
-            let status = ctx
-                .agent
-                .with_project(|p| {
-                    let has_config = p.root.join(".codescout").join("project.toml").exists();
-                    let memories = p.memory.list()?;
-                    let has_onboarding_memory = memories.iter().any(|m| m == "onboarding");
-                    Ok((has_config, has_onboarding_memory, memories))
-                })
-                .await?;
-            let (has_config, has_onboarding_memory, memories) = status;
-            if !has_config || !has_onboarding_memory {
-                return Err(super::RecoverableError::with_hint(
-                    "refresh_prompt requires a fully onboarded project",
-                    "Run onboarding() without any flags first to perform the initial onboarding.",
-                )
-                .into());
-            }
-
-            let (stored_version, config_languages) = ctx
-                .agent
-                .with_project(|p| {
-                    Ok((
-                        p.config.project.onboarding_version,
-                        p.config.project.languages.clone(),
-                    ))
-                })
-                .await?;
-
-            // Optimistic version write to disk so the refresh is not re-triggered
-            let config_path = ctx
-                .agent
-                .with_project(|p| {
-                    let config_path = p.root.join(".codescout").join("project.toml");
-                    if config_path.exists() {
-                        let mut config =
-                            crate::config::project::ProjectConfig::load_or_default(&p.root)?;
-                        config.project.onboarding_version = Some(ONBOARDING_VERSION);
-                        let toml_str = toml::to_string_pretty(&config)?;
-                        std::fs::write(&config_path, &toml_str)?;
-                    }
-                    Ok(config_path)
-                })
-                .await?;
-            ctx.agent.reload_config_if_project_toml(&config_path).await;
-
-            let subagent_prompt = build_prompt_refresh_subagent_prompt(&memories);
-
-            return Ok(json!({
-                "onboarded": true,
-                "version_stale": false,
-                "explicit_refresh": true,
-                "stored_version": stored_version,
-                "current_version": ONBOARDING_VERSION,
-                "languages": config_languages,
-                "config_created": false,
-                "subagent_prompt": subagent_prompt,
-            }));
+            return handle_refresh_prompt(ctx).await;
         }
 
-        // If already onboarded and not forced, return status instead of re-scanning
         if !force {
-            let status = ctx
-                .agent
-                .with_project(|p| {
-                    let has_config = p.root.join(".codescout").join("project.toml").exists();
-                    let memories = p.memory.list()?;
-                    let has_onboarding_memory = memories.iter().any(|m| m == "onboarding");
-                    let private_memories = p.private_memory.list()?;
-                    Ok((
-                        has_config,
-                        has_onboarding_memory,
-                        memories,
-                        private_memories,
-                    ))
-                })
-                .await?;
-            let (has_config, has_onboarding_memory, memories, private_memories) = status;
-            if has_config && has_onboarding_memory {
-                // --- Version check: refresh system prompt if stale ---
-                let (stored_version, config_languages) = ctx
-                    .agent
-                    .with_project(|p| {
-                        Ok((
-                            p.config.project.onboarding_version,
-                            p.config.project.languages.clone(),
-                        ))
-                    })
-                    .await?;
-
-                // Log downgrade (no action)
-                if let Some(v) = stored_version {
-                    if v > ONBOARDING_VERSION {
-                        tracing::warn!(
-                            "stored onboarding version ({}) is newer than compiled ({}) — skipping refresh",
-                            v, ONBOARDING_VERSION
-                        );
-                    }
-                }
-
-                if onboarding_version_stale(stored_version) {
-                    tracing::info!(
-                        "onboarding version stale: stored={:?} current={}",
-                        stored_version,
-                        ONBOARDING_VERSION
-                    );
-
-                    // Optimistic version write to disk (prevents re-trigger across sessions)
-                    let config_path = ctx
-                        .agent
-                        .with_project(|p| {
-                            let config_path = p.root.join(".codescout").join("project.toml");
-                            if config_path.exists() {
-                                let mut config =
-                                    crate::config::project::ProjectConfig::load_or_default(
-                                        &p.root,
-                                    )?;
-                                config.project.onboarding_version = Some(ONBOARDING_VERSION);
-                                let toml_str = toml::to_string_pretty(&config)?;
-                                std::fs::write(&config_path, &toml_str)?;
-                            }
-                            Ok(config_path)
-                        })
-                        .await?;
-                    // Reload in-memory config so subsequent calls in the same session
-                    // see the updated version (prevents re-trigger within session)
-                    ctx.agent.reload_config_if_project_toml(&config_path).await;
-
-                    let subagent_prompt = build_prompt_refresh_subagent_prompt(&memories);
-
-                    return Ok(json!({
-                        "onboarded": true,
-                        "version_stale": true,
-                        "stored_version": stored_version,
-                        "current_version": ONBOARDING_VERSION,
-                        "languages": config_languages,
-                        "config_created": false,
-                        "subagent_prompt": subagent_prompt,
-                    }));
-                }
-
-                let per_project_memories = ctx.agent.workspace_project_memories().await;
-
-                let mut message = format!(
-                    "Onboarding already performed. Available shared memories: {}. \
-                     Use `memory(action=\"read\", topic=...)` to read relevant ones as needed for your current task. \
-                     Do not read all memories at once — only read those relevant to what you're working on. \
-                     Use `memory(action=\"recall\", query=\"...\")` to search memories by meaning when the topic name isn't known.",
-                    memories.join(", ")
-                );
-                if !private_memories.is_empty() {
-                    message.push_str(&format!(
-                        " Private memories: {}. Read with `memory(action=\"read\", topic=..., private=true)`.",
-                        private_memories.join(", ")
-                    ));
-                }
-                if !per_project_memories.is_empty() {
-                    message.push_str(" Per-project memories (use `project: \"<id>\"` parameter):");
-                    for (id, topics) in &per_project_memories {
-                        message.push_str(&format!(" {}: {};", id, topics.join(", ")));
-                    }
-                }
-                let mut response = json!({
-                    "onboarded": true,
-                    "has_config": true,
-                    "has_onboarding_memory": true,
-                    "memories": memories,
-                    "message": message,
-                });
-                if !private_memories.is_empty() {
-                    response["private_memories"] = json!(private_memories);
-                }
-                if !per_project_memories.is_empty() {
-                    let map: serde_json::Map<String, serde_json::Value> = per_project_memories
-                        .into_iter()
-                        .map(|(id, topics)| (id, json!(topics)))
-                        .collect();
-                    response["project_memories"] = serde_json::Value::Object(map);
-                }
+            if let Some(response) = handle_already_onboarded(ctx).await? {
                 return Ok(response);
             }
         }
 
-        // Hardware detection runs after the file walk (Rust futures are lazy — this
-        // just creates the future; it starts executing only when .await'd below).
-        let hw_future = detect_hardware_context();
-
-        // Detect languages by walking files
-        let mut languages = std::collections::BTreeSet::new();
-        let walker = ignore::WalkBuilder::new(&root)
-            .hidden(true)
-            .git_ignore(true)
-            .build();
-        for entry in walker.flatten() {
-            if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                if let Some(lang) = crate::ast::detect_language(entry.path()) {
-                    languages.insert(lang.to_string());
-                }
-            }
-        }
-
-        // List top-level entries
-        let mut top_level = vec![];
-        if let Ok(entries) = std::fs::read_dir(&root) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                let suffix = if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                    "/"
-                } else {
-                    ""
-                };
-                top_level.push(format!("{}{}", name, suffix));
-            }
-        }
-        top_level.sort();
-
-        // Resolve hardware detection and derive model options
-        let hw = hw_future.await;
-        let model_options = model_options_for_hardware(&hw);
-        let recommended_model = model_options
-            .first()
-            .expect("model_options_for_hardware guarantees ≥1 entry")
-            .id
-            .clone();
-
-        // Create .codescout/project.toml if it doesn't exist
-        let config_dir = root.join(".codescout");
-        let config_path = config_dir.join("project.toml");
-        let created_config = if !config_path.exists() {
-            std::fs::create_dir_all(&config_dir)?;
-            let name = root
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unnamed")
-                .to_string();
-            let langs: Vec<String> = languages.iter().cloned().collect();
-            let config = crate::config::project::ProjectConfig {
-                project: crate::config::project::ProjectSection {
-                    name,
-                    languages: langs,
-                    encoding: "utf-8".into(),
-                    system_prompt: None,
-                    tool_timeout_secs: 60,
-                    onboarding_version: Some(ONBOARDING_VERSION),
-                },
-                embeddings: crate::config::project::EmbeddingsSection {
-                    model: recommended_model,
-                    ..Default::default()
-                },
-                ignored_paths: Default::default(),
-                security: Default::default(),
-                memory: Default::default(),
-                libraries: Default::default(),
-            };
-            let toml_str = toml::to_string_pretty(&config)?;
-            std::fs::write(&config_path, &toml_str)?;
-            // Reload in-memory config so the version is visible within this session
-            ctx.agent.reload_config_if_project_toml(&config_path).await;
-            true
-        } else {
-            false
-        };
-
-        // Gather rich context from well-known project files.
-        // Pass the already-discovered project list from the workspace to avoid a
-        // redundant discover_projects walk (the agent runs it at activation time).
-        let discovered = ctx.agent.discovered_projects().await;
-        let gathered = gather_project_context(&root, discovered);
-
-        // Create workspace.toml for multi-project repos
-        let workspace_config_path = crate::config::workspace::workspace_config_path(&root);
-        if gathered.projects.len() > 1 && !workspace_config_path.exists() {
-            let ws_config = crate::config::workspace::WorkspaceConfig {
-                workspace: crate::config::workspace::WorkspaceSection {
-                    name: root
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("unnamed")
-                        .to_string(),
-                    discovery_max_depth: 3,
-                },
-                resources: Default::default(),
-                exclude_projects: vec![],
-                projects: gathered
-                    .projects
-                    .iter()
-                    .map(|p| {
-                        let project_abs = root.join(&p.relative_root);
-                        let depends_on = crate::workspace::infer_depends_on(
-                            &project_abs,
-                            &root,
-                            &gathered.projects,
-                        );
-                        crate::config::workspace::ProjectEntry {
-                            id: p.id.clone(),
-                            root: p.relative_root.to_string_lossy().to_string(),
-                            languages: p.languages.clone(),
-                            depends_on,
-                        }
-                    })
-                    .collect(),
-            };
-            let toml_str = toml::to_string_pretty(&ws_config)?;
-            std::fs::write(&workspace_config_path, &toml_str)?;
-        }
-
-        // Probe embedding index status (only opens existing DB, no network)
-        let index_status = {
-            let db_path = crate::embed::index::project_db_path(&root);
-            if db_path.exists() {
-                match crate::embed::index::open_db(&root)
-                    .and_then(|conn| crate::embed::index::index_stats(&conn))
-                {
-                    Ok(stats) => json!({
-                        "ready": stats.chunk_count > 0,
-                        "files": stats.file_count,
-                        "chunks": stats.chunk_count,
-                    }),
-                    Err(_) => json!({ "ready": false, "files": 0, "chunks": 0 }),
-                }
-            } else {
-                json!({ "ready": false, "files": 0, "chunks": 0 })
-            }
-        };
-
-        // Store onboarding result in memory
-        let lang_list: Vec<String> = languages.iter().cloned().collect();
-        ctx.agent
-            .with_project(|p| {
-                let summary = format!(
-                    "Languages: {}\nHas README: {}\nHas CLAUDE.md: {}\nBuild file: {}\nEntry points: {}\nTest dirs: {}",
-                    lang_list.join(", "),
-                    gathered.readme_path.is_some(),
-                    gathered.claude_md_exists,
-                    gathered.build_file_name.as_deref().unwrap_or("none"),
-                    if gathered.entry_points.is_empty() { "none".to_string() } else { gathered.entry_points.join(", ") },
-                    if gathered.test_dirs.is_empty() { "none".to_string() } else { gathered.test_dirs.join(", ") },
-                );
-                p.memory.write("onboarding", &summary)?;
-
-                // Write language-patterns memory (deterministic, from hardcoded content)
-                if let Some(patterns) = build_language_patterns_memory(&lang_list) {
-                    p.memory.write("language-patterns", &patterns)?;
-                }
-
-                Ok(())
-            })
-            .await?;
-
-        // Write programmatic memories for each sub-project in workspace mode.
-        if gathered.projects.len() > 1 {
-            for project in &gathered.projects {
-                let mem_dir = if project.relative_root == std::path::Path::new(".") {
-                    root.join(".codescout").join("memories")
-                } else {
-                    root.join(".codescout")
-                        .join("projects")
-                        .join(&project.id)
-                        .join("memories")
-                };
-                if let Ok(store) = crate::memory::MemoryStore::from_dir(mem_dir) {
-                    let proj_summary = format!(
-                        "Languages: {}\nRoot: {}\nManifest: {}",
-                        project.languages.join(", "),
-                        project.relative_root.display(),
-                        project.manifest.as_deref().unwrap_or("none"),
-                    );
-                    let _ = store.write("onboarding", &proj_summary);
-                    if let Some(patterns) = build_language_patterns_memory(&project.languages) {
-                        let _ = store.write("language-patterns", &patterns);
-                    }
-                }
-            }
-        }
-
-        // Gather protected memory state for the LLM merge flow
-        let protected_memories = ctx
-            .agent
-            .with_project(|p| {
-                let memories_dir = p.root.join(".codescout").join("memories");
-                let protected = &p.config.memory.protected;
-                Ok(gather_protected_memory_state(
-                    &p.memory,
-                    &memories_dir,
-                    &p.root,
-                    protected,
-                ))
-            })
-            .await?;
-
-        // Build the key-files manifest for the prompt (paths only, no content)
-        let mut key_files: Vec<String> = Vec::new();
-        if let Some(ref p) = gathered.readme_path {
-            key_files.push(p.clone());
-        }
-        if gathered.claude_md_exists {
-            key_files.push("CLAUDE.md".to_string());
-        }
-        if let Some(ref p) = gathered.build_file_name {
-            key_files.push(p.clone());
-        }
-
-        // Build the onboarding instruction prompt
-        let is_workspace = gathered.projects.len() > 1;
-        let prompt = crate::prompts::build_onboarding_prompt(&crate::prompts::OnboardingContext {
-            languages: &lang_list,
-            top_level: &top_level,
-            key_files: &key_files,
-            ci_files: &gathered.ci_files,
-            entry_points: &gathered.entry_points,
-            test_dirs: &gathered.test_dirs,
-            index_ready: index_status["ready"].as_bool().unwrap_or(false),
-            index_files: index_status["files"].as_u64().unwrap_or(0) as usize,
-            index_chunks: index_status["chunks"].as_u64().unwrap_or(0) as usize,
-            projects: &gathered.projects,
-            is_workspace,
-        });
-
-        // Build the system prompt draft scaffold
-        let libraries: Vec<crate::library::registry::LibraryEntry> = ctx
-            .agent
-            .library_registry()
-            .await
-            .map(|r| r.all().to_vec())
-            .unwrap_or_default();
-        let system_prompt_draft = build_system_prompt_draft(
-            &lang_list,
-            &gathered.entry_points,
-            Some(&root),
-            Some(&gathered.projects),
-            &libraries,
-        );
-
-        let discovered_projects: Vec<serde_json::Value> = gathered
-            .projects
-            .iter()
-            .map(|p| {
-                serde_json::json!({
-                    "id": p.id,
-                    "root": p.relative_root.to_string_lossy(),
-                    "languages": p.languages,
-                    "manifest": p.manifest,
-                })
-            })
-            .collect();
-
-        let features_suggestion = gathered.features_md.is_none().then_some(
-            "No FEATURES.md found. Consider creating docs/FEATURES.md to document \
-             implemented capabilities — helps agents understand what's already built \
-             and avoid re-suggesting existing features.",
-        );
-
-        // Per-project protected memory state for workspace mode.
-        let (workspace_mode, per_project_protected) = if gathered.projects.len() > 1 {
-            let protected = ctx
-                .agent
-                .with_project(|p| Ok(p.config.memory.protected.clone()))
-                .await
-                .unwrap_or_default();
-            let mut map = serde_json::Map::new();
-            for project in &gathered.projects {
-                let mem_dir = if project.relative_root == std::path::Path::new(".") {
-                    root.join(".codescout").join("memories")
-                } else {
-                    root.join(".codescout")
-                        .join("projects")
-                        .join(&project.id)
-                        .join("memories")
-                };
-                let project_root = root.join(&project.relative_root);
-                if let Ok(store) = crate::memory::MemoryStore::from_dir(mem_dir.clone()) {
-                    let state =
-                        gather_protected_memory_state(&store, &mem_dir, &project_root, &protected);
-                    map.insert(project.id.clone(), state);
-                }
-            }
-            (true, Some(Value::Object(map)))
-        } else {
-            (false, None)
-        };
-
-        // Build the subagent prompt by concatenating preamble + onboarding prompt +
-        // system prompt draft + gathered data + epilogue
-        let subagent_prompt = {
-            let mut sp = build_subagent_preamble();
-            sp.push_str(&prompt);
-            if !system_prompt_draft.is_empty() {
-                sp.push_str("\n\n## System Prompt Draft\n\n");
-                sp.push_str(&system_prompt_draft);
-            }
-            if let Some(suggestion) = features_suggestion {
-                sp.push_str(&format!("\n\n> {suggestion}"));
-            }
-            // Append gathered data that the subagent needs
-            sp.push_str("\n\n## Gathered Data\n\n");
-            sp.push_str(&format!(
-                "**Hardware:** {}\n\n",
-                serde_json::to_string_pretty(&hw).unwrap_or_default()
-            ));
-            sp.push_str(&format!(
-                "**Model options:** {}\n\n",
-                serde_json::to_string_pretty(&model_options).unwrap_or_default()
-            ));
-            if !protected_memories.is_null() {
-                sp.push_str(&format!(
-                    "**Protected memories:** {}\n\n",
-                    serde_json::to_string_pretty(&protected_memories).unwrap_or_default()
-                ));
-            }
-            if workspace_mode {
-                if let Some(ref ppm) = per_project_protected {
-                    if !ppm.is_null() {
-                        sp.push_str(&format!(
-                            "**Per-project protected memories:** {}\n\n",
-                            serde_json::to_string_pretty(ppm).unwrap_or_default()
-                        ));
-                    }
-                }
-            }
-            sp.push_str(&build_subagent_epilogue());
-            sp
-        };
-
-        // Optimistic version write for full onboarding (force=true on existing project)
-        ctx.agent
-            .with_project(|p| {
-                let config_path = p.root.join(".codescout").join("project.toml");
-                if config_path.exists() {
-                    let mut config =
-                        crate::config::project::ProjectConfig::load_or_default(&p.root)?;
-                    config.project.onboarding_version = Some(ONBOARDING_VERSION);
-                    let toml_str = toml::to_string_pretty(&config)?;
-                    std::fs::write(&config_path, &toml_str)?;
-                }
-                Ok(())
-            })
-            .await?;
-
-        Ok(json!({
-            "languages": lang_list,
-            "top_level": top_level,
-            "config_created": created_config,
-            "has_readme": gathered.readme_path.is_some(),
-            "has_claude_md": gathered.claude_md_exists,
-            "build_file": gathered.build_file_name,
-            "entry_points": gathered.entry_points,
-            "test_dirs": gathered.test_dirs,
-            "ci_files": gathered.ci_files,
-            "features_md": gathered.features_md,
-            "index_status": index_status,
-            "workspace_mode": workspace_mode,
-            "projects": discovered_projects,
-            "subagent_prompt": subagent_prompt,
-        }))
+        perform_full_onboarding(root, ctx).await
     }
 
     async fn call_content(
@@ -3323,7 +2800,345 @@ async fn run_command_interactive(
     }))
 }
 
-/// Inner logic for `RunCommand::call`, extracted so temp-file cleanup
+/// RAII guard: deletes a named temp file when dropped.
+struct TmpfileGuard(String);
+
+impl Drop for TmpfileGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// RAII guard: aborts a spawned task when dropped.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+fn resolve_work_dir(root: &Path, cwd_param: Option<&str>) -> anyhow::Result<std::path::PathBuf> {
+    if let Some(rel) = cwd_param {
+        let candidate = root.join(rel);
+        let canonical = candidate.canonicalize().map_err(|e| {
+            super::RecoverableError::with_hint(
+                format!("cwd '{}' is not a valid directory: {}", rel, e),
+                "Provide a relative path to an existing subdirectory of the project.",
+            )
+        })?;
+        let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let under_project = canonical.starts_with(canonical_root.as_path());
+        let under_tmp = canonical.starts_with("/tmp");
+        if !under_project && !under_tmp {
+            return Err(super::RecoverableError::with_hint(
+                format!("cwd '{}' escapes project root", rel),
+                "The cwd must be a subdirectory within the project, or a path under /tmp.",
+            )
+            .into());
+        }
+        Ok(canonical)
+    } else {
+        Ok(root.to_path_buf())
+    }
+}
+
+async fn spawn_background_command(
+    resolved_command: &str,
+    work_dir: &Path,
+    ctx: &ToolContext,
+) -> anyhow::Result<Value> {
+    let log_tmp = tempfile::Builder::new()
+        .prefix("codescout-bg-")
+        .suffix(".log")
+        .tempfile()?;
+    let log_path = log_tmp.path().to_path_buf();
+    let (log_file, _) = log_tmp.keep()?;
+    let log_stderr = log_file.try_clone()?;
+
+    // Child handle dropped intentionally — process runs detached, adopted by init.
+    let (shell, shell_args) = crate::platform::shell_command(resolved_command);
+    tokio::process::Command::new(shell)
+        .args(&shell_args)
+        .current_dir(work_dir)
+        .env("GIT_PAGER", "cat")
+        .stdout(std::process::Stdio::from(log_file))
+        .stderr(std::process::Stdio::from(log_stderr))
+        .spawn()?;
+
+    // Warm return: 5s window captures startup output and fast failures.
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+    let log_content = std::fs::read_to_string(&log_path).unwrap_or_default();
+    let tail_50: String = {
+        let lines: Vec<&str> = log_content.lines().collect();
+        let start = lines.len().saturating_sub(50);
+        lines[start..].join("\n")
+    };
+
+    let ref_id = ctx.output_buffer.store_background(log_path);
+
+    let mut bg_result = serde_json::json!({
+        "output_id": ref_id,
+        "hint": format!(
+            "Process running. Output captured in {} — use run_command(\"tail -50 {}\") or grep/cat as needed.",
+            ref_id, ref_id
+        )
+    });
+    if !tail_50.is_empty() {
+        bg_result["stdout"] = json!(tail_50);
+    }
+    Ok(bg_result)
+}
+
+fn inject_tee(
+    resolved_command: &str,
+    buffer_only: bool,
+) -> anyhow::Result<(String, Option<TmpfileGuard>)> {
+    use super::command_summary::detect_terminal_filter;
+    if buffer_only {
+        return Ok((resolved_command.to_string(), None));
+    }
+    if let Some(pipe_pos) = detect_terminal_filter(resolved_command) {
+        // Use tempfile::NamedTempFile for unpredictable path (SF-3).
+        // persist() converts it to a regular file we manage via TmpfileGuard.
+        let named = tempfile::Builder::new()
+            .prefix("codescout-unfiltered-")
+            .tempfile()?;
+        let tmppath = named.into_temp_path();
+        let tmpfile = tmppath.to_string_lossy().to_string();
+        // Keep the file on disk — TmpfileGuard handles cleanup.
+        tmppath.keep()?;
+        // Safety (SF-4): the path is generated by tempfile under $TMPDIR
+        // and contains only alphanumeric chars, hyphens, and dots — no
+        // shell metacharacters.
+        if !tmpfile
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '/' || c == '-' || c == '_' || c == '.')
+        {
+            return Err(super::RecoverableError::new(format!(
+                "temporary file path contains unexpected characters: {}",
+                tmpfile,
+            ))
+            .into());
+        }
+        let cmd = format!(
+            "{} | tee {} | {}",
+            resolved_command[..pipe_pos].trim_end(),
+            tmpfile,
+            resolved_command[pipe_pos + 1..].trim_start()
+        );
+        Ok((cmd, Some(TmpfileGuard(tmpfile))))
+    } else {
+        Ok((resolved_command.to_string(), None))
+    }
+}
+
+async fn handle_successful_output(
+    original_command: &str,
+    raw_stdout: String,
+    raw_stderr: String,
+    exit_code: i32,
+    buffer_only: bool,
+    unfiltered_tmpfile: Option<TmpfileGuard>,
+    ctx: &ToolContext,
+) -> anyhow::Result<Value> {
+    use super::command_summary::{
+        count_lines, detect_command_type, needs_summary, strip_ansi_codes, summarize_build_output,
+        summarize_generic, summarize_test_output, truncate_lines, truncate_lines_and_bytes,
+        CommandType, BUFFER_QUERY_INLINE_CAP,
+    };
+
+    // Buffer-only queries strip ANSI codes — they are opaque to LLMs and bloat byte counts.
+    let raw_stdout = if buffer_only {
+        strip_ansi_codes(&raw_stdout)
+    } else {
+        raw_stdout
+    };
+    let raw_stderr = if buffer_only {
+        strip_ansi_codes(&raw_stderr)
+    } else {
+        raw_stderr
+    };
+
+    // --- Step 6.5: Read tee capture and store as unfiltered_output ref ---
+    let unfiltered_ref: Option<(String, bool)> = if let Some(ref tmpfile) = unfiltered_tmpfile {
+        let capture = std::fs::read_to_string(&tmpfile.0).ok();
+        // tmpfile drops at function exit — TmpfileGuard::drop() removes the file.
+        // Skip empty captures: when the terminal filter matched nothing, both
+        // raw_stdout and the tee file are empty — surfacing a handle is misleading.
+        capture.and_then(|content| {
+            if content.is_empty() {
+                return None;
+            }
+            let (stored, truncated) = if crate::tools::exceeds_inline_limit(&content) {
+                let mut byte_budget = crate::tools::MAX_INLINE_TOKENS * 4;
+                let capped: String = content
+                    .lines()
+                    .take_while(|line| {
+                        if byte_budget == 0 {
+                            return false;
+                        }
+                        byte_budget = byte_budget.saturating_sub(line.len() + 1);
+                        true
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                (capped, true)
+            } else {
+                (content, false)
+            };
+            let ref_id = ctx.output_buffer.store(
+                original_command.to_string(),
+                stored,
+                String::new(), // unfiltered capture is stdout-only
+                exit_code,
+            );
+            Some((ref_id, truncated))
+        })
+    } else {
+        None
+    };
+
+    // --- Step 6: Decide whether to buffer + summarize ---
+    let mut result = if needs_summary(&raw_stdout, &raw_stderr) {
+        if buffer_only {
+            // Buffer-only: return inline, never create a new buffer ref (avoids infinite loop).
+            const STDERR_BUDGET: usize = 20;
+            let buffer_stderr: String = if raw_stderr.is_empty() {
+                original_command
+                    .find("@cmd_")
+                    .or_else(|| original_command.find("@file_"))
+                    .and_then(|pos| {
+                        original_command[pos..]
+                            .split_whitespace()
+                            .next()
+                            .and_then(|tok| ctx.output_buffer.get(tok))
+                    })
+                    .map(|e| e.stderr)
+                    .unwrap_or_default()
+            } else {
+                raw_stderr.clone()
+            };
+            let stderr_budget = STDERR_BUDGET.min(count_lines(&buffer_stderr));
+            let stdout_budget = BUFFER_QUERY_INLINE_CAP - stderr_budget;
+
+            let (stderr_out, stderr_shown, stderr_total) =
+                truncate_lines(&buffer_stderr, STDERR_BUDGET);
+
+            // Byte budget: keep final JSON under TOOL_OUTPUT_BUFFER_THRESHOLD to avoid re-buffering loop.
+            const JSON_OVERHEAD: usize = 300;
+            let stdout_byte_budget = crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD
+                .saturating_sub(JSON_OVERHEAD)
+                .saturating_sub(stderr_out.len());
+
+            let (stdout_out, stdout_shown, stdout_total) =
+                truncate_lines_and_bytes(&raw_stdout, stdout_budget, stdout_byte_budget);
+
+            let was_truncated = stdout_shown < stdout_total || stderr_shown < stderr_total;
+
+            let mut result = json!({"exit_code": exit_code});
+            if !stdout_out.is_empty() {
+                result["stdout"] = json!(stdout_out);
+            }
+            if !stderr_out.is_empty() {
+                result["stderr"] = json!(stderr_out);
+            }
+            if was_truncated {
+                result["truncated"] = json!(true);
+                result["stdout_shown"] = json!(stdout_shown);
+                result["stdout_total"] = json!(stdout_total);
+                if stderr_total > 0 {
+                    result["stderr_shown"] = json!(stderr_shown);
+                    result["stderr_total"] = json!(stderr_total);
+                }
+                let stderr_note = if stderr_total > 0 {
+                    format!(", stderr {stderr_shown}/{stderr_total}")
+                } else {
+                    String::new()
+                };
+                let next_start = stdout_shown + 1;
+                let next_end = stdout_shown + BUFFER_QUERY_INLINE_CAP;
+                result["hint"] = json!(format!(
+                    "Output capped at {BUFFER_QUERY_INLINE_CAP} lines \
+                     (stdout {stdout_shown}/{stdout_total}{stderr_note}). \
+                     Next page: sed -n '{next_start},{next_end}p' @ref. \
+                     Or grep 'keyword' @ref for targeted search.",
+                ));
+            }
+            // buffer_only => tee injection was skipped (unfiltered_tmpfile is None).
+            return Ok(result);
+        }
+
+        let output_id = ctx.output_buffer.store(
+            original_command.to_string(),
+            raw_stdout.clone(),
+            raw_stderr.clone(),
+            exit_code,
+        );
+
+        let cmd_type = detect_command_type(original_command);
+        let cmd_summary = match cmd_type {
+            CommandType::Test => summarize_test_output(&raw_stdout, &raw_stderr, exit_code),
+            CommandType::Build => summarize_build_output(&raw_stdout, &raw_stderr, exit_code),
+            CommandType::Generic => summarize_generic(&raw_stdout, &raw_stderr, exit_code),
+        };
+
+        // Rebuild with correct field order so output_id appears before content fields.
+        rebuild_buffered_summary(cmd_summary, &output_id)
+    } else {
+        // Short output — apply byte budget for buffer-only to prevent re-buffering loop.
+        if buffer_only
+            && raw_stdout.len() + raw_stderr.len()
+                > crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD.saturating_sub(300)
+        {
+            const JSON_OVERHEAD: usize = 300;
+            let byte_budget = crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD
+                .saturating_sub(JSON_OVERHEAD)
+                .saturating_sub(raw_stderr.len());
+            let (stdout_out, stdout_shown, stdout_total) =
+                truncate_lines_and_bytes(&raw_stdout, BUFFER_QUERY_INLINE_CAP, byte_budget);
+            let mut r = json!({"exit_code": exit_code});
+            if !stdout_out.is_empty() {
+                r["stdout"] = json!(stdout_out);
+            }
+            if !raw_stderr.is_empty() {
+                r["stderr"] = json!(raw_stderr);
+            }
+            if stdout_shown < stdout_total {
+                r["truncated"] = json!(true);
+                r["hint"] = json!(
+                    "Match truncated: a single grep match inside a @tool_* ref \
+                     contains compact JSON (one very long line). \
+                     Use read_file(@tool_abc, json_path=\"$.field\") to extract \
+                     a specific field, or read_file(@tool_abc, start_line=N, \
+                     end_line=M) to browse sections of the pretty-printed result."
+                );
+            }
+            r
+        } else {
+            let mut r = json!({"exit_code": exit_code});
+            if !raw_stdout.is_empty() {
+                r["stdout"] = json!(raw_stdout);
+            }
+            if !raw_stderr.is_empty() {
+                r["stderr"] = json!(raw_stderr);
+            }
+            r
+        }
+    };
+
+    // Attach unfiltered_output ref if we captured via tee.
+    if let Some((ref ref_id, truncated)) = unfiltered_ref {
+        result["unfiltered_output"] = json!(ref_id);
+        if truncated {
+            result["unfiltered_truncated"] = json!(true);
+        }
+    }
+
+    Ok(result)
+}
+
 /// always happens in the caller regardless of early returns.
 #[allow(clippy::too_many_arguments)]
 async fn run_command_inner(
@@ -3338,11 +3153,6 @@ async fn run_command_inner(
     security: &crate::util::path_security::PathSecurityConfig,
     ctx: &ToolContext,
 ) -> anyhow::Result<Value> {
-    use super::command_summary::{
-        count_lines, detect_command_type, detect_terminal_filter, needs_summary, strip_ansi_codes,
-        summarize_build_output, summarize_generic, summarize_test_output, truncate_lines,
-        truncate_lines_and_bytes, CommandType, BUFFER_QUERY_INLINE_CAP,
-    };
     use crate::util::path_security::is_dangerous_command;
 
     // --- Step 2: Dangerous command gate ---
@@ -3396,28 +3206,7 @@ async fn run_command_inner(
     }
 
     // --- Step 4: Resolve working directory ---
-    let work_dir = if let Some(rel) = cwd_param {
-        let candidate = root.join(rel);
-        let canonical = candidate.canonicalize().map_err(|e| {
-            super::RecoverableError::with_hint(
-                format!("cwd '{}' is not a valid directory: {}", rel, e),
-                "Provide a relative path to an existing subdirectory of the project.",
-            )
-        })?;
-        let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-        let under_project = canonical.starts_with(canonical_root.as_path());
-        let under_tmp = canonical.starts_with("/tmp");
-        if !under_project && !under_tmp {
-            return Err(super::RecoverableError::with_hint(
-                format!("cwd '{}' escapes project root", rel),
-                "The cwd must be a subdirectory within the project, or a path under /tmp.",
-            )
-            .into());
-        }
-        canonical
-    } else {
-        root.to_path_buf()
-    };
+    let work_dir = resolve_work_dir(root, cwd_param)?;
 
     // --- Step 4.7: Background spawn with warm return ---
     if run_in_background {
@@ -3428,102 +3217,14 @@ async fn run_command_inner(
             )
             .into());
         }
-
-        let log_tmp = tempfile::Builder::new()
-            .prefix("codescout-bg-")
-            .suffix(".log")
-            .tempfile()?;
-        let log_path = log_tmp.path().to_path_buf();
-        let (log_file, _) = log_tmp.keep()?;
-        let log_stderr = log_file.try_clone()?;
-
-        // Child handle dropped intentionally — process runs detached, adopted by init.
-        let (shell, shell_args) = crate::platform::shell_command(resolved_command);
-        tokio::process::Command::new(shell)
-            .args(&shell_args)
-            .current_dir(&work_dir)
-            .env("GIT_PAGER", "cat")
-            .stdout(std::process::Stdio::from(log_file))
-            .stderr(std::process::Stdio::from(log_stderr))
-            .spawn()?;
-
-        // Warm return: 5s window captures startup output and fast failures.
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-
-        let log_content = std::fs::read_to_string(&log_path).unwrap_or_default();
-        let tail_50: String = {
-            let lines: Vec<&str> = log_content.lines().collect();
-            let start = lines.len().saturating_sub(50);
-            lines[start..].join("\n")
-        };
-
-        let ref_id = ctx.output_buffer.store_background(log_path);
-
-        let mut bg_result = serde_json::json!({
-            "output_id": ref_id,
-            "hint": format!(
-                "Process running. Output captured in {} — use run_command(\"tail -50 {}\") or grep/cat as needed.",
-                ref_id, ref_id
-            )
-        });
-        if !tail_50.is_empty() {
-            bg_result["stdout"] = json!(tail_50);
-        }
-        return Ok(bg_result);
+        return spawn_background_command(resolved_command, &work_dir, ctx).await;
     }
 
     // --- Step 4.5: Tee injection for terminal filter commands ---
     // When the last pipe stage is a known filter (grep, head, tail, sed, awk, etc.),
     // inject `tee /tmp/codescout-unfiltered-XXXX` before the filter so the caller
     // can surface the unfiltered stream as a buffer ref without re-running the command.
-
-    // RAII guard: deletes the named tmpfile when dropped, ensuring cleanup on all
-    // exit paths (success, error, and timeout arms of the match below).
-    struct TmpfileGuard(String);
-    impl Drop for TmpfileGuard {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_file(&self.0);
-        }
-    }
-
-    let (effective_command, unfiltered_tmpfile): (String, Option<TmpfileGuard>) = if !buffer_only {
-        if let Some(pipe_pos) = detect_terminal_filter(resolved_command) {
-            // Use tempfile::NamedTempFile for unpredictable path (SF-3).
-            // persist() converts it to a regular file we manage via TmpfileGuard.
-            let named = tempfile::Builder::new()
-                .prefix("codescout-unfiltered-")
-                .tempfile()?;
-            let tmppath = named.into_temp_path();
-            let tmpfile = tmppath.to_string_lossy().to_string();
-            // Keep the file on disk — TmpfileGuard handles cleanup.
-            tmppath.keep()?;
-            // Safety (SF-4): the path is generated by tempfile under $TMPDIR
-            // and contains only alphanumeric chars, hyphens, and dots — no
-            // shell metacharacters. We document this invariant rather than
-            // adding a shell-escape dependency.
-            if !tmpfile
-                .chars()
-                .all(|c| c.is_alphanumeric() || c == '/' || c == '-' || c == '_' || c == '.')
-            {
-                return Err(super::RecoverableError::new(format!(
-                    "temporary file path contains unexpected characters: {}",
-                    tmpfile,
-                ))
-                .into());
-            }
-            let cmd = format!(
-                "{} | tee {} | {}",
-                resolved_command[..pipe_pos].trim_end(),
-                tmpfile,
-                resolved_command[pipe_pos + 1..].trim_start()
-            );
-            (cmd, Some(TmpfileGuard(tmpfile)))
-        } else {
-            (resolved_command.to_string(), None)
-        }
-    } else {
-        (resolved_command.to_string(), None)
-    };
+    let (effective_command, unfiltered_tmpfile) = inject_tee(resolved_command, buffer_only)?;
 
     // --- Step 5: Execute command ---
     // On Unix we spawn into a new process group (process_group(0) → PGID = child PID)
@@ -3580,11 +3281,11 @@ async fn run_command_inner(
                     }
                 }
             }
-            let guard = PgidKillGuard(pgid_for_guard);
+            let mut guard = PgidKillGuard(pgid_for_guard);
             let result = child.wait_with_output().await;
-            // Successful completion: disarm the guard so we don't try to kill
-            // an already-reaped pgid (harmless but pointless).
-            std::mem::forget(guard);
+            // Successful completion: disarm the guard by clearing the pgid so
+            // the Drop impl sees None and skips the SIGKILL.
+            guard.0 = None;
             result
         });
         (fut, pgid)
@@ -3608,19 +3309,14 @@ async fn run_command_inner(
 
     // Heartbeat: send elapsed-seconds progress every 3s while the command runs.
     // AbortOnDrop guarantees the task is cancelled even when early `return`s fire.
-    struct AbortOnDrop(tokio::task::JoinHandle<()>);
-    impl Drop for AbortOnDrop {
-        fn drop(&mut self) {
-            self.0.abort();
-        }
-    }
     let progress_clone = ctx.progress.clone();
     let _heartbeat = AbortOnDrop(tokio::spawn(async move {
         let start = std::time::Instant::now();
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             if let Some(p) = &progress_clone {
-                p.report(start.elapsed().as_secs() as u32, None).await;
+                let elapsed = start.elapsed().as_secs();
+                p.report_text(&format!("{}s elapsed", elapsed)).await;
             }
         }
     }));
@@ -3632,232 +3328,16 @@ async fn run_command_inner(
     .await
     {
         Ok(Ok(output)) => {
-            let raw_stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-            let raw_stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-            let exit_code = output.status.code().unwrap_or(-1);
-
-            // Buffer-only queries (e.g. `grep @cmd_A`, `cat @cmd_B`) display output
-            // inline as JSON text. ANSI escape codes are opaque to LLMs and bloat byte
-            // counts, causing byte-budget exhaustion that silently drops all content
-            // (stdout_shown=0). Strip them here so line/byte caps operate on visible
-            // text only. Direct command output is not stripped — callers that want
-            // clean output can pipe through `sed 's/\x1b\[[0-9;]*m//g'`.
-            let raw_stdout = if buffer_only {
-                strip_ansi_codes(&raw_stdout)
-            } else {
-                raw_stdout
-            };
-            let raw_stderr = if buffer_only {
-                strip_ansi_codes(&raw_stderr)
-            } else {
-                raw_stderr
-            };
-
-            // --- Step 6.5: Read tee capture and store as unfiltered_output ref ---
-            let unfiltered_ref: Option<(String, bool)> =
-                if let Some(ref tmpfile) = unfiltered_tmpfile {
-                    let capture = std::fs::read_to_string(&tmpfile.0).ok();
-                    // tmpfile dropped at end of enclosing match arm — TmpfileGuard::drop() removes it
-                    // Skip empty captures: when the terminal filter (e.g. grep) matched nothing,
-                    // both raw_stdout and the tee file are empty — surfacing a handle to an empty
-                    // buffer is misleading and offers no value to the caller.
-                    capture.and_then(|content| {
-                        if content.is_empty() {
-                            return None;
-                        }
-                        let (stored, truncated) = if crate::tools::exceeds_inline_limit(&content) {
-                            let mut byte_budget = crate::tools::MAX_INLINE_TOKENS * 4;
-                            let capped: String = content
-                                .lines()
-                                .take_while(|line| {
-                                    if byte_budget == 0 {
-                                        return false;
-                                    }
-                                    byte_budget = byte_budget.saturating_sub(line.len() + 1);
-                                    true
-                                })
-                                .collect::<Vec<_>>()
-                                .join("\n");
-                            (capped, true)
-                        } else {
-                            (content, false)
-                        };
-                        let ref_id = ctx.output_buffer.store(
-                            original_command.to_string(),
-                            stored,
-                            String::new(), // unfiltered capture is stdout-only; stderr belongs to the main buffer
-                            exit_code,
-                        );
-                        Some((ref_id, truncated))
-                    })
-                } else {
-                    None
-                };
-
-            // --- Step 6: Decide whether to buffer + summarize ---
-            let mut result = if needs_summary(&raw_stdout, &raw_stderr) {
-                // When the command was querying a buffer ref (e.g. `sed @cmd_A`),
-                // creating a *new* buffer causes an infinite loop: the agent sees
-                // a fresh ref, queries it again, gets another ref, and so on.
-                // Break the cycle by returning an error that guides the agent
-                // toward a more targeted query instead.
-                if buffer_only {
-                    // Truncate to BUFFER_QUERY_INLINE_CAP lines total (stderr priority: up to 20,
-                    // remainder goes to stdout) and return inline. Do NOT create a new buffer
-                    // ref — that would cause an infinite query loop.
-                    const STDERR_BUDGET: usize = 20;
-                    // For buffer-only commands (e.g. `cat @cmd_A`), the shell command
-                    // produces empty stderr. Augment with the original buffer entry's
-                    // stored stderr so the agent gets the full picture on replay.
-                    let buffer_stderr: String = if raw_stderr.is_empty() {
-                        original_command
-                            .find("@cmd_")
-                            .or_else(|| original_command.find("@file_"))
-                            .and_then(|pos| {
-                                original_command[pos..]
-                                    .split_whitespace()
-                                    .next()
-                                    .and_then(|tok| ctx.output_buffer.get(tok))
-                            })
-                            .map(|e| e.stderr)
-                            .unwrap_or_default()
-                    } else {
-                        raw_stderr.clone()
-                    };
-                    let stderr_budget = STDERR_BUDGET.min(count_lines(&buffer_stderr));
-                    let stdout_budget = BUFFER_QUERY_INLINE_CAP - stderr_budget;
-
-                    // Compute stderr first so we know its byte size for the stdout budget.
-                    let (stderr_out, stderr_shown, stderr_total) =
-                        truncate_lines(&buffer_stderr, STDERR_BUDGET);
-
-                    // Byte budget: ensure the final JSON stays under TOOL_OUTPUT_BUFFER_THRESHOLD
-                    // so call_content() does not immediately re-buffer the result as @tool_*.
-                    // That re-buffering creates an infinite query loop:
-                    //   grep @cmd_A → inline JSON → >10KB → @tool_B → jq @tool_B → same → @tool_C…
-                    // Overhead ≈ 300 bytes for JSON keys, stderr content, and truncation fields.
-                    const JSON_OVERHEAD: usize = 300;
-                    let stdout_byte_budget = crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD
-                        .saturating_sub(JSON_OVERHEAD)
-                        .saturating_sub(stderr_out.len());
-
-                    let (stdout_out, stdout_shown, stdout_total) =
-                        truncate_lines_and_bytes(&raw_stdout, stdout_budget, stdout_byte_budget);
-
-                    let was_truncated = stdout_shown < stdout_total || stderr_shown < stderr_total;
-
-                    let mut result = json!({"exit_code": exit_code});
-                    if !stdout_out.is_empty() {
-                        result["stdout"] = json!(stdout_out);
-                    }
-                    if !stderr_out.is_empty() {
-                        result["stderr"] = json!(stderr_out);
-                    }
-                    if was_truncated {
-                        result["truncated"] = json!(true);
-                        result["stdout_shown"] = json!(stdout_shown);
-                        result["stdout_total"] = json!(stdout_total);
-                        if stderr_total > 0 {
-                            result["stderr_shown"] = json!(stderr_shown);
-                            result["stderr_total"] = json!(stderr_total);
-                        }
-                        let stderr_note = if stderr_total > 0 {
-                            format!(", stderr {stderr_shown}/{stderr_total}")
-                        } else {
-                            String::new()
-                        };
-                        let next_start = stdout_shown + 1;
-                        let next_end = stdout_shown + BUFFER_QUERY_INLINE_CAP;
-                        result["hint"] = json!(format!(
-                            "Output capped at {BUFFER_QUERY_INLINE_CAP} lines \
-                             (stdout {stdout_shown}/{stdout_total}{stderr_note}). \
-                             Next page: sed -n '{next_start},{next_end}p' @ref. \
-                             Or grep 'keyword' @ref for targeted search.",
-                        ));
-                    }
-                    // buffer_only => tee injection was skipped entirely (unfiltered_tmpfile is None),
-                    // so no unfiltered_output field injection is needed before this early return.
-                    return Ok(result);
-                }
-
-                let output_id = ctx.output_buffer.store(
-                    original_command.to_string(),
-                    raw_stdout.clone(),
-                    raw_stderr.clone(),
-                    exit_code,
-                );
-
-                let cmd_type = detect_command_type(original_command);
-                let cmd_summary = match cmd_type {
-                    CommandType::Test => summarize_test_output(&raw_stdout, &raw_stderr, exit_code),
-                    CommandType::Build => {
-                        summarize_build_output(&raw_stdout, &raw_stderr, exit_code)
-                    }
-                    CommandType::Generic => summarize_generic(&raw_stdout, &raw_stderr, exit_code),
-                };
-
-                // Rebuild with correct field order so output_id (the buffer reference
-                // the agent needs) appears before content fields (stdout/failures/first_error).
-                rebuild_buffered_summary(cmd_summary, &output_id)
-            } else {
-                // Short output — but for buffer-only queries, a single grep match
-                // inside a compact-JSON @tool_* ref can be thousands of bytes even
-                // with just 1 line.  That would push the result JSON over
-                // TOOL_OUTPUT_BUFFER_THRESHOLD and cause call_content to store it
-                // as a *new* @tool_* ref, creating an infinite query loop:
-                //   grep @tool_A → giant line → @tool_B → read_file @tool_B → @tool_C…
-                // Apply the same byte budget used in the needs_summary+buffer_only
-                // path so that never happens.
-                if buffer_only
-                    && raw_stdout.len() + raw_stderr.len()
-                        > crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD
-                            .saturating_sub(300 /* JSON overhead */)
-                {
-                    const JSON_OVERHEAD: usize = 300;
-                    let byte_budget = crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD
-                        .saturating_sub(JSON_OVERHEAD)
-                        .saturating_sub(raw_stderr.len());
-                    let (stdout_out, stdout_shown, stdout_total) =
-                        truncate_lines_and_bytes(&raw_stdout, BUFFER_QUERY_INLINE_CAP, byte_budget);
-                    let mut r = json!({"exit_code": exit_code});
-                    if !stdout_out.is_empty() {
-                        r["stdout"] = json!(stdout_out);
-                    }
-                    if !raw_stderr.is_empty() {
-                        r["stderr"] = json!(raw_stderr);
-                    }
-                    if stdout_shown < stdout_total {
-                        r["truncated"] = json!(true);
-                        r["hint"] = json!(
-                            "Match truncated: a single grep match inside a @tool_* ref \
-                             contains compact JSON (one very long line). \
-                             Use read_file(@tool_abc, json_path=\"$.field\") to extract \
-                             a specific field, or read_file(@tool_abc, start_line=N, \
-                             end_line=M) to browse sections of the pretty-printed result."
-                        );
-                    }
-                    r
-                } else {
-                    let mut r = json!({"exit_code": exit_code});
-                    if !raw_stdout.is_empty() {
-                        r["stdout"] = json!(raw_stdout);
-                    }
-                    if !raw_stderr.is_empty() {
-                        r["stderr"] = json!(raw_stderr);
-                    }
-                    r
-                }
-            };
-
-            // Attach unfiltered_output ref if we captured via tee
-            if let Some((ref ref_id, truncated)) = unfiltered_ref {
-                result["unfiltered_output"] = json!(ref_id);
-                if truncated {
-                    result["unfiltered_truncated"] = json!(true);
-                }
-            }
-
-            Ok(result)
+            handle_successful_output(
+                original_command,
+                String::from_utf8_lossy(&output.stdout).into_owned(),
+                String::from_utf8_lossy(&output.stderr).into_owned(),
+                output.status.code().unwrap_or(-1),
+                buffer_only,
+                unfiltered_tmpfile,
+                ctx,
+            )
+            .await
         }
         Ok(Err(e)) => {
             Err(super::RecoverableError::new(format!("command execution error: {}", e)).into())
@@ -4448,7 +3928,7 @@ mod tests {
         let result = Onboarding.call(json!({}), &ctx).await.unwrap();
         let msg = result["message"].as_str().unwrap();
         assert!(msg.contains("already performed"));
-        assert!(result["memories"].as_array().unwrap().len() > 0);
+        assert!(!result["memories"].as_array().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -4756,14 +4236,12 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
+        assert!(
             result["onboarded"].as_bool().unwrap_or(false),
-            true,
             "onboarded must be true"
         );
-        assert_eq!(
+        assert!(
             result["explicit_refresh"].as_bool().unwrap_or(false),
-            true,
             "explicit_refresh flag must be set"
         );
         assert!(
@@ -4904,6 +4382,52 @@ mod tests {
         assert!(
             hint.contains("run_in_background"),
             "timeout hint should mention run_in_background, got: {hint}"
+        );
+    }
+
+    // --- run_command progress test (T11) ---
+
+    use crate::tools::progress::test_support::CountingSink;
+    use std::sync::atomic::Ordering;
+
+    async fn project_ctx_with_progress(
+    ) -> (tempfile::TempDir, ToolContext, std::sync::Arc<CountingSink>) {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        std::fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let sink = std::sync::Arc::new(CountingSink::default());
+        let reporter = crate::tools::progress::ProgressReporter::with_sink(
+            sink.clone(),
+            rmcp::model::NumberOrString::Number(1),
+        );
+        let ctx = ToolContext {
+            agent,
+            lsp: lsp(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: Some(reporter),
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+        };
+        (dir, ctx, sink)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn run_command_heartbeat_emits_progress_text() {
+        // The heartbeat task fires report_text("Xs elapsed") every 3s.
+        // We use a 5s sleep with a 6s timeout so at least one heartbeat fires.
+        let (_dir, ctx, sink) = project_ctx_with_progress().await;
+        let _ = RunCommand
+            .call(json!({"command": "sleep 5", "timeout_secs": 6}), &ctx)
+            .await;
+        assert!(
+            sink.text_calls.load(Ordering::Relaxed) >= 1,
+            "expected at least 1 report_text() from run_command heartbeat"
         );
     }
 
@@ -6213,6 +5737,35 @@ mod tests {
         );
     }
 
+    #[test]
+    fn system_prompt_points_to_tool_guide_resource() {
+        let prompt = build_system_prompt_draft(&[], &[], None, None, &[]);
+        assert!(
+            prompt.contains("doc://codescout-tool-guide"),
+            "system prompt must point agents to the tool-guide resource"
+        );
+        assert_eq!(ONBOARDING_VERSION, 8);
+    }
+
+    #[test]
+    fn system_prompt_draft_read_markdown_hint_mentions_file_ref_reuse() {
+        let draft = build_system_prompt_draft(
+            &["rust".to_string()],
+            &["src/main.rs".to_string()],
+            None,
+            None,
+            &[],
+        );
+        assert!(
+            draft.contains("@file_ref") || draft.contains("@file_"),
+            "draft must teach @file_* reuse for read_markdown; got:\n{draft}"
+        );
+        assert!(
+            draft.contains("IRON LAW #6"),
+            "draft must cite IRON LAW #6 in the read_markdown guidance; got:\n{draft}"
+        );
+    }
+
     #[tokio::test]
     async fn onboarding_discovers_sub_projects() {
         let dir = tempdir().unwrap();
@@ -7104,7 +6657,7 @@ mod tests {
             .await
             .unwrap();
 
-        let ws_path = crate::config::workspace::workspace_config_path(&root);
+        let ws_path = crate::config::workspace::workspace_config_path(root);
         assert!(
             ws_path.exists(),
             "workspace.toml should be created for multi-project repos"
@@ -7146,7 +6699,7 @@ mod tests {
             .await
             .unwrap();
 
-        let ws_path = crate::config::workspace::workspace_config_path(&root);
+        let ws_path = crate::config::workspace::workspace_config_path(root);
         assert!(
             !ws_path.exists(),
             "workspace.toml should NOT be created for single-project repos"
@@ -7387,7 +6940,7 @@ mod tests {
             .exists());
 
         // workspace.toml created
-        assert!(crate::config::workspace::workspace_config_path(&root).exists());
+        assert!(crate::config::workspace::workspace_config_path(root).exists());
 
         // subagent_prompt contains workspace sections and system prompt draft
         let prompt = result["subagent_prompt"].as_str().unwrap();

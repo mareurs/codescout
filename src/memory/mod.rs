@@ -63,7 +63,7 @@ impl MemoryStore {
         }
         content.push_str(entry);
         content.push('\n');
-        std::fs::write(&gitignore_path, content)?;
+        crate::util::fs::atomic_write(&gitignore_path, &content)?;
         Ok(())
     }
 
@@ -73,7 +73,7 @@ impl MemoryStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(&path, content)?;
+        crate::util::fs::atomic_write(&path, content)?;
         Ok(())
     }
 

@@ -36,6 +36,41 @@ use crate::tools::{
 };
 use crate::usage::UsageRecorder;
 
+/// Tools whose successful execution mutates project state. See the design spec
+/// at docs/superpowers/specs/2026-04-17-cross-process-write-serialization-design.md.
+const WRITE_TOOLS: &[&str] = &[
+    "create_file",
+    "edit_file",
+    "edit_markdown",
+    "replace_symbol",
+    "insert_code",
+    "remove_symbol",
+    "rename_symbol",
+];
+// Note: `register_library` writes libraries.json but is intentionally excluded —
+// it is idempotent and write-lock overhead on registration is not warranted.
+// `onboarding` writes memory but is also excluded — it is infrequent and
+// memory writes are small; the `memory` tool's write actions cover the
+// common case.
+
+/// Memory actions that write to the memory store. `memory` with any other
+/// action (read, list, recall) is treated as a read and bypasses the lock.
+const MEMORY_WRITE_ACTIONS: &[&str] = &["write", "remember", "forget", "delete", "refresh_anchors"];
+
+/// Returns true if the tool call will mutate project state and therefore
+/// must acquire the write lock.
+fn is_write_call(tool_name: &str, input: &serde_json::Value) -> bool {
+    if WRITE_TOOLS.contains(&tool_name) {
+        return true;
+    }
+    if tool_name == "memory" {
+        if let Some(action) = input.get("action").and_then(|v| v.as_str()) {
+            return MEMORY_WRITE_ACTIONS.contains(&action);
+        }
+    }
+    false
+}
+
 #[derive(Clone)]
 pub struct CodeScoutServer {
     agent: Agent,
@@ -58,6 +93,10 @@ pub struct CodeScoutServer {
     /// memory dir. Held behind `RwLock<Arc<...>>` so list/read only need a read lock
     /// while replacement takes a write lock.
     resources: Arc<tokio::sync::RwLock<Arc<crate::mcp_resources::ResourceRegistry>>>,
+    /// How many times the path-disambiguation note ("paths are relative to …") has
+    /// been emitted this session. Capped at `PATH_NOTE_MAX` to avoid noise while
+    /// still surfacing the context early in a session.
+    path_note_count: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl CodeScoutServer {
@@ -114,7 +153,7 @@ impl CodeScoutServer {
             crate::tools::section_coverage::SectionCoverage::new(),
         ));
         let resources = Arc::new(tokio::sync::RwLock::new(Arc::new(
-            build_resource_registry(&agent, &tools).await,
+            build_resource_registry(&agent, Arc::clone(&lsp), &tools).await,
         )));
         Self {
             agent,
@@ -127,6 +166,7 @@ impl CodeScoutServer {
             debug,
             last_broadcast_caps: Arc::new(std::sync::Mutex::new(None)),
             resources,
+            path_note_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
     }
 
@@ -137,7 +177,7 @@ impl CodeScoutServer {
     /// Replace the resource registry after an `activate_project` call that may have
     /// changed the active memory directory.
     async fn refresh_resources(&self) {
-        let new_rr = build_resource_registry(&self.agent, &self.tools).await;
+        let new_rr = build_resource_registry(&self.agent, Arc::clone(&self.lsp), &self.tools).await;
         *self.resources.write().await = Arc::new(new_rr);
     }
 
@@ -268,6 +308,38 @@ impl CodeScoutServer {
         let recorder = UsageRecorder::new(self.agent.clone(), self.debug, self.session_id.clone());
         let input_for_record = input.clone();
 
+        // Acquire the write guard if this is a mutating call. Read calls skip
+        // the lock entirely. The guard is held for the full duration of the
+        // tool future; it drops when the future completes or is cancelled.
+        let write_guard = if is_write_call(&req.name, &input_for_record) {
+            let (mutex, fd_lock, timeout_secs) = self
+                .agent
+                .with_project(|p| {
+                    Ok((
+                        p.write_lock.clone(),
+                        p.file_lock.clone(),
+                        p.config.security.write_lock_timeout_secs,
+                    ))
+                })
+                .await
+                .map_err(|e| McpError::internal_error(format!("write gate: {}", e), None))?;
+            match crate::agent::acquire_write_guard(
+                mutex,
+                fd_lock,
+                std::time::Duration::from_secs(timeout_secs),
+            )
+            .await
+            {
+                Ok(g) => Some(g),
+                Err(rec_err) => {
+                    // Route to isError: false so sibling calls survive.
+                    return Ok(route_tool_error(rec_err.into()));
+                }
+            }
+        } else {
+            None
+        };
+
         // Race the tool call against (a) the server-level timeout and (b) the
         // per-request cancellation token. Cancellation is the load-bearing arm:
         // when the user presses Escape, rmcp cancels `cancel_token`, the select!
@@ -282,7 +354,16 @@ impl CodeScoutServer {
             tokio::select! {
                 biased;
                 _ = cancel_token.cancelled() => {
-                    Err(anyhow::anyhow!("request cancelled by client"))
+                    // Suppress response after cancel: Claude Code closes the MCP
+                    // stdio connection if it receives ANY response for a cancelled
+                    // request (confirmed 2026-04-16 by pending() experiment — see
+                    // docs/issues/2026-04-16-mcp-cancel-disconnect.md).
+                    //
+                    // We park the task here permanently instead. tool_call_fut was
+                    // dropped by select!, so the shell child is already reaped via
+                    // kill_on_drop + PgidKillGuard. Only this task's stack persists
+                    // until rmcp drops it when the connection closes.
+                    std::future::pending::<Result<Vec<Content>, anyhow::Error>>().await
                 }
                 res = tokio::time::timeout(
                     std::time::Duration::from_secs(secs),
@@ -300,7 +381,16 @@ impl CodeScoutServer {
             tokio::select! {
                 biased;
                 _ = cancel_token.cancelled() => {
-                    Err(anyhow::anyhow!("request cancelled by client"))
+                    // Suppress response after cancel: Claude Code closes the MCP
+                    // stdio connection if it receives ANY response for a cancelled
+                    // request (confirmed 2026-04-16 by pending() experiment — see
+                    // docs/issues/2026-04-16-mcp-cancel-disconnect.md).
+                    //
+                    // We park the task here permanently instead. tool_call_fut was
+                    // dropped by select!, so the shell child is already reaped via
+                    // kill_on_drop + PgidKillGuard. Only this task's stack persists
+                    // until rmcp drops it when the connection closes.
+                    std::future::pending::<Result<Vec<Content>, anyhow::Error>>().await
                 }
                 res = tool_call_fut => res,
             }
@@ -336,7 +426,28 @@ impl CodeScoutServer {
             .map(|p| format!("{}/", p.display()))
             .unwrap_or_default();
 
-        Ok(strip_project_root_from_result(call_result, &root_prefix))
+        let (mut call_result, stripped) = strip_project_root_from_result(call_result, &root_prefix);
+
+        // "Low hint": for tools that echo raw content (file contents, shell output),
+        // append a one-liner so agents can distinguish stripped absolute paths from
+        // genuine relative path values in file content. Capped at PATH_NOTE_MAX per
+        // session — after that the agent has seen it enough times to remember.
+        const PATH_NOTE_MAX: usize = 3;
+        const PATH_NOTE_TOOLS: &[&str] = &["read_file", "run_command"];
+        if stripped && PATH_NOTE_TOOLS.contains(&req.name.as_ref()) {
+            let prev = self
+                .path_note_count
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if prev < PATH_NOTE_MAX {
+                let root = root_prefix.trim_end_matches('/');
+                call_result.content.push(Content::text(format!(
+                    "[codescout] paths are relative to {root}"
+                )));
+            }
+        }
+
+        drop(write_guard);
+        Ok(call_result)
     }
 }
 
@@ -442,13 +553,19 @@ impl ServerHandler for CodeScoutServer {
         req: CallToolRequestParams,
         req_ctx: RequestContext<RoleServer>,
     ) -> std::result::Result<CallToolResult, McpError> {
-        let is_activate = req.name == "activate_project";
+        let is_activate = req.name == crate::tools::config::ActivateProject::NAME;
         let progress = Some(progress::ProgressReporter::new(
             req_ctx.peer.clone(),
             req_ctx.id.clone(),
         ));
         let peer = Some(req_ctx.peer.clone());
-        let result = self.call_tool_inner(req, progress, peer).await?;
+        // `req_ctx.ct` is rmcp's per-request CancellationToken. It is cancelled
+        // when the client sends a CancelledNotification (Escape in Claude Code).
+        // Hand it to call_tool_inner so the tool future can be aborted instead
+        // of running to completion and triggering a connection close.
+        let result = self
+            .call_tool_inner(req, progress, peer, req_ctx.ct.clone())
+            .await?;
 
         // After a successful activate_project, check whether the capability set has
         // changed. If it has, emit notifications/tools/list_changed so the client
@@ -488,6 +605,7 @@ impl ServerHandler for CodeScoutServer {
 /// `refresh_resources` call simply re-registers with the same tool slice.
 async fn build_resource_registry(
     agent: &Agent,
+    lsp: Arc<dyn LspProvider>,
     tools: &[Arc<dyn Tool>],
 ) -> crate::mcp_resources::ResourceRegistry {
     use crate::mcp_resources::{
@@ -495,6 +613,7 @@ async fn build_resource_registry(
         memory::MemoryProvider,
         project_summary::{AgentSummarySource, ProjectSummaryProvider},
         tool_guide::ToolGuideProvider,
+        tool_usage::{AgentUsageSource, ToolUsageProvider},
         ResourceRegistry,
     };
 
@@ -530,11 +649,18 @@ async fn build_resource_registry(
 
     // Project summary — always registered; falls back gracefully when no project is active.
     let _ = rr.try_register(Box::new(ProjectSummaryProvider::new(
-        AgentSummarySource::new(agent.clone()),
+        AgentSummarySource::new(agent.clone(), lsp),
     )));
 
     // Tool guide — always registered; renders long_docs() for each registered tool.
     let _ = rr.try_register(Box::new(ToolGuideProvider::new(tools.to_vec())));
+
+    // Tool usage doctor — reports per-tool call counts and prune candidates.
+    // Always registered; returns empty snapshot when usage.db is absent.
+    let _ = rr.try_register(Box::new(ToolUsageProvider::new(AgentUsageSource::new(
+        agent.clone(),
+        tools.to_vec(),
+    ))));
 
     rr
 }
@@ -555,7 +681,7 @@ fn route_tool_error(e: anyhow::Error) -> CallToolResult {
             body[g.field_name()] = serde_json::json!(g.text());
         }
         if let Some(obj) = body.as_object_mut() {
-            for (k, v) in &rec.extra {
+            for (k, v) in rec.extra.iter() {
                 obj.insert(k.clone(), v.clone());
             }
         }
@@ -745,6 +871,7 @@ pub async fn run(
             }
             tracing::info!("codescout MCP server ready (stdio)");
             let server = CodeScoutServer::from_parts(agent, lsp.clone(), debug).await;
+
             let (stdin, stdout) = rmcp::transport::stdio();
             let service = server
                 .serve((ResilientStdin::new(stdin), stdout))
@@ -910,14 +1037,9 @@ pub async fn run(
 /// `root_prefix` must end with `/`. Pass an empty string when no project is
 /// active; the replace becomes a no-op.
 ///
-/// **Disambiguation note**: when stripping fires, a trailing content block is
-/// appended:
-///   `[codescout] paths are relative to /abs/project/root`
-/// This prevents LLMs from misreading stripped paths in file *content* (e.g.
-/// a `"statusLine"` value in `settings.json`) as evidence that the file stores
-/// a relative path. The note only appears when stripping actually changes
-/// something — navigation tools whose output never contained absolute paths
-/// get no note.
+/// Returns `(result, stripped)` where `stripped` is true when at least one
+/// content block was modified. The caller decides whether to append a
+/// disambiguation note (see `PATH_NOTE_MAX` / `PATH_NOTE_TOOLS`).
 ///
 /// **Stripping heuristic**: only occurrences preceded by a non-path character
 /// (e.g. `"`, ` `, `:`, `\n`) or at the very start of the text are replaced.
@@ -927,15 +1049,17 @@ pub async fn run(
 /// Note: values like `"project_root": "/abs/path"` in `activate_project` /
 /// `get_config` responses are intentionally not stripped — they use a bare
 /// absolute path without a trailing slash, so they do not match `root_prefix`
-/// and pass through unchanged. Agents that need to call `activate_project`
-/// again can still use those values as-is.
+/// and pass through unchanged.
 ///
 /// Buffer content (`@tool_xxx` refs) is covered automatically: it only
 /// re-enters the pipeline through `run_command`, which also passes through
 /// `call_tool` and gets stripped there.
-fn strip_project_root_from_result(mut result: CallToolResult, root_prefix: &str) -> CallToolResult {
+fn strip_project_root_from_result(
+    mut result: CallToolResult,
+    root_prefix: &str,
+) -> (CallToolResult, bool) {
     if root_prefix.is_empty() {
-        return result;
+        return (result, false);
     }
     debug_assert!(
         root_prefix.ends_with('/'),
@@ -951,18 +1075,7 @@ fn strip_project_root_from_result(mut result: CallToolResult, root_prefix: &str)
             }
         }
     }
-    // Append a one-liner so agents can distinguish stripped absolute paths
-    // (which appear as bare relative paths) from genuine relative path values
-    // stored in file content. Without this note, an LLM reading a config file
-    // that stores an absolute path as a string value would see a relative path
-    // and incorrectly conclude the file needs to be "fixed".
-    if stripped {
-        let root = root_prefix.trim_end_matches('/');
-        result.content.push(Content::text(format!(
-            "[codescout] paths are relative to {root}"
-        )));
-    }
-    result
+    (result, stripped)
 }
 
 /// Replace occurrences of `prefix` in `text` only when they appear in a
@@ -1271,15 +1384,13 @@ mod tests {
 
     #[test]
     fn recoverable_error_body_splices_extra_fields_at_top_level() {
-        let err_struct = crate::tools::RecoverableError::with_must_follow(
-            "heading too large",
-            "IRON LAW #6",
-        )
-        .with_extra("file_id", serde_json::json!("@file_abc"))
-        .with_extra(
-            "section_map",
-            serde_json::json!([{"level": 2, "text": "## X", "line": 10}]),
-        );
+        let err_struct =
+            crate::tools::RecoverableError::with_must_follow("heading too large", "IRON LAW #6")
+                .with_extra("file_id", serde_json::json!("@file_abc"))
+                .with_extra(
+                    "section_map",
+                    serde_json::json!([{"level": 2, "text": "## X", "line": 10}]),
+                );
         let err: anyhow::Error = err_struct.into();
         let result = route_tool_error(err);
         let text = &result.content[0].as_text().unwrap().text;
@@ -1383,15 +1494,18 @@ mod tests {
     #[tokio::test]
     async fn call_tool_cancellation_kills_long_running_run_command() {
         // Regression for the "codescout disconnects after Escape on long
-        // run_command" bug: when the per-request CancellationToken fires (rmcp
-        // received CancelledNotification), the tool future must drop and the
-        // spawned shell child must be reaped — instead of running to completion
-        // and triggering Claude Code to close the MCP connection.
+        // run_command" bug.
         //
-        // The test runs `sleep 5 && touch <marker>` with timeout_secs=30,
-        // cancels after 200ms, asserts the call returns within ~1s, and
-        // verifies the marker file is *never* created (proving the sleep was
-        // killed before reaching `touch`).
+        // When the per-request CancellationToken fires, the tool future is
+        // dropped (killing the child via kill_on_drop + PgidKillGuard) and
+        // call_tool_inner parks on pending() — no response is ever sent.
+        // Sending a response for a cancelled request causes Claude Code to
+        // close the MCP stdio connection (confirmed 2026-04-16).
+        //
+        // This test verifies the child-reaping half: run `sleep 5 && touch
+        // <marker>` with timeout_secs=30, cancel after 200ms, confirm the
+        // marker is never created (sleep was killed before reaching touch).
+        // We abort the task after checking since it parks permanently.
         let (dir, server) = make_server().await;
         let marker = dir.path().join("cancel-test-marker");
         let marker_str = marker.to_string_lossy().to_string();
@@ -1415,33 +1529,16 @@ mod tests {
 
         // Let the shell child actually start before cancelling.
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        let cancel_at = std::time::Instant::now();
         ct.cancel();
 
-        let result = tokio::time::timeout(std::time::Duration::from_secs(2), handle)
-            .await
-            .expect("call_tool_inner must return within 2s of cancel — it kept running")
-            .expect("spawned task panicked");
+        // Give kill_on_drop + PgidKillGuard time to reap the child, then
+        // abort the handler task (it parks on pending() by design — no
+        // response is sent for cancelled requests).
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        handle.abort();
 
-        let elapsed = cancel_at.elapsed();
-        assert!(
-            elapsed < std::time::Duration::from_millis(1000),
-            "expected return within 1s of cancel, took {elapsed:?}"
-        );
-
-        let r = result.unwrap();
-        let body = r
-            .content
-            .iter()
-            .find_map(|c| c.as_text().map(|t| t.text.as_str()))
-            .unwrap_or("");
-        assert!(
-            body.contains("cancelled") || r.is_error == Some(true),
-            "expected cancellation indication in result, got: {body}"
-        );
-
-        // Wait past the original sleep duration — if the child wasn't killed,
-        // the marker file would now exist.
+        // Wait past the original sleep window. If the child survived the
+        // cancel, touch would have run and the marker would exist by now.
         tokio::time::sleep(std::time::Duration::from_secs(6)).await;
         assert!(
             !marker.exists(),
@@ -1455,25 +1552,19 @@ mod tests {
         let result = CallToolResult::success(vec![Content::text(
             r#"{"file":"/home/user/myproject/src/foo.rs","line":1}"#,
         )]);
-        let stripped = strip_project_root_from_result(result, prefix);
-        // First block: prefix replaced
+        let (stripped, did_strip) = strip_project_root_from_result(result, prefix);
+        assert!(did_strip, "should report that stripping occurred");
         assert_eq!(extract_text(&stripped), r#"{"file":"src/foo.rs","line":1}"#);
-        // Trailing block: disambiguation note with the absolute root
-        assert_eq!(stripped.content.len(), 2);
-        let note = stripped.content[1]
-            .as_text()
-            .map(|t| t.text.as_str())
-            .unwrap_or("");
-        assert!(
-            note.contains("/home/user/myproject"),
-            "note should carry the absolute root, got: {note}"
-        );
+        // Note is NOT appended by this function — call_tool_inner does that
+        // with the session-capped logic. Verify only 1 content block here.
+        assert_eq!(stripped.content.len(), 1);
     }
 
     #[test]
     fn strip_project_root_no_op_when_prefix_empty() {
         let result = CallToolResult::success(vec![Content::text("some output")]);
-        let stripped = strip_project_root_from_result(result, "");
+        let (stripped, did_strip) = strip_project_root_from_result(result, "");
+        assert!(!did_strip);
         assert_eq!(extract_text(&stripped), "some output");
     }
 
@@ -1481,14 +1572,10 @@ mod tests {
     fn strip_project_root_no_op_when_prefix_absent() {
         let prefix = "/home/user/myproject/";
         let result = CallToolResult::success(vec![Content::text("no paths here")]);
-        let stripped = strip_project_root_from_result(result, prefix);
-        // Content unchanged, and no disambiguation note appended since nothing was stripped
+        let (stripped, did_strip) = strip_project_root_from_result(result, prefix);
+        assert!(!did_strip);
         assert_eq!(extract_text(&stripped), "no paths here");
-        assert_eq!(
-            stripped.content.len(),
-            1,
-            "no note should be added when nothing was stripped"
-        );
+        assert_eq!(stripped.content.len(), 1);
     }
 
     #[test]
@@ -1713,6 +1800,36 @@ mod tests {
             .iter()
             .find_map(|c| c.as_text().map(|t| t.text.clone()))
             .unwrap_or_default()
+    }
+
+    #[test]
+    fn is_write_call_classifies_plain_writes() {
+        use serde_json::json;
+        assert!(is_write_call("edit_file", &json!({})));
+        assert!(is_write_call("create_file", &json!({})));
+        assert!(is_write_call("replace_symbol", &json!({})));
+        assert!(is_write_call("insert_code", &json!({})));
+        assert!(is_write_call("remove_symbol", &json!({})));
+        assert!(is_write_call("rename_symbol", &json!({})));
+        assert!(!is_write_call("read_file", &json!({})));
+        assert!(!is_write_call("find_symbol", &json!({})));
+    }
+
+    #[test]
+    fn is_write_call_memory_depends_on_action() {
+        use serde_json::json;
+        assert!(is_write_call("memory", &json!({"action": "write"})));
+        assert!(is_write_call("memory", &json!({"action": "remember"})));
+        assert!(is_write_call("memory", &json!({"action": "forget"})));
+        assert!(is_write_call("memory", &json!({"action": "delete"})));
+        assert!(is_write_call(
+            "memory",
+            &json!({"action": "refresh_anchors"})
+        ));
+        assert!(!is_write_call("memory", &json!({"action": "read"})));
+        assert!(!is_write_call("memory", &json!({"action": "list"})));
+        assert!(!is_write_call("memory", &json!({"action": "recall"})));
+        assert!(!is_write_call("memory", &json!({})));
     }
 }
 

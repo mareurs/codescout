@@ -1,4 +1,4 @@
-pub mod modes;
+pub mod global;
 pub mod project;
 pub mod workspace;
 

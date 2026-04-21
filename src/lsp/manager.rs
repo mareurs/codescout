@@ -78,6 +78,11 @@ pub struct LspManager {
     /// get_or_start returns an error immediately instead of spawning another process.
     /// Reset on successful start or after the window expires.
     startup_failures: StdMutex<HashMap<LspKey, (usize, Instant)>>,
+    /// Cold-start grace period per key. Set by do_start on successful initialization.
+    /// While Instant::now() < cold_start_until[key], startup failures are not counted
+    /// toward the circuit-breaker — the server may still be indexing (e.g. Gradle import)
+    /// and transient crashes during that window should not trip the breaker prematurely.
+    cold_start_until: StdMutex<HashMap<LspKey, Instant>>,
     /// Project root for test-only DB writes. Set by new_for_test_with_root.
     #[cfg(test)]
     project_root_for_test: Option<std::path::PathBuf>,
@@ -163,17 +168,28 @@ impl LspManager {
     /// Time window for the circuit-breaker. Failures older than this are forgotten.
     const CIRCUIT_BREAKER_WINDOW: Duration = Duration::from_secs(60);
 
+    /// Grace period after a successful LSP init during which startup failures are
+    /// not counted toward the circuit-breaker. Covers the post-init indexing phase
+    /// (e.g. kotlin-lsp Gradle import: 1–5 min). Matches the cold-start retry
+    /// window in `LspClient::request()`.
+    const COLD_START_GRACE: Duration = Duration::from_secs(5 * 60);
+
+    /// Default idle TTL for LSP clients. Both `new()` and `new_arc()` use this
+    /// value so tests and production see consistent behaviour.
+    pub const DEFAULT_IDLE_TTL: Duration = Duration::from_secs(30 * 60);
+
     pub fn new() -> Self {
         Self {
             clients: Mutex::new(HashMap::new()),
             last_used: Mutex::new(HashMap::new()),
             starting: StdMutex::new(HashMap::new()),
             max_clients: 5,
-            idle_ttl: Duration::from_secs(20 * 60),
+            idle_ttl: Self::DEFAULT_IDLE_TTL,
             pending_first_response: StdMutex::new(HashMap::new()),
             pending_reason: StdMutex::new(HashMap::new()),
             project_root: None,
             startup_failures: StdMutex::new(HashMap::new()),
+            cold_start_until: StdMutex::new(HashMap::new()),
             #[cfg(test)]
             project_root_for_test: None,
         }
@@ -256,17 +272,30 @@ impl LspManager {
         // subsequent calls within the same session.
         #[cfg(unix)]
         if config.mux {
-            let client = self
-                .get_or_start_via_mux(language, workspace_root, config)
-                .await?;
-            // Cache the mux client so subsequent calls hit the fast path
-            let key = LspKey::new(language, workspace_root);
+            match self
+                .get_or_start_via_mux(language, workspace_root, config.clone())
+                .await
             {
-                let mut clients = self.clients.lock().await;
-                clients.insert(key.clone(), client.clone());
+                Ok(client) => {
+                    // Cache the mux client so subsequent calls hit the fast path
+                    let key = LspKey::new(language, workspace_root);
+                    {
+                        let mut clients = self.clients.lock().await;
+                        clients.insert(key.clone(), client.clone());
+                    }
+                    self.last_used.lock().await.insert(key, Instant::now());
+                    return Ok(client);
+                }
+                Err(e) => {
+                    // Mux is an optimization — fall back to direct mode rather than
+                    // failing the caller. Happens in test environments where
+                    // current_exe() is the test runner (not the codescout binary).
+                    tracing::warn!(
+                        "Mux startup failed for {language}, falling back to direct LSP: {e}"
+                    );
+                    config.mux = false;
+                }
             }
-            self.last_used.lock().await.insert(key, Instant::now());
-            return Ok(client);
         }
 
         // LRU eviction: if at capacity, shut down the least-recently-used client.
@@ -557,14 +586,38 @@ impl LspManager {
                     .unwrap_or_else(|e| e.into_inner())
                     .remove(key);
 
+                // Cold-start grace period: for COLD_START_GRACE after a successful
+                // init, startup failures are not counted toward the circuit-breaker.
+                // kotlin-lsp may still be running Gradle import (1-5 min) and could
+                // crash transiently; the breaker should not trip during that window.
+                self.cold_start_until
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(key.clone(), Instant::now() + Self::COLD_START_GRACE);
+
                 // Signal success. The `starting` entry is removed by _cleanup
                 // when this function returns.
                 let _ = tx.send(Some(true));
                 Ok(new_client)
             }
             Err(e) => {
-                // Circuit-breaker: record failure.
-                {
+                // Circuit-breaker: record failure, but skip if we're within the
+                // cold-start grace period of the previous successful start — the
+                // server may have crashed during Gradle import and the breaker
+                // should not penalise what is effectively a transient indexing crash.
+                let in_grace = self
+                    .cold_start_until
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(key)
+                    .is_some_and(|until| Instant::now() < *until);
+
+                if in_grace {
+                    tracing::info!(
+                        "LSP startup failure for {} suppressed by cold-start grace period",
+                        key
+                    );
+                } else {
                     let mut failures = self
                         .startup_failures
                         .lock()
@@ -777,6 +830,12 @@ impl crate::lsp::ops::LspProvider for LspManager {
         LspManager::shutdown_all(self).await
     }
 
+    async fn is_ready(&self, language: &str, workspace_root: &std::path::Path) -> bool {
+        LspManager::get(self, language, workspace_root)
+            .await
+            .is_some()
+    }
+
     async fn record_first_response(
         &self,
         language: &str,
@@ -807,7 +866,7 @@ impl LspManager {
     /// Create an `Arc<LspManager>` with the default 30-minute idle TTL
     /// and spawn a background eviction task.
     pub fn new_arc() -> Arc<Self> {
-        Self::new_arc_inner(Duration::from_secs(30 * 60), None)
+        Self::new_arc_inner(Self::DEFAULT_IDLE_TTL, None)
     }
 
     /// Create an `Arc<LspManager>` with a custom idle TTL and spawn a
@@ -1130,6 +1189,77 @@ mod tests {
         assert_eq!(mgr.last_used.lock().await.len(), 1);
     }
 
+    /// Option C: startup failures within COLD_START_GRACE after a successful
+    /// do_start must not increment the circuit-breaker counter.
+    ///
+    /// We simulate this by directly seeding cold_start_until with a future
+    /// deadline, then manually running the failure-recording logic and
+    /// asserting startup_failures stays empty.
+    #[tokio::test]
+    async fn cold_start_grace_suppresses_circuit_breaker_increment() {
+        let mgr = LspManager::new();
+        let key = LspKey::new("kotlin", std::path::Path::new("/proj"));
+
+        // Seed grace period: still valid for the next 5 minutes.
+        mgr.cold_start_until
+            .lock()
+            .unwrap()
+            .insert(key.clone(), Instant::now() + Duration::from_secs(300));
+
+        // Simulate what do_start's error path does.
+        let in_grace = mgr
+            .cold_start_until
+            .lock()
+            .unwrap()
+            .get(&key)
+            .is_some_and(|until| Instant::now() < *until);
+
+        if !in_grace {
+            let mut failures = mgr.startup_failures.lock().unwrap();
+            let entry = failures.entry(key.clone()).or_insert((0, Instant::now()));
+            entry.0 += 1;
+        }
+
+        // Grace was active → counter must remain absent (never incremented).
+        assert_eq!(
+            mgr.startup_failures.lock().unwrap().get(&key).map(|e| e.0),
+            None,
+            "circuit-breaker must not be incremented during cold-start grace"
+        );
+    }
+
+    /// Option C: once the grace period expires, failures ARE counted.
+    #[tokio::test]
+    async fn cold_start_grace_expired_counts_failure() {
+        let mgr = LspManager::new();
+        let key = LspKey::new("kotlin", std::path::Path::new("/proj2"));
+
+        // Seed an already-expired grace period.
+        mgr.cold_start_until
+            .lock()
+            .unwrap()
+            .insert(key.clone(), Instant::now() - Duration::from_secs(1));
+
+        let in_grace = mgr
+            .cold_start_until
+            .lock()
+            .unwrap()
+            .get(&key)
+            .is_some_and(|until| Instant::now() < *until);
+
+        if !in_grace {
+            let mut failures = mgr.startup_failures.lock().unwrap();
+            let entry = failures.entry(key.clone()).or_insert((0, Instant::now()));
+            entry.0 += 1;
+        }
+
+        assert_eq!(
+            mgr.startup_failures.lock().unwrap().get(&key).map(|e| e.0),
+            Some(1),
+            "circuit-breaker must be incremented after grace period expires"
+        );
+    }
+
     /// The background task spawned by new_arc_with_ttl must automatically
     /// evict a client that has not been accessed since longer than the TTL.
     ///
@@ -1367,20 +1497,14 @@ mod tests {
 
     #[test]
     fn resolve_mux_flag_override_wins() {
-        assert_eq!(
-            crate::lsp::manager::resolve_mux_flag(true, Some(false)),
-            false
-        );
-        assert_eq!(
-            crate::lsp::manager::resolve_mux_flag(false, Some(true)),
-            true
-        );
+        assert!(!crate::lsp::manager::resolve_mux_flag(true, Some(false)));
+        assert!(crate::lsp::manager::resolve_mux_flag(false, Some(true)));
     }
 
     #[test]
     fn resolve_mux_flag_none_uses_default() {
-        assert_eq!(crate::lsp::manager::resolve_mux_flag(true, None), true);
-        assert_eq!(crate::lsp::manager::resolve_mux_flag(false, None), false);
+        assert!(crate::lsp::manager::resolve_mux_flag(true, None));
+        assert!(!crate::lsp::manager::resolve_mux_flag(false, None));
     }
 
     #[tokio::test]

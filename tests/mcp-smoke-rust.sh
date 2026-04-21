@@ -367,6 +367,22 @@ test_explore_error_routing
 test_explore_tool_architecture
 test_explore_directory_then_drilldown
 
+# ── Category 5: Write Lock Gate ─────────────────────────────────────────────
+
+echo ""
+echo "=== Write Lock Gate ==="
+
+test_write_lock_gate_accepts_single_write() {
+    call edit_file '{"path": "README.md", "old_string": "nonexistent_sentinel_XYZ", "new_string": "nonexistent_sentinel_XYZ"}'
+    if assert_contains "error"; then
+        pass 1 "edit_file returns an error for unmatched old_string (lock gate did not block path)"
+    else
+        fail 1 "edit_file with bad old_string" "expected an error response"
+    fi
+}
+
+test_write_lock_gate_accepts_single_write
+
 # ── Report ───────────────────────────────────────────────────────────────────
 
 echo ""

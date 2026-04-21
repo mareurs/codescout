@@ -20,7 +20,7 @@ pub async fn serve(
     let addr: std::net::SocketAddr = format!("{}:{}", host, port).parse()?;
     tracing::info!("Dashboard server starting at http://{}", addr);
 
-    let router = routes::build_router(&project_root)?;
+    let router = routes::build_router(&project_root, port)?;
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let actual_addr = listener.local_addr()?;

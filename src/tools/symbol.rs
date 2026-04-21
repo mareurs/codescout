@@ -494,9 +494,7 @@ fn validate_symbol_position(sym: &SymbolInfo, lines: &[&str]) -> anyhow::Result<
     // Lead-in: scan a small window below for the name. Six lines covers the
     // typical `})\n}\n\nfn …` chain plus a comment or blank line of slack.
     let check_end = (sl + 6).min(lines.len());
-    let found = lines[sl..check_end]
-        .iter()
-        .any(|l| l.contains(&*sym.name));
+    let found = lines[sl..check_end].iter().any(|l| l.contains(&*sym.name));
     if !found {
         return Err(RecoverableError::with_hint(
             format!(
@@ -554,6 +552,59 @@ fn find_ast_end_line_in(symbols: &[SymbolInfo], name: &str, lsp_start: u32) -> O
         }
     }
     None
+}
+
+/// Fetch a symbol by `name_path` with automatic retry on stale LSP positions.
+///
+/// BUG-041: `textDocument/didChange` is a fire-and-forget notification. After
+/// a large write, rust-analyzer (and peers) can take tens of milliseconds to
+/// reindex. The next `documentSymbol` query may return pre-write positions,
+/// and a write based on those offsets corrupts the file.
+///
+/// Strategy: fetch, validate, and retry on failure. Between attempts, fire a
+/// fresh `did_change` (flushes any pending state) and sleep briefly so the
+/// server has a chance to catch up. Caps at `MAX_RETRIES` attempts.
+///
+/// Returns the validated `SymbolInfo` and the full `document_symbols` list it
+/// came from (the caller needs the list for sibling/parent lookups).
+async fn fetch_validated_symbol(
+    client: &std::sync::Arc<dyn crate::lsp::LspClientOps>,
+    path: &std::path::Path,
+    lang: &str,
+    name_path: &str,
+) -> anyhow::Result<(SymbolInfo, Vec<SymbolInfo>)> {
+    const MAX_RETRIES: u32 = 3;
+    let mut last_err: Option<anyhow::Error> = None;
+
+    for attempt in 0..MAX_RETRIES {
+        let attempt_result = async {
+            let symbols = client.document_symbols(path, lang).await?;
+            let sym = find_unique_symbol_by_name_path(&symbols, name_path)?.clone();
+            validate_symbol_range(&sym)?;
+            let content = std::fs::read_to_string(path)?;
+            let lines: Vec<&str> = content.lines().collect();
+            validate_symbol_position(&sym, &lines)?;
+            anyhow::Ok((sym, symbols))
+        }
+        .await;
+
+        match attempt_result {
+            Ok(pair) => return Ok(pair),
+            Err(e) => {
+                last_err = Some(e);
+                if attempt < MAX_RETRIES - 1 {
+                    // Flush any pending state on the server, then wait briefly
+                    // before retrying. Backoff grows so the last attempt has
+                    // the longest window (useful on cold LSPs).
+                    let _ = client.did_change(path).await;
+                    let backoff_ms = 50u64 * (attempt as u64 + 1);
+                    tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                }
+            }
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("fetch_validated_symbol: no error recorded")))
 }
 
 /// Recursively count how many symbols in `symbols` (walking `children` subtrees)
@@ -2405,15 +2456,11 @@ impl Tool for ReplaceSymbol {
         guard_not_markdown(&full_path)?;
         let (client, lang) = get_lsp_client(ctx, &full_path).await?;
 
-        let symbols = client.document_symbols(&full_path, &lang).await?;
-        let sym = find_unique_symbol_by_name_path(&symbols, name_path)?;
-
-        // Validate: catch degenerate LSP ranges (start == end for multi-line symbols)
-        validate_symbol_range(sym)?;
+        // BUG-041: fetch + validate with auto-retry on stale LSP positions.
+        let (sym, symbols) = fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
 
         let content = std::fs::read_to_string(&full_path)?;
         let lines: Vec<&str> = content.lines().collect();
-        validate_symbol_position(sym, &lines)?;
 
         let start0 = editing_start_line(&sym, &lines);
         let end0 = (editing_end_line(&sym) as usize + 1).min(lines.len());
@@ -2570,15 +2617,11 @@ impl Tool for RemoveSymbol {
         guard_not_markdown(&full_path)?;
         let (client, lang) = get_lsp_client(ctx, &full_path).await?;
 
-        let symbols = client.document_symbols(&full_path, &lang).await?;
-        let sym = find_unique_symbol_by_name_path(&symbols, name_path)?;
-
-        // Validate: catch degenerate LSP ranges
-        validate_symbol_range(sym)?;
+        // BUG-041: fetch + validate with auto-retry on stale LSP positions.
+        let (sym, symbols) = fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
 
         let content = std::fs::read_to_string(&full_path)?;
         let lines: Vec<&str> = content.lines().collect();
-        validate_symbol_position(sym, &lines)?;
 
         let start0 = editing_start_line(&sym, &lines);
         let end0 = (editing_end_line(&sym) as usize + 1).min(lines.len());
@@ -2667,10 +2710,8 @@ impl Tool for InsertCode {
         // BUG-041: fetch + validate with auto-retry on stale LSP positions.
         let (sym, symbols) = fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
 
-        validate_symbol_range(sym)?;
         let content = std::fs::read_to_string(&full_path)?;
         let lines: Vec<&str> = content.lines().collect();
-        validate_symbol_position(sym, &lines)?;
         let code_lines: Vec<&str> = code.lines().collect();
         let insert_at0 = match position {
             "before" => editing_start_line(&sym, &lines),
@@ -6993,7 +7034,10 @@ fn foo() {
             "stale start_line inside preceding function should be detected"
         );
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("stale"), "error should mention stale; got: {msg}");
+        assert!(
+            msg.contains("stale"),
+            "error should mention stale; got: {msg}"
+        );
     }
     /// Lead-in case: LSP returns start_line at a closing `})` of preceding macro,
     /// real symbol is 3 lines below. Must accept (matches existing
@@ -7001,12 +7045,12 @@ fn foo() {
     #[test]
     fn validate_symbol_position_accepts_lead_in_paren_close() {
         let lines = vec![
-            "        })",            // 0 — start_line (lead-in: closing paren of preceding macro)
-            "    }",                 // 1 — closing brace of preceding method
-            "",                      // 2 — blank line
-            "    fn target() {",     // 3 — actual declaration
-            "        old_body();",   // 4
-            "    }",                 // 5
+            "        })",          // 0 — start_line (lead-in: closing paren of preceding macro)
+            "    }",               // 1 — closing brace of preceding method
+            "",                    // 2 — blank line
+            "    fn target() {",   // 3 — actual declaration
+            "        old_body();", // 4
+            "    }",               // 5
         ];
         let sym = crate::lsp::SymbolInfo {
             name: "target".to_string(),
@@ -7030,10 +7074,10 @@ fn foo() {
     #[test]
     fn validate_symbol_position_accepts_lead_in_blank_line() {
         let lines = vec![
-            "",                  // 0 — start_line (blank)
-            "fn target() {",     // 1
-            "    body();",       // 2
-            "}",                 // 3
+            "",              // 0 — start_line (blank)
+            "fn target() {", // 1
+            "    body();",   // 2
+            "}",             // 3
         ];
         let sym = crate::lsp::SymbolInfo {
             name: "target".to_string(),
@@ -7054,9 +7098,9 @@ fn foo() {
     #[test]
     fn validate_symbol_position_accepts_lead_in_rust_attribute() {
         let lines = vec![
-            "#[cfg(test)]",  // 0 — start_line (attribute)
-            "mod tests {",   // 1
-            "}",             // 2
+            "#[cfg(test)]", // 0 — start_line (attribute)
+            "mod tests {",  // 1
+            "}",            // 2
         ];
         let sym = crate::lsp::SymbolInfo {
             name: "tests".to_string(),
@@ -7077,9 +7121,9 @@ fn foo() {
     #[test]
     fn validate_symbol_position_accepts_lead_in_python_decorator() {
         let lines = vec![
-            "@decorator",       // 0 — start_line (decorator)
-            "def my_func():",   // 1
-            "    pass",         // 2
+            "@decorator",     // 0 — start_line (decorator)
+            "def my_func():", // 1
+            "    pass",       // 2
         ];
         let sym = crate::lsp::SymbolInfo {
             name: "my_func".to_string(),
@@ -7103,10 +7147,10 @@ fn foo() {
     #[test]
     fn validate_symbol_position_accepts_lead_in_kdoc_continuation() {
         let lines = vec![
-            "/**",                       // 0
-            " * @param x the param",     // 1 — start_line (KDoc continuation)
-            " */",                       // 2
-            "fun target() {}",           // 3
+            "/**",                   // 0
+            " * @param x the param", // 1 — start_line (KDoc continuation)
+            " */",                   // 2
+            "fun target() {}",       // 3
         ];
         let sym = crate::lsp::SymbolInfo {
             name: "target".to_string(),
@@ -7129,16 +7173,16 @@ fn foo() {
     #[test]
     fn validate_symbol_position_catches_lead_in_with_distant_name() {
         let lines = vec![
-            "",                       // 0 — start_line (lead-in)
-            "fn unrelated_one() {",   // 1
-            "    do_thing();",        // 2
-            "}",                      // 3
-            "",                       // 4
-            "fn unrelated_two() {",   // 5
-            "    do_other();",        // 6
-            "}",                      // 7
-            "",                       // 8
-            "fn target() {}",         // 9 — too far for the 6-line window
+            "",                     // 0 — start_line (lead-in)
+            "fn unrelated_one() {", // 1
+            "    do_thing();",      // 2
+            "}",                    // 3
+            "",                     // 4
+            "fn unrelated_two() {", // 5
+            "    do_other();",      // 6
+            "}",                    // 7
+            "",                     // 8
+            "fn target() {}",       // 9 — too far for the 6-line window
         ];
         let sym = crate::lsp::SymbolInfo {
             name: "target".to_string(),
@@ -7153,7 +7197,10 @@ fn foo() {
             detail: None,
         };
         let result = validate_symbol_position(&sym, &lines);
-        assert!(result.is_err(), "name 9 lines below lead-in should be detected as stale");
+        assert!(
+            result.is_err(),
+            "name 9 lines below lead-in should be detected as stale"
+        );
         assert!(result.unwrap_err().to_string().contains("stale"));
     }
 
@@ -7161,12 +7208,12 @@ fn foo() {
     #[test]
     fn validate_symbol_position_accepts_multiline_signature() {
         let lines = vec![
-            "pub fn long_name(",  // 0 — start_line, name here
-            "    arg1: T,",       // 1
-            "    arg2: U,",       // 2
-            ") -> R {",           // 3
-            "    body()",         // 4
-            "}",                  // 5
+            "pub fn long_name(", // 0 — start_line, name here
+            "    arg1: T,",      // 1
+            "    arg2: U,",      // 2
+            ") -> R {",          // 3
+            "    body()",        // 4
+            "}",                 // 5
         ];
         let sym = crate::lsp::SymbolInfo {
             name: "long_name".to_string(),

@@ -45,6 +45,10 @@ async fn fixture_context(language: &str) -> Arc<ToolContext> {
         lsp,
         output_buffer: Arc::new(codescout::tools::output_buffer::OutputBuffer::new(20)),
         progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            codescout::tools::section_coverage::SectionCoverage::new(),
+        )),
     })
 }
 

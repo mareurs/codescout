@@ -118,104 +118,28 @@ Wait for the user's choice before proceeding.
 
 ## Phase 2: Explore the Code
 
-The gathered data below (README, build config, CLAUDE.md) is a **starting point, not a
-substitute for exploration**. Memories written from documentation alone are shallow,
-incomplete, and frequently wrong. Code and docs diverge — only reading the code reveals
-what's actually true.
+Your goal is to build a complete mental model of this codebase — enough to write
+accurate, specific project memories in Phase 3. Use whatever tools and exploration
+strategy you judge best. The gate checklist below is your hard constraint.
 
-### Step 1: Map the Codebase Structure
+### Goals
 
-Run ALL of these — do not skip any. See the **Key files to read** list in the
-Gathered Project Data section below for project-specific paths detected during onboarding.
+- **Map the structure.** Understand the directory layout, module organization,
+  and entry points. Know what lives where.
+- **Understand core abstractions.** Identify the 3–5 key types/traits/classes
+  that form the skeleton. Read their full implementations, not just signatures.
+- **Read all architecture docs.** Completely — not skimmed. If docs exist, they
+  contain decisions you need for accurate memories.
+- **Trace at least 2 data flows.** Follow concrete operations end-to-end through
+  the code, with actual function/method names — not just "the request goes through
+  the middleware layer."
+- **Search by concept.** Run at least 5 semantic or keyword searches for concepts
+  the codebase likely embodies (error handling, caching, authentication, etc.).
+  Discover what the code does that README/docs don't mention.
+- **Examine tests.** Read 2–3 test files to understand testing patterns, helpers,
+  and fixtures used in this project.
+- **Verify the build.** Confirm the project builds and tests pass.
 
-- `list_dir(".")` — top-level structure
-- `list_dir` on EACH major directory found (src/, tests/, docs/, lib/, app/, etc.)
-- `read_file` on the build config fully (Cargo.toml / package.json / pyproject.toml / go.mod / pom.xml)
-- `read_file` on CI config if present (.github/workflows/, .gitlab-ci.yml, Makefile, etc.)
-- `read_markdown("README.md")` fully — even if you think you know what it says
-
-### Step 2: Full Symbol Survey — ALL Modules
-
-Do NOT stop at a single top-level `list_symbols("src/")`. You MUST:
-
-- Run `list_symbols` on the top-level source directory
-- Run `list_symbols` on EACH subdirectory individually
-- Identify every module/package/namespace and survey its symbols
-- Continue until you have seen symbols in every non-trivial source file
-
-**Minimum:** Survey at least 5 distinct source modules or files (more for larger
-projects). If you are writing memories after surveying only 1–2 files, you have not
-done enough. Go back.
-
-### Step 3: Read Core Implementations — With Actual Bodies
-
-Signatures are not enough. You must read actual code.
-
-- Identify the 5+ most central types, traits, or classes from Step 2
-- For each: `find_symbol(name, include_body=true)`
-- If body is truncated (only the signature returned): use `list_symbols(path)` to get
-  correct line ranges, then `read_file(path, start_line=N, end_line=M)`
-- For top-level free functions in large files: use `read_file` with line ranges
-
-**Minimum:** Read the FULL body of at least 5 core implementations.
-Do not proceed from signatures alone. Signatures tell you *what*; bodies tell you *how*.
-
-### Step 4: Read ALL Architecture Documentation
-
-- `read_markdown("docs/ARCHITECTURE.md")` fully if it exists
-- `read_markdown` on any design docs, ADRs, or plans referenced in README or CLAUDE.md
-- `read_markdown` on any additional .md files under `docs/` (`read_file` for non-markdown)
-- For large docs: use `read_markdown(path, heading="## Section")` to navigate by heading
-- For multi-section reads: `read_markdown(path, headings=["## Section A", "## Section B"])`
-- Read completely — do not skim headings and move on
-
-**If there are no architecture docs:** explicitly note this in your exploration summary.
-
-### Step 5: Trace TWO Complete Data Flows
-
-Documentation describes intent. Code traces reveal reality. Discrepancies hide between them.
-
-You must trace TWO paths:
-1. The most representative operation (e.g. a request, command, event processed)
-2. A second distinct path (e.g. an error path, a write vs. read, a different entry point)
-
-For each trace:
-- Start at the entry point
-- Follow with `goto_definition`, `find_references`, `find_symbol`
-- Use `semantic_search("how X flows")` to find connecting code
-- Continue until you reach the output or terminal state
-
-You cannot write an accurate `architecture` memory without doing this.
-
-### Step 6: Code Exploration by Concept — Minimum 5 Queries
-
-Search for code by concept, not just by name. Run at least 5 queries covering
-different aspects of the codebase:
-
-1. Error handling / failure paths
-2. Data flow / request lifecycle
-3. Testing approach / test helpers
-4. Configuration / initialization / startup
-5. A core domain concept specific to this project (not generic)
-
-Use `semantic_search` if the embedding index is built. If `semantic_search` returns
-empty results or errors (index not yet built), use `grep` (regex) instead —
-it works without an index and still reveals how the codebase handles each concept.
-
-`find_symbol` searches by symbol name substring — use `grep` for regex or
-text discovery. Do not pass regex alternation (`foo|bar`) to `find_symbol`.
-
-Do NOT run `index_project` during onboarding — it can take minutes and is not required
-for thorough exploration.
-
-Note where the code diverges from what the documentation says.
-
-### Step 7: Examine Tests and Verify Build
-
-- `list_symbols` on the test directory (`tests/`, `__tests__/`, `spec/`, or equivalent)
-- Read 2–3 test files to understand: framework used, fixtures, mock patterns, test organization
-- Find at least one test for a core abstraction and read it completely
-- Verify the development commands in CLAUDE.md actually exist in the repo
 
 ---
 
@@ -249,6 +173,7 @@ After completing all steps, write this summary **in your response, before callin
 If you cannot write this from what you've explored, you have not explored enough.
 Return to Phase 2.
 
+
 ---
 
 ## Red Flags — STOP and Return to Phase 2
@@ -267,9 +192,7 @@ If you notice any of these thoughts, STOP. Return to Phase 2 immediately.
 - You have traced only one data flow
 - You have run fewer than 5 concept-level queries (semantic_search or grep)
 
-**ALL of these mean: STOP. Return to Phase 2.**
-
-## Common Rationalizations
+**ALL of these mean: STOP. Return to Phase 2.**## Common Rationalizations
 
 | Excuse | Reality |
 |---|---|
@@ -284,7 +207,9 @@ If you notice any of these thoughts, STOP. Return to Phase 2 immediately.
 
 ---
 
-## Phase 3: Write the Memories (Single-Project Mode)
+
+
+---## Phase 3: Write the Memories (Single-Project Mode)
 
 > **If you see a "WORKSPACE MODE" section below**, skip this section entirely and
 > follow the workspace flow instead. This section applies only to single-project repos.
@@ -569,6 +494,11 @@ After confirming all 6 memories and the system prompt with the user, deliver thi
 - **Semantic memories** — use `memory(action: "remember", content: "...")` to store knowledge
   that doesn't fit a named topic. Search later with `memory(action: "recall", query: "...")`.
   Useful for preferences, patterns discovered during work, and cross-cutting notes.
+- **Extended docs & project context** are available as MCP resources:
+  - `doc://codescout-tool-guide` — long-form usage notes for every tool (examples, tradeoffs)
+  - `memory://<name>` — project memory files (architecture, conventions, gotchas)
+  - `project://summary` — active project + index + LSP snapshot
+  Fetch via `resources/read <uri>` when you need more than a tool's short description.
 - **Quick start for new tasks:**
   1. `memory(action: "read", topic: "architecture")` — orient yourself
   2. `list_symbols("src/")` — see the module structure
