@@ -9,6 +9,7 @@ pub mod config;
 pub mod dashboard;
 pub mod embed;
 pub mod git;
+pub mod hardware;
 pub mod library;
 pub mod logging;
 pub mod lsp;
