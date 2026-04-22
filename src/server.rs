@@ -763,29 +763,57 @@ pub(crate) async fn shutdown_signal() -> &'static str {
 /// Node.js runtime temporarily sets the pipe to non-blocking mode — kills the
 /// entire MCP server.
 ///
-/// This wrapper intercepts `WouldBlock` at the `AsyncRead` level and converts
-/// it to `Poll::Pending`, which is the correct async semantic: "not ready yet,
-/// wake me when data arrives." This prevents rmcp from ever seeing the error.
+/// On `WouldBlock`, this wrapper arms a short timer and returns `Poll::Pending`
+/// with the waker registered via tokio's timer reactor. This avoids both failure
+/// modes: "hang forever" (no waker registered) and "CPU spin" (`wake_by_ref()`
+/// immediately reschedules the task, causing a tight busy-loop when EAGAIN is
+/// persistent).
 struct ResilientStdin {
     inner: tokio::io::Stdin,
+    /// Short sleep armed on `WouldBlock` to prevent CPU spinning.
+    backoff: Option<std::pin::Pin<Box<tokio::time::Sleep>>>,
 }
 
 impl ResilientStdin {
     fn new(stdin: tokio::io::Stdin) -> Self {
-        Self { inner: stdin }
+        Self {
+            inner: stdin,
+            backoff: None,
+        }
     }
 }
 
 impl tokio::io::AsyncRead for ResilientStdin {
     fn poll_read(
-        mut self: std::pin::Pin<&mut Self>,
+        self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        match std::pin::Pin::new(&mut self.inner).poll_read(cx, buf) {
+        use std::future::Future;
+        let this = self.get_mut();
+
+        // Drain any active backoff sleep before attempting a read.
+        // The sleep registers the waker via tokio's timer reactor, so we are
+        // woken after the delay rather than spinning immediately.
+        if let Some(ref mut sleep) = this.backoff {
+            if sleep.as_mut().poll(cx).is_pending() {
+                return std::task::Poll::Pending;
+            }
+            this.backoff = None;
+        }
+
+        match std::pin::Pin::new(&mut this.inner).poll_read(cx, buf) {
             std::task::Poll::Ready(Err(ref e)) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                tracing::warn!("stdin EAGAIN intercepted — converting to Pending");
-                cx.waker().wake_by_ref();
+                // EAGAIN from stdin: Node.js briefly set the pipe O_NONBLOCK.
+                // Returning Poll::Pending without a registered waker would hang
+                // the task forever. Calling wake_by_ref() immediately would spin
+                // at scheduler rate (the original BUG-047 flaw). Instead, arm a
+                // 1ms sleep — polling it registers the waker via the timer
+                // reactor so the task resumes after the delay, not immediately.
+                tracing::trace!("stdin EAGAIN — backing off 1ms before retry");
+                let mut sleep = Box::pin(tokio::time::sleep(std::time::Duration::from_millis(1)));
+                let _ = sleep.as_mut().poll(cx);
+                this.backoff = Some(sleep);
                 std::task::Poll::Pending
             }
             other => other,
@@ -1862,27 +1890,45 @@ impl tokio::io::AsyncRead for WouldBlockThenData {
 
 /// Verifies that WouldBlock from the inner reader is converted to Pending,
 /// not surfaced as an error that would kill the rmcp service loop.
+///
+/// Mirrors the production `ResilientStdin` backoff pattern (BUG-047): on
+/// EAGAIN, arm a 1ms sleep, poll it to register the waker via the timer
+/// reactor, return Pending. Production cannot be tested directly because
+/// `ResilientStdin` is hard-coded to `tokio::io::Stdin`; this generic
+/// version mirrors the state machine so regressions in the pattern are
+/// caught by test.
 #[tokio::test]
 async fn resilient_stdin_absorbs_would_block() {
+    use std::future::Future;
     use tokio::io::AsyncReadExt;
 
-    // We can't wrap WouldBlockThenData in ResilientStdin directly since
-    // ResilientStdin is hard-coded to tokio::io::Stdin.  Instead, test
-    // the same logic inline with a generic version.
     struct ResilientReader<R> {
         inner: R,
+        backoff: Option<std::pin::Pin<Box<tokio::time::Sleep>>>,
     }
     impl<R: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for ResilientReader<R> {
         fn poll_read(
-            mut self: std::pin::Pin<&mut Self>,
+            self: std::pin::Pin<&mut Self>,
             cx: &mut std::task::Context<'_>,
             buf: &mut tokio::io::ReadBuf<'_>,
         ) -> std::task::Poll<std::io::Result<()>> {
-            match std::pin::Pin::new(&mut self.inner).poll_read(cx, buf) {
+            let this = self.get_mut();
+
+            if let Some(ref mut sleep) = this.backoff {
+                if sleep.as_mut().poll(cx).is_pending() {
+                    return std::task::Poll::Pending;
+                }
+                this.backoff = None;
+            }
+
+            match std::pin::Pin::new(&mut this.inner).poll_read(cx, buf) {
                 std::task::Poll::Ready(Err(ref e))
                     if e.kind() == std::io::ErrorKind::WouldBlock =>
                 {
-                    cx.waker().wake_by_ref();
+                    let mut sleep =
+                        Box::pin(tokio::time::sleep(std::time::Duration::from_millis(1)));
+                    let _ = sleep.as_mut().poll(cx);
+                    this.backoff = Some(sleep);
                     std::task::Poll::Pending
                 }
                 other => other,
@@ -1893,9 +1939,14 @@ async fn resilient_stdin_absorbs_would_block() {
     let mock = WouldBlockThenData {
         returned_eagain: false,
     };
-    let mut reader = ResilientReader { inner: mock };
+    let mut reader = ResilientReader {
+        inner: mock,
+        backoff: None,
+    };
     let mut buf = [0u8; 16];
-    // This would fail with WouldBlock if the wrapper didn't absorb it.
+    // Would surface WouldBlock as an error without the wrapper.
+    // With the backoff pattern, the first EAGAIN arms a sleep, the timer
+    // reactor fires, the task resumes, and the second poll returns data.
     let n = reader.read(&mut buf).await.expect("should not error");
     assert_eq!(&buf[..n], b"hello");
 }

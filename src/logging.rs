@@ -71,6 +71,85 @@ pub fn rotate_diagnostic_logs(dir: &Path) {
     }
 }
 
+/// Hard cap per log file before size-based rotation fires.
+///
+/// Defense-in-depth against runtime log-flooding bugs (e.g. BUG-047 — a spinning
+/// `Poll::Pending` emitted millions of WARN lines per second until two files
+/// reached 268 GB each). Count-based `rotate_logs` runs only at startup; this
+/// cap runs on every write.
+const MAX_LOG_BYTES: u64 = 50 * 1024 * 1024; // 50 MiB
+
+/// Write-only file wrapper that rotates to numbered backups when growth would
+/// exceed `max_bytes`. Keeps 3 backups (`.1`, `.2`, `.3`).
+///
+/// Used as the underlying `Write` for `tracing_appender::non_blocking` so the
+/// rotation runs on the dedicated log-writer thread, never on the hot path.
+struct SizeRotatingFile {
+    path: PathBuf,
+    file: std::fs::File,
+    max_bytes: u64,
+    current_bytes: u64,
+}
+
+impl SizeRotatingFile {
+    const KEEP: u32 = 3;
+
+    fn open(path: PathBuf, max_bytes: u64) -> std::io::Result<Self> {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&path)?;
+        Ok(Self {
+            path,
+            file,
+            max_bytes,
+            current_bytes: 0,
+        })
+    }
+
+    /// Shift `.N` → `.N+1` (descending), current → `.1`, open fresh file.
+    /// Mirrors `rotate_logs` but runs mid-session on size, not at startup.
+    fn rotate(&mut self) -> std::io::Result<()> {
+        let _ = std::fs::remove_file(numbered(&self.path, Self::KEEP));
+        for i in (1..Self::KEEP).rev() {
+            let _ = std::fs::rename(numbered(&self.path, i), numbered(&self.path, i + 1));
+        }
+        let _ = std::fs::rename(&self.path, numbered(&self.path, 1));
+        self.file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&self.path)?;
+        self.current_bytes = 0;
+        Ok(())
+    }
+}
+
+/// Append `.{n}` to a log path: `debug.log` + `1` → `debug.log.1`.
+fn numbered(path: &Path, n: u32) -> PathBuf {
+    let mut s = path.as_os_str().to_os_string();
+    s.push(format!(".{n}"));
+    PathBuf::from(s)
+}
+
+impl std::io::Write for SizeRotatingFile {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.current_bytes.saturating_add(buf.len() as u64) > self.max_bytes {
+            // Best-effort rotation — if it fails, keep writing to the current
+            // file rather than lose the log line entirely.
+            let _ = self.rotate();
+        }
+        let n = self.file.write(buf)?;
+        self.current_bytes = self.current_bytes.saturating_add(n as u64);
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()
+    }
+}
+
 /// Logging init result — holds worker guards and optional instance ID.
 pub struct LoggingGuards {
     /// MUST be held for the lifetime of main. Dropping flushes and closes writers.
@@ -153,12 +232,7 @@ pub fn init(debug: bool) -> LoggingGuards {
     // --- Debug file layer (DEBUG level) ---
     let debug_layer = if debug {
         rotate_logs(&log_dir);
-        match std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(log_dir.join("debug.log"))
-        {
+        match SizeRotatingFile::open(log_dir.join("debug.log"), MAX_LOG_BYTES) {
             Ok(file) => {
                 let (non_blocking, guard) = tracing_appender::non_blocking(file);
                 guards.push(guard);
@@ -184,12 +258,7 @@ pub fn init(debug: bool) -> LoggingGuards {
         rotate_diagnostic_logs(&log_dir);
         let id = generate_instance_id();
         let filename = format!("diagnostic-{id}.log");
-        match std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(log_dir.join(&filename))
-        {
+        match SizeRotatingFile::open(log_dir.join(&filename), MAX_LOG_BYTES) {
             Ok(file) => {
                 let (non_blocking, guard) = tracing_appender::non_blocking(file);
                 guards.push(guard);
@@ -382,5 +451,90 @@ mod tests {
     fn sync_append_silently_ignores_bad_path() {
         // Should not panic on a non-existent directory
         sync_append(Path::new("/nonexistent/dir/crash.log"), "test\n");
+    }
+
+    #[test]
+    fn size_rotating_file_rotates_on_cap_exceeded() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("debug.log");
+
+        // 64-byte cap — small enough to trigger rotation quickly.
+        let mut f = SizeRotatingFile::open(path.clone(), 64).unwrap();
+
+        // First write fits: 32 bytes of 'a'.
+        f.write_all(&[b'a'; 32]).unwrap();
+        f.flush().unwrap();
+        assert!(!path.with_extension("log.1").exists());
+
+        // Second write: another 32 bytes. current_bytes (32) + 32 = 64, NOT > 64.
+        f.write_all(&[b'b'; 32]).unwrap();
+        f.flush().unwrap();
+        assert!(!path.with_extension("log.1").exists());
+
+        // Third write: 1 byte. 64 + 1 > 64 → triggers rotation.
+        f.write_all(&[b'c']).unwrap();
+        f.flush().unwrap();
+
+        // debug.log.1 now holds the pre-rotation content (64 bytes: a's and b's).
+        let rotated = std::fs::read(path.with_extension("log.1")).unwrap();
+        assert_eq!(rotated.len(), 64);
+        assert!(rotated.iter().all(|&b| b == b'a' || b == b'b'));
+
+        // debug.log holds the new content (single 'c').
+        let current = std::fs::read(&path).unwrap();
+        assert_eq!(current, b"c");
+    }
+
+    #[test]
+    fn size_rotating_file_caps_total_growth_at_keep_plus_one() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("debug.log");
+
+        let mut f = SizeRotatingFile::open(path.clone(), 16).unwrap();
+
+        // Write 20 × 16-byte chunks — forces many rotations.
+        for _ in 0..20 {
+            f.write_all(&[b'x'; 16]).unwrap();
+            f.write_all(&[b'y'; 1]).unwrap(); // triggers rotate
+            f.flush().unwrap();
+        }
+
+        // Only debug.log, .1, .2, .3 should exist. Nothing beyond KEEP.
+        assert!(path.exists());
+        assert!(path.with_extension("log.1").exists());
+        assert!(path.with_extension("log.2").exists());
+        assert!(path.with_extension("log.3").exists());
+        assert!(
+            !path.with_extension("log.4").exists(),
+            "rotation must not leave files beyond KEEP"
+        );
+    }
+
+    #[test]
+    fn size_rotating_file_single_write_under_cap_does_not_rotate() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("debug.log");
+
+        let mut f = SizeRotatingFile::open(path.clone(), 1024).unwrap();
+        f.write_all(b"small").unwrap();
+        f.flush().unwrap();
+
+        assert!(!path.with_extension("log.1").exists());
+        assert_eq!(std::fs::read(&path).unwrap(), b"small");
+    }
+
+    #[test]
+    fn numbered_appends_suffix() {
+        assert_eq!(
+            numbered(Path::new("/tmp/debug.log"), 1),
+            PathBuf::from("/tmp/debug.log.1")
+        );
+        assert_eq!(
+            numbered(Path::new("diagnostic-abcd.log"), 3),
+            PathBuf::from("diagnostic-abcd.log.3")
+        );
     }
 }

@@ -427,6 +427,68 @@ Moved classification before SHA check. Compute full meta tuple (kind, status, ti
 
 ---
 
+
+### BUG-047 — `ResilientStdin`: spinning `Poll::Pending` floods log files to 268 GB
+
+**Date:** 2026-04-22
+**Severity:** Critical (disk exhaustion)
+**Status:** Fixed (2026-04-22)
+
+**What happened:**
+The codescout server for the `mirela/deployment` project hit a busy-loop on stdin
+`EAGAIN` and logged every iteration at `WARN` level with no rate-limiting or size
+cap. Two log files (`.codescout/debug.log` and `.codescout/diagnostic-*.log`)
+grew to **268 GB each** before the disk was exhausted.
+
+**Root cause — a regression introduced by BUG-033's fix:**
+
+The `ResilientStdin` wrapper (added on 2026-03-21 to absorb transient `EAGAIN` so
+rmcp would not close the stdio transport) had two compounding flaws:
+
+1. **Spinning `Poll::Pending` (CPU busy-loop).** When `tokio::io::Stdin::poll_read`
+   returned `Ready(Err(WouldBlock))`, the waker was *not* registered with epoll
+   (the inner returned `Ready`, not `Pending`). To avoid a task hang, the code
+   called `cx.waker().wake_by_ref()` before returning `Pending`. `wake_by_ref()`
+   immediately re-schedules the task — an external event never fires the waker,
+   the task itself does. The task re-polls, gets EAGAIN again, wakes itself again,
+   at tokio scheduler rate. `Poll::Pending` requires the waker be called by an
+   external event (I/O readiness, timer, channel), not by the pending future
+   itself. This is the canonical "spinning pending" async anti-pattern.
+
+2. **`WARN`-level log inside the spin.** A `tracing::warn!` fired on every poll,
+   so two non-blocking tracing writers (debug.log at DEBUG, diagnostic-*.log at
+   INFO) each received millions of lines per second.
+
+3. **No size-based log rotation.** `rotate_logs()` in `src/logging.rs` ran only at
+   startup and capped by count (3 backups), not size. Runtime floods had no gate.
+
+**Fix (2026-04-22):**
+
+- **`src/server.rs` — `ResilientStdin` truthful `Pending`.** On EAGAIN, arm a 1ms
+  `tokio::time::Sleep` and poll it; this registers the waker via tokio's timer
+  reactor so the task resumes after the delay, not immediately. Struct gains
+  `backoff: Option<Pin<Box<Sleep>>>`. `WARN` → `TRACE`.
+- **`src/logging.rs` — `SizeRotatingFile` defense-in-depth.** New `Write` wrapper
+  caps each log at 50 MiB with 3 numbered backups, rotating on the non-blocking
+  log-writer thread. Both `debug.log` and `diagnostic-*.log` routed through it.
+  Guards against any future runtime log-flooding bug, not only this one.
+- Tests: `size_rotating_file_rotates_on_cap_exceeded`,
+  `size_rotating_file_caps_total_growth_at_keep_plus_one`,
+  `size_rotating_file_single_write_under_cap_does_not_rotate`,
+  `numbered_appends_suffix`, plus `resilient_stdin_absorbs_would_block` updated
+  to mirror the new backoff state machine.
+
+**Upstream still pending:** `rmcp::transport::AsyncRwTransport::receive()` converts
+*any* IO error to `None`. It should distinguish transient (`WouldBlock`,
+`Interrupted`) from fatal (`BrokenPipe`, EOF). File an issue with rmcp so this
+wall is no longer needed.
+
+**Reproduction hint:**
+Observed in practice: Claude Code's Node.js runtime briefly sets the stdin pipe
+`O_NONBLOCK` under I/O pressure. If that state persists past a single poll cycle,
+the spin begins.
+
+**Observed at:** `mirela/deployment` project, 2026-04-22.
 ## Template for new entries
 
 ```
