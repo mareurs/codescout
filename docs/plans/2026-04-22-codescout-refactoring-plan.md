@@ -454,6 +454,13 @@ Step 1 alone is enough. Step 2 is a Phase 8 candidate if needed.
 
 ### Phase 8 — Documentation reorg (Frog's phase)
 
+**Status:** 🟡 PARTIAL. 8.1 + 8.2 done (commits `4f242c7`, `1c98e00`):
+archived 8 shipped plans + 885-line bug log. Plan's other sub-tasks
+turned out to be already-done on the ground (README 133 lines,
+CONTRIBUTING.md exists, docs/ARCHITECTURE.md exists) so they were not
+executed. Trim of CLAUDE.md deferred — the user hand-edits that file
+and Frog will not rewrite it without an explicit ask.
+
 **Goal:** README serves new readers, CONTRIBUTING serves contributors,
 CLAUDE.md serves the LLM, ARCHITECTURE.md is the canonical structural
 reference. No file serves three audiences.
