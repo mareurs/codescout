@@ -12,15 +12,17 @@ use crate::ast;
 use crate::lsp::SymbolInfo;
 
 mod display;
+mod find_references;
 mod goto_definition;
 mod hover;
 
+pub use find_references::FindReferences;
 pub use goto_definition::GotoDefinition;
 pub use hover::Hover;
 
 use display::{
-    format_find_references, format_find_symbol, format_insert_code, format_list_symbols,
-    format_remove_symbol, format_rename_symbol, format_replace_symbol,
+    format_find_symbol, format_insert_code, format_list_symbols, format_remove_symbol,
+    format_rename_symbol, format_replace_symbol,
 };
 
 /// Lightweight timer for recording LSP first-response latency.
@@ -90,7 +92,7 @@ async fn resolve_write_path(ctx: &ToolContext, relative_path: &str) -> anyhow::R
 /// Returns `(library_name, absolute_root_path)` pairs.
 /// For `Scope::Library(name)`, returns a `RecoverableError` if the library
 /// lacks local source code. Other scopes silently skip source-unavailable entries.
-async fn resolve_library_roots(
+pub(super) async fn resolve_library_roots(
     scope: &crate::library::scope::Scope,
     agent: &crate::agent::Agent,
 ) -> anyhow::Result<Vec<(String, PathBuf)>> {
@@ -148,7 +150,7 @@ fn format_library_path(lib_name: &str, lib_root: &Path, file_path: &Path) -> Str
 
 /// Classify a reference path as project, library, or external.
 /// Returns (classification_tag, display_path).
-fn classify_reference_path(
+pub(super) fn classify_reference_path(
     path: &Path,
     project_root: &Path,
     library_roots: &[(String, PathBuf)],
@@ -1743,142 +1745,6 @@ impl Tool for FindSymbol {
     }
 }
 
-// ── find_referencing_symbols ───────────────────────────────────────────────
-
-pub struct FindReferences;
-
-#[async_trait::async_trait]
-impl Tool for FindReferences {
-    fn name(&self) -> &str {
-        "find_references"
-    }
-    fn description(&self) -> &str {
-        "Find all usages of a symbol. Requires symbol and file."
-    }
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "required": ["symbol", "path"],
-            "properties": {
-                "symbol": { "type": "string", "description": "Symbol identifier (e.g. 'MyStruct/my_method')" },
-                "path": { "type": "string", "description": "File containing the symbol" },
-                "detail_level": { "type": "string", "description": "'full' for bodies (default: compact)" },
-                "offset": { "type": "integer", "description": "Pagination offset" },
-                "limit": { "type": "integer", "description": "Max results (default 50)" },
-                "scope": { "type": "string", "description": "'project' (default), 'libraries', 'all', or 'lib:<name>'", "default": "project" }
-            }
-        })
-    }
-    async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let name_path = super::require_str_param(&input, "symbol")?;
-        let rel_path = require_path_param(&input)?;
-        let scope = crate::library::scope::Scope::parse(input["scope"].as_str());
-
-        let full_path = resolve_read_path(ctx, rel_path).await?;
-        let raw_lang = ast::detect_language(&full_path)
-            .ok_or_else(|| anyhow::anyhow!("unsupported language"))?;
-        let root = ctx.agent.require_project_root().await?;
-        let (client, lang) = get_lsp_client(ctx, &full_path).await?;
-
-        // Find the symbol's position by walking document symbols
-        let timer = LspTimer::start();
-        let symbols = client.document_symbols(&full_path, &lang).await?;
-        timer.record(ctx, raw_lang, &root).await;
-        let sym = find_unique_symbol_by_name_path(&symbols, name_path)?;
-
-        // Get references at the symbol's position
-        let refs = client
-            .references(&full_path, sym.start_line, sym.start_col, &lang)
-            .await?;
-
-        // Resolve all library roots for classification (Scope::All to get every lib).
-        let lib_roots =
-            resolve_library_roots(&crate::library::scope::Scope::All, &ctx.agent).await?;
-
-        // Filter out references inside build-artifact directories. LSP servers often
-        // index generated files (target/, node_modules/, dist/, …) and including them
-        // creates noise without actionable information.
-        let total_raw = refs.len();
-        let refs: Vec<_> = refs
-            .into_iter()
-            .filter(|loc| {
-                uri_to_path(loc.uri.as_str())
-                    .map(|p| !path_in_excluded_dir(&p))
-                    .unwrap_or(true)
-            })
-            .collect();
-        let excluded = total_raw - refs.len();
-
-        // Scope-filter references
-        let refs: Vec<_> = refs
-            .into_iter()
-            .filter(|loc| {
-                let Some(path) = uri_to_path(loc.uri.as_str()) else {
-                    return true; // keep references we can't resolve
-                };
-                let (classification, _) = classify_reference_path(&path, &root, &lib_roots);
-                match &scope {
-                    crate::library::scope::Scope::Project => classification == "project",
-                    crate::library::scope::Scope::Libraries => classification.starts_with("lib:"),
-                    crate::library::scope::Scope::All => true,
-                    crate::library::scope::Scope::Library(name) => {
-                        classification == format!("lib:{}", name)
-                    }
-                }
-            })
-            .collect();
-
-        let locations: Vec<Value> = refs
-            .iter()
-            .map(|loc| {
-                let file = uri_to_path(loc.uri.as_str())
-                    .map(|p| {
-                        let (_, display) = classify_reference_path(&p, &root, &lib_roots);
-                        display
-                    })
-                    .unwrap_or_else(|| loc.uri.as_str().to_string());
-
-                // Read context lines around the reference
-                let context = uri_to_path(loc.uri.as_str())
-                    .and_then(|p| std::fs::read_to_string(p).ok())
-                    .map(|src| {
-                        let lines: Vec<&str> = src.lines().collect();
-                        let line = loc.range.start.line as usize;
-                        lines.get(line).unwrap_or(&"").to_string()
-                    })
-                    .unwrap_or_default();
-
-                json!({
-                    "file": file,
-                    "line": loc.range.start.line + 1,
-                    "column": loc.range.start.character,
-                    "context": context,
-                })
-            })
-            .collect();
-
-        let guard = OutputGuard::from_input(&input);
-        let total = locations.len();
-        let (locations, overflow) = guard.cap_items(locations, "This symbol has many references. Use detail_level='full' with offset/limit to paginate");
-        let mut result = json!({ "references": locations, "total": total });
-        if excluded > 0 {
-            result["excluded_from_build_dirs"] = json!(excluded);
-        }
-        if let Some(ov) = overflow {
-            result["overflow"] = OutputGuard::overflow_json(&ov);
-        }
-        Ok(result)
-    }
-
-    fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(format_find_references(result))
-    }
-
-    fn availability(&self, _caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
-        crate::tools::Availability::RequiresLsp
-    }
-}
-
 /// Compute the true start of a symbol declaration for editing (remove/replace).
 ///
 /// Uses the LSP `range.start` (which includes attributes, doc comments, decorators)
@@ -2922,7 +2788,7 @@ fn find_parent_symbol<'a>(
 /// When multiple candidates match but exactly one has an exact `name_path`
 /// match (e.g. class `Book` vs constructor `Book/Book(...)`), the exact match
 /// wins without raising an ambiguity error.
-fn find_unique_symbol_by_name_path<'a>(
+pub(super) fn find_unique_symbol_by_name_path<'a>(
     symbols: &'a [SymbolInfo],
     name_path: &str,
 ) -> anyhow::Result<&'a SymbolInfo> {
@@ -2984,7 +2850,7 @@ pub(super) fn uri_to_path(uri: &str) -> Option<PathBuf> {
 
 /// Returns `true` if any component of `path` is a well-known build-artifact directory.
 /// Used by `find_references` to suppress noise from generated/vendored code.
-fn path_in_excluded_dir(path: &std::path::Path) -> bool {
+pub(super) fn path_in_excluded_dir(path: &std::path::Path) -> bool {
     const EXCLUDED: &[&str] = &[
         "target",
         "node_modules",
@@ -3179,7 +3045,7 @@ fn format_list_symbols_directory_map_with_overflow() {
 
 #[cfg(test)]
 mod tests {
-    use super::display::{format_goto_definition, format_hover};
+    use super::display::{format_find_references, format_goto_definition, format_hover};
     use super::*;
     use crate::agent::Agent;
     use crate::tools::ToolContext;
