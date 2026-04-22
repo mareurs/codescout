@@ -245,33 +245,43 @@ Current `src/tools/workflow.rs` is 7275 lines (3383 helpers/impls + 3892 tests).
 
 ### Phase 3 — Decompose `src/tools/file.rs`
 
+**Status:** ✅ DONE (commits `ad9f70e` → `b79d09b`).
+
 **Goal:** One file operation per file.
 
-**Entry conditions:** Phase 2 complete.
+**Entry conditions:** ✅ Phase 2 complete.
 
-**Approach:** Same per-tool pattern as Phase 1. Likely splits into:
-- `read_file.rs`, `write_file.rs`, `create_file.rs`, `edit_file.rs`,
-  `glob.rs`, `grep.rs`, `list_dir.rs`
-- `file_helpers.rs` for shared utilities
+**Sub-phases (one commit each, all landed):**
 
-Audit which helpers in `path_security` belong with the tool layer vs the
-crate-level `util/`.
+- **3.1 `src/tools/read_file.rs`** (`ad9f70e`) — ReadFile + read helpers
+  (`strip_buffer_ref_quotes`, `read_from_buffer`, `validate_read_nav_params`,
+  `compute_source_tag`, `read_file_text`, `read_json_path_nav`,
+  `read_toml_yaml_key`, `read_with_line_range`, `read_full_file`) +
+  format helpers (`markdown_coverage`, `format_read_file`,
+  `format_read_file_summary`). `markdown.rs` + `memory.rs` updated.
+- **3.2 `src/tools/list_dir.rs`** (`ec7ab97`) — ListDir + `format_list_dir`,
+  `format_list_dir_tree_body`, `common_path_prefix`.
+- **3.3 `src/tools/grep.rs`** (`f0f7cc3`) — Grep + `format_grep`,
+  `format_search_simple_mode`, `format_search_context_mode`.
+- **3.4 `src/tools/create_file.rs`** (`9248db7`) — CreateFile (no helpers).
+- **3.5 `src/tools/glob.rs`** (`dc6e8de`) — Glob + private `format_glob`.
+- **3.6 `src/tools/edit_file.rs`** (`b79d09b`) — `git mv file.rs edit_file.rs`:
+  only EditFile + `perform_edit` + `def_keywords_for_lang`,
+  `find_def_keyword`, `detect_lsp_language`, `infer_edit_hint` remained.
+  Bundled tests stayed with edit_file.rs — sibling tools reached via
+  explicit `super::super::{read_file,list_dir,grep,create_file,glob}`
+  imports added sub-phase by sub-phase.
 
-**Watch points (Yak):**
-- `edit_file` is large and has the gate logic for blocking structural edits.
-  Keep that logic intact during the move — it's load-bearing.
+**Deviation from plan:** No `file_helpers.rs` emerged — each helper stayed
+with its primary tool. The Lion's watch point was observed: no shared-file
+was preserved for its own sake.
 
-**Watch points (Lion):**
-- After this split, see if `file_helpers.rs` is genuinely shared or whether
-  helpers should live with their primary tool. Don't preserve a shared file
-  for the sake of having one.
+**Deferred cleanup:** The ~3800-line `tests` mod still lives inside
+`edit_file.rs`. Splitting it per-tool was judged high-churn for a
+follow-up cleanup commit.
 
-**Exit conditions:**
-- `src/tools/file.rs` deleted, replaced by per-op files
-- Tests passing, clippy clean
-
----
-
+**Exit conditions:** ✅ `src/tools/file.rs` deleted; per-op files in place;
+1751 tests pass; clippy clean.
 ### Phase 4 — Partition `src/agent/mod.rs` impl
 
 **Goal:** Split the 30-method `impl Agent` block into 4–5 cohesive impl blocks.
