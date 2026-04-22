@@ -8,11 +8,14 @@ use crate::tools::{
 };
 
 use super::display::format_replace_symbol;
-use super::{
-    clamp_range_to_parent, collect_all_name_paths, count_symbols_by_name_path, editing_end_line,
-    editing_start_line, fetch_validated_symbol, find_ast_name_path, find_parent_symbol,
-    get_lsp_client, guard_not_markdown, require_path_param, resolve_write_path, write_lines,
+use super::edit_helpers::{
+    clamp_range_to_parent, collect_all_name_paths, editing_end_line, editing_start_line,
+    find_ast_name_path, find_parent_symbol, write_lines,
 };
+use super::path_helpers::{
+    get_lsp_client, guard_not_markdown, require_path_param, resolve_write_path,
+};
+use super::symbol_query::{count_symbols_by_name_path, fetch_validated_symbol};
 
 pub struct ReplaceSymbol;
 

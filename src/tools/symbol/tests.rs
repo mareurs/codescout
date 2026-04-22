@@ -1,23 +1,36 @@
 //! Unit tests for helper functions extracted from `mod.rs`.
 //!
-//! Moved wholesale during Phase 1b.4 to shrink `mod.rs` without per-test
-//! reclassification. Tests reach helpers via `use super::*;` plus explicit
-//! submodule imports — the transitional re-imports in `mod.rs` (dropped in
-//! Phase 1b.5) make this work.
+//! Moved wholesale during Phase 1b.4; imports made explicit in Phase 1b.5.
 
 use super::display::{
     format_find_references, format_find_symbol, format_goto_definition, format_hover,
     format_list_symbols,
+};
+use super::edit_helpers::{
+    apply_text_edits, clamp_range_to_parent, editing_end_line, editing_start_line,
+    find_insert_before_line, find_parent_symbol, text_sweep, write_lines,
 };
 use super::find_symbol::{build_by_file, make_find_symbol_hint};
 use super::list_symbols::{
     ast_class_names_for_dir, count_files_by_subdir, find_split_point, flat_symbol_count,
     LIST_SYMBOLS_SINGLE_FILE_FLAT_CAP,
 };
+use super::path_helpers::{
+    classify_reference_path, format_library_path, resolve_library_roots, tag_external_path,
+    uri_to_path,
+};
+use super::symbol_query::{
+    collect_matching, filter_variable_symbols, find_matching_symbol, find_symbol_by_name_path,
+    find_unique_symbol_by_name_path, is_lead_in_line, matches_kind_filter, symbol_name_matches,
+    symbol_to_json, validate_symbol_position, validate_symbol_range,
+};
 use super::*;
 use crate::agent::Agent;
-use crate::tools::ToolContext;
-use serde_json::json;
+use crate::lsp::SymbolInfo;
+use crate::tools::output::{OutputGuard, OverflowInfo};
+use crate::tools::{optional_u64_param, parse_bool_param, RecoverableError, Tool, ToolContext};
+use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tempfile::tempdir;
 
@@ -2006,11 +2019,11 @@ fn list_symbols_flat_cap_triggers_on_symbol_with_many_children() {
         })
         .collect();
 
-    let flat = super::flat_symbol_count(&symbols);
+    let flat = flat_symbol_count(&symbols);
     assert_eq!(flat, 220); // 20 * (1 + 10)
 
     // Greedy capping within FLAT_CAP=150
-    let budget = super::LIST_SYMBOLS_SINGLE_FILE_FLAT_CAP;
+    let budget = LIST_SYMBOLS_SINGLE_FILE_FLAT_CAP;
     let mut remaining = budget;
     let mut capped: Vec<Value> = Vec::new();
     for sym in symbols {
@@ -2032,15 +2045,15 @@ fn list_symbols_flat_cap_not_triggered_for_leaf_heavy_symbols() {
     let symbols: Vec<Value> = (0..50)
         .map(|i| json!({ "name": format!("fn{i}") }))
         .collect();
-    let flat = super::flat_symbol_count(&symbols);
+    let flat = flat_symbol_count(&symbols);
     assert_eq!(flat, 50);
-    assert!(flat <= super::LIST_SYMBOLS_SINGLE_FILE_FLAT_CAP);
+    assert!(flat <= LIST_SYMBOLS_SINGLE_FILE_FLAT_CAP);
 }
 
 #[test]
 fn list_symbols_single_file_cap_unit() {
     // Unit test: simulate the cap logic on a Vec<Value> of 150 symbol entries.
-    use super::OutputGuard;
+    use crate::tools::output::OutputGuard;
     let symbols: Vec<Value> = (0..150)
         .map(|i| json!({ "name": format!("sym{i}"), "start_line": i + 1 }))
         .collect();
@@ -2071,7 +2084,7 @@ fn list_symbols_single_file_cap_unit() {
 
 #[test]
 fn list_symbols_single_file_no_overflow_under_cap_unit() {
-    use super::OutputGuard;
+    use crate::tools::output::OutputGuard;
     let symbols: Vec<Value> = (0..40)
         .map(|i| json!({ "name": format!("sym{i}") }))
         .collect();

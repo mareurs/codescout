@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use crate::lsp::SymbolInfo;
 use crate::tools::RecoverableError;
 
-use super::ToolContext;
+use crate::tools::ToolContext;
 
 /// Returns true if the symbol's kind matches the given filter string.
 /// Unknown filter values return true (no filtering).
@@ -117,7 +117,7 @@ pub(super) fn symbol_to_json(
             let lines: Vec<&str> = src.lines().collect();
             // Use the full range (including attributes and doc comments) so
             // the body matches what replace_symbol would replace.
-            let body_start = super::editing_start_line(sym, &lines);
+            let body_start = super::edit_helpers::editing_start_line(sym, &lines);
             let end = (sym.end_line as usize + 1).min(lines.len());
             if body_start < lines.len() {
                 map.insert("body".into(), json!(lines[body_start..end].join("\n")));

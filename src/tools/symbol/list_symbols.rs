@@ -9,10 +9,11 @@ use crate::tools::output::{OutputGuard, OverflowInfo};
 use crate::tools::{optional_u64_param, parse_bool_param, RecoverableError, Tool, ToolContext};
 
 use super::display::format_list_symbols;
-use super::{
-    filter_variable_symbols, format_library_path, get_lsp_client, get_path_param, is_glob,
-    resolve_glob, resolve_library_roots, resolve_read_path, symbol_to_json, LspTimer,
+use super::path_helpers::{
+    format_library_path, get_lsp_client, get_path_param, is_glob, resolve_glob,
+    resolve_library_roots, resolve_read_path, LspTimer,
 };
+use super::symbol_query::{filter_variable_symbols, symbol_to_json};
 
 /// Directory/glob scans can produce huge output (each file has many symbols).
 /// Cap exploring-mode file count lower than the global OutputGuard default (200).

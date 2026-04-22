@@ -12,10 +12,12 @@ use crate::tools::{
 };
 
 use super::display::format_find_symbol;
-use super::{
-    collect_matching, format_library_path, get_path_param, is_glob, matches_kind_filter,
-    resolve_glob, resolve_library_roots, resolve_range_via_document_symbols, symbol_name_matches,
-    symbol_to_json, validate_symbol_range, LspTimer,
+use super::path_helpers::{
+    format_library_path, get_path_param, is_glob, resolve_glob, resolve_library_roots, LspTimer,
+};
+use super::symbol_query::{
+    collect_matching, matches_kind_filter, resolve_range_via_document_symbols, symbol_name_matches,
+    symbol_to_json, validate_symbol_range,
 };
 
 pub struct FindSymbol;
