@@ -7,10 +7,11 @@ use serde_json::{json, Value};
 use crate::tools::{guard_worktree_write, require_str_param, Tool, ToolContext};
 
 use super::display::format_rename_symbol;
-use super::{
-    apply_text_edits, find_unique_symbol_by_name_path, get_lsp_client, guard_not_markdown,
-    require_path_param, resolve_write_path, text_sweep, uri_to_path,
+use super::edit_helpers::{apply_text_edits, text_sweep};
+use super::path_helpers::{
+    get_lsp_client, guard_not_markdown, require_path_param, resolve_write_path, uri_to_path,
 };
+use super::symbol_query::find_unique_symbol_by_name_path;
 
 pub struct RenameSymbol;
 

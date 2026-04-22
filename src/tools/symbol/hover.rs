@@ -6,7 +6,9 @@ use crate::ast;
 use crate::tools::{require_u64_param, RecoverableError, Tool, ToolContext};
 
 use super::display::format_hover;
-use super::{get_lsp_client, require_path_param, resolve_read_path, tag_external_path, LspTimer};
+use super::path_helpers::{
+    get_lsp_client, require_path_param, resolve_read_path, tag_external_path, LspTimer,
+};
 
 const HOVER_SKIP_TOKENS: &[&str] = &[
     "pub", "async", "unsafe", "extern", "default", "override", "fn", "struct", "enum", "trait",

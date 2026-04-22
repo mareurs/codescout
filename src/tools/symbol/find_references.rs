@@ -7,10 +7,11 @@ use crate::tools::output::OutputGuard;
 use crate::tools::{require_str_param, Tool, ToolContext};
 
 use super::display::format_find_references;
-use super::{
-    classify_reference_path, find_unique_symbol_by_name_path, get_lsp_client, path_in_excluded_dir,
-    require_path_param, resolve_library_roots, resolve_read_path, uri_to_path, LspTimer,
+use super::path_helpers::{
+    classify_reference_path, get_lsp_client, path_in_excluded_dir, require_path_param,
+    resolve_library_roots, resolve_read_path, uri_to_path, LspTimer,
 };
+use super::symbol_query::find_unique_symbol_by_name_path;
 
 pub struct FindReferences;
 

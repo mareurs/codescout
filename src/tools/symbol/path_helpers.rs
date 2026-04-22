@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::ast;
 use crate::tools::RecoverableError;
 
-use super::ToolContext;
+use crate::tools::ToolContext;
 
 /// Lightweight timer for recording LSP first-response latency.
 /// Start before the LSP call, then call `.record()` on success.

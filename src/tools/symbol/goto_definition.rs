@@ -6,7 +6,7 @@ use crate::ast;
 use crate::tools::{require_u64_param, RecoverableError, Tool, ToolContext};
 
 use super::display::format_goto_definition;
-use super::{
+use super::path_helpers::{
     get_lsp_client, require_path_param, resolve_read_path, tag_external_path, uri_to_path, LspTimer,
 };
 
