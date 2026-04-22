@@ -4,6 +4,8 @@
 //! via `include_str!`. Dynamic sections are appended at runtime based
 //! on project state.
 
+pub mod builders;
+
 /// Static server instructions — tool reference, workflow patterns, steering rules.
 pub const SERVER_INSTRUCTIONS: &str = include_str!("server_instructions.md");
 pub const GITHUB_INSTRUCTIONS: &str = include_str!("github_instructions.md");
