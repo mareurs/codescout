@@ -21,8 +21,9 @@ use serde_json::Value;
 use crate::agent::Agent;
 use crate::tools::{
     config::{ActivateProject, ProjectStatus},
-    file::{CreateFile, EditFile, Glob, Grep, ListDir},
+    file::{CreateFile, EditFile, Glob, Grep},
     library::{ListLibraries, RegisterLibrary},
+    list_dir::ListDir,
     markdown::{EditMarkdown, ReadMarkdown},
     memory::Memory,
     progress,
