@@ -9,6 +9,7 @@ pub mod config;
 pub mod file;
 pub mod file_summary;
 pub(crate) mod format;
+pub mod grep;
 pub mod library;
 pub mod list_dir;
 pub mod memory;
