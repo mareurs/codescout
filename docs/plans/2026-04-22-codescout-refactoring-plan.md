@@ -105,9 +105,11 @@ What it bought us:
 
 ### Phase 1 — Decompose `src/tools/symbol/`
 
-**Status:** ✅ Mostly complete (2026-04-22). 9 atomic commits on `refactoring`;
-1751 tests green and clippy clean between every commit. Phase 1.10 (helpers
-consolidation) deferred — see `docs/plans/2026-04-23-codescout-refactoring-plan-phase-1b.md`.
+**Status:** ✅ Complete (Phase 1 + 1b, 2026-04-23). 16 atomic commits on `refactoring`;
+1751 tests green and clippy clean between every commit. Phase 1b shrank
+`src/tools/symbol/mod.rs` from 6793 → 28 lines by extracting `path_helpers.rs`,
+`symbol_query.rs`, `edit_helpers.rs`, and relocating the test block to `tests.rs`.
+See `docs/plans/2026-04-23-codescout-refactoring-plan-phase-1b.md` for details.
 
 | # | Commit | Tool | Helpers bumped to `pub(super)` |
 |---|--------|------|--------------------------------|
@@ -152,10 +154,65 @@ consolidation) deferred — see `docs/plans/2026-04-23-codescout-refactoring-pla
 ---
 ### Phase 2 — Decompose `src/tools/workflow.rs`
 
+**Status:** ⏳ Not started. Resume here next session.
+
 **Goal:** Split `Onboarding` and `RunCommand` into separate files. Lift
 hardware-probe code out of `tools/` entirely (it isn't a tool).
 
-**Entry conditions:** Phase 1 complete.
+**Entry conditions:** ✅ Phase 1 + 1b complete on `refactoring` (HEAD `ae8abd2`).
+Current `src/tools/workflow.rs` is 7275 lines (3383 helpers/impls + 3892 tests).
+
+**Next-session resume checklist:**
+1. Branch is `refactoring`, working tree clean. Run
+   `cargo test --lib` to confirm 1751 tests still green.
+2. Execute the four sub-phases below as separate commits, in order. Each
+   sub-phase should follow the Phase 1b rhythm: read bodies → create new
+   file → `remove_symbol` from workflow.rs → fix imports → `cargo fmt &&
+   clippy --lib -- -D warnings && test --lib` → commit.
+3. After all four sub-phases land, `src/tools/workflow.rs` should be deleted
+   and `src/tools/mod.rs` should declare `mod hardware;` (at crate root) +
+   `mod onboarding;` + `mod run_command;` + `mod prompts/builders;`.
+
+**Sub-phase plan (one commit each):**
+
+- **2.1 `src/hardware.rs`** — move: `HardwareContext`, `GpuInfo`,
+  `ModelOption`, `ollama_tcp_addr`, `probe_ollama`, `probe_nvidia`,
+  `probe_amd`, `probe_ram`, `detect_hardware_context`,
+  `model_options_for_hardware`. Add `mod hardware;` to `src/lib.rs` (crate
+  root). Update workflow.rs to `use crate::hardware::{...}`.
+- **2.2 `src/prompts/builders.rs`** — move: `language_navigation_hints`,
+  `language_patterns`, `build_language_patterns_memory`,
+  `build_system_prompt_draft`, `build_subagent_preamble`,
+  `build_subagent_epilogue`, `build_per_project_prompt`,
+  `build_synthesis_prompt`, `build_workspace_instructions`,
+  `build_buffered_onboarding_instructions`,
+  `build_buffered_refresh_instructions`,
+  `build_prompt_refresh_subagent_prompt`, `build_heading_map`. Add
+  `pub mod builders;` to `src/prompts/mod.rs`.
+- **2.3 `src/tools/onboarding.rs`** — move `Onboarding` struct,
+  `impl Tool for Onboarding`, `handle_refresh_prompt`,
+  `handle_already_onboarded`, `perform_full_onboarding`,
+  `gather_protected_memory_state`, `gather_project_context`,
+  `GatheredContext`, `format_onboarding`, `ONBOARDING_VERSION`,
+  `onboarding_version_stale`, `client_name`, `is_subagent_capable`. Add
+  `mod onboarding; pub use onboarding::Onboarding;` to `src/tools/mod.rs`.
+- **2.4 `src/tools/run_command.rs`** — move `RunCommand` + `impl Tool for
+  RunCommand` + all `run_command_*` helpers (run_command_inner,
+  run_command_interactive, handle_successful_output, spawn_background_command,
+  inject_tee, resolve_work_dir, parse_timeout_input, get_timeout_u64,
+  truncate_output, looks_like_ack_handle, rebuild_buffered_summary,
+  format_run_command, TmpfileGuard, AbortOnDrop). Move tests block too.
+  Add `mod run_command; pub use run_command::RunCommand;` to
+  `src/tools/mod.rs`. **Delete `src/tools/workflow.rs`** in the same commit.
+
+**Watch points (from Phase 1b experience):**
+- `remove_symbol` of large symbols leaves orphan blank lines — always read
+  ±5 lines after each removal.
+- Tests inside the moved code must move with it. workflow.rs has a single
+  3892-line `tests` module at L3383 — split it across the four target files
+  (or copy then prune by referenced helper, like Phase 1b.4).
+- `ToolContext`, `RecoverableError`, `Tool` trait imports become
+  `crate::tools::{...}` once the code lives outside the tools module.
 
 **Approach:**
 1. Extract hardware probes (`probe_ollama`, `probe_nvidia`, `probe_amd`,
