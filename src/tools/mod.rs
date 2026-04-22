@@ -19,8 +19,10 @@ pub mod symbol;
 pub mod usage;
 pub use usage::GetUsageStats;
 pub mod markdown;
+pub mod onboarding;
 pub mod section_coverage;
 pub mod workflow;
+pub use onboarding::Onboarding;
 
 use std::sync::Arc;
 
