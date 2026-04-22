@@ -284,6 +284,8 @@ follow-up cleanup commit.
 1751 tests pass; clippy clean.
 ### Phase 4 — Partition `src/agent/mod.rs` impl
 
+**Status:** ✅ DONE (commit `e98c8ec`).
+
 **Goal:** Split the 30-method `impl Agent` block into 4–5 cohesive impl blocks.
 Same struct, same methods, same behavior — just organised by concern.
 
