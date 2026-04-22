@@ -430,3 +430,68 @@ pub(super) fn format_rename_symbol(result: &Value) -> String {
         format!("→ {new_name} · {total} sites · {files} files")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::format_list_symbols;
+
+    #[test]
+    fn format_list_symbols_class_overview_mode() {
+        let val = serde_json::json!({
+            "directory": "src/main/kotlin",
+            "mode": "class_overview",
+            "subdirectories": [
+                { "path": "src/main/kotlin/api",    "file_count": 12, "classes": ["CourseController", "PlannerApi"] },
+                { "path": "src/main/kotlin/domain", "file_count": 8,  "classes": ["Course", "Student"] }
+            ],
+            "total_files": 45,
+            "hint": "Found 45 files — drill down with list_symbols('<subdir>')."
+        });
+        let result = format_list_symbols(&val);
+        assert!(result.contains("src/main/kotlin"));
+        assert!(result.contains("45 files"));
+        assert!(result.contains("api"));
+        assert!(result.contains("12"));
+        assert!(result.contains("CourseController"));
+        assert!(result.contains("domain"));
+        assert!(result.contains("Course"));
+        assert!(result.contains("drill down"), "hint shown");
+    }
+
+    #[test]
+    fn format_list_symbols_directory_map_mode() {
+        let val = serde_json::json!({
+            "directory": "ktor-server/src",
+            "mode": "directory_map",
+            "subdirectories": [
+                { "path": "ktor-server/src/main", "file_count": 80 },
+                { "path": "ktor-server/src/test", "file_count": 40 }
+            ],
+            "total_files": 120,
+            "hint": "Found 120 files — too large for symbol overview."
+        });
+        let result = format_list_symbols(&val);
+        assert!(result.contains("ktor-server/src"));
+        assert!(result.contains("120 files"));
+        assert!(result.contains("src/main"));
+        assert!(result.contains("80"));
+        assert!(result.contains("too large"));
+    }
+
+    #[test]
+    fn format_list_symbols_directory_map_with_overflow() {
+        let subdirs: Vec<serde_json::Value> = (0..15)
+            .map(|i| serde_json::json!({ "path": format!("sub/{i}"), "file_count": 10 }))
+            .collect();
+        let val = serde_json::json!({
+            "directory": "big",
+            "mode": "directory_map",
+            "subdirectories": subdirs,
+            "total_files": 300,
+            "overflow": { "shown": 15, "total": 23, "hint": "Showing 15 of 23 directories (largest first)." },
+            "hint": "Found 300 files."
+        });
+        let result = format_list_symbols(&val);
+        assert!(result.contains("Showing 15 of 23"));
+    }
+}
