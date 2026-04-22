@@ -210,6 +210,41 @@ impl CodeScoutServer {
         }
     }
 
+    async fn acquire_write_guard_if_writing(
+        &self,
+        name: &str,
+        input: &Value,
+    ) -> std::result::Result<
+        std::result::Result<Option<crate::agent::WriteGuard>, CallToolResult>,
+        McpError,
+    > {
+        if !is_write_call(name, input) {
+            return Ok(Ok(None));
+        }
+        let (mutex, fd_lock, timeout_secs) = self
+            .agent
+            .with_project(|p| {
+                Ok((
+                    p.write_lock.clone(),
+                    p.file_lock.clone(),
+                    p.config.security.write_lock_timeout_secs,
+                ))
+            })
+            .await
+            .map_err(|e| McpError::internal_error(format!("write gate: {}", e), None))?;
+        match crate::agent::acquire_write_guard(
+            mutex,
+            fd_lock,
+            std::time::Duration::from_secs(timeout_secs),
+        )
+        .await
+        {
+            Ok(g) => Ok(Ok(Some(g))),
+            // Route to isError: false so sibling calls survive.
+            Err(rec_err) => Ok(Err(route_tool_error(rec_err.into()))),
+        }
+    }
+
     /// Replace the resource registry after an `activate_project` call that may have
     /// changed the active memory directory.
     async fn refresh_resources(&self) {
@@ -333,33 +368,12 @@ impl CodeScoutServer {
         // Acquire the write guard if this is a mutating call. Read calls skip
         // the lock entirely. The guard is held for the full duration of the
         // tool future; it drops when the future completes or is cancelled.
-        let write_guard = if is_write_call(&req.name, &input_for_record) {
-            let (mutex, fd_lock, timeout_secs) = self
-                .agent
-                .with_project(|p| {
-                    Ok((
-                        p.write_lock.clone(),
-                        p.file_lock.clone(),
-                        p.config.security.write_lock_timeout_secs,
-                    ))
-                })
-                .await
-                .map_err(|e| McpError::internal_error(format!("write gate: {}", e), None))?;
-            match crate::agent::acquire_write_guard(
-                mutex,
-                fd_lock,
-                std::time::Duration::from_secs(timeout_secs),
-            )
-            .await
-            {
-                Ok(g) => Some(g),
-                Err(rec_err) => {
-                    // Route to isError: false so sibling calls survive.
-                    return Ok(route_tool_error(rec_err.into()));
-                }
-            }
-        } else {
-            None
+        let write_guard = match self
+            .acquire_write_guard_if_writing(&req.name, &input_for_record)
+            .await?
+        {
+            Ok(g) => g,
+            Err(result) => return Ok(result),
         };
 
         // Race the tool call against (a) the server-level timeout and (b) the
