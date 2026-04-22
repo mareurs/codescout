@@ -307,6 +307,43 @@ impl CodeScoutServer {
         }
     }
 
+    /// Strip the absolute project root from all output to reduce token usage.
+    /// Agents work exclusively within the project directory; relative paths
+    /// carry all necessary information. The full root (e.g. /home/user/project)
+    /// is a long repeated prefix that appears in every "file" field and error
+    /// message. Buffer content (@tool_xxx refs) is covered here too: it only
+    /// re-enters the pipeline through run_command, which also passes through
+    /// call_tool.
+    async fn post_process(&self, call_result: CallToolResult, tool_name: &str) -> CallToolResult {
+        let root_prefix = self
+            .agent
+            .project_root()
+            .await
+            .map(|p| format!("{}/", p.display()))
+            .unwrap_or_default();
+
+        let (mut call_result, stripped) = strip_project_root_from_result(call_result, &root_prefix);
+
+        // "Low hint": for tools that echo raw content (file contents, shell output),
+        // append a one-liner so agents can distinguish stripped absolute paths from
+        // genuine relative path values in file content. Capped at PATH_NOTE_MAX per
+        // session — after that the agent has seen it enough times to remember.
+        const PATH_NOTE_MAX: usize = 3;
+        const PATH_NOTE_TOOLS: &[&str] = &["read_file", "run_command"];
+        if stripped && PATH_NOTE_TOOLS.contains(&tool_name) {
+            let prev = self
+                .path_note_count
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if prev < PATH_NOTE_MAX {
+                let root = root_prefix.trim_end_matches('/');
+                call_result.content.push(Content::text(format!(
+                    "[codescout] paths are relative to {root}"
+                )));
+            }
+        }
+        call_result
+    }
+
     /// Replace the resource registry after an `activate_project` call that may have
     /// changed the active memory directory.
     async fn refresh_resources(&self) {
@@ -461,39 +498,7 @@ impl CodeScoutServer {
             "tool_done"
         );
 
-        // Strip the absolute project root from all output to reduce token usage.
-        // Agents work exclusively within the project directory; relative paths
-        // carry all necessary information. The full root (e.g. /home/user/project)
-        // is a long repeated prefix that appears in every "file" field and error
-        // message. Buffer content (@tool_xxx refs) is covered here too: it only
-        // re-enters the pipeline through run_command, which also passes through
-        // call_tool.
-        let root_prefix = self
-            .agent
-            .project_root()
-            .await
-            .map(|p| format!("{}/", p.display()))
-            .unwrap_or_default();
-
-        let (mut call_result, stripped) = strip_project_root_from_result(call_result, &root_prefix);
-
-        // "Low hint": for tools that echo raw content (file contents, shell output),
-        // append a one-liner so agents can distinguish stripped absolute paths from
-        // genuine relative path values in file content. Capped at PATH_NOTE_MAX per
-        // session — after that the agent has seen it enough times to remember.
-        const PATH_NOTE_MAX: usize = 3;
-        const PATH_NOTE_TOOLS: &[&str] = &["read_file", "run_command"];
-        if stripped && PATH_NOTE_TOOLS.contains(&req.name.as_ref()) {
-            let prev = self
-                .path_note_count
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if prev < PATH_NOTE_MAX {
-                let root = root_prefix.trim_end_matches('/');
-                call_result.content.push(Content::text(format!(
-                    "[codescout] paths are relative to {root}"
-                )));
-            }
-        }
+        let call_result = self.post_process(call_result, &req.name).await;
 
         drop(write_guard);
         Ok(call_result)
