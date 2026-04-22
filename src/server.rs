@@ -178,6 +178,11 @@ impl CodeScoutServer {
         self.tools.iter().find(|t| t.name() == name).cloned()
     }
 
+    fn resolve_tool(&self, name: &str) -> std::result::Result<Arc<dyn Tool>, McpError> {
+        self.find_tool(name)
+            .ok_or_else(|| McpError::invalid_params(format!("unknown tool: '{}'", name), None))
+    }
+
     /// Replace the resource registry after an `activate_project` call that may have
     /// changed the active memory directory.
     async fn refresh_resources(&self) {
@@ -276,9 +281,7 @@ impl CodeScoutServer {
         tracing::info!(tool = %req.name, ?arg_keys, "tool_call");
         let tool_start = std::time::Instant::now();
 
-        let tool = self.find_tool(&req.name).ok_or_else(|| {
-            McpError::invalid_params(format!("unknown tool: '{}'", req.name), None)
-        })?;
+        let tool = self.resolve_tool(&req.name)?;
 
         // Check tool access before dispatching
         let security = self.agent.security_config().await;
