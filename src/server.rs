@@ -1242,6 +1242,112 @@ mod tests {
         }
     }
 
+    /// Guard against prompt-surface drift: every backticked snake_case identifier
+    /// in `server_instructions.md`, `onboarding_prompt.md`, and the generated
+    /// `build_system_prompt_draft` output must resolve to a real registered tool
+    /// name or appear in the known-non-tool allowlist below. When you rename or
+    /// remove a tool, the compiler won't catch stale prompt mentions — this test
+    /// does.
+    #[tokio::test]
+    async fn prompt_surfaces_reference_only_real_tools() {
+        use std::collections::HashSet;
+
+        let (_dir, server) = make_server().await;
+        let real_tools: HashSet<&str> = server.tools.iter().map(|t| t.name()).collect();
+
+        // Tokens that appear backticked in the surfaces but are not tool names.
+        // Grow this list as prompts evolve; shrink it when a token disappears
+        // from the surfaces. Keep entries sorted.
+        let allowlist: HashSet<&str> = [
+            "acknowledge_risk",
+            "architecture",
+            "by_file",
+            "class",
+            "code",
+            "conventions",
+            "cwd",
+            "detail_level",
+            "domain_glossary",
+            "end_line",
+            "features_md",
+            "file_id",
+            "files",
+            "fn",
+            "gotchas",
+            "hardware",
+            "include_body",
+            "json_path",
+            "kind",
+            "language_patterns",
+            "limit",
+            "model",
+            "model_options",
+            "name",
+            "name_path",
+            "new_body",
+            "new_string",
+            "next",
+            "offset",
+            "old_string",
+            "output_id",
+            "path",
+            "pattern",
+            "project_overview",
+            "protected_memories",
+            "query",
+            "read_only",
+            "replace_all",
+            "run_in_background",
+            "scope",
+            "sed",
+            "start_line",
+            "struct",
+            "symbol",
+            "system_prompt",
+            "timeout_secs",
+            "toml_key",
+            "untracked",
+            "url",
+        ]
+        .into_iter()
+        .collect();
+
+        let draft = crate::prompts::builders::build_system_prompt_draft(&[], &[], None, None, &[]);
+        let surfaces: &[(&str, &str)] = &[
+            (
+                "server_instructions.md",
+                include_str!("prompts/server_instructions.md"),
+            ),
+            (
+                "onboarding_prompt.md",
+                include_str!("prompts/onboarding_prompt.md"),
+            ),
+            ("build_system_prompt_draft", draft.as_str()),
+        ];
+
+        let re = regex::Regex::new(r"`([a-z][a-z_0-9]{2,})`").unwrap();
+        let mut drift = Vec::<String>::new();
+        for (surface, body) in surfaces {
+            for cap in re.captures_iter(body) {
+                let ident = cap.get(1).unwrap().as_str();
+                if real_tools.contains(ident) || allowlist.contains(ident) {
+                    continue;
+                }
+                drift.push(format!(
+                    "{surface}: `{ident}` looks like a tool name but is not \
+                     registered — rename the reference to a real tool, or add \
+                     it to the allowlist in this test if it's a non-tool token"
+                ));
+            }
+        }
+
+        assert!(
+            drift.is_empty(),
+            "prompt-surface drift detected:\n  {}",
+            drift.join("\n  ")
+        );
+    }
+
     #[tokio::test]
     async fn find_tool_returns_none_for_unknown() {
         let (_dir, server) = make_server().await;
