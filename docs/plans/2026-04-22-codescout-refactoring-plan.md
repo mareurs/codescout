@@ -417,6 +417,10 @@ provider → format output. Nothing else.
 
 ### Phase 7 — Mechanise prompt-surface sync
 
+**Status:** ✅ DONE (commit `555b1ac` — step 1 only; step 2 templating
+not pursued). CLAUDE.md's manual-grep rule downgraded to a pointer at
+the test.
+
 **Goal:** Eliminate the manual "grep all three surfaces when renaming a tool"
 discipline that CLAUDE.md currently enforces by hand.
 
