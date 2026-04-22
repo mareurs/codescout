@@ -139,6 +139,9 @@ fn resolve_head_sha(root: &Path) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+// ---------------------------------------------------------------------------
+// Lifecycle & activation
+// ---------------------------------------------------------------------------
 impl Agent {
     pub async fn new(project: Option<PathBuf>) -> Result<Self> {
         let (workspace, home_root) = if let Some(raw) = project {
@@ -320,42 +323,6 @@ impl Agent {
         Ok(())
     }
 
-    /// Get or create a cached embedder for the given model.
-    /// If the cached model+url matches, returns the existing embedder.
-    /// The Mutex deduplicates concurrent creation — second caller waits and reuses.
-    pub async fn get_or_create_embedder(
-        &self,
-        model: &str,
-    ) -> anyhow::Result<Arc<dyn codescout_embed::Embedder>> {
-        // Read url and api_key from project config
-        let (url, api_key) = self
-            .with_project(|p| {
-                Ok((
-                    p.config.embeddings.url.clone(),
-                    p.config.embeddings.api_key.clone(),
-                ))
-            })
-            .await
-            .unwrap_or((None, None));
-
-        let cache_key = match &url {
-            Some(u) => format!("{}@{}", model, u),
-            None => model.to_string(),
-        };
-
-        let mut guard = self.cached_embedder.lock().await;
-        if let Some((cached_key, embedder)) = guard.as_ref() {
-            if *cached_key == cache_key {
-                return Ok(Arc::clone(embedder));
-            }
-        }
-        let embedder: Arc<dyn codescout_embed::Embedder> = Arc::from(
-            codescout_embed::create_embedder_with_config(model, url.as_deref(), api_key).await?,
-        );
-        *guard = Some((cache_key, Arc::clone(&embedder)));
-        Ok(embedder)
-    }
-
     /// Get the active project root, or error if none is set.
     pub async fn require_project_root(&self) -> Result<PathBuf> {
         let inner = self.inner.read().await;
@@ -532,6 +499,24 @@ impl Agent {
             .ok_or_else(|| anyhow::anyhow!("No active project"))?
             .resolve_root(project, file_hint)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Project files & status
+// ---------------------------------------------------------------------------
+impl Agent {
+    /// Run a closure with a read-lock on the active project.
+    /// Returns an error if no project is active.
+    pub async fn with_project<F, T>(&self, f: F) -> Result<T>
+    where
+        F: FnOnce(&ActiveProject) -> Result<T>,
+    {
+        let inner = self.inner.read().await;
+        let project = inner
+            .active_project()
+            .ok_or_else(|| anyhow::anyhow!("No active project. Use activate_project first."))?;
+        f(project)
+    }
 
     /// Mark a file as written-but-not-yet-indexed.
     /// Called by every write tool after modifying a source file.
@@ -655,6 +640,27 @@ impl Agent {
         Some(summaries)
     }
 
+    /// If `path` is the active project's `.codescout/project.toml`, reload the
+    /// in-memory config from disk. Called by `edit_file` after every successful
+    /// write so that tools like `semantic_search` see the updated model immediately
+    /// without requiring a session restart.
+    pub async fn reload_config_if_project_toml(&self, path: &std::path::Path) {
+        let mut inner = self.inner.write().await;
+        if let Some(ref mut p) = inner.active_project_mut() {
+            let toml_path = p.root.join(".codescout").join("project.toml");
+            if path == toml_path {
+                if let Ok(fresh) = crate::config::project::ProjectConfig::load_or_default(&p.root) {
+                    p.config = fresh;
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Workspace & discovery
+// ---------------------------------------------------------------------------
+impl Agent {
     /// Get optional project root (None if no workspace is active).
     ///
     /// Uses the same `focused_project_root()` path as `require_project_root()` so
@@ -683,58 +689,6 @@ impl Agent {
             (None, None) => true,
             _ => false,
         }
-    }
-
-    /// Get the security config, or defaults if no project is active.
-    /// Populates `library_paths` from the active project's library registry.
-    pub async fn security_config(&self) -> crate::util::path_security::PathSecurityConfig {
-        let inner = self.inner.read().await;
-        match inner.active_project() {
-            Some(p) => {
-                let mut config = p.config.security.to_path_security_config();
-                config.library_paths = p
-                    .library_registry
-                    .all()
-                    .iter()
-                    .map(|e| e.path.clone())
-                    .collect();
-                if p.read_only {
-                    config.file_write_enabled = false;
-                }
-                config
-            }
-            None => crate::util::path_security::PathSecurityConfig::default(),
-        }
-    }
-
-    /// Run a closure with a read-lock on the active project.
-    /// Returns an error if no project is active.
-    pub async fn with_project<F, T>(&self, f: F) -> Result<T>
-    where
-        F: FnOnce(&ActiveProject) -> Result<T>,
-    {
-        let inner = self.inner.read().await;
-        let project = inner
-            .active_project()
-            .ok_or_else(|| anyhow::anyhow!("No active project. Use activate_project first."))?;
-        f(project)
-    }
-
-    /// Resolve the per-language `mux` override from the active project's config.
-    /// Returns `None` when no project is active or no override is set for the language.
-    pub async fn lsp_mux_override(&self, language: &str) -> Option<bool> {
-        self.with_project(|p| Ok(p.config.lsp.langs.get(language).and_then(|o| o.mux)))
-            .await
-            .unwrap_or(None)
-    }
-
-    /// Get a clone of the library registry, if a project is active.
-    pub async fn library_registry(&self) -> Option<LibraryRegistry> {
-        self.inner
-            .read()
-            .await
-            .active_project()
-            .map(|p| p.library_registry.clone())
     }
 
     /// Return the list of discovered projects from the active workspace.
@@ -772,6 +726,50 @@ impl Agent {
             })
             .collect()
     }
+}
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+impl Agent {
+    /// Get the security config, or defaults if no project is active.
+    /// Populates `library_paths` from the active project's library registry.
+    pub async fn security_config(&self) -> crate::util::path_security::PathSecurityConfig {
+        let inner = self.inner.read().await;
+        match inner.active_project() {
+            Some(p) => {
+                let mut config = p.config.security.to_path_security_config();
+                config.library_paths = p
+                    .library_registry
+                    .all()
+                    .iter()
+                    .map(|e| e.path.clone())
+                    .collect();
+                if p.read_only {
+                    config.file_write_enabled = false;
+                }
+                config
+            }
+            None => crate::util::path_security::PathSecurityConfig::default(),
+        }
+    }
+
+    /// Resolve the per-language `mux` override from the active project's config.
+    /// Returns `None` when no project is active or no override is set for the language.
+    pub async fn lsp_mux_override(&self, language: &str) -> Option<bool> {
+        self.with_project(|p| Ok(p.config.lsp.langs.get(language).and_then(|o| o.mux)))
+            .await
+            .unwrap_or(None)
+    }
+
+    /// Get a clone of the library registry, if a project is active.
+    pub async fn library_registry(&self) -> Option<LibraryRegistry> {
+        self.inner
+            .read()
+            .await
+            .active_project()
+            .map(|p| p.library_registry.clone())
+    }
 
     /// Persist the library registry to disk.
     pub async fn save_library_registry(&self) -> Result<()> {
@@ -781,6 +779,47 @@ impl Agent {
             .ok_or_else(|| anyhow::anyhow!("No active project"))?;
         let path = project.root.join(".codescout").join("libraries.json");
         project.library_registry.save(&path)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Embedding & library indexing
+// ---------------------------------------------------------------------------
+impl Agent {
+    /// Get or create a cached embedder for the given model.
+    /// If the cached model+url matches, returns the existing embedder.
+    /// The Mutex deduplicates concurrent creation — second caller waits and reuses.
+    pub async fn get_or_create_embedder(
+        &self,
+        model: &str,
+    ) -> anyhow::Result<Arc<dyn codescout_embed::Embedder>> {
+        // Read url and api_key from project config
+        let (url, api_key) = self
+            .with_project(|p| {
+                Ok((
+                    p.config.embeddings.url.clone(),
+                    p.config.embeddings.api_key.clone(),
+                ))
+            })
+            .await
+            .unwrap_or((None, None));
+
+        let cache_key = match &url {
+            Some(u) => format!("{}@{}", model, u),
+            None => model.to_string(),
+        };
+
+        let mut guard = self.cached_embedder.lock().await;
+        if let Some((cached_key, embedder)) = guard.as_ref() {
+            if *cached_key == cache_key {
+                return Ok(Arc::clone(embedder));
+            }
+        }
+        let embedder: Arc<dyn codescout_embed::Embedder> = Arc::from(
+            codescout_embed::create_embedder_with_config(model, url.as_deref(), api_key).await?,
+        );
+        *guard = Some((cache_key, Arc::clone(&embedder)));
+        Ok(embedder)
     }
 
     /// Check if we should nudge about a library. Returns true at most once per
@@ -803,22 +842,6 @@ impl Agent {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         nudged.insert(lib_name.to_string())
-    }
-
-    /// If `path` is the active project's `.codescout/project.toml`, reload the
-    /// in-memory config from disk. Called by `edit_file` after every successful
-    /// write so that tools like `semantic_search` see the updated model immediately
-    /// without requiring a session restart.
-    pub async fn reload_config_if_project_toml(&self, path: &std::path::Path) {
-        let mut inner = self.inner.write().await;
-        if let Some(ref mut p) = inner.active_project_mut() {
-            let toml_path = p.root.join(".codescout").join("project.toml");
-            if path == toml_path {
-                if let Ok(fresh) = crate::config::project::ProjectConfig::load_or_default(&p.root) {
-                    p.config = fresh;
-                }
-            }
-        }
     }
 
     /// Update the indexing state for a named library.
