@@ -328,6 +328,8 @@ when tools are already organized).
 
 ### Phase 5 — Extract `server.rs::call_tool_inner` pipeline
 
+**Status:** ✅ DONE (commits `6cc878d` → `28a2932`).
+
 **Goal:** Reduce `call_tool_inner` from 200 lines to ~10 lines that call 6
 named helpers.
 
