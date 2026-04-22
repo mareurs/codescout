@@ -227,11 +227,15 @@ Key rules (not just facts):
 The project has **three prompt surfaces** that reference tool names:
 - `src/prompts/server_instructions.md` — injected every MCP request
 - `src/prompts/onboarding_prompt.md` — one-time onboarding
-- `build_system_prompt_draft()` in `src/tools/workflow.rs` — generated per-project
+- `build_system_prompt_draft()` in `src/prompts/builders.rs` — generated per-project
 
 **When tools get renamed/consolidated, all three need coordinated updates.** Files
 closer to the change get updated; distant ones accumulate stale refs ("distance
-from change" problem). Always grep all three surfaces when modifying tool names.
+from change" problem). The test
+`server::tests::prompt_surfaces_reference_only_real_tools` catches stale
+tool-name mentions across all three surfaces at build time — if it fails,
+either fix the stale reference or (if the token is a non-tool identifier like
+a param name) add it to the test's allowlist.
 
 **Any change to tool behavior or signatures requires a prompt surface review.**
 This includes: adding new tools, renaming tools, changing parameter semantics,
