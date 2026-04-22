@@ -3,14 +3,17 @@
 > Continuation of `2026-04-22-codescout-refactoring-plan.md`.
 > Picks up where Phase 1 left off after commit `a81ece2`.
 
-**Status:** In progress on branch `refactoring`.
+**Status:** ✅ Complete on branch `refactoring`.
 
-- Phase 1b.1 ✅ done — commit `29c0568` (path_helpers.rs extracted; mod.rs 6793 → 6455)
-- Phase 1b.2 ✅ done — commit `8eb4d2e` (symbol_query.rs extracted; mod.rs 6455 → 5995)
-- Phase 1b.3 ✅ done — commit `75149cd` (edit_helpers.rs extracted; mod.rs 5995 → 5528)
-- Phase 1b.4 🟡 partial — commit `eb572d2` (3 floating format_list_symbols tests moved to display.rs)
-  - Remaining: migrate 226 tests from two `mod tests {}` blocks (L143 & L2894) into per-helper files
-- Phase 1b.5 ⏳ pending — blocked on 1b.4 (mod.rs ≤ 100 line exit condition requires test migration)
+- Phase 1b.1 ✅ `29c0568` (path_helpers.rs; mod.rs 6793 → 6455)
+- Phase 1b.2 ✅ `8eb4d2e` (symbol_query.rs; mod.rs 6455 → 5995)
+- Phase 1b.3 ✅ `75149cd` (edit_helpers.rs; mod.rs 5995 → 5528)
+- Phase 1b.4 ✅ `eb572d2` + `0ffbeb6` (3 floating tests → display.rs; remaining `mod tests {}` block → tests.rs wholesale; mod.rs 5528 → 83)
+- Phase 1b.5 ✅ `bf8e211` (transitional re-imports dropped; sibling tool files and tests.rs import directly from helper modules; mod.rs 83 → 28)
+
+Final state: mod.rs is 28 lines (module declarations + tool re-exports only). All 1751 tests pass. clippy clean.
+
+**Deviation:** Phase 1b.4 moved the entire `mod tests {}` block to a single sibling `tests.rs` rather than splitting tests per helper file. The 226 tests are interwoven — many span multiple helpers — so bulk relocation was chosen over per-test reclassification. Further per-helper splitting of `tests.rs` can be done incrementally later without structural risk.
 
 ---
 
