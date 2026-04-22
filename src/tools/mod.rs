@@ -10,6 +10,7 @@ pub mod file;
 pub mod file_summary;
 pub(crate) mod format;
 pub mod library;
+pub mod list_dir;
 pub mod memory;
 pub mod output;
 pub mod output_buffer;
