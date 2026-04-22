@@ -1,0 +1,290 @@
+//! `grep` tool and related format helpers.
+
+use anyhow::Result;
+use serde_json::{json, Value};
+
+use super::format::format_overflow;
+use super::{optional_u64_param, RecoverableError, Tool, ToolContext};
+
+// ── grep ───────────────────────────────────────────────────────
+
+pub struct Grep;
+
+#[async_trait::async_trait]
+impl Tool for Grep {
+    fn name(&self) -> &str {
+        "grep"
+    }
+
+    fn description(&self) -> &str {
+        "Regex search across files. Returns matching lines with location. Pass context_lines for surrounding code."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["pattern"],
+            "properties": {
+                "pattern": { "type": "string", "description": "Regex pattern" },
+                "path": { "type": "string", "description": "File or directory (default: project root)" },
+                "limit": { "type": "integer", "default": 50, "description": "Max matching lines" },
+                "context_lines": { "type": "integer", "default": 0, "description": "Context lines before/after each match (max 20). Adjacent matches merge." }
+            }
+        })
+    }
+
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
+        let pattern = super::require_str_param_or(&input, "pattern", &["query", "regex"])?;
+        let raw_path = input["path"].as_str().unwrap_or(".");
+        let project_root = ctx.agent.project_root().await;
+        let security = ctx.agent.security_config().await;
+        let search_path = crate::util::path_security::validate_read_path(
+            raw_path,
+            project_root.as_deref(),
+            &security,
+        )?;
+        let max = optional_u64_param(&input, "limit").unwrap_or(50) as usize;
+        let context_lines = optional_u64_param(&input, "context_lines")
+            .unwrap_or(0)
+            .min(20) as usize;
+        let (re, is_literal_fallback) = match regex::RegexBuilder::new(pattern)
+            .size_limit(1 << 20)
+            .dfa_size_limit(1 << 20)
+            .build()
+        {
+            Ok(re) => (re, false),
+            Err(e) => {
+                if super::is_regex_like(pattern) {
+                    // User intended regex but it's broken — keep the error
+                    return Err(RecoverableError::with_hint(
+                        format!("invalid regex: {e}"),
+                        "patterns are full regex syntax — escape metacharacters like \\( \\. \\[ for literals",
+                    )
+                    .into());
+                }
+                // Plain text with metacharacters — search literally
+                let escaped = regex::escape(pattern);
+                let re = regex::RegexBuilder::new(&escaped)
+                    .size_limit(1 << 20)
+                    .dfa_size_limit(1 << 20)
+                    .build()
+                    .map_err(|e2| {
+                        RecoverableError::with_hint(
+                            format!("invalid pattern even after escaping: {e2}"),
+                            format!("original error: {e}"),
+                        )
+                    })?;
+                (re, true)
+            }
+        };
+        let mut matches = vec![];
+        let mut total_match_count = 0usize;
+        let mut hit_cap = false;
+
+        let walker = ignore::WalkBuilder::new(&search_path)
+            .hidden(true)
+            .git_ignore(true)
+            .build();
+        'outer: for entry in walker.flatten() {
+            if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(entry.path()) else {
+                continue;
+            };
+
+            if context_lines == 0 {
+                // Original behaviour: one entry per matching line
+                for (i, line) in text.lines().enumerate() {
+                    if re.is_match(line) {
+                        total_match_count += 1;
+                        matches.push(json!({
+                            "file": entry.path().display().to_string(),
+                            "line": i + 1,
+                            "content": line
+                        }));
+                        if matches.len() >= max {
+                            hit_cap = true;
+                            break 'outer;
+                        }
+                    }
+                }
+            } else {
+                // Context mode: merge overlapping windows into blocks
+                let file_lines: Vec<&str> = text.lines().collect();
+                let n = file_lines.len();
+                // (block_start_idx, first_match_idx, block_end_idx) — all 0-indexed
+                let mut current: Option<(usize, usize, usize)> = None;
+
+                for (i, line) in file_lines.iter().enumerate() {
+                    if !re.is_match(line) {
+                        continue;
+                    }
+                    total_match_count += 1;
+                    let ctx_start = i.saturating_sub(context_lines);
+                    let ctx_end = (i + context_lines).min(n.saturating_sub(1));
+
+                    match current {
+                        None => {
+                            current = Some((ctx_start, i, ctx_end));
+                        }
+                        Some((blk_start, blk_first, blk_end)) => {
+                            if ctx_start <= blk_end + 1 {
+                                // Overlapping or adjacent: extend the current block
+                                current = Some((blk_start, blk_first, ctx_end.max(blk_end)));
+                            } else {
+                                // Non-overlapping: emit finished block, start new one
+                                let content = file_lines[blk_start..=blk_end].join("\n");
+                                matches.push(json!({
+                                    "file": entry.path().display().to_string(),
+                                    "match_line": blk_first + 1,
+                                    "start_line": blk_start + 1,
+                                    "content": content,
+                                }));
+                                current = Some((ctx_start, i, ctx_end));
+                            }
+                        }
+                    }
+
+                    if total_match_count >= max {
+                        hit_cap = true;
+                        break;
+                    }
+                }
+
+                // Emit the last in-flight block
+                if let Some((blk_start, blk_first, blk_end)) = current {
+                    let content = file_lines[blk_start..=blk_end].join("\n");
+                    matches.push(json!({
+                        "file": entry.path().display().to_string(),
+                        "match_line": blk_first + 1,
+                        "start_line": blk_start + 1,
+                        "content": content,
+                    }));
+                }
+
+                if total_match_count >= max {
+                    hit_cap = true;
+                    break 'outer;
+                }
+            }
+        }
+
+        // In context mode, matches contains merged blocks — fewer than total_match_count
+        // (which counts individual matching lines). Report blocks so `total` == `matches.len()`.
+        let shown_count = if context_lines > 0 {
+            matches.len()
+        } else {
+            total_match_count
+        };
+        let mut result = json!({ "matches": matches, "total": shown_count });
+        if hit_cap {
+            result["overflow"] = json!({
+                "shown": shown_count,
+                "hint": format!(
+                    "Showing first {} matches (cap hit). Narrow with a more specific pattern or path=<file>.",
+                    shown_count
+                )
+            });
+        }
+        if is_literal_fallback {
+            result["mode"] = json!("literal_fallback");
+            result["reason"] = json!("pattern was not valid regex — searched as literal text");
+        }
+        Ok(result)
+    }
+
+    fn format_compact(&self, result: &Value) -> Option<String> {
+        Some(format_grep(result))
+    }
+}
+
+// ── format helpers ──────────────────────────────────────────────────────
+
+pub(super) fn format_grep(val: &Value) -> String {
+    let matches = match val["matches"].as_array() {
+        Some(arr) => arr,
+        None => return String::new(),
+    };
+
+    let total = val["total"].as_u64().unwrap_or(matches.len() as u64);
+
+    if matches.is_empty() {
+        return "0 matches".to_string();
+    }
+
+    let is_context_mode = matches[0].get("start_line").is_some();
+
+    let match_word = if total == 1 { "match" } else { "matches" };
+    let mut out = format!("{total} {match_word}\n");
+
+    if val.get("mode").and_then(|m| m.as_str()) == Some("literal_fallback") {
+        out.insert_str(0, "[literal fallback] ");
+    }
+
+    if is_context_mode {
+        format_search_context_mode(&mut out, matches);
+    } else {
+        format_search_simple_mode(&mut out, matches);
+    }
+
+    if let Some(overflow) = val.get("overflow") {
+        if overflow.is_object() {
+            out.push('\n');
+            out.push_str(&format_overflow(overflow));
+        }
+    }
+
+    out
+}
+
+fn format_search_simple_mode(out: &mut String, matches: &[Value]) {
+    let locations: Vec<String> = matches
+        .iter()
+        .map(|m| {
+            let file = m["file"].as_str().unwrap_or("?");
+            let line = m["line"].as_u64().unwrap_or(0);
+            format!("{file}:{line}")
+        })
+        .collect();
+
+    let max_loc_len = locations.iter().map(|l| l.len()).max().unwrap_or(0);
+
+    for (i, m) in matches.iter().enumerate() {
+        let content = m["content"].as_str().unwrap_or("");
+        let padding = max_loc_len - locations[i].len();
+        out.push_str("\n  ");
+        out.push_str(&locations[i]);
+        for _ in 0..padding {
+            out.push(' ');
+        }
+        out.push_str("   ");
+        out.push_str(content.trim());
+    }
+}
+
+fn format_search_context_mode(out: &mut String, matches: &[Value]) {
+    let mut current_file: Option<&str> = None;
+
+    for m in matches {
+        let file = m["file"].as_str().unwrap_or("?");
+        let start_line = m["start_line"].as_u64().unwrap_or(1);
+        let content = m["content"].as_str().unwrap_or("");
+
+        if current_file != Some(file) {
+            out.push_str("\n  ");
+            out.push_str(file);
+            out.push('\n');
+            current_file = Some(file);
+        }
+
+        for (i, line) in content.lines().enumerate() {
+            let line_num = start_line + i as u64;
+            out.push_str(&format!("  {:<4} {}\n", line_num, line));
+        }
+    }
+
+    if out.ends_with('\n') {
+        out.pop();
+    }
+}
