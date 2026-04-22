@@ -154,7 +154,7 @@ See `docs/plans/2026-04-23-codescout-refactoring-plan-phase-1b.md` for details.
 ---
 ### Phase 2 — Decompose `src/tools/workflow.rs`
 
-**Status:** ⏳ Not started. Resume here next session.
+**Status:** ✅ DONE (commits `3947cd8` → `6f1bf8f`).
 
 **Goal:** Split `Onboarding` and `RunCommand` into separate files. Lift
 hardware-probe code out of `tools/` entirely (it isn't a tool).
