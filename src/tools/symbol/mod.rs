@@ -12,13 +12,15 @@ use crate::ast;
 use crate::lsp::SymbolInfo;
 
 mod display;
+mod goto_definition;
 mod hover;
 
+pub use goto_definition::GotoDefinition;
 pub use hover::Hover;
 
 use display::{
-    format_find_references, format_find_symbol, format_goto_definition, format_insert_code,
-    format_list_symbols, format_remove_symbol, format_rename_symbol, format_replace_symbol,
+    format_find_references, format_find_symbol, format_insert_code, format_list_symbols,
+    format_remove_symbol, format_rename_symbol, format_replace_symbol,
 };
 
 /// Lightweight timer for recording LSP first-response latency.
@@ -1877,166 +1879,6 @@ impl Tool for FindReferences {
     }
 }
 
-pub struct GotoDefinition;
-
-#[async_trait::async_trait]
-impl Tool for GotoDefinition {
-    fn name(&self) -> &str {
-        "goto_definition"
-    }
-    fn description(&self) -> &str {
-        "Jump to the definition of a symbol at a given line. \
-         Resolves types via LSP — handles method calls, trait impls, and cross-crate navigation. \
-         Auto-discovers library dependencies when definitions are outside the project."
-    }
-
-    fn long_docs(&self) -> Option<&str> {
-        Some(
-            "### Workflow: Dependency Tracing — \"How does data flow from A to B?\"\n\n\
-             | Step | Tool | Purpose |\n\
-             |------|------|---------|\n\
-             | 1 | `find_symbol(entry_point)` | Locate starting function |\n\
-             | 2 | `goto_definition` on called functions | Follow the call chain forward |\n\
-             | 3 | `hover` on parameters/return values | See resolved types at each stage |\n\
-             | 4 | `find_references` at destination | Confirm which callers reach this point |",
-        )
-    }
-
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "required": ["path", "line"],
-            "properties": {
-                "path": { "type": "string", "description": "File path (relative or absolute)" },
-                "line": { "type": "integer", "description": "1-indexed line number to jump from" },
-                "identifier": { "type": "string", "description": "Optional identifier on the line to target (disambiguates when multiple symbols on same line)" }
-            }
-        })
-    }
-    async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let rel_path = require_path_param(&input)?;
-        let line_1 = super::require_u64_param(&input, "line")? as u32;
-        if line_1 == 0 {
-            return Err(RecoverableError::with_hint(
-                "'line' must be >= 1 (1-indexed)",
-                "Line numbers are 1-indexed. Use line: 1 for the first line.",
-            )
-            .into());
-        }
-        let line_0 = line_1 - 1;
-        let identifier = input["identifier"].as_str();
-
-        let full_path = resolve_read_path(ctx, rel_path).await?;
-        let raw_lang = ast::detect_language(&full_path)
-            .ok_or_else(|| anyhow::anyhow!("unsupported language"))?;
-        let root = ctx.agent.require_project_root().await?;
-        let (client, lang) = get_lsp_client(ctx, &full_path).await?;
-
-        // Determine column: find identifier on the line, or use first non-whitespace
-        let source = std::fs::read_to_string(&full_path)?;
-        let source_line = source.lines().nth(line_0 as usize).ok_or_else(|| {
-            RecoverableError::with_hint(
-                format!(
-                    "line {} is beyond end of file ({})",
-                    line_1,
-                    full_path.display()
-                ),
-                "Check the line number — use list_symbols or grep to find correct lines",
-            )
-        })?;
-
-        let col = if let Some(ident) = identifier {
-            source_line.find(ident).ok_or_else(|| {
-                RecoverableError::with_hint(
-                    format!("identifier '{}' not found on line {}", ident, line_1),
-                    "Check the identifier spelling, or omit it to use the first symbol on the line",
-                )
-            })? as u32
-        } else {
-            source_line
-                .chars()
-                .take_while(|c| c.is_whitespace())
-                .count() as u32
-        };
-
-        let timer = LspTimer::start();
-        let definitions = client
-            .goto_definition(&full_path, line_0, col, &lang)
-            .await?;
-        timer.record(ctx, raw_lang, &root).await;
-
-        if definitions.is_empty() {
-            return Err(RecoverableError::with_hint(
-                format!("no definition found at {}:{}", full_path.display(), line_1),
-                "The LSP couldn't resolve a definition at this position. \
-                 Try specifying an 'identifier' parameter, or use find_symbol to search by name instead",
-            )
-            .into());
-        }
-
-        let mut results = Vec::new();
-        for loc in &definitions {
-            let def_path = uri_to_path(loc.uri.as_str());
-            let (file_display, source_tag) = if let Some(ref p) = def_path {
-                let tag = tag_external_path(p, &root, &ctx.agent).await;
-                let display = p
-                    .strip_prefix(&root)
-                    .map(|r| r.display().to_string())
-                    .unwrap_or_else(|_| p.display().to_string());
-                (display, tag)
-            } else {
-                (loc.uri.as_str().to_string(), "external".to_string())
-            };
-
-            // Read the definition line for context
-            let context = def_path
-                .as_ref()
-                .and_then(|p| std::fs::read_to_string(p).ok())
-                .and_then(|src| {
-                    src.lines()
-                        .nth(loc.range.start.line as usize)
-                        .map(|l| l.to_string())
-                })
-                .unwrap_or_default();
-
-            let mut def = json!({
-                "file": file_display,
-                "line": loc.range.start.line + 1,
-                "end_line": loc.range.end.line + 1,
-                "context": context.trim(),
-            });
-            if source_tag != "project" {
-                def["source"] = json!(source_tag);
-            }
-            // Nudge if library was discovered but not indexed
-            if let Some(lib_name) = source_tag.strip_prefix("lib:") {
-                if ctx.agent.should_nudge(lib_name).await {
-                    def["library_hint"] = json!({
-                        "name": lib_name,
-                        "status": "not_indexed",
-                        "hint": format!("Library '{}' discovered but not indexed. Run index_project(scope='lib:{}') to enable semantic search.", lib_name, lib_name)
-                    });
-                }
-                ctx.agent.maybe_auto_index_library(lib_name).await;
-            }
-            results.push(def);
-        }
-
-        Ok(json!({
-            "definitions": results,
-            "from": format!("{}:{}", full_path.file_name().unwrap_or_default().to_string_lossy(), line_1),
-        }))
-    }
-
-    fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(format_goto_definition(result))
-    }
-
-    fn availability(&self, _caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
-        crate::tools::Availability::RequiresLsp
-    }
-}
-
 /// Compute the true start of a symbol declaration for editing (remove/replace).
 ///
 /// Uses the LSP `range.start` (which includes attributes, doc comments, decorators)
@@ -3134,7 +2976,7 @@ fn collect_matching_symbols<'a>(symbols: &'a [SymbolInfo], name_path: &str) -> V
 ///
 /// Uses `url::Url` for correct handling of Windows drive letters,
 /// UNC paths, and percent-encoding.
-fn uri_to_path(uri: &str) -> Option<PathBuf> {
+pub(super) fn uri_to_path(uri: &str) -> Option<PathBuf> {
     url::Url::parse(uri)
         .ok()
         .and_then(|u| u.to_file_path().ok())
@@ -3337,7 +3179,7 @@ fn format_list_symbols_directory_map_with_overflow() {
 
 #[cfg(test)]
 mod tests {
-    use super::display::format_hover;
+    use super::display::{format_goto_definition, format_hover};
     use super::*;
     use crate::agent::Agent;
     use crate::tools::ToolContext;
