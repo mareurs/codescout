@@ -190,7 +190,7 @@ Cursor, custom agents). In particular:
 - Error hints should name codescout tools (`replace_symbol`, `insert_code`),
   not host-specific tools (`Edit`, `Write`). The LLM should never be tempted to
   sidestep codescout by falling back to its host's native file editing.
-- The companion plugin (`code-explorer-routing`) adds Claude Code–specific
+- The companion plugin (`codescout-companion`) adds Claude Code–specific
   enforcement (PreToolUse hooks) but the server itself must be self-contained:
   its gate logic, error messages, and instructions should guide any LLM toward
   the right tool without relying on external hooks.
@@ -246,7 +246,7 @@ update all three surfaces in the same commit.
 ### Onboarding Version
 
 When modifying system prompt surfaces, bump `ONBOARDING_VERSION` in
-`src/tools/workflow.rs`. This triggers automatic system prompt refresh for all
+`src/tools/onboarding.rs`. This triggers automatic system prompt refresh for all
 projects onboarded with the previous version.
 
 Bump when the generated system prompt would reference tool names, parameters,
@@ -289,9 +289,9 @@ over brevity. Follow these rules when modifying it:
 `docs/research/2026-03-21-superpowers-prompt-patterns.md` for the evidence behind
 these rules.
 
-## Companion Plugin: code-explorer-routing
+## Companion Plugin: codescout-companion
 
-This project has a companion Claude Code plugin at **`../claude-plugins/code-explorer-routing/`** that is **always active** when working on codescout. You must be aware of it.
+This project has a companion Claude Code plugin at **`../claude-plugins/codescout-companion/`** that is **always active** when working on codescout. You must be aware of it.
 
 **What it does:**
 - `SessionStart` hook (`hooks/session-start.sh`) — injects tool guidance + memory hints into every session
@@ -328,6 +328,5 @@ cold start behavior, circuit breaker, and LSP mux details.
 ## Docs
 
 - **`docs/PROGRESSIVE_DISCOVERABILITY.md`** — Canonical guide for output sizing, overflow hints, and agent guidance patterns. **READ THIS before adding or modifying any tool.**
-- `docs/plans/2026-02-25-v1-implementation-plan.md` — Sprint-level plan (Phase 0–5, 15 sprints)
 - `docs/ARCHITECTURE.md` — Component details, tech stack, design principles
 - `docs/ROADMAP.md` — Quick status overview
