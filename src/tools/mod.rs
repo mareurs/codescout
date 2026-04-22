@@ -20,9 +20,10 @@ pub mod usage;
 pub use usage::GetUsageStats;
 pub mod markdown;
 pub mod onboarding;
+pub mod run_command;
 pub mod section_coverage;
-pub mod workflow;
 pub use onboarding::Onboarding;
+pub use run_command::RunCommand;
 
 use std::sync::Arc;
 
