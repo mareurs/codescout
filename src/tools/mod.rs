@@ -7,7 +7,7 @@ pub mod ast;
 pub mod command_summary;
 pub mod config;
 pub mod create_file;
-pub mod file;
+pub mod edit_file;
 pub mod file_summary;
 pub(crate) mod format;
 pub mod glob;

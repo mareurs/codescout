@@ -1,4 +1,4 @@
-//! File system tools: read, write, search, list.
+//! `edit_file` tool and language-aware edit helpers.
 
 use anyhow::Result;
 use serde_json::{json, Value};
