@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use crate::lsp::SymbolInfo;
 
-use super::symbol_query::find_ast_end_line_in;
+use crate::symbol::query::find_ast_end_line_in;
 
 /// Compute the true start of a symbol declaration for editing (remove/replace).
 ///
@@ -43,7 +43,7 @@ use super::symbol_query::find_ast_end_line_in;
 /// `range_start_line`. This keeps the fix language-agnostic — it covers Kotlin, Java,
 /// Scala, and any future LSP with the same quirk — without risking false positives
 /// in languages where `*`-prefixed lines have non-comment meaning (e.g. Rust `*mut`).
-pub(super) fn editing_start_line(sym: &crate::lsp::SymbolInfo, lines: &[&str]) -> usize {
+pub fn editing_start_line(sym: &crate::lsp::SymbolInfo, lines: &[&str]) -> usize {
     if let Some(r) = sym.range_start_line {
         let r = r as usize;
         if r < lines.len() {
@@ -115,7 +115,7 @@ pub(super) fn editing_start_line(sym: &crate::lsp::SymbolInfo, lines: &[&str]) -
 ///
 /// When AST finds the symbol, we trust it unconditionally. When AST can't find it
 /// (different language, name mismatch), we fall back to the LSP end line.
-pub(super) fn editing_end_line(sym: &crate::lsp::SymbolInfo) -> u32 {
+pub fn editing_end_line(sym: &crate::lsp::SymbolInfo) -> u32 {
     let Ok(ast_syms) = crate::ast::extract_symbols(&sym.file) else {
         return sym.end_line;
     };
@@ -138,7 +138,7 @@ pub(super) fn editing_end_line(sym: &crate::lsp::SymbolInfo) -> u32 {
 ///
 /// Returns the clamped `(start, end)` where `end` is an exclusive upper bound
 /// suitable for `lines[start..end]` slicing.
-pub(super) fn clamp_range_to_parent(
+pub fn clamp_range_to_parent(
     start: usize,
     end: usize,
     parent_body_start: usize,
@@ -155,7 +155,7 @@ pub(super) fn clamp_range_to_parent(
 ///
 /// Used by `replace_symbol` / `remove_symbol` to compare pre- vs post-write
 /// symbol sets and detect dropped siblings (BUG-044).
-pub(super) fn collect_all_name_paths(
+pub fn collect_all_name_paths(
     syms: &[crate::lsp::SymbolInfo],
 ) -> std::collections::HashSet<String> {
     fn walk(syms: &[crate::lsp::SymbolInfo], out: &mut std::collections::HashSet<String>) {
@@ -174,7 +174,7 @@ pub(super) fn collect_all_name_paths(
 /// LSP and AST name_paths diverge on Rust impl blocks (LSP: `impl Type/m`, AST: `Type/m`),
 /// so we cannot match by `name_path` directly. Matching by simple name + start-line is
 /// the same heuristic used by `find_ast_end_line_in`.
-pub(super) fn find_ast_name_path(
+pub fn find_ast_name_path(
     ast_syms: &[crate::lsp::SymbolInfo],
     lsp_name: &str,
     lsp_start: u32,
@@ -202,7 +202,7 @@ pub(super) fn find_ast_name_path(
 /// - Python/Java decorators: `@decorator`, `@app.route("/path")`
 /// - Doc comments: `///`, `//!`, `//` (Go-style), `/** ... */`
 /// - Block comments: `/* ... */` (multi-line), including bare `*` continuation lines
-pub(super) fn find_insert_before_line(lines: &[&str], symbol_start: usize) -> usize {
+pub fn find_insert_before_line(lines: &[&str], symbol_start: usize) -> usize {
     let mut cursor = symbol_start;
     // Track unclosed brackets when scanning upward through multi-line attributes.
     // When we see `)` or `]` without a matching opener on the same line, we know
@@ -269,17 +269,17 @@ pub(super) fn find_insert_before_line(lines: &[&str], symbol_start: usize) -> us
 
 /// A textual match found during post-rename sweep.
 #[derive(Debug)]
-pub(super) struct TextualMatch {
+pub struct TextualMatch {
     /// Relative path from project root
-    pub(super) file: String,
+    pub file: String,
     /// All matching line numbers (1-indexed)
-    pub(super) lines: Vec<u32>,
+    pub lines: Vec<u32>,
     /// First N matching line contents (trimmed)
-    pub(super) previews: Vec<String>,
+    pub previews: Vec<String>,
     /// Total occurrences in this file
-    pub(super) occurrence_count: usize,
+    pub occurrence_count: usize,
     /// "documentation" | "config" | "source"
-    pub(super) kind: &'static str,
+    pub kind: &'static str,
 }
 
 /// Classify a file by extension for result prioritization.
@@ -302,7 +302,7 @@ fn classify_sort_key(kind: &str) -> u8 {
 
 /// Post-rename text sweep: finds remaining textual occurrences of `old_name`
 /// that the LSP rename didn't touch.
-pub(super) fn text_sweep(
+pub fn text_sweep(
     project_root: &Path,
     old_name: &str,
     lsp_modified_files: &std::collections::HashSet<PathBuf>,
@@ -379,7 +379,7 @@ pub(super) fn text_sweep(
 }
 
 /// Write lines back to a file, preserving a trailing newline if the original had one.
-pub(super) fn write_lines(
+pub fn write_lines(
     path: &std::path::Path,
     lines: &[&str],
     had_trailing_newline: bool,
@@ -399,7 +399,7 @@ pub(super) fn write_lines(
 ///
 /// Returns `None` for top-level symbols (no `/` in path) or if the tree doesn't
 /// contain the child as a direct descendant.
-pub(super) fn find_parent_symbol<'a>(
+pub fn find_parent_symbol<'a>(
     symbols: &'a [SymbolInfo],
     child_name_path: &str,
 ) -> Option<&'a SymbolInfo> {
@@ -438,7 +438,7 @@ fn utf16_to_byte_offset(s: &str, utf16_offset: usize) -> usize {
 /// Apply LSP TextEdits to a source string, returning the modified version.
 ///
 /// Edits are applied from bottom to top to preserve line numbers.
-pub(super) fn apply_text_edits(content: &str, edits: &[lsp_types::TextEdit]) -> String {
+pub fn apply_text_edits(content: &str, edits: &[lsp_types::TextEdit]) -> String {
     let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
     // Ensure trailing newline is preserved
     if content.ends_with('\n') {

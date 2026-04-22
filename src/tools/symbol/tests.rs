@@ -6,10 +6,6 @@ use super::display::{
     format_find_references, format_find_symbol, format_goto_definition, format_hover,
     format_list_symbols,
 };
-use super::edit_helpers::{
-    apply_text_edits, clamp_range_to_parent, editing_end_line, editing_start_line,
-    find_insert_before_line, find_parent_symbol, text_sweep, write_lines,
-};
 use super::find_symbol::{build_by_file, make_find_symbol_hint};
 use super::list_symbols::{
     ast_class_names_for_dir, count_files_by_subdir, find_split_point, flat_symbol_count,
@@ -19,14 +15,18 @@ use super::path_helpers::{
     classify_reference_path, format_library_path, resolve_library_roots, tag_external_path,
     uri_to_path,
 };
-use super::symbol_query::{
+use super::*;
+use crate::agent::Agent;
+use crate::lsp::SymbolInfo;
+use crate::symbol::edit::{
+    apply_text_edits, clamp_range_to_parent, editing_end_line, editing_start_line,
+    find_insert_before_line, find_parent_symbol, text_sweep, write_lines,
+};
+use crate::symbol::query::{
     collect_matching, filter_variable_symbols, find_matching_symbol, find_symbol_by_name_path,
     find_unique_symbol_by_name_path, is_lead_in_line, matches_kind_filter, symbol_name_matches,
     symbol_to_json, validate_symbol_position, validate_symbol_range,
 };
-use super::*;
-use crate::agent::Agent;
-use crate::lsp::SymbolInfo;
 use crate::tools::output::{OutputGuard, OverflowInfo};
 use crate::tools::{optional_u64_param, parse_bool_param, RecoverableError, Tool, ToolContext};
 use serde_json::{json, Value};

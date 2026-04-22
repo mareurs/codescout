@@ -1,7 +1,6 @@
 //! Symbol-level tools backed by the LSP client.
 
 mod display;
-mod edit_helpers;
 mod find_references;
 mod find_symbol;
 mod goto_definition;
@@ -12,7 +11,6 @@ mod path_helpers;
 mod remove_symbol;
 mod rename_symbol;
 mod replace_symbol;
-mod symbol_query;
 
 #[cfg(test)]
 mod tests;

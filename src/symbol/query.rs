@@ -12,7 +12,7 @@ use crate::tools::ToolContext;
 
 /// Returns true if the symbol's kind matches the given filter string.
 /// Unknown filter values return true (no filtering).
-pub(super) fn matches_kind_filter(kind: &crate::lsp::SymbolKind, filter: &str) -> bool {
+pub fn matches_kind_filter(kind: &crate::lsp::SymbolKind, filter: &str) -> bool {
     use crate::lsp::SymbolKind as K;
     match filter {
         "function" => matches!(kind, K::Function | K::Method | K::Constructor),
@@ -31,7 +31,7 @@ pub(super) fn matches_kind_filter(kind: &crate::lsp::SymbolKind, filter: &str) -
 /// bash-language-server reports all local variables as children of their enclosing
 /// function, flooding the output with low-signal noise. Stripping them leaves only
 /// functions and other structural symbols.
-pub(super) fn filter_variable_symbols(symbols: Vec<Value>) -> Vec<Value> {
+pub fn filter_variable_symbols(symbols: Vec<Value>) -> Vec<Value> {
     symbols
         .into_iter()
         .filter(|s| s["kind"].as_str() != Some("Variable"))
@@ -50,7 +50,7 @@ pub(super) fn filter_variable_symbols(symbols: Vec<Value>) -> Vec<Value> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn collect_matching(
+pub fn collect_matching(
     symbols: &[SymbolInfo],
     name_ok: &dyn Fn(&SymbolInfo) -> bool,
     include_body: bool,
@@ -85,7 +85,7 @@ pub(super) fn collect_matching(
     }
 }
 
-pub(super) fn symbol_to_json(
+pub fn symbol_to_json(
     sym: &SymbolInfo,
     include_body: bool,
     source_code: Option<&str>,
@@ -117,7 +117,7 @@ pub(super) fn symbol_to_json(
             let lines: Vec<&str> = src.lines().collect();
             // Use the full range (including attributes and doc comments) so
             // the body matches what replace_symbol would replace.
-            let body_start = super::edit_helpers::editing_start_line(sym, &lines);
+            let body_start = crate::symbol::edit::editing_start_line(sym, &lines);
             let end = (sym.end_line as usize + 1).min(lines.len());
             if body_start < lines.len() {
                 map.insert("body".into(), json!(lines[body_start..end].join("\n")));
@@ -149,7 +149,7 @@ pub(super) fn symbol_to_json(
 /// Detect degenerate LSP ranges where start_line == end_line but tree-sitter
 /// shows the symbol spans multiple lines. Returns RecoverableError instead of
 /// silently fixing — consistent with "trust LSP, validate, fail loudly".
-pub(super) fn validate_symbol_range(sym: &SymbolInfo) -> anyhow::Result<()> {
+pub fn validate_symbol_range(sym: &SymbolInfo) -> anyhow::Result<()> {
     let Ok(ast_syms) = crate::ast::extract_symbols(&sym.file) else {
         return Ok(());
     };
@@ -188,7 +188,7 @@ pub(super) fn validate_symbol_range(sym: &SymbolInfo) -> anyhow::Result<()> {
 /// a fresh `did_change`. The old check searched the entire `[range_start..end_line]`
 /// window, which masked staleness when the true declaration appeared later in
 /// the same range.
-pub(super) fn validate_symbol_position(sym: &SymbolInfo, lines: &[&str]) -> anyhow::Result<()> {
+pub fn validate_symbol_position(sym: &SymbolInfo, lines: &[&str]) -> anyhow::Result<()> {
     let sl = sym.start_line as usize;
     if sl >= lines.len() {
         return Err(RecoverableError::with_hint(
@@ -248,7 +248,7 @@ pub(super) fn validate_symbol_position(sym: &SymbolInfo, lines: &[&str]) -> anyh
 /// attributes/decorators above the real keyword line. Used by
 /// `validate_symbol_position` to distinguish acceptable LSP range over-extension
 /// from stale positions pointing at unrelated code.
-pub(super) fn is_lead_in_line(line: &str) -> bool {
+pub fn is_lead_in_line(line: &str) -> bool {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return true;
@@ -274,11 +274,7 @@ pub(super) fn is_lead_in_line(line: &str) -> bool {
 
 /// Recursively search `symbols` for a symbol with the given name whose
 /// `start_line` is within 1 of `lsp_start`. Returns its `end_line`.
-pub(super) fn find_ast_end_line_in(
-    symbols: &[SymbolInfo],
-    name: &str,
-    lsp_start: u32,
-) -> Option<u32> {
+pub fn find_ast_end_line_in(symbols: &[SymbolInfo], name: &str, lsp_start: u32) -> Option<u32> {
     for sym in symbols {
         if sym.name == name && sym.start_line.abs_diff(lsp_start) <= 1 {
             return Some(sym.end_line);
@@ -303,7 +299,7 @@ pub(super) fn find_ast_end_line_in(
 ///
 /// Returns the validated `SymbolInfo` and the full `document_symbols` list it
 /// came from (the caller needs the list for sibling/parent lookups).
-pub(super) async fn fetch_validated_symbol(
+pub async fn fetch_validated_symbol(
     client: &std::sync::Arc<dyn crate::lsp::LspClientOps>,
     path: &std::path::Path,
     lang: &str,
@@ -346,7 +342,7 @@ pub(super) async fn fetch_validated_symbol(
 /// Recursively count how many symbols in `symbols` (walking `children` subtrees)
 /// have the exact `name_path`. Returns 0 or 1 for well-formed source; higher
 /// counts indicate genuine duplicates (e.g. same method in two `impl` blocks).
-pub(super) fn count_symbols_by_name_path(symbols: &[SymbolInfo], name_path: &str) -> usize {
+pub fn count_symbols_by_name_path(symbols: &[SymbolInfo], name_path: &str) -> usize {
     symbols
         .iter()
         .map(|s| {
@@ -359,7 +355,7 @@ pub(super) fn count_symbols_by_name_path(symbols: &[SymbolInfo], name_path: &str
 /// When `workspace/symbol` returns a degenerate range, attempt to resolve the
 /// correct range by querying `textDocument/documentSymbol` for the symbol's file.
 /// Returns the corrected SymbolInfo if found, None otherwise.
-pub(super) async fn resolve_range_via_document_symbols(
+pub async fn resolve_range_via_document_symbols(
     sym: &SymbolInfo,
     ctx: &ToolContext,
 ) -> Option<SymbolInfo> {
@@ -374,7 +370,7 @@ pub(super) async fn resolve_range_via_document_symbols(
 
 /// Recursively search a document symbol tree for a symbol matching `name`
 /// within ±1 line of `lsp_start`. Returns a clone of the matching SymbolInfo.
-pub(super) fn find_matching_symbol(
+pub fn find_matching_symbol(
     symbols: &[SymbolInfo],
     name: &str,
     lsp_start: u32,
@@ -395,7 +391,7 @@ pub(super) fn find_matching_symbol(
 /// Exact match takes priority. Falls back to a prefix check for generic types
 /// so that e.g. `IRepository<T, ID>` matches query `IRepository`, and
 /// `impl Tool for MyStruct<T>` matches query `MyStruct<T>` or `MyStruct`.
-pub(super) fn symbol_name_matches(sym: &SymbolInfo, query: &str) -> bool {
+pub fn symbol_name_matches(sym: &SymbolInfo, query: &str) -> bool {
     if sym.name_path == query || sym.name == query {
         return true;
     }
@@ -413,7 +409,7 @@ pub(super) fn symbol_name_matches(sym: &SymbolInfo, query: &str) -> bool {
 }
 
 #[cfg(test)]
-pub(super) fn find_symbol_by_name_path<'a>(
+pub fn find_symbol_by_name_path<'a>(
     symbols: &'a [SymbolInfo],
     name_path: &str,
 ) -> Option<&'a SymbolInfo> {
@@ -439,7 +435,7 @@ pub(super) fn find_symbol_by_name_path<'a>(
 /// When multiple candidates match but exactly one has an exact `name_path`
 /// match (e.g. class `Book` vs constructor `Book/Book(...)`), the exact match
 /// wins without raising an ambiguity error.
-pub(super) fn find_unique_symbol_by_name_path<'a>(
+pub fn find_unique_symbol_by_name_path<'a>(
     symbols: &'a [SymbolInfo],
     name_path: &str,
 ) -> anyhow::Result<&'a SymbolInfo> {
@@ -478,7 +474,7 @@ pub(super) fn find_unique_symbol_by_name_path<'a>(
 }
 
 /// Collect all symbols matching `name_path` (depth-first, including children).
-pub(super) fn collect_matching_symbols<'a>(
+pub fn collect_matching_symbols<'a>(
     symbols: &'a [SymbolInfo],
     name_path: &str,
 ) -> Vec<&'a SymbolInfo> {
