@@ -5,11 +5,11 @@ use serde_json::{json, Value};
 use crate::tools::{guard_worktree_write, require_str_param, Tool, ToolContext};
 
 use super::display::format_insert_code;
-use super::edit_helpers::{editing_end_line, editing_start_line, find_parent_symbol, write_lines};
 use super::path_helpers::{
     get_lsp_client, guard_not_markdown, require_path_param, resolve_write_path,
 };
-use super::symbol_query::fetch_validated_symbol;
+use crate::symbol::edit::{editing_end_line, editing_start_line, find_parent_symbol, write_lines};
+use crate::symbol::query::fetch_validated_symbol;
 
 pub struct InsertCode;
 

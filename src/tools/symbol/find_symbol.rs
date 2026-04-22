@@ -15,7 +15,7 @@ use super::display::format_find_symbol;
 use super::path_helpers::{
     format_library_path, get_path_param, is_glob, resolve_glob, resolve_library_roots, LspTimer,
 };
-use super::symbol_query::{
+use crate::symbol::query::{
     collect_matching, matches_kind_filter, resolve_range_via_document_symbols, symbol_name_matches,
     symbol_to_json, validate_symbol_range,
 };

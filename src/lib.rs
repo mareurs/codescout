@@ -18,6 +18,7 @@ pub mod memory;
 pub mod platform;
 pub mod prompts;
 pub mod server;
+pub mod symbol;
 pub mod tools;
 pub mod usage;
 pub mod util;

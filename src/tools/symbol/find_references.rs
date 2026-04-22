@@ -11,7 +11,7 @@ use super::path_helpers::{
     classify_reference_path, get_lsp_client, path_in_excluded_dir, require_path_param,
     resolve_library_roots, resolve_read_path, uri_to_path, LspTimer,
 };
-use super::symbol_query::find_unique_symbol_by_name_path;
+use crate::symbol::query::find_unique_symbol_by_name_path;
 
 pub struct FindReferences;
 
