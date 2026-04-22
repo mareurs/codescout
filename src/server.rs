@@ -183,6 +183,12 @@ impl CodeScoutServer {
             .ok_or_else(|| McpError::invalid_params(format!("unknown tool: '{}'", name), None))
     }
 
+    fn parse_input(arguments: Option<serde_json::Map<String, Value>>) -> Value {
+        arguments
+            .map(Value::Object)
+            .unwrap_or(Value::Object(Default::default()))
+    }
+
     /// Replace the resource registry after an `activate_project` call that may have
     /// changed the active memory directory.
     async fn refresh_resources(&self) {
@@ -289,10 +295,7 @@ impl CodeScoutServer {
             return Ok(CallToolResult::error(vec![Content::text(e.to_string())]));
         }
 
-        let input: Value = req
-            .arguments
-            .map(Value::Object)
-            .unwrap_or(Value::Object(Default::default()));
+        let input: Value = Self::parse_input(req.arguments);
 
         let ctx = ToolContext {
             agent: self.agent.clone(),
