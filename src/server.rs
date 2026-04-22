@@ -189,6 +189,12 @@ impl CodeScoutServer {
             .unwrap_or(Value::Object(Default::default()))
     }
 
+    async fn check_tool_access(&self, name: &str) -> std::result::Result<(), CallToolResult> {
+        let security = self.agent.security_config().await;
+        crate::util::path_security::check_tool_access(name, &security)
+            .map_err(|e| CallToolResult::error(vec![Content::text(e.to_string())]))
+    }
+
     /// Replace the resource registry after an `activate_project` call that may have
     /// changed the active memory directory.
     async fn refresh_resources(&self) {
@@ -289,10 +295,8 @@ impl CodeScoutServer {
 
         let tool = self.resolve_tool(&req.name)?;
 
-        // Check tool access before dispatching
-        let security = self.agent.security_config().await;
-        if let Err(e) = crate::util::path_security::check_tool_access(&req.name, &security) {
-            return Ok(CallToolResult::error(vec![Content::text(e.to_string())]));
+        if let Err(err) = self.check_tool_access(&req.name).await {
+            return Ok(err);
         }
 
         let input: Value = Self::parse_input(req.arguments);
