@@ -367,6 +367,14 @@ shape exactly.
 
 ### Phase 6 — Lift providers out of tool code
 
+**Status:** 🟡 PARTIAL (commit `f7ca520` — 6.1 symbol provider done).
+Remaining fs/text lifts deferred: the context-free candidates (`is_glob`,
+`classify_reference_path`, `format_library_path`, `uri_to_path`,
+`path_in_excluded_dir`) are a tight 5-function cluster that doesn't
+earn its own `src/fs/` module without a wider API redesign — most
+neighbours take `&ToolContext` and resist a clean crate-root lift.
+Revisit when a concrete consumer outside `src/tools/` appears.
+
 **Goal:** Tool files become thin adapters. Domain logic lives in provider
 modules.
 
