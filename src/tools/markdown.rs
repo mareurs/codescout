@@ -228,7 +228,8 @@ impl Tool for ReadMarkdown {
         if let Some(heading_query) = heading {
             let section_result =
                 crate::tools::file_summary::extract_markdown_section(&text, heading_query)?;
-            let cov = super::file::markdown_coverage(&text, &resolved, ctx, heading, None, None);
+            let cov =
+                super::read_file::markdown_coverage(&text, &resolved, ctx, heading, None, None);
 
             // Oversized match — return ok:false with must_follow + nested section_map
             // + next_actions. The agent must pick a sub-heading or a line range, not
@@ -318,8 +319,9 @@ impl Tool for ReadMarkdown {
                 .into());
             }
             let content = extract_lines(&text, start as usize, end as usize);
-            let md_cov =
-                super::file::markdown_coverage(&text, &resolved, ctx, None, start_line, end_line);
+            let md_cov = super::read_file::markdown_coverage(
+                &text, &resolved, ctx, None, start_line, end_line,
+            );
 
             // Buffer large extracts
             if crate::tools::exceeds_inline_limit(&content) {
@@ -368,7 +370,7 @@ impl Tool for ReadMarkdown {
         let total_lines = text.lines().count();
         let oversized = crate::tools::exceeds_inline_limit(&text);
 
-        let md_cov = super::file::markdown_coverage(&text, &resolved, ctx, None, None, None);
+        let md_cov = super::read_file::markdown_coverage(&text, &resolved, ctx, None, None, None);
 
         // ── Tier 3: large — heading map + must_follow, no body ────────────
         if oversized {
@@ -464,7 +466,7 @@ impl Tool for ReadMarkdown {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(super::file::format_read_file(result))
+        Some(super::read_file::format_read_file(result))
     }
 }
 

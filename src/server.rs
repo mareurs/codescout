@@ -21,11 +21,12 @@ use serde_json::Value;
 use crate::agent::Agent;
 use crate::tools::{
     config::{ActivateProject, ProjectStatus},
-    file::{CreateFile, EditFile, Glob, Grep, ListDir, ReadFile},
+    file::{CreateFile, EditFile, Glob, Grep, ListDir},
     library::{ListLibraries, RegisterLibrary},
     markdown::{EditMarkdown, ReadMarkdown},
     memory::Memory,
     progress,
+    read_file::ReadFile,
     semantic::{IndexProject, IndexStatus, SemanticSearch},
     symbol::{
         FindReferences, FindSymbol, GotoDefinition, Hover, InsertCode, ListSymbols, RemoveSymbol,

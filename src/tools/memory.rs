@@ -1305,7 +1305,7 @@ mod tests {
 
         // Verify the @file_* ref is line-navigable
         let file_id = result["file_id"].as_str().unwrap().to_string();
-        let sub = crate::tools::file::ReadFile
+        let sub = crate::tools::read_file::ReadFile
             .call(
                 json!({"path": file_id, "start_line": 10, "end_line": 10}),
                 &ctx,
