@@ -31,8 +31,7 @@ use crate::tools::{
         FindReferences, FindSymbol, GotoDefinition, Hover, InsertCode, ListSymbols, RemoveSymbol,
         RenameSymbol, ReplaceSymbol,
     },
-    workflow::RunCommand,
-    Onboarding, Tool, ToolContext,
+    Onboarding, RunCommand, Tool, ToolContext,
 };
 use crate::usage::UsageRecorder;
 
