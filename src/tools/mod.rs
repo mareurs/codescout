@@ -10,6 +10,7 @@ pub mod create_file;
 pub mod file;
 pub mod file_summary;
 pub(crate) mod format;
+pub mod glob;
 pub mod grep;
 pub mod library;
 pub mod list_dir;
