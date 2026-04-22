@@ -105,64 +105,51 @@ What it bought us:
 
 ### Phase 1 — Decompose `src/tools/symbol/`
 
-**Goal:** One tool per file. `mod.rs` becomes a thin re-export hub.
+**Status:** ✅ Mostly complete (2026-04-22). 9 atomic commits on `refactoring`;
+1751 tests green and clippy clean between every commit. Phase 1.10 (helpers
+consolidation) deferred — see `docs/plans/2026-04-23-codescout-refactoring-plan-phase-1b.md`.
 
-**Entry conditions:** Phase 0 complete. Branch `refactoring` clean and pushed.
+| # | Commit | Tool | Helpers bumped to `pub(super)` |
+|---|--------|------|--------------------------------|
+| 1 | `9b8a9a0` | `Hover` | LspTimer, require_path_param, resolve_read_path, get_lsp_client, tag_external_path |
+| 2 | `9fa646a` | `GotoDefinition` | uri_to_path |
+| 3 | `4a10403` | `FindReferences` | resolve_library_roots, classify_reference_path, find_unique_symbol_by_name_path, path_in_excluded_dir |
+| 4 | `a41a25b` | `RemoveSymbol` | resolve_write_path, guard_not_markdown, fetch_validated_symbol, editing_start_line, editing_end_line, clamp_range_to_parent, write_lines, find_parent_symbol |
+| 5 | `3dcd33c` | `InsertCode` | (reuses #4's helpers) |
+| 6 | `85420b6` | `ReplaceSymbol` | count_symbols_by_name_path, collect_all_name_paths, find_ast_name_path |
+| 7 | `97a79c8` | `FindSymbol` | get_path_param, is_glob, resolve_glob, format_library_path, matches_kind_filter, collect_matching, symbol_to_json, validate_symbol_range, resolve_range_via_document_symbols, symbol_name_matches |
+| 8 | `88876ce` | `RenameSymbol` | apply_text_edits, text_sweep, TextualMatch |
+| 9 | `a81ece2` | `ListSymbols` | filter_variable_symbols; list-mode helpers kept private to `list_symbols.rs` |
 
-**Approach:** For each of the 9 tools (`ListSymbols`, `FindSymbol`,
-`FindReferences`, `GotoDefinition`, `Hover`, `ReplaceSymbol`, `RemoveSymbol`,
-`InsertCode`, `RenameSymbol`):
+**What was achieved:**
+- `src/tools/symbol/` is now a directory module with one file per tool.
+- `hover.rs` (152), `goto_definition.rs` (171), `find_references.rs` (147),
+  `remove_symbol.rs` (95), `insert_code.rs` (97), `replace_symbol.rs` (176),
+  `find_symbol.rs` (494), `rename_symbol.rs` (264), `list_symbols.rs` (618).
+- `display.rs` (432) holds all `format_compact` helpers.
+- `mod.rs` (6793) now contains only shared helpers + the existing ~5600-line
+  test suite. It is no longer mixed with per-tool `impl Tool` bodies.
 
-1. Identify which `mod.rs` helpers the tool uses.
-2. Bump those helpers to `pub(super) fn`.
-3. Create `src/tools/symbol/<tool>.rs` containing the tool struct, its `impl
-   Tool for X`, and any helpers used *only* by this tool.
-4. Remove the migrated code from `mod.rs`.
-5. Re-export from `mod.rs` so external imports (`tools::symbol::ListSymbols`)
-   keep working.
-6. Test, commit, push.
+**What was deferred (Phase 1.10 → 1b):**
+- Extraction of shared helpers out of `mod.rs` into `helpers.rs` +
+  `edit_helpers.rs`.
+- Tests intermingled with helpers (~5600 lines of tests reaching helpers via
+  `use super::*;`) make the consolidation higher-risk than any single move
+  done in Phase 1. A dedicated phase — Phase 1b — is planned.
 
-After all 9 tools are extracted, surviving helpers in `mod.rs` are by
-definition shared. Move them to `src/tools/symbol/helpers.rs` (Phase 1 final
-step).
-
-**Order (smallest blast radius first):**
-1. `Hover` (~140 lines, leaf)
-2. `GotoDefinition` (~165 lines)
-3. `FindReferences` (~130 lines + `tag_external_path`)
-4. `RemoveSymbol` (~85 lines)
-5. `InsertCode` (~100 lines + `classify_file`, `classify_sort_key`, `text_sweep`)
-6. `ReplaceSymbol` (~160 lines + edit-shared helpers)
-7. `FindSymbol` (~440 lines + `build_by_file`, `make_find_symbol_hint`)
-8. `RenameSymbol` (~250 lines + `utf16_to_byte_offset`, `apply_text_edits`)
-9. `ListSymbols` (~430 lines + `LIST_SYMBOLS_*` constants, `find_split_point`,
-   `count_files_by_subdir`, `ast_class_names_for_dir`, `flat_symbol_count`)
-10. **Final:** consolidate surviving shared helpers → `helpers.rs`
-
-**Watch points (Yak):**
-- Edit-tool helpers (`editing_start_line`, `editing_end_line`,
-  `clamp_range_to_parent`, `collect_all_name_paths`, `find_ast_name_path`,
-  `find_insert_before_line`) are shared by 4 edit tools — keep them in one
-  place once the edit tools are extracted, likely as `edit_helpers.rs`.
-- `fetch_validated_symbol` calls `find_unique_symbol_by_name_path` — both
-  must move together or both stay in shared scope.
-
-**Watch points (Lion):**
-- Resist the urge to introduce a `ToolBase` trait or shared abstraction during
-  this phase. The `Tool` trait IS the abstraction. Per-tool files should
-  remain plain.
-- The natural seam is **per-tool**, not per-category (read/write). Resist
-  intermediate groupings like `query.rs`/`edit.rs` — those are arbitrary.
-
-**Exit conditions:**
-- 9 files in `src/tools/symbol/` (one per tool) + `display.rs` + `helpers.rs`
-  + `edit_helpers.rs` + `mod.rs` (re-exports only)
-- `mod.rs` < 100 lines
-- All 1751 tests passing
-- Clippy clean
+**Lesson carried forward (Yak):**
+- Per-tool moves fell into a repeatable rhythm: read bodies → create file with
+  copied impl → `remove_symbol` for impl + struct → edit mod.rs to add
+  `mod X; pub use X::Tool;` → bump helper visibilities → `cargo build && fmt
+  && clippy && test` → commit. The mechanical loop is the key; deviating
+  from it (bundling two tools, editing in prose instead of `remove_symbol`)
+  would have produced rollbacks.
+- Two consistent friction points: (1) tests in `mod.rs` referencing display
+  formatters had to be re-imported after each tool move; (2) `remove_symbol`
+  leaves orphan blank lines that clippy sometimes flags — always read ±5
+  lines around the removal and clean up.
 
 ---
-
 ### Phase 2 — Decompose `src/tools/workflow.rs`
 
 **Goal:** Split `Onboarding` and `RunCommand` into separate files. Lift
