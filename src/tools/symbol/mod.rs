@@ -15,14 +15,16 @@ mod display;
 mod find_references;
 mod goto_definition;
 mod hover;
+mod remove_symbol;
 
 pub use find_references::FindReferences;
 pub use goto_definition::GotoDefinition;
 pub use hover::Hover;
+pub use remove_symbol::RemoveSymbol;
 
 use display::{
-    format_find_symbol, format_insert_code, format_list_symbols, format_remove_symbol,
-    format_rename_symbol, format_replace_symbol,
+    format_find_symbol, format_insert_code, format_list_symbols, format_rename_symbol,
+    format_replace_symbol,
 };
 
 /// Lightweight timer for recording LSP first-response latency.
@@ -82,7 +84,10 @@ pub(super) async fn resolve_read_path(
 }
 
 /// Resolve a path for writing, with security validation.
-async fn resolve_write_path(ctx: &ToolContext, relative_path: &str) -> anyhow::Result<PathBuf> {
+pub(super) async fn resolve_write_path(
+    ctx: &ToolContext,
+    relative_path: &str,
+) -> anyhow::Result<PathBuf> {
     let root = ctx.agent.require_project_root().await?;
     let security = ctx.agent.security_config().await;
     crate::util::path_security::validate_write_path(relative_path, &root, &security)
@@ -253,7 +258,7 @@ pub(super) fn require_path_param(input: &Value) -> anyhow::Result<&str> {
 
 /// Return a `RecoverableError` if the path looks like a markdown file,
 /// directing the caller to `edit_markdown` / `read_markdown` instead.
-fn guard_not_markdown(path: &Path) -> anyhow::Result<()> {
+pub(super) fn guard_not_markdown(path: &Path) -> anyhow::Result<()> {
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         if ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown") {
             return Err(RecoverableError::with_hint(
@@ -583,7 +588,7 @@ fn find_ast_end_line_in(symbols: &[SymbolInfo], name: &str, lsp_start: u32) -> O
 ///
 /// Returns the validated `SymbolInfo` and the full `document_symbols` list it
 /// came from (the caller needs the list for sibling/parent lookups).
-async fn fetch_validated_symbol(
+pub(super) async fn fetch_validated_symbol(
     client: &std::sync::Arc<dyn crate::lsp::LspClientOps>,
     path: &std::path::Path,
     lang: &str,
@@ -1778,7 +1783,7 @@ impl Tool for FindSymbol {
 /// `range_start_line`. This keeps the fix language-agnostic — it covers Kotlin, Java,
 /// Scala, and any future LSP with the same quirk — without risking false positives
 /// in languages where `*`-prefixed lines have non-comment meaning (e.g. Rust `*mut`).
-fn editing_start_line(sym: &crate::lsp::SymbolInfo, lines: &[&str]) -> usize {
+pub(super) fn editing_start_line(sym: &crate::lsp::SymbolInfo, lines: &[&str]) -> usize {
     if let Some(r) = sym.range_start_line {
         let r = r as usize;
         if r < lines.len() {
@@ -1849,7 +1854,7 @@ fn editing_start_line(sym: &crate::lsp::SymbolInfo, lines: &[&str]) -> usize {
 ///
 /// When AST finds the symbol, we trust it unconditionally. When AST can't find it
 /// (different language, name mismatch), we fall back to the LSP end line.
-fn editing_end_line(sym: &crate::lsp::SymbolInfo) -> u32 {
+pub(super) fn editing_end_line(sym: &crate::lsp::SymbolInfo) -> u32 {
     let Ok(ast_syms) = crate::ast::extract_symbols(&sym.file) else {
         return sym.end_line;
     };
@@ -1872,7 +1877,7 @@ fn editing_end_line(sym: &crate::lsp::SymbolInfo) -> u32 {
 ///
 /// Returns the clamped `(start, end)` where `end` is an exclusive upper bound
 /// suitable for `lines[start..end]` slicing.
-fn clamp_range_to_parent(
+pub(super) fn clamp_range_to_parent(
     start: usize,
     end: usize,
     parent_body_start: usize,
@@ -2157,91 +2162,6 @@ impl Tool for ReplaceSymbol {
 
     fn format_compact(&self, result: &Value) -> Option<String> {
         Some(format_replace_symbol(result))
-    }
-}
-
-// ── remove_symbol ──────────────────────────────────────────────────────────
-
-pub struct RemoveSymbol;
-
-#[async_trait::async_trait]
-impl Tool for RemoveSymbol {
-    fn name(&self) -> &str {
-        "remove_symbol"
-    }
-
-    fn description(&self) -> &str {
-        "Delete a symbol (function, struct, impl block, test, etc.) by name. Removes the lines covered by the LSP symbol range."
-    }
-
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "required": ["symbol", "path"],
-            "properties": {
-                "symbol": { "type": "string", "description": "Symbol identifier (e.g. 'MyStruct/my_method', 'tests/old_test')" },
-                "path": { "type": "string", "description": "File path" }
-            }
-        })
-    }
-
-    async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        super::guard_worktree_write(ctx).await?;
-        let name_path = super::require_str_param(&input, "symbol")?;
-        let rel_path = require_path_param(&input)?;
-
-        let full_path = resolve_write_path(ctx, rel_path).await?;
-        guard_not_markdown(&full_path)?;
-        let (client, lang) = get_lsp_client(ctx, &full_path).await?;
-
-        // BUG-041: fetch + validate with auto-retry on stale LSP positions.
-        let (sym, symbols) = fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
-
-        let content = std::fs::read_to_string(&full_path)?;
-        let lines: Vec<&str> = content.lines().collect();
-
-        let start0 = editing_start_line(&sym, &lines);
-        let end0 = (editing_end_line(&sym) as usize + 1).min(lines.len());
-
-        // BUG-030/034/037/044 guard: symmetric parent clamp on both start and end.
-        let (start, end) = if let Some(parent) = find_parent_symbol(&symbols, &sym.name_path) {
-            let parent_body_start = parent.start_line as usize + 1;
-            let parent_body_end_exclusive = parent.end_line as usize;
-            clamp_range_to_parent(start0, end0, parent_body_start, parent_body_end_exclusive)
-        } else {
-            (start0, end0)
-        };
-
-        if start >= lines.len() {
-            return Err(RecoverableError::with_hint(
-                format!(
-                    "symbol range out of bounds: start line {} but file has {} lines",
-                    start + 1,
-                    lines.len(),
-                ),
-                "The LSP may have stale data. Try list_symbols(path) to refresh.",
-            )
-            .into());
-        }
-
-        let mut new_lines: Vec<&str> = Vec::new();
-        new_lines.extend_from_slice(&lines[..start]);
-        new_lines.extend_from_slice(&lines[end..]);
-
-        write_lines(&full_path, &new_lines, content.ends_with('\n'))?;
-        ctx.lsp.notify_file_changed(&full_path).await;
-        ctx.agent.mark_file_dirty(full_path).await;
-        let line_count = end - start;
-        let removed_range = format!("{}-{}", start + 1, end);
-        Ok(json!({
-            "status": "ok",
-            "removed_lines": removed_range,
-            "line_count": line_count,
-        }))
-    }
-
-    fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(format_remove_symbol(result))
     }
 }
 
@@ -2698,7 +2618,7 @@ impl Tool for RenameSymbol {
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /// Write lines back to a file, preserving a trailing newline if the original had one.
-fn write_lines(
+pub(super) fn write_lines(
     path: &std::path::Path,
     lines: &[&str],
     had_trailing_newline: bool,
@@ -2757,7 +2677,7 @@ fn find_symbol_by_name_path<'a>(
 ///
 /// Returns `None` for top-level symbols (no `/` in path) or if the tree doesn't
 /// contain the child as a direct descendant.
-fn find_parent_symbol<'a>(
+pub(super) fn find_parent_symbol<'a>(
     symbols: &'a [SymbolInfo],
     child_name_path: &str,
 ) -> Option<&'a SymbolInfo> {
