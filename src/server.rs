@@ -195,6 +195,21 @@ impl CodeScoutServer {
             .map_err(|e| CallToolResult::error(vec![Content::text(e.to_string())]))
     }
 
+    fn build_context(
+        &self,
+        progress: Option<Arc<progress::ProgressReporter>>,
+        peer: Option<Peer<RoleServer>>,
+    ) -> ToolContext {
+        ToolContext {
+            agent: self.agent.clone(),
+            lsp: self.lsp.clone(),
+            output_buffer: self.output_buffer.clone(),
+            progress,
+            peer,
+            section_coverage: self.section_coverage.clone(),
+        }
+    }
+
     /// Replace the resource registry after an `activate_project` call that may have
     /// changed the active memory directory.
     async fn refresh_resources(&self) {
@@ -301,14 +316,7 @@ impl CodeScoutServer {
 
         let input: Value = Self::parse_input(req.arguments);
 
-        let ctx = ToolContext {
-            agent: self.agent.clone(),
-            lsp: self.lsp.clone(),
-            output_buffer: self.output_buffer.clone(),
-            progress,
-            peer,
-            section_coverage: self.section_coverage.clone(),
-        };
+        let ctx = self.build_context(progress, peer);
 
         let timeout_secs = if tool_skips_server_timeout(&req.name) {
             None
