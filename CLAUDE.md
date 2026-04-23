@@ -150,9 +150,6 @@ clean — git detects the cherry-pick and skips the duplicate commit automatical
 - **Do not push after every commit.** Accumulate local commits during a work session; push once when the work is solid.
 - When iterating on a fix, keep working locally until the fix is confirmed, then commit the final state — not every intermediate attempt.
 
-## Project Structure
-
-See codescout memory `architecture` (Source Tree section) and workspace-level memory `architecture` for the full 6-project workspace map.
 ## Design Principles
 
 **Progressive Disclosure & Discoverability** — Every tool defaults to the most
@@ -313,11 +310,6 @@ The `PreToolUse` hook will **block** any attempt to use the native `Read`, `Grep
 - Can be overridden via `.claude/code-explorer-routing.json`
 - `block_reads: false` in that config to disable blocking (dev/debug use)
 
-## Rust Coding Standards
-
-See codescout memory `language-patterns` (Rust section) for anti-patterns and idiomatic patterns.
-
-
 ## Language-Specific LSP Issues
 
 See codescout memory `gotchas` (LSP section) for Kotlin multi-instance conflicts,
@@ -327,6 +319,18 @@ cold start behavior, circuit breaker, and LSP mux details.
 
 ## Docs
 
+Files:
+
 - **`docs/PROGRESSIVE_DISCOVERABILITY.md`** — Canonical guide for output sizing, overflow hints, and agent guidance patterns. **READ THIS before adding or modifying any tool.**
 - `docs/ARCHITECTURE.md` — Component details, tech stack, design principles
 - `docs/ROADMAP.md` — Quick status overview
+- `CONTRIBUTING.md` — Contributor-facing setup + PR checklist
+
+Memories (Claude auto-loads these; listed for reference):
+
+- `architecture` — Source Tree + 6-project workspace map, tool dispatch pipeline, LSP lifecycle, embedding pipeline, output routing
+- `conventions` — Testing patterns (test file locations, helpers, mock patterns)
+- `development-commands` — Full command reference (cargo, scripts, release)
+- `language-patterns` — Rust anti-patterns and idiomatic patterns
+- `gotchas` — LSP quirks (Kotlin multi-instance, cold start, circuit breaker, LSP mux)
+- `domain-glossary`, `project-overview`, `system-prompt`, `onboarding` — project self-description
