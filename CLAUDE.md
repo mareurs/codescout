@@ -194,9 +194,6 @@ Cursor, custom agents). In particular:
 
 ## Testing Patterns
 
-See codescout memory `conventions` (Testing Patterns section) for test file locations,
-helpers, and mock patterns.
-
 **Cache-invalidation tests use a three-query sandwich** — not two. The structure is:
 1. Query → record baseline state
 2. Mutate the underlying data (disk, cache, external system) without going through the normal notification path
@@ -210,10 +207,8 @@ See `did_change_refreshes_stale_symbol_positions` in `src/lsp/client.rs` for the
 
 ## Key Patterns
 
-See codescout memory `architecture` for the full tool dispatch pipeline, ToolContext
-fields, LSP lifecycle, embedding pipeline, and output routing.
+Load-bearing rules I keep getting wrong otherwise:
 
-Key rules (not just facts):
 - `RecoverableError` for expected, input-driven failures → `isError: false` (sibling calls survive)
 - `anyhow::bail!` for genuine tool failures → `isError: true` (fatal)
 - Write tools return `json!("ok")` — never echo content back
