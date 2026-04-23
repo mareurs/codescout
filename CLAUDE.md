@@ -23,7 +23,6 @@ See codescout memory `development-commands` for the full command reference.
 
 This applies to ALL unexpected tool behavior: `edit_file`, `rename_symbol`, `replace_symbol`, `find_symbol`, `semantic_search`, etc.
 
-
 ## Git Workflow
 
 **This is a public repo.** Do not push incomplete or untested work.
