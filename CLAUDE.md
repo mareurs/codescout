@@ -258,33 +258,10 @@ Do NOT bump for:
 - Internal refactors
 - Memory template changes (memories are re-read during refresh anyway)
 
-`src/prompts/server_instructions.md` is injected **once at MCP session start**,
-not per-request. Token cost is session-scoped, not per-call — invest in clarity
-over brevity. Follow these rules when modifying it:
-
-1. **Cap hard rules at 5–8.** Beyond 8 behavioral constraints, compliance on all
-   drops. Consolidate, don't accumulate.
-2. **No triple-layer repetition.** A rule in Iron Laws should NOT be restated in
-   Anti-Patterns AND Rules. Max 2 appearances: once as a law, optionally once as
-   a closing reminder (for the 1–2 most-violated rules only).
-3. **Tables > prose** for decision-matrix content. Claude scans tables faster.
-4. **End of prompt = highest compliance.** Put the most-violated rule(s) in the
-   closing `## Rules` section — that's closest to generation.
-5. **Don't document every param.** Pagination (`offset`, `limit`, `detail_level`)
-   and aliases (`file_path`, `limit`) are discoverable from the tool schema. Only
-   document params that change behavior in non-obvious ways.
-6. **Prompt caching matters.** Keep section order stable between releases so the
-   static prefix benefits from automatic caching. Don't reorganize for cosmetic reasons.
-7. **You are the consumer.** When writing or reviewing prompt changes, think as
-   the agent who will read this mid-task. Ask: "Would this have helped me find
-   the right tool chain naturally?" Test by simulating a realistic task and
-   checking whether the prompt guided you to the right flow. Usage data
-   (`usage.db`) is the ground truth — if a tool has near-zero calls despite
-   being useful, the prompt isn't surfacing it.
-
-**Research:** See `docs/research/2026-03-21-claude-prompt-engineering.md` and
-`docs/research/2026-03-21-superpowers-prompt-patterns.md` for the evidence behind
-these rules.
+**Style guide for `server_instructions.md` / `onboarding_prompt.md` edits:**
+see `src/prompts/README.md` for the 7 writing rules (rule caps, repetition
+budget, caching, etc.) and links to the research behind them. Load that only
+when actually editing a prompt surface — it's not needed otherwise.
 
 ## Companion Plugin: codescout-companion
 
