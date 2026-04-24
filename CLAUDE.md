@@ -299,9 +299,9 @@ Files:
 
 Memories (Claude auto-loads these; listed for reference):
 
-- `architecture` — Source Tree + 6-project workspace map, tool dispatch pipeline, LSP lifecycle, embedding pipeline, output routing
-- `conventions` — Testing patterns (test file locations, helpers, mock patterns)
+- `architecture` — 8-project workspace map, cross-project deps, CI/shared infra; per-project: module structure, key abstractions, data flows
+- `conventions` — Commit style, branch strategy, error handling rules, pre-commit requirements; per-project patterns
 - `development-commands` — Full command reference (cargo, scripts, release)
 - `language-patterns` — Rust anti-patterns and idiomatic patterns
-- `gotchas` — LSP quirks (Kotlin multi-instance, cold start, circuit breaker, LSP mux)
+- `gotchas` — Cross-project path resolution pitfalls, find_symbol truncation, Kotlin LSP, embedding model restrictions, memory leak
 - `domain-glossary`, `project-overview`, `system-prompt`, `onboarding` — project self-description
