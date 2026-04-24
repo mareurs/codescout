@@ -35,8 +35,32 @@ These are fixed in the happy path but still have edge cases worth knowing about.
 
 ## Open
 
-*(none at time of archive — 2026-04-22)*
+### BUG-048 — `find_symbol` hangs 60s during LSP cold-start indexing
 
+**Date:** 2026-04-24
+**Severity:** High (core navigation tool unusable after `/mcp` reconnect on large projects)
+**Status:** Fixed (2026-04-24) — `workspace/symbol` now bypasses the cold-start retry budget in `src/lsp/client.rs`. Unit test: `workspace_symbol_skips_cold_start_retry_budget`.
+
+**Repro during initial investigation:**
+
+```
+find_symbol(name="open_repo")                       # timed out after 60s
+find_symbol(name="open_repo", substring_matching=false)  # returned in <1s
+```
+
+**Red herring:** `substring_matching` is NOT a `find_symbol` parameter. The schema accepts only `query`/`symbol`/`name`/`path`/`kind`/`include_body`/`depth`/`detail_level`/`offset`/`limit`/`scope`. Unknown kwargs are silently dropped by MCP, so both calls executed the identical code path. The second call returning instantly was rust-analyzer finishing indexing in the background between calls, not the extra kwarg.
+
+**Actual root cause:**
+
+1. After `/mcp` reconnect on a 587-file Rust project, rust-analyzer started reindexing.
+2. `workspace/symbol` requests during indexing return `-32800 RequestCancelled` — the response only becomes answerable once the *whole* project is indexed (minutes).
+3. `LspClient::request` (`src/lsp/client.rs`) gives every idempotent method a cold-start retry budget of **10 × 3 s linear backoff + 30 s per-attempt timeout** — far more than the 60 s MCP tool timeout.
+4. Per-file LSP ops (`textDocument/documentSymbol`, `hover`, `definition`, `references`) answer lazily per file, so `list_symbols`/`hover`/`goto_definition`/`find_references` stayed fast while `find_symbol` blocked.
+5. Tree-sitter fallback in `find_symbol` runs only after `workspace_symbols` returns, so the retry loop had to drain before it could kick in.
+
+**Fix:** new helper `uses_cold_start_retry_budget(method)` in `src/lsp/client.rs` returns `false` for `workspace/symbol`. That method now uses the warm retry budget (3 × 300 ms ≈ 1.2 s) even inside the cold-start window, so `find_symbol` fails over to the tree-sitter walker within ~1 s instead of hanging for 60 s. `workspace/symbol` remains in `is_idempotent_lsp_method` so the warm-path retry still engages.
+
+**Mitigation for users on older builds:** pin `path` to a file or directory — that takes the per-file `document_symbols` path, which is unaffected.
 ## Archive
 
 Fixed / superseded entries: `docs/archive/bug-reports/`.

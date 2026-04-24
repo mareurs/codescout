@@ -89,6 +89,19 @@ fn is_idempotent_lsp_method(method: &str) -> bool {
     )
 }
 
+/// Return true if cold-start's extended retry budget makes sense for `method`.
+///
+/// Most LSP queries that return `-32800 RequestCancelled` during cold start
+/// become answerable per-file as the server parses each file, so retrying
+/// for ~45s catches them. But `workspace/symbol` stays unanswerable until
+/// the *whole* project is indexed (minutes for large Rust/Kotlin projects),
+/// and a 45s retry budget + 30s per-attempt timeout blows through the MCP
+/// 60s tool timeout. For that method we keep the short warm budget and let
+/// callers (e.g. `find_symbol`) fail over to tree-sitter quickly.
+fn uses_cold_start_retry_budget(method: &str) -> bool {
+    !matches!(method, "workspace/symbol")
+}
+
 /// Convert hierarchical `DocumentSymbol[]` into our `SymbolInfo` tree.
 fn convert_document_symbols(
     symbols: &[lsp_types::DocumentSymbol],
@@ -509,7 +522,8 @@ impl LspClient {
         // benefit from the patient window.
         let anchor = self.init_completed_at.get().unwrap_or(&self.started_at);
         let in_cold_start = anchor.elapsed() < COLD_START_WINDOW;
-        let (max_retries, retry_delay_ms) = if in_cold_start {
+        let (max_retries, retry_delay_ms) = if in_cold_start && uses_cold_start_retry_budget(method)
+        {
             (MAX_RETRIES_COLD, RETRY_DELAY_COLD_MS)
         } else {
             (MAX_RETRIES_WARM, RETRY_DELAY_WARM_MS)
@@ -1318,6 +1332,22 @@ impl crate::lsp::ops::LspClientOps for LspClient {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn workspace_symbol_skips_cold_start_retry_budget() {
+        // Rationale: rust-analyzer answers -32800 for workspace/symbol until the
+        // whole project is indexed (minutes). Cold-start budget (10×3s + 30s
+        // per-attempt timeout) blows the 60s MCP tool timeout. find_symbol
+        // falls back to tree-sitter when workspace/symbol errors, so fail fast.
+        assert!(!uses_cold_start_retry_budget("workspace/symbol"));
+        // Per-file ops become answerable as soon as the server parses the file,
+        // so the patient cold-start retry still pays off there.
+        assert!(uses_cold_start_retry_budget("textDocument/documentSymbol"));
+        assert!(uses_cold_start_retry_budget("textDocument/references"));
+        assert!(uses_cold_start_retry_budget("textDocument/hover"));
+        // workspace/symbol must still be idempotent so warm-path retry works.
+        assert!(is_idempotent_lsp_method("workspace/symbol"));
+    }
 
     /// Create a minimal Cargo project for testing with rust-analyzer.
     fn create_test_cargo_project(dir: &Path) {
