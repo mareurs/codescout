@@ -596,12 +596,15 @@ fn resolve_work_dir(root: &Path, cwd_param: Option<&str>) -> anyhow::Result<std:
             )
         })?;
         let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let tmp = crate::platform::temp_dir();
+        let canonical_tmp = tmp.canonicalize().unwrap_or(tmp);
         let under_project = canonical.starts_with(canonical_root.as_path());
-        let under_tmp = canonical.starts_with("/tmp");
+        let under_tmp = canonical.starts_with(canonical_tmp.as_path());
         if !under_project && !under_tmp {
             return Err(super::RecoverableError::with_hint(
                 format!("cwd '{}' escapes project root", rel),
-                "The cwd must be a subdirectory within the project, or a path under /tmp.",
+                "The cwd must be a subdirectory within the project, or a path under the \
+                 platform temp directory.",
             )
             .into());
         }
@@ -624,9 +627,8 @@ async fn spawn_background_command(
     let (log_file, _) = log_tmp.keep()?;
     let log_stderr = log_file.try_clone()?;
 
-    // Child handle dropped intentionally — process runs detached, adopted by init.
     let (shell, shell_args) = crate::platform::shell_command(resolved_command);
-    tokio::process::Command::new(shell)
+    let child = tokio::process::Command::new(shell)
         .args(&shell_args)
         .current_dir(work_dir)
         .env("GIT_PAGER", "cat")
@@ -634,8 +636,19 @@ async fn spawn_background_command(
         .stderr(std::process::Stdio::from(log_stderr))
         .spawn()?;
 
-    // Warm return: 5s window captures startup output and fast failures.
+    // Cancel-aware warm-up: during the 5s window we hold a guard that
+    // SIGKILLs the child if this future is dropped (tool cancellation).
+    // After the window elapses normally the guard disarms, the tokio
+    // Child handle is dropped, and the process runs detached.
+    let pid = child.id();
+    drop(child);
+    let mut kill_guard = BackgroundKillGuard {
+        pid,
+        disarmed: false,
+    };
+
     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    kill_guard.disarmed = true;
 
     let log_content = std::fs::read_to_string(&log_path).unwrap_or_default();
     let tail_50: String = {
@@ -657,6 +670,37 @@ async fn spawn_background_command(
         bg_result["stdout"] = json!(tail_50);
     }
     Ok(bg_result)
+}
+
+/// Guard that SIGKILLs a background child if dropped while armed. Used during
+/// the `spawn_background_command` warm-up window so that a cancelled tool
+/// future does not leave orphaned processes behind.
+struct BackgroundKillGuard {
+    pid: Option<u32>,
+    disarmed: bool,
+}
+
+impl Drop for BackgroundKillGuard {
+    fn drop(&mut self) {
+        if self.disarmed {
+            return;
+        }
+        if let Some(pid) = self.pid {
+            #[cfg(unix)]
+            // SAFETY: libc::kill with a PID obtained from a child we just spawned,
+            // SIGKILL is safe to send. Worst case the PID was reaped and we
+            // kill nothing (ESRCH), which is a no-op.
+            unsafe {
+                libc::kill(pid as libc::pid_t, libc::SIGKILL);
+            }
+            #[cfg(windows)]
+            {
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/F", "/PID", &pid.to_string()])
+                    .status();
+            }
+        }
+    }
 }
 
 fn inject_tee(

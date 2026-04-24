@@ -92,6 +92,7 @@ lsp-types = "0.97"
 
 # URI handling (file:// ↔ path conversion, handles Windows drive letters + percent-encoding)
 url = "2"
+percent-encoding = "2"
 
 # AST parsing (tree-sitter)
 tree-sitter = "0.26"

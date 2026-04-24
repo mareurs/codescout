@@ -59,6 +59,37 @@ fn infer_edit_hint(old_string: &str, new_string: &str) -> &'static str {
     "replace_symbol(symbol, path, new_body) — replaces the symbol body via LSP"
 }
 
+/// Returns Err if `old_string` looks like a structural rewrite on an
+/// LSP-supported source file. Enforced in both single-edit and batch modes so
+/// multi-line replacements containing `fn`/`struct`/`class`/etc. are routed
+/// through `replace_symbol` regardless of entry point.
+fn guard_structural_rewrite(
+    path: &str,
+    old_string: &str,
+    new_string: &str,
+) -> Result<(), super::RecoverableError> {
+    if !old_string.contains('\n') {
+        return Ok(());
+    }
+    if !crate::util::path_security::is_source_path(path) {
+        return Ok(());
+    }
+    let Some(lang) = detect_lsp_language(path) else {
+        return Ok(());
+    };
+    let Some(keyword) = find_def_keyword(old_string, lang) else {
+        return Ok(());
+    };
+    let hint = infer_edit_hint(old_string, new_string);
+    Err(super::RecoverableError::with_hint(
+        format!(
+            "multi-line edit contains a symbol definition ({keyword:?}) — \
+             use symbol tools for structural changes"
+        ),
+        hint,
+    ))
+}
+
 pub struct EditFile;
 
 #[async_trait::async_trait]
@@ -152,6 +183,11 @@ impl Tool for EditFile {
                     .into());
                 }
 
+                if let Err(mut e) = guard_structural_rewrite(path, old_s, new_s) {
+                    e.message = format!("edit[{i}]: {}", e.message);
+                    return Err(e.into());
+                }
+
                 let match_count = content.matches(old_s).count();
                 if match_count == 0 {
                     return Err(super::RecoverableError::with_hint(
@@ -228,21 +264,7 @@ impl Tool for EditFile {
         }
 
         // Hard-block multi-line edits that contain definition keywords on LSP-supported languages.
-        if old_string.contains('\n') && crate::util::path_security::is_source_path(path) {
-            if let Some(lang) = detect_lsp_language(path) {
-                if let Some(keyword) = find_def_keyword(old_string, lang) {
-                    let hint = infer_edit_hint(old_string, new_string);
-                    return Err(super::RecoverableError::with_hint(
-                        format!(
-                            "multi-line edit contains a symbol definition ({keyword:?}) \
-                             — use symbol tools for structural changes"
-                        ),
-                        hint,
-                    )
-                    .into());
-                }
-            }
-        }
+        guard_structural_rewrite(path, old_string, new_string)?;
 
         // Validate new_string is an explicit string — null/missing must error,
         // not silently delete. Empty string "" is valid (explicit deletion).
@@ -316,22 +338,12 @@ async fn perform_edit(
         }
     }
 
-    // Coverage hint for markdown files.
+    // Update section-coverage mtime on markdown writes so the next read
+    // doesn't spuriously invalidate. The unread-section hint field was removed
+    // (telemetry showed it never fired across ~1.7k edit_file calls).
     if path.ends_with(".md") || path.ends_with(".markdown") {
-        // Update mtime to prevent spurious invalidation after the write.
         if let Ok(mut cov) = ctx.section_coverage.lock() {
             cov.update_mtime(&resolved);
-        }
-
-        // If unread sections exist, return a hint alongside the ok status.
-        let all_headings = crate::tools::file_summary::parse_all_headings(&new_content);
-        if !all_headings.is_empty() {
-            let heading_texts: Vec<String> = all_headings.iter().map(|h| h.text.clone()).collect();
-            if let Ok(mut cov) = ctx.section_coverage.lock() {
-                if let Some(hint) = cov.unread_hint(&resolved, &heading_texts) {
-                    return Ok(json!({"status": "ok", "hint": hint}));
-                }
-            }
         }
     }
 
@@ -1255,6 +1267,49 @@ mod tests {
             .call(json!({ "path": outside_str }), &ctx)
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn create_file_refuses_to_overwrite_by_default() {
+        let (dir, ctx) = project_ctx().await;
+        let file = dir.path().join("existing.txt");
+        std::fs::write(&file, "original").unwrap();
+
+        let result = CreateFile
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "content": "new content"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err(), "must refuse to overwrite");
+        let contents = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(contents, "original", "file must be untouched");
+    }
+
+    #[tokio::test]
+    async fn create_file_overwrites_with_explicit_flag() {
+        let (dir, ctx) = project_ctx().await;
+        let file = dir.path().join("existing.txt");
+        std::fs::write(&file, "original").unwrap();
+
+        CreateFile
+            .call(
+                json!({
+                    "path": file.to_str().unwrap(),
+                    "content": "new content",
+                    "overwrite": true
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let contents = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(contents, "new content");
     }
 
     // ── Glob ─────────────────────────────────────────────────────────────
@@ -3392,6 +3447,47 @@ mod tests {
         assert!(content.contains("extra line a"));
         assert!(content.contains("extra line b"));
         assert!(content.contains("line three updated"));
+    }
+
+    #[tokio::test]
+    async fn batch_edit_blocks_structural_rewrite() {
+        // Multi-line edit that replaces a Rust function body must be blocked in
+        // batch mode — same semantic as single-edit mode. Caller should be
+        // pushed toward replace_symbol.
+        let (dir, ctx) = project_ctx().await;
+        let path = dir.path().join("src").join("lib.rs");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "pub fn foo() {\n    println!(\"old\");\n}\n\npub fn bar() {}\n",
+        )
+        .unwrap();
+
+        let result = EditFile
+            .call(
+                json!({
+                    "path": path.to_str().unwrap(),
+                    "edits": [
+                        {
+                            "old_string": "pub fn foo() {\n    println!(\"old\");\n}",
+                            "new_string": "pub fn foo() {\n    println!(\"new\");\n}"
+                        }
+                    ]
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err(), "batch must reject structural rewrite");
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("symbol definition") || err.contains("replace_symbol"),
+            "error should guide to replace_symbol, got: {err}"
+        );
+
+        // Original content untouched.
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.contains("println!(\"old\")"));
     }
 
     // --- format_list_dir tests ---

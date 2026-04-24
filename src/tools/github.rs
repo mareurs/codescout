@@ -24,11 +24,32 @@ pub(crate) async fn run_gh(args: &[&str]) -> anyhow::Result<GhOutput> {
             RecoverableError::new(format!("failed to run gh: {e}"))
         }
     })?;
+    let stdout = decode_gh_bytes(&out.stdout, "stdout", args);
+    let stderr = decode_gh_bytes(&out.stderr, "stderr", args);
     Ok(GhOutput {
-        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+        stdout,
+        stderr,
         exit_code: out.status.code().unwrap_or(-1),
     })
+}
+
+/// Decode `gh` output as UTF-8, warning if lossy replacement had to happen.
+/// `gh` should always emit UTF-8; replacement characters suggest a garbled
+/// process pipe or an unsupported terminal-encoding environment.
+fn decode_gh_bytes(bytes: &[u8], stream: &'static str, args: &[&str]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(s) => s.to_owned(),
+        Err(_) => {
+            let lossy = String::from_utf8_lossy(bytes).into_owned();
+            tracing::warn!(
+                stream,
+                args = ?args,
+                bytes = bytes.len(),
+                "gh output contained non-UTF-8 bytes; decoded with lossy replacement"
+            );
+            lossy
+        }
+    }
 }
 
 pub(crate) fn check_gh_output(out: GhOutput) -> Result<String, RecoverableError> {
@@ -90,12 +111,27 @@ fn with_summary(mut result: Value, summary: Option<String>) -> Value {
 }
 
 /// Summarize a JSON array by extracting a label from each item.
+///
+/// Parse failures are logged at `warn` level (mid-output truncation from `gh`
+/// silently produced no summary before) and return `None` so the caller still
+/// returns the raw content unchanged.
 fn summarize_list(
     content: &str,
     item_label: &str,
     extract: impl Fn(&Value) -> Option<String>,
 ) -> Option<String> {
-    let arr = serde_json::from_str::<Vec<Value>>(content).ok()?;
+    let arr = match serde_json::from_str::<Vec<Value>>(content) {
+        Ok(arr) => arr,
+        Err(e) => {
+            tracing::warn!(
+                item_label,
+                error = %e,
+                bytes = content.len(),
+                "summarize_list: failed to parse gh output as JSON array"
+            );
+            return None;
+        }
+    };
     let count = arr.len();
     if count == 0 {
         return Some(format!("0 {item_label}"));
@@ -147,6 +183,88 @@ fn require_number<'a>(number: &'a Option<String>, method: &str) -> Result<&'a st
         )
         .into()
     })
+}
+
+/// Validate owner/repo if either is present. Ok if both are empty (caller
+/// falls back to `gh`'s cwd-based repo resolution).
+fn validate_owner_repo_if_present(owner: &str, repo: &str) -> Result<(), RecoverableError> {
+    if owner.is_empty() && repo.is_empty() {
+        return Ok(());
+    }
+    require_owner_repo(owner, repo)
+}
+
+/// Build a `--name=value` argv string for `gh`.
+///
+/// The `=` form prevents flag-confusion: a value like `"--add-label=critical"`
+/// passed as a plain positional arg would be re-parsed as a flag by `gh`'s
+/// clap. Combined with `=`, the whole token is consumed as one flag.
+fn gh_flag(name: &str, value: &str) -> String {
+    format!("--{name}={value}")
+}
+
+/// Percent-encode a GitHub file path for insertion into an API URL.
+///
+/// Splits on `/`, rejects empty segments, `.`, and `..`. Rejects `?` and `#`
+/// anywhere in the input (they change URL semantics). Each segment is
+/// percent-encoded via `NON_ALPHANUMERIC`, then rejoined with literal `/`.
+fn encode_github_path(path: &str) -> Result<String, RecoverableError> {
+    if path.contains('?') || path.contains('#') {
+        return Err(RecoverableError::with_hint(
+            "path must not contain '?' or '#'",
+            "GitHub file paths cannot contain URL metacharacters",
+        ));
+    }
+    if path.contains('\0') {
+        return Err(RecoverableError::with_hint(
+            "path contains null byte",
+            "GitHub file paths must not contain null bytes",
+        ));
+    }
+    let trimmed = path.strip_prefix('/').unwrap_or(path);
+    if trimmed.is_empty() {
+        return Err(RecoverableError::with_hint(
+            "path is empty",
+            "Provide a non-empty file path",
+        ));
+    }
+    let mut encoded_segments: Vec<String> = Vec::new();
+    for seg in trimmed.split('/') {
+        if seg.is_empty() || seg == "." || seg == ".." {
+            return Err(RecoverableError::with_hint(
+                "path contains empty, '.', or '..' segment",
+                "Each segment of the path must be a real filename",
+            ));
+        }
+        let enc: String =
+            percent_encoding::utf8_percent_encode(seg, percent_encoding::NON_ALPHANUMERIC)
+                .to_string();
+        encoded_segments.push(enc);
+    }
+    Ok(encoded_segments.join("/"))
+}
+
+/// Percent-encode a git ref value (branch, tag, SHA) for use in a query string.
+///
+/// Rejects characters outside a conservative whitelist matching git ref
+/// semantics plus common tag/SHA characters.
+fn encode_github_ref(r: &str) -> Result<String, RecoverableError> {
+    if r.is_empty() {
+        return Err(RecoverableError::with_hint(
+            "ref is empty",
+            "Provide a non-empty git ref",
+        ));
+    }
+    let ok = |c: char| {
+        c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '+')
+    };
+    if !r.chars().all(ok) {
+        return Err(RecoverableError::with_hint(
+            "ref contains invalid characters",
+            "Git refs may contain only alphanumerics and `-_./+`",
+        ));
+    }
+    Ok(percent_encoding::utf8_percent_encode(r, percent_encoding::NON_ALPHANUMERIC).to_string())
 }
 
 // ── Stub tool structs ─────────────────────────────────────────────────────────
@@ -272,8 +390,9 @@ impl Tool for GithubIssue {
         let method = params["method"].as_str().unwrap_or("");
         let owner = params["owner"].as_str().unwrap_or("");
         let repo = params["repo"].as_str().unwrap_or("");
+        validate_owner_repo_if_present(owner, repo)?;
         let repo_flag = if !owner.is_empty() && !repo.is_empty() {
-            format!("{owner}/{repo}")
+            gh_flag("repo", &format!("{owner}/{repo}"))
         } else {
             String::new()
         };
@@ -281,26 +400,28 @@ impl Tool for GithubIssue {
             .unwrap_or(30)
             .min(100)
             .to_string();
+        let limit_flag = gh_flag("limit", &limit);
         let number = optional_u64_param(&params, "number").map(|n| n.to_string());
 
         match method {
             "list" => {
+                let state_flag = params["state"].as_str().map(|s| gh_flag("state", s));
+                let label_flag = params["labels"].as_str().map(|l| gh_flag("label", l));
                 let mut args = vec![
                     "issue",
                     "list",
                     "--json",
                     "number,title,state,labels,assignees,createdAt,updatedAt",
-                    "--limit",
-                    &limit,
+                    &limit_flag,
                 ];
                 if !repo_flag.is_empty() {
-                    args.extend(["--repo", &repo_flag]);
+                    args.push(&repo_flag);
                 }
-                if let Some(s) = params["state"].as_str() {
-                    args.extend(["--state", s]);
+                if let Some(ref f) = state_flag {
+                    args.push(f.as_str());
                 }
-                if let Some(l) = params["labels"].as_str() {
-                    args.extend(["--label", l]);
+                if let Some(ref f) = label_flag {
+                    args.push(f.as_str());
                 }
                 let out = run_gh(&args).await?;
                 let content = check_gh_output(out)?;
@@ -321,11 +442,11 @@ impl Tool for GithubIssue {
                 let args = [
                     "search",
                     "issues",
+                    "--",
                     q,
                     "--json",
                     "number,title,state,repository,url",
-                    "--limit",
-                    &limit,
+                    &limit_flag,
                 ];
                 let out = run_gh(&args).await?;
                 let content = check_gh_output(out)?;
@@ -349,7 +470,7 @@ impl Tool for GithubIssue {
                     "number,title,body,state,labels,assignees,comments,createdAt,updatedAt,url",
                 ];
                 if !repo_flag.is_empty() {
-                    args.extend(["--repo", &repo_flag]);
+                    args.push(&repo_flag);
                 }
                 let out = run_gh(&args).await?;
                 Ok(maybe_buffer(check_gh_output(out)?, "github_issue", ctx))
@@ -358,7 +479,7 @@ impl Tool for GithubIssue {
                 let num = require_number(&number, "get_comments")?;
                 let mut args = vec!["issue", "view", num, "--json", "comments"];
                 if !repo_flag.is_empty() {
-                    args.extend(["--repo", &repo_flag]);
+                    args.push(&repo_flag);
                 }
                 let out = run_gh(&args).await?;
                 Ok(maybe_buffer(check_gh_output(out)?, "github_issue", ctx))
@@ -367,7 +488,7 @@ impl Tool for GithubIssue {
                 let num = require_number(&number, "get_labels")?;
                 let mut args = vec!["issue", "view", num, "--json", "labels"];
                 if !repo_flag.is_empty() {
-                    args.extend(["--repo", &repo_flag]);
+                    args.push(&repo_flag);
                 }
                 let out = run_gh(&args).await?;
                 Ok(maybe_buffer(check_gh_output(out)?, "github_issue", ctx))
@@ -384,17 +505,23 @@ impl Tool for GithubIssue {
                 let title = params["title"].as_str().ok_or_else(|| {
                     RecoverableError::with_hint("title required", "Provide the issue title")
                 })?;
-                let mut args = vec!["issue", "create", "--repo", &repo_flag, "--title", title];
-                if let Some(b) = params["body"].as_str() {
-                    args.extend(["--body", b]);
-                } else {
-                    args.extend(["--body", ""]);
+                let body_val = params["body"].as_str().unwrap_or("");
+                let title_flag = gh_flag("title", title);
+                let body_flag = gh_flag("body", body_val);
+                let label_flag = params["labels"].as_str().map(|l| gh_flag("label", l));
+                let assignee_flag = params["assignees"].as_str().map(|a| gh_flag("assignee", a));
+                let mut args = vec![
+                    "issue",
+                    "create",
+                    &repo_flag,
+                    &title_flag,
+                    &body_flag,
+                ];
+                if let Some(ref f) = label_flag {
+                    args.push(f.as_str());
                 }
-                if let Some(l) = params["labels"].as_str() {
-                    args.extend(["--label", l]);
-                }
-                if let Some(a) = params["assignees"].as_str() {
-                    args.extend(["--assignee", a]);
+                if let Some(ref f) = assignee_flag {
+                    args.push(f.as_str());
                 }
                 let out = run_gh(&args).await?;
                 Ok(json!(check_gh_output(out)?))
@@ -402,21 +529,28 @@ impl Tool for GithubIssue {
             "update" => {
                 let num = require_number(&number, "update")?;
                 require_owner_repo(owner, repo)?;
-                let mut args = vec!["issue", "edit", num, "--repo", &repo_flag];
-                if let Some(t) = params["title"].as_str() {
-                    args.extend(["--title", t]);
+                let title_flag = params["title"].as_str().map(|t| gh_flag("title", t));
+                let body_flag = params["body"].as_str().map(|b| gh_flag("body", b));
+                let state_flag = params["state"].as_str().map(|s| gh_flag("state", s));
+                let label_flag = params["labels"].as_str().map(|l| gh_flag("add-label", l));
+                let assignee_flag = params["assignees"]
+                    .as_str()
+                    .map(|a| gh_flag("add-assignee", a));
+                let mut args = vec!["issue", "edit", num, &repo_flag];
+                if let Some(ref f) = title_flag {
+                    args.push(f.as_str());
                 }
-                if let Some(b) = params["body"].as_str() {
-                    args.extend(["--body", b]);
+                if let Some(ref f) = body_flag {
+                    args.push(f.as_str());
                 }
-                if let Some(s) = params["state"].as_str() {
-                    args.extend(["--state", s]);
+                if let Some(ref f) = state_flag {
+                    args.push(f.as_str());
                 }
-                if let Some(l) = params["labels"].as_str() {
-                    args.extend(["--add-label", l]);
+                if let Some(ref f) = label_flag {
+                    args.push(f.as_str());
                 }
-                if let Some(a) = params["assignees"].as_str() {
-                    args.extend(["--add-assignee", a]);
+                if let Some(ref f) = assignee_flag {
+                    args.push(f.as_str());
                 }
                 let out = run_gh(&args).await?;
                 Ok(json!(check_gh_output(out)?))
@@ -426,9 +560,10 @@ impl Tool for GithubIssue {
                 let body = params["body"].as_str().ok_or_else(|| {
                     RecoverableError::with_hint("body required", "Provide the comment body")
                 })?;
-                let mut args = vec!["issue", "comment", num, "--body", body];
+                let body_flag = gh_flag("body", body);
+                let mut args = vec!["issue", "comment", num, &body_flag];
                 if !repo_flag.is_empty() {
-                    args.extend(["--repo", &repo_flag]);
+                    args.push(&repo_flag);
                 }
                 let out = run_gh(&args).await?;
                 Ok(json!(check_gh_output(out)?))
@@ -526,8 +661,9 @@ impl Tool for GithubPr {
         let method = params["method"].as_str().unwrap_or("");
         let owner = params["owner"].as_str().unwrap_or("");
         let repo = params["repo"].as_str().unwrap_or("");
+        validate_owner_repo_if_present(owner, repo)?;
         let repo_flag = if !owner.is_empty() && !repo.is_empty() {
-            format!("{owner}/{repo}")
+            gh_flag("repo", &format!("{owner}/{repo}"))
         } else {
             String::new()
         };
@@ -535,23 +671,24 @@ impl Tool for GithubPr {
             .unwrap_or(30)
             .min(100)
             .to_string();
+        let limit_flag = gh_flag("limit", &limit);
         let number = optional_u64_param(&params, "number").map(|n| n.to_string());
 
         match method {
             "list" => {
+                let state_flag = params["state"].as_str().map(|s| gh_flag("state", s));
                 let mut args = vec![
                     "pr",
                     "list",
                     "--json",
                     "number,title,state,isDraft,headRefName,baseRefName,createdAt,updatedAt,url",
-                    "--limit",
-                    &limit,
+                    &limit_flag,
                 ];
                 if !repo_flag.is_empty() {
-                    args.extend(["--repo", &repo_flag]);
+                    args.push(&repo_flag);
                 }
-                if let Some(s) = params["state"].as_str() {
-                    args.extend(["--state", s]);
+                if let Some(ref f) = state_flag {
+                    args.push(f.as_str());
                 }
                 let out = run_gh(&args).await?;
                 let content = check_gh_output(out)?;
@@ -572,11 +709,11 @@ impl Tool for GithubPr {
                 let out = run_gh(&[
                     "search",
                     "prs",
+                    "--",
                     q,
                     "--json",
                     "number,title,state,repository,url",
-                    "--limit",
-                    &limit,
+                    &limit_flag,
                 ])
                 .await?;
                 let content = check_gh_output(out)?;
@@ -601,7 +738,7 @@ impl Tool for GithubPr {
                      labels,assignees,reviewers,url,mergeStateStatus,createdAt,updatedAt",
                 ];
                 if !repo_flag.is_empty() {
-                    args.extend(["--repo", &repo_flag]);
+                    args.push(&repo_flag);
                 }
                 let out = run_gh(&args).await?;
                 Ok(maybe_buffer(check_gh_output(out)?, "github_pr", ctx))
@@ -610,7 +747,7 @@ impl Tool for GithubPr {
                 let num = require_number(&number, "get_diff")?;
                 let mut args = vec!["pr", "diff", num];
                 if !repo_flag.is_empty() {
-                    args.extend(["--repo", &repo_flag]);
+                    args.push(&repo_flag);
                 }
                 let out = run_gh(&args).await?;
                 let content = check_gh_output(out)?;
@@ -626,7 +763,7 @@ impl Tool for GithubPr {
                 let num = require_number(&number, "get_files")?;
                 let mut args = vec!["pr", "view", num, "--json", "files"];
                 if !repo_flag.is_empty() {
-                    args.extend(["--repo", &repo_flag]);
+                    args.push(&repo_flag);
                 }
                 let out = run_gh(&args).await?;
                 Ok(maybe_buffer(check_gh_output(out)?, "github_pr", ctx))
@@ -635,7 +772,7 @@ impl Tool for GithubPr {
                 let num = require_number(&number, "get_comments")?;
                 let mut args = vec!["pr", "view", num, "--json", "comments"];
                 if !repo_flag.is_empty() {
-                    args.extend(["--repo", &repo_flag]);
+                    args.push(&repo_flag);
                 }
                 let out = run_gh(&args).await?;
                 Ok(maybe_buffer(check_gh_output(out)?, "github_pr", ctx))
@@ -658,7 +795,7 @@ impl Tool for GithubPr {
                 let num = require_number(&number, "get_status")?;
                 let mut args = vec!["pr", "checks", num];
                 if !repo_flag.is_empty() {
-                    args.extend(["--repo", &repo_flag]);
+                    args.push(&repo_flag);
                 }
                 args.extend(["--json", "name,state,conclusion,startedAt,completedAt"]);
                 let out = run_gh(&args).await?;
@@ -681,15 +818,20 @@ impl Tool for GithubPr {
                 let title = params["title"].as_str().ok_or_else(|| {
                     RecoverableError::with_hint("title required", "Provide the PR title")
                 })?;
+                let body_val = params["body"].as_str().unwrap_or("");
+                let head_flag = gh_flag("head", head);
+                let base_flag = gh_flag("base", base);
+                let title_flag = gh_flag("title", title);
+                let body_flag = gh_flag("body", body_val);
                 let mut args = vec![
-                    "pr", "create", "--repo", &repo_flag, "--head", head, "--base", base,
-                    "--title", title,
+                    "pr",
+                    "create",
+                    &repo_flag,
+                    &head_flag,
+                    &base_flag,
+                    &title_flag,
+                    &body_flag,
                 ];
-                if let Some(b) = params["body"].as_str() {
-                    args.extend(["--body", b]);
-                } else {
-                    args.extend(["--body", ""]);
-                }
                 if parse_bool_param(&params["draft"]) {
                     args.push("--draft");
                 }
@@ -698,18 +840,21 @@ impl Tool for GithubPr {
             }
             "update" => {
                 let num = require_number(&number, "update")?;
+                let title_flag = params["title"].as_str().map(|t| gh_flag("title", t));
+                let body_flag = params["body"].as_str().map(|b| gh_flag("body", b));
+                let base_flag = params["base"].as_str().map(|b| gh_flag("base", b));
                 let mut args = vec!["pr", "edit", num];
                 if !repo_flag.is_empty() {
-                    args.extend(["--repo", &repo_flag]);
+                    args.push(&repo_flag);
                 }
-                if let Some(t) = params["title"].as_str() {
-                    args.extend(["--title", t]);
+                if let Some(ref f) = title_flag {
+                    args.push(f.as_str());
                 }
-                if let Some(b) = params["body"].as_str() {
-                    args.extend(["--body", b]);
+                if let Some(ref f) = body_flag {
+                    args.push(f.as_str());
                 }
-                if let Some(base) = params["base"].as_str() {
-                    args.extend(["--base", base]);
+                if let Some(ref f) = base_flag {
+                    args.push(f.as_str());
                 }
                 let out = run_gh(&args).await?;
                 Ok(json!(check_gh_output(out)?))
@@ -719,12 +864,19 @@ impl Tool for GithubPr {
                 let merge_method = params["merge_method"].as_str().unwrap_or("merge");
                 let mut args = vec!["pr", "merge", num];
                 if !repo_flag.is_empty() {
-                    args.extend(["--repo", &repo_flag]);
+                    args.push(&repo_flag);
                 }
                 match merge_method {
+                    "merge" => args.push("--merge"),
                     "squash" => args.push("--squash"),
                     "rebase" => args.push("--rebase"),
-                    _ => args.push("--merge"),
+                    other => {
+                        return Err(RecoverableError::with_hint(
+                            format!("unknown merge_method: '{other}'"),
+                            "merge_method must be one of: merge, squash, rebase",
+                        )
+                        .into());
+                    }
                 }
                 let out = run_gh(&args).await?;
                 Ok(json!(check_gh_output(out)?))
@@ -740,7 +892,6 @@ impl Tool for GithubPr {
                 let num = require_number(&number, "create_review")?;
                 require_owner_repo(owner, repo)?;
                 let endpoint = format!("/repos/{owner}/{repo}/pulls/{num}/reviews");
-                // Pre-compute owned strings to avoid &format!() temporaries
                 let body_field = params["body"].as_str().map(|b| format!("body={b}"));
                 let event_field = params["event"].as_str().map(|e| format!("event={e}"));
                 let mut gh_args = vec!["api", "--method", "POST", &endpoint];
@@ -795,7 +946,6 @@ impl Tool for GithubPr {
                 })?;
                 require_owner_repo(owner, repo)?;
                 let endpoint = format!("/repos/{owner}/{repo}/pulls/{num}/comments");
-                // Pre-compute owned strings to avoid &format!() temporaries
                 let body_field = format!("body={body}");
                 let commit_field = params["commit_id"]
                     .as_str()
@@ -902,9 +1052,11 @@ impl Tool for GithubFile {
                 let path = params["path"].as_str().ok_or_else(|| {
                     RecoverableError::with_hint("path required", "Provide the file path")
                 })?;
-                let mut endpoint = format!("/repos/{owner}/{repo}/contents/{path}");
+                let path_enc = encode_github_path(path)?;
+                let mut endpoint = format!("/repos/{owner}/{repo}/contents/{path_enc}");
                 if let Some(r) = params["ref"].as_str() {
-                    endpoint.push_str(&format!("?ref={r}"));
+                    let r_enc = encode_github_ref(r)?;
+                    endpoint.push_str(&format!("?ref={r_enc}"));
                 }
                 let out = run_gh(&["api", &endpoint]).await?;
                 Ok(always_buffer(check_gh_output(out)?, "github_file", ctx))
@@ -914,6 +1066,7 @@ impl Tool for GithubFile {
                 let path = params["path"].as_str().ok_or_else(|| {
                     RecoverableError::with_hint("path required", "Provide the file path")
                 })?;
+                let path_enc = encode_github_path(path)?;
                 let content = params["content"].as_str().ok_or_else(|| {
                     RecoverableError::with_hint(
                         "content required",
@@ -923,7 +1076,7 @@ impl Tool for GithubFile {
                 let message = params["message"].as_str().ok_or_else(|| {
                     RecoverableError::with_hint("message required", "Provide a commit message")
                 })?;
-                let endpoint = format!("/repos/{owner}/{repo}/contents/{path}");
+                let endpoint = format!("/repos/{owner}/{repo}/contents/{path_enc}");
                 let msg_field = format!("message={message}");
                 let content_field = format!("content={content}");
                 let sha_field = params["sha"].as_str().map(|s| format!("sha={s}"));
@@ -952,6 +1105,7 @@ impl Tool for GithubFile {
                 let path = params["path"].as_str().ok_or_else(|| {
                     RecoverableError::with_hint("path required", "Provide the file path")
                 })?;
+                let path_enc = encode_github_path(path)?;
                 let sha = params["sha"].as_str().ok_or_else(|| {
                     RecoverableError::with_hint(
                         "sha required",
@@ -961,7 +1115,7 @@ impl Tool for GithubFile {
                 let message = params["message"].as_str().ok_or_else(|| {
                     RecoverableError::with_hint("message required", "Provide a commit message")
                 })?;
-                let endpoint = format!("/repos/{owner}/{repo}/contents/{path}");
+                let endpoint = format!("/repos/{owner}/{repo}/contents/{path_enc}");
                 let msg_field = format!("message={message}");
                 let sha_field = format!("sha={sha}");
                 let branch_field = params["branch"].as_str().map(|b| format!("branch={b}"));
@@ -1496,4 +1650,37 @@ mod tests {
         assert!(require_owner_repo("owner/injection", "repo").is_err());
         assert!(require_owner_repo("owner", "repo name").is_err());
     }
+
+    #[test]
+    fn encode_github_path_percent_encodes_segments() {
+        assert_eq!(encode_github_path("src/lib.rs").unwrap(), "src/lib.rs");
+        assert_eq!(
+            encode_github_path("docs/my file.md").unwrap(),
+            "docs/my%20file.md"
+        );
+        assert_eq!(
+            encode_github_path("a/b?c").err().is_some(),
+            true,
+            "must reject '?'"
+        );
+        assert!(encode_github_path("a/b#c").is_err(), "must reject '#'");
+        assert!(encode_github_path("../escape").is_err(), "must reject '..'");
+        assert!(encode_github_path("a/./b").is_err(), "must reject '.'");
+        assert!(encode_github_path("a//b").is_err(), "must reject empty segment");
+        assert!(encode_github_path("").is_err());
+        assert!(encode_github_path("/").is_err());
+        assert!(encode_github_path("a\0b").is_err());
+    }
+
+    #[test]
+    fn encode_github_ref_rejects_invalid_chars() {
+        assert_eq!(encode_github_ref("main").unwrap(), "main");
+        assert_eq!(encode_github_ref("release/1.0").unwrap(), "release%2F1.0");
+        assert_eq!(encode_github_ref("v1.2.3+rc1").unwrap(), "v1.2.3%2Brc1");
+        assert!(encode_github_ref("").is_err());
+        assert!(encode_github_ref("main&path=other").is_err());
+        assert!(encode_github_ref("main?foo=bar").is_err());
+        assert!(encode_github_ref("branch with space").is_err());
+    }
+
 }
