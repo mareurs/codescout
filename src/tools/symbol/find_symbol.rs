@@ -267,6 +267,14 @@ impl Tool for FindSymbol {
 
                 // Concurrently start/query all LSP servers so different languages
                 // (e.g. Kotlin JVM startup) don't block each other.
+                //
+                // Per-language hard timeout: a pathological LSP state (silent
+                // workspace/symbol on a still-indexing server, init retry loop
+                // on a server that keeps crashing) must not hang the whole
+                // tool call past the MCP 60 s ceiling. On timeout we yield an
+                // empty result for that language; the tree-sitter fallback
+                // below still runs if every language produces nothing.
+                const PER_LANG_BUDGET: std::time::Duration = std::time::Duration::from_secs(8);
                 let languages: Vec<&str> = languages.into_iter().collect();
                 let mut join_set = tokio::task::JoinSet::new();
                 for lang in languages {
@@ -275,8 +283,23 @@ impl Tool for FindSymbol {
                     let pattern = pattern_lower.clone();
                     let mux_override = ctx.agent.lsp_mux_override(lang).await;
                     join_set.spawn(async move {
-                        let client = lsp.get_or_start(lang, &root, mux_override).await?;
-                        client.workspace_symbols(&pattern).await
+                        match tokio::time::timeout(PER_LANG_BUDGET, async {
+                            let client = lsp.get_or_start(lang, &root, mux_override).await?;
+                            client.workspace_symbols(&pattern).await
+                        })
+                        .await
+                        {
+                            Ok(r) => r,
+                            Err(_) => {
+                                tracing::warn!(
+                                    language = lang,
+                                    budget_ms = PER_LANG_BUDGET.as_millis() as u64,
+                                    "workspace/symbol per-language budget exceeded; \
+                                     falling back to tree-sitter for this language"
+                                );
+                                Ok(Vec::new())
+                            }
+                        }
                     });
                 }
                 while let Some(task_result) = join_set.join_next().await {

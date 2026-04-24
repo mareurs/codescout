@@ -102,6 +102,27 @@ fn uses_cold_start_retry_budget(method: &str) -> bool {
     !matches!(method, "workspace/symbol")
 }
 
+/// Scan a stderr line buffer for patterns that make LSP-side retries pointless.
+///
+/// Pure helper so it can be exercised in unit tests without spinning up a real
+/// server. Add new patterns here when we encounter additional permanent-failure
+/// modes (as opposed to transient ones that legitimately benefit from retry).
+fn detect_fatal_stderr(lines: &[String]) -> Option<RecoverableError> {
+    for line in lines {
+        if line.contains("Multiple editing sessions") {
+            return Some(RecoverableError::with_hint(
+                "kotlin-lsp rejected this workspace: \
+                 \"Multiple editing sessions for one workspace are not supported yet\"",
+                "Another codescout instance or editor is already serving this \
+                 project with kotlin-lsp. Only one Kotlin LSP session per \
+                 workspace is allowed in the current kotlin-lsp release. \
+                 Stop the other session and retry.",
+            ));
+        }
+    }
+    None
+}
+
 /// Convert hierarchical `DocumentSymbol[]` into our `SymbolInfo` tree.
 fn convert_document_symbols(
     symbols: &[lsp_types::DocumentSymbol],
@@ -672,6 +693,18 @@ impl LspClient {
         transport::write_message(&mut *writer, &msg).await
     }
 
+    /// Scan the buffered server stderr for patterns that make further
+    /// retries pointless. Returns a `RecoverableError` with a user-facing
+    /// hint if a known-fatal pattern is present.
+    ///
+    /// The caller is expected to surface the error to the tool layer; sibling
+    /// tool calls should keep working. Add new patterns here as we encounter
+    /// more permanent-failure modes.
+    fn fatal_stderr_hint(&self) -> Option<RecoverableError> {
+        let stderr = self.stderr_lines.lock().unwrap_or_else(|e| e.into_inner());
+        detect_fatal_stderr(&stderr)
+    }
+
     /// Perform the LSP initialize/initialized handshake.
     ///
     /// Retries on -32800 (RequestCancelled) because JVM-based servers like
@@ -733,6 +766,12 @@ impl LspClient {
                     self.workspace_root.display()
                 );
             }
+            // Pre-flight stderr check: a fatal error (e.g. kotlin-lsp
+            // "Multiple editing sessions") may have been emitted between
+            // attempts. Retrying would just spawn another doomed request.
+            if let Some(fatal) = self.fatal_stderr_hint() {
+                return Err(fatal.into());
+            }
             match self
                 .request_with_timeout("initialize", params_value.clone(), self.init_timeout)
                 .await
@@ -754,26 +793,22 @@ impl LspClient {
                     tracing::info!("LSP server initialized successfully");
                     return Ok(());
                 }
-                Err(e) if e.to_string().contains("code -32800") => {
-                    // Check stderr for fatal errors that make retrying pointless.
-                    let stderr = self.stderr_lines.lock().unwrap_or_else(|e| e.into_inner());
-                    for line in stderr.iter() {
-                        if line.contains("Multiple editing sessions") {
-                            return Err(RecoverableError::with_hint(
-                                "kotlin-lsp rejected this workspace: \
-                                 \"Multiple editing sessions for one workspace are not supported yet\"",
-                                "Another codescout instance or editor is already serving this \
-                                 project with kotlin-lsp. Only one Kotlin LSP session per \
-                                 workspace is allowed in the current kotlin-lsp release. \
-                                 Stop the other session and retry.",
-                            )
-                            .into());
-                        }
+                Err(e) => {
+                    // Any error path (-32800, timeout, disconnect, …): check
+                    // stderr for fatal patterns before deciding whether to
+                    // retry. The original code only checked on -32800, which
+                    // missed the common case where kotlin-lsp crashes mid-init
+                    // and the next attempt times out or hits a closed pipe
+                    // rather than -32800.
+                    if let Some(fatal) = self.fatal_stderr_hint() {
+                        return Err(fatal.into());
                     }
-                    drop(stderr);
-                    last_err = Some(e);
+                    if e.to_string().contains("code -32800") {
+                        last_err = Some(e);
+                    } else {
+                        return Err(e);
+                    }
                 }
-                Err(e) => return Err(e),
             }
         }
         Err(last_err.unwrap())
@@ -1347,6 +1382,36 @@ mod tests {
         assert!(uses_cold_start_retry_budget("textDocument/hover"));
         // workspace/symbol must still be idempotent so warm-path retry works.
         assert!(is_idempotent_lsp_method("workspace/symbol"));
+    }
+
+    #[test]
+    fn detect_fatal_stderr_flags_kotlin_multi_session() {
+        // kotlin-lsp refuses to run when another editing session holds the
+        // workspace. This is a permanent failure per release; retrying would
+        // just spawn more zombie processes, so we must surface it fast.
+        let lines = vec![
+            "Exception in thread \"main\" com.jetbrains.lsp.implementation.\
+             LspException: Multiple editing sessions for one workspace are not supported yet"
+                .to_string(),
+        ];
+        let hint = detect_fatal_stderr(&lines).expect("should detect fatal pattern");
+        let msg = hint.to_string();
+        assert!(
+            msg.contains("Multiple editing sessions"),
+            "error message should surface the original pattern: {msg}"
+        );
+    }
+
+    #[test]
+    fn detect_fatal_stderr_ignores_benign_lines() {
+        // Noisy but non-fatal lines (warnings, informational) must not trip
+        // the fast-fail path — those are normal cold-start chatter.
+        let lines = vec![
+            "WARN notify error: No path was found.".to_string(),
+            "INFO LSP server starting".to_string(),
+            "Gradle import in progress".to_string(),
+        ];
+        assert!(detect_fatal_stderr(&lines).is_none());
     }
 
     /// Create a minimal Cargo project for testing with rust-analyzer.
