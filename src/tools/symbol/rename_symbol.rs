@@ -60,48 +60,71 @@ impl Tool for RenameSymbol {
 
         // Apply workspace edit — validate every file from the LSP response
         // as a write target before modifying it.
+        //
+        // Two-phase execution for rollback safety (phase-4 I1):
+        //   1. Plan phase: validate every path, read each file once, compute
+        //      the new content in memory. Any error here aborts with zero
+        //      writes to disk.
+        //   2. Write phase: write each planned file in sequence. If a write
+        //      fails at index N, restore files 0..N-1 from their in-memory
+        //      pre-images. Restore failures are logged but not fatal — we
+        //      surface the original write error so the caller can investigate.
         let rename_root = ctx.agent.require_project_root().await?;
         let rename_security = ctx.agent.security_config().await;
-        let mut files_changed = 0;
-        let mut total_edits = 0;
         let mut lsp_files: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+
+        struct PlannedWrite {
+            path: PathBuf,
+            pre_image: String,
+            new_content: String,
+            edit_count: usize,
+        }
+        let mut plan: Vec<PlannedWrite> = Vec::new();
+        let plan_path = |path: PathBuf,
+                         plain_edits: Vec<lsp_types::TextEdit>,
+                         plan: &mut Vec<PlannedWrite>|
+         -> anyhow::Result<()> {
+            // Skip if we already planned a write for this path (LSP may repeat
+            // the same file across `changes` and `document_changes`).
+            if plan.iter().any(|p| p.path == path) {
+                return Ok(());
+            }
+            let path_str = path
+                .to_str()
+                .ok_or_else(|| anyhow::anyhow!("non-UTF8 path from LSP: {:?}", path))?;
+            crate::util::path_security::validate_write_path(
+                path_str,
+                &rename_root,
+                &rename_security,
+            )?;
+            let pre_image = std::fs::read_to_string(&path)?;
+            let new_content = apply_text_edits(&pre_image, &plain_edits);
+            let edit_count = plain_edits.len();
+            plan.push(PlannedWrite {
+                path,
+                pre_image,
+                new_content,
+                edit_count,
+            });
+            Ok(())
+        };
 
         if let Some(changes) = &edit.changes {
             for (uri, edits) in changes {
                 let Some(path) = uri_to_path(uri.as_str()) else {
                     continue;
                 };
-                let path_str = path.display().to_string();
-                crate::util::path_security::validate_write_path(
-                    &path_str,
-                    &rename_root,
-                    &rename_security,
-                )?;
-                let content = std::fs::read_to_string(&path)?;
-                let new_content = apply_text_edits(&content, edits);
-                std::fs::write(&path, new_content)?;
-                lsp_files.insert(path.clone());
-                files_changed += 1;
-                total_edits += edits.len();
+                plan_path(path, edits.clone(), &mut plan)?;
             }
         }
 
         if let Some(doc_changes) = &edit.document_changes {
             let operations: Vec<&lsp_types::DocumentChangeOperation> = match doc_changes {
                 lsp_types::DocumentChanges::Edits(edits) => {
-                    // Convert TextDocumentEdits to DocumentChangeOperations for uniform handling
-                    // Just process them directly instead
                     for text_edit in edits {
                         let Some(path) = uri_to_path(text_edit.text_document.uri.as_str()) else {
                             continue;
                         };
-                        let path_str = path.display().to_string();
-                        crate::util::path_security::validate_write_path(
-                            &path_str,
-                            &rename_root,
-                            &rename_security,
-                        )?;
-                        let content = std::fs::read_to_string(&path)?;
                         let plain_edits: Vec<lsp_types::TextEdit> = text_edit
                             .edits
                             .iter()
@@ -110,11 +133,7 @@ impl Tool for RenameSymbol {
                                 lsp_types::OneOf::Right(ate) => ate.text_edit.clone(),
                             })
                             .collect();
-                        let new_content = apply_text_edits(&content, &plain_edits);
-                        std::fs::write(&path, new_content)?;
-                        lsp_files.insert(path.clone());
-                        files_changed += 1;
-                        total_edits += text_edit.edits.len();
+                        plan_path(path, plain_edits, &mut plan)?;
                     }
                     vec![]
                 }
@@ -125,13 +144,6 @@ impl Tool for RenameSymbol {
                     let Some(path) = uri_to_path(text_edit.text_document.uri.as_str()) else {
                         continue;
                     };
-                    let path_str = path.display().to_string();
-                    crate::util::path_security::validate_write_path(
-                        &path_str,
-                        &rename_root,
-                        &rename_security,
-                    )?;
-                    let content = std::fs::read_to_string(&path)?;
                     let plain_edits: Vec<lsp_types::TextEdit> = text_edit
                         .edits
                         .iter()
@@ -140,13 +152,49 @@ impl Tool for RenameSymbol {
                             lsp_types::OneOf::Right(ate) => ate.text_edit.clone(),
                         })
                         .collect();
-                    let new_content = apply_text_edits(&content, &plain_edits);
-                    std::fs::write(&path, new_content)?;
-                    lsp_files.insert(path.clone());
-                    files_changed += 1;
-                    total_edits += text_edit.edits.len();
+                    plan_path(path, plain_edits, &mut plan)?;
                 }
             }
+        }
+
+        // Write phase. On failure, roll back previously-written files from
+        // their in-memory pre-images.
+        let mut files_changed = 0usize;
+        let mut total_edits = 0usize;
+        for (i, planned) in plan.iter().enumerate() {
+            if let Err(e) = std::fs::write(&planned.path, &planned.new_content) {
+                let mut dirty: Vec<String> = Vec::new();
+                for prev in plan.iter().take(i) {
+                    if let Err(restore_err) = std::fs::write(&prev.path, &prev.pre_image) {
+                        tracing::error!(
+                            "rename rollback failed for {:?}: {}",
+                            prev.path,
+                            restore_err,
+                        );
+                        dirty.push(prev.path.display().to_string());
+                    }
+                }
+                if dirty.is_empty() {
+                    anyhow::bail!(
+                        "write failed for {:?}: {} (previous {} file(s) restored)",
+                        planned.path,
+                        e,
+                        i,
+                    );
+                } else {
+                    anyhow::bail!(
+                        "write failed for {:?}: {}; rollback ALSO failed for: {} \
+                         — these files are now in an inconsistent state and need \
+                         manual review",
+                        planned.path,
+                        e,
+                        dirty.join(", "),
+                    );
+                }
+            }
+            lsp_files.insert(planned.path.clone());
+            files_changed += 1;
+            total_edits += planned.edit_count;
         }
 
         // Notify LSP of all changed files so its symbol state is refreshed.
@@ -210,11 +258,29 @@ impl Tool for RenameSymbol {
                 )),
             )
         } else {
-            match text_sweep(&rename_root, old_name_str, &lsp_files, 20, 2) {
-                Ok(matches) => (matches, false, None::<String>),
-                Err(e) => {
+            // Run the sweep on a blocking thread — it walks the full project
+            // tree and reads each file, and we don't want to stall the tokio
+            // runtime on a large monorepo.
+            let sweep_root = rename_root.clone();
+            let sweep_name = old_name_str.to_string();
+            let sweep_files = lsp_files.clone();
+            let sweep_result = tokio::task::spawn_blocking(move || {
+                text_sweep(&sweep_root, &sweep_name, &sweep_files, 20, 2)
+            })
+            .await;
+            match sweep_result {
+                Ok(Ok(matches)) => (matches, false, None::<String>),
+                Ok(Err(e)) => {
                     tracing::warn!("text sweep after rename failed: {e}");
                     (vec![], false, Some(format!("sweep error: {e}")))
+                }
+                Err(join_err) => {
+                    tracing::warn!("text sweep task join failed: {join_err}");
+                    (
+                        vec![],
+                        false,
+                        Some(format!("sweep task failed: {join_err}")),
+                    )
                 }
             }
         };

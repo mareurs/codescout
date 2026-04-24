@@ -149,11 +149,27 @@ pub fn symbol_to_json(
 /// Detect degenerate LSP ranges where start_line == end_line but tree-sitter
 /// shows the symbol spans multiple lines. Returns RecoverableError instead of
 /// silently fixing — consistent with "trust LSP, validate, fail loudly".
+///
+/// Skips validation when tree-sitter reports syntax errors (a broken parse
+/// tree under-reports spans) so we don't false-positive on files the user is
+/// mid-edit on.
 pub fn validate_symbol_range(sym: &SymbolInfo) -> anyhow::Result<()> {
-    let Ok(ast_syms) = crate::ast::extract_symbols(&sym.file) else {
+    let Ok(source) = std::fs::read_to_string(&sym.file) else {
         return Ok(());
     };
-    if let Some(ast_end) = find_ast_end_line_in(&ast_syms, &sym.name, sym.start_line) {
+    let lang = crate::ast::detect_language(&sym.file);
+    if let Some(lang) = lang {
+        if crate::ast::has_syntax_errors(&source, lang) {
+            return Ok(());
+        }
+    }
+    let Ok(ast_syms) = crate::ast::parser::extract_symbols_from_source(&source, lang, &sym.file)
+    else {
+        return Ok(());
+    };
+    if let Some(ast_end) =
+        find_ast_end_line_in(&ast_syms, &sym.name, sym.start_line, Some(&sym.name_path))
+    {
         if ast_end > sym.end_line {
             anyhow::bail!(RecoverableError::with_hint(
                 format!(
@@ -188,6 +204,12 @@ pub fn validate_symbol_range(sym: &SymbolInfo) -> anyhow::Result<()> {
 /// a fresh `did_change`. The old check searched the entire `[range_start..end_line]`
 /// window, which masked staleness when the true declaration appeared later in
 /// the same range.
+///
+/// **I7 (phase-4 2026-04-24):** when `start_line` is a bare `*` block-comment
+/// continuation (a BUG-027-shape position), we additionally require a `/**`
+/// or `/*` opener within a small window *above* it. Without this check, a
+/// failed BUG-027 walk-back leaves the write starting inside the comment,
+/// orphaning the `/**` opener above the newly-written symbol.
 pub fn validate_symbol_position(sym: &SymbolInfo, lines: &[&str]) -> anyhow::Result<()> {
     let sl = sym.start_line as usize;
     if sl >= lines.len() {
@@ -222,6 +244,48 @@ pub fn validate_symbol_position(sym: &SymbolInfo, lines: &[&str]) -> anyhow::Res
              Call list_symbols(path) to refresh, then retry the operation.",
         )
         .into());
+    }
+    // I7: bare `*` block-comment continuation must have a `/**` or `/*` opener
+    // above it. Without one, BUG-027 walk-back will fail, the write will begin
+    // inside the comment, and the opener will be orphaned.
+    let trimmed_start = start_text.trim_start();
+    let is_bare_star_continuation = trimmed_start.starts_with('*')
+        && !trimmed_start.starts_with("/**")
+        && !trimmed_start.starts_with("/*")
+        && trimmed_start != "*/";
+    if is_bare_star_continuation {
+        // Search up to 64 lines above for the opener. Doc comments longer than
+        // that are unrealistic in practice.
+        let lookback_end = sl;
+        let lookback_start = sl.saturating_sub(64);
+        let opener_found = lines[lookback_start..lookback_end]
+            .iter()
+            .rev()
+            .take_while(|l| {
+                // Stop if we leave the comment (any line not starting with `*`,
+                // `/**`, `/*`, or blank inside the comment block).
+                let t = l.trim_start();
+                t.is_empty() || t.starts_with('*') || t.starts_with("/**") || t.starts_with("/*")
+            })
+            .any(|l| {
+                let t = l.trim_start();
+                t.starts_with("/**") || t.starts_with("/*")
+            });
+        if !opener_found {
+            return Err(RecoverableError::with_hint(
+                format!(
+                    "symbol '{}' at line {} is on a block-comment continuation ('*') \
+                     with no '/**' or '/*' opener visible above — writing here would \
+                     orphan the comment",
+                    sym.name,
+                    sl + 1,
+                ),
+                "The LSP returned a position inside a comment. Refresh via \
+                 list_symbols(path) and retry; if this persists, use edit_file \
+                 for this symbol.",
+            )
+            .into());
+        }
     }
     // Lead-in: scan a small window below for the name. Six lines covers the
     // typical `})\n}\n\nfn …` chain plus a comment or blank line of slack.
@@ -274,16 +338,56 @@ pub fn is_lead_in_line(line: &str) -> bool {
 
 /// Recursively search `symbols` for a symbol with the given name whose
 /// `start_line` is within 1 of `lsp_start`. Returns its `end_line`.
-pub fn find_ast_end_line_in(symbols: &[SymbolInfo], name: &str, lsp_start: u32) -> Option<u32> {
-    for sym in symbols {
-        if sym.name == name && sym.start_line.abs_diff(lsp_start) <= 1 {
-            return Some(sym.end_line);
-        }
-        if let Some(end) = find_ast_end_line_in(&sym.children, name, lsp_start) {
-            return Some(end);
+///
+/// Ambiguity guard: if more than one AST symbol matches (e.g. two `fn foo`
+/// on nearby lines in separate `impl` blocks), returns `None` rather than
+/// picking the first — the caller should fall back to the LSP end line.
+/// When `name_path` is provided, candidates whose AST `name_path` equals
+/// it are preferred (exact match wins immediately). This handles Rust
+/// impl methods where LSP reports `impl Type/m` and AST reports `Type/m`:
+/// the name/line heuristic still fires, but name_path disambiguates when
+/// available.
+pub fn find_ast_end_line_in(
+    symbols: &[SymbolInfo],
+    name: &str,
+    lsp_start: u32,
+    name_path: Option<&str>,
+) -> Option<u32> {
+    let mut matches: Vec<&SymbolInfo> = Vec::new();
+    collect_ast_candidates(symbols, name, lsp_start, &mut matches);
+
+    if matches.is_empty() {
+        return None;
+    }
+    if let Some(np) = name_path {
+        // Prefer exact name_path equality; if LSP and AST name_paths diverge
+        // (impl blocks) the suffix match handles it.
+        if let Some(exact) = matches
+            .iter()
+            .find(|s| s.name_path == np || np.ends_with(&format!("/{}", s.name_path)))
+        {
+            return Some(exact.end_line);
         }
     }
-    None
+    if matches.len() > 1 {
+        // Ambiguous — refuse to guess.
+        return None;
+    }
+    Some(matches[0].end_line)
+}
+
+fn collect_ast_candidates<'a>(
+    symbols: &'a [SymbolInfo],
+    name: &str,
+    lsp_start: u32,
+    out: &mut Vec<&'a SymbolInfo>,
+) {
+    for sym in symbols {
+        if sym.name == name && sym.start_line.abs_diff(lsp_start) <= 1 {
+            out.push(sym);
+        }
+        collect_ast_candidates(&sym.children, name, lsp_start, out);
+    }
 }
 
 /// Fetch a symbol by `name_path` with automatic retry on stale LSP positions.

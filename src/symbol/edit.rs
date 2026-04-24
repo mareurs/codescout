@@ -8,8 +8,6 @@ use std::path::{Path, PathBuf};
 
 use crate::lsp::SymbolInfo;
 
-use crate::symbol::query::find_ast_end_line_in;
-
 /// Compute the true start of a symbol declaration for editing (remove/replace).
 ///
 /// Uses the LSP `range.start` (which includes attributes, doc comments, decorators)
@@ -106,20 +104,71 @@ pub fn editing_start_line(sym: &crate::lsp::SymbolInfo, lines: &[&str]) -> usize
     find_insert_before_line(lines, sym.start_line as usize)
 }
 
-/// Get the true end line for write operations (insert_code after, replace_symbol).
+/// Resolve the authoritative end line for a symbol we are about to edit.
 ///
 /// Uses AST as the authoritative source for the symbol's end line when available.
 /// Tree-sitter always terminates at the real closing brace/delimiter, while LSP
 /// servers may over-extend (rust-analyzer including the next symbol's opening line)
 /// or under-extend (reporting the last statement line instead of `}`).
 ///
-/// When AST finds the symbol, we trust it unconditionally. When AST can't find it
-/// (different language, name mismatch), we fall back to the LSP end line.
+/// We fall back to the LSP end line when:
+/// - AST extraction itself fails (e.g. `detect_language` returned a name like
+///   `"c"`/`"cpp"` with no tree-sitter grammar).
+/// - Tree-sitter reports syntax errors: a broken parse tree can under-report
+///   the end, silently truncating the edit range.
+/// - The AST produces multiple same-name candidates near `lsp_start` with no
+///   name_path tiebreaker (ambiguous — refuse to guess; see `find_ast_end_line_in`).
+///
+/// When AST and LSP disagree by more than a small threshold, we log a warning
+/// so large mismatches are visible under `RUST_LOG=warn`.
 pub fn editing_end_line(sym: &crate::lsp::SymbolInfo) -> u32 {
-    let Ok(ast_syms) = crate::ast::extract_symbols(&sym.file) else {
-        return sym.end_line;
+    let source = match std::fs::read_to_string(&sym.file) {
+        Ok(s) => s,
+        Err(err) => {
+            tracing::trace!(
+                target: "codescout::editing_end_line",
+                "cannot read {:?} ({}); falling back to LSP end_line={}",
+                sym.file, err, sym.end_line,
+            );
+            return sym.end_line;
+        }
     };
-    if let Some(ast_end) = find_ast_end_line_in(&ast_syms, &sym.name, sym.start_line) {
+    let lang = crate::ast::detect_language(&sym.file);
+    if let Some(lang) = lang {
+        if crate::ast::has_syntax_errors(&source, lang) {
+            tracing::trace!(
+                target: "codescout::editing_end_line",
+                "syntax errors in {:?}; refusing to trust AST, using LSP end_line={}",
+                sym.file, sym.end_line,
+            );
+            return sym.end_line;
+        }
+    }
+    let ast_syms = match crate::ast::parser::extract_symbols_from_source(&source, lang, &sym.file) {
+        Ok(syms) => syms,
+        Err(err) => {
+            tracing::trace!(
+                target: "codescout::editing_end_line",
+                "AST unavailable for {:?} ({}); falling back to LSP end_line={}",
+                sym.file, err, sym.end_line,
+            );
+            return sym.end_line;
+        }
+    };
+    if let Some(ast_end) = crate::symbol::query::find_ast_end_line_in(
+        &ast_syms,
+        &sym.name,
+        sym.start_line,
+        Some(&sym.name_path),
+    ) {
+        const DISAGREE_THRESHOLD: u32 = 64;
+        if ast_end.abs_diff(sym.end_line) > DISAGREE_THRESHOLD {
+            tracing::warn!(
+                target: "codescout::editing_end_line",
+                "AST/LSP end-line disagreement > {} lines for '{}' in {:?}: ast={}, lsp={} (trusting AST)",
+                DISAGREE_THRESHOLD, sym.name, sym.file, ast_end + 1, sym.end_line + 1,
+            );
+        }
         return ast_end; // AST is authoritative when available
     }
     sym.end_line
@@ -302,6 +351,9 @@ fn classify_sort_key(kind: &str) -> u8 {
 
 /// Post-rename text sweep: finds remaining textual occurrences of `old_name`
 /// that the LSP rename didn't touch.
+///
+/// Per-file size cap: files larger than `MAX_FILE_BYTES` are skipped (with a
+/// trace log) so a single multi-MB generated file doesn't stall the sweep.
 pub fn text_sweep(
     project_root: &Path,
     old_name: &str,
@@ -309,6 +361,8 @@ pub fn text_sweep(
     max_matches: usize,
     max_previews_per_file: usize,
 ) -> anyhow::Result<Vec<TextualMatch>> {
+    const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
+
     let escaped = regex::escape(old_name);
     let pattern = format!(r"\b{escaped}\b");
     let re = regex::RegexBuilder::new(&pattern)
@@ -332,6 +386,19 @@ pub fn text_sweep(
         // Skip files already modified by LSP rename
         if lsp_modified_files.contains(path) {
             continue;
+        }
+
+        // Skip oversized files — don't load multi-MB blobs into memory just
+        // to scan for an identifier.
+        if let Ok(meta) = std::fs::metadata(path) {
+            if meta.len() > MAX_FILE_BYTES {
+                tracing::trace!(
+                    target: "codescout::text_sweep",
+                    "skipping {} ({} bytes > {} cap)",
+                    path.display(), meta.len(), MAX_FILE_BYTES,
+                );
+                continue;
+            }
         }
 
         let Ok(content) = std::fs::read_to_string(path) else {
@@ -455,6 +522,29 @@ pub fn apply_text_edits(content: &str, edits: &[lsp_types::TextEdit]) -> String 
             .then(b.range.start.character.cmp(&a.range.start.character))
     });
 
+    // Detect overlapping edits after sorting (bottom-to-top). If edit[i] ends
+    // after edit[i+1] starts (remember: i is lower in file than i+1 here), the
+    // two ranges overlap and applying both will corrupt the source. Warn once
+    // per pair so the LSP producing bad edits can be identified downstream.
+    for pair in sorted.windows(2) {
+        let later = &pair[0].range; // higher in file (applied first)
+        let earlier = &pair[1].range; // lower in file (applied next)
+        let overlaps = earlier.end.line > later.start.line
+            || (earlier.end.line == later.start.line
+                && earlier.end.character > later.start.character);
+        if overlaps {
+            tracing::warn!(
+                target: "codescout::apply_text_edits",
+                "overlapping LSP edits: [{}:{}..{}:{}] and [{}:{}..{}:{}]",
+                earlier.start.line, earlier.start.character,
+                earlier.end.line, earlier.end.character,
+                later.start.line, later.start.character,
+                later.end.line, later.end.character,
+            );
+        }
+    }
+
+    let mut skipped_oob: usize = 0;
     for edit in sorted {
         let start_line = edit.range.start.line as usize;
         let start_char = edit.range.start.character as usize;
@@ -462,6 +552,12 @@ pub fn apply_text_edits(content: &str, edits: &[lsp_types::TextEdit]) -> String 
         let end_char = edit.range.end.character as usize;
 
         if start_line >= lines.len() {
+            skipped_oob += 1;
+            tracing::warn!(
+                target: "codescout::apply_text_edits",
+                "skipping out-of-bounds LSP edit: range [{}:{}..{}:{}] but file has {} lines",
+                start_line, start_char, end_line, end_char, lines.len(),
+            );
             continue;
         }
 
@@ -482,6 +578,15 @@ pub fn apply_text_edits(content: &str, edits: &[lsp_types::TextEdit]) -> String 
         // Remove old lines and insert new ones
         let remove_end = (end_line + 1).min(lines.len());
         lines.splice(start_line..remove_end, replacement_lines);
+    }
+
+    if skipped_oob > 0 {
+        tracing::warn!(
+            target: "codescout::apply_text_edits",
+            "skipped {} out-of-bounds edit(s) out of {} total",
+            skipped_oob,
+            edits.len(),
+        );
     }
 
     lines.join("\n")
