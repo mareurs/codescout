@@ -24,6 +24,11 @@ impl Tool for ReplaceSymbol {
     fn name(&self) -> &str {
         "replace_symbol"
     }
+
+    fn is_write(&self, _input: &Value) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Replace the entire body of a named symbol with new source code. \
          new_body should include the full declaration: attributes, doc comments, \

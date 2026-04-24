@@ -1930,7 +1930,11 @@ pub async fn build_index(
         create_embedder_with_config(
             &config.embeddings.model,
             config.embeddings.url.as_deref(),
-            config.embeddings.api_key.clone(),
+            config
+                .embeddings
+                .api_key
+                .as_ref()
+                .map(|k| k.as_str().to_string()),
         )
         .await?,
     );
@@ -2096,7 +2100,11 @@ pub async fn build_library_index(
         create_embedder_with_config(
             &config.embeddings.model,
             config.embeddings.url.as_deref(),
-            config.embeddings.api_key.clone(),
+            config
+                .embeddings
+                .api_key
+                .as_ref()
+                .map(|k| k.as_str().to_string()),
         )
         .await?,
     );

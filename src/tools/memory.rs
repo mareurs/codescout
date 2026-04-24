@@ -419,6 +419,21 @@ impl Tool for Memory {
         "memory"
     }
 
+    fn is_write(&self, input: &Value) -> bool {
+        // Dispatched by the `action` field. These mutate the memory store;
+        // read|list|recall|dump bypass the write lock.
+        input
+            .get("action")
+            .and_then(|v| v.as_str())
+            .map(|a| {
+                matches!(
+                    a,
+                    "write" | "remember" | "forget" | "delete" | "refresh_anchors"
+                )
+            })
+            .unwrap_or(false)
+    }
+
     fn description(&self) -> &str {
         "Persistent project memory. Topic-based: read/write/list/delete with path-like keys. \
          Semantic: remember/recall/forget with bucket classification and meaning-based search."

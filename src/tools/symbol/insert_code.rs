@@ -18,6 +18,11 @@ impl Tool for InsertCode {
     fn name(&self) -> &str {
         "insert_code"
     }
+
+    fn is_write(&self, _input: &Value) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Insert code immediately before or after a named symbol."
     }

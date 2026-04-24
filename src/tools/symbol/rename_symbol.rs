@@ -20,6 +20,11 @@ impl Tool for RenameSymbol {
     fn name(&self) -> &str {
         "rename_symbol"
     }
+
+    fn is_write(&self, _input: &Value) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Rename a symbol across the entire codebase using LSP. After renaming, sweeps for remaining textual occurrences (comments, docs, strings) that LSP missed and reports them."
     }

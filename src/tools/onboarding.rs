@@ -247,6 +247,11 @@ impl Tool for Onboarding {
     fn name(&self) -> &str {
         "onboarding"
     }
+
+    fn is_write(&self, _input: &Value) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Perform initial project discovery: detect languages, read key files \
          (README, build config, CLAUDE.md), and return instructions for creating \

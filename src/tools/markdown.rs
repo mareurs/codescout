@@ -746,6 +746,10 @@ impl Tool for EditMarkdown {
         "edit_markdown"
     }
 
+    fn is_write(&self, _input: &Value) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Edit a Markdown document by heading. Actions: replace, insert_before, insert_after, \
          remove, edit. Supports batch mode via edits array."

@@ -36,14 +36,40 @@ impl Drop for WriteGuard {
     }
 }
 
-/// Acquire both locks. Returns `RecoverableError` on cross-process timeout
-/// so the caller can surface it as `isError: false`.
+/// Acquire both locks. Returns `RecoverableError` on timeout so the caller
+/// can surface it as `isError: false`.
+///
+/// `timeout` is a **total** budget covering both the in-process async-mutex
+/// wait and the cross-process flock poll. Without wrapping the whole thing in
+/// `tokio::time::timeout`, a queue of N tools waiting on the async mutex could
+/// each consume up to `timeout` on the flock poll individually, giving an
+/// effective ceiling of `timeout × queue_depth` — no overall deadline.
 pub async fn acquire(
     async_mutex: Arc<AsyncMutex<()>>,
     file: Arc<File>,
     timeout: Duration,
 ) -> Result<WriteGuard, RecoverableError> {
-    let async_guard = async_mutex.lock_owned().await;
+    let start = Instant::now();
+
+    // Phase 1: in-process async mutex, bounded by the total budget.
+    let async_guard = match tokio::time::timeout(timeout, async_mutex.lock_owned()).await {
+        Ok(g) => g,
+        Err(_) => {
+            return Err(RecoverableError::with_hint(
+                "timed out waiting for in-process write lock",
+                "Another tool call is holding the project's write lock. Retry shortly.",
+            ));
+        }
+    };
+
+    // Phase 2: cross-process flock, bounded by whatever remains of the budget.
+    let remaining = timeout.saturating_sub(start.elapsed());
+    if remaining.is_zero() {
+        return Err(RecoverableError::with_hint(
+            "timed out before checking cross-process write lock",
+            "In-process queue exhausted the write-lock budget. Retry shortly.",
+        ));
+    }
 
     let file_clone = file.clone();
     let acquired = tokio::task::spawn_blocking(move || {
@@ -52,7 +78,7 @@ pub async fn acquire(
             match file_clone.try_lock_exclusive() {
                 Ok(()) => return true,
                 Err(e) if e.raw_os_error() == fs4::lock_contended_error().raw_os_error() => {
-                    if start.elapsed() >= timeout {
+                    if start.elapsed() >= remaining {
                         return false;
                     }
                     std::thread::sleep(Duration::from_millis(50));

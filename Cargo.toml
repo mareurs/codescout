@@ -118,6 +118,10 @@ open = { version = "5", optional = true }
 tokio-util = "0.7"
 uuid = { version = "1.20.0", features = ["v4"] }
 
+# Poison-free, faster synchronization primitives for short-held locks in async
+# hot paths where std::sync poisoning is a correctness footgun.
+parking_lot = "0.12"
+
 [features]
 default = ["remote-embed", "local-embed", "dashboard", "http"]
 dashboard = ["dep:axum", "dep:tower-http", "dep:open"]

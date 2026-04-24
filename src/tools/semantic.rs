@@ -344,6 +344,11 @@ impl Tool for IndexProject {
     fn name(&self) -> &str {
         "index_project"
     }
+
+    fn is_write(&self, _input: &Value) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Build or incrementally update the semantic search index for the active project. \
          Use scope='lib:<name>' to index a registered library (replaces index_library)."

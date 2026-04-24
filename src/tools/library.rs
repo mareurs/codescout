@@ -77,6 +77,10 @@ impl Tool for RegisterLibrary {
         "register_library"
     }
 
+    fn is_write(&self, _input: &Value) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Register an external library for searching with scope='lib:<name>'. \
          Auto-detects name and language from manifest files (Cargo.toml, package.json, etc.). \

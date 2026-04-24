@@ -67,6 +67,10 @@ impl Tool for EditFile {
         "edit_file"
     }
 
+    fn is_write(&self, _input: &Value) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Exact string replacement in a file. Whitespace-sensitive. \
          Use insert: \"prepend\"/\"append\" for file boundaries."

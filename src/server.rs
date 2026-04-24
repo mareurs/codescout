@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::lsp::{LspManager, LspProvider};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 #[cfg(feature = "http")]
 use axum::response::IntoResponse;
 use rmcp::{
@@ -40,40 +40,11 @@ use crate::tools::{
 };
 use crate::usage::UsageRecorder;
 
-/// Tools whose successful execution mutates project state. See the design spec
-/// at docs/superpowers/specs/2026-04-17-cross-process-write-serialization-design.md.
-const WRITE_TOOLS: &[&str] = &[
-    "create_file",
-    "edit_file",
-    "edit_markdown",
-    "replace_symbol",
-    "insert_code",
-    "remove_symbol",
-    "rename_symbol",
-];
 // Note: `register_library` writes libraries.json but is intentionally excluded —
 // it is idempotent and write-lock overhead on registration is not warranted.
 // `onboarding` writes memory but is also excluded — it is infrequent and
 // memory writes are small; the `memory` tool's write actions cover the
 // common case.
-
-/// Memory actions that write to the memory store. `memory` with any other
-/// action (read, list, recall) is treated as a read and bypasses the lock.
-const MEMORY_WRITE_ACTIONS: &[&str] = &["write", "remember", "forget", "delete", "refresh_anchors"];
-
-/// Returns true if the tool call will mutate project state and therefore
-/// must acquire the write lock.
-fn is_write_call(tool_name: &str, input: &serde_json::Value) -> bool {
-    if WRITE_TOOLS.contains(&tool_name) {
-        return true;
-    }
-    if tool_name == "memory" {
-        if let Some(action) = input.get("action").and_then(|v| v.as_str()) {
-            return MEMORY_WRITE_ACTIONS.contains(&action);
-        }
-    }
-    false
-}
 
 #[derive(Clone)]
 pub struct CodeScoutServer {
@@ -86,13 +57,13 @@ pub struct CodeScoutServer {
     /// `activate_project` can refresh the string mid-session without
     /// reconstructing the server. `get_info()` is sync so we read-lock;
     /// `refresh_instructions()` write-locks after each `activate_project`.
-    instructions: Arc<std::sync::RwLock<String>>,
+    instructions: Arc<parking_lot::RwLock<String>>,
     section_coverage: Arc<std::sync::Mutex<crate::tools::section_coverage::SectionCoverage>>,
     session_id: String,
     debug: bool,
     /// Last capabilities snapshot that was broadcast to the client via
     /// `notifications/tools/list_changed`. Used to suppress redundant broadcasts.
-    last_broadcast_caps: Arc<std::sync::Mutex<Option<crate::tools::ToolCapabilities>>>,
+    last_broadcast_caps: Arc<parking_lot::Mutex<Option<crate::tools::ToolCapabilities>>>,
     /// MCP resource registry — replaceable on `activate_project` to pick up a new
     /// memory dir. Held behind `RwLock<Arc<...>>` so list/read only need a read lock
     /// while replacement takes a write lock.
@@ -164,11 +135,11 @@ impl CodeScoutServer {
             lsp,
             output_buffer,
             tools,
-            instructions: Arc::new(std::sync::RwLock::new(instructions)),
+            instructions: Arc::new(parking_lot::RwLock::new(instructions)),
             section_coverage,
             session_id: uuid::Uuid::new_v4().to_string(),
             debug,
-            last_broadcast_caps: Arc::new(std::sync::Mutex::new(None)),
+            last_broadcast_caps: Arc::new(parking_lot::Mutex::new(None)),
             resources,
             path_note_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
@@ -181,6 +152,18 @@ impl CodeScoutServer {
     fn resolve_tool(&self, name: &str) -> std::result::Result<Arc<dyn Tool>, McpError> {
         self.find_tool(name)
             .ok_or_else(|| McpError::invalid_params(format!("unknown tool: '{}'", name), None))
+    }
+
+    /// Returns true if this tool call will mutate project state.
+    ///
+    /// Dispatches to `Tool::is_write(input)` on the resolved tool. Unknown
+    /// tools return false — they never reach dispatch (resolve_tool rejects
+    /// them first), so the answer is immaterial; returning false avoids a
+    /// second lookup failure.
+    fn is_write_call(&self, tool_name: &str, input: &serde_json::Value) -> bool {
+        self.find_tool(tool_name)
+            .map(|t| t.is_write(input))
+            .unwrap_or(false)
     }
 
     fn parse_input(arguments: Option<serde_json::Map<String, Value>>) -> Value {
@@ -218,7 +201,7 @@ impl CodeScoutServer {
         std::result::Result<Option<crate::agent::WriteGuard>, CallToolResult>,
         McpError,
     > {
-        if !is_write_call(name, input) {
+        if !self.is_write_call(name, input) {
             return Ok(Ok(None));
         }
         let (mutex, fd_lock, timeout_secs) = self
@@ -251,14 +234,20 @@ impl CodeScoutServer {
     /// arm fires, and the tool future is dropped — which kills any spawned
     /// child via `kill_on_drop`. Without this, the future runs to completion
     /// and the late response makes Claude Code close the MCP connection.
-    async fn race_against_cancel<F>(
+    ///
+    /// `release_on_cancel` is dropped **before** parking with `pending()`.
+    /// Use this to release any guards (e.g. `WriteGuard`) that must not be
+    /// held while the task is parked waiting for rmcp to drop it on disconnect.
+    async fn race_against_cancel<F, G>(
         tool_call_fut: F,
         cancel_token: tokio_util::sync::CancellationToken,
         timeout_secs: Option<u64>,
         tool_name: &str,
+        release_on_cancel: G,
     ) -> Result<Vec<Content>, anyhow::Error>
     where
         F: std::future::Future<Output = Result<Vec<Content>, anyhow::Error>>,
+        G: Send + 'static,
     {
         if let Some(secs) = timeout_secs {
             tokio::select! {
@@ -273,6 +262,7 @@ impl CodeScoutServer {
                     // dropped by select!, so the shell child is already reaped via
                     // kill_on_drop + PgidKillGuard. Only this task's stack persists
                     // until rmcp drops it when the connection closes.
+                    drop(release_on_cancel);
                     std::future::pending::<Result<Vec<Content>, anyhow::Error>>().await
                 }
                 res = tokio::time::timeout(
@@ -300,6 +290,7 @@ impl CodeScoutServer {
                     // dropped by select!, so the shell child is already reaped via
                     // kill_on_drop + PgidKillGuard. Only this task's stack persists
                     // until rmcp drops it when the connection closes.
+                    drop(release_on_cancel);
                     std::future::pending::<Result<Vec<Content>, anyhow::Error>>().await
                 }
                 res = tool_call_fut => res,
@@ -357,7 +348,7 @@ impl CodeScoutServer {
     async fn refresh_instructions(&self) {
         let status = self.agent.project_status().await;
         let new_instructions = crate::prompts::build_server_instructions(status.as_ref());
-        *self.instructions.write().unwrap() = new_instructions;
+        *self.instructions.write() = new_instructions;
     }
 
     /// Probe the current project state and return a snapshot of its capabilities.
@@ -387,14 +378,14 @@ impl CodeScoutServer {
         // so we rely on the feature flags alone.
         let has_embeddings = cfg!(any(feature = "local-embed", feature = "remote-embed"));
 
-        // has_git_remote: true when the active project's git repository has at least one remote.
+        // has_git_remote: read the value cached at activation time. The original
+        // implementation called `git2::Repository::open(&root)` here, which ran
+        // on every `list_tools` call — list_tools fires frequently and opening
+        // a repo walks parent directories looking for .git.
         let has_git_remote = self
             .agent
-            .project_root()
+            .with_project(|p| Ok(p.has_git_remote))
             .await
-            .and_then(|root| git2::Repository::open(&root).ok())
-            .and_then(|repo| repo.remotes().ok())
-            .map(|remotes| !remotes.is_empty())
             .unwrap_or(false);
 
         // has_libraries: true when at least one library is registered for the active project.
@@ -465,8 +456,11 @@ impl CodeScoutServer {
         let input_for_record = input.clone();
 
         // Acquire the write guard if this is a mutating call. Read calls skip
-        // the lock entirely. The guard is held for the full duration of the
-        // tool future; it drops when the future completes or is cancelled.
+        // the lock entirely. The guard is passed into race_against_cancel and
+        // dropped there — either naturally when the tool future completes, or
+        // explicitly before parking if the request is cancelled. This ensures
+        // the cross-process write lock is released even when the task is parked
+        // waiting for rmcp to drop it on connection close.
         let write_guard = match self
             .acquire_write_guard_if_writing(&req.name, &input_for_record)
             .await?
@@ -479,8 +473,14 @@ impl CodeScoutServer {
             tool.call_content(input, &ctx)
         });
 
-        let result =
-            Self::race_against_cancel(tool_call_fut, cancel_token, timeout_secs, &req.name).await;
+        let result = Self::race_against_cancel(
+            tool_call_fut,
+            cancel_token,
+            timeout_secs,
+            &req.name,
+            write_guard,
+        )
+        .await;
 
         // Assemble the result — success or error both produce a CallToolResult
         // so we can apply post-processing in one place.
@@ -500,7 +500,6 @@ impl CodeScoutServer {
 
         let call_result = self.post_process(call_result, &req.name).await;
 
-        drop(write_guard);
         Ok(call_result)
     }
 }
@@ -525,7 +524,7 @@ impl ServerHandler for CodeScoutServer {
                 .enable_resources()
                 .build(),
         )
-        .with_instructions(self.instructions.read().unwrap().clone())
+        .with_instructions(self.instructions.read().clone())
     }
 
     async fn list_tools(
@@ -627,7 +626,7 @@ impl ServerHandler for CodeScoutServer {
         if is_activate {
             let new_caps = self.current_capabilities().await;
             let caps_changed = {
-                let mut last = self.last_broadcast_caps.lock().unwrap();
+                let mut last = self.last_broadcast_caps.lock();
                 let changed = last.as_ref() != Some(&new_caps);
                 if changed {
                     *last = Some(new_caps);
@@ -726,6 +725,11 @@ async fn build_resource_registry(
 ///   (`hint` / `warning` / `must_follow`), and any `extra` fields spliced
 ///   in at the top level.  Sibling parallel calls are **not** aborted.
 /// - Any other error → `isError: true` (fatal; something truly broke).
+///   The full `anyhow` context chain is logged server-side via
+///   `tracing::error!`; only the outermost message goes over the wire. This
+///   keeps `with_context` chains (which often include absolute paths) out
+///   of MCP responses for the HTTP transport, where error oracles can leak
+///   filesystem layout to an authenticated-but-untrusted client.
 ///
 /// [`RecoverableError`]: crate::tools::RecoverableError
 fn route_tool_error(e: anyhow::Error) -> CallToolResult {
@@ -758,6 +762,9 @@ fn route_tool_error(e: anyhow::Error) -> CallToolResult {
         let text = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
         CallToolResult::success(vec![Content::text(text)])
     } else {
+        // Log the full context chain server-side (`{:#}` walks `.source()`
+        // chain). Only the outermost message crosses the wire.
+        tracing::error!(error = format!("{e:#}"), "tool error");
         CallToolResult::error(vec![Content::text(e.to_string())])
     }
 }
@@ -765,16 +772,21 @@ fn route_tool_error(e: anyhow::Error) -> CallToolResult {
 /// Entry point: start the MCP server with the chosen transport.
 /// Generate a bearer token for HTTP transport authentication.
 ///
-/// Combines high-resolution timestamp with process ID to produce a unique,
-/// hard-to-guess hex string. This is NOT cryptographically secure — it is a
-/// convenience default when the operator does not supply `--auth-token`.
+/// # Deprecated
+///
+/// Uses timestamp + PID, which is NOT cryptographically secure. Kept only
+/// for external callers that may reference this symbol. New code should call
+/// `os_random_auth_token()` (private) or pass `--auth-token` explicitly.
+#[deprecated(
+    since = "0.9.0",
+    note = "Not cryptographically secure. Use os_random_auth_token() internally or pass --auth-token."
+)]
 pub fn generate_auth_token() -> String {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
     let pid = std::process::id() as u64;
-    // Mask to 64 bits each so the total is exactly 32 hex characters.
     let hi = nanos as u64;
     let lo = pid.wrapping_mul(0x517cc1b727220a95);
     format!("{:016x}{:016x}", hi, lo)
@@ -875,6 +887,33 @@ impl tokio::io::AsyncRead for ResilientStdin {
     }
 }
 
+/// Generate a random bearer token for HTTP transport auth.
+///
+/// Uses the OS CSPRNG exclusively. Aborts startup on failure rather than
+/// falling back to a weak token — a predictable bearer on a network-reachable
+/// endpoint is equivalent to no auth.
+fn os_random_auth_token() -> Result<String> {
+    let mut buf = [0u8; 32];
+    // File::open + read_exact, not std::fs::read — device nodes have no EOF.
+    use std::io::Read;
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut buf))
+        .map_err(|e| anyhow::anyhow!("Failed to read /dev/urandom for auth token: {e}"))?;
+    Ok(hex::encode(buf))
+}
+
+/// Constant-time bearer string comparison. Prevents timing oracles that let
+/// an attacker enumerate valid token bytes by measuring response latency.
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter()
+        .zip(b.iter())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     project: Option<PathBuf>,
@@ -890,9 +929,15 @@ pub async fn run(
     // absolute path.  Without this, a relative `--project .` would store `home_root = "."`
     // while `activate_project(".")` later canonicalizes to `/abs/path`, making `is_home()`
     // return false and causing path-form drift across the system.
-    let project = project
-        .or_else(|| std::env::current_dir().ok())
-        .map(|p| std::fs::canonicalize(&p).unwrap_or(p));
+    let project = match project.or_else(|| std::env::current_dir().ok()) {
+        Some(p) => Some(std::fs::canonicalize(&p).with_context(|| {
+            format!(
+                "failed to canonicalize project path {} — check it exists and is readable",
+                p.display()
+            )
+        })?),
+        None => None,
+    };
     let lsp = match project.clone() {
         Some(root) => LspManager::new_arc_with_root(root),
         None => LspManager::new_arc(),
@@ -1004,55 +1049,14 @@ pub async fn run(
             );
 
             // Bearer token auth middleware
-            let token = auth_token.unwrap_or_else(|| {
-                let mut buf = [0u8; 32];
-                // Read exactly 32 bytes from /dev/urandom.  Must use File::open +
-                // read_exact — std::fs::read tries to read the entire "file" which
-                // is undefined for device nodes.
-                use std::io::Read;
-                let ok = std::fs::File::open("/dev/urandom")
-                    .and_then(|mut f| f.read_exact(&mut buf))
-                    .is_ok();
-                if !ok {
-                    // Fallback: mix pid, thread id, timestamp, and address-space
-                    // entropy.  Not cryptographic, but unpredictable enough for a
-                    // local-only convenience token.
-                    use std::hash::{Hash, Hasher};
-                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                    std::process::id().hash(&mut hasher);
-                    std::thread::current().id().hash(&mut hasher);
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_nanos()
-                        .hash(&mut hasher);
-                    // Hash twice with different seeds to fill 32 bytes.
-                    let h1 = hasher.finish().to_le_bytes();
-                    h1[0].hash(&mut hasher);
-                    let h2 = hasher.finish().to_le_bytes();
-                    buf[..8].copy_from_slice(&h1);
-                    buf[8..16].copy_from_slice(&h2);
-                    h2[0].hash(&mut hasher);
-                    let h3 = hasher.finish().to_le_bytes();
-                    h3[0].hash(&mut hasher);
-                    let h4 = hasher.finish().to_le_bytes();
-                    buf[16..24].copy_from_slice(&h3);
-                    buf[24..32].copy_from_slice(&h4);
+            let token = match auth_token {
+                Some(t) => t,
+                None => {
+                    let t = os_random_auth_token()?;
+                    eprintln!("Generated auth token: {t}");
+                    t
                 }
-                let generated: String = buf
-                    .iter()
-                    .map(|b| {
-                        let idx = b % 62;
-                        match idx {
-                            0..=9 => (b'0' + idx) as char,
-                            10..=35 => (b'a' + idx - 10) as char,
-                            _ => (b'A' + idx - 36) as char,
-                        }
-                    })
-                    .collect();
-                eprintln!("Generated auth token: {generated}");
-                generated
-            });
+            };
 
             let router =
                 axum::Router::new()
@@ -1061,9 +1065,15 @@ pub async fn run(
                         move |req: axum::extract::Request, next: axum::middleware::Next| {
                             let expected = format!("Bearer {token}");
                             async move {
-                                match req.headers().get("authorization") {
-                                    Some(v) if v == expected.as_str() => next.run(req).await,
-                                    _ => axum::http::StatusCode::UNAUTHORIZED.into_response(),
+                                let ok = req
+                                    .headers()
+                                    .get("authorization")
+                                    .map(|v| ct_eq(v.as_bytes(), expected.as_bytes()))
+                                    .unwrap_or(false);
+                                if ok {
+                                    next.run(req).await
+                                } else {
+                                    axum::http::StatusCode::UNAUTHORIZED.into_response()
                                 }
                             }
                         },
@@ -1990,34 +2000,37 @@ mod tests {
             .unwrap_or_default()
     }
 
-    #[test]
-    fn is_write_call_classifies_plain_writes() {
+    #[tokio::test]
+    async fn is_write_call_classifies_plain_writes() {
         use serde_json::json;
-        assert!(is_write_call("edit_file", &json!({})));
-        assert!(is_write_call("create_file", &json!({})));
-        assert!(is_write_call("replace_symbol", &json!({})));
-        assert!(is_write_call("insert_code", &json!({})));
-        assert!(is_write_call("remove_symbol", &json!({})));
-        assert!(is_write_call("rename_symbol", &json!({})));
-        assert!(!is_write_call("read_file", &json!({})));
-        assert!(!is_write_call("find_symbol", &json!({})));
+        let (_dir, server) = make_server().await;
+        assert!(server.is_write_call("edit_file", &json!({})));
+        assert!(server.is_write_call("create_file", &json!({})));
+        assert!(server.is_write_call("replace_symbol", &json!({})));
+        assert!(server.is_write_call("insert_code", &json!({})));
+        assert!(server.is_write_call("remove_symbol", &json!({})));
+        assert!(server.is_write_call("rename_symbol", &json!({})));
+        assert!(server.is_write_call("edit_markdown", &json!({})));
+        assert!(server.is_write_call("index_project", &json!({})));
+        assert!(server.is_write_call("onboarding", &json!({})));
+        assert!(server.is_write_call("register_library", &json!({})));
+        assert!(!server.is_write_call("read_file", &json!({})));
+        assert!(!server.is_write_call("find_symbol", &json!({})));
     }
 
-    #[test]
-    fn is_write_call_memory_depends_on_action() {
+    #[tokio::test]
+    async fn is_write_call_memory_depends_on_action() {
         use serde_json::json;
-        assert!(is_write_call("memory", &json!({"action": "write"})));
-        assert!(is_write_call("memory", &json!({"action": "remember"})));
-        assert!(is_write_call("memory", &json!({"action": "forget"})));
-        assert!(is_write_call("memory", &json!({"action": "delete"})));
-        assert!(is_write_call(
-            "memory",
-            &json!({"action": "refresh_anchors"})
-        ));
-        assert!(!is_write_call("memory", &json!({"action": "read"})));
-        assert!(!is_write_call("memory", &json!({"action": "list"})));
-        assert!(!is_write_call("memory", &json!({"action": "recall"})));
-        assert!(!is_write_call("memory", &json!({})));
+        let (_dir, server) = make_server().await;
+        assert!(server.is_write_call("memory", &json!({"action": "write"})));
+        assert!(server.is_write_call("memory", &json!({"action": "remember"})));
+        assert!(server.is_write_call("memory", &json!({"action": "forget"})));
+        assert!(server.is_write_call("memory", &json!({"action": "delete"})));
+        assert!(server.is_write_call("memory", &json!({"action": "refresh_anchors"})));
+        assert!(!server.is_write_call("memory", &json!({"action": "read"})));
+        assert!(!server.is_write_call("memory", &json!({"action": "list"})));
+        assert!(!server.is_write_call("memory", &json!({"action": "recall"})));
+        assert!(!server.is_write_call("memory", &json!({})));
     }
 }
 

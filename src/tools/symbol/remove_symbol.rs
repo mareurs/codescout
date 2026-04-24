@@ -21,6 +21,10 @@ impl Tool for RemoveSymbol {
         "remove_symbol"
     }
 
+    fn is_write(&self, _input: &Value) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Delete a symbol (function, struct, impl block, test, etc.) by name. Removes the lines covered by the LSP symbol range."
     }

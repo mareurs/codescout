@@ -104,6 +104,12 @@ pub struct ActiveProject {
     pub(crate) read_only: bool,
     /// Git HEAD SHA of the project at activation time. None for non-git projects.
     pub(crate) head_sha: Option<String>,
+    /// Cached at activation: does this project have at least one git remote?
+    /// Used by `current_capabilities` to gate GitHub-family tool exposure
+    /// without re-opening the repo on every `list_tools` call. Refreshed on
+    /// re-activation; does not track remotes added mid-session (rare enough
+    /// to not justify invalidation complexity — user can re-activate).
+    pub(crate) has_git_remote: bool,
     /// Async mutex serializing writes within this process.
     /// Acquired FIRST in the write-lock order (see agent::write_guard).
     pub(crate) write_lock: Arc<tokio::sync::Mutex<()>>,
@@ -139,6 +145,16 @@ fn resolve_head_sha(root: &Path) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// Does `root` contain a git repository with at least one configured remote?
+/// Used at activation time to cache `has_git_remote` on `ActiveProject`.
+fn probe_has_git_remote(root: &Path) -> bool {
+    git2::Repository::open(root)
+        .ok()
+        .and_then(|repo| repo.remotes().ok())
+        .map(|remotes| !remotes.is_empty())
+        .unwrap_or(false)
+}
+
 // ---------------------------------------------------------------------------
 // Lifecycle & activation
 // ---------------------------------------------------------------------------
@@ -165,6 +181,7 @@ impl Agent {
                 dirty_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
                 read_only: false,
                 head_sha: resolve_head_sha(&root),
+                has_git_remote: probe_has_git_remote(&root),
                 write_lock: Arc::new(tokio::sync::Mutex::new(())),
                 file_lock: open_lock_file(&root)
                     .with_context(|| format!("failed to open write.lock for {}", root.display()))?,
@@ -172,8 +189,18 @@ impl Agent {
 
             // Discover sub-projects; root project is always included.
             // Respect depth and exclude settings from workspace.toml if it exists.
+            // Walked on a blocking thread — `ignore::WalkBuilder` + manifest
+            // reads do synchronous fs I/O that must not stall the Tokio runtime.
             let (discover_depth, discover_exclude) = load_discover_settings(&root);
-            let discovered = discover_projects(&root, discover_depth, &discover_exclude);
+            let discovered = {
+                let root = root.clone();
+                let exclude = discover_exclude.clone();
+                tokio::task::spawn_blocking(move || {
+                    discover_projects(&root, discover_depth, &exclude)
+                })
+                .await
+                .map_err(|e| anyhow::anyhow!("discover_projects task failed: {e}"))?
+            };
             let mut projects: Vec<Project> = Vec::new();
 
             // Find if the root project was discovered (relative_root == ".")
@@ -233,6 +260,12 @@ impl Agent {
 
     /// Activate a project by path, replacing the current workspace.
     pub async fn activate(&self, root: PathBuf, read_only: Option<bool>) -> Result<()> {
+        // Canonicalize up-front so every downstream consumer sees the same
+        // absolute path. Without this, activate(".") would compare unequal
+        // to Agent::new's canonicalized home_root, making is_home return
+        // false on the very first re-activation and flipping the project
+        // to read-only unexpectedly.
+        let root = std::fs::canonicalize(&root).unwrap_or(root);
         // Load all resources outside any lock — I/O is independent of is_home.
         let config = ProjectConfig::load_or_default(&root)?;
         let memory = MemoryStore::open(&root)?;
@@ -243,13 +276,22 @@ impl Agent {
 
         // Discover sub-projects before acquiring the write lock.
         // Respect depth and exclude settings from workspace.toml if it exists.
+        // Walked on a blocking thread — see Agent::new for rationale.
         let (discover_depth, discover_exclude) = load_discover_settings(&root);
-        let discovered = discover_projects(&root, discover_depth, &discover_exclude);
+        let discovered = {
+            let root = root.clone();
+            let exclude = discover_exclude.clone();
+            tokio::task::spawn_blocking(move || discover_projects(&root, discover_depth, &exclude))
+                .await
+                .map_err(|e| anyhow::anyhow!("discover_projects task failed: {e}"))?
+        };
 
         // Open the lock file before acquiring the write lock — involves blocking
         // fs I/O (create_dir_all + OpenOptions::open) that must not run on the
-        // async executor while holding a write guard.
-        let file_lock = write_guard::open_lock_file(&root)
+        // async executor while holding a write guard. This fresh handle may be
+        // discarded if we find we're re-activating the same root (in which case
+        // the existing file_lock is reused for correct serialization).
+        let fresh_file_lock = write_guard::open_lock_file(&root)
             .with_context(|| format!("failed to open write.lock for {}", root.display()))?;
 
         {
@@ -267,16 +309,40 @@ impl Agent {
                 _ => true,
             };
 
+            // Re-activating the same root must keep the SAME write_lock,
+            // file_lock, and dirty_files — otherwise an in-flight tool holding
+            // the old locks does not serialize against new tools using the new
+            // locks, and two writers can race on the same project. Scan the
+            // current workspace for an already-activated project at this root.
+            let existing = inner.workspace.as_ref().and_then(|ws| {
+                ws.projects.iter().find_map(|p| match &p.state {
+                    ProjectState::Activated(ap) if ap.root == root => Some((
+                        ap.write_lock.clone(),
+                        ap.file_lock.clone(),
+                        ap.dirty_files.clone(),
+                    )),
+                    _ => None,
+                })
+            });
+            let (write_lock, file_lock, dirty_files) = existing.unwrap_or_else(|| {
+                (
+                    Arc::new(tokio::sync::Mutex::new(())),
+                    fresh_file_lock,
+                    Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+                )
+            });
+
             let active = ActiveProject {
                 root: root.clone(),
                 config,
                 memory,
                 private_memory,
                 library_registry,
-                dirty_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+                dirty_files,
                 read_only: effective_read_only,
                 head_sha,
-                write_lock: Arc::new(tokio::sync::Mutex::new(())),
+                has_git_remote: probe_has_git_remote(&root),
+                write_lock,
                 file_lock,
             };
 
@@ -468,6 +534,7 @@ impl Agent {
             dirty_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
             read_only: effective_read_only,
             head_sha,
+            has_git_remote: probe_has_git_remote(&abs_root),
             write_lock: Arc::new(tokio::sync::Mutex::new(())),
             file_lock,
         };
@@ -477,7 +544,7 @@ impl Agent {
             .projects
             .iter_mut()
             .find(|p| p.discovered.id == project_id)
-            .unwrap(); // safe: found above
+            .expect("project_mut lookup — invariant: re-resolved from the same ws.projects slice under the write lock above; only activate_within_workspace mutates project list, and it holds this lock");
         project_mut.state = ProjectState::Activated(Box::new(active));
 
         // Switch focus
@@ -798,7 +865,11 @@ impl Agent {
             .with_project(|p| {
                 Ok((
                     p.config.embeddings.url.clone(),
-                    p.config.embeddings.api_key.clone(),
+                    p.config
+                        .embeddings
+                        .api_key
+                        .as_ref()
+                        .map(|k| k.as_str().to_string()),
                 ))
             })
             .await

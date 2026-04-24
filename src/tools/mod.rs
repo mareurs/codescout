@@ -591,6 +591,18 @@ pub trait Tool: Send + Sync {
         Availability::Always
     }
 
+    /// Returns true if this tool call will mutate project state and therefore
+    /// must acquire the cross-process write lock before dispatch.
+    ///
+    /// Defaults to `false` (read-only). Override on every mutating tool.
+    /// For tools whose write-ness depends on input (e.g. `memory` switches on
+    /// `action`), inspect `input` to decide. The server calls this after
+    /// argument parsing, so `input` is already the same `Value` that `call()`
+    /// will receive.
+    fn is_write(&self, _input: &Value) -> bool {
+        false
+    }
+
     /// Returns the JSON path to the most useful field in a buffered result.
     ///
     /// Used to build a specific, actionable hint when the tool result is stored

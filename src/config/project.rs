@@ -69,8 +69,12 @@ pub struct EmbeddingsSection {
     pub url: Option<String>,
     /// API key for the embedding endpoint. Only used when `url` is set.
     /// Can also be provided via the `EMBED_API_KEY` environment variable.
+    ///
+    /// Stored as `SensitiveString` so a stray `tracing::debug!(?config)` or
+    /// any other diagnostic dump of the config hides the key rather than
+    /// writing it to logs/stdout.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub api_key: Option<String>,
+    pub api_key: Option<crate::config::sensitive::SensitiveString>,
     /// Override the per-chunk size in characters. Smaller chunks produce
     /// sharper semantic search results and cost less LLM context per hit
     /// (typical search returns 3–5 chunks; large chunks bloat the agent's
@@ -463,7 +467,43 @@ impl ProjectConfig {
         };
 
         let merged = merge_toml(global_base, project_overlay);
-        Ok(toml::Value::try_into(merged)?)
+        let config: Self = toml::Value::try_into(merged)?;
+        config.validate_list_limits()?;
+        Ok(config)
+    }
+
+    /// Enforce upper bounds on user-controlled list fields. The 1 MiB file cap
+    /// already limits total size, but 1 MiB of TOML easily encodes tens of
+    /// thousands of regex patterns — each evaluated on every shell invocation,
+    /// every path check, every ignore walk. Cap the counts to keep a crafted
+    /// or copy-pasted manifest from DoS'ing per-request hot paths.
+    fn validate_list_limits(&self) -> Result<()> {
+        const MAX_EXTRA_WRITE_ROOTS: usize = 128;
+        const MAX_SHELL_DANGEROUS_PATTERNS: usize = 256;
+        const MAX_IGNORED_PATTERNS: usize = 1024;
+
+        if self.security.extra_write_roots.len() > MAX_EXTRA_WRITE_ROOTS {
+            anyhow::bail!(
+                "security.extra_write_roots has {} entries, exceeds limit of {}",
+                self.security.extra_write_roots.len(),
+                MAX_EXTRA_WRITE_ROOTS,
+            );
+        }
+        if self.security.shell_dangerous_patterns.len() > MAX_SHELL_DANGEROUS_PATTERNS {
+            anyhow::bail!(
+                "security.shell_dangerous_patterns has {} entries, exceeds limit of {}",
+                self.security.shell_dangerous_patterns.len(),
+                MAX_SHELL_DANGEROUS_PATTERNS,
+            );
+        }
+        if self.ignored_paths.patterns.len() > MAX_IGNORED_PATTERNS {
+            anyhow::bail!(
+                "ignored_paths.patterns has {} entries, exceeds limit of {}",
+                self.ignored_paths.patterns.len(),
+                MAX_IGNORED_PATTERNS,
+            );
+        }
+        Ok(())
     }
 
     pub fn default_for(name: String) -> Self {
@@ -744,7 +784,10 @@ api_key = "test-key-123"
             config.embeddings.url.as_deref(),
             Some("http://127.0.0.1:43300/v1")
         );
-        assert_eq!(config.embeddings.api_key.as_deref(), Some("test-key-123"));
+        assert_eq!(
+            config.embeddings.api_key.as_ref().map(|k| k.as_str()),
+            Some("test-key-123")
+        );
     }
 
     #[test]
@@ -1031,6 +1074,33 @@ model = "local:AllMiniLML6V2Q"
         }
         assert_eq!(cfg.embeddings.model, default_embed_model());
         assert!(cfg.security.shell_enabled);
+    }
+
+    #[test]
+    fn validate_list_limits_rejects_oversized_patterns() {
+        // Regression for S5 — a 1 MiB TOML can encode tens of thousands of
+        // regex patterns; each would be compiled/evaluated on every ignore
+        // walk. The cap keeps that hot path bounded.
+        let toml_str = r#"
+[project]
+name = "x"
+languages = []
+
+[embeddings]
+model = "local:test"
+"#;
+        let mut cfg: ProjectConfig = toml::from_str(toml_str).unwrap();
+
+        // Under the default limit passes.
+        cfg.validate_list_limits().unwrap();
+
+        // Exceeding the cap on ignored_paths.patterns rejects.
+        cfg.ignored_paths.patterns = (0..2000).map(|i| format!("p{i}")).collect();
+        let err = cfg.validate_list_limits().unwrap_err();
+        assert!(
+            err.to_string().contains("ignored_paths.patterns"),
+            "expected ignored_paths limit error, got {err}"
+        );
     }
 
     #[test]

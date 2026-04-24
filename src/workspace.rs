@@ -13,6 +13,18 @@ pub struct DiscoveredProject {
     pub manifest: Option<String>,
 }
 
+/// Read up to `max_bytes` of a file as UTF-8. Used for manifest reads where
+/// an unbounded `read_to_string` would DoS if the file is pathologically large.
+/// Returns `Err` if the file cannot be opened or if the truncated bytes are
+/// not valid UTF-8 — both are treated as "skip this manifest" by callers.
+fn read_file_capped(path: &Path, max_bytes: u64) -> std::io::Result<String> {
+    use std::io::Read;
+    let f = std::fs::File::open(path)?;
+    let mut buf = String::new();
+    f.take(max_bytes).read_to_string(&mut buf)?;
+    Ok(buf)
+}
+
 /// Walk the workspace root for build manifests and return discovered sub-projects.
 pub fn discover_projects(
     workspace_root: &Path,
@@ -91,7 +103,11 @@ pub fn discover_projects(
                 continue;
             }
             if *manifest_name == "package.json" {
-                if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                // Cap read at 1 MiB — matches config-file cap. A package.json
+                // above this is pathological and would otherwise DoS agent
+                // startup (discover_projects is called on every Agent::new /
+                // activate, so a large manifest pays on every activation).
+                if let Ok(content) = read_file_capped(entry.path(), 1024 * 1024) {
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
                         let has_scripts = json
                             .get("scripts")
@@ -199,7 +215,42 @@ pub fn discover_projects(
     found
 }
 
+/// Lexically collapse `.` / `..` components in a path without touching the
+/// filesystem. Used to prevent prefix-match bypass in `resolve_project_for_path`
+/// — without this, `/workspace/project/../../etc/passwd` would lexically
+/// start-with `/workspace/project` and be incorrectly attributed to the project.
+///
+/// Does not resolve symlinks; if the path exists, prefer `std::fs::canonicalize`.
+fn lexically_normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                // Pop a Normal component; otherwise preserve the `..` (e.g. a
+                // path starting with `../` has nothing to pop).
+                if !matches!(
+                    out.components().next_back(),
+                    Some(std::path::Component::Normal(_))
+                ) {
+                    out.push("..");
+                } else {
+                    out.pop();
+                }
+            }
+            std::path::Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
 /// Resolve which project a file path belongs to using longest-prefix match.
+///
+/// The input path is lexically normalized (`..` collapsed) before the prefix
+/// check so that traversal attempts like `project/../../etc/passwd` cannot
+/// lexically match a project root. Callers downstream that read/write the
+/// returned project's files must still re-validate the original `file_path`
+/// with `path_security` — this function only classifies, it does not gate I/O.
 pub fn resolve_project_for_path<'a>(
     projects: &'a [DiscoveredProject],
     workspace_root: &Path,
@@ -210,6 +261,7 @@ pub fn resolve_project_for_path<'a>(
     } else {
         file_path.to_path_buf()
     };
+    let abs_file = lexically_normalize(&abs_file);
 
     projects
         .iter()
@@ -219,6 +271,7 @@ pub fn resolve_project_for_path<'a>(
             } else {
                 workspace_root.join(&p.relative_root)
             };
+            let project_abs = lexically_normalize(&project_abs);
             abs_file.starts_with(&project_abs)
         })
         .max_by_key(|p| p.relative_root.components().count())
@@ -363,13 +416,19 @@ impl Workspace {
     }
 
     /// Memory directory for a project. Root project -> workspace-level, sub-projects -> per-project.
+    ///
+    /// An unknown `project_id` is treated as a sub-project (returns a per-project
+    /// subdirectory under `projects/<id>/`). Previously defaulted to the root
+    /// memory dir on unknown ID, which silently co-mingled memories from typos
+    /// or stale IDs with the workspace root's memories — a bug that would go
+    /// unnoticed until a user noticed crossed-over memories.
     pub fn memory_dir_for_project(&self, project_id: &str) -> PathBuf {
         let is_root = self
             .projects
             .iter()
             .find(|p| p.discovered.id == project_id)
             .map(|p| p.discovered.relative_root == std::path::Path::new("."))
-            .unwrap_or(true);
+            .unwrap_or(false);
         if is_root {
             self.root.join(".codescout").join("memories")
         } else {
@@ -401,6 +460,23 @@ impl Project {
 
 /// Normalize a relative path reference against a base directory without touching
 /// the filesystem (handles `../` components manually).
+///
+/// # Security
+///
+/// **NOT a filesystem-safe path normalizer.** This function intentionally
+/// permits escaping `base` (e.g. `..` components that rise above it), because
+/// it exists to resolve cross-project dependency paths in manifest files —
+/// a Cargo workspace member may legitimately reference `../sibling-crate`,
+/// which resolves to workspace-root/sibling-crate (above `base = project_root`).
+///
+/// The result is used only as a lookup key against a closed set of known
+/// projects (`project_by_abs` in `infer_depends_on`). Unknown paths silently
+/// miss the lookup and are discarded — they never reach an I/O sink.
+///
+/// **Callers wiring this to a filesystem read/write, shell command, or any
+/// other capability that acts on the path MUST re-validate with `path_security`
+/// (or equivalent) before using the result.** Keep this function private;
+/// making it `pub` creates a cross-crate footgun.
 fn normalize_path(base: &Path, relative: &str) -> PathBuf {
     let mut result = base.to_path_buf();
     for component in Path::new(relative).components() {
@@ -600,6 +676,36 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
+
+    #[test]
+    fn resolve_project_for_path_rejects_dotdot_escape() {
+        // Regression for S3: lexical starts_with without normalization would
+        // attribute `/workspace/project-a/../../etc/passwd` to `project-a`
+        // because the string prefix matches. After normalization the path
+        // collapses to `/etc/passwd` and no project prefix matches.
+        use std::path::PathBuf;
+        let workspace = PathBuf::from("/workspace");
+        let projects = vec![DiscoveredProject {
+            id: "project-a".into(),
+            relative_root: PathBuf::from("project-a"),
+            languages: vec!["rust".into()],
+            manifest: Some("Cargo.toml".into()),
+        }];
+        let escaped = PathBuf::from("/workspace/project-a/../../etc/passwd");
+        let resolved = resolve_project_for_path(&projects, &workspace, &escaped);
+        assert!(
+            resolved.is_none(),
+            "escape path must not match any project, got {:?}",
+            resolved.map(|p| &p.id)
+        );
+
+        // Sanity: a real file inside the project still resolves.
+        let legit = PathBuf::from("/workspace/project-a/src/main.rs");
+        assert_eq!(
+            resolve_project_for_path(&projects, &workspace, &legit).map(|p| p.id.as_str()),
+            Some("project-a")
+        );
+    }
 
     #[test]
     fn discover_single_project_repo() {

@@ -13,6 +13,10 @@ impl Tool for CreateFile {
         "create_file"
     }
 
+    fn is_write(&self, _input: &Value) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Create or overwrite a file with the given content. Creates parent directories as needed."
     }
