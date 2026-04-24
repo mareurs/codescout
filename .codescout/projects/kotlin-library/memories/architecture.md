@@ -1,76 +1,78 @@
 # kotlin-library — Architecture
 
 ## Module Structure
+Single Gradle module (`kotlin-library`). All source under `src/main/kotlin/library/`:
+
 ```
 library/
-  interfaces/Searchable.kt     — Searchable interface (searchText, relevance)
-  models/Book.kt               — Book data class + companion factory, MAX_RESULTS const
-  models/Genre.kt              — Genre enum (FICTION, NON_FICTION, SCIENCE, HISTORY, BIOGRAPHY)
-  services/Catalog.kt          — Catalog<T:Searchable> generic class + free functions
-  extensions/Results.kt        — SearchResult sealed class, BookRegistry singleton
-  extensions/Advanced.kt       — ISBN value class, LazyBook delegated property, factory fn
+  interfaces/   Searchable          — search contract
+  models/       Book, Genre         — core domain types
+  services/     Catalog<T>          — primary collection type + factory fns
+  extensions/   SearchResult        — result ADT
+                BookRegistry        — singleton registry
+                ISBN, LazyBook      — advanced language demos
 ```
 
 ## Key Abstractions
 
 ### `Searchable` (interface)
-The central interface. Declares `searchText(): String` (abstract) and `relevance(): Double`
-(default = 0.0). All catalog items must implement it.
+Implemented by any type that participates in catalog search. Two methods:
+- `searchText(): String` — required; returns the text the catalog filters on
+- `relevance(): Double` — optional, defaults to 0.0
 
 ### `Book` (data class, implements nothing directly)
-Primary domain type. Fields: `title`, `isbn`, `genre: Genre`, `copiesAvailable: Int = 1`.
-Has `isAvailable(): Boolean` and a companion object with `create(...)` and `fromJson(...)` factory methods.
-Note: `Book` does NOT explicitly implement `Searchable` — `Catalog<Book>` works via the
-extension function `Book.toSearchText()` provided in Catalog.kt; the LSP fixture intentionally
-exercises this structural pattern.
+Core domain entity. Fields: `title`, `isbn`, `Genre`, `copiesAvailable` (default 1).
+- `isAvailable()` — `copiesAvailable > 0`
+- Companion object: `create(title, isbn)` and `fromJson(json)` factory methods
+- `Book.toSearchText()` extension in `Catalog.kt` wraps `"$title ($isbn)"`
 
 ### `Catalog<T : Searchable>` (generic class)
-Core service. Holds a `mutableListOf<T>`. Methods: `add(item)`, `search(query): List<T>`,
-`stats(): CatalogStats`. `search` delegates to `it.searchText().contains(query)`.
-Nested: `CatalogStats(totalItems, name)` data class.
+Primary collection. Holds `mutableListOf<T>()` internally (private).
+- `add(item)` — append
+- `search(query)` — `filter { it.searchText().contains(query) }`
+- `stats()` — returns nested `CatalogStats(totalItems, name)`
+- `searchAsync(query)` — suspend extension delegating to `search()`
+Factory functions at file level: `createDefaultCatalog()`, `createNamedCatalog(name, maxItems)`
 
 ### `SearchResult` (sealed class)
-Three subtypes: `Found(book, score)`, `NotFound` (singleton object), `Error(message, code)`.
-`isMatch(): Boolean = this is Found`. Models operation outcomes without exceptions.
+Three variants: `Found(book, score)`, `NotFound` (object), `Error(message, code)`.
+`isMatch()` checks `this is Found`. No connection to `Catalog.search()` in this fixture —
+`SearchResult` exists as a type-system demonstration, not wired to the search pipeline.
 
 ### `BookRegistry` (object / singleton)
-Global ISBN→Book map. `register(book)` and `lookup(isbn): Book?`. Demonstrates Kotlin
-`object` declaration.
+`MutableMap<String, Book>` keyed by ISBN. `register(book)` and `lookup(isbn): Book?`.
+Independent of `Catalog` — a parallel registry pattern.
 
-### `ISBN` (`@JvmInline value class`)
-Wraps a `String` with zero overhead at runtime. Demonstrates Kotlin value classes.
+## Data Flows
 
-### `LazyBook`
-Demonstrates Kotlin delegated properties: `formattedTitle by lazy { title.uppercase() }`.
+### Search flow
+`Catalog.add(book)` → internal list → `Catalog.search(query)` →
+`items.filter { it.searchText().contains(query) }` → `List<T>`
 
-## Data Flow: Catalog Search
-1. Caller builds a `Book` (via constructor or `Book.create(...)`)
-2. `Catalog<Book>` is created via `createDefaultCatalog()` or `createNamedCatalog(name, maxItems)`
-3. `catalog.add(book)` appends to internal list
-4. `catalog.search(query)` filters by `book.searchText().contains(query)` — relies on
-   `Book.toSearchText()` extension (`"$title ($isbn)"`) or a custom `Searchable` implementation
-5. Returns `List<T>` directly (no SearchResult wrapping at this layer)
+The caller is responsible for making `T` implement `Searchable`. `Book` is not declared to
+implement `Searchable` in the fixture — `Book.toSearchText()` is an extension, not an
+interface conformance. To put a Book in a `Catalog<Book>`, Book would need to implement
+Searchable; this fixture demonstrates the pattern without closing the loop.
 
-## Data Flow: Registry Lookup
-1. `BookRegistry.register(book)` stores by `book.isbn`
-2. `BookRegistry.lookup(isbn)` returns `Book?` (null if not found)
-3. Callers may wrap the nullable result in `SearchResult.Found`/`NotFound` for typed outcomes
+### Registry flow
+`BookRegistry.register(book)` → `books[book.isbn] = book` →
+`BookRegistry.lookup(isbn)` → `books[isbn]` → `Book?`
 
 ## Design Patterns Demonstrated
-- Generic type constraints (`T : Searchable`)
-- Sealed class for ADT-style result types
-- Kotlin object declaration (singleton)
-- Companion object factory methods
-- Delegated properties (`by lazy`)
-- `@JvmInline value class`
-- Coroutine extension: `suspend fun <T : Searchable> Catalog<T>.searchAsync(query)` (thin wrapper)
-- Extension functions on existing types (`Book.toSearchText()`)
-- Scope functions (`let` in `createBookWithDefaults`)
-- KDoc comments throughout
+- Generic bounded type parameter: `Catalog<T : Searchable>`
+- Sealed class as ADT: `SearchResult`
+- Companion object factory: `Book.Companion`
+- Singleton object: `BookRegistry`
+- Inline/value class: `@JvmInline value class ISBN`
+- Delegated property: `val formattedTitle by lazy { ... }`
+- Scope function: `.let { }` in `createBookWithDefaults()`
+- Suspend extension function: `Catalog<T>.searchAsync()`
+- `require()` precondition: `createNamedCatalog(name, maxItems)`
+- KDoc with `@param`/`@return` (multi-line): `createNamedCatalog` — used for LSP hover tests
 
 ## Good Semantic Search Queries
-- `semantic_search("sealed class result handling kotlin-library")`
-- `semantic_search("generic catalog searchable interface")`
-- `semantic_search("book isbn registry lookup")`
-- `semantic_search("value class ISBN inline")`
-- `semantic_search("lazy delegated property book title")`
+- `semantic_search("Catalog search implementation generic type", project_id="kotlin-library")`
+- `semantic_search("sealed class result type error handling", project_id="kotlin-library")`
+- `semantic_search("singleton object registry book lookup", project_id="kotlin-library")`
+- `semantic_search("delegated property lazy scope function", project_id="kotlin-library")`
+- `semantic_search("extension function coroutine suspend", project_id="kotlin-library")`

@@ -1,60 +1,57 @@
-# codescout — Conventions
+# Workspace Conventions
 
-## Rust Patterns
+## Commit Style
 
-- **Error handling**: `RecoverableError` for expected input-driven failures (path not found, no index,
-  unsupported type). `anyhow::bail!` for genuine bugs. Never use `RecoverableError` for internal errors.
-- **Write tools**: Always return `json!("ok")` — never echo back content the caller just sent.
-- **Tool entry point**: `call_content()` is the MCP entry point. It handles buffer routing.
-  Tools implement `call()` which returns `Result<Value>`; `call_content()` wraps it.
-- **Async trait**: All tools use `#[async_trait::async_trait]` from the `async-trait` crate.
-- **Arc<dyn Tool>**: Tools are stored as `Vec<Arc<dyn Tool>>` — trait objects behind Arc for
-  shared ownership across async calls.
+- Conventional commits: `feat(scope): ...`, `fix(scope): ...`, `chore: ...`, `docs: ...`
+- Scope = crate name or subsystem: `onboarding`, `lsp`, `embed`, `librarian`, `review/date`
+- Single well-tested commit per fix/feature — batch related changes, don't commit intermediates
+- Co-author line: `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>` on AI-assisted commits
 
-## Testing Patterns
+## Branch Strategy
 
-- **Cache-invalidation tests**: Three-query sandwich — baseline → stale assert (proves bug) →
-  post-invalidation assert (proves fix). See `did_change_refreshes_stale_symbol_positions`.
-- **Mock LSP**: Tests use `MockLspClient` (implements `LspClientOps`). Constructed via
-  `ctx_with_mock()` helper in `tests/symbol_lsp.rs`. Real LSP tests require `#[cfg(feature="e2e-rust")]`.
-- **Integration tests**: `tests/integration.rs` — full tool pipeline with `ToolContext`, real file I/O,
-  no LSP. Tests are async (`#[tokio::test]`).
-- **Fixture projects**: Language fixtures in `tests/fixtures/{rust,python,typescript,kotlin,java}-library`
-  used by e2e tests. Do not add real dependencies to fixtures.
-- **Unit tests**: Inline in each module behind `#[cfg(test)] mod tests { ... }`. Use `tempfile::tempdir()`
-  for file I/O tests to avoid state pollution.
+- `master` — protected, production-quality only; cherry-picked commits from `experiments`
+- `experiments` — all experimental/in-progress work; iterate freely here
+- Feature branches for large parallel tracks if needed
+- Never commit directly to master; never force-push master
 
-## Naming & Structure
+## PR / Ship Process
 
-- Tool structs: PascalCase unit structs (e.g. `FindSymbol`, `ReplaceSymbol`, `SemanticSearch`)
-- One `impl Tool for X` block per tool file
-- Tool files in `src/tools/` or `src/tools/symbol/` for LSP-backed tools
-- `OutputGuard::from_input(&input)` at the top of every tool's `call()` that returns variable output
-- Guidance variants: `Hint` (informational), `Warning` (likely wrong), `MustFollow` (hard rule)
-- `strip_project_root` applied in `post_process()` — tools do not strip paths themselves
+1. Work on `experiments`; verify: `cargo fmt && cargo clippy -- -D warnings && cargo test`
+2. For tools: also `cargo build --release` + `/mcp` restart + manual MCP verification
+3. Cherry-pick clean commit to master: `git cherry-pick <sha>`
+4. Push master; rebase experiments: `git checkout experiments && git rebase master`
 
-## Memory & Config
+## Experimental Feature Docs
 
-- Per-project memories live in `.codescout/memories/<topic>.md` (tracked) and
-  `.codescout/private-memories/<topic>.md` (gitignored)
-- Project config: `.codescout/project.toml` (optional; sensible defaults)
-- Global config: `~/.config/codescout/config.toml` or `~/.codescout/config.toml`
-- Library registry: `.codescout/libraries.json`
-- Embedding DB: `.codescout/embeddings.db` (code chunks + semantic memories)
-- Write lock: `.codescout/write.lock`
+When adding a feature commit to `experiments`:
+- Create `docs/manual/src/experimental/<feature-name>.md` with `> ⚠ Experimental` callout
+- Add entry to `docs/manual/src/experimental/index.md`
+- On graduation to master: `git mv` doc to target chapter, remove callout, update SUMMARY.md
 
-## Pre-Commit Requirements
+## CI Rules (enforced pre-commit)
 
-Always run before completing any task:
-```
-cargo fmt && cargo clippy -- -D warnings && cargo test
-```
-For live MCP verification: `cargo build --release` then `/mcp` restart.
+- `cargo fmt` — no formatting diffs
+- `cargo clippy -- -D warnings` — zero warnings
+- `cargo test` — all tests pass (1142 tests: 1110 unit + 10 integration + 22 symbol_lsp)
+- `panic = "abort"` in release profile (Cargo.toml) — no zombie server processes
 
-## Prompt Surface Consistency
+## Error Handling (code-explorer)
 
-When tools are renamed/added/changed: update all three surfaces in the same commit:
-1. `src/prompts/server_instructions.md`
-2. `src/prompts/onboarding_prompt.md`
-3. `build_system_prompt_draft()` in `src/prompts/builders.rs`
-Then bump `ONBOARDING_VERSION` in `src/tools/onboarding.rs` if the change affects tool names/params.
+- `RecoverableError` for expected input-driven failures → `isError: false` (sibling calls survive)
+- `anyhow::bail!` for genuine tool failures → `isError: true` (fatal)
+- Write tools return `json!("ok")` — never echo content back
+
+## Tool Development Rules
+
+When adding a new tool: update 6 locations (struct, server registration, test list, path_security
+check_tool_access, disabled-blocks test, server_instructions.md).
+
+When renaming a tool: update all 3 prompt surfaces (server_instructions.md, onboarding_prompt.md,
+builders.rs) and bump ONBOARDING_VERSION in src/tools/onboarding.rs.
+
+## Per-Project Specifics
+
+- **code-explorer**: see CLAUDE.md § Prompt Surface Consistency; Tool trait at `src/tools/mod.rs:543`
+- **librarian-mcp**: simpler Tool trait (no call_content/OutputGuard); parking_lot::Mutex for catalog
+- **codescout-embed**: feature-gated compilation (local-embed / remote-embed); no tool trait
+- **fixture libraries**: read-only test targets; never add external dependencies

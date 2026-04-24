@@ -1,86 +1,104 @@
-# codescout-embed — Architecture
+# Architecture — codescout-embed
 
 ## Module Structure
 
 ```
 src/
-  lib.rs         — public API surface: re-exports, chunk_size_for_model, create_embedder*
-  embedder.rs    — Embedder trait + Embedding type alias (always compiled)
-  chunker.rs     — RawChunk, split(), split_markdown(), chunk_markdown() (always compiled)
-  remote.rs      — RemoteEmbedder (#[cfg(feature = "remote-embed")])
-  local.rs       — LocalEmbedder (#[cfg(feature = "local-embed")])
+  lib.rs         Public API surface + factory functions
+  embedder.rs    Embedding type + Embedder trait (core abstraction)
+  chunker.rs     Text splitting (code + markdown paths)
+  local.rs       LocalEmbedder  [feature = "local-embed"]
+  remote.rs      RemoteEmbedder [feature = "remote-embed"]
 ```
 
-## Key Abstractions
+## Core Abstraction: `Embedder` trait
 
-### `Embedder` trait (`embedder.rs`)
-```rust
-pub trait Embedder: Send + Sync {
-    fn dimensions(&self) -> usize;
-    async fn embed(&self, texts: &[&str]) -> Result<Vec<Embedding>>;
-    async fn embed_query(&self, text: &str) -> Result<Embedding>; // default: delegates to embed
-}
-pub type Embedding = Vec<f32>;
-```
-Object-safe async trait. `embed_query` provides a hook for asymmetric models
-(e.g. CodeRankEmbed) that need a prefix on queries but not documents.
+Defined in `embedder.rs`, `async_trait`-boxable:
+- `fn dimensions(&self) -> usize` — vector dimensionality
+- `async fn embed(&self, texts: &[&str]) -> Result<Vec<Embedding>>` — batch
+- `async fn embed_query(&self, text: &str) -> Result<Embedding>` — default impl
+  delegates to `embed`; override for models needing a query prefix (CodeRankEmbed)
 
-### `RemoteEmbedder` (`remote.rs`)
-- Targets any OpenAI-compatible `/v1/embeddings` endpoint (Ollama, OpenAI, LM Studio, custom)
-- Constructors: `openai()`, `ollama()`, `custom()`, `from_url()`
-- `dimensions()` returns 0 until first successful `embed()` (lazy via `Arc<AtomicUsize>`)
-- `embed()` batches in groups of 32, retries server errors up to 3× with exponential backoff
-- Filters empty/whitespace inputs before sending (servers reject them with 400); fills zeros in output
-- `embed_query()` prepends `query_prefix` for asymmetric models (CodeRankEmbed)
-- `probe_ollama()` is a standalone health-check with 2-second timeout
+`Embedding = Vec<f32>`. Both implementations are `Send + Sync`.
 
-### `LocalEmbedder` (`local.rs`)
-- Wraps `fastembed::TextEmbedding` behind `Arc<Mutex<>>` (fastembed v5 requires `&mut self`)
-- Construction offloads to `tokio::task::spawn_blocking` (ONNX session init is CPU-heavy)
-- `embed()` also uses `spawn_blocking` for every batch call
-- `parse_model()` maps string names to `fastembed::EmbeddingModel` enum variants
+## LocalEmbedder (fastembed)
 
-### Chunker (`chunker.rs`)
-- `RawChunk { content, start_line, end_line, metadata }` — chunk with 1-indexed line tracking
-- `split()` — character-budget splitter with configurable overlap, uses `estimate_overlap_lines()`
-- `split_markdown()` — splits first on `#`/`##`/`###` heading boundaries, then sub-splits large sections with `split()`
-- `chunk_markdown()` — simpler heading-based splitter returning `Vec<String>` (no line tracking); uses token budget (4 chars/token approximation)
+- Wraps `fastembed::TextEmbedding` behind `Arc<Mutex<...>>` for thread safety
+- Constructor is async (`new`) but ONNX session init runs on `spawn_blocking`
+  to keep the tokio executor responsive
+- Model strings: fastembed `EmbeddingModel` variant names, e.g.
+  `JinaEmbeddingsV2BaseCode`, `BGESmallENV15Q`, `AllMiniLML6V2Q`
+- Dimensions stored eagerly at construction time via a probe embed
 
-### Factory (`lib.rs`)
-- `create_embedder_with_config(model, url, api_key)` — resolution order:
-  1. `url` set → `RemoteEmbedder::from_url`
-  2. `local:` prefix → `LocalEmbedder`
-  3. `ollama:` prefix → `RemoteEmbedder::ollama` (probes daemon first; hard error if unreachable)
-  4. `openai:` prefix → `RemoteEmbedder::openai`
-  5. `custom:` prefix → hard error with migration hint (prefix removed)
-  6. No prefix → tries `LocalEmbedder` directly
-- `create_embedder(model)` — thin wrapper calling `create_embedder_with_config(model, None, None)`
-- `chunk_size_for_model(model_spec)` — computes safe chunk size in chars from documented model max-token limits using formula `max_tokens × 0.85 × 3`
+## RemoteEmbedder (HTTP)
 
-## Data Flow
+- Fields: `client` (reqwest), `endpoint` (String), `model` (String),
+  `api_key` (Option<String>), `cached_dims` (Arc<AtomicUsize>),
+  `query_prefix` (Option<String>)
+- `cached_dims` starts at 0; populated after first successful `embed()`.
+  Clones share the same `Arc<AtomicUsize>`.
+- Constructors: `openai(model, api_key)`, `ollama(model)`, `custom(base_url, model)`,
+  `from_url(url, model, api_key)` — last one normalises URL to always end with
+  `/v1/embeddings`
+- Security: rejects plaintext HTTP when an API key is present, unless the host
+  is loopback (`localhost`, `127.0.0.1`, `[::1]`)
+- HTTP client: 300-second timeout to avoid blocking `index_project` on a hung
+  Ollama during GPU discovery
+- Batching: chunks of 32 texts, 3 retries with exponential backoff (500ms base,
+  doubles per attempt). 5xx retried, 4xx immediately fatal.
+- Empty/whitespace texts are filtered before HTTP; zero-vectors substituted
+  back at original positions
 
-### Remote embedding path
-1. Caller: `create_embedder_with_config("ollama:nomic-embed-text", None, None)`
-2. `probe_ollama` → GET http://localhost:11434 (2s timeout) — errors if unreachable
-3. `RemoteEmbedder::ollama("nomic-embed-text")` constructed
-4. `embed(&["text1", "text2"])`:
-   - Filter empty → batches of 32 → POST `/v1/embeddings` with `{model, input}`
-   - Parse `EmbedResponse.data[]`, sort by `index`, extend `embedded`
-   - Cache dims in `cached_dims` on first success
-   - Reconstruct full-length result with zeros for originally-empty slots
+## Chunker
 
-### Local embedding path
-1. Caller: `create_embedder("local:AllMiniLML6V2Q")`
-2. `LocalEmbedder::new("AllMiniLML6V2Q")`
-   - `spawn_blocking` → `parse_model("AllMiniLML6V2Q")` → `fastembed::EmbeddingModel::AllMiniLML6V2Q`
-   - `fastembed::TextEmbedding::try_new(opts)` (downloads model if missing)
-   - Probe embed to discover dims
-3. `embed(&["text"])`:
-   - `spawn_blocking` → `Mutex::lock()` → `model.embed(owned, None)`
+Three public functions:
+1. `split(source, chunk_size, chunk_overlap) -> Vec<RawChunk>` — line-based
+   sliding window. Emits 1-indexed line numbers. Overlap computed by
+   `estimate_overlap_lines` (counts chars from tail).
+2. `split_markdown(source, chunk_size, chunk_overlap) -> Vec<RawChunk>` —
+   splits on `#`/`##`/`###` headings first, then applies `split` to oversized
+   sections with offset-adjusted line numbers.
+3. `chunk_markdown(text, max_tokens) -> Vec<String>` — returns plain strings
+   (no line tracking). Pass 1: heading + blank-line boundary split. Pass 2:
+   subdivide sections exceeding `max_tokens * 4` chars.
 
-## Semantic Search Examples
-- `semantic_search("embedding batch retry backoff", project="codescout-embed")`
-- `semantic_search("chunk overlap line tracking", project="codescout-embed")`
-- `semantic_search("model feature gate cfg", project="codescout-embed")`
-- `semantic_search("query prefix asymmetric embedding", project="codescout-embed")`
-- `semantic_search("chunk size token budget model spec", project="codescout-embed")`
+`RawChunk` fields: `content: String`, `start_line: usize` (1-indexed),
+`end_line: usize` (1-indexed inclusive), `metadata: Option<String>` (set by
+callers for AST-derived context headers; not returned in search results).
+
+## Factory: `create_embedder_with_config`
+
+Resolution order (feature-gated):
+1. `url` supplied → `RemoteEmbedder::from_url` (strips routing prefix from model)
+2. `local:` prefix → `LocalEmbedder::new` (ONNX)
+3. `ollama:` prefix → probes Ollama reachability first, then `RemoteEmbedder::ollama`
+4. `openai:` prefix → `RemoteEmbedder::openai`
+5. `custom:` prefix → hard error with migration hint (use `url` field instead)
+6. No prefix, `local-embed` feature → tries `LocalEmbedder::new` directly
+7. Unknown → actionable error listing all options
+
+`create_embedder(model)` is the legacy single-arg interface; delegates to
+`create_embedder_with_config(model, None, None)`.
+
+## Data Flow: Code Indexing
+
+1. Caller reads file text
+2. `split(text, chunk_size_for_model(model_spec), overlap)` → `Vec<RawChunk>`
+3. Each `RawChunk.content` (optionally prefixed with `metadata`) is passed to
+   `embedder.embed(texts)` as a batch
+4. Returned `Vec<Embedding>` (each `Vec<f32>`) stored in sqlite-vec alongside
+   chunk line ranges
+
+## Data Flow: Semantic Search
+
+1. Query string → `embed_one(embedder, query)` → single `Embedding`
+2. KNN search in sqlite-vec → chunk row + cosine similarity
+3. Chunk's `(file, start_line, end_line)` used to surface source location
+
+## Useful Semantic Search Queries
+
+- `semantic_search("chunk overlap line tracking", project_id="codescout-embed")`
+- `semantic_search("remote embedder retry backoff batch size")`
+- `semantic_search("model prefix resolution factory embedder")`
+- `semantic_search("ONNX fastembed spawn_blocking")`
+- `semantic_search("markdown heading split chunk")`

@@ -3,15 +3,23 @@
 
 [[anchors]]
 path = "src/server.rs"
-hash = "893f7e3548d3fce32b520c5d3e367d16bdbd48f34d5d93ad44c2155120a6a40e"
+hash = "77f61edcf6cf14fc31b35626bdac5accea90b1ed67fdb64af45bb94c6622d4f6"
 
 [[anchors]]
 path = "src/tools/mod.rs"
-hash = "c8a520ca89b95465e9c474029b884082dd79550c677e83d7e6537467ad756220"
+hash = "45d346d7236cf306500a9451d4c88ed95dc147dfaba66434c3a99e5b12282699"
 
 [[anchors]]
-path = "src/agent.rs"
-hash = "0724a8ec4a257fe61c5297a30b616d53368946587e29dec4f39a590072dc7a83"
+path = "src/lib.rs"
+hash = "73744073d0950435f69fc7d496398e926ebbd28f68f4c45cfb8e5170992474df"
+
+[[anchors]]
+path = "docs/TODO-tool-misbehaviors.md"
+hash = "d705a45089e0fdb9d18c897523e9a7b931a36e9af3ebd0dd5f664bae44840499"
+
+[[anchors]]
+path = "src/agent/mod.rs"
+hash = "ca26527fe2e459d4ede64e5d238844ba6b5b0239388904f9c90f008039a715d6"
 
 [[anchors]]
 path = "src/tools/output.rs"
@@ -19,28 +27,20 @@ hash = "3780a914063ee4973c233c17fd9299424725ea08cd775e0e4d2415e4d414a88a"
 
 [[anchors]]
 path = "src/lsp/ops.rs"
-hash = "5575da8872318189dd02bee674bd3ba8e841ea7e01261dc5abfd0c956b8f1b8f"
-
-[[anchors]]
-path = "docs/TODO-tool-misbehaviors.md"
-hash = "3da8a8fc9a4152a718608798077e5b2d309c88f7b38e7853f6d06e9c77b82233"
+hash = "27e1357fa649731548d5688e71741b91b8c5747cf56d80323f326d2f0a3833c0"
 
 [[anchors]]
 path = "docs/PROGRESSIVE_DISCOVERABILITY.md"
-hash = "c7b155b764d3154e145d819c9b0b38d50ffe168ec37eb1f24c3c6c6273bc7b9f"
+hash = "3b9c3e076173632d958cf21410f2afa3fffca73c4d098bc110845ad86df317b3"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "4a21890ae00f3e7b2b0a7691d3a38f338d3672d855bfddd2afbbb13c382dbcfe"
-
-[[anchors]]
-path = "src/tools/workflow.rs"
-hash = "fc330b73f8f26c947b422d1911e9594ccb45a8e7aca9249931fcd0e1ab08a73c"
+hash = "2afe8c59252ad158c8782b579ad2de170cee91166bc70c0b6e6c61de80c44bf0"
 
 [[anchors]]
 path = "src/tools/output_buffer.rs"
-hash = "feda57465e6be6a2acdecc32f57fd6d5dbdf30b8af7f6033a174995d8c7782f2"
+hash = "a324041fc3de894c344b06a89b88f158e3aa4cf315e00d2ea2535d12ffb0e890"
 
 [[anchors]]
 path = "src/util/path_security.rs"
-hash = "ab603b887f75c5436c0c5ad8da7f5553254ce0e96f511caf206b150ae88067c8"
+hash = "db7007e1dbea9e28efe4398e6ca50a4341d386966de144e4e31c376500f6ddae"
