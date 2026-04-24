@@ -9,20 +9,25 @@ go-to-definition, hover, find-references, and related features.
 ## Tech Stack
 - Language: Kotlin (JVM), Kotlin 2.1.0
 - Build: Gradle with Kotlin DSL (`build.gradle.kts`)
+- Group/artifact: `library:kotlin-library:0.1.0`
 - Dependencies: `kotlin("stdlib")` only — no test framework, no external libraries
-- Group/version: `library:0.1.0`
+- Repository: Maven Central
 
 ## Package Structure
-All sources live under `src/main/kotlin/library/`:
-- `models/` — core domain types: `Book` (data class), `Genre` (enum)
-- `interfaces/` — `Searchable` interface
-- `services/` — `Catalog<T>` generic class, catalog factory functions, extension functions
-- `extensions/` — advanced Kotlin features: `SearchResult` (sealed class), `BookRegistry`
-  (singleton object), `ISBN` (value/inline class), `LazyBook` (delegated property)
+All 6 sources live under `src/main/kotlin/library/`:
+- `models/Book.kt` — `Book` data class with companion object; `MAX_RESULTS = 100` constant
+- `models/Genre.kt` — `Genre` enum with 5 values and a `label()` display method
+- `interfaces/Searchable.kt` — `Searchable` interface with `searchText()` and `relevance()`
+- `services/Catalog.kt` — `Catalog<T>` generic class, nested `CatalogStats`, factory functions,
+  suspend extension `searchAsync`, extension `Book.toSearchText()`
+- `extensions/Results.kt` — `SearchResult` sealed class (Found/NotFound/Error variants);
+  `BookRegistry` singleton object
+- `extensions/Advanced.kt` — `ISBN` value/inline class; `LazyBook` with delegated property;
+  `createBookWithDefaults` scope function
 
 ## No Tests
 There is no `src/test/` directory. This fixture is exercised exclusively by codescout's
-own Rust test suite via the Kotlin LSP.
+own Rust test suite via the Kotlin LSP (kotlin-language-server).
 
 ## Key Constants
-- `MAX_RESULTS = 50` (top-level constant in `Book.kt`)
+- `MAX_RESULTS = 100` (top-level constant in `Book.kt`, `library.models` package)

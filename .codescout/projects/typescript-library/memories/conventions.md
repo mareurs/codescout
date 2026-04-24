@@ -1,40 +1,41 @@
 # typescript-library — Conventions
 
-## Language & Compiler
-- TypeScript strict mode; ES2022 target; CommonJS modules
-- `experimentalDecorators` and `emitDecoratorMetadata` enabled (needed for `@logged`)
-- No external dependencies — pure TypeScript standard library
+## Language Patterns
 
-## Naming
+### Naming
 - Classes: PascalCase (`Book`, `Catalog`, `CatalogStats`, `BookService`)
-- Interfaces: PascalCase (`Searchable`, `FoundResult`, `BookIndex`, `BookMetadata`)
-- Enums: PascalCase members (`Genre.Fiction`, `Genre.NonFiction`, ...)
-- Functions: camelCase (`genreLabel`, `createDefaultCatalog`, `isFound`, `findBook`)
-- Type aliases: PascalCase (`SearchResult`, `ReadonlyBook`, `IsAvailable`)
-- Private fields: underscore prefix (`_title`, `_isbn`, `_genre`, `_copiesAvailable`)
+- Interfaces: PascalCase, no `I` prefix (`Searchable`, `FoundResult`, `BookIndex`)
+- Enums: PascalCase, string values are snake_case (`Fiction = 'fiction'`, `NonFiction = 'non_fiction'`)
 - Constants: SCREAMING_SNAKE_CASE (`MAX_RESULTS`)
+- Private fields: underscore-prefixed (`_title`, `_isbn`, `_genre`, `_copiesAvailable`)
+- Methods: camelCase (`searchText`, `isAvailable`, `genreLabel`, `createDefaultCatalog`)
+- Factory functions: `create*` or `createDefault*` prefix
 
-## Design Patterns
-- **Discriminated union**: `SearchResult` uses a `kind` literal field for exhaustive narrowing
-- **Type guard**: `isFound(result): result is FoundResult` — checks `kind === 'found'`
-- **Generic constraint**: `Catalog<T extends Searchable>` — T must implement `searchText()`
-- **Namespace merging**: `BookMetadata` interface + `BookMetadata` namespace coexist
-- **Function overloads**: `findBook` has two call signatures + one implementation
-- **Barrel export**: `src/index.ts` re-exports public API; internal modules import directly
-- **Default export**: `DefaultCatalog` in advanced.ts uses `export default class`
+### TypeScript Features Demonstrated
+- `strict: true` — all fields typed, no implicit any
+- Private constructor parameters via shorthand (`constructor(private name: string) {}`)
+- Discriminated unions with `kind` literal discriminant
+- Type guards using `is` predicate return type
+- Mapped types (`Readonly<Pick<...>>`)
+- Conditional types (`T extends ... ? true : false`)
+- Index signatures (`[isbn: string]: Book`)
+- Generic bounded type parameters (`<T extends Searchable>`)
+- Function overloads (multiple signatures + single implementation)
+- Experimental decorators (`@logged` on method)
+- Declaration merging (interface + namespace with same name)
+- Default export alongside named exports (`export default class DefaultCatalog`)
+- Barrel/index re-export pattern
 
-## Testing Approach
-No unit tests in the fixture. Correctness is validated externally by
-`tests/fixtures/typescript-extensions.toml` in the parent codescout project.
-Each TOML entry specifies:
-- `tool`: which codescout tool to invoke (`get_symbols_overview`, `find_referencing_symbols`)
-- `path`: file to target
-- `symbol` (for ref tests): symbol to resolve
-- `contains_symbols` or `expected_refs_contain`: what the response must include
+### Module Organization
+- One class/concept per file; related utilities in the same file
+- Imports are relative (`../models/book`, `../interfaces/searchable`)
+- Public API defined solely in `src/index.ts` — consumers import from the barrel
 
-## File Organization
-- `src/models/` — domain entities (Book, Genre)
-- `src/interfaces/` — contracts (Searchable) and type compositions (types.ts)
-- `src/services/` — service layer (Catalog)
-- `src/extensions/` — advanced TypeScript feature showcase (not production patterns)
-- No `tests/` directory inside the fixture itself
+### Docstring Style
+- JSDoc-style block comments on exported symbols (`/** ... */`)
+- Inline section labels mark TypeScript feature intent (`/** Extension: ... */`)
+- No runtime test framework; no test files in the fixture
+
+### No Error Handling at Runtime
+This is a fixture, not production code. Functions like `findBook` return `undefined`
+and `Catalog.search` silently returns empty arrays — no thrown errors.

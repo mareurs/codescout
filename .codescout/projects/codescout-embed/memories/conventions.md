@@ -1,43 +1,64 @@
-# codescout-embed — Conventions
+# Conventions — codescout-embed
 
-## Error Handling
-- All errors use `anyhow`; no custom error enums with `thiserror`
-- `anyhow::bail!()` for input-driven failures (unknown model, unreachable server, wrong config)
-- `.map_err(|e| anyhow::anyhow!(...))` for converting foreign errors with context
-- Error messages are user-facing and actionable: always suggest alternatives or next steps
-- 4xx HTTP errors from embedding server → immediate bail (no retry); 5xx → retry with backoff
+## Language & Style
+- Pure Rust, workspace edition/license/authors inherited via `workspace = true`
+- `async_trait` used for all async trait methods — required by the `Embedder`
+  trait definition; all impls must carry `#[async_trait::async_trait]`
+- Error handling: `anyhow::Result` throughout; `anyhow::bail!` for hard errors,
+  `anyhow::anyhow!` for constructing error values
+- No `thiserror` custom types in this crate — `anyhow` is sufficient at this layer
+
+## Naming & Public API
+- `Embedding = Vec<f32>` — the fundamental output type
+- `RawChunk` — pre-embed text chunk with line provenance
+- Factory functions are free functions in `lib.rs`, not constructors:
+  `create_embedder`, `create_embedder_with_config`, `embed_one`,
+  `chunk_size_for_model`
+- Backend constructors live in `impl` blocks: `RemoteEmbedder::openai`,
+  `::ollama`, `::custom`, `::from_url`; `LocalEmbedder::new`
+
+## Feature Gates
+- All `local-embed`-gated code uses `#[cfg(feature = "local-embed")]` at item level
+- All `remote-embed`-gated code uses `#[cfg(feature = "remote-embed")]`
+- Feature-independent code (chunker, trait, factory fn skeleton) compiles always
+- The `let _ = &api_key;` suppression pattern used in `create_embedder_with_config`
+  when `remote-embed` is disabled — avoids unused-variable warnings
+
+## Line Number Convention
+- All public chunker output uses **1-indexed** line numbers (both `start_line`
+  and `end_line`). Internal loop indices are 0-indexed and converted on output:
+  `start_line: start_line + 1`.
 
 ## Async Patterns
-- `async-trait` crate for all async trait methods
-- CPU-heavy work (ONNX session init, fastembed embed) always goes through `tokio::task::spawn_blocking`
-- `Arc<Mutex<fastembed::TextEmbedding>>` because fastembed v5 requires `&mut self` on embed
-- `Arc<AtomicUsize>` for cached_dims in `RemoteEmbedder` so clones share the lazily-populated value
+- CPU-heavy ONNX session creation runs on `tokio::task::spawn_blocking`
+- `Mutex<fastembed::TextEmbedding>` is std (not tokio) — blocked inside
+  `spawn_blocking`; the async `embed` method spawns a new blocking task per call
 
-## Feature Gating
-- `remote-embed` and `local-embed` are both opt-in; the core (`Embedder` trait, `RawChunk`, splitters) has no feature dependencies
-- `lib.rs` uses many `#[cfg(feature = "...")]` guards in `create_embedder_with_config`
-- Feature-gated modules (`local`, `remote`) are conditionally compiled with `#[cfg(feature)]` on `pub mod`
+## Security Invariants
+- Never send an API key over plaintext HTTP to a non-loopback host: enforced
+  in both `RemoteEmbedder::custom` and `::from_url`
+- `OPENAI_API_KEY` env var is the fallback for openai: prefix
+- `EMBED_API_KEY` env var is the fallback for custom/from_url paths
+- `OLLAMA_HOST` env var overrides the default `http://localhost:11434`
 
-## Public API Surface (lib.rs re-exports)
-- `Embedder`, `Embedding` — trait + type alias
-- `RawChunk`, `split`, `split_markdown`, `chunk_markdown` — chunking primitives
-- `chunk_size_for_model` — model-aware chunk size calculator
-- `create_embedder`, `create_embedder_with_config` — factory functions
-- `embed_one` — convenience wrapper for single-query embed
+## Testing Approach
+- Chunker has an inline `#[cfg(test)] mod tests` with unit tests covering:
+  empty input, single chunk, 1-indexed start, overlap invariants,
+  line continuity across chunks, markdown heading splits
+- Remote embedder tests are in `#[cfg(test)] mod tests` in `remote.rs`:
+  covers URL normalisation, loopback/HTTPS security, query prefix detection
+- Local embedder tests: gated behind `#[cfg(feature = "local-embed")]` and
+  `#[cfg_attr(not(feature = "local-embed"), ignore)]` — only run in CI with
+  the feature enabled
+- `lib.rs` has a trivial `smoke::crate_builds` test (no network/model needed)
+- Tests that require a live server are not present — by design, to keep CI fast
 
-## Testing
-- Chunker tests are pure unit tests (no async, no network) — fast and always run
-- Remote tests use `#[tokio::test]` and require a live Ollama instance; they test: nonzero dims, batch consistency, semantic similarity ordering, large batch handling, URL normalization, API key precedence
-- Local tests cover `parse_model` name mapping — no network needed but require `local-embed` feature
-- `#[test] fn crate_builds()` smoke test in `lib.rs` (just `2+2==4`)
-
-## Naming Conventions
-- Model specs use `prefix:model-name` format: `local:`, `ollama:`, `openai:`; bare model name = local fallback
-- fastembed variant names are CamelCase matching the enum: `AllMiniLML6V2Q`, `NomicEmbedTextV15Q`
-- Ollama/OpenAI model names are kebab-case strings: `nomic-embed-text`, `text-embedding-3-small`
-
-## Key Invariants
-- `RawChunk.start_line` is always 1-indexed
-- `RemoteEmbedder.dimensions()` returns 0 before first embed — callers must handle this
-- Empty/whitespace-only input strings are replaced with zero-vectors; never sent to server
-- `chunk_size_for_model` is not user-configurable — derived from model spec to prevent misconfiguration
+## Model String Format Summary
+| Prefix         | Backend              | Notes                              |
+|----------------|----------------------|------------------------------------|
+| `local:`       | LocalEmbedder (ONNX) | e.g. `local:AllMiniLML6V2Q`        |
+| `ollama:`      | RemoteEmbedder       | probes reachability at startup     |
+| `openai:`      | RemoteEmbedder       | requires API key                   |
+| `custom:`      | — (hard error)       | use `url` field in project.toml    |
+| (no prefix)    | local fallback       | tries LocalEmbedder, else error    |
+| url + any      | RemoteEmbedder       | url takes priority over prefix     |

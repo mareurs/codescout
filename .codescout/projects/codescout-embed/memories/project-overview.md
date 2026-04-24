@@ -1,35 +1,44 @@
-# codescout-embed — Project Overview
+# codescout-embed
 
 ## Purpose
-Shared embedding primitives library used by both `codescout` (the MCP server) and
-`librarian-mcp`. Provides text chunking, embedding vector generation, and a unified
-factory for selecting the right backend at runtime.
+Shared embedding primitives crate used by both `codescout` (main server) and
+`librarian-mcp`. Provides: a backend-agnostic `Embedder` trait, two concrete
+backends (local ONNX via fastembed, remote OpenAI-compatible HTTP), a
+language-aware text chunker, and factory functions to construct the right
+backend from a model string.
 
 ## Tech Stack
-- **Language:** Rust (async via `tokio`, trait object dispatch)
-- **Async trait:** `async-trait` for object-safe async methods
-- **Remote backend:** `reqwest` (optional, `remote-embed` feature) — OpenAI-compatible HTTP API
-- **Local backend:** `fastembed` v5 (optional, `local-embed` feature) — ONNX Runtime + HuggingFace model hub
-- **Error handling:** `anyhow` throughout; no `thiserror` custom error types
+- **Rust**, edition from workspace
+- **fastembed** (v5, optional feature `local-embed`) — ONNX Runtime via
+  HuggingFace model hub; models cached in `~/.cache/huggingface/hub/`
+- **reqwest** (v0.13, optional feature `remote-embed`) — async HTTP client for
+  `/v1/embeddings` compatible endpoints
+- **async-trait** — required for async methods in the `Embedder` trait
+- **anyhow / thiserror** — error handling
+- **tokio** — async runtime (from workspace)
 
-## Optional Features
-- `remote-embed` — enables `RemoteEmbedder` and `probe_ollama`; unlocks Ollama, OpenAI, and any custom OpenAI-compatible endpoint
-- `local-embed` — enables `LocalEmbedder`; downloads ONNX models to `~/.cache/huggingface/hub/` on first use
+## Features (Cargo)
+- `local-embed` — enables `LocalEmbedder` (fastembed/ONNX)
+- `remote-embed` — enables `RemoteEmbedder` (reqwest HTTP)
+- Both are optional; the crate compiles with neither (only chunker + trait)
 
-## Key Dependencies
-- `anyhow`, `thiserror`, `serde`, `serde_json`, `tokio`, `tracing`
-- `reqwest` (optional), `fastembed` (optional)
+## Source Files
+- `src/lib.rs` — public API: re-exports, `chunk_size_for_model`, `embed_one`,
+  `create_embedder`, `create_embedder_with_config`
+- `src/embedder.rs` — `Embedding` type alias + `Embedder` trait definition
+- `src/chunker.rs` — `RawChunk`, `split`, `split_markdown`, `chunk_markdown`
+- `src/local.rs` — `LocalEmbedder` (fastembed, ONNX, CPU)
+- `src/remote.rs` — `RemoteEmbedder` (OpenAI-compatible HTTP API)
 
 ## Runtime Requirements
-- **Remote mode:** accessible HTTP server implementing `/v1/embeddings`
-- **Local mode:** models downloaded on first use (~22MB for AllMiniLML6V2Q, up to ~547MB for NomicEmbedTextV15)
-- No runtime requirements for the chunker (pure Rust, no features needed)
+- **local-embed**: First use downloads chosen model (22MB–300MB) to
+  `~/.cache/huggingface/hub/`. No server needed.
+- **remote-embed**: Requires a running embedding server (Ollama, OpenAI API,
+  or any `/v1/embeddings`-compatible endpoint). Ollama host defaults to
+  `http://localhost:11434`; override with `OLLAMA_HOST` env var.
+  OpenAI requires `OPENAI_API_KEY` or explicit `api_key` config.
 
-## Default Model
-`AllMiniLML6V2Q` (384-dimensional, quantized, ~22MB) — the conservative default when no prefix or URL is specified and `local-embed` is enabled.
-
-## Supported Local Models
-- `AllMiniLML6V2Q` / `AllMiniLML6V2` — 384d, recommended default
-- `NomicEmbedTextV15Q` / `NomicEmbedTextV15` — 768d, higher quality
-- `JinaEmbeddingsV2BaseCode` — 768d, code-specialized
-- `BGESmallENV15Q` / `BGESmallENV15` — 384d (deprecated: GPU-only, crashes on CPU)
+## Key Consumers
+- `src/embed/mod.rs` (code-explorer main crate) — re-exports and uses
+  `create_embedder_with_config` to build the embedder on demand
+- `crates/librarian-mcp` — uses `Embedder` trait for document indexing

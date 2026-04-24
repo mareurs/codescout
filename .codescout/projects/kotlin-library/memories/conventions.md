@@ -1,43 +1,42 @@
 # kotlin-library — Conventions
 
-## Language Patterns
+## Language & Style
+- All files use KDoc (`/** ... */`) on every declaration — required for LSP hover tests
+- Package names mirror directory structure: `library.models`, `library.interfaces`,
+  `library.services`, `library.extensions`
+- `val` everywhere; no `var` in the main source
+- Named arguments for `Book(...)` construction in scope functions
+- Default parameter values used in primary constructors (`copiesAvailable = 1`)
+  and free functions (`maxItems: Int = 100`)
 
-### Naming
-- Classes: PascalCase (`Book`, `Catalog`, `SearchResult`)
-- Functions/properties: camelCase (`searchText`, `isAvailable`, `formattedTitle`)
-- Constants: SCREAMING_SNAKE_CASE (`MAX_RESULTS`, `FICTION`)
-- Packages: lowercase (`library.models`, `library.services`)
+## Naming
+- Classes/interfaces: PascalCase — `Book`, `Catalog`, `SearchResult`, `BookRegistry`
+- Functions/properties: camelCase — `searchText()`, `isAvailable()`, `copiesAvailable`
+- Constants: SCREAMING_SNAKE_CASE — `MAX_RESULTS`
+- Enum variants: SCREAMING_SNAKE_CASE — `FICTION`, `NON_FICTION`, `SCIENCE`
 
-### Data Modeling
-- Immutable data types: `data class` with `val` fields (all model types)
-- Enums for closed sets: `Genre` enum with a `label()` helper
-- Sealed classes for typed outcomes: `SearchResult` (Found/NotFound/Error)
-- Singletons: `object` declaration (`BookRegistry`, `SearchResult.NotFound`)
-- Value semantics with zero overhead: `@JvmInline value class ISBN`
+## Kotlin Feature Coverage (designed for LSP test breadth)
+The fixture deliberately demonstrates one of each major Kotlin construct:
+- `data class` with companion object (`Book`)
+- `enum class` with member function (`Genre`)
+- `interface` with default implementation (`Searchable.relevance()`)
+- Generic class with bounded type param (`Catalog<T : Searchable>`)
+- Nested data class (`Catalog.CatalogStats`)
+- Sealed class with data class / object / data class variants (`SearchResult`)
+- `object` singleton (`BookRegistry`)
+- `@JvmInline value class` (`ISBN`)
+- Delegated property (`by lazy`) (`LazyBook.formattedTitle`)
+- Suspend extension function (`Catalog<T>.searchAsync()`)
+- Scope function (`let`) with lambda receiver
+- Top-level free functions (`createDefaultCatalog`, `createNamedCatalog`, `createBookWithDefaults`)
+- `require()` precondition with message lambda
 
-### Kotlin-Specific Idioms
-- Default parameter values: `copiesAvailable: Int = 1`, `maxItems: Int = 100`
-- Expression bodies: single-expression functions use `= expr` syntax throughout
-- `by lazy` for computed-once properties
-- Scope functions: `let` used in `createBookWithDefaults` to transform and return
-- Extension functions: `Book.toSearchText()` and `Catalog<T>.searchAsync()` add
-  behavior without modifying original classes
-- Companion objects for factory methods instead of static methods
+## Testing Approach
+No unit tests in this fixture. All verification is done by codescout's Rust integration
+tests (`tests/`) which spin up kotlin-language-server against this fixture and assert
+correct LSP responses (symbol positions, hover content, go-to-definition targets, etc.).
 
-### Documentation
-- All public types and methods have KDoc `/** */` comments
-- Comments describe Kotlin feature intent (e.g. "Extension: inline/value class",
-  "Extension: delegated property") — this is deliberate for LSP testing purposes
-
-### Build/Project Conventions
-- Kotlin DSL for Gradle (`build.gradle.kts`, `settings.gradle.kts`)
-- Single-module project, no subprojects
-- No test source sets — testing is done externally via codescout's Rust test suite
-- Package hierarchy mirrors directory hierarchy under `src/main/kotlin/`
-
-## Testing Notes (from codescout perspective)
-- This fixture is referenced by codescout LSP tests to verify symbol navigation on Kotlin
-- `createNamedCatalog` has a KDoc `@param`/`@return` block — specifically to test whether
-  kotlin-language-server includes KDoc in hover responses
-- The variety of Kotlin constructs (sealed, value class, generics, extensions, coroutines)
-  ensures broad LSP feature coverage
+## Build
+- Gradle wrapper via `./gradlew`; Kotlin JVM plugin 2.1.0
+- `./gradlew build` compiles; `./gradlew test` runs (no tests, exits cleanly)
+- No Gradle plugins beyond the core Kotlin JVM plugin

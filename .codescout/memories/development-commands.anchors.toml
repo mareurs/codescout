@@ -3,8 +3,8 @@
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "4a21890ae00f3e7b2b0a7691d3a38f338d3672d855bfddd2afbbb13c382dbcfe"
+hash = "2afe8c59252ad158c8782b579ad2de170cee91166bc70c0b6e6c61de80c44bf0"
 
 [[anchors]]
-path = "src/tools/workflow.rs"
-hash = "fc330b73f8f26c947b422d1911e9594ccb45a8e7aca9249931fcd0e1ab08a73c"
+path = "Cargo.toml"
+hash = "d4f64490c3772ed10af6fa878058eb7d3ab22e562f3f179815e1b7fd1448e545"

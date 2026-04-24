@@ -2,32 +2,41 @@
 
 ## Purpose
 
-Test fixture for the codescout workspace. Provides a small but well-structured
-Python library that exercises Python-specific language features for codescout's
-AST parser, symbol navigation, and LSP integration tests.
+A small Python library management system serving as a **test fixture** for codescout's
+Python symbol navigation, LSP, and semantic-search capabilities. It is intentionally
+designed to exercise diverse Python language features: dataclasses, enums, ABCs,
+Protocols, generics, mixins, multiple inheritance, type aliases, *args/**kwargs, and
+nested functions/closures.
+
+## Location
+
+`tests/fixtures/python-library/` within the code-explorer workspace.
 
 ## Tech Stack
 
-- **Language:** Python 3.10+
-- **Build:** pyproject.toml (minimal, no external dependencies)
-- **Type system:** dataclasses, Enum, ABC, Protocol, Generic, TypeVar
-- **No runtime dependencies** — stdlib only
+- **Language:** Python ≥ 3.10
+- **Build/Manifest:** `pyproject.toml` (minimal; no external dependencies)
+- **No test suite** — the fixture itself is exercised by codescout's own integration tests
 
-## What It Exercises
+## Package Structure
 
-This fixture is designed to test codescout's handling of Python-specific constructs:
-- `@dataclass` with `@property` methods
-- `Enum` subclasses with methods
-- Abstract base classes (`ABC` + `@abstractmethod`)
-- Structural typing (`Protocol` with `@runtime_checkable`)
-- Generics (`Generic[T]` with bounded `TypeVar`)
-- Multiple inheritance / MRO (`AudioBook(Book, Playable)`)
-- Type aliases (`BookList = list[Book]`)
-- Nested classes (`Catalog.Stats`)
-- Nested functions / closures (`rank_results._score`)
-- `*args` / `**kwargs` signatures (`search_books`)
-- Module-level constants with type annotations (`MAX_RESULTS: int = 100`)
+```
+library/               # top-level package
+  __init__.py          # re-exports: Book, Genre, Searchable, Catalog
+  models/
+    book.py            # Book dataclass + MAX_RESULTS constant
+    genre.py           # Genre enum
+  interfaces/
+    searchable.py      # Searchable ABC + HasISBN Protocol
+  services/
+    catalog.py         # Catalog[T] generic + create_default_catalog()
+  extensions/
+    advanced.py        # Playable mixin, AudioBook, search_books, rank_results, BookList type alias
+```
 
-## Key Exports (library/__init__.py)
+## Key Dependencies (stdlib only)
 
-`Book`, `Genre`, `Searchable`, `Catalog` — the four public types.
+- `abc` — ABC, abstractmethod
+- `dataclasses` — dataclass, field
+- `enum` — Enum
+- `typing` — Generic, TypeVar, Protocol, runtime_checkable, Any
