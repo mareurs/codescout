@@ -448,6 +448,8 @@ provided to you separately.
 - Full architecture details (the `architecture` memory covers this)
 - Command lists, glossary, detailed conventions (memories cover these)
 - Anything over 30 lines (keep it concise — this is injected every session)
+- Natural-language commands to "read", "open", or "view" source files — future sessions will have `read_file` blocked on any file whose extension maps to a language in `ast::detect_language` (`.rs`, `.py`, `.ts`, `.tsx`, `.js`, `.jsx`, `.go`, `.java`, `.kt`, `.c`, `.cpp`, `.cs`, `.rb`, `.html`, `.css`, `.scss`, `.less`, `.php`, `.swift`, `.scala`, `.ex`, `.hs`, `.lua`, `.sh`, `.bash`). Instead always reference `find_symbol(include_body=true)`, `list_symbols`, `grep`, or `semantic_search`. Only `.md` (→ `read_markdown`) and data formats like `.json`, `.toml`, `.yaml` go through `read_file`.
+- Native host tool names (`Read`, `Grep`, `Glob`, `Edit`, `Bash`) — those are blocked in codescout-enabled sessions; only codescout MCP tools belong in recommendations.
 
 **Template:**
 ```
@@ -463,7 +465,14 @@ provided to you separately.
 [Concrete query examples that work well. Terms to avoid.]
 
 ## Navigation Strategy
-[Recommended exploration order for new tasks.]
+[Recommended exploration order for new tasks. Every step must name a
+codescout tool — never "read X" in natural language. Example:
+  1. `list_symbols("src/core")` — survey module structure
+  2. `find_symbol("Orchestrator", include_body=true)` — read core type end-to-end
+  3. `semantic_search("retry backoff")` — find cross-cutting logic
+  4. `grep(pattern="FOO_KEY", path="src/hooks")` — locate literal occurrences
+  5. `read_markdown("docs/ARCHITECTURE.md")` — for markdown only
+]
 
 ## Project Rules
 [Conventions the AI should always follow.]
@@ -478,7 +487,6 @@ by heading, or for scoped string replacement within a section (action="edit").
 Use `read_markdown` to navigate markdown files by heading.
 
 ---
-
 ## After Everything Is Created
 
 After confirming all 6 memories and the system prompt with the user, deliver this:
