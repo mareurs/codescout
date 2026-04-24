@@ -511,3 +511,85 @@ phase-6 fix commit. No residuals from minors.
 3. `WORKSPACE_ONBOARDING_PROMPT` uses `<HARD-GATE>` at lines 25 and 73. Is
    this pattern worth codifying in `src/prompts/README.md`'s 7-rule style
    guide? (Emerging convention.)
+
+
+# Phase 9 — Cross-cutting
+
+## S9-3 — Windows `taskkill` / `tasklist` PATH hijack
+
+- **Location:** `src/platform/windows.rs::terminate_process` / `process_alive`.
+- **Evidence:** `Command::new("taskkill")` / `Command::new("tasklist")` resolve
+  via PATH. Attacker-dropped `taskkill.exe` in CWD can run with server
+  privileges.
+- **Unblock:** use absolute `%SYSTEMROOT%\System32\taskkill.exe`, OR call
+  `TerminateProcess` via `windows-sys` / `winapi` directly (matches
+  `platform/mod.rs` doc). No Linux reviewer can test this directly — defer
+  to a Windows-dev pass.
+
+## C9-2 — `Default` security profile is "Root minus deny-list"
+
+- **Location:** `src/util/path_security.rs::validate_read_path`.
+- **Evidence:** Only difference between `Default` and `Root` for absolute
+  paths is deny-list intersection. Given how many secret-bearing locations
+  the audit enumerated, the `Default` bound is weaker than "containment by
+  default." Phase 9 expanded the deny-list (S9-1) but didn't flip the
+  model.
+- **Unblock:** invert the check — require absolute reads to fall under
+  `project_root`, an explicit `extra_read_root`, or a registered
+  `library_path`. Deny-list stays as belt-and-suspenders. Big behavior
+  change; risk of breaking legitimate cross-project navigation users rely
+  on today (overlaps with Phase 2 F4 residual).
+
+## I9-1 — Windows `terminate_process` uses `/F`, Unix uses SIGTERM
+
+- **Location:** `src/platform/windows.rs` vs `src/platform/unix.rs`.
+- **Evidence:** Asymmetric cross-platform contract — Windows children die
+  without grace window → stale lock files (kotlin-LSP already hit this).
+- **Unblock:** send `Ctrl+Break` via `GenerateConsoleCtrlEvent`, grace
+  window, fall back to `TerminateProcess`. Or use `windows-sys` directly
+  and update doc on `platform/mod.rs`.
+
+## I9-2 (partial) — `probe_ram` signature is `u64`; 0 conflates errors
+
+- **Status:** `#[cfg]`-gating of the Linux vs macOS branches **landed**
+  (no more spurious `sysctl` spawns on Linux). Still returns `0` on
+  failure.
+- **Unblock:** change signature to `Option<u64>` so telemetry can
+  distinguish "no probe available" from "0 GiB system." Also add a
+  Windows branch via `GlobalMemoryStatusEx`. Touches callers; not landed.
+
+## S9-2 — already addressed
+
+The deprecated `generate_auth_token` (timestamp+PID) now exists only as a
+back-compat stub with `#[deprecated]`. Live callers use
+`os_random_auth_token`. No residual.
+
+## C9-1 — already addressed
+
+`LibraryRegistry::save` already routes through `crate::util::fs::atomic_write`
+as of a prior fix. No residual.
+
+## Phase-9 minors — not yet landed
+
+- `shell_tokenize` Windows-vs-Unix parity: Unix handles single quotes +
+  backslash escapes; Windows only double quotes, hardcoded `' '`
+  separator. Use `shlex` / `winsplit-rs` or document the gap.
+- `probe_nvidia` / `probe_amd` shell out without absolute paths
+  (same PATH-hijack class as S9-3, read-only, lower risk). `which::which`
+  once at startup.
+- `SizeRotatingFile::rotate` — mid-rename failure leaves inconsistent
+  rotation chain; log + continue on error.
+- `open_db` migration (`usage/db.rs`) has no version table; refactor
+  before v0.10.
+- `window_to_modifier` silently maps unknowns to "30 days"; surface typos.
+- `expand_home` returns `Some` for any non-`~` input; name suggests
+  `~`-only success.
+- `path_security.rs` has grown to 1500+ lines mixing path validation
+  with shell-command inspection. Split into `path_security` (paths) +
+  `shell_security` (commands) before another 500 lines accrue.
+
+## Phase-9 open questions
+
+1. `usage.db` with `debug=true` stores raw tool input/output JSON —
+   secret-bearing. Should the docs call this out, or should we gate
+   debug mode behind a confirmation? (Q9-1 in phase file.)

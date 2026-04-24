@@ -10,6 +10,7 @@ pub fn temp_dir() -> PathBuf {
 
 pub fn denied_read_prefixes() -> &'static [&'static str] {
     &[
+        // Cloud / provider credentials
         "~/.ssh",
         "~/.aws",
         "~/.gnupg",
@@ -19,6 +20,45 @@ pub fn denied_read_prefixes() -> &'static [&'static str] {
         "~/.netrc",
         "~/.npmrc",
         "~/.kube/config",
+        // Git credential stores (both legacy and XDG locations)
+        "~/.git-credentials",
+        "~/.config/git/credentials",
+        // Package-registry credentials
+        "~/.pypirc",
+        "~/.cargo/credentials.toml",
+        "~/.cargo/credentials",
+        // DB + SQL client credentials
+        "~/.pgpass",
+        "~/.my.cnf",
+        // Password managers / keyrings
+        "~/.password-store",
+        "~/.config/op",
+        "~/.config/Bitwarden",
+        "~/.local/share/keyrings",
+        // Shell/tool history — often captures secret argv
+        "~/.bash_history",
+        "~/.zsh_history",
+        "~/.psql_history",
+        "~/.python_history",
+        "~/.config/atuin",
+        // macOS: Keychain stores
+        "~/Library/Keychains",
+        // System secrets (Linux)
+        "/etc/shadow",
+        "/etc/gshadow",
+        "/etc/sudoers",
+        "/etc/sudoers.d",
+        // macOS system secrets
+        "/etc/master.passwd",
+        "/private/etc/sudoers",
+        "/private/etc/sudoers.d",
+        "/private/etc/master.passwd",
+        // Linux: /proc/self/environ and /proc/self/mem leak the current
+        // process's env and memory. Only self is predictable without a pid
+        // glob; deny-list format does not support glob so we block the most
+        // directly reachable patterns.
+        "/proc/self/environ",
+        "/proc/self/mem",
     ]
 }
 

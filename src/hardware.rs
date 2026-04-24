@@ -170,32 +170,39 @@ async fn probe_amd() -> Option<GpuInfo> {
 
 /// Read total system RAM in GiB. Returns 0 on failure (non-fatal).
 async fn probe_ram() -> u64 {
-    // Linux: /proc/meminfo — use spawn_blocking to avoid blocking the async executor
-    let meminfo = tokio::task::spawn_blocking(|| std::fs::read_to_string("/proc/meminfo"))
-        .await
-        .ok()
-        .and_then(|r| r.ok());
-    if let Some(content) = meminfo {
-        for line in content.lines() {
-            if line.starts_with("MemTotal:") {
-                let kb: u64 = line
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0);
-                return kb / 1024 / 1024;
+    // Linux: /proc/meminfo — use spawn_blocking to avoid blocking the async executor.
+    #[cfg(target_os = "linux")]
+    {
+        let meminfo = tokio::task::spawn_blocking(|| std::fs::read_to_string("/proc/meminfo"))
+            .await
+            .ok()
+            .and_then(|r| r.ok());
+        if let Some(content) = meminfo {
+            for line in content.lines() {
+                if line.starts_with("MemTotal:") {
+                    let kb: u64 = line
+                        .split_whitespace()
+                        .nth(1)
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0);
+                    return kb / 1024 / 1024;
+                }
             }
         }
     }
-    // macOS
-    if let Ok(output) = tokio::process::Command::new("sysctl")
-        .args(["-n", "hw.memsize"])
-        .output()
-        .await
+    // macOS: sysctl hw.memsize. Gated so we don't spawn sysctl on Linux
+    // when /proc/meminfo parse already failed.
+    #[cfg(target_os = "macos")]
     {
-        if let Ok(s) = String::from_utf8(output.stdout) {
-            if let Ok(bytes) = s.trim().parse::<u64>() {
-                return bytes / 1024 / 1024 / 1024;
+        if let Ok(output) = tokio::process::Command::new("sysctl")
+            .args(["-n", "hw.memsize"])
+            .output()
+            .await
+        {
+            if let Ok(s) = String::from_utf8(output.stdout) {
+                if let Ok(bytes) = s.trim().parse::<u64>() {
+                    return bytes / 1024 / 1024 / 1024;
+                }
             }
         }
     }

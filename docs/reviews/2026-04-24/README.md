@@ -35,7 +35,7 @@ per phase. Items that were deferred are captured in
 | 6 | Git | pending | 3 minors + Q1 doc | Q2 ceiling_dirs, I5 cache (perf) |
 | 7 | Dashboard | pending | S2, S3, S4, I3, Q1(esc) + 2 minors | S1 (auth), I1, I2 (SRI), P1 (cache), Q1 (sanitize tighten) |
 | 8 | Prompts + MCP resources | pending | S3 SAFETY, I1 scope-doc, I2 lib routing | S1 repo-prompt trust, S2 prefs gating, I3 hoist, minors |
-| 9 | Cross-cutting | — | 0/? | not started |
+| 9 | Cross-cutting | pending | S9-1 denylist expand, I9-3 canon, I9-2 cfg | S9-2 (already done), S9-3, C9-2, I9-1, I9-2 sig, minors |
 
 ### Resuming work in a new session
 

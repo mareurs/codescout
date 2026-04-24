@@ -10,16 +10,36 @@ pub fn temp_dir() -> PathBuf {
 
 pub fn denied_read_prefixes() -> &'static [&'static str] {
     &[
+        // Cloud / provider credentials
         "~/.ssh",
         "~/.aws",
         "~/.gnupg",
+        "~/.config/gcloud",
         "~/.config/gh",
         "~/.netrc",
         "~/.npmrc",
         "~/.pypirc",
         "~/.docker/config.json",
         "~/.kube/config",
+        // Git credential stores
         "~/.git-credentials",
+        "~/.config/git/credentials",
+        // Package-registry credentials
+        "~/.cargo/credentials.toml",
+        "~/.cargo/credentials",
+        // DB + SQL client credentials
+        "~/.pgpass",
+        "~/.my.cnf",
+        // Password managers
+        "~/.password-store",
+        "~/.config/op",
+        "~/.config/Bitwarden",
+        // Shell/tool history
+        "~/.bash_history",
+        "~/.zsh_history",
+        "~/.psql_history",
+        "~/.python_history",
+        "~/.config/atuin",
     ]
 }
 

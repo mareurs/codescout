@@ -127,6 +127,13 @@ fn expand_home(pattern: &str) -> Option<PathBuf> {
 }
 
 /// Build the full list of denied read paths (defaults + user-configured).
+///
+/// Each entry is canonicalized once here so that a `$HOME` symlink (e.g.
+/// `/home/user -> /var/users/user` on some macOS FileVault / NFS-mounted
+/// setups) cannot bypass the deny-list. Input paths get canonicalized by
+/// `validate_read_path`; without canonicalizing the deny-list too, the
+/// `starts_with` check compares a resolved input against an unresolved
+/// prefix and silently passes.
 fn denied_read_paths(_config: &PathSecurityConfig) -> Vec<PathBuf> {
     let mut denied = Vec::new();
     for p in crate::platform::denied_read_prefixes()
@@ -134,14 +141,15 @@ fn denied_read_paths(_config: &PathSecurityConfig) -> Vec<PathBuf> {
         .chain(DEFAULT_DENIED_EXACT.iter())
     {
         if let Some(expanded) = expand_home(p) {
-            denied.push(expanded);
+            denied.push(best_effort_canonicalize(&expanded));
         }
     }
     // Windows-specific system paths
     #[cfg(windows)]
     {
         if let Ok(sysroot) = std::env::var("SYSTEMROOT") {
-            denied.push(PathBuf::from(&sysroot).join("System32").join("config"));
+            let p = PathBuf::from(&sysroot).join("System32").join("config");
+            denied.push(best_effort_canonicalize(&p));
         }
     }
     denied
