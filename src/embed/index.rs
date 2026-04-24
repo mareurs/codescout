@@ -326,6 +326,14 @@ const SCHEMA_VERSION: u32 = 1;
 /// Uses `sqlite3_auto_extension` so the init runs on every `Connection::open`.
 /// Safe to call multiple times — the `Once` guard makes it idempotent.
 pub(crate) fn init_sqlite_vec() {
+    // Compile-time pin on the upstream signature of `sqlite3_vec_init`.
+    // The transmute below relies on it being `unsafe extern "C" fn()` (the
+    // "bare" SQLite-loadable-extension entry point); if a future version of
+    // the `sqlite-vec` crate changes the exported signature, this const
+    // initializer will fail to type-check and flag the transmute before it
+    // silently miscompiles at runtime.
+    const _UPSTREAM_SQLITE_VEC_INIT_SIG: unsafe extern "C" fn() = sqlite_vec::sqlite3_vec_init;
+
     static INIT: Once = Once::new();
     INIT.call_once(|| {
         // SAFETY: sqlite3_vec_init is a valid SQLite extension entry point.
@@ -705,6 +713,34 @@ pub struct MemoryResult {
     pub created_at: String,
 }
 
+/// Validate that `embedding.len()` matches the `embedding_dims` recorded in
+/// the `meta` table. Surfaces a `RecoverableError` with a repair hint when
+/// they diverge — the usual cause is a model change between the initial
+/// `build_index` and the current `memory(action="write")` call, which would
+/// otherwise be swallowed by sqlite-vec returning a cryptic INSERT error.
+fn validate_memory_embedding_dims(conn: &Connection, embedding_len: usize) -> Result<()> {
+    let Some(stored) = get_meta(conn, "embedding_dims")? else {
+        // No dims recorded yet — ensure_vec_memories_table will create it.
+        return Ok(());
+    };
+    let stored_dims: usize = stored
+        .parse()
+        .context("embedding_dims in meta is not a valid integer — DB may be corrupted")?;
+    if stored_dims != 0 && stored_dims != embedding_len {
+        return Err(crate::tools::RecoverableError::with_hint(
+            format!(
+                "embedding dim mismatch: model produced {} but the index was built \
+                 with {} — the memory was not stored",
+                embedding_len, stored_dims,
+            ),
+            "Run index_project(force=true) to rebuild the semantic index with \
+             the current model, then retry memory(action=\"write\").",
+        )
+        .into());
+    }
+    Ok(())
+}
+
 /// Insert a new memory and its embedding into both `memories` and `vec_memories`.
 ///
 /// Uses a savepoint to ensure both tables are written atomically.
@@ -717,6 +753,7 @@ pub fn insert_memory(
     content: &str,
     embedding: &[f32],
 ) -> Result<i64> {
+    validate_memory_embedding_dims(conn, embedding.len())?;
     let now = utc_now_display();
     conn.execute_batch("SAVEPOINT sp_insert_memory")?;
 
@@ -847,6 +884,8 @@ pub fn upsert_memory_by_title(
     embedding: &[f32],
 ) -> Result<i64> {
     use rusqlite::OptionalExtension;
+
+    validate_memory_embedding_dims(conn, embedding.len())?;
 
     // Scope the lookup to the same bucket — two memories in different buckets
     // with the same title are independent and must not collide.

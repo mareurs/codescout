@@ -204,10 +204,25 @@ impl Tool for DeleteMemory {
         let private = parse_bool_param(&input["private"]);
         ctx.agent
             .with_project(|p| {
-                if private {
+                let memories_dir = if private {
                     p.private_memory.delete(topic)?;
+                    p.private_memory.dir().to_path_buf()
                 } else {
                     p.memory.delete(topic)?;
+                    p.memory.dir().to_path_buf()
+                };
+                // Also clean up the anchor sidecar — without this, stale
+                // sidecars accumulate and continue to show up in anchor
+                // enumeration (check_all_memories).
+                let sidecar = crate::memory::anchors::anchor_path_for_topic(&memories_dir, topic);
+                if sidecar.exists() {
+                    if let Err(e) = std::fs::remove_file(&sidecar) {
+                        tracing::warn!(
+                            "failed to remove anchor sidecar {}: {}",
+                            sidecar.display(),
+                            e,
+                        );
+                    }
                 }
                 Ok(json!("ok"))
             })
@@ -529,10 +544,17 @@ impl Tool for Memory {
                     crate::memory::MemoryStore::from_dir(memories_dir)?.write(topic, content)?;
                 }
 
+                // Collect non-fatal side-effect failures so the caller has a
+                // chance to see them. Cross-embed / anchor indexing are
+                // best-effort but the user explicitly asked for "memory write"
+                // — silent degradation there is data loss from their POV.
+                let mut warnings: Vec<String> = Vec::new();
+
                 // Cross-embed into semantic store (best-effort, non-fatal)
                 if !private {
                     if let Err(e) = cross_embed_memory(ctx, topic, content).await {
-                        tracing::debug!("cross-embed memory failed (non-fatal): {e}");
+                        tracing::warn!("cross-embed memory failed (non-fatal): {e}");
+                        warnings.push(format!("cross-embed failed: {e}"));
                     }
                 }
 
@@ -545,7 +567,8 @@ impl Tool for Memory {
                         if let Err(e) = crate::memory::anchors::update_anchors_on_write(
                             &root, &memories_dir, topic, content,
                         ) {
-                            tracing::debug!("anchor update failed (non-fatal): {e}");
+                            tracing::warn!("anchor update failed (non-fatal): {e}");
+                            warnings.push(format!("anchor update failed: {e}"));
                         }
                     }
                 }
@@ -570,11 +593,22 @@ impl Tool for Memory {
                     if let Err(e) =
                         create_semantic_anchors(ctx, topic, content, &path_files).await
                     {
-                        tracing::debug!("semantic anchor creation failed (non-fatal): {e}");
+                        tracing::warn!("semantic anchor creation failed (non-fatal): {e}");
+                        warnings.push(format!("semantic anchor creation failed: {e}"));
                     }
                 }
 
-                Ok(json!("ok"))
+                if warnings.is_empty() {
+                    Ok(json!("ok"))
+                } else {
+                    // Legitimate exception to the `json!("ok")` rule for writes:
+                    // the caller cannot otherwise know that a best-effort side
+                    // effect (semantic indexing, anchor update) silently failed.
+                    Ok(json!({
+                        "status": "ok",
+                        "warnings": warnings,
+                    }))
+                }
             }
             "read" => {
                 let topic = super::require_str_param(&input, "topic")?;
@@ -867,6 +901,19 @@ mod tests {
     fn lsp() -> Arc<dyn crate::lsp::LspProvider> {
         crate::lsp::LspManager::new_arc()
     }
+
+    /// Memory writes may return either `"ok"` (no best-effort side-effect
+    /// failures) or `{"status":"ok", "warnings":[…]}` (one or more non-fatal
+    /// side effects failed — e.g. no semantic index built in the test fixture
+    /// so `cross_embed_memory` fails). Both count as a successful write; this
+    /// helper keeps tests indifferent to which shape they got.
+    fn assert_memory_write_ok(result: &Value) {
+        if result == &json!("ok") {
+            return;
+        }
+        assert_eq!(result["status"], json!("ok"), "unexpected result: {result}");
+    }
+
 
     async fn test_ctx_with_project() -> (tempfile::TempDir, ToolContext) {
         let dir = tempdir().unwrap();
@@ -1268,7 +1315,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(w, json!("ok"));
+        assert_memory_write_ok(&w);
 
         // read
         let r = tool
@@ -1483,7 +1530,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(result, json!("ok"));
+        assert_memory_write_ok(&result);
 
         // Verify markdown file was written
         let read_result = tool
@@ -1539,7 +1586,7 @@ mod tests {
             "content": "## Tools\nThe tool trait lives in `src/tools/mod.rs`."
         });
         let result = Memory.call(input, &ctx).await.unwrap();
-        assert_eq!(result, json!("ok"));
+        assert_memory_write_ok(&result);
 
         // Check sidecar was created
         let sidecar = dir

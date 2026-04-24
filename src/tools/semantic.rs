@@ -376,6 +376,46 @@ impl Tool for IndexProject {
         if let Some(lib_name) = scope_str.strip_prefix("lib:") {
             let force = parse_bool_param(&input["force"]);
 
+            // Guard against concurrent runs — mirror the project-scope branch
+            // so two concurrent `index_project(scope="lib:foo")` calls (or a
+            // lib + project call together) don't race on the shared
+            // `libraries.json` rewrite or the sqlite busy-timeout.
+            {
+                let mut state = ctx.agent.indexing.lock().unwrap_or_else(|e| e.into_inner());
+                if matches!(*state, IndexingState::Running { .. }) {
+                    return Ok(json!({
+                        "status": "already_running",
+                        "hint": "Use index_status() to check progress.",
+                    }));
+                }
+                *state = IndexingState::Running {
+                    done: 0,
+                    total: 0,
+                    eta_secs: None,
+                };
+            }
+
+            // Ensure we always reset indexing state on every exit path from
+            // the lib-scope branch — success, error, or early return.
+            struct StateGuard {
+                indexing: std::sync::Arc<std::sync::Mutex<IndexingState>>,
+                active: bool,
+            }
+            impl Drop for StateGuard {
+                fn drop(&mut self) {
+                    if self.active {
+                        let mut s = self.indexing.lock().unwrap_or_else(|e| e.into_inner());
+                        if matches!(*s, IndexingState::Running { .. }) {
+                            *s = IndexingState::Idle;
+                        }
+                    }
+                }
+            }
+            let _state_guard = StateGuard {
+                indexing: ctx.agent.indexing.clone(),
+                active: true,
+            };
+
             let (root, lib_path) = {
                 let inner = ctx.agent.inner.read().await;
                 let project = inner.active_project().ok_or_else(|| {

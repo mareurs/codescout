@@ -59,13 +59,14 @@ impl LibraryRegistry {
         Ok(registry)
     }
 
-    /// Persist the registry to a JSON file.
+    /// Persist the registry to a JSON file. Uses `atomic_write` so a crash
+    /// or disk-full mid-write cannot leave `libraries.json` half-serialized.
     pub fn save(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let data = serde_json::to_string_pretty(self)?;
-        std::fs::write(path, data)?;
+        crate::util::fs::atomic_write(path, &data)?;
         Ok(())
     }
 

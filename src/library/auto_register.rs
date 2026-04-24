@@ -211,11 +211,25 @@ pub fn parse_node_deps(content: &str) -> Vec<DiscoveredDep> {
 
 pub fn find_node_source(project_root: &Path, dep_name: &str) -> Option<PathBuf> {
     let candidate = project_root.join("node_modules").join(dep_name);
-    if candidate.is_dir() {
-        Some(candidate)
-    } else {
-        None
+    if !candidate.is_dir() {
+        return None;
     }
+    // Resolve symlinks and ensure the candidate still lives under the project
+    // root. A poisoned `node_modules/express` symlinked to `/etc` would
+    // otherwise be auto-registered on every `activate_project` (phase-5 I2).
+    let canon_candidate = std::fs::canonicalize(&candidate).ok()?;
+    let canon_root =
+        std::fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
+    if !canon_candidate.starts_with(&canon_root) {
+        tracing::warn!(
+            "skipping node dep '{}': {} resolves outside project root {}",
+            dep_name,
+            canon_candidate.display(),
+            canon_root.display(),
+        );
+        return None;
+    }
+    Some(candidate)
 }
 
 fn detect_node_language(pkg_dir: &Path) -> &'static str {
@@ -351,6 +365,8 @@ pub fn parse_python_deps_requirements(content: &str) -> Vec<DiscoveredDep> {
 }
 
 pub fn find_python_source(project_root: &Path, dep_name: &str) -> Option<PathBuf> {
+    let canon_root =
+        std::fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
     let venv_dirs = [".venv", "venv", ".env", "env"];
     for venv in &venv_dirs {
         let lib = project_root.join(venv).join("lib");
@@ -360,9 +376,24 @@ pub fn find_python_source(project_root: &Path, dep_name: &str) -> Option<PathBuf
         for entry in entries.filter_map(|e| e.ok()) {
             // python3.X directory
             let sp = entry.path().join("site-packages").join(dep_name);
-            if sp.is_dir() {
-                return Some(sp);
+            if !sp.is_dir() {
+                continue;
             }
+            // Resolve symlinks and ensure the candidate still lives under the
+            // project root (phase-5 I2).
+            let Ok(canon_sp) = std::fs::canonicalize(&sp) else {
+                continue;
+            };
+            if !canon_sp.starts_with(&canon_root) {
+                tracing::warn!(
+                    "skipping python dep '{}': {} resolves outside project root {}",
+                    dep_name,
+                    canon_sp.display(),
+                    canon_root.display(),
+                );
+                continue;
+            }
+            return Some(sp);
         }
     }
     None

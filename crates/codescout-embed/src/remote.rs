@@ -42,6 +42,23 @@ struct EmbedData {
     index: usize,
 }
 
+/// `true` when `url` is `https://…` or targets a loopback host (`localhost`,
+/// `127.0.0.1`, `[::1]`). Used by `from_url` / `custom` to keep local Ollama
+/// setups working while rejecting API keys over plaintext HTTP on the network.
+fn is_https_or_loopback(url: &str) -> bool {
+    if url.starts_with("https://") {
+        return true;
+    }
+    let rest = match url.strip_prefix("http://") {
+        Some(r) => r,
+        None => return false,
+    };
+    rest.starts_with("localhost")
+        || rest.starts_with("127.0.0.1")
+        || rest.starts_with("127.")
+        || rest.starts_with("[::1]")
+}
+
 impl RemoteEmbedder {
     /// Build a reqwest client with a per-request timeout so that a hung
     /// embedding server (e.g. Ollama during GPU discovery failure) doesn't
@@ -119,6 +136,11 @@ impl RemoteEmbedder {
     /// - `http://host:port`               → `http://host:port/v1/embeddings`
     /// - `http://host:port/v1`            → `http://host:port/v1/embeddings`
     /// - `http://host:port/v1/embeddings` → `http://host:port/v1/embeddings`
+    ///
+    /// Rejects plaintext HTTP when an `api_key` is supplied (from argument or
+    /// the `EMBED_API_KEY` env var). Loopback hosts (`localhost`, `127.0.0.1`,
+    /// `[::1]`) are permitted to support local Ollama / llama.cpp setups where
+    /// the key is only meaningful as a request-shape parameter.
     pub fn from_url(url: &str, model: &str, api_key: Option<String>) -> Result<Self> {
         let base = url.trim_end_matches('/');
         let endpoint = if base.ends_with("/v1/embeddings") {
@@ -130,6 +152,14 @@ impl RemoteEmbedder {
         };
 
         let api_key = api_key.or_else(|| std::env::var("EMBED_API_KEY").ok());
+
+        if api_key.is_some() && !is_https_or_loopback(url) {
+            bail!(
+                "HTTPS required when api_key is set — \
+                 refusing to send API key over plaintext HTTP to {}",
+                url
+            );
+        }
 
         Ok(Self {
             client: Self::http_client(),
@@ -208,7 +238,26 @@ impl Embedder for RemoteEmbedder {
                         // 4xx — bad request, wrong model, etc. — don't retry.
                         bail!("HTTP {status} from embedding server: {body}");
                     }
-                    break 'retry resp.json::<EmbedResponse>().await?;
+                    // Cap the response body at 32 MiB before json-decode. A
+                    // hostile or misconfigured endpoint can otherwise stream
+                    // gigabytes into memory — the 300s per-request timeout
+                    // bounds duration, not bytes.
+                    const MAX_RESPONSE_BYTES: usize = 32 * 1024 * 1024;
+                    let body_bytes = match resp.bytes().await {
+                        Ok(b) => b,
+                        Err(e) => {
+                            last_err = Some(anyhow::anyhow!(e));
+                            continue;
+                        }
+                    };
+                    if body_bytes.len() > MAX_RESPONSE_BYTES {
+                        bail!(
+                            "embedding response {} bytes exceeds {}-byte cap",
+                            body_bytes.len(),
+                            MAX_RESPONSE_BYTES
+                        );
+                    }
+                    break 'retry serde_json::from_slice::<EmbedResponse>(&body_bytes)?;
                 }
                 return Err(last_err.unwrap_or_else(|| {
                     anyhow::anyhow!("embedding server unavailable after {MAX_RETRIES} attempts")
@@ -430,7 +479,7 @@ mod tests {
     #[test]
     fn from_url_passes_api_key() {
         let e =
-            RemoteEmbedder::from_url("http://host:8080", "model", Some("sk-123".into())).unwrap();
+            RemoteEmbedder::from_url("https://host:8080", "model", Some("sk-123".into())).unwrap();
         assert_eq!(e.api_key.as_deref(), Some("sk-123"));
     }
 

@@ -127,6 +127,28 @@ impl Tool for RegisterLibrary {
             .into());
         }
 
+        // Scope guard (phase-5 S2): reject registering the home directory,
+        // its parent, or a system path like `/etc` / `/usr`. Without this,
+        // a prompt-injected `register_library(path="/etc")` would let a later
+        // `index_project(scope="lib:…")` walk and embed the entire directory,
+        // leaking secrets back to the LLM via `semantic_search`.
+        //
+        // Canonicalize first so relative traversals (`../..`) and symlinks
+        // cannot bypass the classifier.
+        let canon_lib_path = std::fs::canonicalize(&lib_path).unwrap_or_else(|_| lib_path.clone());
+        if let Some(reason) = crate::embed::preflight::classify_path(&canon_lib_path) {
+            return Err(super::RecoverableError::with_hint(
+                format!(
+                    "refusing to register library at '{}': {:?}",
+                    canon_lib_path.display(),
+                    reason,
+                ),
+                "Register a library root under a specific package directory, \
+                 not your home directory or a system path.",
+            )
+            .into());
+        }
+
         // Auto-detect from manifest, with user overrides.
         // IMPORTANT: discover_library_root expects a *file* path and calls .parent()
         // to start searching. Passing a directory would skip the directory itself.
