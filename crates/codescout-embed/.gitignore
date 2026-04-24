@@ -1,0 +1,14 @@
+.codescout/private-memories/
+.codescout/embeddings/
+.codescout/embeddings.db
+.codescout/embeddings.db-wal
+.codescout/embeddings.db-shm
+.codescout/usage.db
+.codescout/usage.db-wal
+.codescout/usage.db-shm
+.codescout/write.lock
+.codescout/libraries.json
+.codescout/project.toml
+.codescout/debug.log*
+.codescout/diagnostic-*.log
+.codescout/tmp/
