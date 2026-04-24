@@ -101,6 +101,12 @@ Pass `scope="lib:<name>"` on `find_symbol`, `list_symbols`, `find_references`,
 `semantic_search`, or `index_project` to target a registered library.
 Libraries are auto-discovered when `goto_definition`/`hover` resolves outside
 the project root. All read-only tools work on libraries; write tools are project-only.
+
+**Lifecycle:** `register_library(name, path)` adds a library to the registry
+(one-time, per project). Then `index_project(scope="lib:<name>")` builds the
+symbol+embedding index. `list_libraries()` enumerates registered libraries.
+You rarely need `register_library` manually — goto_definition registers
+external dependencies on the fly.
 ## Output System
 
 **File paths in tool output are relative to the project root** (e.g. `src/tools/mod.rs`,

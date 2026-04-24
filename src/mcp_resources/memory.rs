@@ -30,6 +30,17 @@ impl MemoryProvider {
         out
     }
 
+    /// Resolve `memory://<stem>` to a `.md` path under `self.dir`.
+    ///
+    /// SAFETY / invariant: resolution is by **allowlist lookup** against the
+    /// set enumerated by `self.entries()` (which only yields files produced by
+    /// `read_dir(self.dir)` with `.md` extension). A URI like
+    /// `memory://../../etc/passwd` simply misses the allowlist and returns
+    /// `None` — there is no `self.dir.join(stem)` path construction.
+    ///
+    /// Do NOT "optimize" this to `self.dir.join(format!("{stem}.md"))` — that
+    /// would re-introduce path traversal. If you need faster lookup, build a
+    /// `HashMap<String, PathBuf>` from `entries()` once and index into it.
     fn lookup(&self, uri: &str) -> Option<PathBuf> {
         let stem = uri.strip_prefix("memory://")?;
         self.entries()

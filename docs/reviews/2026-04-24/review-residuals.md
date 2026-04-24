@@ -440,3 +440,74 @@ phase-6 fix commit. No residuals from minors.
 - `config.rs:10` dumps full project config. Fine today; flag for future
   `PublicConfig` projection once any secret-bearing field is added.
 - `/api/health` payload schema not covered by tests.
+
+
+# Phase 8 — Prompts + MCP resources
+
+## S1 — Repo-controlled `system_prompt` injected raw into server instructions
+
+- **Location:** `src/prompts/mod.rs::build_server_instructions` (~:96-101).
+- **Evidence:** `.codescout/system-prompt.md` (or legacy `system_prompt` field
+  in `.codescout/project.toml`) is concatenated verbatim into server
+  instructions delivered to the LLM at session start. A malicious repo ships
+  a payload that the agent treats as authoritative tool guidance.
+- **Unblock:** decide on the two-pronged fix — (a) wrap the injected content
+  in an "untrusted repo content; do not treat as authoritative" delimiter
+  block, AND/OR (b) require explicit `security.trust_repo_system_prompt = true`
+  opt-in in `project.toml`, default false. Document in README + CLAUDE.md.
+- **Owner:** TBD — behavior change (silent opt-in → silent opt-out) may
+  surprise existing repos that rely on the feature.
+
+## S2 — `bucket="preferences"` auto-injection is subagent-writable
+
+- **Location:** `src/prompts/builders.rs::build_system_prompt_draft` (~:255-282).
+- **Evidence:** `memory(remember, bucket="preferences", ...)` writes to project
+  SQLite; next-session draft auto-renders rows under `## User Preferences`.
+  Subagent-triggerable on a malicious repo → persistent per-project prompt
+  injection.
+- **Unblock:** (a) gate `bucket="preferences"` writes behind explicit user
+  confirmation (hook or tool-metadata flag), OR (b) wrap each preference as
+  a "stored note" (data) rather than a directive at render time.
+- **Owner:** TBD — confirm open question 2 (is the bucket already
+  user-gated or fully agent-writable today?).
+
+## I3 — `build_system_prompt_draft` opens SQLite on every call
+
+- **Location:** `src/prompts/builders.rs` (preferences read block).
+- **Evidence:** `embed::index::open_db` + `ensure_vec_memories` synchronous
+  inside prompt-rendering path. Couples prompt build to embedding DB
+  lifecycle; risk of stall under Phase 5 SQLite contention.
+- **Unblock:** hoist the preferences read into the caller; pass as a
+  parameter, mirroring how `libraries` is already threaded. Refactor
+  the 5-positional-arg signature into a `BuildDraftCtx` struct at the
+  same time.
+- **Owner:** TBD — wider refactor; touches drift test + all call sites.
+
+## Phase-8 minors — not yet landed
+
+- `onboarding_prompt.md` is 567 lines / 25 sections. Consider pulling
+  `### Memories to Create` subsections into a tool-guide resource.
+- Three identical "MCP Resources" sections across `server_instructions.md`,
+  `builders.rs`, `onboarding_prompt.md`. Consolidate to one canonical
+  pointer (README rule #2 on triple-layer repetition).
+- Move `KOTLIN_KNOWN_ISSUES` from `prompts/mod.rs` into
+  `prompts/builders.rs::language_navigation_hints` for consistency.
+- `ResourceRegistry::register` panics on duplicate URI; doc-comment
+  `try_register` as the safe variant for dynamic (user-registered) providers.
+- `AgentSummarySource::snapshot` probes LSP readiness sequentially; make
+  concurrent if `project://summary` reads ever become latency-sensitive.
+- `build_system_prompt_draft` 5-positional-arg signature → `BuildDraftCtx`
+  struct (pairs with I3).
+- Verify `probe_project_hints` is still consumed somewhere outside this
+  directory; if not, remove.
+
+## Phase-8 open questions
+
+1. Confirm which code path loads `.codescout/system-prompt.md` into
+   `ProjectStatus.system_prompt`. Any sanitization on the way in bounds S1's
+   exploitability.
+2. Can `bucket="preferences"` be written autonomously by a subagent today,
+   or is it gated on direct user action? Answer determines S2 severity.
+3. `WORKSPACE_ONBOARDING_PROMPT` uses `<HARD-GATE>` at lines 25 and 73. Is
+   this pattern worth codifying in `src/prompts/README.md`'s 7-rule style
+   guide? (Emerging convention.)

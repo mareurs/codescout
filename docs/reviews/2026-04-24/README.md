@@ -34,7 +34,7 @@ per phase. Items that were deferred are captured in
 | 5 | Embeddings + memory + library | `8b041d4` | 10/10 | S3, phase-5 minors, Q1–Q4 |
 | 6 | Git | pending | 3 minors + Q1 doc | Q2 ceiling_dirs, I5 cache (perf) |
 | 7 | Dashboard | pending | S2, S3, S4, I3, Q1(esc) + 2 minors | S1 (auth), I1, I2 (SRI), P1 (cache), Q1 (sanitize tighten) |
-| 8 | Prompts + MCP resources | — | 0/? | not started |
+| 8 | Prompts + MCP resources | pending | S3 SAFETY, I1 scope-doc, I2 lib routing | S1 repo-prompt trust, S2 prefs gating, I3 hoist, minors |
 | 9 | Cross-cutting | — | 0/? | not started |
 
 ### Resuming work in a new session

@@ -1286,6 +1286,14 @@ mod tests {
     /// name or appear in the known-non-tool allowlist below. When you rename or
     /// remove a tool, the compiler won't catch stale prompt mentions — this test
     /// does.
+    ///
+    /// Scope: **snake_case tokens only** (regex `[a-z][a-z_0-9]{2,}`). This
+    /// deliberately skips PascalCase identifiers — host-harness tool names
+    /// (`EnterWorktree`, `TaskCreate`), Rust type names, and tree-sitter node
+    /// kinds use PascalCase and would explode the allowlist with non-codescout
+    /// tokens. Codescout's own tool names are all snake_case, so this coverage
+    /// matches the drift surface we care about. If a codescout tool is ever
+    /// added in PascalCase (none today), widen the regex and grow the allowlist.
     #[tokio::test]
     async fn prompt_surfaces_reference_only_real_tools() {
         use std::collections::HashSet;
