@@ -25,6 +25,10 @@ pub struct DiffEntry {
 
 /// Diff two commits by SHA, returning a list of changed files.
 /// Returns `Err` if either SHA is not found (e.g. after a rebase).
+///
+/// Note: `revparse_single` accepts full revspec grammar (`HEAD~3`, `:/regex`,
+/// `branch@{1}`). Callers passing attacker-influenced values must validate them
+/// (e.g. `git2::Oid::from_str` or `[0-9a-f]{4,40}` allowlist) first.
 pub fn diff_tree_to_tree(
     repo: &git2::Repository,
     from_sha: &str,
@@ -36,12 +40,12 @@ pub fn diff_tree_to_tree(
     let to_tree = to_obj.peel_to_commit()?.tree()?;
 
     let mut opts = git2::DiffOptions::new();
-    let diff = repo.diff_tree_to_tree(Some(&from_tree), Some(&to_tree), Some(&mut opts))?;
+    let mut diff = repo.diff_tree_to_tree(Some(&from_tree), Some(&to_tree), Some(&mut opts))?;
 
-    // Enable rename detection
+    // Rename detection only; copy detection and break-rewrites left off to keep
+    // diff fast and stable for cache-invalidation consumers.
     let mut find_opts = git2::DiffFindOptions::new();
     find_opts.renames(true);
-    let mut diff = diff;
     diff.find_similar(Some(&mut find_opts))?;
 
     let mut entries = Vec::new();
@@ -57,7 +61,10 @@ pub fn diff_tree_to_tree(
                 };
                 DiffStatus::Renamed { old_path: old }
             }
-            _ => continue, // Ignore typechange, copied, etc.
+            // Silently drops Typechange/Copied/Untracked/Ignored/Conflicted.
+            // Fine for indexing cache-invalidation; if a future caller surfaces
+            // "what changed" to an LLM, extend this match.
+            _ => continue,
         };
         let path = match delta.new_file().path().or_else(|| delta.old_file().path()) {
             Some(p) => p.to_string_lossy().replace('\\', "/"),
