@@ -17,7 +17,7 @@ pub fn workspace_hash(workspace_root: &Path) -> String {
 }
 
 pub fn socket_path_for_workspace(language: &str, workspace_root: &Path) -> PathBuf {
-    std::env::temp_dir().join(format!(
+    per_user_mux_dir().join(format!(
         "codescout-{}-mux-{}.sock",
         language,
         workspace_hash(workspace_root)
@@ -25,11 +25,47 @@ pub fn socket_path_for_workspace(language: &str, workspace_root: &Path) -> PathB
 }
 
 pub fn lock_path_for_workspace(language: &str, workspace_root: &Path) -> PathBuf {
-    std::env::temp_dir().join(format!(
+    per_user_mux_dir().join(format!(
         "codescout-{}-mux-{}.lock",
         language,
         workspace_hash(workspace_root)
     ))
+}
+
+/// Return a directory for mux socket/lock files that is private to the
+/// current user.
+///
+/// Unix: prefers `$XDG_RUNTIME_DIR` (typically `/run/user/$UID`, already mode
+/// `0700`). Falls back to `$TMPDIR/codescout-$UID` created with mode `0700`
+/// when XDG_RUNTIME_DIR is unset (e.g. headless servers, macOS).
+///
+/// Windows: uses the process's temp dir. Windows temp is already per-user
+/// under `%LOCALAPPDATA%\Temp` and subject to per-user ACLs, so no extra
+/// hardening is applied at this layer.
+fn per_user_mux_dir() -> PathBuf {
+    #[cfg(unix)]
+    {
+        if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") {
+            let p = PathBuf::from(dir);
+            if p.exists() {
+                return p;
+            }
+        }
+        // Fallback: create a 0700 subdir under temp, keyed by UID.
+        use std::os::unix::fs::DirBuilderExt;
+        // SAFETY: getuid is always safe; returns the real UID.
+        let uid = unsafe { libc::getuid() };
+        let dir = std::env::temp_dir().join(format!("codescout-{uid}"));
+        let _ = std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&dir);
+        dir
+    }
+    #[cfg(not(unix))]
+    {
+        std::env::temp_dir()
+    }
 }
 
 #[cfg(test)]

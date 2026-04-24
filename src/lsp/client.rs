@@ -18,6 +18,7 @@ use tokio::task::JoinHandle;
 type PendingRequests = Arc<StdMutex<HashMap<i64, oneshot::Sender<Result<Value>>>>>;
 
 use super::transport;
+use crate::tools::RecoverableError;
 
 /// Maximum number of stderr lines retained in the shared buffer.
 ///
@@ -57,6 +58,35 @@ fn path_to_uri(path: &Path) -> Result<lsp_types::Uri> {
     u.as_str()
         .parse()
         .map_err(|e| anyhow::anyhow!("invalid URI: {}", e))
+}
+
+/// Return true if the given LSP method is safe to retry after a
+/// `-32800 RequestCancelled` response.
+///
+/// Idempotent methods only return information — retrying them may do extra
+/// work server-side but does not double-apply any mutation. Methods like
+/// `textDocument/rename` or `workspace/applyEdit` MAY have partially mutated
+/// state before the cancellation, so retrying can double-apply edits.
+fn is_idempotent_lsp_method(method: &str) -> bool {
+    matches!(
+        method,
+        "textDocument/documentSymbol"
+            | "textDocument/references"
+            | "textDocument/hover"
+            | "textDocument/definition"
+            | "textDocument/declaration"
+            | "textDocument/typeDefinition"
+            | "textDocument/implementation"
+            | "textDocument/completion"
+            | "textDocument/signatureHelp"
+            | "textDocument/codeAction"
+            | "textDocument/codeLens"
+            | "textDocument/foldingRange"
+            | "textDocument/selectionRange"
+            | "textDocument/prepareRename"
+            | "workspace/symbol"
+            | "initialize"
+    )
 }
 
 /// Convert hierarchical `DocumentSymbol[]` into our `SymbolInfo` tree.
@@ -150,10 +180,14 @@ pub struct LspClient {
     /// Collects stderr lines from the server process. Checked during init retries
     /// to detect fatal errors (e.g. kotlin-lsp "Multiple editing sessions").
     stderr_lines: Arc<StdMutex<Vec<String>>>,
-    /// Wall-clock instant when the LSP initialize handshake completed. Used by
-    /// `request()` to apply a more patient retry window during the cold-start
-    /// indexing phase (e.g. Gradle import for kotlin-lsp can take 1–5 minutes).
+    /// Wall-clock instant when the LSP client was constructed. Used as a
+    /// fallback anchor for the cold-start window if init hasn't completed yet.
     pub(crate) started_at: std::time::Instant,
+    /// Set when the LSP `initialize` handshake completes successfully. The
+    /// cold-start retry window is measured from this point, not from
+    /// construction — otherwise a slow kotlin-lsp init (5+ min Gradle import)
+    /// consumes the whole budget before the first user request.
+    pub(crate) init_completed_at: std::sync::OnceLock<std::time::Instant>,
 }
 
 impl LspClient {
@@ -356,6 +390,7 @@ impl LspClient {
             open_files: StdMutex::new(HashMap::new()),
             stderr_lines,
             started_at: std::time::Instant::now(),
+            init_completed_at: std::sync::OnceLock::new(),
         };
 
         // Perform the LSP initialize handshake
@@ -451,6 +486,7 @@ impl LspClient {
             open_files: StdMutex::new(HashMap::new()),
             stderr_lines: Arc::new(StdMutex::new(Vec::new())),
             started_at: std::time::Instant::now(),
+            init_completed_at: std::sync::OnceLock::new(),
         })
     }
 
@@ -468,22 +504,32 @@ impl LspClient {
         const MAX_RETRIES_WARM: usize = 3;
         const RETRY_DELAY_WARM_MS: u64 = 300;
 
-        let in_cold_start = self.started_at.elapsed() < COLD_START_WINDOW;
+        // Anchor cold-start budget at init completion if we have it; otherwise
+        // fall back to construction time so in-flight init requests still
+        // benefit from the patient window.
+        let anchor = self.init_completed_at.get().unwrap_or(&self.started_at);
+        let in_cold_start = anchor.elapsed() < COLD_START_WINDOW;
         let (max_retries, retry_delay_ms) = if in_cold_start {
             (MAX_RETRIES_COLD, RETRY_DELAY_COLD_MS)
         } else {
             (MAX_RETRIES_WARM, RETRY_DELAY_WARM_MS)
         };
 
+        // Only retry idempotent methods on -32800 (RequestCancelled). Retrying
+        // a non-idempotent method like textDocument/rename risks double-applying
+        // an edit if the server cancelled AFTER performing the operation.
+        let retry_on_cancel = is_idempotent_lsp_method(method);
+        let effective_max_retries = if retry_on_cancel { max_retries } else { 0 };
+
         let mut last_err = None;
-        for attempt in 0..=max_retries {
+        for attempt in 0..=effective_max_retries {
             if attempt > 0 {
                 let delay = std::time::Duration::from_millis(retry_delay_ms * attempt as u64);
                 tokio::time::sleep(delay).await;
                 tracing::debug!(
                     "LSP request cancelled, retrying {}/{}: {} (cold_start={})",
                     attempt,
-                    max_retries,
+                    effective_max_retries,
                     method,
                     in_cold_start,
                 );
@@ -494,6 +540,17 @@ impl LspClient {
             {
                 Ok(result) => return Ok(result),
                 Err(e) if e.to_string().contains("code -32800") => {
+                    if !retry_on_cancel {
+                        // Surface as RecoverableError so sibling tool calls
+                        // survive and the caller can retry at a higher level
+                        // where the semantics are known.
+                        return Err(RecoverableError::with_hint(
+                            format!("LSP cancelled non-idempotent request: {method}"),
+                            "The server cancelled mid-operation. Retry is unsafe here because \
+                             the edit may have partially applied. Re-issue the request manually.",
+                        )
+                        .into());
+                    }
                     last_err = Some(e);
                 }
                 Err(e) => return Err(e),
@@ -510,7 +567,12 @@ impl LspClient {
         timeout: std::time::Duration,
     ) -> Result<Value> {
         if !self.alive.load(Ordering::SeqCst) {
-            bail!("LSP server is not running");
+            return Err(RecoverableError::with_hint(
+                "LSP server is not running",
+                "The language server exited or failed to start. Try re-activating the \
+                 project or check logs for server startup errors.",
+            )
+            .into());
         }
 
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
@@ -558,11 +620,20 @@ impl LspClient {
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .remove(&id);
-                bail!(
-                    "LSP request timed out after {}s: {}",
-                    timeout.as_secs(),
-                    method
+                // Tell the server to stop working on this id — otherwise it
+                // keeps computing (real CPU waste for slow kotlin-lsp /
+                // rust-analyzer queries during Gradle or Cargo load).
+                let _ = self.notify("$/cancelRequest", json!({ "id": id })).await;
+                Err(RecoverableError::with_hint(
+                    format!(
+                        "LSP request timed out after {}s: {}",
+                        timeout.as_secs(),
+                        method
+                    ),
+                    "The server did not respond in time. This is common during cold \
+                     start or heavy indexing; retry in a moment.",
                 )
+                .into())
             }
         }
     }
@@ -570,7 +641,11 @@ impl LspClient {
     /// Send a JSON-RPC notification (no response expected).
     pub async fn notify(&self, method: &str, params: Value) -> Result<()> {
         if !self.alive.load(Ordering::SeqCst) {
-            bail!("LSP server is not running");
+            return Err(RecoverableError::with_hint(
+                "LSP server is not running",
+                "The language server exited or failed to start.",
+            )
+            .into());
         }
 
         let msg = json!({
@@ -657,6 +732,11 @@ impl LspClient {
                     // Send initialized notification
                     self.notify("initialized", json!({})).await?;
 
+                    // Anchor the cold-start retry budget here, not at construction.
+                    // A slow kotlin-lsp init (5+ min Gradle import) used to burn
+                    // the whole window before the first user request.
+                    let _ = self.init_completed_at.set(std::time::Instant::now());
+
                     tracing::info!("LSP server initialized successfully");
                     return Ok(());
                 }
@@ -665,13 +745,15 @@ impl LspClient {
                     let stderr = self.stderr_lines.lock().unwrap_or_else(|e| e.into_inner());
                     for line in stderr.iter() {
                         if line.contains("Multiple editing sessions") {
-                            return Err(anyhow::anyhow!(
+                            return Err(RecoverableError::with_hint(
                                 "kotlin-lsp rejected this workspace: \
-                                 \"Multiple editing sessions for one workspace are not supported yet\". \
-                                 Another codescout instance or editor is already serving this project \
-                                 with kotlin-lsp. Only one Kotlin LSP session per workspace is allowed \
-                                 in the current kotlin-lsp release."
-                            ));
+                                 \"Multiple editing sessions for one workspace are not supported yet\"",
+                                "Another codescout instance or editor is already serving this \
+                                 project with kotlin-lsp. Only one Kotlin LSP session per \
+                                 workspace is allowed in the current kotlin-lsp release. \
+                                 Stop the other session and retry.",
+                            )
+                            .into());
                         }
                     }
                     drop(stderr);
@@ -1099,12 +1181,16 @@ impl LspClient {
             // The guard is scoped strictly to the inner block so it drops before any await
             // point — StdMutex guards are not Send and cannot be held across awaits.
             //
-            // wrapping_add: i32 overflow in debug builds panics; wrap is harmless in practice
-            // (sessions never reach 2 billion edits) and keeps the LSP protocol happy.
+            // saturating_add: LSP spec requires strictly monotonic version per document
+            // (rust-analyzer and kotlin-lsp have rejected non-monotonic versions in past
+            // releases). Sessions never realistically reach i32::MAX edits; if they
+            // somehow do, the counter pins at MAX instead of wrapping to a lower value
+            // that would break the monotonicity contract. i32 matches
+            // lsp_types::VersionedTextDocumentIdentifier.version.
             let maybe_version = {
                 let mut open_files = self.open_files.lock().unwrap_or_else(|e| e.into_inner());
                 open_files.get_mut(&canonical).map(|v| {
-                    *v = v.wrapping_add(1);
+                    *v = v.saturating_add(1);
                     *v
                 })
             }; // guard drops here

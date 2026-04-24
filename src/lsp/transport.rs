@@ -25,14 +25,22 @@ pub async fn read_message<R: AsyncBufReadExt + Unpin>(reader: &mut R) -> Result<
         if trimmed.is_empty() {
             break;
         }
-        if let Some(len_str) = trimmed.strip_prefix("Content-Length: ") {
-            content_length = Some(len_str.parse().context("invalid Content-Length")?);
+        // Robust header parse: case-insensitive name, any whitespace around ':'.
+        // LSP spec requires a single space after ':' but some implementations
+        // drift; splitn+trim is forgiving without being permissive.
+        if let Some((name, value)) = trimmed.split_once(':') {
+            if name.trim().eq_ignore_ascii_case("Content-Length") {
+                content_length = Some(value.trim().parse().context("invalid Content-Length")?);
+            }
         }
         // Ignore Content-Type and other headers
     }
 
     let length = content_length.context("missing Content-Length header")?;
-    const MAX_MESSAGE_SIZE: usize = 100 * 1024 * 1024; // 100 MiB
+    // 16 MiB per-message cap. LSP responses (documentSymbol, hover, references)
+    // rarely exceed the KB-MB range even on huge files; a tight cap bounds
+    // worst-case allocation per mux client and neutralizes oversized-header DOS.
+    const MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
     if length > MAX_MESSAGE_SIZE {
         bail!(
             "Content-Length {} exceeds maximum allowed size of {} bytes",
@@ -126,7 +134,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_oversized_content_length() {
-        let oversized = 200 * 1024 * 1024; // 200 MiB
+        let oversized = 32 * 1024 * 1024; // 32 MiB (over the 16 MiB cap)
         let msg = format!("Content-Length: {}\r\n\r\n", oversized);
         let mut reader = BufReader::new(msg.as_bytes());
         let result = read_message(&mut reader).await;

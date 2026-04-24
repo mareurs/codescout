@@ -210,6 +210,15 @@ pub async fn run(
     }
     let listener = UnixListener::bind(socket_path)
         .with_context(|| format!("failed to bind socket: {}", socket_path.display()))?;
+    // Restrict socket to the current user. Defence-in-depth on top of the
+    // per-user directory: anyone with `/tmp` read access could otherwise
+    // attempt to connect on older systems where the socket was created
+    // world-writable before this chmod.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600));
+    }
 
     // 5. Signal ready to parent, then drop stdout
     {
@@ -431,6 +440,13 @@ async fn handle_server_message(
     } else if has_method {
         // Server notification — broadcast to all clients
         broadcast_to_clients(&msg, state).await;
+    } else {
+        // Neither id nor method: not a valid JSON-RPC message. Silent drop
+        // used to hide misbehaving servers — log so it shows up in telemetry.
+        tracing::debug!(
+            ?msg,
+            "mux: dropping server message with no id and no method"
+        );
     }
 }
 

@@ -244,16 +244,21 @@ impl LspManager {
                 if first_failure.elapsed() < Self::CIRCUIT_BREAKER_WINDOW
                     && *count >= Self::CIRCUIT_BREAKER_MAX_FAILURES
                 {
-                    anyhow::bail!(
-                        "LSP server for {} failed to start {} times in {}s — circuit-breaker open. \
-                         Another process may hold the workspace lock. Check for other codescout \
-                         instances or editors targeting this project. \
-                         The breaker resets after {}s of inactivity.",
-                        language,
-                        count,
-                        first_failure.elapsed().as_secs(),
-                        Self::CIRCUIT_BREAKER_WINDOW.as_secs()
-                    );
+                    return Err(crate::tools::RecoverableError::with_hint(
+                        format!(
+                            "LSP server for {} failed to start {} times in {}s — circuit-breaker open",
+                            language,
+                            count,
+                            first_failure.elapsed().as_secs(),
+                        ),
+                        format!(
+                            "Another process may hold the workspace lock. Check for other \
+                             codescout instances or editors targeting this project. The breaker \
+                             resets after {}s of inactivity.",
+                            Self::CIRCUIT_BREAKER_WINDOW.as_secs()
+                        ),
+                    )
+                    .into());
                 }
             }
         }
@@ -414,12 +419,17 @@ impl LspManager {
         let socket_path = crate::lsp::mux::socket_path_for_workspace(language, workspace_root);
         let lock_path = crate::lsp::mux::lock_path_for_workspace(language, workspace_root);
 
-        let lock_file = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(false)
-            .open(&lock_path)
-            .context("Failed to open mux lock file")?;
+        let lock_file = {
+            let mut opts = std::fs::OpenOptions::new();
+            opts.create(true).write(true).truncate(false);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                opts.mode(0o600);
+            }
+            opts.open(&lock_path)
+                .context("Failed to open mux lock file")?
+        };
 
         let need_spawn = match lock_file.try_lock_exclusive() {
             Ok(()) => {
@@ -467,13 +477,26 @@ impl LspManager {
                     tracing::info!("mux process ready for {} at {:?}", language, socket_path);
                 }
                 Ok(Ok(_)) => {
-                    anyhow::bail!("mux process failed to start: {}", line.trim());
+                    return Err(crate::tools::RecoverableError::with_hint(
+                        format!("mux process failed to start: {}", line.trim()),
+                        "Check that another codescout mux isn't already running for this \
+                         workspace, and that the lock file directory is writable.",
+                    )
+                    .into());
                 }
                 Ok(Err(e)) => {
-                    anyhow::bail!("mux process stdout error: {}", e);
+                    return Err(crate::tools::RecoverableError::new(format!(
+                        "mux process stdout error: {e}"
+                    ))
+                    .into());
                 }
                 Err(_) => {
-                    anyhow::bail!("mux process timed out waiting for ready (120s)");
+                    return Err(crate::tools::RecoverableError::with_hint(
+                        "mux process timed out waiting for ready (120s)",
+                        "The LSP server is slow to initialize (Gradle/Cargo index?). \
+                         Retry in a moment; if the problem persists, check server logs.",
+                    )
+                    .into());
                 }
             }
             // Detach child — mux runs independently
