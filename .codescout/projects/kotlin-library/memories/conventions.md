@@ -2,32 +2,42 @@
 
 ## Language Patterns
 
-### Kotlin Features (by design)
-This fixture explicitly exercises modern Kotlin language features for LSP/AST testing:
-- **data class** — `Book` with auto-generated equals/hashCode/toString/copy
-- **sealed class** — `SearchResult` for exhaustive when expressions
-- **value class** — zero-overhead wrapper types in Advanced.kt
-- **companion object** — factory methods on `Book`
-- **object declaration** — singleton pattern
-- **enum class** — `Genre` with member function
-- **extension functions** — `Catalog<T>.searchAsync`, `Book.toSearchText`
-- **delegated properties** — `by lazy`, `by observable`
-- **coroutines** — `suspend` extension on Catalog
-- **scope functions** — `let`, `run`, `apply`, `also`
+### Naming
+- Classes: PascalCase (`Book`, `Catalog`, `SearchResult`)
+- Functions/properties: camelCase (`searchText`, `isAvailable`, `formattedTitle`)
+- Constants: SCREAMING_SNAKE_CASE (`MAX_RESULTS`, `FICTION`)
+- Packages: lowercase (`library.models`, `library.services`)
 
-### Naming Conventions
-- Classes/interfaces: PascalCase (`Book`, `Catalog`, `Searchable`, `SearchResult`)
-- Enum values: UPPER_SNAKE_CASE (`FICTION`, `NON_FICTION`)
-- Functions/methods: camelCase (`searchText`, `isAvailable`, `createDefaultCatalog`)
-- Properties: camelCase (`copiesAvailable`, `totalItems`)
-- Constants: SCREAMING_SNAKE_CASE or `const val` in companion objects
+### Data Modeling
+- Immutable data types: `data class` with `val` fields (all model types)
+- Enums for closed sets: `Genre` enum with a `label()` helper
+- Sealed classes for typed outcomes: `SearchResult` (Found/NotFound/Error)
+- Singletons: `object` declaration (`BookRegistry`, `SearchResult.NotFound`)
+- Value semantics with zero overhead: `@JvmInline value class ISBN`
 
-### Testing
-- No test files — this is a syntax/structure fixture for codescout's own test suite
-- All correctness validation is in codescout's `tests/symbol_lsp.rs` and `tests/integration.rs`
+### Kotlin-Specific Idioms
+- Default parameter values: `copiesAvailable: Int = 1`, `maxItems: Int = 100`
+- Expression bodies: single-expression functions use `= expr` syntax throughout
+- `by lazy` for computed-once properties
+- Scope functions: `let` used in `createBookWithDefaults` to transform and return
+- Extension functions: `Book.toSearchText()` and `Catalog<T>.searchAsync()` add
+  behavior without modifying original classes
+- Companion objects for factory methods instead of static methods
 
-### Build
-- Gradle Kotlin DSL (`build.gradle.kts`)
-- Single module, `kotlin("jvm")` plugin
-- Kotlin stdlib only, no external dependencies
-- Kotlin 2.1.0, JVM target
+### Documentation
+- All public types and methods have KDoc `/** */` comments
+- Comments describe Kotlin feature intent (e.g. "Extension: inline/value class",
+  "Extension: delegated property") — this is deliberate for LSP testing purposes
+
+### Build/Project Conventions
+- Kotlin DSL for Gradle (`build.gradle.kts`, `settings.gradle.kts`)
+- Single-module project, no subprojects
+- No test source sets — testing is done externally via codescout's Rust test suite
+- Package hierarchy mirrors directory hierarchy under `src/main/kotlin/`
+
+## Testing Notes (from codescout perspective)
+- This fixture is referenced by codescout LSP tests to verify symbol navigation on Kotlin
+- `createNamedCatalog` has a KDoc `@param`/`@return` block — specifically to test whether
+  kotlin-language-server includes KDoc in hover responses
+- The variety of Kotlin constructs (sealed, value class, generics, extensions, coroutines)
+  ensures broad LSP feature coverage

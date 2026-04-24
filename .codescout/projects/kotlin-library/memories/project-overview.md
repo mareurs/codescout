@@ -1,33 +1,28 @@
 # kotlin-library — Project Overview
 
 ## Purpose
-A fixture library project used to test codescout's Kotlin/JVM language intelligence
-(AST parsing, LSP, symbol navigation, semantic search). It models a small book catalog
-domain — not production software.
+A minimal Kotlin fixture used by the codescout (code-explorer) project for LSP integration
+testing. It is not a real application library — it exists to provide a realistic Kotlin
+codebase with enough type diversity that the LSP tests can exercise symbol navigation,
+go-to-definition, hover, find-references, and related features.
 
 ## Tech Stack
-- **Language:** Kotlin (JVM target, Kotlin 2.1.0)
-- **Build:** Gradle with Kotlin DSL (`build.gradle.kts`)
-- **Runtime:** JVM via `kotlin("jvm")` plugin
-- **Dependencies:** Kotlin stdlib only — no frameworks, no test dependencies
+- Language: Kotlin (JVM), Kotlin 2.1.0
+- Build: Gradle with Kotlin DSL (`build.gradle.kts`)
+- Dependencies: `kotlin("stdlib")` only — no test framework, no external libraries
+- Group/version: `library:0.1.0`
 
-## Project Name & Coordinates
-- Root project name: `kotlin-library`
-- Gradle group: `library`, version: `0.1.0`
+## Package Structure
+All sources live under `src/main/kotlin/library/`:
+- `models/` — core domain types: `Book` (data class), `Genre` (enum)
+- `interfaces/` — `Searchable` interface
+- `services/` — `Catalog<T>` generic class, catalog factory functions, extension functions
+- `extensions/` — advanced Kotlin features: `SearchResult` (sealed class), `BookRegistry`
+  (singleton object), `ISBN` (value/inline class), `LazyBook` (delegated property)
 
-## Structure
-```
-src/main/kotlin/library/
-  interfaces/   Searchable.kt
-  models/       Book.kt, Genre.kt
-  services/     Catalog.kt
-  extensions/   Advanced.kt, Results.kt
-```
-No test sources (`src/test/`) — this is a syntax/structure fixture, not a tested codebase.
+## No Tests
+There is no `src/test/` directory. This fixture is exercised exclusively by codescout's
+own Rust test suite via the Kotlin LSP.
 
-## Key Facts
-- 6 source files, ~130 lines total
-- The `extensions/` package deliberately exercises advanced Kotlin syntax:
-  sealed classes, value classes, delegated properties, scope functions, coroutines, object declarations
-- Exists alongside similar fixtures in java-library, python-library, rust-library, typescript-library
-  within the codescout test suite
+## Key Constants
+- `MAX_RESULTS = 50` (top-level constant in `Book.kt`)

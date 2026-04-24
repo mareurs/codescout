@@ -6,5 +6,5 @@ path = "Cargo.toml"
 hash = "661aca381959355e33b9e367f8ae1054bb0e23c90ca0e8ab69ab4351ee63d3a9"
 
 [[anchors]]
-path = ".codescout/project.toml"
-hash = "52c5b03458edfff120e09c3f817f0f92a199ca7bd01ae2c036f55748b15af78f"
+path = "src/lib.rs"
+hash = "73744073d0950435f69fc7d496398e926ebbd28f68f4c45cfb8e5170992474df"

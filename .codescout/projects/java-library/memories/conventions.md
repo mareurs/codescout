@@ -1,38 +1,21 @@
-## Conventions
+# Conventions
 
-### Language Patterns (Java 21)
-- **Records over classes** for data carriers (`Book`, `Found`, `NotFound`, `Error`)
-- **Sealed interfaces** for closed type hierarchies (`SearchResult permits ...`)
-- **Default methods** on interfaces for optional behavior (`relevance()`, `isMatch()`)
-- **Pattern matching** with `instanceof` (no explicit cast needed)
-- **Streams API** for collection operations (`stream().filter().toList()`)
+## Naming
+| Entity | Convention | Example |
+|---|---|---|
+| Packages | lowercase, dot-separated | `library.models`, `library.services` |
+| Classes/Interfaces | PascalCase | `Book`, `Searchable`, `Catalog` |
+| Methods | camelCase | `searchText()`, `isAvailable()`, `createDefault()` |
+| Constants | UPPER_SNAKE_CASE | `MAX_RESULTS` |
+| Enum members | UPPER_SNAKE_CASE | `FICTION`, `NON_FICTION` |
 
-### Naming
-- Package: `library.<layer>` (models, interfaces, services, extensions)
-- Classes: PascalCase, singular nouns (`Book`, `Catalog`, `BookProcessor`)
-- Interfaces: adjective or noun describing capability (`Searchable`, `Indexed`)
-- Enums: PascalCase type, SCREAMING_SNAKE members (`Genre.NON_FICTION`)
-- Methods: camelCase verbs (`searchText`, `isAvailable`, `createDefault`)
-- Constants: SCREAMING_SNAKE (`MAX_RESULTS`)
+## Patterns
+- **Records for data:** `Book` is a Java 21 record with a compact constructor override.
+- **Sealed interfaces for ADTs:** `SearchResult` uses `sealed` + `permits` with record variants — pattern-match safe.
+- **Default interface methods:** `Searchable.relevance()` returns 0.0 by default; override for custom ranking.
+- **Static factory:** `Catalog.createDefault()` — conventional Java factory pattern.
+- **Annotations as markers:** `@Indexed` (defined in `Advanced.java`) is a custom annotation used to tag methods.
 
-### Documentation
-- Javadoc `/** ... */` on all public types, constructors, and methods
-- Comments prefixed with "Extension:" mark features exercising specific Java constructs
-  (e.g., "Extension: sealed interface hierarchy", "Extension: anonymous class")
-
-### Build
-- Gradle Groovy DSL (`build.gradle`)
-- Group: `library`, version: `0.1.0`
-- Java 21 source and target compatibility
-- No external dependencies — stdlib only
-
-### Project Role
-- This is a **codescout test fixture**, not a production codebase
-- Each file is designed to exercise specific tree-sitter / LSP parsing scenarios:
-  - `Book.java` — records, compact constructors, constants
-  - `Genre.java` — enums with methods
-  - `Searchable.java` — interfaces, default methods
-  - `Catalog.java` — generics with bounds, nested classes, static factories, streams
-  - `Advanced.java` — annotations, anonymous classes, wildcards, inner classes
-  - `Results.java` — sealed interfaces, record variants, pattern matching
-- No tests exist — the fixture is tested by codescout's own test suite
+## Code Quality
+- No linting configuration beyond Gradle's default Java compile warnings.
+- Java 21 source/target compatibility (`JavaVersion.VERSION_21`).

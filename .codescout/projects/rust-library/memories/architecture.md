@@ -1,56 +1,17 @@
-## Module Structure
+# rust-library Architecture
 
-```
-lib.rs
-├── models::book      -- Book struct (title, isbn, genre, copies_available) + accessor methods
-├── models::genre     -- Genre enum (Fiction, NonFiction, Science, History, Biography) + label()
-├── traits::searchable -- Searchable trait (search_text, relevance) + impl for Book
-├── services::catalog  -- Catalog<T: Searchable> (add, search, stats) + CatalogStats + create_default_catalog()
-└── extensions
-    ├── results        -- SearchResult enum (Found/NotFound/Error variants) + BookIterator (Iterator impl)
-    └── advanced       -- BookRef (derive macros), borrow_title (lifetimes), available_titles (impl Trait), re-export alias
-```
+Small single-crate library with no external dependencies. Four top-level modules:
 
-## Key Abstractions
+- `models` — plain data types (`Book`, `Genre`)
+- `traits` — behavioural abstractions (`Searchable` trait)
+- `services` — generic container (`Catalog<T: Searchable>`)
+- `extensions` — utilities, iterators, lifetime examples (`SearchResult`, `BookIterator`, `BookRef`, `borrow_title`, `available_titles`)
 
-- **Book** -- core domain entity with title, isbn, genre, availability
-- **Genre** -- 5-variant enum with `label()` for display
-- **Searchable** -- trait with `search_text() -> String` (required) and `relevance() -> f64` (default 0.0)
-- **Catalog<T: Searchable>** -- generic collection with substring-match search via the Searchable trait
-- **SearchResult** -- rich enum demonstrating struct variants, tuple variants, and named fields
-- **BookIterator** -- manual Iterator impl with associated type `Item = Book`
+The domain models a library catalogue: books have genres and availability counts; catalogues hold searchable items; search results carry typed outcomes.
 
-## Data Flow: Catalog Search
-
-1. `Catalog::new(name)` creates empty catalog
-2. `catalog.add(item)` pushes into `Vec<T>`
-3. `catalog.search(query)` calls `item.search_text()` on each, filters with `contains(query)`, returns `Vec<&T>`
-4. Book's `search_text()` returns `"{title} ({isbn})"` format
-5. Book's `relevance()` returns 1.0 if available, 0.5 otherwise
-
-## Design Patterns
-
-- **Trait-based polymorphism**: Searchable trait decouples Catalog from Book
-- **Generic constraints**: `Catalog<T: Searchable>` uses trait bounds
-- **Default trait methods**: `relevance()` has a default implementation (0.0)
-- **Re-exports**: `lib.rs` re-exports core types; `advanced.rs` re-exports Genre as BookGenre
-
-## Rust Feature Coverage (for codescout testing)
-
-This fixture deliberately exercises many Rust language features:
-- Structs, enums (with struct/tuple/unit variants), traits, impls
-- Generics with trait bounds
-- Lifetime annotations (`borrow_title<'a>`)
-- `impl Trait` return types (`available_titles`)
-- Derive macros (`Debug, Clone, PartialEq`)
-- Associated types (`type Item = Book` in Iterator impl)
-- Pattern matching (`matches!` macro, `match` expressions)
-- Module system (pub mod, pub use, type aliases via re-export)
-
-## Semantic Search Examples
-
-```
-semantic_search("lifetime annotations and borrowing", project="rust-library")
-semantic_search("iterator pattern and collection operations", project="rust-library")
-semantic_search("generic type constraints and bounds", project="rust-library")
-```
+### Design choices relevant to LSP testing
+- `Catalog<T>` uses a trait bound — exercises generic symbol resolution
+- `BookIterator` implements `std::iter::Iterator` — exercises trait impl navigation
+- `borrow_title` uses explicit lifetime parameters — exercises hover/inlay hints
+- `SearchResult` enum carries data variants — exercises enum variant goto-definition
+- `impl Searchable for Book` is in `traits/searchable.rs`, not `models/book.rs` — cross-file impl navigation
