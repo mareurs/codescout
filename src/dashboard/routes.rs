@@ -61,6 +61,14 @@ pub fn build_router(project_root: &Path, port: u16) -> Result<Router> {
                 ])
                 .allow_headers([header::CONTENT_TYPE]),
         )
+        // Memory write bodies are bounded at 1 MiB; anything bigger is a bug
+        // or abuse. Applied globally since no endpoint legitimately exceeds it.
+        .layer(tower_http::limit::RequestBodyLimitLayer::new(1024 * 1024))
+        // 30s per-request timeout guards against slow-loris and runaway queries.
+        .layer(tower_http::timeout::TimeoutLayer::with_status_code(
+            axum::http::StatusCode::REQUEST_TIMEOUT,
+            std::time::Duration::from_secs(30),
+        ))
         .with_state(state);
 
     Ok(router)
@@ -84,7 +92,10 @@ async fn serve_index() -> Html<String> {
     }
     #[cfg(debug_assertions)]
     {
-        let content = std::fs::read_to_string("src/dashboard/static/index.html")
+        // Anchor to CARGO_MANIFEST_DIR so dev reloads work regardless of CWD.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/dashboard/static/index.html");
+        let content = std::fs::read_to_string(path)
             .unwrap_or_else(|_| "Dashboard HTML not found".into());
         Html(content)
     }
@@ -94,7 +105,11 @@ async fn serve_css() -> ([(header::HeaderName, &'static str); 1], String) {
     #[cfg(not(debug_assertions))]
     let content = embedded::DASHBOARD_CSS.to_string();
     #[cfg(debug_assertions)]
-    let content = std::fs::read_to_string("src/dashboard/static/dashboard.css").unwrap_or_default();
+    let content = {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/dashboard/static/dashboard.css");
+        std::fs::read_to_string(path).unwrap_or_default()
+    };
     ([(header::CONTENT_TYPE, "text/css")], content)
 }
 
@@ -102,7 +117,11 @@ async fn serve_js() -> ([(header::HeaderName, &'static str); 1], String) {
     #[cfg(not(debug_assertions))]
     let content = embedded::DASHBOARD_JS.to_string();
     #[cfg(debug_assertions)]
-    let content = std::fs::read_to_string("src/dashboard/static/dashboard.js").unwrap_or_default();
+    let content = {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/dashboard/static/dashboard.js");
+        std::fs::read_to_string(path).unwrap_or_default()
+    };
     ([(header::CONTENT_TYPE, "application/javascript")], content)
 }
 

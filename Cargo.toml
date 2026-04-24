@@ -114,7 +114,7 @@ tempfile = "3"
 
 # Dashboard web server (behind "dashboard" feature) and HTTP transport (behind "http" feature)
 axum = { version = "0.8", features = ["json"], optional = true }
-tower-http = { version = "0.6", features = ["cors"], optional = true }
+tower-http = { version = "0.6", features = ["cors", "limit", "timeout"], optional = true }
 open = { version = "5", optional = true }
 tokio-util = "0.7"
 uuid = { version = "1.20.0", features = ["v4"] }

@@ -33,7 +33,7 @@ per phase. Items that were deferred are captured in
 | 4 | AST + symbols | `2682548` | 9/9 + 4 minors | S2, M4, M5, M6, M9 + open Q1–Q5 |
 | 5 | Embeddings + memory + library | `8b041d4` | 10/10 | S3, phase-5 minors, Q1–Q4 |
 | 6 | Git | pending | 3 minors + Q1 doc | Q2 ceiling_dirs, I5 cache (perf) |
-| 7 | Dashboard | — | 0/? | not started |
+| 7 | Dashboard | pending | S2, S3, S4, I3, Q1(esc) + 2 minors | S1 (auth), I1, I2 (SRI), P1 (cache), Q1 (sanitize tighten) |
 | 8 | Prompts + MCP resources | — | 0/? | not started |
 | 9 | Cross-cutting | — | 0/? | not started |
 

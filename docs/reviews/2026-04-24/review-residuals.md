@@ -371,3 +371,72 @@ deferred and what's needed before tackling it.
 M1 (no-op rebind), M2 (rename-detection comment), M3 (dropped-variants comment),
 and Q1 doc-comment on `diff_tree_to_tree` revspec validation all landed in the
 phase-6 fix commit. No residuals from minors.
+
+
+# Phase 7 — Dashboard
+
+## S1-DASH — Dashboard has no auth; safety hinges on `--host 127.0.0.1`
+
+- **Location:** `src/dashboard/routes.rs::build_router`; `--host` in `src/main.rs`.
+- **Evidence:** No auth middleware on any endpoint. `--host 0.0.0.0` exposes
+  read+write+delete memory APIs plus `/api/project`, `/api/config`, `/api/libraries`
+  to the LAN. CORS doesn't block non-browser clients (curl).
+- **Open question:** decide deployment model. Either (a) hard-bind 127.0.0.1 and
+  refuse non-loopback unless `--token` is set + enforced via a bearer-auth
+  middleware layer; or (b) generate a random token on startup, print URL with
+  `?token=…`, enforce in middleware; or (c) drop the `--host` knob entirely and
+  require an SSH tunnel for remote access. Reuse Phase 1 S1 bearer machinery.
+- **Owner:** TBD — needs product decision first.
+
+## I1-DASH — `/api/libraries` and `/api/project` leak absolute paths
+
+- **Location:** `src/dashboard/api/libraries.rs:17`, `src/dashboard/api/project.rs:21`.
+- **Evidence:** `e.path.display()`, `root.display()` — full home-directory layout
+  surfaces to any caller. Only matters once S1-DASH is closed or if operator
+  runs `--host 0.0.0.0`.
+- **Unblock:** strip to basename/relative for non-loopback context, or omit
+  entirely. Gated on S1-DASH decision.
+
+## I2-DASH — Chart.js loaded from CDN with no SRI hash
+
+- **Location:** `src/dashboard/static/index.html:8`.
+- **Evidence:** `<script src="https://cdn.jsdelivr.net/npm/chart.js@4">` — no
+  `integrity=`, no `crossorigin=`. CDN compromise → arbitrary JS in dashboard
+  origin with full access to unauthenticated APIs.
+- **Unblock:** pin to a specific version (e.g. `chart.js@4.4.6`), compute SRI
+  hash from `sha384sum` on the CDN bundle, add `integrity="sha384-…"
+  crossorigin="anonymous"`. Better still: bundle Chart.js into `static/` and
+  serve via `include_str!`-backed route (eliminates CDN dependency). Needs
+  decision on bundle-vs-pin.
+
+## P1-DASH — `/api/project` re-discovers git repo on every poll
+
+- **Location:** `src/dashboard/api/project.rs::git_info`.
+- **Evidence:** Calls `open_repo` per request. Dashboard JS polls overview at
+  `POLL_INTERVAL`. Cross-confirms phase-6 I5 (uncached `Repository::discover`).
+- **Unblock:** cache `git_branch` + dirty status with short TTL (1–5s) or
+  file-watcher invalidation. Bundle with phase-6 I5 fix (shared `Repository`
+  on `ActiveProject`).
+
+## Q1 (partial) — Tighten `sanitize_topic` to strict `[A-Za-z0-9._ -]+`
+
+- **Location:** `src/memory/mod.rs::sanitize_topic`.
+- **Status:** JS `esc()` now escapes `"` and `'` (dashboard.js), which closes
+  the reachable XSS path even if S1-DASH is unfixed. Tightening
+  `sanitize_topic` itself is **defense-in-depth but breaking** — existing
+  users may have memory files with spaces/punctuation in topic names.
+- **Unblock:** decide whether to tighten the server-side allowlist. If yes,
+  add a one-time migration path (or document that names with stripped chars
+  need manual rename). Until then, relying on JS-side escape is sufficient.
+
+## Phase-7 minors — not yet landed
+
+- No `X-Content-Type-Options: nosniff`, no CSP header. A `default-src 'self'
+  https://cdn.jsdelivr.net; script-src 'self' https://cdn.jsdelivr.net` CSP
+  would blunt XSS slipping past `esc`. Goes with I2-DASH bundle decision.
+- `dashboard.js:171` and similar concat HTML via `innerHTML`. Codebase-wide
+  pattern refactor to `createElement` + `textContent` is out of scope for
+  this review.
+- `config.rs:10` dumps full project config. Fine today; flag for future
+  `PublicConfig` projection once any secret-bearing field is added.
+- `/api/health` payload schema not covered by tests.

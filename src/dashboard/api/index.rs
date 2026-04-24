@@ -17,9 +17,10 @@ pub async fn get_index(State(state): State<DashboardState>) -> Json<Value> {
     let conn = match embed_index::open_db(&state.project_root) {
         Ok(c) => c,
         Err(e) => {
+            tracing::warn!(target: "dashboard", "index db open failed: {e}");
             return Json(json!({
                 "available": false,
-                "reason": format!("Failed to open index DB: {}", e)
+                "reason": "Failed to open index DB."
             }));
         }
     };
@@ -69,7 +70,15 @@ pub async fn get_drift(
         Err(_) => return Json(json!({ "available": false, "files": [] })),
     };
 
-    let threshold = params.threshold.unwrap_or(0.1);
+    // Clamp to [0.0, 1.0]; reject non-finite. Drift scores are cosine-like in
+    // this range — negative/NaN/inf would produce confusing or infinite-cost
+    // DB work.
+    let raw = params.threshold.unwrap_or(0.1);
+    let threshold = if raw.is_finite() {
+        raw.clamp(0.0, 1.0)
+    } else {
+        0.1
+    };
     let rows = embed_index::query_drift_report(&conn, Some(threshold), None).unwrap_or_default();
 
     let files: Vec<Value> = rows
