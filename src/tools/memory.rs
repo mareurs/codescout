@@ -914,7 +914,6 @@ mod tests {
         assert_eq!(result["status"], json!("ok"), "unexpected result: {result}");
     }
 
-
     async fn test_ctx_with_project() -> (tempfile::TempDir, ToolContext) {
         let dir = tempdir().unwrap();
         // Create .codescout dir so MemoryStore::open works

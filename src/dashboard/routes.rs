@@ -95,8 +95,8 @@ async fn serve_index() -> Html<String> {
         // Anchor to CARGO_MANIFEST_DIR so dev reloads work regardless of CWD.
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("src/dashboard/static/index.html");
-        let content = std::fs::read_to_string(path)
-            .unwrap_or_else(|_| "Dashboard HTML not found".into());
+        let content =
+            std::fs::read_to_string(path).unwrap_or_else(|_| "Dashboard HTML not found".into());
         Html(content)
     }
 }

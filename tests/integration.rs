@@ -40,7 +40,9 @@ async fn project_with_files(files: &[(&str, &str)]) -> (tempfile::TempDir, ToolC
 
 #[tokio::test]
 async fn workflow_read_search_replace() {
-    use codescout::tools::file::{EditFile, Grep, ReadFile};
+    use codescout::tools::edit_file::EditFile;
+    use codescout::tools::grep::Grep;
+    use codescout::tools::read_file::ReadFile;
     let (dir, ctx) = project_with_files(&[
         (
             "src/main.txt",
@@ -341,8 +343,8 @@ async fn workflow_ollama_index_and_search() {
 
 #[tokio::test]
 async fn workflow_onboarding_explore() {
-    use codescout::tools::file::ListDir;
-    use codescout::tools::workflow::Onboarding;
+    use codescout::tools::list_dir::ListDir;
+    use codescout::tools::onboarding::Onboarding;
 
     let (dir, ctx) = project_with_files(&[
         ("src/main.rs", "fn main() {}\n"),
@@ -466,7 +468,7 @@ async fn workflow_find_symbol_path_types() {
 
 #[tokio::test]
 async fn write_allowed_when_project_provided_at_startup_even_with_worktrees() {
-    use codescout::tools::file::CreateFile;
+    use codescout::tools::create_file::CreateFile;
 
     // 1. Create a temp project dir with fake worktree metadata
     let dir = tempdir().unwrap();
@@ -512,7 +514,7 @@ async fn write_allowed_when_project_provided_at_startup_even_with_worktrees() {
 #[cfg(unix)]
 #[tokio::test]
 async fn integration_run_command_buffer_round_trip() {
-    use codescout::tools::workflow::RunCommand;
+    use codescout::tools::run_command::RunCommand;
 
     let (dir, ctx) = project_with_files(&[("README.md", "# test\n")]).await;
 
@@ -558,8 +560,8 @@ async fn integration_run_command_buffer_round_trip() {
 #[cfg(unix)]
 #[tokio::test]
 async fn integration_read_file_large_then_query_via_buffer() {
-    use codescout::tools::file::ReadFile;
-    use codescout::tools::workflow::RunCommand;
+    use codescout::tools::read_file::ReadFile;
+    use codescout::tools::run_command::RunCommand;
 
     // Build a file exceeding MAX_INLINE_TOKENS (~10KB)
     let content: String = (1..=250)
@@ -605,7 +607,7 @@ async fn integration_read_file_large_then_query_via_buffer() {
 #[cfg(unix)]
 #[tokio::test]
 async fn integration_speed_bump_two_round_trips() {
-    use codescout::tools::workflow::RunCommand;
+    use codescout::tools::run_command::RunCommand;
 
     let (dir, ctx) = project_with_files(&[("README.md", "# test\n")]).await;
 

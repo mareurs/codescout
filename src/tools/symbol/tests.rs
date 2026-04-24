@@ -20,17 +20,16 @@ use crate::agent::Agent;
 use crate::lsp::SymbolInfo;
 use crate::symbol::edit::{
     apply_text_edits, clamp_range_to_parent, editing_end_line, editing_start_line,
-    find_insert_before_line, find_parent_symbol, text_sweep, write_lines,
+    find_insert_before_line, text_sweep, write_lines,
 };
 use crate::symbol::query::{
     collect_matching, filter_variable_symbols, find_matching_symbol, find_symbol_by_name_path,
     find_unique_symbol_by_name_path, is_lead_in_line, matches_kind_filter, symbol_name_matches,
     symbol_to_json, validate_symbol_position, validate_symbol_range,
 };
-use crate::tools::output::{OutputGuard, OverflowInfo};
-use crate::tools::{optional_u64_param, parse_bool_param, RecoverableError, Tool, ToolContext};
+use crate::tools::{Tool, ToolContext};
 use serde_json::{json, Value};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::tempdir;
 

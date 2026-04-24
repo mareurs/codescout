@@ -473,7 +473,7 @@ mod tests {
         assert!(!path.with_extension("log.1").exists());
 
         // Third write: 1 byte. 64 + 1 > 64 → triggers rotation.
-        f.write_all(&[b'c']).unwrap();
+        f.write_all(b"c").unwrap();
         f.flush().unwrap();
 
         // debug.log.1 now holds the pre-rotation content (64 bytes: a's and b's).

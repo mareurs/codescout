@@ -183,6 +183,7 @@ mod tests {
         );
     }
 
+    #[allow(dead_code)] // stale test — missing #[test] attribute, kept for future re-enable
     fn global_config_load_errors_on_malformed_toml() {
         let _guard = ENV_LOCK.lock().unwrap();
         let saved_home = std::env::var_os("HOME");

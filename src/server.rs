@@ -1474,6 +1474,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn generate_auth_token_produces_nonempty_hex() {
         let token = super::generate_auth_token();
         assert!(!token.is_empty(), "token must not be empty");
@@ -1486,6 +1487,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn generate_auth_token_is_unique_across_calls() {
         let t1 = super::generate_auth_token();
         let t2 = super::generate_auth_token();

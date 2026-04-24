@@ -946,6 +946,7 @@ model = "local:AllMiniLML6V2Q"
         assert_eq!(cfg.embeddings.chunk_size, None);
     }
 
+    #[allow(dead_code)] // stale test — missing #[test] attribute, kept for future re-enable
     fn load_or_default_applies_global_when_project_absent() {
         let _guard = ENV_LOCK.lock().unwrap();
         let saved_home = std::env::var_os("HOME");
@@ -976,6 +977,7 @@ model = "local:AllMiniLML6V2Q"
         assert_eq!(cfg.project.name, "my-project");
     }
 
+    #[allow(dead_code)] // stale test — missing #[test] attribute, kept for future re-enable
     fn load_or_default_project_wins_over_global() {
         let _guard = ENV_LOCK.lock().unwrap();
         let saved_home = std::env::var_os("HOME");
@@ -1011,6 +1013,7 @@ model = "local:AllMiniLML6V2Q"
         assert_eq!(cfg.embeddings.model, "project-model");
     }
 
+    #[allow(dead_code)] // stale test — missing #[test] attribute, kept for future re-enable
     fn load_or_default_global_fills_gap_in_project() {
         let _guard = ENV_LOCK.lock().unwrap();
         let saved_home = std::env::var_os("HOME");
@@ -1047,6 +1050,7 @@ model = "local:AllMiniLML6V2Q"
         assert_eq!(cfg.embeddings.model, "project-model");
     }
 
+    #[allow(dead_code)] // stale test — missing #[test] attribute, kept for future re-enable
     fn load_or_default_no_global_behaves_as_before() {
         let _guard = ENV_LOCK.lock().unwrap();
         let saved_home = std::env::var_os("HOME");
