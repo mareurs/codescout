@@ -32,25 +32,36 @@ per phase. Items that were deferred are captured in
 | 3 | LSP integration | `50509fb` | 9/15 | S1, S2, C2, I3, I1, I4, I6 + 7 minors |
 | 4 | AST + symbols | `2682548` | 9/9 + 4 minors | S2, M4, M5, M6, M9 + open Q1–Q5 |
 | 5 | Embeddings + memory + library | `8b041d4` | 10/10 | S3, phase-5 minors, Q1–Q4 |
-| 6 | Git | pending | 3 minors + Q1 doc | Q2 ceiling_dirs, I5 cache (perf) |
-| 7 | Dashboard | pending | S2, S3, S4, I3, Q1(esc) + 2 minors | S1 (auth), I1, I2 (SRI), P1 (cache), Q1 (sanitize tighten) |
-| 8 | Prompts + MCP resources | pending | S3 SAFETY, I1 scope-doc, I2 lib routing | S1 repo-prompt trust, S2 prefs gating, I3 hoist, minors |
-| 9 | Cross-cutting | pending | S9-1 denylist expand, I9-3 canon, I9-2 cfg | S9-2 (already done), S9-3, C9-2, I9-1, I9-2 sig, minors |
+| 6 | Git | `d618b9d` | 3 minors + Q1 doc | Q2 ceiling_dirs, I5 Repository cache (perf) |
+| 7 | Dashboard | `d465bd6` | S2, S3, S4, I3, Q1(esc) + spec compliance | S1 (auth), I1, I2 (SRI), P1 (cache), Q1 (sanitize tighten), minors |
+| 8 | Prompts + MCP resources | `976a5e1` | S3 SAFETY, I1 scope-doc, I2 lib routing | S1 repo-prompt trust, S2 prefs gating, I3 hoist, minors |
+| 9 | Cross-cutting | `b0da313` | S9-1 denylist expand, I9-3 canon, I9-2 cfg | S9-3, C9-2, I9-1, I9-2 sig, minors (S9-2, C9-1 already done) |
+
+**All 9 phases shipped.** Remaining work lives in
+[review-residuals.md](review-residuals.md).
 
 ### Resuming work in a new session
 
+All 9 phases have landed on `review/2026-04-24`. Next session picks up with:
+
 1. Checkout the branch: `git checkout review/2026-04-24`
 2. Skim this README + [review-residuals.md](review-residuals.md) for context.
-3. Pick the next phase (4 unless priorities shifted).
-4. Read the phase file, propose a green/yellow split (safe fixes vs deferred),
-   get user approval, then implement.
-5. Pattern per phase: cargo fmt + `cargo clippy --lib -- -D warnings` +
-   `cargo test --lib` before committing.
-6. One commit per phase with detailed body enumerating landed + deferred
-   items. Co-author line: `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>`.
-7. After all phases: Standard Ship Sequence (cherry-pick each phase commit
-   to master, push, rebase experiments).
-
+3. Decide priority from the residuals buckets:
+   - **Needs user decision before code:** phase-7 S1 (auth), phase-8 S1
+     (repo-prompt trust), phase-8 S2 (preferences gating), C9-2
+     (containment redesign).
+   - **Ready to land once someone profiles:** phase-6 I5 + phase-7 P1
+     (Repository cache).
+   - **Windows-specific, needs a Windows dev pass:** S9-3, I9-1, phase-5 S3.
+   - **Refactors / polish:** phase-8 I3 hoist, `path_security.rs` split,
+     various minors.
+4. Implementation loop (same as prior phases):
+   `cargo fmt` + `cargo clippy --lib -- -D warnings` + `cargo test --lib`
+   before each commit; one focused commit per residual item.
+5. **When residuals are either landed or closed-as-won't-fix**:
+   run the Standard Ship Sequence — cherry-pick each of the 9 phase
+   commits from `review/2026-04-24` onto `master`, push, then rebase
+   `experiments` on the new `master`.
 ### Open cross-cutting decisions
 
 These surfaced during phase 2/3 and should be resolved before phase 4 starts
