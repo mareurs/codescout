@@ -622,33 +622,48 @@ impl Agent {
 
     /// Get the current project status for building server instructions.
     pub async fn project_status(&self) -> Option<crate::prompts::ProjectStatus> {
-        // Phase 1: read project fields under a short-lived lock
-        let (name, path, languages, memories, has_index, github_enabled, system_prompt) = {
+        // Phase 1: cheap clones under the read lock — no blocking I/O
+        let (
+            name,
+            path,
+            languages,
+            memory_store,
+            db_path,
+            prompt_file,
+            default_prompt,
+            github_enabled,
+        ) = {
             let inner = self.inner.read().await;
             let project = inner.active_project()?;
-            let memories = project.memory.list().unwrap_or_default();
-            let has_index = crate::embed::index::project_db_path(&project.root).exists();
-            let github_enabled = project.config.security.github_enabled;
-
             let prompt_file = project.root.join(".codescout").join("system-prompt.md");
-            let system_prompt = if prompt_file.exists() {
-                std::fs::read_to_string(&prompt_file).ok()
-            } else {
-                project.config.project.system_prompt.clone()
-            };
-
+            let db_path = crate::embed::index::project_db_path(&project.root);
             Some((
                 project.config.project.name.clone(),
                 project.root.display().to_string(),
                 project.config.project.languages.clone(),
-                memories,
-                has_index,
-                github_enabled,
-                system_prompt,
+                project.memory.clone(),
+                db_path,
+                prompt_file,
+                project.config.project.system_prompt.clone(),
+                project.config.security.github_enabled,
             ))
         }?; // lock dropped here
 
-        // Phase 2: workspace summary (acquires its own read-lock)
+        // Phase 2: blocking filesystem reads off the executor
+        let (memories, has_index, system_prompt) = tokio::task::spawn_blocking(move || {
+            let memories = memory_store.list().unwrap_or_default();
+            let has_index = db_path.exists();
+            let system_prompt = if prompt_file.exists() {
+                std::fs::read_to_string(&prompt_file).ok()
+            } else {
+                default_prompt
+            };
+            (memories, has_index, system_prompt)
+        })
+        .await
+        .ok()?;
+
+        // Phase 3: workspace summary (acquires its own read-lock)
         let workspace = self.workspace_summary().await;
 
         Some(crate::prompts::ProjectStatus {

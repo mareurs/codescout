@@ -283,6 +283,38 @@ impl LspClient {
         }
     }
 
+    /// Read messages from `reader` and dispatch them via `dispatch_lsp_message`
+    /// until a transport error occurs. Returns the error so callers can run
+    /// transport-specific cleanup before draining pending requests.
+    async fn run_dispatch_loop<R>(
+        mut reader: BufReader<R>,
+        pending: PendingRequests,
+        writer: Arc<Mutex<Box<dyn AsyncWrite + Unpin + Send>>>,
+        request_label: &'static str,
+        notif_label: &'static str,
+    ) -> anyhow::Error
+    where
+        R: tokio::io::AsyncRead + Unpin + Send + 'static,
+    {
+        loop {
+            match transport::read_message(&mut reader).await {
+                Ok(msg) => {
+                    Self::dispatch_lsp_message(msg, &pending, &writer, request_label, notif_label)
+                        .await;
+                }
+                Err(e) => return e,
+            }
+        }
+    }
+
+    /// Drain all pending requests with a disconnect error message.
+    fn drain_pending_disconnect(pending: &PendingRequests, msg: &'static str) {
+        let mut map = pending.lock().unwrap_or_else(|e| e.into_inner());
+        for (_, sender) in map.drain() {
+            let _ = sender.send(Err(anyhow::anyhow!(msg)));
+        }
+    }
+
     /// Start a language server process and perform the LSP initialize handshake.
     /// Start a language server process and perform the LSP initialize handshake.
     pub async fn start(config: LspServerConfig) -> Result<Self> {
@@ -315,8 +347,7 @@ impl LspClient {
             "LSP server spawned"
         );
 
-        let pending: Arc<StdMutex<HashMap<i64, oneshot::Sender<Result<Value>>>>> =
-            Arc::new(StdMutex::new(HashMap::new()));
+        let pending: PendingRequests = Arc::new(StdMutex::new(HashMap::new()));
         let alive = Arc::new(AtomicBool::new(true));
 
         // Wrap writer in Arc so the reader task can share it for auto-responses.
@@ -364,46 +395,32 @@ impl LspClient {
         let alive_clone = alive.clone();
         let writer_clone = writer.clone();
         let reader_handle = tokio::spawn(async move {
-            let mut reader = BufReader::new(stdout);
-            loop {
-                match transport::read_message(&mut reader).await {
-                    Ok(msg) => {
-                        Self::dispatch_lsp_message(
-                            msg,
-                            &pending_clone,
-                            &writer_clone,
-                            "LSP server request",
-                            "LSP notification",
-                        )
-                        .await;
-                    }
-                    Err(read_err) => {
-                        // EOF or read error — server crashed or exited
-                        if alive_clone.load(Ordering::SeqCst) {
-                            tracing::warn!("LSP reader error: {}", read_err);
-                        }
-                        // Try to get the exit status for diagnostics.
-                        // try_wait() returns Ok(None) if the child is still running (rare at EOF),
-                        // Ok(Some(status)) if it has exited, or Err if the call itself failed.
-                        match child.try_wait() {
-                            Ok(Some(status)) => {
-                                tracing::warn!(exit_status = ?status, "LSP server exited")
-                            }
-                            Ok(None) => tracing::warn!("LSP reader EOF but child still running"),
-                            Err(wait_err) => {
-                                tracing::warn!("could not get LSP exit status: {wait_err}")
-                            }
-                        }
-                        alive_clone.store(false, Ordering::SeqCst);
-                        // Drain pending requests with errors
-                        let mut map = pending_clone.lock().unwrap_or_else(|e| e.into_inner());
-                        for (_, sender) in map.drain() {
-                            let _ = sender.send(Err(anyhow::anyhow!("LSP server disconnected")));
-                        }
-                        break;
-                    }
+            let read_err = Self::run_dispatch_loop(
+                BufReader::new(stdout),
+                pending_clone.clone(),
+                writer_clone,
+                "LSP server request",
+                "LSP notification",
+            )
+            .await;
+            // EOF or read error — server crashed or exited
+            if alive_clone.load(Ordering::SeqCst) {
+                tracing::warn!("LSP reader error: {}", read_err);
+            }
+            // Try to get the exit status for diagnostics.
+            // try_wait() returns Ok(None) if the child is still running (rare at EOF),
+            // Ok(Some(status)) if it has exited, or Err if the call itself failed.
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    tracing::warn!(exit_status = ?status, "LSP server exited")
+                }
+                Ok(None) => tracing::warn!("LSP reader EOF but child still running"),
+                Err(wait_err) => {
+                    tracing::warn!("could not get LSP exit status: {wait_err}")
                 }
             }
+            alive_clone.store(false, Ordering::SeqCst);
+            Self::drain_pending_disconnect(&pending_clone, "LSP server disconnected");
             // Wait for child to exit (kill_on_drop will handle cleanup)
             let _ = child.wait().await;
         });
@@ -451,8 +468,7 @@ impl LspClient {
 
         let (read_half, write_half) = stream.into_split();
 
-        let pending: Arc<StdMutex<HashMap<i64, oneshot::Sender<Result<Value>>>>> =
-            Arc::new(StdMutex::new(HashMap::new()));
+        let pending: PendingRequests = Arc::new(StdMutex::new(HashMap::new()));
         let alive = Arc::new(AtomicBool::new(true));
         let writer: Arc<Mutex<Box<dyn AsyncWrite + Unpin + Send>>> =
             Arc::new(Mutex::new(Box::new(write_half)));
@@ -475,34 +491,20 @@ impl LspClient {
         };
 
         // Spawn reader task — dispatches responses to pending senders.
-        // Same pattern as start(), but reads from the socket instead of stdout.
         let pending_clone = pending.clone();
         let alive_clone = alive.clone();
         let writer_clone = writer.clone();
         let reader_handle = tokio::spawn(async move {
-            let mut reader = buf_reader;
-            loop {
-                match transport::read_message(&mut reader).await {
-                    Ok(msg) => {
-                        Self::dispatch_lsp_message(
-                            msg,
-                            &pending_clone,
-                            &writer_clone,
-                            "mux forwarded server request",
-                            "LSP notification from mux",
-                        )
-                        .await;
-                    }
-                    Err(_) => {
-                        alive_clone.store(false, Ordering::SeqCst);
-                        let mut map = pending_clone.lock().unwrap_or_else(|e| e.into_inner());
-                        for (_, sender) in map.drain() {
-                            let _ = sender.send(Err(anyhow::anyhow!("Mux connection lost")));
-                        }
-                        break;
-                    }
-                }
-            }
+            let _read_err = Self::run_dispatch_loop(
+                buf_reader,
+                pending_clone.clone(),
+                writer_clone,
+                "mux forwarded server request",
+                "LSP notification from mux",
+            )
+            .await;
+            alive_clone.store(false, Ordering::SeqCst);
+            Self::drain_pending_disconnect(&pending_clone, "Mux connection lost");
         });
 
         Ok(Self {
