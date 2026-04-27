@@ -89,6 +89,30 @@ impl AgentInner {
     }
 }
 
+/// Active project state.
+///
+/// **Field-visibility contract:** all fields are `pub(crate)` rather than
+/// private to keep `Agent::with_project(|p| ...)` closures ergonomic — they
+/// receive `&ActiveProject` and read fields directly. Mutation invariants are
+/// not enforced by getters; they are enforced by the borrow contract:
+///
+/// - External callers go through `Agent::with_project`, which hands out
+///   `&ActiveProject` (shared, not mutable) — assignment to any field is a
+///   compile error from outside this module.
+/// - In-module mutation requires `AgentInner::active_project_mut()` and is
+///   limited to a small number of well-named call sites in `agent/mod.rs`
+///   (e.g. `activate`, `reload_config_if_project_toml`).
+/// - Cross-cutting state (`dirty_files`, `write_lock`, `file_lock`) is
+///   `Arc<Mutex<_>>` / `Arc<File>` and self-protects via interior mutability;
+///   external access is routed through `Agent` accessor methods such as
+///   `mark_file_dirty`, `dirty_file_count`, `dirty_files_arc`.
+///
+/// If codescout is ever split into multiple crates, fields with cross-field
+/// invariants (`read_only`, `config`, `head_sha`/`has_git_remote`) should be
+/// reduced to private and exposed through accessors. Until then, the type
+/// system already enforces the contract — getters would add boilerplate
+/// without adding safety.
+
 #[derive(Clone)]
 pub struct ActiveProject {
     pub(crate) root: PathBuf,
