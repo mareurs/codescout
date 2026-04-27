@@ -276,7 +276,6 @@ impl LspManager {
         // Mux path: languages that use the multiplexer bypass the normal pool.
         // The fast-path cache check at the top of get_or_start() handles
         // subsequent calls within the same session.
-        #[cfg(unix)]
         if config.mux {
             match self
                 .get_or_start_via_mux(language, workspace_root, config.clone())
@@ -404,10 +403,10 @@ impl LspManager {
     /// Start or connect to a multiplexed LSP server.
     ///
     /// The mux process is a detached codescout child that owns the real LSP
-    /// server and multiplexes connections over a Unix socket.  If no mux is
-    /// running for this workspace we spawn one and wait for its "ready" line
-    /// on stdout before connecting.
-    #[cfg(unix)]
+    /// server and multiplexes connections over a transport endpoint (Unix
+    /// domain socket on Unix, named pipe on Windows). If no mux is running
+    /// for this workspace we spawn one and wait for its "ready" line on
+    /// stdout before connecting.
     async fn get_or_start_via_mux(
         &self,
         language: &str,

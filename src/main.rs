@@ -80,7 +80,7 @@ enum Commands {
     /// Run the LSP multiplexer (internal — spawned automatically by codescout)
     #[command(hide = true)]
     Mux {
-        /// Path to the Unix socket to listen on
+        /// Path or pipe name of the transport endpoint to listen on
         #[arg(long)]
         socket: std::path::PathBuf,
 

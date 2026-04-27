@@ -207,7 +207,7 @@ pub async fn run(
     // 4. Bind transport endpoint (Unix socket today, named pipe on Windows).
     //    transport::bind also restricts the endpoint to the current user as
     //    defence-in-depth on top of the per-user mux directory.
-    let listener = transport::bind(socket_path).await?;
+    let mut listener = transport::bind(socket_path).await?;
 
     // 5. Signal ready to parent, then drop stdout
     {
@@ -220,7 +220,7 @@ pub async fn run(
     // Run the event loop
     let state = Arc::new(Mutex::new(MuxState::new(init_result)));
     let result = event_loop(
-        &listener,
+        &mut listener,
         &mut server_reader,
         &server_writer,
         &state,
@@ -238,7 +238,7 @@ pub async fn run(
 
 /// Main event loop — accepts clients, reads from server, checks idle timeout.
 async fn event_loop(
-    listener: &transport::Listener,
+    listener: &mut transport::Listener,
     server_reader: &mut BufReader<tokio::process::ChildStdout>,
     server_writer: &SharedWriter,
     state: &Arc<Mutex<MuxState>>,
@@ -254,8 +254,8 @@ async fn event_loop(
             // Accept new client connections
             accept_result = listener.accept() => {
                 match accept_result {
-                    Ok((stream, _addr)) => {
-                        let (read_half, write_half) = stream.into_split();
+                    Ok(stream) => {
+                        let (read_half, write_half) = transport::split_server(stream);
                         let writer: SharedWriter = Arc::new(Mutex::new(
                             Box::new(write_half) as Box<dyn AsyncWrite + Unpin + Send>,
                         ));
@@ -328,7 +328,7 @@ async fn event_loop(
 /// Per-client reader task — reads messages from a client and forwards to the server.
 async fn client_reader_task(
     tag: ClientTag,
-    mut reader: BufReader<transport::OwnedReadHalf>,
+    mut reader: BufReader<transport::ServerReadHalf>,
     server_writer: SharedWriter,
     state: Arc<Mutex<MuxState>>,
 ) {

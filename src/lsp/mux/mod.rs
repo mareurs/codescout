@@ -18,11 +18,11 @@ pub fn workspace_hash(workspace_root: &Path) -> String {
 }
 
 pub fn socket_path_for_workspace(language: &str, workspace_root: &Path) -> PathBuf {
-    per_user_mux_dir().join(format!(
-        "codescout-{}-mux-{}.sock",
+    transport::endpoint_path(
+        &per_user_mux_dir(),
         language,
-        workspace_hash(workspace_root)
-    ))
+        &workspace_hash(workspace_root),
+    )
 }
 
 pub fn lock_path_for_workspace(language: &str, workspace_root: &Path) -> PathBuf {

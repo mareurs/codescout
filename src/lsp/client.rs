@@ -455,7 +455,6 @@ impl LspClient {
     /// The mux sends a JSON init message immediately on connect containing
     /// the cached `InitializeResult`. This client does NOT perform the LSP
     /// initialize handshake.
-    #[cfg(unix)]
     pub async fn connect(
         socket_path: &std::path::Path,
         workspace_root: std::path::PathBuf,
@@ -464,7 +463,7 @@ impl LspClient {
 
         let stream = mux_transport::connect(socket_path).await?;
 
-        let (read_half, write_half) = stream.into_split();
+        let (read_half, write_half) = mux_transport::split_client(stream);
 
         let pending: PendingRequests = Arc::new(StdMutex::new(HashMap::new()));
         let alive = Arc::new(AtomicBool::new(true));
