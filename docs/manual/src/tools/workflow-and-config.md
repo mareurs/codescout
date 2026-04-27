@@ -232,7 +232,7 @@ On Unix the command runs under `sh -c`. On Windows it runs under `cmd /C`.
       },
       "embeddings": { "model": "...", "chunk_size": 512, "chunk_overlap": 64 },
       "ignored_paths": { "patterns": ["target/", "*.lock"] },
-      "security": { "shell_command_mode": "warn", "shell_output_limit_bytes": 102400, "shell_enabled": false, "file_write_enabled": true, "indexing_enabled": true, "github_enabled": true }
+      "security": { "shell_command_mode": "warn", "shell_output_limit_bytes": 102400, "shell_enabled": false, "file_write_enabled": true, "indexing_enabled": true }
     }
   }
 }

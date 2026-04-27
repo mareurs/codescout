@@ -303,11 +303,7 @@ async fn build_activation_response(
             let memories = p.memory.list().unwrap_or_default();
             let has_index = crate::embed::index::project_db_path(&p.root).exists();
             let security = if !p.read_only {
-                Some((
-                    p.config.security.profile,
-                    p.config.security.shell_enabled,
-                    p.config.security.github_enabled,
-                ))
+                Some((p.config.security.profile, p.config.security.shell_enabled))
             } else {
                 None
             };
@@ -400,10 +396,9 @@ async fn build_activation_response(
         result["workspace"] = json!(ws);
     }
 
-    if let Some((profile, shell, github)) = security {
+    if let Some((profile, shell)) = security {
         result["security_profile"] = json!(profile);
         result["shell_enabled"] = json!(shell);
-        result["github_enabled"] = json!(github);
     }
 
     if !auto_registered.is_empty() {
@@ -1154,10 +1149,6 @@ depends_on = ["test"]
             !result["shell_enabled"].is_null(),
             "RW should include shell_enabled"
         );
-        assert!(
-            !result["github_enabled"].is_null(),
-            "RW should include github_enabled"
-        );
     }
 
     #[tokio::test]
@@ -1193,10 +1184,6 @@ depends_on = ["test"]
         assert!(
             result["shell_enabled"].is_null(),
             "RO should not include shell_enabled"
-        );
-        assert!(
-            result["github_enabled"].is_null(),
-            "RO should not include github_enabled"
         );
     }
 

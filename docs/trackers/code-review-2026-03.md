@@ -6,12 +6,12 @@ Full codebase audit of codescout (60K lines, 82 files). Issues prioritized by se
 
 All 36 items re-checked against current code:
 
-- **Fixed (28):** C1–C7, I1–I10, I12, I13, I14, M2, M3, M4, M5, M7, M11, M12, M14
+- **Fixed (29):** C1–C7, I1–I14 (I11 retired 2026-04-27), M2, M3, M4, M5, M7, M11, M12, M14
 - **Obsolete (3):** M6 (widened to `i64`), M8 (single shared impl), M15 (pattern gone)
-- **Open by design (3):** I11 (`tools/github.rs` registration-pending, gated by `github_enabled`), M9 (`RemoteEmbedder` dimensions unknown until first response), M13 (intentional tempdir leak in test fixture)
+- **Open by design (2):** M9 (`RemoteEmbedder` dimensions unknown until first response), M13 (intentional tempdir leak in test fixture)
 - **Open — actionable (2):** M1 (encapsulation), M10 (11 detected langs lack AST)
 
-Net: 31 / 36 resolved. 2 minor refactors + 1 product decision (wire I11 up or retire) remain.
+Net: 32 / 36 resolved. 2 minor refactors remain.
 ## Critical
 
 ### C1. Deadlock: lock-ordering inversion in LspManager
@@ -113,7 +113,7 @@ Net: 31 / 36 resolved. 2 minor refactors + 1 product decision (wire I11 up or re
 ### I11. ~1500 lines of unregistered dead code in github.rs
 - **Location:** `src/tools/github.rs`
 - **Problem:** 5 full tool implementations unregistered since c808995. Maintenance burden on every `Tool` trait refactor.
-- **Status:** open — by design (re-verified 2026-04-27 — NOT dead code: file actively maintained (recent fixes in `4038036`), gated behind `github_enabled` config at `src/config/project.rs:166`, referenced by `path_security.rs:406` and `prompts/github_instructions.md`. Registration-pending, kept warm for re-enable. Either wire into `from_parts()` or formally retire — current limbo is the actual problem)
+- **Status:** fixed (2026-04-27 — retired: deleted `src/tools/github.rs`, `src/prompts/github_instructions.md`, `docs/manual/src/tools/github.md`. Removed `github_enabled` from `PathSecurityConfig`, `SecuritySection`, `GlobalSecuritySection`, `ProjectStatus`, `activate_project` output, and all gating + tests. Bumped `ONBOARDING_VERSION` to 11)
 
 ### I12. CORS allows all localhost ports
 - **Location:** `src/dashboard/routes.rs`

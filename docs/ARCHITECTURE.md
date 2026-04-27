@@ -136,7 +136,6 @@ Each tool implements the `Tool` trait (`name`, `description`, `input_schema`, `a
 | Library | `library.rs` | `list_libraries` |
 | Memory | `memory.rs` | `memory` (dispatches `read` / `write` / `list` / `delete` / `remember` / `recall` / `forget` / `refresh_anchors` via `action` param) |
 | Config | `config.rs` | `activate_project`, `project_status` |
-| GitHub | `github.rs` | `github_identity`, `github_issue`, `github_pr`, `github_file`, `github_repo` |
 
 ### Utilities (`src/util/`)
 

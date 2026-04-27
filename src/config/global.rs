@@ -33,8 +33,6 @@ pub struct GlobalSecuritySection {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_write_enabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub github_enabled: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_index_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub indexing_enabled: Option<bool>,
@@ -237,14 +235,12 @@ mod tests {
         let config = GlobalConfig {
             security: GlobalSecuritySection {
                 shell_enabled: Some(false),
-                github_enabled: Some(true),
                 ..Default::default()
             },
             ..Default::default()
         };
         let val = config.to_toml_value();
         assert_eq!(val["security"]["shell_enabled"].as_bool(), Some(false));
-        assert_eq!(val["security"]["github_enabled"].as_bool(), Some(true));
         assert!(val
             .get("security")
             .and_then(|s| s.get("shell_command_mode"))

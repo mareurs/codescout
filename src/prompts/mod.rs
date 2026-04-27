@@ -8,7 +8,6 @@ pub mod builders;
 
 /// Static server instructions — tool reference, workflow patterns, steering rules.
 pub const SERVER_INSTRUCTIONS: &str = include_str!("server_instructions.md");
-pub const GITHUB_INSTRUCTIONS: &str = include_str!("github_instructions.md");
 
 /// Kotlin-specific known issues — only injected for projects with Kotlin.
 const KOTLIN_KNOWN_ISSUES: &str = "\n\n## Language Support — Known Issues\n\n\
@@ -90,11 +89,6 @@ pub fn build_server_instructions(project_status: Option<&ProjectStatus>) -> Stri
             instructions.push_str(KOTLIN_KNOWN_ISSUES);
         }
 
-        if status.github_enabled {
-            instructions.push_str("\n\n");
-            instructions.push_str(GITHUB_INSTRUCTIONS);
-        }
-
         if let Some(prompt) = &status.system_prompt {
             instructions.push_str("\n\n## Custom Instructions\n\n");
             instructions.push_str(prompt);
@@ -123,7 +117,6 @@ pub struct ProjectStatus {
     pub memories: Vec<String>,
     pub has_index: bool,
     pub system_prompt: Option<String>,
-    pub github_enabled: bool,
     /// Other projects in the workspace, if this is a multi-project repo.
     /// None for single-project activations; Some([]) is never emitted.
     pub workspace: Option<Vec<WorkspaceProjectSummary>>,
@@ -263,7 +256,6 @@ mod tests {
             memories: vec!["architecture".into(), "conventions".into()],
             has_index: true,
             system_prompt: None,
-            github_enabled: false,
             workspace: None,
         };
         let result = build_server_instructions(Some(&status));
@@ -283,7 +275,6 @@ mod tests {
             memories: vec![],
             has_index: false,
             system_prompt: None,
-            github_enabled: false,
             workspace: None,
         };
         let result = build_server_instructions(Some(&status));
@@ -388,7 +379,6 @@ mod tests {
             memories: vec![],
             has_index: false,
             system_prompt: Some("Always use pytest.".into()),
-            github_enabled: false,
             workspace: None,
         };
         let result = build_server_instructions(Some(&status));
@@ -409,54 +399,10 @@ mod tests {
             memories: vec![],
             has_index: false,
             system_prompt: None,
-            github_enabled: false,
             workspace: None,
         };
         let result = build_server_instructions(Some(&status));
         assert!(!result.contains("## Custom Instructions"));
-    }
-
-    #[test]
-    fn build_with_github_enabled_appends_github_instructions() {
-        let status = ProjectStatus {
-            name: "test".into(),
-            path: "/tmp/test".into(),
-            languages: vec![],
-            memories: vec![],
-            has_index: false,
-            system_prompt: None,
-            github_enabled: true,
-            workspace: None,
-        };
-        let result = build_server_instructions(Some(&status));
-        assert!(
-            result.contains("github_identity"),
-            "should include GitHub tool docs when enabled"
-        );
-        assert!(
-            result.contains("github_pr"),
-            "should include GitHub PR docs when enabled"
-        );
-    }
-
-    #[test]
-    fn build_without_github_excludes_github_instructions() {
-        let status = ProjectStatus {
-            name: "test".into(),
-            path: "/tmp/test".into(),
-            languages: vec![],
-            memories: vec![],
-            has_index: false,
-            system_prompt: None,
-            github_enabled: false,
-            workspace: None,
-        };
-        let result = build_server_instructions(Some(&status));
-        // Check for content unique to github_instructions.md (not the hint in server_instructions.md)
-        assert!(
-            !result.contains("github_identity(method)"),
-            "should NOT include optional GitHub tool reference docs when disabled"
-        );
     }
 
     #[test]
@@ -468,7 +414,6 @@ mod tests {
             memories: vec![],
             has_index: false,
             system_prompt: None,
-            github_enabled: false,
             workspace: Some(vec![
                 WorkspaceProjectSummary {
                     id: "backend-kotlin".into(),
@@ -511,7 +456,6 @@ mod tests {
             memories: vec![],
             has_index: false,
             system_prompt: None,
-            github_enabled: false,
             workspace: None,
         };
         let result = build_server_instructions(Some(&status));
@@ -600,7 +544,6 @@ mod tests {
             memories: vec![],
             has_index: false,
             system_prompt: None,
-            github_enabled: false,
             workspace: None,
         };
         let result = build_server_instructions(Some(&status));
@@ -619,7 +562,6 @@ mod tests {
             memories: vec![],
             has_index: false,
             system_prompt: None,
-            github_enabled: false,
             workspace: None,
         };
         let result = build_server_instructions(Some(&status));

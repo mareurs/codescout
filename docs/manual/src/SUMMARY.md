@@ -95,7 +95,6 @@
     - [Read-Only `activate_project`](tools/activate-project-read-only.md)
     - [Tool Workflows](tools/tool-workflows.md)
     - [Onboarding Improvements](concepts/onboarding-improvements.md)
-  - [GitHub](tools/github.md)
 
 # Experimental
 

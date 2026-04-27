@@ -79,8 +79,6 @@ pub struct PathSecurityConfig {
     pub file_write_enabled: bool,
     /// Enable semantic search and indexing tools (default: true)
     pub indexing_enabled: bool,
-    /// Enable additional GitHub tools: identity, issue, pr, file (default: false)
-    pub github_enabled: bool,
     /// Read-only library paths (registered via LibraryRegistry).
     pub library_paths: Vec<PathBuf>,
     /// Additional regex patterns to flag as dangerous commands.
@@ -99,7 +97,6 @@ impl Default for PathSecurityConfig {
             shell_enabled: true,
             file_write_enabled: true,
             indexing_enabled: true,
-            github_enabled: false,
             library_paths: Vec::new(),
             shell_dangerous_patterns: Vec::new(),
             max_index_bytes: 500 * 1024 * 1024,
@@ -403,14 +400,6 @@ pub fn check_tool_access(tool_name: &str, config: &PathSecurityConfig) -> Result
                 );
             }
         }
-        "github_identity" | "github_issue" | "github_pr" | "github_file" => {
-            if !config.github_enabled {
-                bail!(
-                    "GitHub tools (identity/issue/pr/file) are disabled. Set security.github_enabled = true in .codescout/project.toml to enable."
-                );
-            }
-        }
-        // github_repo: always allowed, no gate
         _ => {} // All other tools are always allowed
     }
     Ok(())
@@ -1060,7 +1049,6 @@ mod tests {
             shell_enabled: false,
             file_write_enabled: false,
             indexing_enabled: false,
-            github_enabled: false,
             ..PathSecurityConfig::default()
         };
         // Read tools should always work
@@ -1110,76 +1098,6 @@ mod tests {
             err.to_string().contains("project.toml"),
             "error should mention config file"
         );
-        // github_enabled is false by default; use a separate config for clarity
-        let config = PathSecurityConfig {
-            github_enabled: false,
-            ..PathSecurityConfig::default()
-        };
-        let err = check_tool_access("github_pr", &config).unwrap_err();
-        assert!(
-            err.to_string().contains("github_enabled"),
-            "error should mention config key"
-        );
-        // github_repo should NOT be blocked
-        assert!(
-            check_tool_access("github_repo", &config).is_ok(),
-            "github_repo should not be gated"
-        );
-    }
-
-    #[test]
-    fn github_disabled_blocks_optional_github_tools() {
-        let config = PathSecurityConfig {
-            github_enabled: false,
-            ..PathSecurityConfig::default()
-        };
-        for tool in &[
-            "github_identity",
-            "github_issue",
-            "github_pr",
-            "github_file",
-        ] {
-            assert!(
-                check_tool_access(tool, &config).is_err(),
-                "{} should be blocked when github_enabled is false",
-                tool
-            );
-        }
-    }
-
-    #[test]
-    fn github_repo_always_allowed() {
-        let mut config = PathSecurityConfig::default();
-        // default is false, but github_repo should still be allowed
-        assert!(
-            check_tool_access("github_repo", &config).is_ok(),
-            "github_repo should always be allowed regardless of github_enabled"
-        );
-        config.github_enabled = true;
-        assert!(
-            check_tool_access("github_repo", &config).is_ok(),
-            "github_repo should be allowed when github_enabled is true"
-        );
-    }
-
-    #[test]
-    fn github_enabled_allows_optional_github_tools() {
-        let config = PathSecurityConfig {
-            github_enabled: true,
-            ..PathSecurityConfig::default()
-        };
-        for tool in &[
-            "github_identity",
-            "github_issue",
-            "github_pr",
-            "github_file",
-        ] {
-            assert!(
-                check_tool_access(tool, &config).is_ok(),
-                "{} should be allowed when github_enabled is true",
-                tool
-            );
-        }
     }
 
     #[test]
