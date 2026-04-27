@@ -3,7 +3,11 @@
 
 [[anchors]]
 path = "docs/manual/src/experimental/index.md"
-hash = "b9ef64ed5c64fb0c54099d2cbe733230f0681789b6ab04eee33a5041f7626c15"
+hash = "cff082314e4274c20aee13e52e1097df434206024ce8428de3615774e324ad03"
+
+[[anchors]]
+path = "docs/trackers/archive/experiments-to-master.md"
+hash = "e50483264f6ee8ea17af88232c57f6c7349187aa20516d9c5ba20b481a8de278"
 
 [[anchors]]
 path = "Cargo.toml"

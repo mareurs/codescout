@@ -1,8 +1,14 @@
 ---
-title: experiments → master promotion tracker
+id: null
 kind: tracker
-status: active
-tags: [release, promotion]
+status: archived
+title: experiments → master promotion tracker
+owners: []
+tags:
+- release
+- promotion
+topic: null
+time_scope: null
 ---
 
 # experiments → master promotion tracker
