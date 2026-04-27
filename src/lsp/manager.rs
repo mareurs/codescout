@@ -126,8 +126,9 @@ impl Drop for StartingCleanup<'_> {
 }
 
 /// Build the CLI argv passed to a spawned `codescout mux` child. Factored out
-/// for unit-testability; `get_or_start_via_mux` is the only caller.
-#[cfg(unix)]
+/// for unit-testability; `get_or_start_via_mux` is the only caller. Pure
+/// string manipulation — portable across platforms even though the mux process
+/// itself is currently Unix-only.
 pub(super) fn build_mux_args(
     workspace_root: &std::path::Path,
     socket_path: &std::path::Path,

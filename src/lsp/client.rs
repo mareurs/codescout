@@ -460,11 +460,9 @@ impl LspClient {
         socket_path: &std::path::Path,
         workspace_root: std::path::PathBuf,
     ) -> Result<Self> {
-        use tokio::net::UnixStream;
+        use crate::lsp::mux::transport as mux_transport;
 
-        let stream = UnixStream::connect(socket_path)
-            .await
-            .with_context(|| format!("Failed to connect to mux socket: {:?}", socket_path))?;
+        let stream = mux_transport::connect(socket_path).await?;
 
         let (read_half, write_half) = stream.into_split();
 

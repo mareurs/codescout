@@ -17,12 +17,12 @@ use anyhow::{Context, Result};
 use fs2::FileExt;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::net::UnixListener;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
 use crate::lsp::mux::protocol::{self, ClientTag, DocumentState};
+use crate::lsp::mux::transport;
 use crate::lsp::transport::{read_message, write_message};
 
 /// Writer handle shared between tasks. Both server stdin and client streams use this type.
@@ -204,21 +204,10 @@ pub async fn run(
         write_message(&mut *w, &initialized_notif).await?;
     }
 
-    // 4. Bind Unix socket
-    if socket_path.exists() {
-        std::fs::remove_file(socket_path).ok();
-    }
-    let listener = UnixListener::bind(socket_path)
-        .with_context(|| format!("failed to bind socket: {}", socket_path.display()))?;
-    // Restrict socket to the current user. Defence-in-depth on top of the
-    // per-user directory: anyone with `/tmp` read access could otherwise
-    // attempt to connect on older systems where the socket was created
-    // world-writable before this chmod.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600));
-    }
+    // 4. Bind transport endpoint (Unix socket today, named pipe on Windows).
+    //    transport::bind also restricts the endpoint to the current user as
+    //    defence-in-depth on top of the per-user mux directory.
+    let listener = transport::bind(socket_path).await?;
 
     // 5. Signal ready to parent, then drop stdout
     {
@@ -239,8 +228,8 @@ pub async fn run(
     )
     .await;
 
-    // Shutdown: remove socket file
-    std::fs::remove_file(socket_path).ok();
+    // Shutdown: cleanup endpoint (no-op for transports that don't need it).
+    transport::cleanup(socket_path);
     // flock released when lock_file drops
 
     info!("mux process shutting down");
@@ -249,7 +238,7 @@ pub async fn run(
 
 /// Main event loop — accepts clients, reads from server, checks idle timeout.
 async fn event_loop(
-    listener: &UnixListener,
+    listener: &transport::Listener,
     server_reader: &mut BufReader<tokio::process::ChildStdout>,
     server_writer: &SharedWriter,
     state: &Arc<Mutex<MuxState>>,
@@ -339,7 +328,7 @@ async fn event_loop(
 /// Per-client reader task — reads messages from a client and forwards to the server.
 async fn client_reader_task(
     tag: ClientTag,
-    mut reader: BufReader<tokio::net::unix::OwnedReadHalf>,
+    mut reader: BufReader<transport::OwnedReadHalf>,
     server_writer: SharedWriter,
     state: Arc<Mutex<MuxState>>,
 ) {

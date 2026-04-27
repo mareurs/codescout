@@ -1,5 +1,6 @@
 pub mod process;
 pub mod protocol;
+pub mod transport;
 
 #[cfg(test)]
 mod coherence_rust;
