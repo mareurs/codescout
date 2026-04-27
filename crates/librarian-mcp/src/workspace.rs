@@ -12,6 +12,8 @@ pub struct WorkspaceConfig {
     pub ignore: Vec<String>,
     #[serde(default, rename = "rule")]
     pub rules: Vec<Rule>,
+    #[serde(default, rename = "umbrella")]
+    pub umbrellas: Vec<Umbrella>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,6 +21,16 @@ pub struct WorkspaceConfig {
 pub struct Root {
     pub name: String,
     pub path: PathBuf,
+}
+
+/// User-declared grouping of sub-projects that share enough context to be
+/// queried together. Members are `"<root_name>/<rel_subdir>"` strings; an
+/// empty subdir (`"<root_name>"`) means the entire root.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Umbrella {
+    pub name: String,
+    pub members: Vec<String>,
 }
 
 pub fn default_config_path() -> Result<PathBuf> {

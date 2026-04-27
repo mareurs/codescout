@@ -160,9 +160,11 @@ mod tests {
                 }],
                 ignore: vec![],
                 rules: vec![],
+                umbrellas: vec![],
             }),
             rules: Arc::new(rules),
             embedding: None,
+            current_project: None,
         }
     }
 

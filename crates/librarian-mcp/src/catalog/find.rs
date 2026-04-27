@@ -41,6 +41,22 @@ pub fn find(cat: &Catalog, opts: &FindOpts) -> Result<Vec<ArtifactRow>> {
     rows.collect::<Result<_, _>>().map_err(Into::into)
 }
 
+/// Count of artifacts matching `filter`. Used by listing tools to generate
+/// progressive-disclosure hints ("N more in repo, M more in workspace").
+pub fn count_matching(cat: &Catalog, filter: Option<&FilterNode>) -> Result<usize> {
+    let mut sql = String::from("SELECT COUNT(*) FROM artifact");
+    let mut params: Vec<rusqlite::types::Value> = Vec::new();
+    if let Some(f) = filter {
+        let frag = compile(f)?;
+        sql.push_str(" WHERE ");
+        sql.push_str(&frag.sql);
+        params.extend(frag.params);
+    }
+    let mut stmt = cat.conn.prepare(&sql)?;
+    let n: i64 = stmt.query_row(rusqlite::params_from_iter(params.iter()), |r| r.get(0))?;
+    Ok(n.max(0) as usize)
+}
+
 /// Two-phase semantic search with iterative K backfill:
 ///
 /// 1. KNN query against artifact_vec to get top-K candidate ids by cosine distance.
