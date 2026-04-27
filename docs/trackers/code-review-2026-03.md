@@ -8,10 +8,9 @@ All 36 items re-checked against current code:
 
 - **Fixed (29):** C1–C7, I1–I14 (I11 retired 2026-04-27), M3, M4, M5, M7, M10, M11, M12, M14
 - **Obsolete (4):** M2 (`cached_instructions` removed), M6 (widened to `i64`), M8 (single shared impl), M15 (pattern gone)
-- **Open by design (2):** M9 (`RemoteEmbedder` dimensions unknown until first response), M13 (intentional tempdir leak in test fixture)
-- **Open — actionable (1):** M1 (encapsulation)
+- **Open by design (3):** M1 (re-audited 2026-04-27 — fields already `pub(crate)`, borrow contract enforces invariants), M9 (`RemoteEmbedder` dimensions unknown until first response), M13 (intentional tempdir leak in test fixture)
 
-Net: 35 / 36 resolved. Only M1 (`ActiveProject` pub fields) remains as actionable refactor.
+Net: 36 / 36 resolved. M1 closed by-design 2026-04-27 (re-audit found fields already `pub(crate)` and borrow contract enforces invariants — see M1 entry).
 ## Critical
 
 ### C1. Deadlock: lock-ordering inversion in LspManager
@@ -133,9 +132,21 @@ Net: 35 / 36 resolved. Only M1 (`ActiveProject` pub fields) remains as actionabl
 ## Minor
 
 ### M1. ActiveProject fields all pub — breaks encapsulation
-- **Location:** `src/agent.rs:88-101`
-- **Status:** open (verified 2026-04-27 — all 12 fields still `pub` at `src/agent/mod.rs:93-121`)
 
+- **Location:** `src/agent/mod.rs:93-121`
+- **Status:** closed — by design (re-audited 2026-04-27)
+- **Resolution:** Original premise was stale. Fields are already `pub(crate)`, not `pub` — no external-crate exposure. The borrow contract enforces invariants the reviewer feared losing:
+  - `Agent::with_project<F>(&self, f: F) where F: FnOnce(&ActiveProject)` hands out `&ActiveProject`, not `&mut`. External callers cannot assign to any field regardless of visibility.
+  - Mutation requires `AgentInner::active_project_mut()`, callable only inside `src/agent/mod.rs`.
+  - Cross-cutting state (`dirty_files`, `write_lock`, `file_lock`) is `Arc<Mutex<_>>` / `Arc<File>` — self-protecting via interior mutability, already routed through accessor methods (`mark_file_dirty`, `dirty_file_count`, `dirty_files_arc`).
+- **Audit (mutation sites, full-codebase grep):**
+  - `read_only`: 1 mutation (`agent/mod.rs:514`, inside `activate`) — set-once at activation
+  - `config`: 1 mutation (`agent/mod.rs:724`, inside `reload_config_if_project_toml`) — single controlled rewrite
+  - `head_sha`, `has_git_remote`: 0 mutations post-construction (read via `.clone()` only)
+  - `write_lock`, `file_lock`, `dirty_files`: 0 field mutations — only `Arc::clone` for sharing
+  - `memory`, `private_memory`, `library_registry`: internal use; expose via existing `Agent` accessor methods
+  - `root`: immutable PathBuf
+- **Why not the proposed 50-150-call-site getter sweep:** would add boilerplate without adding safety. The type system (borrow checker + module privacy) already enforces what getters would document. Revisit only if codescout is split into multiple crates (e.g. `codescout-core` / `codescout-server`).
 ### M2. Cached instructions field stale for stdio transport
 - **Location:** `src/server.rs:46-50`
 - **Status:** obsolete (verified 2026-04-27 — `cached_instructions` no longer exists; instructions generated dynamically)
