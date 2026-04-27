@@ -1,3 +1,13 @@
+---
+id: null
+kind: null
+status: done
+title: null
+owners: []
+tags: []
+topic: null
+time_scope: null
+---
 # Issue: Indexer sends oversized chunks to embedding server
 
 **Date:** 2026-04-19  
