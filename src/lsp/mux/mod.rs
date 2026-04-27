@@ -11,9 +11,22 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
+/// Compute a stable workspace hash used for naming mux endpoints and lock files.
+///
+/// On Windows, the path is ASCII-lowercased before hashing so that
+/// `C:\foo` and `c:\foo` (the same workspace, different drive-letter case)
+/// collapse to a single mux instance.
 pub fn workspace_hash(workspace_root: &Path) -> String {
     let mut hasher = DefaultHasher::new();
-    workspace_root.hash(&mut hasher);
+    #[cfg(windows)]
+    {
+        let normalized = workspace_root.to_string_lossy().to_ascii_lowercase();
+        normalized.hash(&mut hasher);
+    }
+    #[cfg(not(windows))]
+    {
+        workspace_root.hash(&mut hasher);
+    }
     format!("{:016x}", hasher.finish())
 }
 
@@ -88,5 +101,15 @@ mod tests {
         let p1 = socket_path_for_workspace("kotlin", Path::new("/project"));
         let p2 = socket_path_for_workspace("java", Path::new("/project"));
         assert_ne!(p1, p2);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn mixed_case_drive_letter_collapses_on_windows() {
+        // C:\foo and c:\foo are the same workspace on Windows; the hash
+        // (and therefore the mux endpoint) must collapse to one.
+        let upper = workspace_hash(Path::new(r"C:\Users\me\project"));
+        let lower = workspace_hash(Path::new(r"c:\users\me\project"));
+        assert_eq!(upper, lower);
     }
 }

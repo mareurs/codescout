@@ -38,7 +38,7 @@ session through the mux, and passes the bulk of `cargo test`.
 | `cargo test` on actual Windows | 🔴 open |
 | MCP smoke test (Claude Code → codescout via stdio) | 🔴 open |
 | Mux runtime test (Kotlin or Java LSP via mux) | 🔴 open |
-| CI `windows-latest` matrix job | 🔴 open |
+| CI `windows-latest` matrix job (windows-baseline + no-features rows) | ✅ done |
 
 ## Mux / LSP transport
 
@@ -81,21 +81,20 @@ session through the mux, and passes the bulk of `cargo test`.
 ## Process management
 
 ### W5. `run_command` timeout cleanup is Unix-only 🔴 open
+
 - **Location:** `src/tools/run_command.rs:1057-1175`.
 - **Issue:** Unix path uses `libc::killpg`, `libc::signal(SIGPIPE)`, and
   `process_group(0)` to kill an entire shell pipeline on timeout. Windows
-  branch (`#[cfg(windows)]` at `:1106`) spawns `cmd /C` but has no
-  process-group equivalent. Spawned grand-children orphan on timeout.
-- **Existing warning:** `child_pgid` unused in the Windows path — surface
-  symptom of this gap.
-- **Fix options:**
-  - Win32 Job Objects (`CreateJobObject` + `AssignProcessToJobObject` +
-    `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`). Cleanest; tokio doesn't expose
-    it natively, would need `windows`/`windows-sys` crate.
-  - `taskkill /T /F /PID <pid>` on timeout. Simpler but shells out and
-    races with already-exited children.
-- **Status:** 🔴 open. Pre-existing — not introduced by mux work.
-
+  branch had no equivalent — spawned grand-children orphaned on timeout.
+- **First-pass fix (commit pending):** `TaskkillGuard` mirrors the Unix
+  `PgidKillGuard`. On future drop or timeout, runs
+  `taskkill /T /F /PID <pid>` to walk the process tree. Still uses
+  `kill_on_drop(true)` for the immediate child as belt-and-braces.
+- **Status:** 🟡 partial. Job Objects (cleaner, kernel-managed) deferred
+  as brainstorm-level. `taskkill` race window: a grand-child that
+  exits-and-respawns between our `taskkill` and `wait_with_output`
+  return could escape — unlikely in shell-pipeline contexts but worth
+  a Job Objects upgrade later.
 ### W6. `terminate_process` already abstracted ✅ done
 - **Location:** `src/platform/{unix,windows}.rs`.
 - **Note:** Already does `taskkill /PID /F` on Windows for top-level
@@ -156,25 +155,23 @@ session through the mux, and passes the bulk of `cargo test`.
 - **Status:** 🚫 blocked on upstream `ort-sys` packaging.
 
 ### W12. `tikv-jemallocator` global allocator on Windows 🟡 partial
-- **Location:** `src/main.rs:5`.
-- **Note:** `tikv-jemallocator` claims Unix-focus but compiles cleanly
-  for Windows in this audit (cross-check passes). Whether it actually
-  benefits Windows or quietly degrades to system allocator is untested.
-- **Action:** measure on real Windows; consider `cfg(unix)` gating the
-  global allocator if Windows behavior is degraded.
-- **Status:** 🟡 unverified.
 
+- **Location:** `src/main.rs:5`, `Cargo.toml`.
+- **Fix (commit pending):** Both the dependency declaration and the
+  `#[global_allocator]` are now `cfg(not(windows))`-gated. Windows uses
+  the system Win32 heap. Avoids any latent `tikv-jemallocator` Windows
+  oddities and saves a build dep.
+- **Status:** ✅ done.
 ## Hardware / system probes
 
 ### W13. `hardware.rs` Windows RAM probe missing 🔴 open
-- **Location:** `src/hardware.rs:174-195`.
-- **Issue:** Linux reads `/proc/meminfo`; macOS shells `sysctl`. Windows
-  branch is absent — returns 0. Heuristics that scale by RAM see a
-  zero-RAM machine.
-- **Fix:** call `GlobalMemoryStatusEx` via `windows-sys` (kernel32). One
-  function; small surface.
-- **Status:** 🔴 open. Non-fatal — falls through to defaults.
 
+- **Location:** `src/hardware.rs:171-228`.
+- **Fix (commit pending):** `#[cfg(windows)]` branch calls
+  `GlobalMemoryStatusEx` via `windows-sys` (newly-added Windows-only
+  dep, feature `Win32_System_SystemInformation`). Returns total physical
+  RAM in GiB, falling through to `0` on probe failure.
+- **Status:** ✅ done.
 ## Shell / process invocation
 
 ### W14. Shell command branching abstracted ✅ done
@@ -205,24 +202,30 @@ session through the mux, and passes the bulk of `cargo test`.
 - **Status:** 🔴 open.
 
 ### W18. Drive-letter case sensitivity 🔴 open
-- **Issue:** Windows treats `C:\foo` and `c:\foo` as the same path.
-  Hashing for `socket_path_for_workspace` uses raw `PathBuf` hashing
-  via `DefaultHasher` — case-different drive letters yield different
-  workspace hashes, so a single workspace can fork into multiple mux
-  instances.
-- **Fix:** lower-case the workspace root on Windows before hashing in
-  `mux::workspace_hash`.
-- **Status:** 🔴 open.
 
+- **Issue:** Windows treats `C:\foo` and `c:\foo` as the same path.
+  Hashing for `socket_path_for_workspace` used raw `PathBuf` hashing
+  via `DefaultHasher` — case-different drive letters yielded different
+  workspace hashes, forking a single workspace into multiple mux
+  instances.
+- **Fix (commit pending):** `mux::workspace_hash` ASCII-lowercases the
+  workspace root on Windows before hashing. Unix path unchanged.
+  `#[cfg(windows)]` test `mixed_case_drive_letter_collapses_on_windows`
+  pins the contract.
+- **Status:** ✅ done.
 ## CI / tooling
 
 ### W19. CI `windows-latest` matrix job 🔴 open
-- **Action:** add a `windows-latest` runner to the existing GitHub
-  Actions workflow. Run `cargo build --no-default-features --features
-  remote-embed,http,dashboard` and `cargo test --lib` at minimum.
-  `local-embed` deferred until W11 is resolved.
-- **Status:** 🔴 open.
 
+- **Action (done):** existing `.github/workflows/ci.yml` already had a
+  `windows-latest` row but ran feature combos that pull `local-embed`
+  (W11), guaranteed to fail. Updated matrix to:
+  - exclude `default` and `local-embed` rows on Windows
+  - add `windows-baseline` row using
+    `--no-default-features --features remote-embed,http,dashboard`
+  - keep `no-features` row on Windows for minimal-build coverage.
+- **Status:** ✅ done. Re-evaluate when W11 is decided (then either drop
+  the exclude or extend it).
 ### W20. `dunce`-style canonicalize helper 🔴 open
 - **Action:** decide whether to take a dep on `dunce` (small, pure-Rust
   UNC normaliser) or hand-roll a stripper in `util/fs.rs`. Required
@@ -239,10 +242,12 @@ session through the mux, and passes the bulk of `cargo test`.
   child, second mux acquires lock, etc.).
 
 ### W22. Tokio signals 🔴 open
-- **Note:** `tokio::signal::unix` is Unix-only. Search for any uses;
-  if found, replace with `tokio::signal::ctrl_c` for Windows.
-- **Action:** grep audit.
 
+- **Audit result:** `src/server.rs:799-823` `shutdown_signal` already
+  uses `#[cfg(unix)]` for `tokio::signal::unix` (SIGTERM, SIGHUP) and
+  `#[cfg(not(unix))]` for `tokio::signal::ctrl_c` only. No other uses
+  of `tokio::signal::unix` in the tree.
+- **Status:** ✅ done (was already correct — audit confirmed).
 ### W23. LSP server discovery (PATHEXT) 🔴 open
 - **Note:** `platform::lsp_binary_name` adds `.exe`/`.cmd` on Windows.
   Untested whether Windows PATH lookup actually finds the binary —
@@ -265,28 +270,33 @@ session through the mux, and passes the bulk of `cargo test`.
 | Bucket | ✅ done | 🟡 partial | 🔴 open | 🚫 blocked |
 |--------|--------|------------|---------|-----------|
 | Mux / LSP transport | 2 | 2 | 0 | 0 |
-| Process management | 1 | 0 | 1 | 0 |
-| Path / filesystem | 1 | 1 | 2 | 0 |
-| Embedding | 0 | 1 | 0 | 1 |
-| Hardware | 0 | 0 | 1 | 0 |
+| Process management | 1 | 1 | 0 | 0 |
+| Path / filesystem | 2 | 1 | 1 | 0 |
+| Embedding | 1 | 0 | 0 | 1 |
+| Hardware | 1 | 0 | 0 | 0 |
 | Shell | 2 | 0 | 0 | 0 |
 | Security / paths | 1 | 0 | 2 | 0 |
-| CI / tooling | 0 | 0 | 2 | 0 |
+| CI / tooling | 1 | 0 | 1 | 0 |
+| Signals (W22) | 1 | 0 | 0 | 0 |
 | Unaudited | 0 | 0 | 5 | 0 |
-| **Totals** | **7** | **4** | **13** | **1** |
-
+| **Totals** | **12** | **4** | **9** | **1** |
 ## Next moves (ordered by leverage)
 
-1. **W19** — CI windows-latest job. Cheapest way to keep regressions out.
-2. **W11 decision** — ship Windows with `local-embed` off OR adopt MSVC
-   cross-build via `xwin`. Rest of plan branches off this.
-3. **W5** — process group cleanup (Job Objects). Largest correctness gap
-   for users running shell pipelines.
-4. **W18, W17, W7** — path/security correctness pass. All small, can
-   bundle into one commit with `dunce` adopted under W20.
-5. **W11 runtime gates** — actual Windows runtime test for mux + at least
-   one LSP. Without this we have hypothesis, not a port.
+Low-hanging fruit landed (W5 first-pass, W12, W13, W18, W19, W22). Remaining
+items need brainstorming or a real Windows machine:
 
+1. **W11 decision** — ship Windows with `local-embed` off (current
+   posture) OR adopt MSVC cross-build via `xwin` to get `ort-sys`
+   prebuilts. Decision blocks W19 matrix expansion.
+2. **W7, W17, W20** — path/security pass: dunce dep adoption, Windows
+   symlink validation, UNC normalisation. One bundled commit.
+3. **W8** — audit hardcoded `/tmp` write-root in `path_security.rs`;
+   route through `platform::temp_dir()`.
+4. **W5 upgrade** — swap `taskkill` for Win32 Job Objects
+   (`CreateJobObject` + `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`). Removes
+   the `taskkill` race window.
+5. **W21–W25** — actual Windows runtime tests. Until these run, the
+   port is hypothesis.
 ## References
 
 - Phase A commit: `3b6f8c3` — concentrate IPC behind `transport` module.

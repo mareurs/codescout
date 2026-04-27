@@ -206,6 +206,21 @@ async fn probe_ram() -> u64 {
             }
         }
     }
+    // Windows: GlobalMemoryStatusEx. The call is cheap and synchronous;
+    // no spawn_blocking needed.
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+        // SAFETY: MEMORYSTATUSEX is a plain C struct; zero-initialising and
+        // setting dwLength is the documented init pattern. GlobalMemoryStatusEx
+        // is safe to call from any thread and only writes to the struct we
+        // pass in.
+        let mut status: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
+        status.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+        if unsafe { GlobalMemoryStatusEx(&mut status) } != 0 {
+            return status.ullTotalPhys / 1024 / 1024 / 1024;
+        }
+    }
     0
 }
 

@@ -36,7 +36,6 @@ name = "codescout"
 path = "src/main.rs"
 
 [dependencies]
-tikv-jemallocator = "0.6"
 fs2 = "0.4"
 fs4 = "0.12"
 # Async runtime
@@ -122,6 +121,16 @@ uuid = { version = "1.20.0", features = ["v4"] }
 # Poison-free, faster synchronization primitives for short-held locks in async
 # hot paths where std::sync poisoning is a correctness footgun.
 parking_lot = "0.12"
+
+# jemalloc is Unix-focused; on Windows fall back to the system allocator.
+[target.'cfg(not(windows))'.dependencies]
+tikv-jemallocator = "0.6"
+
+# Windows-only system bindings used for RAM probing and (future) Job Objects.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_System_SystemInformation",
+] }
 
 [features]
 default = ["remote-embed", "local-embed", "dashboard", "http"]

@@ -703,6 +703,29 @@ impl Drop for BackgroundKillGuard {
     }
 }
 
+/// Windows analogue of `PgidKillGuard`: walks the process tree via
+/// `taskkill /T /F /PID` so grand-children spawned by `cmd /C`
+/// (for-loops, batch files, piped commands) are reaped along with the
+/// immediate child when the future is cancelled or times out. The
+/// closest semantic match to Unix's `killpg(pgid, SIGKILL)`.
+#[cfg(windows)]
+struct TaskkillGuard(Option<i32>);
+
+#[cfg(windows)]
+impl Drop for TaskkillGuard {
+    fn drop(&mut self) {
+        if let Some(pid) = self.0 {
+            // Best-effort: process may already be gone. /T walks the tree;
+            // /F is unconditional kill.
+            let _ = std::process::Command::new("taskkill")
+                .args(["/T", "/F", "/PID", &pid.to_string()])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
+    }
+}
+
 fn inject_tee(
     resolved_command: &str,
     buffer_only: bool,
@@ -1105,18 +1128,27 @@ async fn run_command_inner(
 
     #[cfg(windows)]
     let (child_output_fut, child_pgid) = {
+        let mut cmd = tokio::process::Command::new("cmd");
+        cmd.arg("/C")
+            .arg(&effective_command)
+            .current_dir(&work_dir)
+            .env("GIT_PAGER", "cat")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true);
+        let child = cmd.spawn()?;
+        let pid: Option<i32> = child.id().map(|id| id as i32);
+        let pid_for_guard = pid;
         let fut: std::pin::Pin<
             Box<dyn std::future::Future<Output = std::io::Result<std::process::Output>> + Send>,
-        > = Box::pin(
-            tokio::process::Command::new("cmd")
-                .arg("/C")
-                .arg(&effective_command)
-                .current_dir(&work_dir)
-                .env("GIT_PAGER", "cat")
-                .kill_on_drop(true)
-                .output(),
-        );
-        (fut, None::<i32>)
+        > = Box::pin(async move {
+            let mut guard = TaskkillGuard(pid_for_guard);
+            let result = child.wait_with_output().await;
+            // Successful completion: disarm the guard so Drop is a no-op.
+            guard.0 = None;
+            result
+        });
+        (fut, pid)
     };
 
     // Heartbeat: send elapsed-seconds progress every 3s while the command runs.
@@ -1163,6 +1195,18 @@ async fn run_command_inner(
                 // killpg with SIGKILL is the only reliable way to stop the whole pipeline
                 // tree (sh + curl + grep + tee + head) in one shot.
                 unsafe { libc::killpg(pgid, libc::SIGKILL) };
+            }
+            #[cfg(windows)]
+            if let Some(pid) = child_pgid {
+                // Walk the process tree via taskkill — Windows analogue of
+                // killpg. The TaskkillGuard inside the dropped future also
+                // fires; this is belt-and-braces in case the future is
+                // somehow held alive past the timeout.
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/T", "/F", "/PID", &pid.to_string()])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
             }
             Ok(json!({
                 "timed_out": true,

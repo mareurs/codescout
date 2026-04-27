@@ -1,6 +1,11 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+// jemalloc is Unix-focused; Windows falls back to the system allocator.
+// `tikv_jemallocator` does not officially support Windows, and even when it
+// compiles its arena retention semantics differ enough that we'd prefer the
+// well-tuned default Win32 heap.
+#[cfg(not(windows))]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
