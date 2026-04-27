@@ -28,6 +28,18 @@ When adding a feature commit to `experiments`:
 - Add entry to `docs/manual/src/experimental/index.md`
 - On graduation to master: `git mv` doc to target chapter, remove callout, update SUMMARY.md
 
+## Promotion History (experiments → master)
+
+Historical log of feature clusters promoted from `experiments` to `master` lives in
+`docs/trackers/archive/experiments-to-master.md` (archived 2026-04-27 — was misclassified as
+an active tracker). Use it to look up:
+- Which feature clusters have already graduated (e.g. cargo workspace, jemalloc, bash support,
+  librarian-mcp, mux rust rollout, metadata-enriched chunks).
+- Which graduated as ⚠ experimental vs fully promoted (still carry the experimental callout).
+
+For *current* in-flight promotion candidates, use `git log experiments ^master` rather than a
+tracker file — git is the source of truth.
+
 ## CI Rules (enforced pre-commit)
 
 - `cargo fmt` — no formatting diffs
