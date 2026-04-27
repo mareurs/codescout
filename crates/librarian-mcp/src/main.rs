@@ -20,6 +20,9 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
+    /// Print a short hint block for companion plugins to inject at session start.
+    /// Stable, side-effect-free; safe to call from shell hooks.
+    PrintCompanionHint,
 }
 
 #[tokio::main]
@@ -35,6 +38,11 @@ async fn main() -> Result<()> {
         Some(Cmd::ImportCodescout) => librarian_mcp::import_codescout(),
         Some(Cmd::Reindex { repo, force }) => {
             librarian_mcp::reindex_cli(repo.as_deref(), force).await
+        }
+        Some(Cmd::PrintCompanionHint) => {
+            const COMPANION_HINT: &str = include_str!("prompts/companion_hint.md");
+            print!("{COMPANION_HINT}");
+            Ok(())
         }
     }
 }
