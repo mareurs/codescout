@@ -298,6 +298,50 @@ across sessions until OS reboot clears `/tmp`.
 
 **Context:** See `docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md`
 
+### Dangerous-Command Audit Log
+
+**Priority:** Medium | **Effort:** Small/Medium
+
+`run_command` already detects dangerous commands (sudo, `rm -rf`, force-push, etc.)
+and routes them through the two-round-trip `acknowledge_risk` gate. What it does
+**not** do today is record those calls anywhere durable — once the response is
+returned, the command and its output are only visible in the live `@cmd_*`
+buffer (LRU, 20 entries, session-scoped) and the optional `--diagnostic` log.
+
+For projects where multiple agents share the same shell-enabled instance, this
+is too thin: there is no after-the-fact way to answer "what `sudo` calls did the
+agent run last week, on which project, with what output?".
+
+**Goal:** persist every dangerous-command invocation (and the user's
+acknowledge_risk decision) to a per-project audit log that survives restarts
+and is straightforward to inspect.
+
+**Sketch:**
+- New table in `.codescout/usage.db` (already SQLite; see `src/usage/db.rs`):
+  `dangerous_commands(rowid, ts_unix_ms, project, cwd, command, matched_pattern,
+  acknowledged, exit_code, stdout_excerpt, stderr_excerpt, agent_id)`.
+- Write site: the existing dangerous-detection branch in `run_command` —
+  log on both rejection (first round-trip) and execution (second round-trip
+  with `acknowledge_risk: true`), so denials are auditable too.
+- Read site: a new tool, e.g. `audit_log(action="list", since="…", project="…")`
+  or extend `project_status` with a recent-dangerous-commands tail.
+- Excerpts capped (e.g. first/last 32 lines) so the table stays small.
+- Optional: opt-out via `[security] audit_disabled = true` in `project.toml`,
+  but default ON — auditability beats convenience for this category.
+
+**Open questions:**
+- Where do shell calls inside sub-agents get attributed? Tag with the
+  spawning session id if available.
+- Should we hash the command instead of storing it verbatim when secrets
+  are likely (e.g. `--password=`)? Maybe redact known secret-flag patterns
+  before insert.
+- Surface a UI in the dashboard (`src/dashboard/`) — list view + per-row
+  drill-down to the buffered output if the cmd_id is still alive.
+
+**Context:** see `is_dangerous_command` and the `acknowledge_risk` flow in
+`src/tools/run_command.rs`; companion plugin's `pre-tool-guard.sh` already
+funnels every Bash call through `run_command`, so the audit hook covers all
+agent shell activity.
 ## Contributor Skills
 
 Three Claude Code skills living in `.claude/skills/` within this repo. Contributors who open codescout in Claude Code get them automatically — no build step required. See [`plans/2026-02-26-contributor-skills-design.md`](plans/2026-02-26-contributor-skills-design.md) for the full design.
