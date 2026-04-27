@@ -13,14 +13,25 @@ use std::path::{Path, PathBuf};
 
 /// Compute a stable workspace hash used for naming mux endpoints and lock files.
 ///
-/// On Windows, the path is ASCII-lowercased before hashing so that
-/// `C:\foo` and `c:\foo` (the same workspace, different drive-letter case)
-/// collapse to a single mux instance.
+/// On Windows, the path is normalised before hashing so that
+/// `C:\foo`, `c:\foo`, and `C:/foo` all collapse to a single mux instance:
+///
+/// * forward slashes are replaced with backslashes (Win32 accepts both),
+/// * the result is ASCII-lowercased (drive-letter case insensitivity).
+///
+/// Known limitations: verbatim paths (`\\?\C:\foo`), UNC paths
+/// (`\\server\share`), and full-Unicode case folding are NOT collapsed.
+/// The first two require deeper canonicalisation (tracker W17/W20);
+/// non-ASCII case folding would need ICU and is out of scope for the
+/// 16-hex-char mux endpoint name.
 pub fn workspace_hash(workspace_root: &Path) -> String {
     let mut hasher = DefaultHasher::new();
     #[cfg(windows)]
     {
-        let normalized = workspace_root.to_string_lossy().to_ascii_lowercase();
+        let normalized = workspace_root
+            .to_string_lossy()
+            .replace('/', "\\")
+            .to_ascii_lowercase();
         normalized.hash(&mut hasher);
     }
     #[cfg(not(windows))]
@@ -111,5 +122,15 @@ mod tests {
         let upper = workspace_hash(Path::new(r"C:\Users\me\project"));
         let lower = workspace_hash(Path::new(r"c:\users\me\project"));
         assert_eq!(upper, lower);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn forward_slash_path_collapses_with_backslash_on_windows() {
+        // Cargo, many tools, and humans frequently emit forward slashes on
+        // Windows. The mux must treat them as the same workspace.
+        let backslash = workspace_hash(Path::new(r"C:\Users\me\project"));
+        let slash = workspace_hash(Path::new("C:/Users/me/project"));
+        assert_eq!(backslash, slash);
     }
 }
