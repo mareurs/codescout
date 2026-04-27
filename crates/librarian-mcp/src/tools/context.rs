@@ -3,16 +3,28 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::catalog::{artifact, links};
+use crate::filter::FilterNode;
 
+use super::scope::{apply_scope, Scope};
 use super::{Tool, ToolContext};
+
+const HIDDEN_STATUSES: &[&str] = &["archived", "superseded"];
 
 pub struct LibrarianContext;
 
 #[derive(Deserialize)]
+
 struct Args {
+    #[serde(default)]
     topic: Option<String>,
+    #[serde(default)]
     anchor_id: Option<String>,
+    #[serde(default)]
     max_tokens: Option<usize>,
+    #[serde(default)]
+    scope: Option<Scope>,
+    #[serde(default)]
+    include_archived: bool,
 }
 
 const DEFAULT_MAX_TOKENS: usize = 4000;
@@ -24,16 +36,25 @@ impl Tool for LibrarianContext {
     }
 
     fn description(&self) -> &'static str {
-        "Build a packed markdown context bundle around a topic or anchor artifact."
+        "Pack a topic or anchor's neighbourhood into a markdown bundle. \
+         Defaults: scope=project (current sub-project only), archived/superseded \
+         excluded. Pass scope=repo|umbrella|all to widen, include_archived=true to \
+         surface archived/superseded artifacts. Anchor mode ignores scope."
     }
 
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "topic": {"type": "string"},
-                "anchor_id": {"type": "string"},
-                "max_tokens": {"type": "integer"}
+                "topic": {"type": "string", "description": "Subject for semantic / LIKE search across titles & topics"},
+                "anchor_id": {"type": "string", "description": "Artifact id to anchor the bundle (uses link graph)"},
+                "max_tokens": {"type": "integer", "default": 4000, "description": "Approximate token budget"},
+                "scope": {
+                    "type": "string",
+                    "enum": ["project", "repo", "umbrella", "all"],
+                    "default": "project"
+                },
+                "include_archived": {"type": "boolean", "default": false}
             }
         })
     }
@@ -46,7 +67,16 @@ impl Tool for LibrarianContext {
         let max_tokens = a.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS);
         let char_cap = max_tokens * 4;
 
-        // If topic + embedder: compute the embedding vector *before* locking the catalog.
+        // Resolve scope for topic search. Anchor mode ignores scope (caller
+        // already pinned a specific artifact).
+        let requested_scope = a.scope.unwrap_or_default();
+        let (effective_scope, scope_fallback) =
+            match (requested_scope, ctx.current_project.is_some()) {
+                (Scope::Project | Scope::Repo, false) => (Scope::All, true),
+                (s, _) => (s, false),
+            };
+        let current = ctx.current_project.as_deref();
+
         let topic_vec: Option<Vec<f32>> =
             if let (Some(ref topic), Some(ref svc)) = (&a.topic, &ctx.embedding) {
                 Some(svc.embedder.embed_query(topic).await?)
@@ -54,11 +84,9 @@ impl Tool for LibrarianContext {
                 None
             };
 
-        // Collect candidate artifact IDs in order (all sync, lock held only briefly).
         let candidate_ids: Vec<String> = {
             let cat = ctx.catalog.lock();
             if let Some(ref anchor_id) = a.anchor_id {
-                // Start with anchor, then depth-1 neighbors (dedupe)
                 let mut ids: Vec<String> = vec![anchor_id.clone()];
                 let out = links::outgoing(&cat, anchor_id)?;
                 let inc = links::incoming(&cat, anchor_id)?;
@@ -74,12 +102,23 @@ impl Tool for LibrarianContext {
                 }
                 ids
             } else if a.topic.is_some() {
+                let archived_clause = if a.include_archived {
+                    None
+                } else {
+                    Some(FilterNode::Leaf(
+                        [("status".to_string(), json!({"nin": HIDDEN_STATUSES}))]
+                            .into_iter()
+                            .collect(),
+                    ))
+                };
+                let (scoped_filter, _) =
+                    apply_scope(archived_clause, effective_scope, &ctx.workspace, current)?;
+
                 if let Some(vec) = topic_vec {
-                    // Semantic search path
                     let rows = find(
                         &cat,
                         &FindOpts {
-                            filter: None,
+                            filter: scoped_filter,
                             limit: 50,
                             offset: 0,
                             semantic: Some(vec),
@@ -87,27 +126,48 @@ impl Tool for LibrarianContext {
                     )?;
                     rows.into_iter().map(|r| r.id).collect()
                 } else {
-                    // LIKE fallback when no embedder
+                    // LIKE fallback: build a title|topic OR clause and AND with scope.
                     let topic = a.topic.as_deref().unwrap_or("");
-                    let pattern = format!("%{topic}%");
-                    let mut stmt = cat.conn.prepare(
-                        "SELECT id FROM artifact \
-                         WHERE title LIKE ?1 OR topic LIKE ?1 \
-                         ORDER BY updated_at DESC LIMIT 50",
+                    let topic_clause = FilterNode::Or {
+                        or: vec![
+                            FilterNode::Leaf(
+                                [("title".to_string(), json!({"contains": topic}))]
+                                    .into_iter()
+                                    .collect(),
+                            ),
+                            FilterNode::Leaf(
+                                [("topic".to_string(), json!({"contains": topic}))]
+                                    .into_iter()
+                                    .collect(),
+                            ),
+                        ],
+                    };
+                    let combined = match scoped_filter {
+                        Some(s) => FilterNode::And {
+                            and: vec![s, topic_clause],
+                        },
+                        None => topic_clause,
+                    };
+                    let rows = find(
+                        &cat,
+                        &FindOpts {
+                            filter: Some(combined),
+                            limit: 50,
+                            offset: 0,
+                            semantic: None,
+                        },
                     )?;
-                    let ids: Vec<String> = stmt
-                        .query_map(rusqlite::params![pattern], |row| row.get(0))?
-                        .filter_map(|r| r.ok())
-                        .collect();
-                    ids
+                    rows.into_iter().map(|r| r.id).collect()
                 }
             } else {
-                return Ok(json!({"markdown": "", "included_ids": []}));
+                return Ok(json!({
+                    "markdown": "",
+                    "included_ids": [],
+                    "scope": scope_summary(effective_scope, current, scope_fallback),
+                }));
             }
-            // MutexGuard dropped here
         };
 
-        // Batch-fetch all candidate rows in a single query.
         let rows_map: HashMap<String, artifact::ArtifactRow> = {
             let cat = ctx.catalog.lock();
             if candidate_ids.is_empty() {
@@ -131,7 +191,6 @@ impl Tool for LibrarianContext {
             }
         };
 
-        // Build root lookup: repo name → root path
         let root_map: std::collections::HashMap<String, std::path::PathBuf> = ctx
             .workspace
             .roots
@@ -143,13 +202,10 @@ impl Tool for LibrarianContext {
         let mut included_ids: Vec<String> = Vec::new();
 
         for id in &candidate_ids {
-            // Look up row from the batch result, preserving candidate order.
             let row = match rows_map.get(id) {
                 Some(r) => r,
                 None => continue,
             };
-
-            // Read file content
             let repo_root = match root_map.get(&row.repo) {
                 Some(p) => p,
                 None => continue,
@@ -159,31 +215,21 @@ impl Tool for LibrarianContext {
                 Ok(c) => c,
                 Err(_) => continue,
             };
-
-            // Extract body (skip frontmatter)
             let body = match crate::frontmatter::parse(&content) {
                 Ok((_, body)) => body.to_string(),
                 Err(_) => content.clone(),
             };
-
-            // First 30 lines of body
             let first_30: String = body.lines().take(30).collect::<Vec<_>>().join("\n");
-
-            // Render section
             let title = row.title.as_deref().unwrap_or("(untitled)");
             let section = format!(
                 "## {}  — {}/{}  ({}/{})\n{}\n\n",
                 title, row.kind, row.status, row.repo, row.rel_path, first_30
             );
-
-            // Check token budget (chars / 4 approximation)
             if !markdown.is_empty() && (markdown.len() + section.len()) > char_cap {
                 break;
             }
-
             markdown.push_str(&section);
             included_ids.push(id.clone());
-
             if markdown.len() >= char_cap {
                 break;
             }
@@ -191,9 +237,29 @@ impl Tool for LibrarianContext {
 
         Ok(json!({
             "markdown": markdown,
-            "included_ids": included_ids
+            "included_ids": included_ids,
+            "scope": scope_summary(effective_scope, current, scope_fallback),
         }))
     }
+}
+
+fn scope_summary(
+    scope: Scope,
+    current: Option<&crate::current_project::CurrentProject>,
+    fallback: bool,
+) -> Value {
+    json!({
+        "applied": match scope {
+            Scope::Project => "project",
+            Scope::Repo => "repo",
+            Scope::Umbrella => "umbrella",
+            Scope::All => "all",
+        },
+        "root": current.map(|c| c.root.clone()),
+        "subdir": current.map(|c| c.subdir.clone()),
+        "umbrella": current.and_then(|c| c.umbrella.clone()),
+        "scope_fallback": fallback,
+    })
 }
 
 #[cfg(test)]
@@ -358,5 +424,55 @@ mod tests {
 
         assert_eq!(v["markdown"].as_str().unwrap(), "");
         assert_eq!(v["included_ids"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn project_scope_excludes_other_repos() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let in_proj = sample_row(
+            "in",
+            "claude",
+            "code-explorer/auth.md",
+            "auth notes",
+            Some("auth"),
+        );
+        let out_proj = sample_row("out", "agents", "x/auth.md", "auth elsewhere", Some("auth"));
+        let auth_path = root.join("code-explorer");
+        std::fs::create_dir_all(&auth_path).unwrap();
+        std::fs::write(auth_path.join("auth.md"), "# auth\nbody").unwrap();
+        artifact::upsert(&cat, &in_proj).unwrap();
+        artifact::upsert(&cat, &out_proj).unwrap();
+
+        let ctx = ToolContext {
+            catalog: Arc::new(parking_lot::Mutex::new(cat)),
+            workspace: Arc::new(WorkspaceConfig {
+                roots: vec![Root {
+                    name: "claude".into(),
+                    path: root,
+                }],
+                ignore: vec![],
+                rules: vec![],
+                umbrellas: vec![],
+            }),
+            rules: Arc::new(vec![]),
+            embedding: None,
+            current_project: Some(Arc::new(crate::current_project::CurrentProject {
+                root: "claude".into(),
+                subdir: "code-explorer".into(),
+                umbrella: None,
+            })),
+        };
+
+        let v = LibrarianContext
+            .call(&ctx, json!({"topic": "auth"}))
+            .await
+            .unwrap();
+        let included = v["included_ids"].as_array().unwrap();
+        assert_eq!(included.len(), 1);
+        assert_eq!(included[0], "in");
+        assert_eq!(v["scope"]["applied"], "project");
     }
 }

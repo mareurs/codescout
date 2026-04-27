@@ -23,7 +23,7 @@ through file frontmatter.
 ## Filter AST
 
 JSON tree. Composition: `and`, `or`, `not`. Leaf ops: `eq`, `ne`, `in`,
-`nin`, `gt`, `lt`, `gte`, `lte`, `contains`.
+`nin`, `gt`, `lt`, `gte`, `lte`, `contains`, `prefix`.
 
 Allowed fields: `id`, `kind`, `status`, `repo`, `title`, `topic`,
 `time_scope`, `tags`, `owners`, `rel_path`, `updated_at`, `created_at`,
@@ -43,6 +43,9 @@ Example:
   array contains the value exactly.
 - On `title` / any scalar column: substring (SQL LIKE `%val%`).
 
+`prefix` is LIKE `val%` with SQL wildcards in `val` escaped — used by scope
+to pin rel_path to a sub-directory.
+
 Times are ms-epoch integers, not ISO-8601.
 
 ## Kinds
@@ -55,6 +58,36 @@ Times are ms-epoch integers, not ISO-8601.
 `unknown → draft → active → (blocked ↔ active) → done → archived`.
 `superseded` is terminal and set automatically by `artifact_link` with
 `rel="supersedes"` on the dst.
+
+## Default scope (project, archived hidden)
+
+Listing tools (`artifact_list_by_kind`, `artifact_find`, `librarian_context`)
+default to **the agent's current sub-project** and **hide archived/superseded**.
+
+- `scope`: `"project"` (default) | `"repo"` | `"umbrella"` | `"all"`.
+  - `project` = files under the current sub-project (cwd → nearest `.git`
+    inside a configured root).
+  - `repo` = whole current root.
+  - `umbrella` = members of the umbrella the current project belongs to;
+    errors when no umbrella is declared for it.
+  - `all` = pre-scoping workspace-wide behaviour.
+- `include_archived: true` surfaces `archived` / `superseded` rows.
+- An explicit `status` filter wins over the archived-hide default.
+- Responses include a `scope` block (applied scope + resolved root/subdir/
+  umbrella) and `hints` reporting how many extra rows live at wider scopes
+  (`more_in_repo`, `more_in_umbrella`, `more_in_workspace`,
+  `hidden_archived`) plus an `expand` list of args to widen.
+- When cwd is outside every configured root, scope falls back to `all` and
+  the response surfaces `scope_fallback` in hints.
+
+**Umbrellas are user-declared** in `workspace.toml`:
+
+    [[umbrella]]
+    name = "my-platform"
+    members = ["infra/svc-a", "infra/svc-b"]
+
+Leaf ops gain `prefix` (LIKE `val%` with `_`/`%` escaped) for safe
+`rel_path` matching used by scope clauses.
 
 ## Limits
 
