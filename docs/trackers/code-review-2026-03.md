@@ -6,12 +6,12 @@ Full codebase audit of codescout (60K lines, 82 files). Issues prioritized by se
 
 All 36 items re-checked against current code:
 
-- **Fixed (25):** C1–C7, I1–I10, I12, I13, I14, M2, M5, M11, M12, M14
+- **Fixed (28):** C1–C7, I1–I10, I12, I13, I14, M2, M3, M4, M5, M7, M11, M12, M14
 - **Obsolete (3):** M6 (widened to `i64`), M8 (single shared impl), M15 (pattern gone)
 - **Open by design (3):** I11 (`tools/github.rs` registration-pending, gated by `github_enabled`), M9 (`RemoteEmbedder` dimensions unknown until first response), M13 (intentional tempdir leak in test fixture)
-- **Open — actionable (5):** M1 (encapsulation), M3 (naive replacement), M4 (blocking I/O under async lock), M7 (reader-task duplication), M10 (11 detected langs lack AST)
+- **Open — actionable (2):** M1 (encapsulation), M10 (11 detected langs lack AST)
 
-Net: 28 / 36 resolved. 5 minor refactors + 1 product decision (wire I11 up or retire) remain.
+Net: 31 / 36 resolved. 2 minor refactors + 1 product decision (wire I11 up or retire) remain.
 ## Critical
 
 ### C1. Deadlock: lock-ordering inversion in LspManager
@@ -142,11 +142,11 @@ Net: 28 / 36 resolved. 5 minor refactors + 1 product decision (wire I11 up or re
 
 ### M3. strip_project_root_from_result uses naive string replacement
 - **Location:** `src/server.rs:634-648`
-- **Status:** open (verified 2026-04-27 — function at `src/server.rs:1149-1175`, used at L316; still naive `content.replace`)
+- **Status:** fixed (re-verified 2026-04-27 — delegates to `strip_prefix_from_text` at `src/server.rs:1181` which checks for value-boundary chars (quotes, spaces, colons, newlines) before stripping; preserves embedded path literals inside code/comments)
 
 ### M4. project_status does blocking file I/O under async read lock
 - **Location:** `src/agent.rs:461-501`
-- **Status:** open (verified 2026-04-27 — `std::fs::read_to_string` / `File::open` under `inner.read().await` at `src/agent/mod.rs:624-680`)
+- **Status:** fixed (2026-04-27 — split into Phase 1 (cheap clones under read lock), Phase 2 (`memory.list()` + FS reads in `tokio::task::spawn_blocking`), Phase 3 (workspace summary). Cloned `MemoryStore` (cheap, just `PathBuf`) instead of holding the lock)
 
 ### M5. Stale comment says retry disabled but RETRY_ON_CANCELLED = true
 - **Location:** `src/lsp/client.rs:448`
@@ -158,7 +158,7 @@ Net: 28 / 36 resolved. 5 minor refactors + 1 product decision (wire I11 up or re
 
 ### M7. Reader task code duplicated between start() and connect()
 - **Location:** `src/lsp/client.rs:327`
-- **Status:** open (verified 2026-04-27 — duplicated spawn blocks at `src/lsp/client.rs:349-375` and `483-500`)
+- **Status:** fixed (2026-04-27 — extracted `Self::run_dispatch_loop<R: AsyncRead>` and `Self::drain_pending_disconnect` helpers in `src/lsp/client.rs`; both `start()` and `connect()` now call the shared loop, keeping only their transport-specific cleanup (child wait + warn logging vs. silent drain))
 
 ### M8. Duplicated get_ts_language with different case sensitivity
 - **Location:** `src/embed/ast_chunker.rs` + `src/ast/parser.rs`
