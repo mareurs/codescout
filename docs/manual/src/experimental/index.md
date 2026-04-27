@@ -6,6 +6,4 @@
 
 ## Available Features
 
-No experimental features at this time. Features land here before their APIs
-stabilise and graduate to the main manual. Check back as new work lands on
-the [`experiments` branch](https://github.com/mareurs/codescout/tree/experiments).
+- [Librarian Companion Hint](./librarian-companion-hint.md) — `librarian-mcp print-companion-hint` subcommand + `codescout-companion` SessionStart wiring so LLMs discover Librarian alongside codescout.
