@@ -6,12 +6,12 @@ Full codebase audit of codescout (60K lines, 82 files). Issues prioritized by se
 
 All 36 items re-checked against current code:
 
-- **Fixed (29):** C1–C7, I1–I14 (I11 retired 2026-04-27), M2, M3, M4, M5, M7, M11, M12, M14
-- **Obsolete (3):** M6 (widened to `i64`), M8 (single shared impl), M15 (pattern gone)
+- **Fixed (29):** C1–C7, I1–I14 (I11 retired 2026-04-27), M3, M4, M5, M7, M10, M11, M12, M14
+- **Obsolete (4):** M2 (`cached_instructions` removed), M6 (widened to `i64`), M8 (single shared impl), M15 (pattern gone)
 - **Open by design (2):** M9 (`RemoteEmbedder` dimensions unknown until first response), M13 (intentional tempdir leak in test fixture)
-- **Open — actionable (2):** M1 (encapsulation), M10 (11 detected langs lack AST)
+- **Open — actionable (1):** M1 (encapsulation)
 
-Net: 32 / 36 resolved. 2 minor refactors remain.
+Net: 35 / 36 resolved. Only M1 (`ActiveProject` pub fields) remains as actionable refactor.
 ## Critical
 
 ### C1. Deadlock: lock-ordering inversion in LspManager
@@ -170,7 +170,7 @@ Net: 32 / 36 resolved. 2 minor refactors remain.
 
 ### M10. 15 languages detected but only 9 have AST support
 - **Location:** `src/embed/mod.rs` + `src/ast/mod.rs`
-- **Status:** open (verified 2026-04-27 — `detect_language` at `src/ast/mod.rs:52-81` returns 24 langs; `get_ts_language` at L91-105 supports ~14. Detected without AST: c, cpp, csharp, ruby, php, swift, scala, elixir, haskell, lua, markdown)
+- **Status:** fixed — by design with regression test (2026-04-27 — the gap is intentional: `detect_language` answers "is this a source file?" for LSP routing / file gating / fence labels (30+ call sites); `get_ts_language` answers "do we have AST chunking?". Pinned the contract with `detect_language_vs_get_ts_language_contract` test in `src/ast/mod.rs` enumerating both sets explicitly so additions are deliberate)
 
 ### M11. get_path_param(true)?.unwrap() — safe but brittle pattern
 - **Location:** `src/tools/symbol.rs` (7 occurrences)

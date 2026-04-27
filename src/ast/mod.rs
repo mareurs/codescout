@@ -103,3 +103,98 @@ pub(crate) fn get_ts_language(lang: &str) -> Option<tree_sitter::Language> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    /// `detect_language` is intentionally broader than `get_ts_language`:
+    /// it identifies any source file we recognise (for LSP routing, file
+    /// gating, code-fence labels, …) while AST chunking is only available
+    /// for the languages where we ship a tree-sitter grammar.
+    ///
+    /// This test pins the contract by enumerating both sets explicitly.
+    /// Add a new extension → also update this list (and add a tree-sitter
+    /// crate if you intend to give it AST support).
+    #[test]
+    fn detect_language_vs_get_ts_language_contract() {
+        // Every extension that detect_language() recognises.
+        let detected_samples: &[(&str, &str)] = &[
+            ("a.rs", "rust"),
+            ("a.py", "python"),
+            ("a.ts", "typescript"),
+            ("a.tsx", "tsx"),
+            ("a.js", "javascript"),
+            ("a.jsx", "jsx"),
+            ("a.go", "go"),
+            ("a.java", "java"),
+            ("a.kt", "kotlin"),
+            ("a.c", "c"),
+            ("a.cpp", "cpp"),
+            ("a.cs", "csharp"),
+            ("a.rb", "ruby"),
+            ("a.html", "html"),
+            ("a.css", "css"),
+            ("a.scss", "scss"),
+            ("a.less", "less"),
+            ("a.php", "php"),
+            ("a.swift", "swift"),
+            ("a.scala", "scala"),
+            ("a.ex", "elixir"),
+            ("a.hs", "haskell"),
+            ("a.lua", "lua"),
+            ("a.sh", "bash"),
+            ("a.md", "markdown"),
+        ];
+
+        for (path, expected_lang) in detected_samples {
+            let actual = detect_language(Path::new(path));
+            assert_eq!(
+                actual,
+                Some(*expected_lang),
+                "detect_language({path}) should return Some({expected_lang})"
+            );
+        }
+
+        // Languages that DO have tree-sitter (AST) support.
+        let with_ast = &[
+            "rust",
+            "python",
+            "typescript",
+            "javascript",
+            "tsx",
+            "jsx",
+            "go",
+            "java",
+            "kotlin",
+            "html",
+            "css",
+            "scss",
+            "less",
+            "bash",
+        ];
+        for lang in with_ast {
+            assert!(
+                get_ts_language(lang).is_some(),
+                "expected AST support for {lang}"
+            );
+        }
+
+        // Languages we detect as source files but do NOT chunk via AST.
+        // These fall back to plain-text chunking in the embedding pipeline,
+        // and tools that require AST (e.g. structural editing) refuse them
+        // with a clear error. Adding a tree-sitter crate moves an entry
+        // from this list into `with_ast`.
+        let without_ast = &[
+            "c", "cpp", "csharp", "ruby", "php", "swift", "scala", "elixir", "haskell", "lua",
+            "markdown",
+        ];
+        for lang in without_ast {
+            assert!(
+                get_ts_language(lang).is_none(),
+                "{lang} unexpectedly has AST support — move it to with_ast"
+            );
+        }
+    }
+}
