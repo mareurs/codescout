@@ -11,12 +11,17 @@ pub mod get;
 pub mod graph;
 pub mod links;
 pub mod list_by_kind;
+pub mod scope;
 
 pub struct ToolContext {
     pub catalog: Arc<parking_lot::Mutex<Catalog>>,
     pub workspace: Arc<WorkspaceConfig>,
     pub rules: Arc<Vec<CompiledRule>>,
     pub embedding: Option<Arc<crate::embedding::EmbeddingService>>,
+    /// Resolved at server startup from the process cwd. `None` when the cwd
+    /// lies outside every configured workspace root; tools then fall back to
+    /// workspace-wide scope and surface a hint in their response.
+    pub current_project: Option<Arc<crate::current_project::CurrentProject>>,
 }
 
 #[async_trait::async_trait]

@@ -24,6 +24,7 @@ pub enum LeafOp {
     Gte,
     Lte,
     Contains,
+    Prefix,
 }
 
 impl std::str::FromStr for LeafOp {
@@ -39,6 +40,7 @@ impl std::str::FromStr for LeafOp {
             "gte" => Self::Gte,
             "lte" => Self::Lte,
             "contains" => Self::Contains,
+            "prefix" => Self::Prefix,
             _ => return Err(()),
         })
     }
@@ -56,6 +58,7 @@ impl LeafOp {
             Self::Gte => ">=",
             Self::Lte => "<=",
             Self::Contains => "LIKE",
+            Self::Prefix => "LIKE",
         }
     }
 }
@@ -170,6 +173,21 @@ fn compile_leaf(map: &serde_json::Map<String, Value>) -> Result<SqlFragment> {
             Ok(SqlFragment {
                 sql: format!("{field} LIKE ?"),
                 params: vec![rusqlite::types::Value::Text(format!("%{s}%"))],
+            })
+        }
+        LeafOp::Prefix => {
+            let s = value
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("prefix expects string"))?;
+            // Escape SQL LIKE wildcards in the user-supplied prefix so a
+            // path containing `%` or `_` cannot widen the match.
+            let escaped = s
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            Ok(SqlFragment {
+                sql: format!("{field} LIKE ? ESCAPE '\\'"),
+                params: vec![rusqlite::types::Value::Text(format!("{escaped}%"))],
             })
         }
         _ => Ok(SqlFragment {

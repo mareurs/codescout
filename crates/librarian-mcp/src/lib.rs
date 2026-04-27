@@ -14,6 +14,8 @@ pub mod indexer;
 pub mod preview;
 pub mod workspace;
 
+pub mod current_project;
+
 pub mod server;
 pub mod tools;
 
@@ -60,11 +62,30 @@ pub async fn run_stdio_server() -> Result<()> {
         None
     };
 
+    let ws_arc = std::sync::Arc::new(ws);
+    let current_project = std::env::var("LIBRARIAN_CWD")
+        .map(PathBuf::from)
+        .ok()
+        .or_else(|| std::env::current_dir().ok())
+        .and_then(|cwd| current_project::resolve(&cwd, &ws_arc))
+        .map(std::sync::Arc::new);
+    if let Some(cp) = current_project.as_deref() {
+        tracing::info!(
+            "current project resolved: root={} subdir={:?} umbrella={:?}",
+            cp.root,
+            cp.subdir,
+            cp.umbrella,
+        );
+    } else {
+        tracing::info!("current project unresolved — defaulting to workspace-wide scope");
+    }
+
     let ctx = tools::ToolContext {
         catalog: std::sync::Arc::new(parking_lot::Mutex::new(catalog)),
-        workspace: std::sync::Arc::new(ws),
+        workspace: ws_arc,
         rules: std::sync::Arc::new(rules),
         embedding,
+        current_project,
     };
     server::LibrarianServer::new(ctx).serve_stdio().await
 }
@@ -191,6 +212,7 @@ pub fn import_codescout() -> Result<()> {
         roots,
         ignore: vec![],
         rules,
+        umbrellas: vec![],
     };
     let toml_str = toml::to_string_pretty(&cfg).context("serialising workspace.toml")?;
 

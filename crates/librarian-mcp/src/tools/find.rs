@@ -113,9 +113,11 @@ mod tests {
                 roots: vec![],
                 ignore: vec![],
                 rules: vec![],
+                umbrellas: vec![],
             }),
             rules: Arc::new(vec![]),
             embedding: None,
+            current_project: None,
         }
     }
 
@@ -126,9 +128,11 @@ mod tests {
                 roots: vec![],
                 ignore: vec![],
                 rules: vec![],
+                umbrellas: vec![],
             }),
             rules: Arc::new(vec![]),
             embedding: Some(svc),
+            current_project: None,
         }
     }
 

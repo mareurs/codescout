@@ -177,9 +177,11 @@ mod tests {
                 }],
                 ignore: vec![],
                 rules: vec![],
+                umbrellas: vec![],
             }),
             rules: Arc::new(vec![]),
             embedding: None,
+            current_project: None,
         }
     }
 
