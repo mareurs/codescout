@@ -132,7 +132,6 @@ shell_output_limit_bytes = 102400
 shell_enabled = false
 file_write_enabled = true
 indexing_enabled = true
-github_enabled = true
 ```
 
 | Field | Type | Default | Description |
@@ -144,7 +143,6 @@ github_enabled = true
 | `shell_enabled` | bool | `false` | Master switch for shell execution. Must be `true` for `run_command` to run any command regardless of `shell_command_mode`. |
 | `file_write_enabled` | bool | `true` | Enables file write tools: `create_file` and the symbol write tools. Set to `false` for a read-only session. |
 | `indexing_enabled` | bool | `true` | Enables `index_project` and `project_status`. Set to `false` to prevent the agent from kicking off potentially long-running indexing. |
-| `github_enabled` | bool | `true` | Enables GitHub tools: `github_identity`, `github_issue`, `github_pr`, `github_file`, `github_repo`. Set to `false` to block all GitHub API access. |
 
 ### Built-in Read Deny-List
 
@@ -240,7 +238,6 @@ shell_output_limit_bytes = 204800
 shell_enabled = true
 file_write_enabled = true
 indexing_enabled = true
-github_enabled = true
 ```
 
 ---

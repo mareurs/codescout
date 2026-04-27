@@ -158,7 +158,6 @@ Individual feature categories can be toggled independently:
 file_write_enabled = true    # create_file, edit_file, symbol writes
 shell_enabled      = false   # run_command
 indexing_enabled   = true    # index_project, project_status
-github_enabled     = true    # GitHub API tools (github_issue, github_pr, etc.)
 ```
 
 Disabling a category returns a `RecoverableError` with a hint explaining which

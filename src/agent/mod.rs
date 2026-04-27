@@ -623,16 +623,7 @@ impl Agent {
     /// Get the current project status for building server instructions.
     pub async fn project_status(&self) -> Option<crate::prompts::ProjectStatus> {
         // Phase 1: cheap clones under the read lock — no blocking I/O
-        let (
-            name,
-            path,
-            languages,
-            memory_store,
-            db_path,
-            prompt_file,
-            default_prompt,
-            github_enabled,
-        ) = {
+        let (name, path, languages, memory_store, db_path, prompt_file, default_prompt) = {
             let inner = self.inner.read().await;
             let project = inner.active_project()?;
             let prompt_file = project.root.join(".codescout").join("system-prompt.md");
@@ -645,7 +636,6 @@ impl Agent {
                 db_path,
                 prompt_file,
                 project.config.project.system_prompt.clone(),
-                project.config.security.github_enabled,
             ))
         }?; // lock dropped here
 
@@ -673,7 +663,6 @@ impl Agent {
             memories,
             has_index,
             system_prompt,
-            github_enabled,
             workspace,
         })
     }

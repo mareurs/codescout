@@ -19,7 +19,6 @@
   // RW only:
   "security_profile": "default",
   "shell_enabled": true,
-  "github_enabled": false,
 
   // Multi-project workspaces only:
   "workspace": [
