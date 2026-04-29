@@ -44,12 +44,27 @@ impl Tool for ArtifactObserve {
         let cat = ctx.catalog.lock();
         let obs = ObservationRow {
             id: None,
-            artifact_id: a.id,
-            text: a.text,
-            source: a.source,
+            artifact_id: a.id.clone(),
+            text: a.text.clone(),
+            source: a.source.clone(),
             created_at: now,
         };
         let observation_id = observations::insert(&cat, &obs)?;
+        // Dual-write: also emit a `note` event so timeline tools see the observation.
+        // Wrapped in let _ = so an event-table failure does not break the observation path.
+        let _ = crate::catalog::events::insert(
+            &cat,
+            &crate::catalog::events::EventRow {
+                id: ulid::Ulid::new().to_string(),
+                artifact_id: a.id.clone(),
+                kind: "note".into(),
+                payload: serde_json::json!({"text": a.text}).to_string(),
+                anchor_commit: None,
+                head_commit: None,
+                author: a.source.clone(),
+                created_at: now,
+            },
+        );
         Ok(json!({"observation_id": observation_id}))
     }
 }
@@ -61,6 +76,7 @@ pub(crate) mod tests {
     use crate::catalog::Catalog;
     use crate::tools::create::ArtifactCreate;
     use crate::workspace::{Root, WorkspaceConfig};
+    use rusqlite;
     use std::sync::Arc;
     use tempfile::TempDir;
 
@@ -122,5 +138,45 @@ pub(crate) mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].text, "looks good");
         assert_eq!(rows[0].source.as_deref(), Some("review-agent"));
+    }
+
+    #[tokio::test]
+    async fn observe_dual_writes_note_event() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        // Create an artifact first.
+        let v = ArtifactCreate
+            .call(
+                &ctx,
+                serde_json::json!({
+                    "repo": "r", "rel_path": "note2.md",
+                    "kind": "doc", "title": "T", "body": "body"
+                }),
+            )
+            .await
+            .unwrap();
+        let artifact_id = v["id"].as_str().unwrap().to_string();
+
+        ArtifactObserve
+            .call(
+                &ctx,
+                serde_json::json!({"id": artifact_id, "text": "dual write check"}),
+            )
+            .await
+            .unwrap();
+
+        // Expect exactly one event row of kind="note" for this artifact.
+        let count: i64 = ctx
+            .catalog
+            .lock()
+            .conn
+            .query_row(
+                "SELECT count(*) FROM events WHERE artifact_id=?1 AND kind='note'",
+                rusqlite::params![artifact_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "observe must dual-write a note event");
     }
 }

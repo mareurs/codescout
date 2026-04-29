@@ -114,6 +114,25 @@ impl Tool for ArtifactEventCreate {
             apply_payload_to_frontmatter(ctx, &a.artifact_id, &a.kind, &a.payload)?;
         }
 
+        // superseded_by: also create an artifact_link rel=supersedes (back-compat dual-write).
+        if a.kind == "superseded_by" {
+            let target_id = a
+                .payload
+                .get("target_artifact_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow!("superseded_by.target_artifact_id required"))?;
+            let cat = ctx.catalog.lock();
+            crate::catalog::links::insert(
+                &cat,
+                &crate::catalog::links::LinkRow {
+                    src_id: a.artifact_id.clone(),
+                    dst_id: target_id.into(),
+                    rel: "supersedes".into(),
+                    created_at: now,
+                },
+            )?;
+        }
+
         let payload_str = serde_json::to_string(&a.payload)?;
         {
             let cat = ctx.catalog.lock();
@@ -453,5 +472,44 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("already resolved"));
+    }
+
+    #[tokio::test]
+    async fn event_create_superseded_by_creates_link() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        {
+            let cat = ctx.catalog.lock();
+            art_insert(&cat, &art("src-art")).unwrap();
+            art_insert(&cat, &art("dst-art")).unwrap();
+        }
+
+        ArtifactEventCreate
+            .call(
+                &ctx,
+                serde_json::json!({
+                    "artifact_id": "src-art",
+                    "kind": "superseded_by",
+                    "payload": {"target_artifact_id": "dst-art"}
+                }),
+            )
+            .await
+            .unwrap();
+
+        // Expect an artifact_link with rel=supersedes from src-art → dst-art.
+        let count: i64 = ctx
+            .catalog
+            .lock()
+            .conn
+            .query_row(
+                "SELECT count(*) FROM artifact_link WHERE src_id='src-art' AND dst_id='dst-art' AND rel='supersedes'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "superseded_by event must create an artifact_link rel=supersedes"
+        );
     }
 }

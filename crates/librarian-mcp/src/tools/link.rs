@@ -63,6 +63,22 @@ impl Tool for ArtifactLink {
             dst.status = "superseded".into();
             dst.updated_at = now;
             artifact::upsert(&cat, &dst)?;
+
+            // Dual-write: emit a superseded_by event on the source artifact so the
+            // timeline surface sees the supersession.
+            let _ = crate::catalog::events::insert(
+                &cat,
+                &crate::catalog::events::EventRow {
+                    id: ulid::Ulid::new().to_string(),
+                    artifact_id: a.src_id.clone(),
+                    kind: "superseded_by".into(),
+                    payload: serde_json::json!({"target_artifact_id": a.dst_id}).to_string(),
+                    anchor_commit: None,
+                    head_commit: None,
+                    author: None,
+                    created_at: now,
+                },
+            );
         }
 
         Ok(json!("ok"))
@@ -153,6 +169,35 @@ mod tests {
         assert_eq!(v, json!("ok"));
         let dst = artifact::get(&ctx.catalog.lock(), "b").unwrap().unwrap();
         assert_eq!(dst.status, "superseded");
+    }
+
+    #[tokio::test]
+    async fn link_supersedes_emits_event() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        artifact::upsert(&cat, &mk_row("b")).unwrap();
+        let ctx = mk_ctx(cat);
+
+        ArtifactLink
+            .call(
+                &ctx,
+                json!({"src_id": "a", "dst_id": "b", "rel": "supersedes"}),
+            )
+            .await
+            .unwrap();
+
+        // Expect a superseded_by event on artifact "a".
+        let count: i64 = ctx
+            .catalog
+            .lock()
+            .conn
+            .query_row(
+                "SELECT count(*) FROM events WHERE artifact_id='a' AND kind='superseded_by'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "supersedes link must emit a superseded_by event");
     }
 
     #[tokio::test]
