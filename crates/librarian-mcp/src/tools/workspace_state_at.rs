@@ -15,7 +15,7 @@ pub struct WorkspaceStateAt;
 
 /// Maximum artifacts returned per call (exploring-mode cap, matches codescout convention).
 const MAX_ROWS: usize = 200;
-const FRESHNESS_HORIZON: i64 = 50;
+const FRESHNESS_HORIZON: i64 = crate::freshness::FRESHNESS_HORIZON_DEFAULT;
 
 #[derive(Debug, Deserialize)]
 pub struct Args {
@@ -407,7 +407,8 @@ mod tests {
     }
 
     /// Sandwich regression: a new reviewed event after the cutoff must not affect
-    /// the at-as-of freshness computation.
+    /// the at-as-of freshness computation. A fourth query at a wider cutoff proves
+    /// the new event IS visible when the window includes it.
     #[tokio::test]
     async fn sandwich_freshness_regression() {
         let tmp = TempDir::new().unwrap();
@@ -440,6 +441,7 @@ mod tests {
             entry1["freshness_at_as_of"], "fresh",
             "at ts=25 with review@20 and file_mtime=10, should be fresh"
         );
+        let latest_id_r1 = entry1["latest_event_at_as_of"]["id"].clone();
 
         // Step 2: append another reviewed event at ts=100 (after cutoff)
         {
@@ -464,8 +466,13 @@ mod tests {
             entry2["freshness_at_as_of"], "fresh",
             "after adding event@100, query at ts=25 must still yield fresh (event outside window)"
         );
+        // latest_event_at_as_of must still be the review@20 event, not the new review@100.
+        assert_eq!(
+            entry2["latest_event_at_as_of"]["id"], latest_id_r1,
+            "cutoff-bounded query must not see the post-cutoff event"
+        );
 
-        // Step 4: query at ts=200 → now event@100 is visible → reviewed_at=100, file_mtime=10 → fresh
+        // Step 4: query at ts=200 → event@100 is now inside the window → latest_event id differs.
         let r3 = WorkspaceStateAt
             .call(&ctx, json!({"timestamp": 200, "scope": "all"}))
             .await
@@ -480,6 +487,11 @@ mod tests {
         assert_eq!(
             entry3["freshness_at_as_of"], "fresh",
             "at ts=200 with review@100 and file_mtime=10, should still be fresh"
+        );
+        // The flip: at ts=200 the at-as-of latest event is review@100, which differs from ts=25.
+        assert_ne!(
+            entry3["latest_event_at_as_of"]["id"], latest_id_r1,
+            "query at ts=200 must see the newer event@100 (proving the at-as-of query can flip)"
         );
     }
 }
