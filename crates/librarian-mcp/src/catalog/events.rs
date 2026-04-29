@@ -16,7 +16,13 @@ pub struct EventRow {
 }
 
 pub fn insert(cat: &Catalog, ev: &EventRow) -> Result<()> {
-    cat.conn.execute(
+    insert_with(&cat.conn, ev)
+}
+
+/// Insert into an existing connection or transaction. Use this when the
+/// caller wants atomicity across multiple writes (event row + edges).
+pub fn insert_with(conn: &rusqlite::Connection, ev: &EventRow) -> Result<()> {
+    conn.execute(
         "INSERT INTO events (id, artifact_id, kind, payload, anchor_commit, head_commit, author, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![ev.id, ev.artifact_id, ev.kind, ev.payload, ev.anchor_commit, ev.head_commit, ev.author, ev.created_at],
@@ -69,6 +75,44 @@ pub fn timeline_for_artifact(
     params_dyn.push(Box::new(limit as i64));
     let rows = stmt
         .query_map(rusqlite::params_from_iter(params_dyn.iter()), row_to_event)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Return all `intent` events that have not yet been resolved by a
+/// `verdict` event (i.e. no `event_edges` row with `rel='resolves'`
+/// pointing at the intent's id).
+pub fn open_intents(cat: &Catalog) -> Result<Vec<EventRow>> {
+    let mut stmt = cat.conn.prepare(
+        "SELECT id, artifact_id, kind, payload, anchor_commit, head_commit, author, created_at
+         FROM events
+         WHERE kind='intent'
+           AND id NOT IN (
+             SELECT dst_event_id FROM event_edges
+             WHERE rel='resolves' AND dst_event_id IS NOT NULL
+           )
+         ORDER BY created_at DESC, id DESC",
+    )?;
+    let rows = stmt
+        .query_map([], row_to_event)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Return all `verdict` events that have no outgoing `resolves` edge.
+/// Such rows are a data bug — every verdict must resolve an intent.
+pub fn orphan_verdicts(cat: &Catalog) -> Result<Vec<EventRow>> {
+    let mut stmt = cat.conn.prepare(
+        "SELECT id, artifact_id, kind, payload, anchor_commit, head_commit, author, created_at
+         FROM events
+         WHERE kind='verdict'
+           AND id NOT IN (
+             SELECT src_event_id FROM event_edges WHERE rel='resolves'
+           )
+         ORDER BY created_at DESC, id DESC",
+    )?;
+    let rows = stmt
+        .query_map([], row_to_event)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
@@ -206,5 +250,59 @@ mod tests {
             bounded.iter().all(|e| e.created_at <= 5),
             "all results must satisfy created_at <= 5"
         );
+    }
+
+    #[test]
+    fn open_intents_excludes_resolved_and_includes_unresolved() {
+        use crate::catalog::event_edges::{insert_many as edges_insert, EdgeRow};
+        let cat = Catalog::open_in_memory().unwrap();
+        art_insert(&cat, &art("a")).unwrap();
+        // unresolved intent
+        insert(&cat, &ev("i_open", "a", "intent", 100)).unwrap();
+        // resolved intent (verdict + resolves edge)
+        insert(&cat, &ev("i_done", "a", "intent", 200)).unwrap();
+        insert(&cat, &ev("v1", "a", "verdict", 300)).unwrap();
+        edges_insert(
+            &cat,
+            &[EdgeRow {
+                src_event_id: "v1".into(),
+                dst_event_id: Some("i_done".into()),
+                dst_artifact_id: None,
+                dst_source_id: None,
+                rel: "resolves".into(),
+            }],
+        )
+        .unwrap();
+
+        let open = open_intents(&cat).unwrap();
+        let ids: Vec<&str> = open.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, vec!["i_open"]);
+    }
+
+    #[test]
+    fn verdict_without_intent_is_data_bug() {
+        use crate::catalog::event_edges::{insert_many as edges_insert, EdgeRow};
+        let cat = Catalog::open_in_memory().unwrap();
+        art_insert(&cat, &art("a")).unwrap();
+        // healthy verdict (has resolves edge)
+        insert(&cat, &ev("intent_h", "a", "intent", 100)).unwrap();
+        insert(&cat, &ev("verdict_h", "a", "verdict", 200)).unwrap();
+        edges_insert(
+            &cat,
+            &[EdgeRow {
+                src_event_id: "verdict_h".into(),
+                dst_event_id: Some("intent_h".into()),
+                dst_artifact_id: None,
+                dst_source_id: None,
+                rel: "resolves".into(),
+            }],
+        )
+        .unwrap();
+        // orphan verdict (no resolves edge)
+        insert(&cat, &ev("verdict_orphan", "a", "verdict", 300)).unwrap();
+
+        let orphans = orphan_verdicts(&cat).unwrap();
+        let ids: Vec<&str> = orphans.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, vec!["verdict_orphan"]);
     }
 }

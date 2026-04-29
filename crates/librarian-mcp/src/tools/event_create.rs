@@ -1,10 +1,10 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{Tool, ToolContext};
+use super::{RecoverableError, Tool, ToolContext};
 use crate::catalog::{event_edges, events, sources};
 
 pub struct ArtifactEventCreate;
@@ -68,15 +68,18 @@ impl Tool for ArtifactEventCreate {
         let a: Args = serde_json::from_value(args)?;
 
         if !ALLOWED_KINDS.contains(&a.kind.as_str()) {
-            return Err(anyhow!("unknown event kind: {}", a.kind));
+            return Err(RecoverableError::with_hint(
+                format!("unknown event kind: {}", a.kind),
+                format!("allowed: {}", ALLOWED_KINDS.join(", ")),
+            ));
         }
         validate_payload(&a.kind, &a.payload)?;
 
         // verdict ↔ intent invariants — checked before any writes
         if let Some(ref target) = a.resolves_intent_event_id {
             if a.kind != "verdict" {
-                return Err(anyhow!(
-                    "resolves_intent_event_id only valid on verdict events"
+                return Err(RecoverableError::new(
+                    "resolves_intent_event_id only valid on verdict events",
                 ));
             }
             let cat = ctx.catalog.lock();
@@ -90,11 +93,21 @@ impl Tool for ArtifactEventCreate {
                 .ok();
             match target_kind.as_deref() {
                 Some("intent") => {}
-                Some(k) => return Err(anyhow!("target event {target} is kind={k}, not intent")),
-                None => return Err(anyhow!("target event {target} not found")),
+                Some(k) => {
+                    return Err(RecoverableError::new(format!(
+                        "target event {target} is kind={k}, not intent"
+                    )))
+                }
+                None => {
+                    return Err(RecoverableError::new(format!(
+                        "target event {target} not found"
+                    )))
+                }
             }
             if !event_edges::incoming_by_rel(&cat, target, "resolves")?.is_empty() {
-                return Err(anyhow!("intent {target} already resolved"));
+                return Err(RecoverableError::new(format!(
+                    "intent {target} already resolved"
+                )));
             }
         }
 
@@ -110,46 +123,41 @@ impl Tool for ArtifactEventCreate {
         };
 
         // status_change / field_patch: round-trip change to frontmatter on disk
+        // before the DB transaction (filesystem effect can't roll back).
         if a.kind == "status_change" || a.kind == "field_patch" {
             apply_payload_to_frontmatter(ctx, &a.artifact_id, &a.kind, &a.payload)?;
         }
 
-        // superseded_by: also create an artifact_link rel=supersedes (back-compat dual-write).
-        if a.kind == "superseded_by" {
+        // Build all rows + edges first, then commit them in one transaction.
+        let payload_str = serde_json::to_string(&a.payload)?;
+        let event_row = events::EventRow {
+            id: id.clone(),
+            artifact_id: a.artifact_id.clone(),
+            kind: a.kind.clone(),
+            payload: payload_str,
+            anchor_commit: a.anchor_commit.clone(),
+            head_commit: a.head_commit.clone(),
+            author: a.author.clone(),
+            created_at: now,
+        };
+
+        let supersedes_link = if a.kind == "superseded_by" {
             let target_id = a
                 .payload
                 .get("target_artifact_id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow!("superseded_by.target_artifact_id required"))?;
-            let cat = ctx.catalog.lock();
-            crate::catalog::links::insert(
-                &cat,
-                &crate::catalog::links::LinkRow {
-                    src_id: a.artifact_id.clone(),
-                    dst_id: target_id.into(),
-                    rel: "supersedes".into(),
-                    created_at: now,
-                },
-            )?;
-        }
-
-        let payload_str = serde_json::to_string(&a.payload)?;
-        {
-            let cat = ctx.catalog.lock();
-            events::insert(
-                &cat,
-                &events::EventRow {
-                    id: id.clone(),
-                    artifact_id: a.artifact_id.clone(),
-                    kind: a.kind.clone(),
-                    payload: payload_str,
-                    anchor_commit: a.anchor_commit.clone(),
-                    head_commit: a.head_commit.clone(),
-                    author: a.author.clone(),
-                    created_at: now,
-                },
-            )?;
-        }
+                .ok_or_else(|| {
+                    RecoverableError::new("superseded_by.target_artifact_id required")
+                })?;
+            Some(crate::catalog::links::LinkRow {
+                src_id: a.artifact_id.clone(),
+                dst_id: target_id.into(),
+                rel: "supersedes".into(),
+                created_at: now,
+            })
+        } else {
+            None
+        };
 
         let mut edges: Vec<event_edges::EdgeRow> = Vec::new();
 
@@ -163,29 +171,23 @@ impl Tool for ArtifactEventCreate {
             });
         }
 
-        if let Some(s) = &a.source {
+        let source_row = a.source.as_ref().map(|s| {
             let src_id = format!("{}:{}", s.kind, s.uri);
-            {
-                let cat = ctx.catalog.lock();
-                sources::upsert(
-                    &cat,
-                    &sources::SourceRow {
-                        id: src_id.clone(),
-                        uri: s.uri.clone(),
-                        kind: s.kind.clone(),
-                        payload: s.payload.as_ref().map(|p| p.to_string()),
-                        ingested_at: now,
-                    },
-                )?;
-            }
             edges.push(event_edges::EdgeRow {
                 src_event_id: id.clone(),
                 dst_event_id: None,
                 dst_artifact_id: None,
-                dst_source_id: Some(src_id),
+                dst_source_id: Some(src_id.clone()),
                 rel: "triggered_by".into(),
             });
-        }
+            sources::SourceRow {
+                id: src_id,
+                uri: s.uri.clone(),
+                kind: s.kind.clone(),
+                payload: s.payload.as_ref().map(|p| p.to_string()),
+                ingested_at: now,
+            }
+        });
 
         for art in a.also_mutates.unwrap_or_default() {
             edges.push(event_edges::EdgeRow {
@@ -207,9 +209,30 @@ impl Tool for ArtifactEventCreate {
             });
         }
 
+        // Single transaction for source + supersedes link + event row + edges.
+        // Frontmatter mutation already happened on disk above; if this tx
+        // fails the on-disk file may be ahead of the DB until the next event
+        // re-syncs it. That's acceptable — file is the source of truth.
         {
             let cat = ctx.catalog.lock();
-            event_edges::insert_many(&cat, &edges)?;
+            let tx = cat.conn.unchecked_transaction()?;
+            if let Some(s) = &source_row {
+                sources::upsert_with(&tx, s)?;
+            }
+            if let Some(l) = &supersedes_link {
+                crate::catalog::links::insert_with(&tx, l)?;
+            }
+            events::insert_with(&tx, &event_row)?;
+            #[cfg(test)]
+            if tests::INJECT_FAIL_AFTER_EVENT_INSERT.with(|c| {
+                let v = c.get();
+                c.set(false);
+                v
+            }) {
+                anyhow::bail!("test injection: forced failure after event insert");
+            }
+            event_edges::insert_many_in_tx(&tx, &edges)?;
+            tx.commit()?;
         }
 
         Ok(json!({
@@ -224,52 +247,54 @@ impl Tool for ArtifactEventCreate {
 fn validate_payload(kind: &str, p: &Value) -> Result<()> {
     let obj = p
         .as_object()
-        .ok_or_else(|| anyhow!("payload must be object"))?;
+        .ok_or_else(|| RecoverableError::new("payload must be object"))?;
     match kind {
         "note" => {
             obj.get("text")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow!("note.text required"))?;
+                .ok_or_else(|| RecoverableError::new("note.text required"))?;
         }
         "reviewed" => { /* both fields optional */ }
         "status_change" => {
             obj.get("to")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow!("status_change.to required"))?;
+                .ok_or_else(|| RecoverableError::new("status_change.to required"))?;
         }
         "field_patch" => {
             obj.get("field")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow!("field_patch.field required"))?;
+                .ok_or_else(|| RecoverableError::new("field_patch.field required"))?;
             obj.get("to")
-                .ok_or_else(|| anyhow!("field_patch.to required"))?;
+                .ok_or_else(|| RecoverableError::new("field_patch.to required"))?;
         }
         "superseded_by" => {
             obj.get("target_artifact_id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow!("superseded_by.target_artifact_id required"))?;
+                .ok_or_else(|| {
+                    RecoverableError::new("superseded_by.target_artifact_id required")
+                })?;
         }
         "external_signal" => {
             obj.get("source_id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow!("external_signal.source_id required"))?;
+                .ok_or_else(|| RecoverableError::new("external_signal.source_id required"))?;
             obj.get("summary")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow!("external_signal.summary required"))?;
+                .ok_or_else(|| RecoverableError::new("external_signal.summary required"))?;
         }
         "intent" => {
             obj.get("hypothesis")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow!("intent.hypothesis required"))?;
+                .ok_or_else(|| RecoverableError::new("intent.hypothesis required"))?;
         }
         "verdict" => {
             let outcome = obj
                 .get("outcome")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow!("verdict.outcome required"))?;
+                .ok_or_else(|| RecoverableError::new("verdict.outcome required"))?;
             if !matches!(outcome, "confirmed" | "refuted" | "partial" | "abandoned") {
-                return Err(anyhow!(
-                    "verdict.outcome must be confirmed|refuted|partial|abandoned"
+                return Err(RecoverableError::new(
+                    "verdict.outcome must be confirmed|refuted|partial|abandoned",
                 ));
             }
         }
@@ -310,6 +335,15 @@ mod tests {
     use crate::catalog::artifact::{upsert as art_insert, ArtifactRow};
     use crate::tools::observe::tests::mk_ctx;
     use tempfile::TempDir;
+
+    thread_local! {
+        /// When set true, `call()` aborts with an error after inserting the
+        /// event row but before inserting edges. Used by the transaction-rollback
+        /// test below to verify atomicity. Thread-local so parallel tests
+        /// running on different threads do not race on a shared flag.
+        pub(super) static INJECT_FAIL_AFTER_EVENT_INSERT: std::cell::Cell<bool> =
+            const { std::cell::Cell::new(false) };
+    }
 
     fn art(id: &str) -> ArtifactRow {
         ArtifactRow {
@@ -510,6 +544,114 @@ mod tests {
         assert_eq!(
             count, 1,
             "superseded_by event must create an artifact_link rel=supersedes"
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_kind_is_recoverable_error() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let err = ArtifactEventCreate
+            .call(
+                &ctx,
+                json!({
+                    "artifact_id": "a1",
+                    "kind": "bogus",
+                    "payload": {}
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.downcast_ref::<RecoverableError>().is_some(),
+            "expected RecoverableError, got: {err:#}"
+        );
+    }
+
+    #[tokio::test]
+    async fn rollback_on_failure_after_event_insert_leaves_no_orphan_row() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        {
+            let cat = ctx.catalog.lock();
+            art_insert(&cat, &art("a-tx")).unwrap();
+        }
+        INJECT_FAIL_AFTER_EVENT_INSERT.with(|c| c.set(true));
+        let err = ArtifactEventCreate
+            .call(
+                &ctx,
+                json!({
+                    "artifact_id": "a-tx",
+                    "kind": "note",
+                    "payload": {"text": "should roll back"}
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("test injection"),
+            "expected injected failure, got: {err:#}"
+        );
+        // Event row must be rolled back — count must be zero for this artifact.
+        let cat = ctx.catalog.lock();
+        let count: i64 = cat
+            .conn
+            .query_row(
+                "SELECT count(*) FROM events WHERE artifact_id='a-tx'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 0,
+            "expected event-row rollback after failure between event insert and edges insert"
+        );
+        // No edges either.
+        let edge_count: i64 = cat
+            .conn
+            .query_row("SELECT count(*) FROM event_edges", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(edge_count, 0);
+    }
+
+    #[tokio::test]
+    async fn intent_inputs_payload_passthrough() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        {
+            let cat = ctx.catalog.lock();
+            art_insert(&cat, &art("a-inp")).unwrap();
+        }
+        let inputs = json!([
+            {"kind": "doc", "ref": "spec/foo.md"},
+            {"kind": "issue", "ref": "linear://abc-123"}
+        ]);
+        let result = ArtifactEventCreate
+            .call(
+                &ctx,
+                json!({
+                    "artifact_id": "a-inp",
+                    "kind": "intent",
+                    "payload": {"hypothesis": "X works", "inputs": inputs.clone()}
+                }),
+            )
+            .await
+            .unwrap();
+        let event_id = result["event_id"].as_str().unwrap().to_string();
+
+        let cat = ctx.catalog.lock();
+        let payload_str: String = cat
+            .conn
+            .query_row(
+                "SELECT payload FROM events WHERE id=?1",
+                rusqlite::params![event_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&payload_str).unwrap();
+        assert_eq!(
+            payload["inputs"], inputs,
+            "intent.inputs must round-trip unchanged through events.payload"
         );
     }
 }

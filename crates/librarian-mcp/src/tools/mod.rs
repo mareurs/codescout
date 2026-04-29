@@ -13,6 +13,59 @@ pub mod links;
 pub mod list_by_kind;
 pub mod scope;
 
+/// A recoverable tool error: the LLM gave bad input and can self-correct.
+///
+/// When a tool returns this error type, the MCP server serialises it as
+/// `isError: false` with a JSON body containing `"error"` and an optional
+/// `"hint"`. This prevents Claude Code from aborting sibling parallel tool
+/// calls (which it does when it sees `isError: true`).
+///
+/// Use this for **expected, input-driven failures**: unknown event kind,
+/// missing required payload field, intent already resolved, target event
+/// not found, etc.
+///
+/// Keep returning plain `anyhow` errors (→ `isError: true`) for genuine
+/// bugs: panics, security violations, IO/database failures.
+#[derive(Debug)]
+pub struct RecoverableError {
+    pub message: String,
+    pub hint: Option<String>,
+}
+
+impl std::fmt::Display for RecoverableError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)?;
+        if let Some(h) = &self.hint {
+            write!(f, " (hint: {h})")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for RecoverableError {}
+
+impl RecoverableError {
+    /// Construct a recoverable error wrapped in `anyhow::Error` so it can
+    /// flow through `Result<_, anyhow::Error>` tool calls via `?`.
+    ///
+    /// Returns `anyhow::Error` rather than `Self` so call sites read like
+    /// the `anyhow!(...)` macro they replace.
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new(msg: impl Into<String>) -> anyhow::Error {
+        anyhow::Error::new(Self {
+            message: msg.into(),
+            hint: None,
+        })
+    }
+
+    pub fn with_hint(msg: impl Into<String>, hint: impl Into<String>) -> anyhow::Error {
+        anyhow::Error::new(Self {
+            message: msg.into(),
+            hint: Some(hint.into()),
+        })
+    }
+}
+
 pub struct ToolContext {
     pub catalog: Arc<parking_lot::Mutex<Catalog>>,
     pub workspace: Arc<WorkspaceConfig>,

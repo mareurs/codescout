@@ -13,6 +13,16 @@ pub struct EdgeRow {
 }
 
 pub fn insert_many(cat: &Catalog, edges: &[EdgeRow]) -> Result<()> {
+    let tx = cat.conn.unchecked_transaction()?;
+    insert_many_in_tx(&tx, edges)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Insert edges into an existing connection or transaction. Use this when
+/// the caller already holds a transaction and wants the edge inserts to
+/// commit atomically with sibling writes (e.g. an event row).
+pub fn insert_many_in_tx(conn: &rusqlite::Connection, edges: &[EdgeRow]) -> Result<()> {
     const VALID_RELS: &[&str] = &[
         "parent",
         "mutates",
@@ -25,24 +35,20 @@ pub fn insert_many(cat: &Catalog, edges: &[EdgeRow]) -> Result<()> {
             anyhow::bail!("invalid rel {:?}; must be one of {:?}", e.rel, VALID_RELS);
         }
     }
-    let tx = cat.conn.unchecked_transaction()?;
-    {
-        let mut stmt = tx.prepare(
-            "INSERT OR IGNORE INTO event_edges
-             (src_event_id, dst_event_id, dst_artifact_id, dst_source_id, rel)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-        )?;
-        for e in edges {
-            stmt.execute(params![
-                e.src_event_id,
-                e.dst_event_id,
-                e.dst_artifact_id,
-                e.dst_source_id,
-                e.rel
-            ])?;
-        }
+    let mut stmt = conn.prepare(
+        "INSERT OR IGNORE INTO event_edges
+         (src_event_id, dst_event_id, dst_artifact_id, dst_source_id, rel)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+    )?;
+    for e in edges {
+        stmt.execute(params![
+            e.src_event_id,
+            e.dst_event_id,
+            e.dst_artifact_id,
+            e.dst_source_id,
+            e.rel
+        ])?;
     }
-    tx.commit()?;
     Ok(())
 }
 

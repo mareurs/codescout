@@ -70,25 +70,39 @@ impl ServerHandler for LibrarianServer {
                 McpError::invalid_params(format!("unknown tool `{}`", req.name), None)
             })?;
         let args = serde_json::Value::Object(req.arguments.unwrap_or_default());
-        match tool.call(&self.ctx, args).await {
-            Ok(v) => {
-                let text = serde_json::to_string_pretty(&v).unwrap_or_else(|_| v.to_string());
-                Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(map_tool_result(tool.call(&self.ctx, args).await))
+    }
+}
+
+/// Map a tool result to an MCP `CallToolResult`. Recoverable errors become
+/// `success` results with an `{"error": "...", "hint": "..."}` JSON body so
+/// sibling parallel tool calls survive (Claude Code aborts batched calls when
+/// it sees `isError: true`). Other errors stay on the `isError: true` path.
+pub(crate) fn map_tool_result(r: Result<serde_json::Value>) -> CallToolResult {
+    match r {
+        Ok(v) => {
+            let text = serde_json::to_string_pretty(&v).unwrap_or_else(|_| v.to_string());
+            CallToolResult::success(vec![Content::text(text)])
+        }
+        Err(e) => {
+            if let Some(rec) = e.downcast_ref::<crate::tools::RecoverableError>() {
+                let mut body = serde_json::json!({ "error": rec.message });
+                if let Some(h) = &rec.hint {
+                    body["hint"] = serde_json::Value::String(h.clone());
+                }
+                let text = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
+                return CallToolResult::success(vec![Content::text(text)]);
             }
-            Err(e) => {
-                let hint = e
-                    .downcast_ref::<serde_json::Error>()
-                    .map(|se| {
-                        format!(
-                            "input deserialization failed (check types vs tool schema): {}. ",
-                            se
-                        )
-                    })
-                    .unwrap_or_default();
-                Ok(CallToolResult::error(vec![Content::text(format!(
-                    "{hint}error: {e:#}"
-                ))]))
-            }
+            let hint = e
+                .downcast_ref::<serde_json::Error>()
+                .map(|se| {
+                    format!(
+                        "input deserialization failed (check types vs tool schema): {}. ",
+                        se
+                    )
+                })
+                .unwrap_or_default();
+            CallToolResult::error(vec![Content::text(format!("{hint}error: {e:#}"))])
         }
     }
 }
@@ -134,5 +148,28 @@ mod tests {
             s.to_lowercase().contains("bool") || s.to_lowercase().contains("string"),
             "expected type-hint in error, got: {s}"
         );
+    }
+
+    #[test]
+    fn map_tool_result_recoverable_returns_success_with_error_body() {
+        use crate::tools::RecoverableError;
+        let err = RecoverableError::with_hint("bad input", "use foo");
+        let res = map_tool_result(Err(err));
+        // Recoverable → success, no isError flag set
+        assert!(!res.is_error.unwrap_or(false));
+        let text = match &res.content[0].raw {
+            rmcp::model::RawContent::Text(t) => t.text.clone(),
+            _ => panic!("expected text"),
+        };
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["error"], "bad input");
+        assert_eq!(v["hint"], "use foo");
+    }
+
+    #[test]
+    fn map_tool_result_anyhow_returns_is_error_true() {
+        let err = anyhow::anyhow!("boom");
+        let res = map_tool_result(Err(err));
+        assert_eq!(res.is_error, Some(true));
     }
 }

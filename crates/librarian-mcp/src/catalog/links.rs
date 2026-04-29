@@ -13,7 +13,13 @@ pub struct LinkRow {
 }
 
 pub fn insert(cat: &Catalog, link: &LinkRow) -> Result<()> {
-    cat.conn.execute(
+    insert_with(&cat.conn, link)
+}
+
+/// Insert into an existing connection or transaction. Use this when the
+/// caller wants atomicity across multiple writes.
+pub fn insert_with(conn: &rusqlite::Connection, link: &LinkRow) -> Result<()> {
+    conn.execute(
         "INSERT OR IGNORE INTO artifact_link (src_id, dst_id, rel, created_at) VALUES (?, ?, ?, ?)",
         params![link.src_id, link.dst_id, link.rel, link.created_at],
     )?;

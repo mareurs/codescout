@@ -101,7 +101,7 @@ mod tests {
             subject: Some("a".into()),
             topo_order: Some(0),
         };
-        upsert_many(&cat, &[row.clone()]).unwrap();
+        upsert_many(&cat, std::slice::from_ref(&row)).unwrap();
         upsert_many(&cat, &[row]).unwrap();
         let count: i64 = cat
             .conn

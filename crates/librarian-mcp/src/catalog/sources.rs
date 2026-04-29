@@ -13,7 +13,13 @@ pub struct SourceRow {
 }
 
 pub fn upsert(cat: &Catalog, s: &SourceRow) -> Result<()> {
-    cat.conn.execute(
+    upsert_with(&cat.conn, s)
+}
+
+/// Upsert into an existing connection or transaction. Use this when the
+/// caller wants atomicity across multiple writes.
+pub fn upsert_with(conn: &rusqlite::Connection, s: &SourceRow) -> Result<()> {
+    conn.execute(
         "INSERT INTO sources (id, uri, kind, payload, ingested_at)
          VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT(id) DO UPDATE SET

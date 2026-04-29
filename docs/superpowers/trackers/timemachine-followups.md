@@ -28,36 +28,36 @@ References:
 
 **Issue:** Every input-driven validation error (`unknown event kind`,
 `note.text required`, `intent.hypothesis required`, `intent already resolved`,
-`target event not found`, etc.) returns `anyhow::anyhow!`, which surfaces as
-`isError: true` to the MCP caller. Project convention (CLAUDE.md): expected
-input failures should be `RecoverableError`-style so sibling tool calls in a
-batched MCP request survive.
+`target event not found`, etc.) returned `anyhow::anyhow!`, surfaced as
+`isError: true` to the MCP caller. Sibling tool calls aborted.
 
-**Fix shape:** introduce/reuse a `RecoverableError` wrapper from
-`crates/librarian-mcp/src/tools/mod.rs` (or local helper) and route the
-input-validation arms through it. Keep `anyhow!` for genuine bugs only.
+**Resolution:** introduced `RecoverableError` in
+`crates/librarian-mcp/src/tools/mod.rs`. Routing in
+`server.rs::map_tool_result` downcasts and serialises the error as a
+success body `{"error": ..., "hint": ...}` so sibling parallel calls
+survive. All input-validation arms in `event_create.rs` now use
+`RecoverableError::new` / `with_hint`.
 
-**Estimate:** 1 short session. Touch one file. Tests already cover the error
-strings — adjust assertions if the error type changes.
-
+**Status:** DONE (phase 1).
 ### 2. Transaction-wrap event + edges insert
 
 **Where:** `crates/librarian-mcp/src/tools/event_create.rs::call`.
 
-**Issue:** Catalog mutex is acquired/dropped multiple times across a single
-`call`: pre-flight intent check, parent-event lookup, frontmatter write,
-event insert, source upsert, edges insert. No transaction spans them. A
-crash or interleaving writer between the event insert and the edges insert
-leaves an event without its edges (parent, mutates, triggered_by, resolves).
+**Issue:** Catalog mutex was acquired/dropped multiple times. No
+transaction spanned event + edges. A crash between them left an event
+without its edges.
 
-**Fix shape:** wrap the row + edges inserts in
-`cat.unchecked_transaction()`; commit after edges land. Keep the frontmatter
-write before the transaction (file-system effect can't roll back).
+**Resolution:** added `_with` / `_in_tx` helpers in `catalog::events`,
+`catalog::sources`, `catalog::links`, `catalog::event_edges` so callers
+can share a `rusqlite::Transaction`. `event_create::call` now opens one
+`unchecked_transaction()`, writes source row + supersedes link + event
+row + edges, commits as a unit. Frontmatter mutation stays before the
+transaction (filesystem effect can't roll back). Test
+`rollback_on_failure_after_event_insert_leaves_no_orphan_row` uses a
+thread-local injection flag to abort the call between event insert and
+edge insert; asserts both `events` and `event_edges` are empty after.
 
-**Estimate:** 1 short session. Same file. Add a test that simulates a panic
-between event-insert and edge-insert (via a feature flag or direct catalog
-manipulation) — assert no orphan rows.
-
+**Status:** DONE (phase 1).
 ### 3. `apply_payload_to_frontmatter` runs outside the catalog lock
 
 **Where:** `crates/librarian-mcp/src/tools/event_create.rs`.
@@ -96,25 +96,18 @@ real `field_patch` for owners/tags is needed.
 
 ### 5. Missing narrative-layer tests (spec §9 #2, #3, #5)
 
-**Where:** new test cases needed; locations would be in
-`crates/librarian-mcp/src/catalog/events.rs::tests` and adjacent.
+**Where:** `crates/librarian-mcp/src/catalog/events.rs::tests`,
+`crates/librarian-mcp/src/tools/event_create.rs::tests`.
 
-**Issues:**
-- `open_intents_query` — no test asserts the
-  `events k='intent' WHERE id NOT IN (... resolves edges)` SQL.
-- `verdict_without_intent_is_data_bug` — no helper or test checks for
-  orphan verdicts (verdict events with no `resolves` edge).
-- `intent_inputs_payload_passthrough` — no test asserts that the soft
-  `inputs` refs round-trip unchanged through write→read.
+**Resolution:**
+- Added `events::open_intents(cat) -> Vec<EventRow>` + test
+  `open_intents_excludes_resolved_and_includes_unresolved`.
+- Added `events::orphan_verdicts(cat) -> Vec<EventRow>` + test
+  `verdict_without_intent_is_data_bug`.
+- Added `intent_inputs_payload_passthrough` round-trip test in
+  `event_create.rs::tests`.
 
-**Fix shape:** three new unit tests. Open-intents query lives in catalog;
-either add a `pub fn open_intents(cat) -> Result<Vec<EventRow>>` and test
-it, or assert via raw SQL in the test. Orphan-verdict helper similarly.
-Inputs-passthrough is one round-trip via `event_create` + read-back from
-`events.payload`.
-
-**Estimate:** 1 short session. ~30 lines of test code.
-
+**Status:** DONE (phase 1).
 ### 6. Frontmatter hydration duplicated `state_at` ↔ `get.rs`
 
 **Where:** `crates/librarian-mcp/src/tools/state_at.rs::replay_state_at`
