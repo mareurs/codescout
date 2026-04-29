@@ -311,17 +311,15 @@ session through the mux, and passes the bulk of `cargo test`.
   Node-based LSPs misbehave on the Windows runner.
 ### W24. `gh` CLI invocations ✅ done
 
-- **Audit (2026-04-29):** the only `gh` invocation is
-  `tools::github::run_gh` (single bare `Command::new("gh")`). Rust
-  `std::process::Command` on Windows calls `CreateProcessW`, which
-  respects PATH + PATHEXT, so `gh.exe` resolves automatically when on
-  PATH. The NotFound branch already produces an actionable error
-  pointing the user at https://cli.github.com.
-- **Note:** on master the github tools are retired (commit 0bc70eb);
-  on `experiments` they remain. Either way the static analysis is the
-  same: bare-name lookup works on Windows.
-- **Status:** ✅ done (static audit). Empirical verification folds
-  into W21–W25 runtime phase if/when github tools return.
+- **Resolution:** moot. After rebasing onto `experiments` (commit
+  0bc70eb retired the github tools and `github_enabled` config flag),
+  the codescout binary no longer invokes `gh` at all. `tools/github.rs`
+  is gone; no `Command::new("gh")` remains in the tree.
+- **If they ever come back:** Rust `std::process::Command` on Windows
+  uses `CreateProcessW` which respects PATH + PATHEXT, so a bare
+  `Command::new("gh")` resolves `gh.exe` automatically. No code change
+  was required even when the tools existed.
+- **Status:** ✅ done.
 ### W25. Claude Code MCP integration on Windows 🔴 open
 - **Note:** Claude Code itself runs on Windows; whether it can launch
   codescout via stdio MCP transport on Windows is untested. May
