@@ -24,6 +24,11 @@ pub struct FreshnessInputs<'a> {
     pub freshness_horizon: i64,
 }
 
+/// Default freshness horizon (commit distance). Sites that don't yet derive
+/// topological distance pass `None` for `topo_distance_from_head`, so this
+/// constant is effectively unused in v1 — it is plumbed for v1.1.
+pub const FRESHNESS_HORIZON_DEFAULT: i64 = 50;
+
 pub fn compute(input: FreshnessInputs<'_>) -> Freshness {
     if input.latest_event_kind == Some("superseded_by") {
         return Freshness::Superseded;

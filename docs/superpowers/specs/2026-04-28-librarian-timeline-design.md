@@ -475,6 +475,18 @@ Three-query sandwich for `workspace_state_at`:
   trigger = stale-input drift becomes a felt problem.
 - **`librarian_context as_of:` parameter.** Tracked for v1.1.
 - **Pivot to unified docs+code KG (scope B).** See §12.
+- **`replay_state_at` uses live `file_mtime` for freshness-at-as-of.** v1 reads
+  `artifact.file_mtime` (current) when computing `freshness_at_as_of`; if the
+  file changed after the as-of point, the at-as-of freshness can read `stale`
+  even though the artifact was fresh at the cutoff. Fixing requires storing
+  per-anchor file_mtime (event payload, or a snapshot table) — out of scope
+  for v1.
+- **Freshness horizon rule is plumbed but never invoked.** Spec §7 calls for
+  `topo_distance(HEAD, reviewed.head_commit) > FRESHNESS_HORIZON → stale`.
+  v1 hardcodes `topo_distance_from_head: None` at every call site, so the
+  rule never fires. The `FreshnessInputs::topo_distance_from_head` field
+  remains in the API for v1.1, when reindex's commits-table backfill is
+  used to derive distances.
 
 ## 11. Rollout
 

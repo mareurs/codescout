@@ -253,7 +253,7 @@ impl Tool for ArtifactGet {
             latest_reviewed_at,
             file_updated_at: row.file_mtime,
             topo_distance_from_head: None,
-            freshness_horizon: 50,
+            freshness_horizon: crate::freshness::FRESHNESS_HORIZON_DEFAULT,
         });
         out["freshness"] = serde_json::to_value(freshness)?;
         out["latest_event"] = match latest_event_row {
