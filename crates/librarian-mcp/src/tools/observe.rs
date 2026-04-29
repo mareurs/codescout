@@ -55,7 +55,7 @@ impl Tool for ArtifactObserve {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::catalog::observations::list_for_artifact;
     use crate::catalog::Catalog;
@@ -64,7 +64,7 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
 
-    fn mk_ctx(tmp_root: std::path::PathBuf) -> ToolContext {
+    pub(crate) fn mk_ctx(tmp_root: std::path::PathBuf) -> ToolContext {
         ToolContext {
             catalog: Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap())),
             workspace: Arc::new(WorkspaceConfig {
