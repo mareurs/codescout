@@ -112,6 +112,7 @@ impl Tool for ArtifactGraph {
                     &cat,
                     artifact_id,
                     None,
+                    None,
                     usize::MAX,
                 )?;
                 for ev in &events {

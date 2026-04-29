@@ -50,13 +50,16 @@ impl Tool for ArtifactTimeline {
             .map(|v| v.iter().map(|s| s.as_str()).collect());
         let mut rows = {
             let cat = ctx.catalog.lock();
-            events::timeline_for_artifact(&cat, &a.artifact_id, kinds_refs.as_deref(), a.limit)?
+            events::timeline_for_artifact(
+                &cat,
+                &a.artifact_id,
+                kinds_refs.as_deref(),
+                a.until,
+                a.limit,
+            )?
         };
         if let Some(since) = a.since {
             rows.retain(|e| e.created_at >= since);
-        }
-        if let Some(until) = a.until {
-            rows.retain(|e| e.created_at <= until);
         }
 
         let mut out = Vec::with_capacity(rows.len());

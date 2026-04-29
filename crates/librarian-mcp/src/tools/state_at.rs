@@ -53,7 +53,7 @@ pub(crate) fn replay_state_at(
     art: &crate::catalog::artifact::ArtifactRow,
     cutoff_ts: i64,
 ) -> Result<ReplayedState> {
-    let all = events::timeline_for_artifact(cat, &art.id, None, usize::MAX)?;
+    let all = events::timeline_for_artifact(cat, &art.id, None, None, usize::MAX)?;
     // timeline_for_artifact returns newest-first; filter to ≤ cutoff and reverse
     // for chronological replay.
     let mut filtered: Vec<_> = all
@@ -119,7 +119,7 @@ pub(crate) fn replay_state_at(
         latest_reviewed_at,
         file_updated_at: art.file_mtime,
         topo_distance_from_head: None,
-        freshness_horizon: 50,
+        freshness_horizon: crate::freshness::FRESHNESS_HORIZON_DEFAULT,
     });
 
     let supersession_chain: Vec<String> = superseded_by.into_iter().collect();

@@ -39,6 +39,7 @@ pub fn timeline_for_artifact(
     cat: &Catalog,
     artifact_id: &str,
     kinds: Option<&[&str]>,
+    until: Option<i64>,
     limit: usize,
 ) -> Result<Vec<EventRow>> {
     let mut sql = String::from(
@@ -51,6 +52,9 @@ pub fn timeline_for_artifact(
             sql.push_str(&format!(" AND kind IN ({placeholders})"));
         }
     }
+    if until.is_some() {
+        sql.push_str(" AND created_at <= ?");
+    }
     sql.push_str(" ORDER BY created_at DESC, id DESC LIMIT ?");
     let mut stmt = cat.conn.prepare(&sql)?;
     let mut params_dyn: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(artifact_id.to_string())];
@@ -58,6 +62,9 @@ pub fn timeline_for_artifact(
         for k in ks {
             params_dyn.push(Box::new(k.to_string()));
         }
+    }
+    if let Some(u) = until {
+        params_dyn.push(Box::new(u));
     }
     params_dyn.push(Box::new(limit as i64));
     let rows = stmt
@@ -163,10 +170,41 @@ mod tests {
             let kind = if i % 2 == 0 { "note" } else { "reviewed" };
             insert(&cat, &ev(&format!("0{i}"), "a", kind, i as i64)).unwrap();
         }
-        let only_notes = timeline_for_artifact(&cat, "a", Some(&["note"]), 10).unwrap();
+        let only_notes = timeline_for_artifact(&cat, "a", Some(&["note"]), None, 10).unwrap();
         assert_eq!(only_notes.len(), 3);
-        let capped = timeline_for_artifact(&cat, "a", None, 2).unwrap();
+        let capped = timeline_for_artifact(&cat, "a", None, None, 2).unwrap();
         assert_eq!(capped.len(), 2);
         assert_eq!(capped[0].id, "04"); // newest first
+    }
+
+    #[test]
+    fn timeline_until_pushes_into_sql_not_post_limit() {
+        // Seed 50 events at ts=1..=50 plus one ancient event at ts=0.
+        let cat = Catalog::open_in_memory().unwrap();
+        crate::catalog::artifact::upsert(&cat, &art("a")).unwrap();
+        // Ancient event at ts=0
+        insert(&cat, &ev("ancient", "a", "note", 0)).unwrap();
+        // 50 events at ts=1..=50
+        for i in 1i64..=50 {
+            insert(&cat, &ev(&format!("e{i:02}"), "a", "note", i)).unwrap();
+        }
+
+        // limit=10 without until → returns the 10 newest (ts=41..=50)
+        let newest = timeline_for_artifact(&cat, "a", None, None, 10).unwrap();
+        assert_eq!(newest.len(), 10);
+        assert!(newest.iter().all(|e| e.created_at >= 41));
+
+        // limit=10 with until=5 → must return events ts=0..=5 (6 rows), NOT the 10 newest.
+        // This proves the until filter is applied in SQL before the LIMIT clause.
+        let bounded = timeline_for_artifact(&cat, "a", None, Some(5), 10).unwrap();
+        assert_eq!(
+            bounded.len(),
+            6, // ts=0,1,2,3,4,5
+            "until must be pushed into SQL before the LIMIT"
+        );
+        assert!(
+            bounded.iter().all(|e| e.created_at <= 5),
+            "all results must satisfy created_at <= 5"
+        );
     }
 }
