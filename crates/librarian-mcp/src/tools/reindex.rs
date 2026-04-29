@@ -118,6 +118,14 @@ impl Tool for LibrarianReindex {
                 let cat = ctx.catalog.lock();
                 indexer::write_embeddings(&cat, &computed)?;
             }
+
+            // --- Phase 4: backfill git commit history ---
+            {
+                let cat = ctx.catalog.lock();
+                if let Err(e) = backfill_commits(&cat, &root.path, &root.name) {
+                    tracing::debug!("backfill_commits skipped for {}: {}", root.name, e);
+                }
+            }
         }
 
         let unknown_count = all_unknown_ids.len();
@@ -138,6 +146,52 @@ impl Tool for LibrarianReindex {
             }
         }))
     }
+}
+
+fn backfill_commits(
+    catalog: &crate::catalog::Catalog,
+    repo_path: &std::path::Path,
+    repo_name: &str,
+) -> anyhow::Result<()> {
+    use git2::{Repository, Sort};
+
+    let repo = match Repository::open(repo_path) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::debug!("skipping {}: not a git repo ({})", repo_path.display(), e);
+            return Ok(());
+        }
+    };
+
+    let mut walk = repo.revwalk()?;
+    // TOPOLOGICAL | REVERSE = parents before children = lowest topo_order for oldest commit
+    walk.set_sorting(Sort::TOPOLOGICAL | Sort::REVERSE)?;
+    if let Err(e) = walk.push_head() {
+        // Empty repo or detached HEAD with no commits
+        tracing::debug!(
+            "revwalk push_head failed for {}: {}",
+            repo_path.display(),
+            e
+        );
+        return Ok(());
+    }
+
+    let rows: anyhow::Result<Vec<_>> = walk
+        .enumerate()
+        .map(|(order, oid_result)| {
+            let oid = oid_result?;
+            let commit = repo.find_commit(oid)?;
+            Ok(crate::catalog::commits::CommitRow {
+                hash: oid.to_string(),
+                repo: repo_name.to_string(),
+                authored_at: Some(commit.time().seconds() * 1000),
+                subject: commit.summary().map(String::from),
+                topo_order: Some(order as i64),
+            })
+        })
+        .collect();
+    crate::catalog::commits::upsert_many(catalog, &rows?)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -224,5 +278,94 @@ mod tests {
             .unwrap();
         assert_eq!(v3["added"].as_u64().unwrap(), 1);
         assert_eq!(v3["unchanged"].as_u64().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn reindex_backfills_commits_table() {
+        use std::process::Command;
+
+        let tmp = TempDir::new().unwrap();
+        let repo_path = tmp.path().join("r1");
+        std::fs::create_dir_all(&repo_path).unwrap();
+
+        let run = |args: &[&str], cwd: &std::path::Path| {
+            Command::new("git")
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .unwrap()
+        };
+
+        // git init (plain — avoid -b flag for older git compatibility)
+        run(&["init", "-q"], &repo_path);
+        run(&["config", "user.email", "test@test.com"], &repo_path);
+        run(&["config", "user.name", "Test User"], &repo_path);
+
+        // 3 commits
+        for i in 1..=3u32 {
+            std::fs::write(repo_path.join("f.md"), format!("v{i}")).unwrap();
+            run(&["add", "."], &repo_path);
+            run(&["commit", "-q", "-m", &format!("c{i}")], &repo_path);
+        }
+
+        // Build a ToolContext pointing at this repo as "r1"
+        let rules = crate::classify::load_rules("").unwrap();
+        let ctx = ToolContext {
+            catalog: Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap())),
+            workspace: Arc::new(WorkspaceConfig {
+                roots: vec![Root {
+                    name: "r1".into(),
+                    path: repo_path.clone(),
+                }],
+                ignore: vec![],
+                rules: vec![],
+                umbrellas: vec![],
+            }),
+            rules: Arc::new(rules),
+            embedding: None,
+            current_project: None,
+        };
+
+        // Run reindex — this should backfill the commits table
+        LibrarianReindex.call(&ctx, json!({})).await.unwrap();
+
+        // Assert 3 rows in commits table for "r1"
+        let n: i64 = {
+            let cat = ctx.catalog.lock();
+            cat.conn
+                .query_row(
+                    "SELECT COUNT(*) FROM commits WHERE repo=?1",
+                    rusqlite::params!["r1"],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(n, 3, "should have 3 commit rows");
+
+        // newest commit = highest topo_order = 2 (0-indexed: c1=0, c2=1, c3=2)
+        let max_order: i64 = {
+            let cat = ctx.catalog.lock();
+            cat.conn
+                .query_row(
+                    "SELECT MAX(topo_order) FROM commits WHERE repo=?1",
+                    rusqlite::params!["r1"],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(max_order, 2, "newest commit should have topo_order=2");
+
+        // topo_order is monotonically increasing (all distinct 0,1,2)
+        let min_order: i64 = {
+            let cat = ctx.catalog.lock();
+            cat.conn
+                .query_row(
+                    "SELECT MIN(topo_order) FROM commits WHERE repo=?1",
+                    rusqlite::params!["r1"],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(min_order, 0, "oldest commit should have topo_order=0");
     }
 }
