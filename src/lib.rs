@@ -10,6 +10,8 @@ pub mod dashboard;
 pub mod embed;
 pub mod git;
 pub mod hardware;
+#[cfg(feature = "librarian")]
+pub mod librarian;
 pub mod library;
 pub mod logging;
 pub mod lsp;

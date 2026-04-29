@@ -18,11 +18,12 @@ pub mod workspace;
 pub mod current_project;
 
 pub mod server;
+pub use server::INSTRUCTIONS;
 pub mod tools;
 
 use anyhow::Result;
 
-pub async fn run_stdio_server() -> Result<()> {
+pub async fn build_tool_context() -> Result<tools::ToolContext> {
     use anyhow::Context as _;
     use std::path::PathBuf;
 
@@ -81,13 +82,17 @@ pub async fn run_stdio_server() -> Result<()> {
         tracing::info!("current project unresolved — defaulting to workspace-wide scope");
     }
 
-    let ctx = tools::ToolContext {
+    Ok(tools::ToolContext {
         catalog: std::sync::Arc::new(parking_lot::Mutex::new(catalog)),
         workspace: ws_arc,
         rules: std::sync::Arc::new(rules),
         embedding,
         current_project,
-    };
+    })
+}
+
+pub async fn run_stdio_server() -> Result<()> {
+    let ctx = build_tool_context().await?;
     server::LibrarianServer::new(ctx).serve_stdio().await
 }
 

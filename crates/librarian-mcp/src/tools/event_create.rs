@@ -9,10 +9,27 @@ use crate::catalog::{event_edges, events, sources};
 
 pub struct ArtifactEventCreate;
 
+fn any_value_schema(_g: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({})
+}
+
+fn source_schema(_g: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": ["object", "null"],
+        "properties": {
+            "uri": {"type": "string"},
+            "kind": {"type": "string"},
+            "payload": {}
+        },
+        "required": ["uri", "kind"]
+    })
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct Args {
     pub artifact_id: String,
     pub kind: String,
+    #[schemars(schema_with = "any_value_schema")]
     pub payload: Value,
     #[serde(default)]
     pub anchor_commit: Option<String>,
@@ -25,6 +42,7 @@ pub struct Args {
     #[serde(default)]
     pub resolves_intent_event_id: Option<String>,
     #[serde(default)]
+    #[schemars(schema_with = "source_schema")]
     pub source: Option<SourceArg>,
     #[serde(default)]
     pub author: Option<String>,
@@ -35,6 +53,7 @@ pub struct SourceArg {
     pub uri: String,
     pub kind: String,
     #[serde(default)]
+    #[schemars(schema_with = "any_value_schema")]
     pub payload: Option<Value>,
 }
 

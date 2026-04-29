@@ -538,6 +538,7 @@ dependencies = [
  "hex",
  "ignore",
  "libc",
+ "librarian-mcp",
  "lsp-types",
  "open",
  "parking_lot",

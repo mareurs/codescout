@@ -58,6 +58,7 @@ async-trait = "0.1"
 
 # Sibling crates
 codescout-embed = { path = "crates/codescout-embed" }
+librarian-mcp = { path = "crates/librarian-mcp", optional = true }
 
 # Logging / tracing
 tracing = "0.1"
@@ -124,7 +125,12 @@ uuid = { version = "1.20.0", features = ["v4"] }
 parking_lot = "0.12"
 
 [features]
-default = ["remote-embed", "local-embed", "dashboard", "http"]
+default = ["remote-embed", "local-embed", "dashboard", "http", "librarian"]
+# Embedded librarian-mcp (workspace doc/spec/plan index). Default-on for dev
+# builds; turn off for production publishes via `--no-default-features`.
+# Runtime override: `LIBRARIAN_ENABLED=0` or `[librarian] enabled = false` in
+# `.codescout/project.toml` disables registration even when compiled.
+librarian = ["dep:librarian-mcp"]
 dashboard = ["dep:axum", "dep:tower-http", "dep:open"]
 http = ["dep:axum", "dep:tower-http", "rmcp/transport-streamable-http-server"]
 # Remote embedding via OpenAI-compatible HTTP API (Ollama, OpenAI, etc.)

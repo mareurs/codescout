@@ -86,8 +86,15 @@ impl CodeScoutServer {
     /// Create a server with an existing LspManager (used for HTTP multi-session).
     pub async fn from_parts(agent: Agent, lsp: Arc<dyn LspProvider>, debug: bool) -> Self {
         let status = agent.project_status().await;
-        let instructions = crate::prompts::build_server_instructions(status.as_ref());
-        let tools: Vec<Arc<dyn Tool>> = vec![
+        #[cfg_attr(not(feature = "librarian"), allow(unused_mut))]
+        let mut instructions = crate::prompts::build_server_instructions(status.as_ref());
+        #[cfg(feature = "librarian")]
+        if librarian_enabled_at_runtime(status.as_ref().map(|s| s.path.as_str())) {
+            instructions.push_str("\n\n");
+            instructions.push_str(librarian_mcp::INSTRUCTIONS);
+        }
+        #[cfg_attr(not(feature = "librarian"), allow(unused_mut))]
+        let mut tools: Vec<Arc<dyn Tool>> = vec![
             // File tools (fully implemented)
             Arc::new(ReadFile),
             Arc::new(ListDir),
@@ -123,6 +130,12 @@ impl CodeScoutServer {
             Arc::new(ListLibraries),
             Arc::new(RegisterLibrary),
         ];
+        #[cfg(feature = "librarian")]
+        if librarian_enabled_at_runtime(status.as_ref().map(|s| s.path.as_str())) {
+            if let Some(lib_ctx) = crate::librarian::try_build_runtime().await {
+                tools.extend(crate::librarian::adapters_for(lib_ctx));
+            }
+        }
         let output_buffer = Arc::new(crate::tools::output_buffer::OutputBuffer::new(50));
         let section_coverage = Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
@@ -347,7 +360,13 @@ impl CodeScoutServer {
     /// (e.g. memories written by a just-completed onboarding run).
     async fn refresh_instructions(&self) {
         let status = self.agent.project_status().await;
-        let new_instructions = crate::prompts::build_server_instructions(status.as_ref());
+        #[cfg_attr(not(feature = "librarian"), allow(unused_mut))]
+        let mut new_instructions = crate::prompts::build_server_instructions(status.as_ref());
+        #[cfg(feature = "librarian")]
+        if librarian_enabled_at_runtime(status.as_ref().map(|s| s.path.as_str())) {
+            new_instructions.push_str("\n\n");
+            new_instructions.push_str(librarian_mcp::INSTRUCTIONS);
+        }
         *self.instructions.write() = new_instructions;
     }
 
@@ -513,6 +532,43 @@ impl CodeScoutServer {
 ///   the per-request `timeout_secs` parameter effectively ignored.
 fn tool_skips_server_timeout(name: &str) -> bool {
     matches!(name, "index_project" | "index_library" | "run_command")
+}
+
+/// Whether to register the embedded librarian tool surface for this session.
+///
+/// Layered defaults:
+/// 1. `LIBRARIAN_ENABLED=0|false|off` env var disables (overrides everything).
+/// 2. `LIBRARIAN_ENABLED=1|true|on` env var enables (overrides config).
+/// 3. `[librarian] enabled = false` in `<project>/.codescout/project.toml` disables.
+/// 4. Default: enabled (matches `feature = "librarian"` compile-in).
+#[cfg(feature = "librarian")]
+fn librarian_enabled_at_runtime(project_path: Option<&str>) -> bool {
+    if let Ok(v) = std::env::var("LIBRARIAN_ENABLED") {
+        let v = v.trim().to_ascii_lowercase();
+        if matches!(v.as_str(), "0" | "false" | "off" | "no") {
+            return false;
+        }
+        if matches!(v.as_str(), "1" | "true" | "on" | "yes") {
+            return true;
+        }
+    }
+    if let Some(root) = project_path {
+        let cfg = std::path::Path::new(root)
+            .join(".codescout")
+            .join("project.toml");
+        if let Ok(text) = std::fs::read_to_string(&cfg) {
+            if let Ok(parsed) = toml::from_str::<toml::Value>(&text) {
+                if let Some(v) = parsed
+                    .get("librarian")
+                    .and_then(|t| t.get("enabled"))
+                    .and_then(|v| v.as_bool())
+                {
+                    return v;
+                }
+            }
+        }
+    }
+    true
 }
 
 impl ServerHandler for CodeScoutServer {
@@ -1248,12 +1304,17 @@ mod tests {
             "list_libraries",
             "register_library",
         ];
+        let core_count = server
+            .tools
+            .iter()
+            .filter(|t| !is_librarian_tool(t.name()))
+            .count();
         assert_eq!(
-            server.tools.len(),
+            core_count,
             expected_tools.len(),
-            "tool count mismatch: expected {}, got {}\nregistered: {:?}",
+            "core tool count mismatch: expected {}, got {}\nregistered: {:?}",
             expected_tools.len(),
-            server.tools.len(),
+            core_count,
             server.tools.iter().map(|t| t.name()).collect::<Vec<_>>()
         );
         for name in &expected_tools {
@@ -1265,10 +1326,19 @@ mod tests {
         }
     }
 
+    fn is_librarian_tool(name: &str) -> bool {
+        name.starts_with("artifact_")
+            || name.starts_with("librarian_")
+            || name == "workspace_state_at"
+    }
+
     #[tokio::test]
     async fn tool_descriptions_stay_under_budget() {
         let (_dir, server) = make_server().await;
         for t in &server.tools {
+            if is_librarian_tool(t.name()) {
+                continue;
+            }
             let d = t.description();
             assert!(
                 d.len() <= 300,
