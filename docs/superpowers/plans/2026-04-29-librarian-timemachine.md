@@ -1942,6 +1942,8 @@ Phase 1+2 land on `experiments` first, then cherry-picked to `master` once
 manually verified via `/mcp` restart and `cargo test` clean. Phase 3 (tracker
 + inaugural intent) lands on `master` after cherry-pick.
 
+- [x] Tracker file landed (commit 5352c5b); inaugural intent event still pending — run after the librarian MCP server picks up the new file via `librarian_reindex`.
+
 - [ ] **Update spec changelog**
 
 Append to spec §13 once implementation lands:
