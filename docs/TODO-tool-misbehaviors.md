@@ -33,73 +33,28 @@ These are fixed in the happy path but still have edge cases worth knowing about.
 - **Crash fixed** by rmcp 1.2.0 cancellation-race fix.
 - **Still applies:** never dispatch parallel write tool calls. Two independent writes have no transaction semantics; if one is denied by the permission dialog and the other succeeds, files end up half-applied.
 
-## Open
-
 ### BUG-048 — `find_symbol` hangs 60s during LSP cold-start indexing
 
-**Date:** 2026-04-24
-**Severity:** High (core navigation tool unusable after `/mcp` reconnect on large projects)
-**Status:** Fixed (2026-04-24) — `workspace/symbol` now bypasses the cold-start retry budget in `src/lsp/client.rs`. Unit test: `workspace_symbol_skips_cold_start_retry_budget`.
+- **Mitigation (2026-04-24):** `workspace/symbol` bypasses the cold-start retry budget in `src/lsp/client.rs` via `uses_cold_start_retry_budget`; `find_symbol` falls over to tree-sitter in ~1 s. Test: `workspace_symbol_skips_cold_start_retry_budget`.
+- **Still watch for:** `/mcp` reconnects on large projects (rust-analyzer reindex). Per-file paths (`list_symbols`, `hover`, `goto_definition`, `find_references`) remain unaffected.
 
-**Repro during initial investigation:**
-
-```
-find_symbol(name="open_repo")                       # timed out after 60s
-find_symbol(name="open_repo", substring_matching=false)  # returned in <1s
-```
-
-**Red herring:** `substring_matching` is NOT a `find_symbol` parameter. The schema accepts only `query`/`symbol`/`name`/`path`/`kind`/`include_body`/`depth`/`detail_level`/`offset`/`limit`/`scope`. Unknown kwargs are silently dropped by MCP, so both calls executed the identical code path. The second call returning instantly was rust-analyzer finishing indexing in the background between calls, not the extra kwarg.
-
-**Actual root cause:**
-
-1. After `/mcp` reconnect on a 587-file Rust project, rust-analyzer started reindexing.
-2. `workspace/symbol` requests during indexing return `-32800 RequestCancelled` — the response only becomes answerable once the *whole* project is indexed (minutes).
-3. `LspClient::request` (`src/lsp/client.rs`) gives every idempotent method a cold-start retry budget of **10 × 3 s linear backoff + 30 s per-attempt timeout** — far more than the 60 s MCP tool timeout.
-4. Per-file LSP ops (`textDocument/documentSymbol`, `hover`, `definition`, `references`) answer lazily per file, so `list_symbols`/`hover`/`goto_definition`/`find_references` stayed fast while `find_symbol` blocked.
-5. Tree-sitter fallback in `find_symbol` runs only after `workspace_symbols` returns, so the retry loop had to drain before it could kick in.
-
-**Fix:** new helper `uses_cold_start_retry_budget(method)` in `src/lsp/client.rs` returns `false` for `workspace/symbol`. That method now uses the warm retry budget (3 × 300 ms ≈ 1.2 s) even inside the cold-start window, so `find_symbol` fails over to the tree-sitter walker within ~1 s instead of hanging for 60 s. `workspace/symbol` remains in `is_idempotent_lsp_method` so the warm-path retry still engages.
-
-**Mitigation for users on older builds:** pin `path` to a file or directory — that takes the per-file `document_symbols` path, which is unaffected.
 ### BUG-049 — `find_symbol` hangs ~90s when kotlin-lsp hits "Multiple editing sessions"
 
-**Date:** 2026-04-24
-**Severity:** High (core navigation tool unusable on mixed-language projects whenever another editor/agent is holding the kotlin-lsp workspace lock)
-**Status:** Fixed (2026-04-24)
+- **Mitigation (2026-04-24):** per-language 8 s hard budget in `src/tools/symbol/find_symbol.rs` JoinSet; `detect_fatal_stderr` in `src/lsp/client.rs` fast-fails kotlin-lsp's multi-session error on every init attempt. Tests: `detect_fatal_stderr_flags_kotlin_multi_session`, `detect_fatal_stderr_ignores_benign_lines`.
+- **Still watch for:** another editor/agent holding the kotlin-lsp workspace lock — first call still pays up to ~8 s before falling back. Pin `path=` to a non-Kotlin file to skip kotlin-lsp entirely.
 
-**Repro:** From a second codescout instance (or while IntelliJ / another editor is open on the same Kotlin project):
+### BUG-050 — `edit_file` batch can silently inject mid-function when `new_string` contains `fn `
 
-```
-find_symbol(query="some_name", include_body=true, limit=1)   # run from backend-kotlin
-```
-
-Hangs until the MCP client gives up (~60 s from the agent's view; server-side the task keeps running for another ~30 s before SIGINT).
-
-**Observed in logs (`1e88` instance, `diagnostic-1e88.log` lines 3065-3090):**
-
-```
-17:00:50.940  WARN  Mux startup failed for kotlin, falling back to direct LSP
-17:00:50.941  INFO  Starting LSP server: kotlin-lsp
-17:00:55.548  INFO  LSP initialize cancelled, retrying 1/5: backend-kotlin
-17:00:55.550  WARN  lsp_stderr: com.jetbrains.lsp.implementation.LspException:
-                    Multiple editing sessions for one workspace are not supported yet
-…heartbeats, no tool_done…
-17:02:27.432  user-cancel received
-```
-
-**Root cause (two compounding issues):**
-
-1. **`find_symbol` fast path waits for every language.** Its `JoinSet` fan-out (`src/tools/symbol/find_symbol.rs`) spawns one `get_or_start + workspace_symbols` task per detected language and awaits **all** of them via `join_next`. backend-kotlin contains Rust/JS/Bash/Python/Kotlin source, so one pathological LSP (kotlin) blocks the whole tool call.
-2. **`initialize()`'s fatal-stderr check only fired on `-32800`.** The original check in `LspClient::initialize` looked for `Multiple editing sessions` only inside the `Err(e) if … "-32800"` arm. In practice the first attempt got -32800, the stderr exception arrived ~2 ms *after* that arm dispatched the retry, and subsequent attempts hit a closed pipe / timeout (not -32800), so the fatal pattern was never checked again. Combined with `MAX_INIT_RETRIES=5 × INIT_RETRY_DELAY_MS=3000 ms` linear backoff and a 300 s per-attempt budget for JVM servers, one doomed kotlin-lsp could burn the entire MCP ceiling on its own.
-
-**Fix (this commit):**
-
-- **`src/tools/symbol/find_symbol.rs` — per-language hard budget.** Each JoinSet task is wrapped in `tokio::time::timeout(PER_LANG_BUDGET = 8 s, …)`. On timeout that language yields an empty result and the tree-sitter fallback still runs if every language produces nothing. Any future pathological LSP state is time-boxed instead of taking the whole tool down.
-- **`src/lsp/client.rs` — `detect_fatal_stderr` + `fatal_stderr_hint`.** Extracted a pure helper that scans the buffered stderr for `Multiple editing sessions`. `initialize()` now calls it before **every** attempt and on **every** error arm (not only `-32800`), so the common race where kotlin-lsp crashes mid-init and the next send hits a closed pipe is now detected and fast-failed.
-- Tests: `detect_fatal_stderr_flags_kotlin_multi_session`, `detect_fatal_stderr_ignores_benign_lines`.
-
-**Workaround on older builds:** close the other editor / stop the other codescout instance before calling `find_symbol` from a Kotlin project; or pin `path=` to a non-Kotlin file so the per-file `document_symbols` path is used instead.
-
+- **Observed:** 2026-04-29
+- **Tool:** `mcp__codescout__edit_file` (batch mode with two edits)
+- **Severity:** High (silent corruption of source)
+- **What I did:** Batch `edit_file` against `crates/librarian-mcp/src/catalog/events.rs`. Second edit's `new_string` contained the literal `fn ` (declaring a new private helper function). The `old_string` for that second edit was a single-line match.
+- **Expected:** either the edit applies cleanly between existing functions, or the multi-line-fn guard rejects it.
+- **What happened:** the tool accepted the edit (no error) but injected the replacement text **mid-function**, splicing into the body of an existing fn (`insert`) and corrupting it. Caller noticed via subsequent `cargo build` failure; recovered by re-issuing the edit with surrounding context.
+- **Probable cause:** the structural-edit guard fires only when `old_string` spans multiple lines containing `fn`. A single-line `old_string` with `fn ` in `new_string` slips through the gate.
+- **Workaround:** for any new-function injection, use a multi-line `old_string` with explicit anchor lines on both sides, or use `insert_code`/`replace_symbol` instead of `edit_file`.
+- **Fix:** open
+- **Status:** Open
 ## Archive
 
 Fixed / superseded entries: `docs/archive/bug-reports/`.
