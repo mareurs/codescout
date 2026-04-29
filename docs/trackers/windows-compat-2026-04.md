@@ -80,21 +80,31 @@ session through the mux, and passes the bulk of `cargo test`.
 
 ## Process management
 
-### W5. `run_command` timeout cleanup is Unix-only 🔴 open
+### W5. `run_command` timeout cleanup via Job Objects ✅ done
 
-- **Location:** `src/tools/run_command.rs:1057-1175`.
-- **Issue:** Unix path uses `libc::killpg`, `libc::signal(SIGPIPE)`, and
-  `process_group(0)` to kill an entire shell pipeline on timeout. Windows
-  branch had no equivalent — spawned grand-children orphaned on timeout.
-- **First-pass fix (commit pending):** `TaskkillGuard` mirrors the Unix
-  `PgidKillGuard`. On future drop or timeout, runs
-  `taskkill /T /F /PID <pid>` to walk the process tree. Still uses
-  `kill_on_drop(true)` for the immediate child as belt-and-braces.
-- **Status:** 🟡 partial. Job Objects (cleaner, kernel-managed) deferred
-  as brainstorm-level. `taskkill` race window: a grand-child that
-  exits-and-respawns between our `taskkill` and `wait_with_output`
-  return could escape — unlikely in shell-pipeline contexts but worth
-  a Job Objects upgrade later.
+- **First pass (earlier commit):** added `TaskkillGuard` to mirror the
+  Unix `PgidKillGuard` Drop pattern using `taskkill /T /F /PID`.
+  Functional but carried a PID-reuse race window between guard
+  observation and signal.
+- **Upgrade (2026-04-29):** replaced `TaskkillGuard` with
+  `JobObjectGuard`. After spawning the child, codescout now creates a
+  Win32 Job Object configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
+  and assigns the child via `AssignProcessToJobObject`. When the job
+  handle is dropped (timeout, future cancel, normal completion) the
+  kernel atomically terminates every process still in the job — the
+  closest semantic match to Unix `killpg(SIGKILL)`. No more PID-reuse
+  race.
+- **Fallback:** if Job Object setup fails (e.g. parent in a job that
+  disallows nested-job assignment without breakaway), the future
+  installs a `TaskkillFallback` that reproduces the prior
+  `taskkill /T /F` behaviour. Belt-and-braces only.
+- **windows-sys features added:** `Win32_System_JobObjects`,
+  `Win32_System_Threading`.
+- **Send marker:** `JobObjectGuard` carries a `HANDLE` (`*mut c_void`)
+  which is `!Send`. A Win32 job handle has no thread affinity and is
+  safe to close from any thread, so an `unsafe impl Send` is sound and
+  documented in the source.
+- **Status:** ✅ done.
 ### W6. `terminate_process` already abstracted ✅ done
 - **Location:** `src/platform/{unix,windows}.rs`.
 - **Note:** Already does `taskkill /PID /F` on Windows for top-level
@@ -305,7 +315,7 @@ session through the mux, and passes the bulk of `cargo test`.
 | Bucket | ✅ done | 🟡 partial | 🔴 open | 🚫 blocked |
 |--------|--------|------------|---------|-----------|
 | Mux / LSP transport | 2 | 2 | 0 | 0 |
-| Process management | 1 | 1 | 0 | 0 |
+| Process management | 2 | 0 | 0 | 0 |
 | Path / filesystem | 4 | 1 | 0 | 0 |
 | Embedding | 1 | 1 | 0 | 0 |
 | Hardware | 1 | 0 | 0 | 0 |
@@ -314,21 +324,19 @@ session through the mux, and passes the bulk of `cargo test`.
 | CI / tooling | 2 | 0 | 0 | 0 |
 | Signals (W22) | 1 | 0 | 0 | 0 |
 | Unaudited | 0 | 0 | 5 | 0 |
-| **Totals** | **17** | **5** | **6** | **0** |
+| **Totals** | **18** | **4** | **6** | **0** |
 ## Next moves (ordered by leverage)
 
-Low-hanging fruit landed (W5 first-pass, W7+W17+W20 path/UNC pass, W8,
-W11 decision + W19 CI swap, W12, W13, W18, W22). Remaining items need
-brainstorming or a real Windows machine:
+Low-hanging fruit + design-tier items landed (W5 Job Objects, W7+W17+W20
+path/UNC pass, W8, W11 decision + W19 CI swap, W12, W13, W18, W22).
+Remaining items need brainstorming or a real Windows machine:
 
-1. **W5 upgrade** — swap `taskkill` for Win32 Job Objects
-   (`CreateJobObject` + `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`). Removes
-   the `taskkill` race window.
-2. **W8a (optional)** — extend `SYSTEM_PATHS` in
+1. **W8a (optional)** — extend `SYSTEM_PATHS` in
    `src/embed/preflight.rs` with Windows equivalents. UX polish.
-3. **W21–W25** — actual Windows runtime tests. Until these run, the
+2. **W21–W25** — actual Windows runtime tests. Until these run, the
    port is hypothesis. First Windows CI run (W19) is the first real
-   signal. Symlink-escape coverage on Windows folds into this phase.
+   signal. Symlink-escape coverage and Job Object kill-on-close
+   verification fold into this phase.
 ## References
 
 - Phase A commit: `3b6f8c3` — concentrate IPC behind `transport` module.

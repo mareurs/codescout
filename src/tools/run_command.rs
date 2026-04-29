@@ -703,20 +703,93 @@ impl Drop for BackgroundKillGuard {
     }
 }
 
-/// Windows analogue of `PgidKillGuard`: walks the process tree via
-/// `taskkill /T /F /PID` so grand-children spawned by `cmd /C`
-/// (for-loops, batch files, piped commands) are reaped along with the
-/// immediate child when the future is cancelled or times out. The
-/// closest semantic match to Unix's `killpg(pgid, SIGKILL)`.
+/// Windows analogue of `PgidKillGuard`: creates a Job Object with
+/// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` and assigns the spawned child
+/// to it. When the job handle is dropped (normal exit, timeout, future
+/// cancel), the kernel atomically terminates every process still in
+/// the job — the entire tree spawned by `cmd /C`. Closest semantic
+/// match to Unix's `killpg(pgid, SIGKILL)` and eliminates the
+/// `taskkill` race where a PID could be reused between observation and
+/// signal.
+///
+/// `try_attach` returns `Some` when the Job Object is wired up. On
+/// failure (parent in a non-breakaway job, etc.), the caller falls
+/// back to `taskkill /T /F` via `TaskkillFallback`.
 #[cfg(windows)]
-struct TaskkillGuard(Option<i32>);
+struct JobObjectGuard {
+    job: windows_sys::Win32::Foundation::HANDLE,
+}
 
 #[cfg(windows)]
-impl Drop for TaskkillGuard {
+impl JobObjectGuard {
+    /// Wire up `child_handle` to a fresh Job Object configured for
+    /// kill-on-close. Returns `None` on any Win32 failure so the caller
+    /// can choose a fallback.
+    ///
+    /// Safety: `child_handle` must be a valid, currently-owned process
+    /// handle (obtained from `tokio::process::Child::raw_handle()`).
+    fn try_attach(child_handle: windows_sys::Win32::Foundation::HANDLE) -> Option<Self> {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+
+        unsafe {
+            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if job.is_null() {
+                return None;
+            }
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let info_size = std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32;
+            if SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                &info as *const _ as *const _,
+                info_size,
+            ) == 0
+            {
+                CloseHandle(job);
+                return None;
+            }
+            if AssignProcessToJobObject(job, child_handle) == 0 {
+                CloseHandle(job);
+                return None;
+            }
+            Some(Self { job })
+        }
+    }
+}
+
+// SAFETY: `HANDLE` is `*mut c_void`, which is !Send by default. A Win32 job
+// handle is a kernel object with no thread affinity — it is safe to close
+// from any thread, so transferring ownership across threads is sound.
+#[cfg(windows)]
+unsafe impl Send for JobObjectGuard {}
+
+#[cfg(windows)]
+impl Drop for JobObjectGuard {
+    fn drop(&mut self) {
+        // Closing the last handle to the job triggers
+        // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: the kernel terminates any
+        // process still in the job. No-op when the child has already
+        // exited cleanly.
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.job) };
+    }
+}
+
+/// Fallback used when Job Object setup fails. Reproduces the prior
+/// behaviour: walk the process tree via `taskkill /T /F /PID`. Carries
+/// the inherent PID-reuse race; the Job Object path is preferred.
+#[cfg(windows)]
+struct TaskkillFallback(Option<i32>);
+
+#[cfg(windows)]
+impl Drop for TaskkillFallback {
     fn drop(&mut self) {
         if let Some(pid) = self.0 {
-            // Best-effort: process may already be gone. /T walks the tree;
-            // /F is unconditional kill.
             let _ = std::process::Command::new("taskkill")
                 .args(["/T", "/F", "/PID", &pid.to_string()])
                 .stdout(std::process::Stdio::null())
@@ -1138,14 +1211,27 @@ async fn run_command_inner(
             .kill_on_drop(true);
         let child = cmd.spawn()?;
         let pid: Option<i32> = child.id().map(|id| id as i32);
-        let pid_for_guard = pid;
+        // Try the Job Object path first (atomic kill-on-close, no PID-reuse
+        // race). Fall back to taskkill if the job assignment fails — e.g.
+        // when the parent is itself in a non-breakaway job. `raw_handle`
+        // is the OS-owned process handle; tokio retains ownership for
+        // wait/output, so we only borrow it for the AssignProcessToJobObject
+        // call.
+        let job_guard = match child.raw_handle() {
+            Some(h) => JobObjectGuard::try_attach(h as _),
+            None => None,
+        };
+        let fallback_pid = if job_guard.is_some() { None } else { pid };
         let fut: std::pin::Pin<
             Box<dyn std::future::Future<Output = std::io::Result<std::process::Output>> + Send>,
         > = Box::pin(async move {
-            let mut guard = TaskkillGuard(pid_for_guard);
+            let _job = job_guard;
+            let mut fallback = TaskkillFallback(fallback_pid);
             let result = child.wait_with_output().await;
-            // Successful completion: disarm the guard so Drop is a no-op.
-            guard.0 = None;
+            // Successful completion: disarm the taskkill fallback. The
+            // JobObjectGuard's Drop still runs (closes the handle), but
+            // the child has already exited so KILL_ON_JOB_CLOSE is a no-op.
+            fallback.0 = None;
             result
         });
         (fut, pid)
@@ -1198,10 +1284,11 @@ async fn run_command_inner(
             }
             #[cfg(windows)]
             if let Some(pid) = child_pgid {
-                // Walk the process tree via taskkill — Windows analogue of
-                // killpg. The TaskkillGuard inside the dropped future also
-                // fires; this is belt-and-braces in case the future is
-                // somehow held alive past the timeout.
+                // Belt-and-braces: the JobObjectGuard inside the dropped
+                // future already terminated the tree atomically via
+                // KILL_ON_JOB_CLOSE. taskkill is only meaningful here when
+                // job-object setup failed and we fell back to TaskkillFallback;
+                // when the job path succeeded this is a harmless no-op.
                 let _ = std::process::Command::new("taskkill")
                     .args(["/T", "/F", "/PID", &pid.to_string()])
                     .stdout(std::process::Stdio::null())
