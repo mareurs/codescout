@@ -112,15 +112,26 @@ session through the mux, and passes the bulk of `cargo test`.
   Windows returns UNC paths — caller must normalize).
 - **Status:** 🔴 open.
 
-### W8. Hardcoded `/tmp` as write root 🔴 open
-- **Location:** `src/util/path_security.rs` write-root validator.
-- **Issue:** `/tmp` is a Unix-ism. Windows uses
-  `%LOCALAPPDATA%\Temp` (returned by `std::env::temp_dir()`).
-- **Action:** Replace hardcoded `/tmp` check with
-  `std::env::temp_dir()` ancestor check. Already partially right via
-  `platform::temp_dir()`; audit all sites.
-- **Status:** 🔴 open.
+### W8. Hardcoded `/tmp` as write root ✅ done
 
+- **Audit (2026-04-29):** the original concern (a hardcoded `/tmp`
+  write-root in `path_security.rs`) is no longer present.
+  `validate_write_path` already routes through
+  `crate::platform::temp_dir()` (file:src/util/path_security.rs around
+  L308). All other `"/tmp"` literals under `src/` are inside `#[cfg(test)]`
+  fixtures.
+- **Side finding:** `src/embed/preflight.rs::SYSTEM_PATHS` (L55) is a
+  Unix-only list (`/`, `/usr`, `/etc`, `/var`, `/tmp`, `/root`, `/opt`,
+  `/proc`, `/sys`, `/home`) used to warn when a user roots codescout on
+  a "broad" filesystem location. On Windows this list never matches, so
+  it produces no false positives — but also no warning for `C:\`,
+  `C:\Windows`, `C:\Program Files`, `%USERPROFILE%`. UX polish, not a
+  security regression. Tracked as a follow-up below; not blocking the
+  Windows port.
+- **Status:** ✅ done.
+- **Follow-up (W8a, optional):** extend `SYSTEM_PATHS` with Windows
+  equivalents under `#[cfg(windows)]`, or replace with a platform-aware
+  classifier in `crate::platform`.
 ### W9. `atomic_write` exec-bit preservation Unix-only 🟡 partial
 - **Location:** `src/util/fs.rs:52-68`.
 - **Issue:** `#[cfg(unix)]` block reads + restores Unix mode (preserves
@@ -272,7 +283,7 @@ session through the mux, and passes the bulk of `cargo test`.
 |--------|--------|------------|---------|-----------|
 | Mux / LSP transport | 2 | 2 | 0 | 0 |
 | Process management | 1 | 1 | 0 | 0 |
-| Path / filesystem | 2 | 1 | 1 | 0 |
+| Path / filesystem | 3 | 1 | 0 | 0 |
 | Embedding | 1 | 1 | 0 | 0 |
 | Hardware | 1 | 0 | 0 | 0 |
 | Shell | 2 | 0 | 0 | 0 |
@@ -280,20 +291,20 @@ session through the mux, and passes the bulk of `cargo test`.
 | CI / tooling | 1 | 0 | 1 | 0 |
 | Signals (W22) | 1 | 0 | 0 | 0 |
 | Unaudited | 0 | 0 | 5 | 0 |
-| **Totals** | **13** | **5** | **9** | **0** |
+| **Totals** | **14** | **5** | **8** | **0** |
 ## Next moves (ordered by leverage)
 
-Low-hanging fruit landed (W5 first-pass, W11 decision + W19 CI swap, W12,
-W13, W18, W22). Remaining items need brainstorming or a real Windows
-machine:
+Low-hanging fruit landed (W5 first-pass, W8, W11 decision + W19 CI swap,
+W12, W13, W18, W22). Remaining items need brainstorming or a real
+Windows machine:
 
 1. **W7, W17, W20** — path/security pass: dunce dep adoption, Windows
    symlink validation, UNC normalisation. One bundled commit.
-2. **W8** — audit hardcoded `/tmp` write-root in `path_security.rs`;
-   route through `platform::temp_dir()`.
-3. **W5 upgrade** — swap `taskkill` for Win32 Job Objects
+2. **W5 upgrade** — swap `taskkill` for Win32 Job Objects
    (`CreateJobObject` + `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`). Removes
    the `taskkill` race window.
+3. **W8a (optional)** — extend `SYSTEM_PATHS` in
+   `src/embed/preflight.rs` with Windows equivalents. UX polish.
 4. **W21–W25** — actual Windows runtime tests. Until these run, the
    port is hypothesis. First Windows CI run (W19) is the first real
    signal.
