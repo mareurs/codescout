@@ -10,6 +10,7 @@ pub mod ids;
 pub mod util;
 
 pub mod embedding;
+pub mod freshness;
 pub mod indexer;
 pub mod preview;
 pub mod workspace;
