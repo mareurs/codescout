@@ -4,6 +4,7 @@ use std::path::Path;
 
 pub mod artifact;
 pub mod commits;
+pub mod event_edges;
 pub mod events;
 pub mod find;
 pub mod links;
