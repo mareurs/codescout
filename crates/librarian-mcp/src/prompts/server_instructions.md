@@ -108,3 +108,17 @@ derived index.
 `librarian_reindex {repo?, force?}` to manually trigger. No file watcher —
 files moved / created outside this tool won't appear until the next
 reindex. On a busy workspace, call reindex at the start of a session.
+
+
+## Event authorship
+
+- Before non-trivial artifact work (revising a spec/plan/ADR, supersession,
+  status flip), emit an `intent` event capturing hypothesis + soft `inputs` refs.
+- After the work concludes, emit a paired `verdict` event with
+  `resolves_intent_event_id` set. Outcome ∈ confirmed|refuted|partial|abandoned.
+- After confirming an artifact still reflects reality, emit a `reviewed` event
+  (freshness ping). Cheap and high-value.
+- Reserve direct user calls for high-stakes events: `superseded_by`,
+  `external_signal` (chat/jira/meeting decisions the librarian did not see).
+- Do not emit `intent` for trivial mechanical edits (typo fixes, link rot).
+  Threshold: would a future reader want to know *why* this changed? If yes, emit.
