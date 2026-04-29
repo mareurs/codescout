@@ -14,7 +14,13 @@ pub(super) fn format_goto_definition(val: &Value) -> String {
     };
 
     if defs.is_empty() {
-        return String::new();
+        // Empty defs is a successful "no definition" result. Surface the hint
+        // attached by the tool (if any) instead of swallowing it silently.
+        return val
+            .get("hint")
+            .and_then(Value::as_str)
+            .map(|h| h.to_string())
+            .unwrap_or_default();
     }
 
     if defs.len() == 1 {
@@ -59,7 +65,18 @@ pub(super) fn format_goto_definition(val: &Value) -> String {
 pub(super) fn format_hover(val: &Value) -> String {
     let content = match val["content"].as_str() {
         Some(s) => s,
-        None => return String::new(),
+        None => {
+            // No hover content. Surface a hint+location if the tool attached one
+            // (the empty-result path now returns Ok with hint instead of erroring).
+            let location = val["location"].as_str().unwrap_or("");
+            let hint = val["hint"].as_str().unwrap_or("");
+            return match (location.is_empty(), hint.is_empty()) {
+                (true, true) => String::new(),
+                (false, true) => location.to_string(),
+                (true, false) => hint.to_string(),
+                (false, false) => format!("{}\n  ({})", location, hint),
+            };
+        }
     };
     let location = val["location"].as_str().unwrap_or("");
 

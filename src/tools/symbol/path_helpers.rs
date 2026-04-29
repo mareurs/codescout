@@ -282,6 +282,40 @@ pub(super) async fn get_lsp_client(
     Ok((client, language_id.to_string()))
 }
 
+/// Returns `true` for transient LSP-mux infrastructure errors that warrant
+/// a single retry with a freshly-spawned client.
+fn is_mux_disconnect(e: &anyhow::Error) -> bool {
+    let s = e.to_string();
+    s.contains("Mux connection lost") || s.contains("Failed to spawn mux process")
+}
+
+/// Run an LSP operation; on a transient mux disconnect, refetch a fresh
+/// client (the manager evicts dead clients on `is_alive() == false`) and
+/// retry once.
+///
+/// Designed for read-only LSP requests (hover, goto_definition, references).
+/// The closure may be called twice — keep it idempotent.
+pub(super) async fn retry_on_mux_disconnect<F, Fut, T>(
+    ctx: &ToolContext,
+    path: &Path,
+    initial_client: std::sync::Arc<dyn crate::lsp::LspClientOps>,
+    initial_lang: String,
+    op: F,
+) -> anyhow::Result<T>
+where
+    F: Fn(std::sync::Arc<dyn crate::lsp::LspClientOps>, String) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    match op(initial_client, initial_lang).await {
+        Err(e) if is_mux_disconnect(&e) => {
+            tracing::warn!("LSP mux disconnect, retrying once: {}", e);
+            let (client, lang) = get_lsp_client(ctx, path).await?;
+            op(client, lang).await
+        }
+        other => other,
+    }
+}
+
 /// Convert a `file://` URI to a filesystem path.
 ///
 /// Uses `url::Url` for correct handling of Windows drive letters,

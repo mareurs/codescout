@@ -3861,6 +3861,17 @@ fn goto_empty_definitions() {
 }
 
 #[test]
+fn goto_empty_definitions_with_hint() {
+    let val = serde_json::json!({
+        "definitions": [],
+        "from": "main.rs:42",
+        "hint": "no definition resolvable at this position",
+    });
+    let out = format_goto_definition(&val);
+    assert_eq!(out, "no definition resolvable at this position");
+}
+
+#[test]
 fn goto_no_context() {
     let val = serde_json::json!({
         "definitions": [{
@@ -3930,6 +3941,27 @@ fn hover_no_location() {
 fn hover_empty_content() {
     let val = serde_json::json!({});
     assert_eq!(format_hover(&val), "");
+}
+
+#[test]
+fn hover_null_content_with_hint_surfaces_hint() {
+    let val = serde_json::json!({
+        "content": null,
+        "location": "lib.rs:10",
+        "hint": "no hover info at this position",
+    });
+    let out = format_hover(&val);
+    assert!(out.starts_with("lib.rs:10"));
+    assert!(out.contains("no hover info at this position"));
+}
+
+#[test]
+fn hover_null_content_hint_only() {
+    let val = serde_json::json!({
+        "content": null,
+        "hint": "lone hint",
+    });
+    assert_eq!(format_hover(&val), "lone hint");
 }
 
 #[test]
@@ -4446,6 +4478,233 @@ async fn find_symbol_falls_back_to_document_symbols_on_bad_workspace_range() {
     assert!(
         body.contains("let y = x + 1"),
         "body should contain function contents; got: {body}"
+    );
+}
+
+#[tokio::test]
+async fn goto_definition_uses_col_param_over_identifier() {
+    use crate::lsp::{mock::MockLspClient, mock::MockLspProvider};
+    use crate::tools::symbol::GotoDefinition;
+
+    let dir = tempfile::tempdir().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let file = src_dir.join("lib.rs");
+    // line 0: `fn helper(x: i32) {}` — identifier `helper` at byte col 3
+    std::fs::write(&file, "fn helper(x: i32) {}\n").unwrap();
+
+    // Register definition keyed at (line=0, col=3) only.
+    // Caller passes col=4 (1-indexed) → 3 (0-indexed) plus a bogus identifier
+    // that doesn't exist on the line. With col-priority, identifier is ignored.
+    let target = lsp_types::Location {
+        uri: url::Url::from_file_path(&file)
+            .unwrap()
+            .as_str()
+            .parse()
+            .unwrap(),
+        range: lsp_types::Range {
+            start: lsp_types::Position {
+                line: 5,
+                character: 0,
+            },
+            end: lsp_types::Position {
+                line: 5,
+                character: 6,
+            },
+        },
+    };
+    let mock = MockLspClient::new().with_definitions(0, 3, vec![target]);
+    let lsp = MockLspProvider::with_client(mock);
+
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+    };
+
+    let result = GotoDefinition
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "line": 1,
+                "col": 4,
+                "identifier": "DOES_NOT_EXIST_ON_LINE",
+            }),
+            &ctx,
+        )
+        .await
+        .expect("col should win over identifier and resolve");
+    let defs = result["definitions"].as_array().unwrap();
+    assert_eq!(defs.len(), 1, "exactly one definition expected");
+    assert_eq!(defs[0]["line"].as_u64(), Some(6)); // 5 + 1 (1-indexed)
+}
+
+#[tokio::test]
+async fn hover_returns_ok_with_null_content_when_lsp_empty() {
+    use crate::lsp::{mock::MockLspClient, mock::MockLspProvider};
+    use crate::tools::symbol::Hover;
+
+    let dir = tempfile::tempdir().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let file = src_dir.join("lib.rs");
+    std::fs::write(&file, "fn x() {}\n").unwrap();
+
+    // MockLspClient::hover always returns Ok(None) — exercises empty-result path.
+    let mock = MockLspClient::new();
+    let lsp = MockLspProvider::with_client(mock);
+
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+    };
+
+    let result = Hover
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "line": 1,
+                "col": 4,
+            }),
+            &ctx,
+        )
+        .await
+        .expect("empty hover must be Ok, not Err (no misclassification)");
+    assert!(
+        result["content"].is_null(),
+        "content should be null on empty"
+    );
+    assert!(
+        result["hint"].as_str().is_some(),
+        "hint should be present to guide caller"
+    );
+}
+
+#[tokio::test]
+async fn hover_col_zero_rejected() {
+    use crate::lsp::{mock::MockLspClient, mock::MockLspProvider};
+    use crate::tools::symbol::Hover;
+
+    let dir = tempfile::tempdir().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let file = src_dir.join("lib.rs");
+    std::fs::write(&file, "fn x() {}\n").unwrap();
+
+    let lsp = MockLspProvider::with_client(MockLspClient::new());
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+    };
+
+    let err = Hover
+        .call(json!({"path": "src/lib.rs", "line": 1, "col": 0}), &ctx)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("'col' must be >= 1"), "got: {err}");
+}
+
+#[tokio::test]
+async fn hover_retries_once_on_mux_disconnect() {
+    use crate::lsp::{mock::MockLspClient, mock::MockLspProvider};
+    use crate::tools::symbol::Hover;
+
+    let dir = tempfile::tempdir().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let file = src_dir.join("lib.rs");
+    std::fs::write(&file, "fn x() {}\n").unwrap();
+
+    // First hover errors with the magic mux-disconnect string; helper retries
+    // and the second call succeeds with real content.
+    let mock = MockLspClient::new().with_hover_responses(vec![
+        Err(anyhow::anyhow!("Mux connection lost")),
+        Ok(Some("```rust\nfn x()\n```".to_string())),
+    ]);
+    let lsp = MockLspProvider::with_client(mock);
+
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+    };
+
+    let result = Hover
+        .call(json!({"path": "src/lib.rs", "line": 1, "col": 4}), &ctx)
+        .await
+        .expect("transient mux disconnect should be retried, not surfaced");
+    assert_eq!(
+        result["content"].as_str(),
+        Some("```rust\nfn x()\n```"),
+        "second-attempt content should be returned"
+    );
+}
+
+#[tokio::test]
+async fn hover_does_not_retry_non_disconnect_errors() {
+    use crate::lsp::{mock::MockLspClient, mock::MockLspProvider};
+    use crate::tools::symbol::Hover;
+
+    let dir = tempfile::tempdir().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let file = src_dir.join("lib.rs");
+    std::fs::write(&file, "fn x() {}\n").unwrap();
+
+    let mock = MockLspClient::new()
+        .with_hover_responses(vec![Err(anyhow::anyhow!("some unrelated LSP error"))]);
+    let lsp = MockLspProvider::with_client(mock);
+
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+    };
+
+    let err = Hover
+        .call(json!({"path": "src/lib.rs", "line": 1, "col": 4}), &ctx)
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("some unrelated LSP error"),
+        "non-disconnect errors must surface immediately, got: {err}"
     );
 }
 

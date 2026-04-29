@@ -19,6 +19,14 @@ pub struct MockLspClient {
         std::sync::Mutex<HashMap<PathBuf, std::collections::VecDeque<Vec<SymbolInfo>>>>,
     definitions: HashMap<(u32, u32), Vec<lsp_types::Location>>,
     workspace_results: Vec<SymbolInfo>,
+    /// Test infra for mux-disconnect retry: each `hover` call pops the front
+    /// of this queue and returns it. When empty, falls back to `Ok(None)`.
+    /// Use `with_hover_responses` to populate.
+    hover_responses: std::sync::Mutex<std::collections::VecDeque<anyhow::Result<Option<String>>>>,
+    /// Same idea for `goto_definition`. When empty, falls back to the
+    /// `definitions` map keyed by (line, col).
+    goto_responses:
+        std::sync::Mutex<std::collections::VecDeque<anyhow::Result<Vec<lsp_types::Location>>>>,
 }
 
 impl MockLspClient {
@@ -28,6 +36,8 @@ impl MockLspClient {
             symbols_sequence: std::sync::Mutex::new(HashMap::new()),
             definitions: HashMap::new(),
             workspace_results: vec![],
+            hover_responses: std::sync::Mutex::new(std::collections::VecDeque::new()),
+            goto_responses: std::sync::Mutex::new(std::collections::VecDeque::new()),
         }
     }
 
@@ -70,6 +80,34 @@ impl MockLspClient {
     /// Pre-load workspace/symbol results returned for any query.
     pub fn with_workspace_symbols(mut self, syms: Vec<SymbolInfo>) -> Self {
         self.workspace_results = syms;
+        self
+    }
+
+    /// Pre-load a sequence of `hover` responses. Each call pops the front;
+    /// when the queue is empty, falls back to `Ok(None)`.
+    /// Used to simulate transient mux disconnects in retry tests.
+    pub fn with_hover_responses(self, responses: Vec<anyhow::Result<Option<String>>>) -> Self {
+        let mut q = self
+            .hover_responses
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        q.extend(responses);
+        drop(q);
+        self
+    }
+
+    /// Pre-load a sequence of `goto_definition` responses. Each call pops the
+    /// front; when the queue is empty, falls back to the (line, col) map.
+    pub fn with_goto_responses(
+        self,
+        responses: Vec<anyhow::Result<Vec<lsp_types::Location>>>,
+    ) -> Self {
+        let mut q = self
+            .goto_responses
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        q.extend(responses);
+        drop(q);
         self
     }
 }
@@ -120,6 +158,14 @@ impl LspClientOps for MockLspClient {
         col: u32,
         _language_id: &str,
     ) -> anyhow::Result<Vec<lsp_types::Location>> {
+        if let Some(next) = self
+            .goto_responses
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .pop_front()
+        {
+            return next;
+        }
         Ok(self
             .definitions
             .get(&(line, col))
@@ -134,6 +180,14 @@ impl LspClientOps for MockLspClient {
         _col: u32,
         _language_id: &str,
     ) -> anyhow::Result<Option<String>> {
+        if let Some(next) = self
+            .hover_responses
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .pop_front()
+        {
+            return next;
+        }
         Ok(None)
     }
 

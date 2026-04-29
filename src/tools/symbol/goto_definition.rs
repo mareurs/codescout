@@ -7,7 +7,8 @@ use crate::tools::{require_u64_param, RecoverableError, Tool, ToolContext};
 
 use super::display::format_goto_definition;
 use super::path_helpers::{
-    get_lsp_client, require_path_param, resolve_read_path, tag_external_path, uri_to_path, LspTimer,
+    get_lsp_client, require_path_param, resolve_read_path, retry_on_mux_disconnect,
+    tag_external_path, uri_to_path, LspTimer,
 };
 
 pub struct GotoDefinition;
@@ -18,9 +19,9 @@ impl Tool for GotoDefinition {
         "goto_definition"
     }
     fn description(&self) -> &str {
-        "Jump to the definition of a symbol at a given line. \
-         Resolves types via LSP — handles method calls, trait impls, and cross-crate navigation. \
-         Auto-discovers library dependencies when definitions are outside the project."
+        "Jump to the definition of a symbol via LSP — handles method calls, trait impls, \
+         and cross-crate navigation. Pass `col` (1-indexed) when known; fall back to \
+         `identifier` to locate by name on the line. Auto-discovers library dependencies."
     }
 
     fn long_docs(&self) -> Option<&str> {
@@ -42,7 +43,8 @@ impl Tool for GotoDefinition {
             "properties": {
                 "path": { "type": "string", "description": "File path (relative or absolute)" },
                 "line": { "type": "integer", "description": "1-indexed line number to jump from" },
-                "identifier": { "type": "string", "description": "Optional identifier on the line to target (disambiguates when multiple symbols on same line)" }
+                "col": { "type": "integer", "description": "1-indexed column. Preferred — LSP-native, no identifier-mismatch risk. When known (e.g. from list_symbols), pass directly." },
+                "identifier": { "type": "string", "description": "Optional fallback when col not known. The substring is searched on the line; mismatch errors. Prefer col." }
             }
         })
     }
@@ -57,6 +59,7 @@ impl Tool for GotoDefinition {
             .into());
         }
         let line_0 = line_1 - 1;
+        let col_param = input["col"].as_u64();
         let identifier = input["identifier"].as_str();
 
         let full_path = resolve_read_path(ctx, rel_path).await?;
@@ -65,7 +68,7 @@ impl Tool for GotoDefinition {
         let root = ctx.agent.require_project_root().await?;
         let (client, lang) = get_lsp_client(ctx, &full_path).await?;
 
-        // Determine column: find identifier on the line, or use first non-whitespace
+        // Resolution: col > identifier > first-non-whitespace.
         let source = std::fs::read_to_string(&full_path)?;
         let source_line = source.lines().nth(line_0 as usize).ok_or_else(|| {
             RecoverableError::with_hint(
@@ -78,11 +81,21 @@ impl Tool for GotoDefinition {
             )
         })?;
 
-        let col = if let Some(ident) = identifier {
+        let col = if let Some(c1) = col_param {
+            if c1 == 0 {
+                return Err(RecoverableError::with_hint(
+                    "'col' must be >= 1 (1-indexed)",
+                    "Column numbers are 1-indexed. Use col: 1 for the first column.",
+                )
+                .into());
+            }
+            (c1 - 1) as u32
+        } else if let Some(ident) = identifier {
             source_line.find(ident).ok_or_else(|| {
                 RecoverableError::with_hint(
                     format!("identifier '{}' not found on line {}", ident, line_1),
-                    "Check the identifier spelling, or omit it to use the first symbol on the line",
+                    "Pass `col` directly (1-indexed) for an LSP-native lookup, \
+                     or check the identifier spelling.",
                 )
             })? as u32
         } else {
@@ -93,18 +106,27 @@ impl Tool for GotoDefinition {
         };
 
         let timer = LspTimer::start();
-        let definitions = client
-            .goto_definition(&full_path, line_0, col, &lang)
-            .await?;
+        let definitions = retry_on_mux_disconnect(ctx, &full_path, client, lang, |c, l| {
+            let p = full_path.clone();
+            async move { c.goto_definition(&p, line_0, col, &l).await }
+        })
+        .await?;
         timer.record(ctx, raw_lang, &root).await;
 
+        let from = format!(
+            "{}:{}",
+            full_path.file_name().unwrap_or_default().to_string_lossy(),
+            line_1
+        );
+
         if definitions.is_empty() {
-            return Err(RecoverableError::with_hint(
-                format!("no definition found at {}:{}", full_path.display(), line_1),
-                "The LSP couldn't resolve a definition at this position. \
-                 Try specifying an 'identifier' parameter, or use find_symbol to search by name instead",
-            )
-            .into());
+            return Ok(json!({
+                "definitions": [],
+                "from": from,
+                "hint": "no definition resolvable at this position — LSP couldn't bind the symbol. \
+                         Verify the cursor is on a symbol name (or pass `col`), \
+                         or use find_symbol for name-based lookup.",
+            }));
         }
 
         let mut results = Vec::new();
@@ -121,7 +143,6 @@ impl Tool for GotoDefinition {
                 (loc.uri.as_str().to_string(), "external".to_string())
             };
 
-            // Read the definition line for context
             let context = def_path
                 .as_ref()
                 .and_then(|p| std::fs::read_to_string(p).ok())
@@ -141,7 +162,6 @@ impl Tool for GotoDefinition {
             if source_tag != "project" {
                 def["source"] = json!(source_tag);
             }
-            // Nudge if library was discovered but not indexed
             if let Some(lib_name) = source_tag.strip_prefix("lib:") {
                 if ctx.agent.should_nudge(lib_name).await {
                     def["library_hint"] = json!({
@@ -157,7 +177,7 @@ impl Tool for GotoDefinition {
 
         Ok(json!({
             "definitions": results,
-            "from": format!("{}:{}", full_path.file_name().unwrap_or_default().to_string_lossy(), line_1),
+            "from": from,
         }))
     }
 
