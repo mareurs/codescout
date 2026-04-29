@@ -1,0 +1,357 @@
+use anyhow::{anyhow, Result};
+use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde_json::{json, Map, Value};
+
+use super::{Tool, ToolContext};
+use crate::catalog::{artifact, events};
+use crate::freshness::{compute, FreshnessInputs};
+
+pub struct ArtifactStateAt;
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct Args {
+    pub artifact_id: String,
+    #[serde(default)]
+    pub commit: Option<String>,
+    #[serde(default)]
+    pub timestamp: Option<i64>,
+}
+
+#[async_trait]
+impl Tool for ArtifactStateAt {
+    fn name(&self) -> &'static str {
+        "artifact_state_at"
+    }
+
+    fn description(&self) -> &'static str {
+        "Reconstruct an artifact's status + frontmatter + freshness as it stood at a given \
+         commit or timestamp. Replays status_change / field_patch events in chronological order \
+         up to the cutoff; un-patched fields fall back to the current artifact-row value."
+    }
+
+    fn input_schema(&self) -> Value {
+        serde_json::to_value(schemars::schema_for!(Args)).unwrap()
+    }
+
+    async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
+        let a: Args = serde_json::from_value(args)?;
+
+        // Exactly one of commit / timestamp must be supplied.
+        match (&a.commit, &a.timestamp) {
+            (Some(_), Some(_)) | (None, None) => {
+                return Err(anyhow!("supply exactly one of `commit` or `timestamp`"));
+            }
+            _ => {}
+        }
+
+        // Resolve cutoff timestamp.
+        let cutoff_ts: i64 = if let Some(ref hash) = a.commit {
+            let cat = ctx.catalog.lock();
+            let ts = cat
+                .conn
+                .query_row(
+                    "SELECT authored_at FROM commits WHERE hash=?1",
+                    rusqlite::params![hash],
+                    |r| r.get::<_, Option<i64>>(0),
+                )
+                .ok()
+                .flatten()
+                .ok_or_else(|| anyhow!("commit {hash} not indexed; run librarian_reindex"))?;
+            ts
+        } else {
+            a.timestamp.unwrap()
+        };
+
+        // Load artifact row + all events up to the cutoff (single lock scope).
+        let (art, rows) = {
+            let cat = ctx.catalog.lock();
+            let art = artifact::get(&cat, &a.artifact_id)?
+                .ok_or_else(|| anyhow!("artifact not found: {}", a.artifact_id))?;
+            let all = events::timeline_for_artifact(&cat, &a.artifact_id, None, usize::MAX)?;
+            // timeline_for_artifact returns newest-first; we want chronological order
+            // and only events up to the cutoff.
+            let mut filtered: Vec<_> = all
+                .into_iter()
+                .filter(|e| e.created_at <= cutoff_ts)
+                .collect();
+            filtered.reverse(); // oldest-first for replay
+            (art, filtered)
+        };
+
+        // Seed frontmatter from the current artifact row (provides the fallback
+        // for fields not touched by any event).
+        let mut frontmatter: Map<String, Value> = Map::new();
+        frontmatter.insert("status".into(), Value::String(art.status.clone()));
+        if let Some(ref t) = art.title {
+            frontmatter.insert("title".into(), Value::String(t.clone()));
+        }
+        frontmatter.insert("kind".into(), Value::String(art.kind.clone()));
+        frontmatter.insert("tags".into(), serde_json::to_value(&art.tags)?);
+        frontmatter.insert("owners".into(), serde_json::to_value(&art.owners)?);
+        if let Some(ref t) = art.topic {
+            frontmatter.insert("topic".into(), Value::String(t.clone()));
+        }
+        if let Some(ref t) = art.time_scope {
+            frontmatter.insert("time_scope".into(), Value::String(t.clone()));
+        }
+
+        // Replay deltas in chronological order up to the cutoff.
+        let mut latest_event: Option<&events::EventRow> = None;
+        let mut latest_reviewed_at: Option<i64> = None;
+        let mut latest_kind: Option<String> = None;
+        let mut superseded_by: Option<String> = None;
+
+        for ev in &rows {
+            latest_event = Some(ev);
+            latest_kind = Some(ev.kind.clone());
+            let p: Value = serde_json::from_str(&ev.payload).unwrap_or(Value::Null);
+            match ev.kind.as_str() {
+                "status_change" => {
+                    if let Some(s) = p.get("to").and_then(|v| v.as_str()) {
+                        frontmatter.insert("status".into(), Value::String(s.into()));
+                    }
+                }
+                "field_patch" => {
+                    if let (Some(field), Some(to)) = (
+                        p.get("field").and_then(|v| v.as_str()),
+                        p.get("to").cloned(),
+                    ) {
+                        frontmatter.insert(field.into(), to);
+                    }
+                }
+                "reviewed" => {
+                    latest_reviewed_at = Some(ev.created_at);
+                }
+                "superseded_by" => {
+                    superseded_by = p
+                        .get("target_artifact_id")
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
+                }
+                _ => {}
+            }
+        }
+
+        let freshness = compute(FreshnessInputs {
+            latest_event_kind: latest_kind.as_deref(),
+            latest_reviewed_at,
+            file_updated_at: art.file_mtime,
+            topo_distance_from_head: None,
+            freshness_horizon: 50,
+        });
+
+        let supersession_chain: Vec<String> = superseded_by.into_iter().collect();
+        let status_now = frontmatter.get("status").cloned().unwrap_or(Value::Null);
+
+        Ok(json!({
+            "status": status_now,
+            "frontmatter": Value::Object(frontmatter),
+            "freshness": freshness,
+            "latest_event": latest_event.map(|e| json!({
+                "id": e.id,
+                "kind": e.kind,
+                "created_at": e.created_at,
+                "head_commit": e.head_commit,
+            })),
+            "supersession_chain": supersession_chain,
+        }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::catalog::artifact::{upsert as art_insert, ArtifactRow};
+    use crate::catalog::commits::{upsert_many, CommitRow};
+    use crate::catalog::events::{insert as ev_insert, EventRow};
+    use crate::tools::observe::tests::mk_ctx;
+    use tempfile::TempDir;
+
+    fn art(id: &str) -> ArtifactRow {
+        ArtifactRow {
+            id: id.into(),
+            repo: "r".into(),
+            rel_path: format!("{id}.md"),
+            kind: "spec".into(),
+            status: "active".into(),
+            title: None,
+            owners: vec![],
+            tags: vec![],
+            topic: None,
+            time_scope: None,
+            source: None,
+            created_at: 0,
+            updated_at: 0,
+            file_mtime: 0,
+            file_sha256: "".into(),
+            confidence: 1.0,
+        }
+    }
+
+    fn seed(ctx: &ToolContext, id: &str) {
+        let cat = ctx.catalog.lock();
+        art_insert(&cat, &art(id)).unwrap();
+    }
+
+    fn ev(artifact_id: &str, kind: &str, payload: Value, ts: i64) -> EventRow {
+        EventRow {
+            id: ulid::Ulid::new().to_string(),
+            artifact_id: artifact_id.into(),
+            kind: kind.into(),
+            payload: payload.to_string(),
+            anchor_commit: None,
+            head_commit: None,
+            author: None,
+            created_at: ts,
+        }
+    }
+
+    #[tokio::test]
+    async fn replay_status_change() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        seed(&ctx, "a1");
+
+        // Write a status_change event at ts=10
+        {
+            let cat = ctx.catalog.lock();
+            ev_insert(
+                &cat,
+                &ev(
+                    "a1",
+                    "status_change",
+                    json!({"from": "active", "to": "done"}),
+                    10,
+                ),
+            )
+            .unwrap();
+        }
+
+        // Query at ts=20 — event is visible → status should be "done"
+        let result = ArtifactStateAt
+            .call(&ctx, json!({"artifact_id": "a1", "timestamp": 20}))
+            .await
+            .unwrap();
+        assert_eq!(result["status"], "done", "at ts=20 status should be done");
+
+        // Query at ts=5 — event not yet seen → status should be "active" (seeded)
+        let result = ArtifactStateAt
+            .call(&ctx, json!({"artifact_id": "a1", "timestamp": 5}))
+            .await
+            .unwrap();
+        assert_eq!(
+            result["status"], "active",
+            "at ts=5 status should be active"
+        );
+    }
+
+    #[tokio::test]
+    async fn superseded_by_listed_in_chain() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        seed(&ctx, "b1");
+
+        {
+            let cat = ctx.catalog.lock();
+            ev_insert(
+                &cat,
+                &ev(
+                    "b1",
+                    "superseded_by",
+                    json!({"target_artifact_id": "other"}),
+                    5,
+                ),
+            )
+            .unwrap();
+        }
+
+        let result = ArtifactStateAt
+            .call(&ctx, json!({"artifact_id": "b1", "timestamp": 10}))
+            .await
+            .unwrap();
+        let chain = result["supersession_chain"].as_array().unwrap();
+        assert!(!chain.is_empty(), "supersession_chain should not be empty");
+        assert_eq!(chain[0], "other");
+    }
+
+    #[tokio::test]
+    async fn requires_exactly_one_of_commit_timestamp() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        seed(&ctx, "c1");
+
+        // Both supplied → error
+        let err = ArtifactStateAt
+            .call(
+                &ctx,
+                json!({"artifact_id": "c1", "commit": "abc", "timestamp": 5}),
+            )
+            .await;
+        assert!(err.is_err(), "both commit+timestamp should error");
+
+        // Neither supplied → error
+        let err = ArtifactStateAt
+            .call(&ctx, json!({"artifact_id": "c1"}))
+            .await;
+        assert!(err.is_err(), "neither commit nor timestamp should error");
+    }
+
+    #[tokio::test]
+    async fn commit_lookup_uses_authored_at() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        seed(&ctx, "d1");
+
+        // Insert commit row: hash="abc", authored_at=15
+        {
+            let cat = ctx.catalog.lock();
+            upsert_many(
+                &cat,
+                &[CommitRow {
+                    hash: "abc".into(),
+                    repo: "r".into(),
+                    authored_at: Some(15),
+                    subject: None,
+                    topo_order: None,
+                }],
+            )
+            .unwrap();
+
+            // Event at ts=10 (before authored_at=15) — should be visible
+            ev_insert(
+                &cat,
+                &ev(
+                    "d1",
+                    "status_change",
+                    json!({"from": "active", "to": "done"}),
+                    10,
+                ),
+            )
+            .unwrap();
+
+            // Event at ts=20 (after authored_at=15) — should NOT be visible
+            ev_insert(
+                &cat,
+                &ev(
+                    "d1",
+                    "status_change",
+                    json!({"from": "done", "to": "archived"}),
+                    20,
+                ),
+            )
+            .unwrap();
+        }
+
+        // Query at commit "abc" → authored_at=15 → only first event visible
+        let result = ArtifactStateAt
+            .call(&ctx, json!({"artifact_id": "d1", "commit": "abc"}))
+            .await
+            .unwrap();
+        assert_eq!(
+            result["status"], "done",
+            "at commit abc (authored_at=15) status should be done, not archived"
+        );
+    }
+}
