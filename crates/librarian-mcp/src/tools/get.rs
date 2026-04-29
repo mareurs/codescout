@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 
 use super::{Tool, ToolContext};
 use crate::catalog::{artifact, links, observations};
+use rusqlite;
 
 use crate::frontmatter;
 use crate::preview::headings;
@@ -166,7 +167,7 @@ impl Tool for ArtifactGet {
         // so holding it across `preview::extract` would deadlock.
         let want_observations = a.include_observations.unwrap_or(false);
         let want_links = a.include_links.unwrap_or(false);
-        let (row, observations_json, links_json) = {
+        let (row, observations_json, links_json, latest_event_row, latest_reviewed_at) = {
             let cat = ctx.catalog.lock();
             let row = match artifact::get(&cat, &a.id)? {
                 Some(r) => r,
@@ -205,7 +206,23 @@ impl Tool for ArtifactGet {
                 None
             };
 
-            (row, observations_json, links_json)
+            let latest_event_row = crate::catalog::events::latest_for_artifact(&cat, &a.id)?;
+            let latest_reviewed_at: Option<i64> = cat
+                .conn
+                .query_row(
+                    "SELECT MAX(created_at) FROM events WHERE artifact_id=?1 AND kind='reviewed'",
+                    rusqlite::params![&a.id],
+                    |r| r.get::<_, Option<i64>>(0),
+                )
+                .unwrap_or(None);
+
+            (
+                row,
+                observations_json,
+                links_json,
+                latest_event_row,
+                latest_reviewed_at,
+            )
         };
 
         let mut out = json!({
@@ -229,6 +246,25 @@ impl Tool for ArtifactGet {
         if let Some(v) = links_json {
             out["links"] = v;
         }
+
+        // TimeMachine freshness + latest_event annotations.
+        let freshness = crate::freshness::compute(crate::freshness::FreshnessInputs {
+            latest_event_kind: latest_event_row.as_ref().map(|e| e.kind.as_str()),
+            latest_reviewed_at,
+            file_updated_at: row.file_mtime,
+            topo_distance_from_head: None,
+            freshness_horizon: 50,
+        });
+        out["freshness"] = serde_json::to_value(freshness)?;
+        out["latest_event"] = match latest_event_row {
+            Some(ref e) => json!({
+                "id": e.id,
+                "kind": e.kind,
+                "created_at": e.created_at,
+                "head_commit": e.head_commit,
+            }),
+            None => Value::Null,
+        };
 
         let file_path = resolve_file_path(ctx, &row);
         let body_selected = a.full.unwrap_or(false)
@@ -814,5 +850,43 @@ mod tests {
         let missing = v["body_meta"]["headings_missing"].as_array().unwrap();
         assert_eq!(missing.len(), 1);
         assert_eq!(missing[0].as_str().unwrap(), "Missing");
+    }
+
+    #[tokio::test]
+    async fn artifact_get_includes_freshness_unknown_by_default() {
+        use crate::catalog::events;
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let ctx = mk_ctx(cat);
+        let res = ArtifactGet.call(&ctx, json!({"id": "a"})).await.unwrap();
+        assert_eq!(res["freshness"], "unknown");
+        assert!(res["latest_event"].is_null());
+        let _ = events::latest_for_artifact; // keep import used
+    }
+
+    #[tokio::test]
+    async fn artifact_get_freshness_after_reviewed_event() {
+        use crate::catalog::events;
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        // Seed a reviewed event directly.
+        events::insert(
+            &cat,
+            &events::EventRow {
+                id: "ev1".into(),
+                artifact_id: "a".into(),
+                kind: "reviewed".into(),
+                payload: "{}".into(),
+                anchor_commit: None,
+                head_commit: None,
+                author: None,
+                created_at: 1,
+            },
+        )
+        .unwrap();
+        let ctx = mk_ctx(cat);
+        let res = ArtifactGet.call(&ctx, json!({"id": "a"})).await.unwrap();
+        assert_eq!(res["freshness"], "fresh");
+        assert_eq!(res["latest_event"]["kind"], "reviewed");
     }
 }
