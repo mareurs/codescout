@@ -3,6 +3,7 @@ use rusqlite::Connection;
 use std::path::Path;
 
 pub mod artifact;
+pub mod events;
 pub mod find;
 pub mod links;
 pub mod observations;
