@@ -138,21 +138,16 @@ session through the mux, and passes the bulk of `cargo test`.
 - **Audit (2026-04-29):** the original concern (a hardcoded `/tmp`
   write-root in `path_security.rs`) is no longer present.
   `validate_write_path` already routes through
-  `crate::platform::temp_dir()` (file:src/util/path_security.rs around
-  L308). All other `"/tmp"` literals under `src/` are inside `#[cfg(test)]`
-  fixtures.
-- **Side finding:** `src/embed/preflight.rs::SYSTEM_PATHS` (L55) is a
-  Unix-only list (`/`, `/usr`, `/etc`, `/var`, `/tmp`, `/root`, `/opt`,
-  `/proc`, `/sys`, `/home`) used to warn when a user roots codescout on
-  a "broad" filesystem location. On Windows this list never matches, so
-  it produces no false positives — but also no warning for `C:\`,
-  `C:\Windows`, `C:\Program Files`, `%USERPROFILE%`. UX polish, not a
-  security regression. Tracked as a follow-up below; not blocking the
-  Windows port.
+  `crate::platform::temp_dir()`. All other `"/tmp"` literals under
+  `src/` are inside `#[cfg(test)]` fixtures.
+- **Side finding (W8a, addressed 2026-04-29):** moved the broad
+  "system root" list out of `embed::preflight` and into
+  `crate::platform::system_path_prefixes()`. Unix list unchanged;
+  Windows variant now covers `C:\`, `C:\Windows`, `C:\Program Files`,
+  `C:\Program Files (x86)`, `C:\ProgramData`, `C:\Users`. Tests gated
+  per-OS, with a fresh `classify_path_detects_windows_system_roots`
+  asserting the Windows roots that always exist on a stock install.
 - **Status:** ✅ done.
-- **Follow-up (W8a, optional):** extend `SYSTEM_PATHS` with Windows
-  equivalents under `#[cfg(windows)]`, or replace with a platform-aware
-  classifier in `crate::platform`.
 ### W9. `atomic_write` exec-bit preservation Unix-only 🟡 partial
 - **Location:** `src/util/fs.rs:52-68`.
 - **Issue:** `#[cfg(unix)]` block reads + restores Unix mode (preserves
@@ -327,16 +322,15 @@ session through the mux, and passes the bulk of `cargo test`.
 | **Totals** | **18** | **4** | **6** | **0** |
 ## Next moves (ordered by leverage)
 
-Low-hanging fruit + design-tier items landed (W5 Job Objects, W7+W17+W20
-path/UNC pass, W8, W11 decision + W19 CI swap, W12, W13, W18, W22).
-Remaining items need brainstorming or a real Windows machine:
+All architectural and code-tier items have landed. What remains is
+runner-dependent or already in a usable partial state:
 
-1. **W8a (optional)** — extend `SYSTEM_PATHS` in
-   `src/embed/preflight.rs` with Windows equivalents. UX polish.
-2. **W21–W25** — actual Windows runtime tests. Until these run, the
+1. **W21–W25** — actual Windows runtime tests. Until these run, the
    port is hypothesis. First Windows CI run (W19) is the first real
    signal. Symlink-escape coverage and Job Object kill-on-close
    verification fold into this phase.
+2. **Partials (W3, W4, W9, W12)** — degraded-but-functional. Revisit
+   only when runtime feedback indicates a problem.
 ## References
 
 - Phase A commit: `3b6f8c3` — concentrate IPC behind `transport` module.

@@ -62,6 +62,12 @@ pub fn denied_read_prefixes() -> &'static [&'static str] {
     ]
 }
 
+pub fn system_path_prefixes() -> &'static [&'static str] {
+    &[
+        "/", "/usr", "/etc", "/var", "/tmp", "/root", "/opt", "/proc", "/sys", "/home",
+    ]
+}
+
 pub fn shell_command(cmd: &str) -> (&'static str, Vec<String>) {
     ("sh", vec!["-c".to_string(), cmd.to_string()])
 }

@@ -43,6 +43,20 @@ pub fn denied_read_prefixes() -> &'static [&'static str] {
     ]
 }
 
+pub fn system_path_prefixes() -> &'static [&'static str] {
+    // Standard install/user roots on a typical Windows system. Canonicalize
+    // is applied at the comparison site, so missing entries (e.g. no
+    // `Program Files (x86)` on ARM-only installs) simply never match.
+    &[
+        r"C:\",
+        r"C:\Windows",
+        r"C:\Program Files",
+        r"C:\Program Files (x86)",
+        r"C:\ProgramData",
+        r"C:\Users",
+    ]
+}
+
 pub fn shell_command(cmd: &str) -> (&'static str, Vec<String>) {
     ("cmd.exe", vec!["/C".to_string(), cmd.to_string()])
 }

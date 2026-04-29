@@ -51,10 +51,6 @@ pub(crate) fn format_bytes(bytes: u64) -> String {
     }
 }
 
-const SYSTEM_PATHS: &[&str] = &[
-    "/", "/usr", "/etc", "/var", "/tmp", "/root", "/opt", "/proc", "/sys", "/home",
-];
-
 /// Classify a root path against the known-broad list.
 /// Returns `None` for ordinary project directories.
 pub(crate) fn classify_path(root: &Path) -> Option<SuspiciousReason> {
@@ -72,7 +68,7 @@ pub(crate) fn classify_path(root: &Path) -> Option<SuspiciousReason> {
         }
     }
 
-    for sys in SYSTEM_PATHS {
+    for sys in crate::platform::system_path_prefixes() {
         let sys_path = Path::new(sys);
         let sys_canon = crate::platform::canonicalize_or(sys_path);
         if canon == sys_canon {
@@ -254,6 +250,7 @@ mod tests {
         assert_eq!(classify_path(parent), Some(SuspiciousReason::HomeParent),);
     }
 
+    #[cfg(unix)]
     #[test]
     fn classify_path_detects_root_system_path() {
         // '/' is a system path. It also tests canonicalization doesn't break it.
@@ -261,9 +258,26 @@ mod tests {
         assert!(matches!(v, Some(SuspiciousReason::SystemPath(_))));
     }
 
+    #[cfg(unix)]
     #[test]
     fn classify_path_detects_usr_etc_var() {
         for p in ["/usr", "/etc", "/var", "/tmp", "/opt"] {
+            if !Path::new(p).exists() {
+                continue;
+            }
+            let v = classify_path(Path::new(p));
+            assert!(
+                matches!(v, Some(SuspiciousReason::SystemPath(_))),
+                "{p} should classify as SystemPath, got {v:?}",
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn classify_path_detects_windows_system_roots() {
+        // Subset that always exists on a stock Windows install.
+        for p in [r"C:\Windows", r"C:\Users", r"C:\ProgramData"] {
             if !Path::new(p).exists() {
                 continue;
             }

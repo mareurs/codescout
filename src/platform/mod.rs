@@ -60,6 +60,14 @@ pub fn denied_read_prefixes() -> &'static [&'static str] {
     imp::denied_read_prefixes()
 }
 
+/// Return the list of broad "system root" paths used to warn when a user
+/// roots codescout at one of them (e.g. running `index_project` against
+/// `C:\` or `/`). On Unix this covers the FHS top-level directories; on
+/// Windows it covers the standard install/user roots.
+pub fn system_path_prefixes() -> &'static [&'static str] {
+    imp::system_path_prefixes()
+}
+
 /// Build a shell command for executing a string.
 /// Returns `(program, args)` — e.g. `("sh", ["-c", cmd])` on Unix.
 pub fn shell_command(cmd: &str) -> (&'static str, Vec<String>) {
