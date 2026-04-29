@@ -8,6 +8,7 @@ pub mod events;
 pub mod find;
 pub mod links;
 pub mod observations;
+pub mod sources;
 
 pub struct Catalog {
     pub conn: Connection,
