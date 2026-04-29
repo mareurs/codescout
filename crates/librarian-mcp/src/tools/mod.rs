@@ -41,6 +41,7 @@ pub mod link;
 pub mod observe;
 
 pub mod event_create;
+pub mod timeline;
 
 pub mod reindex;
 
@@ -58,6 +59,7 @@ pub fn all_tools() -> Vec<Arc<dyn Tool>> {
         Arc::new(link::ArtifactLink),
         Arc::new(observe::ArtifactObserve),
         Arc::new(event_create::ArtifactEventCreate),
+        Arc::new(timeline::ArtifactTimeline),
         Arc::new(reindex::LibrarianReindex),
         Arc::new(context::LibrarianContext),
     ]

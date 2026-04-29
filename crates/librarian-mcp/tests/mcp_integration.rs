@@ -163,8 +163,8 @@ fn mcp_subprocess_integration() {
         .expect("tools/list result.tools should be an array");
     assert_eq!(
         tools.len(),
-        12,
-        "expected 12 tools, got {}: {:?}",
+        13,
+        "expected 13 tools, got {}: {:?}",
         tools.len(),
         tools.iter().map(|t| &t["name"]).collect::<Vec<_>>()
     );
