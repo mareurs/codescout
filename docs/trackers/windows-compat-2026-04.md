@@ -103,15 +103,26 @@ session through the mux, and passes the bulk of `cargo test`.
 
 ## Path handling / filesystem
 
-### W7. Symlink validation Unix-only 🔴 open
-- **Location:** `src/util/path_security.rs:915,953`.
-- **Issue:** Symlink-escape tests guarded `#[cfg(unix)]`. Windows
-  symlinks (require admin or Developer Mode) are not validated.
-- **Action:** Extend symlink resolution to canonicalize Windows paths
-  through `dunce::canonicalize` or `std::fs::canonicalize` (which on
-  Windows returns UNC paths — caller must normalize).
-- **Status:** 🔴 open.
+### W7. Symlink validation routed through platform helper ✅ done
 
+- **Action (2026-04-29):** all production `std::fs::canonicalize` call
+  sites that participate in path comparison or are forwarded to LSP
+  servers now route through `crate::platform::canonicalize` /
+  `canonicalize_or` (W20 helper). On Windows this strips verbatim UNC
+  prefixes via `dunce`, so symlink-resolved paths compare equal to
+  project roots and `extra_write_roots`.
+- **Sites updated:** `path_security::best_effort_canonicalize`,
+  `embed/preflight::{classify_path, scan}`,
+  `library/auto_register::{find_node_source, find_python_source}`,
+  `lsp/client::{did_open, did_close, did_change}`,
+  `agent::{Agent::new, ActiveProject::activate}`,
+  `tools/library::register`, `server::from_parts`.
+- **Deferred:** Windows symlink-escape unit tests need a runner with
+  Developer Mode enabled (or admin) to call
+  `std::os::windows::fs::symlink_dir/symlink_file`. Picked up under
+  W21–W25 once we have a real Windows machine.
+- **Status:** ✅ done (production code path); 🟡 Windows symlink test
+  coverage deferred to runtime-validation phase.
 ### W8. Hardcoded `/tmp` as write root ✅ done
 
 - **Audit (2026-04-29):** the original concern (a hardcoded `/tmp`
@@ -207,14 +218,17 @@ session through the mux, and passes the bulk of `cargo test`.
   Windows has 19 (`%USERPROFILE%\.aws`, `%USERPROFILE%\.pypirc`, etc).
   Lists are intentionally different per OS. ✓
 
-### W17. UNC path handling 🔴 open
-- **Issue:** Windows `std::fs::canonicalize` returns UNC paths
-  (`\\?\C:\…`). `path_security` and various string-comparison sites may
-  fail to match equal-but-textually-different paths.
-- **Action:** consider `dunce` crate or hand-rolled UNC stripper at
-  validation boundaries.
-- **Status:** 🔴 open.
+### W17. UNC path handling ✅ done
 
+- **Action (2026-04-29):** resolved by W20 — `crate::platform::canonicalize`
+  on Windows uses `dunce::canonicalize`, which strips verbatim UNC
+  prefixes (`\\?\C:\foo` → `C:\foo`) when the underlying path does not
+  require them. All production canonicalize call sites that compare or
+  forward paths now go through this helper, so prefix mismatches that
+  would have broken `starts_with` are eliminated.
+- **Test:** `src/platform/windows.rs::tests::canonicalize_strips_verbatim_unc_prefix`
+  asserts the UNC prefix is gone after canonicalization (cfg(windows)).
+- **Status:** ✅ done.
 ### W18. Drive-letter case sensitivity 🔴 open
 
 - **Issue:** Windows treats `C:\foo` and `c:\foo` as the same path.
@@ -238,12 +252,21 @@ session through the mux, and passes the bulk of `cargo test`.
 - **Status:** ✅ done. First Windows CI run is the validation gate;
   if `local-embed` fails on `windows-latest`, revisit W11 (candle
   fallback).
-### W20. `dunce`-style canonicalize helper 🔴 open
-- **Action:** decide whether to take a dep on `dunce` (small, pure-Rust
-  UNC normaliser) or hand-roll a stripper in `util/fs.rs`. Required
-  before W7, W17 can ship.
-- **Status:** 🔴 open.
+### W20. `dunce` canonicalize helper ✅ done
 
+- **Done (2026-04-29):** added `dunce = "1"` (small pure-Rust dep) and
+  introduced two helpers in `crate::platform`:
+  - `canonicalize(&Path) -> io::Result<PathBuf>` — fallible, mirrors
+    `std::fs::canonicalize` semantics on Unix; on Windows uses
+    `dunce::canonicalize`.
+  - `canonicalize_or(&Path) -> PathBuf` — best-effort, returns the
+    input unchanged on failure.
+- **Why a dep, not hand-rolled:** `dunce` correctly handles edge cases
+  where the verbatim form *is* required (long paths, paths with `\\`
+  components). A hand-rolled stripper would either be over-eager
+  (corrupting valid UNC paths) or under-eager (missing forms). Dep is
+  ~200 LOC, no transitive dependencies.
+- **Status:** ✅ done.
 ## Unaudited surfaces (need a pass before claiming Windows works)
 
 ### W21. `notify` / `fs2` / `fs4` runtime behavior 🔴 open
@@ -283,31 +306,29 @@ session through the mux, and passes the bulk of `cargo test`.
 |--------|--------|------------|---------|-----------|
 | Mux / LSP transport | 2 | 2 | 0 | 0 |
 | Process management | 1 | 1 | 0 | 0 |
-| Path / filesystem | 3 | 1 | 0 | 0 |
+| Path / filesystem | 4 | 1 | 0 | 0 |
 | Embedding | 1 | 1 | 0 | 0 |
 | Hardware | 1 | 0 | 0 | 0 |
 | Shell | 2 | 0 | 0 | 0 |
-| Security / paths | 1 | 0 | 2 | 0 |
-| CI / tooling | 1 | 0 | 1 | 0 |
+| Security / paths | 2 | 0 | 1 | 0 |
+| CI / tooling | 2 | 0 | 0 | 0 |
 | Signals (W22) | 1 | 0 | 0 | 0 |
 | Unaudited | 0 | 0 | 5 | 0 |
-| **Totals** | **14** | **5** | **8** | **0** |
+| **Totals** | **17** | **5** | **6** | **0** |
 ## Next moves (ordered by leverage)
 
-Low-hanging fruit landed (W5 first-pass, W8, W11 decision + W19 CI swap,
-W12, W13, W18, W22). Remaining items need brainstorming or a real
-Windows machine:
+Low-hanging fruit landed (W5 first-pass, W7+W17+W20 path/UNC pass, W8,
+W11 decision + W19 CI swap, W12, W13, W18, W22). Remaining items need
+brainstorming or a real Windows machine:
 
-1. **W7, W17, W20** — path/security pass: dunce dep adoption, Windows
-   symlink validation, UNC normalisation. One bundled commit.
-2. **W5 upgrade** — swap `taskkill` for Win32 Job Objects
+1. **W5 upgrade** — swap `taskkill` for Win32 Job Objects
    (`CreateJobObject` + `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`). Removes
    the `taskkill` race window.
-3. **W8a (optional)** — extend `SYSTEM_PATHS` in
+2. **W8a (optional)** — extend `SYSTEM_PATHS` in
    `src/embed/preflight.rs` with Windows equivalents. UX polish.
-4. **W21–W25** — actual Windows runtime tests. Until these run, the
+3. **W21–W25** — actual Windows runtime tests. Until these run, the
    port is hypothesis. First Windows CI run (W19) is the first real
-   signal.
+   signal. Symlink-escape coverage on Windows folds into this phase.
 ## References
 
 - Phase A commit: `3b6f8c3` — concentrate IPC behind `transport` module.

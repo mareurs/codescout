@@ -58,10 +58,10 @@ const SYSTEM_PATHS: &[&str] = &[
 /// Classify a root path against the known-broad list.
 /// Returns `None` for ordinary project directories.
 pub(crate) fn classify_path(root: &Path) -> Option<SuspiciousReason> {
-    let canon = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let canon = crate::platform::canonicalize_or(root);
 
     if let Some(home) = crate::platform::home_dir() {
-        let home_canon = std::fs::canonicalize(&home).unwrap_or(home.clone());
+        let home_canon = crate::platform::canonicalize_or(&home);
         if canon == home_canon {
             return Some(SuspiciousReason::HomeDirectory);
         }
@@ -74,7 +74,7 @@ pub(crate) fn classify_path(root: &Path) -> Option<SuspiciousReason> {
 
     for sys in SYSTEM_PATHS {
         let sys_path = Path::new(sys);
-        let sys_canon = std::fs::canonicalize(sys_path).unwrap_or_else(|_| sys_path.to_path_buf());
+        let sys_canon = crate::platform::canonicalize_or(sys_path);
         if canon == sys_canon {
             return Some(SuspiciousReason::SystemPath(canon.clone()));
         }
@@ -134,7 +134,7 @@ pub fn check_index_scope(
         return Ok(PreflightVerdict::Clear);
     }
 
-    let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let canonical_root = crate::platform::canonicalize_or(root);
 
     Ok(PreflightVerdict::RequiresConfirmation(PreflightInfo {
         root: canonical_root,

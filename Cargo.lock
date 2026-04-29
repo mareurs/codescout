@@ -530,6 +530,7 @@ dependencies = [
  "axum",
  "clap",
  "codescout-embed",
+ "dunce",
  "filetime",
  "fs2",
  "fs4",

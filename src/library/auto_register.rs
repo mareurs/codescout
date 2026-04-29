@@ -217,9 +217,8 @@ pub fn find_node_source(project_root: &Path, dep_name: &str) -> Option<PathBuf> 
     // Resolve symlinks and ensure the candidate still lives under the project
     // root. A poisoned `node_modules/express` symlinked to `/etc` would
     // otherwise be auto-registered on every `activate_project` (phase-5 I2).
-    let canon_candidate = std::fs::canonicalize(&candidate).ok()?;
-    let canon_root =
-        std::fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
+    let canon_candidate = crate::platform::canonicalize(&candidate).ok()?;
+    let canon_root = crate::platform::canonicalize_or(project_root);
     if !canon_candidate.starts_with(&canon_root) {
         tracing::warn!(
             "skipping node dep '{}': {} resolves outside project root {}",
@@ -365,8 +364,7 @@ pub fn parse_python_deps_requirements(content: &str) -> Vec<DiscoveredDep> {
 }
 
 pub fn find_python_source(project_root: &Path, dep_name: &str) -> Option<PathBuf> {
-    let canon_root =
-        std::fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
+    let canon_root = crate::platform::canonicalize_or(project_root);
     let venv_dirs = [".venv", "venv", ".env", "env"];
     for venv in &venv_dirs {
         let lib = project_root.join(venv).join("lib");
@@ -381,7 +379,7 @@ pub fn find_python_source(project_root: &Path, dep_name: &str) -> Option<PathBuf
             }
             // Resolve symlinks and ensure the candidate still lives under the
             // project root (phase-5 I2).
-            let Ok(canon_sp) = std::fs::canonicalize(&sp) else {
+            let Ok(canon_sp) = crate::platform::canonicalize(&sp) else {
                 continue;
             };
             if !canon_sp.starts_with(&canon_root) {

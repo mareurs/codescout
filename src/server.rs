@@ -930,7 +930,7 @@ pub async fn run(
     // while `activate_project(".")` later canonicalizes to `/abs/path`, making `is_home()`
     // return false and causing path-form drift across the system.
     let project = match project.or_else(|| std::env::current_dir().ok()) {
-        Some(p) => Some(std::fs::canonicalize(&p).with_context(|| {
+        Some(p) => Some(crate::platform::canonicalize(&p).with_context(|| {
             format!(
                 "failed to canonicalize project path {} — check it exists and is readable",
                 p.display()

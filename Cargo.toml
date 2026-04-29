@@ -122,6 +122,10 @@ uuid = { version = "1.20.0", features = ["v4"] }
 # hot paths where std::sync poisoning is a correctness footgun.
 parking_lot = "0.12"
 
+# Path canonicalization that strips Windows verbatim UNC prefixes (\\?\C:\...)
+# unless they are actually required. No-op on Unix.
+dunce = "1"
+
 # jemalloc is Unix-focused; on Windows fall back to the system allocator.
 [target.'cfg(not(windows))'.dependencies]
 tikv-jemallocator = "0.6"

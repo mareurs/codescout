@@ -905,7 +905,7 @@ impl LspClient {
         if !is_socket {
             // Canonicalize before tracking to avoid treating symlinks or relative paths
             // as different files — the LSP spec prohibits duplicate didOpen notifications.
-            let canonical = std::fs::canonicalize(path)
+            let canonical = crate::platform::canonicalize(path)
                 .with_context(|| format!("Failed to canonicalize path for didOpen: {:?}", path))?;
             {
                 let mut open_files = self.open_files.lock().unwrap_or_else(|e| e.into_inner());
@@ -1185,7 +1185,7 @@ impl LspClient {
     pub async fn did_close(&self, path: &Path) -> Result<()> {
         // For socket transport, the mux tracks document state — skip local bookkeeping.
         if !matches!(self.transport, LspTransport::Socket { .. }) {
-            let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+            let canonical = crate::platform::canonicalize_or(path);
             self.open_files
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
@@ -1214,7 +1214,7 @@ impl LspClient {
     pub async fn did_change(&self, path: &Path) -> Result<()> {
         let is_socket = matches!(self.transport, LspTransport::Socket { .. });
 
-        let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let canonical = crate::platform::canonicalize_or(path);
 
         // For socket transport, skip local version tracking — the mux owns versions.
         // Always send didChange and let the mux handle state.

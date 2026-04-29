@@ -188,7 +188,7 @@ impl Agent {
             // Canonicalize so home_root is always an absolute path.  This prevents
             // path-form drift when activate_project(".") later canonicalizes its
             // argument and compares against home_root.
-            let root = std::fs::canonicalize(&raw).unwrap_or(raw);
+            let root = crate::platform::canonicalize(&raw).unwrap_or(raw);
             let config = ProjectConfig::load_or_default(&root)?;
             let memory = MemoryStore::open(&root)?;
             let private_memory = MemoryStore::open_private(&root)?;
@@ -289,7 +289,7 @@ impl Agent {
         // to Agent::new's canonicalized home_root, making is_home return
         // false on the very first re-activation and flipping the project
         // to read-only unexpectedly.
-        let root = std::fs::canonicalize(&root).unwrap_or(root);
+        let root = crate::platform::canonicalize(&root).unwrap_or(root);
         // Load all resources outside any lock — I/O is independent of is_home.
         let config = ProjectConfig::load_or_default(&root)?;
         let memory = MemoryStore::open(&root)?;

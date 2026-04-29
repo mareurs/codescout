@@ -4,7 +4,7 @@
 //! process management, and security defaults. All platform-specific code should
 //! go through this module rather than using `#[cfg]` blocks elsewhere.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
 mod unix;
@@ -24,6 +24,35 @@ pub fn home_dir() -> Option<PathBuf> {
 /// Return the system temporary directory.
 pub fn temp_dir() -> PathBuf {
     imp::temp_dir()
+}
+
+/// Canonicalize a path, normalising platform-specific quirks.
+///
+/// On Unix this is a thin wrapper around `std::fs::canonicalize`.
+///
+/// On Windows this uses `dunce::canonicalize`, which strips Windows verbatim
+/// UNC prefixes (`\\?\C:\foo` → `C:\foo`) when the underlying path does not
+/// actually need them. This matters because:
+///   * `std::fs::canonicalize` on Windows always returns a `\\?\…` prefix.
+///   * Many downstream consumers (LSP servers, `git`, prefix comparisons,
+///     human-readable error messages) do not handle the verbatim form.
+///     Falling back to `dunce` keeps paths comparable across the codebase.
+pub fn canonicalize(path: &Path) -> std::io::Result<PathBuf> {
+    #[cfg(windows)]
+    {
+        dunce::canonicalize(path)
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::canonicalize(path)
+    }
+}
+
+/// Best-effort canonicalize: returns the canonical form when the path exists,
+/// otherwise the input unchanged. Use at validation/comparison boundaries
+/// where a missing path is not itself an error.
+pub fn canonicalize_or(path: &Path) -> PathBuf {
+    canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Return the platform-specific read deny-list prefixes (e.g. `~/.ssh`).

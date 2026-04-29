@@ -135,7 +135,7 @@ impl Tool for RegisterLibrary {
         //
         // Canonicalize first so relative traversals (`../..`) and symlinks
         // cannot bypass the classifier.
-        let canon_lib_path = std::fs::canonicalize(&lib_path).unwrap_or_else(|_| lib_path.clone());
+        let canon_lib_path = crate::platform::canonicalize_or(&lib_path);
         if let Some(reason) = crate::embed::preflight::classify_path(&canon_lib_path) {
             return Err(super::RecoverableError::with_hint(
                 format!(

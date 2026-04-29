@@ -118,3 +118,23 @@ pub fn lsp_binary_name(base: &str) -> String {
         _ => format!("{}.exe", base),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::canonicalize;
+
+    #[test]
+    fn canonicalize_strips_verbatim_unc_prefix() {
+        // dunce::canonicalize should drop the `\\?\` prefix for paths that do
+        // not actually require it (i.e. ordinary drive-letter paths). This is
+        // the whole reason we route through the platform helper rather than
+        // calling std::fs::canonicalize directly.
+        let dir = std::env::temp_dir();
+        let canon = canonicalize(&dir).expect("temp_dir canonicalize");
+        let s = canon.to_string_lossy();
+        assert!(
+            !s.starts_with(r"\\?\"),
+            "canonicalized path should not retain verbatim UNC prefix: {s}"
+        );
+    }
+}
