@@ -54,3 +54,64 @@ CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER PRIMARY KEY
 );
 INSERT OR IGNORE INTO schema_version (version) VALUES (1);
+
+-- v2: TimeMachine event log + narrative graph
+CREATE TABLE IF NOT EXISTS events (
+  id            TEXT PRIMARY KEY,
+  artifact_id   TEXT NOT NULL REFERENCES artifact(id) ON DELETE CASCADE,
+  kind          TEXT NOT NULL CHECK (kind IN (
+                  'note', 'reviewed', 'status_change', 'field_patch',
+                  'superseded_by', 'external_signal',
+                  'intent', 'verdict'
+                )),
+  payload       TEXT NOT NULL,
+  anchor_commit TEXT,
+  head_commit   TEXT,
+  author        TEXT,
+  created_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_events_artifact ON events(artifact_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_events_head_commit ON events(head_commit);
+CREATE INDEX IF NOT EXISTS idx_events_anchor_commit ON events(anchor_commit);
+CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind);
+
+CREATE TABLE IF NOT EXISTS commits (
+  hash         TEXT PRIMARY KEY,
+  repo         TEXT NOT NULL,
+  authored_at  INTEGER,
+  subject      TEXT,
+  topo_order   INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_commits_repo_topo ON commits(repo, topo_order);
+
+CREATE TABLE IF NOT EXISTS sources (
+  id           TEXT PRIMARY KEY,
+  uri          TEXT NOT NULL,
+  kind         TEXT NOT NULL CHECK (kind IN (
+                  'chat','jira','gmail','confluence','drive','calendar','manual'
+                )),
+  payload      TEXT,
+  ingested_at  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS event_edges (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  src_event_id    TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  dst_event_id    TEXT REFERENCES events(id) ON DELETE CASCADE,
+  dst_artifact_id TEXT REFERENCES artifact(id) ON DELETE CASCADE,
+  dst_source_id   TEXT REFERENCES sources(id) ON DELETE CASCADE,
+  rel             TEXT NOT NULL CHECK (rel IN (
+                    'parent', 'mutates', 'triggered_by', 'merges_with', 'resolves'
+                  ))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_event_edges_unique ON event_edges(
+  src_event_id, rel,
+  COALESCE(dst_event_id, ''),
+  COALESCE(dst_artifact_id, ''),
+  COALESCE(dst_source_id, '')
+);
+CREATE INDEX IF NOT EXISTS idx_event_edges_src ON event_edges(src_event_id, rel);
+CREATE INDEX IF NOT EXISTS idx_event_edges_dst_artifact ON event_edges(dst_artifact_id);
+CREATE INDEX IF NOT EXISTS idx_event_edges_dst_event ON event_edges(dst_event_id);
+
+INSERT OR IGNORE INTO schema_version (version) VALUES (2);

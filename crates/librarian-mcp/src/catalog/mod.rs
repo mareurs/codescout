@@ -87,4 +87,29 @@ mod tests {
         assert!(tables.iter().any(|t| t == "artifact_link"));
         assert!(tables.iter().any(|t| t == "artifact_observation"));
     }
+
+    #[test]
+    fn schema_has_timemachine_tables() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let names: Vec<String> = cat
+            .conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        for t in ["events", "commits", "sources", "event_edges"] {
+            assert!(
+                names.iter().any(|n| n == t),
+                "missing table {t}: {:?}",
+                names
+            );
+        }
+        let v: i64 = cat
+            .conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 2);
+    }
 }
