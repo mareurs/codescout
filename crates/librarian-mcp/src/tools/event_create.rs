@@ -49,6 +49,42 @@ const ALLOWED_KINDS: &[&str] = &[
     "verdict",
 ];
 
+
+/// Per-artifact write lock registry.
+///
+/// `event_create::call` acquires a per-artifact-id lock that spans the
+/// frontmatter mutation, parent-event lookup, and the row + edges
+/// transaction. Two concurrent calls on the same artifact serialise
+/// (preventing interleaved frontmatter writes and ensuring the
+/// parent_event_id chain forms a line, not a fan). Calls on different
+/// artifacts do not contend.
+///
+/// Memory grows linearly with the number of distinct artifact ids ever
+/// seen in this process. Acceptable at v1 catalog sizes; revisit if the
+/// catalog grows past tens of thousands of artifacts in long-lived
+/// servers.
+#[derive(Default)]
+struct WriteLockRegistry {
+    inner: parking_lot::Mutex<
+        std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>,
+    >,
+}
+
+impl WriteLockRegistry {
+    fn lock_for(&self, artifact_id: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+        let mut g = self.inner.lock();
+        g.entry(artifact_id.to_string())
+            .or_insert_with(|| std::sync::Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    }
+}
+
+static WRITE_LOCKS: std::sync::OnceLock<WriteLockRegistry> = std::sync::OnceLock::new();
+
+fn write_locks() -> &'static WriteLockRegistry {
+    WRITE_LOCKS.get_or_init(WriteLockRegistry::default)
+}
+
 #[async_trait]
 impl Tool for ArtifactEventCreate {
     fn name(&self) -> &'static str {
@@ -74,6 +110,14 @@ impl Tool for ArtifactEventCreate {
             ));
         }
         validate_payload(&a.kind, &a.payload)?;
+
+        // Per-artifact write lock — serialises frontmatter mutation,
+        // parent-event lookup, and the row/edges transaction so that two
+        // concurrent calls on the same artifact form a chain not a fan.
+        let _write_guard = write_locks()
+            .lock_for(&a.artifact_id)
+            .lock_owned()
+            .await;
 
         // verdict ↔ intent invariants — checked before any writes
         if let Some(ref target) = a.resolves_intent_event_id {
@@ -654,4 +698,131 @@ mod tests {
             "intent.inputs must round-trip unchanged through events.payload"
         );
     }
+
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_calls_on_same_artifact_chain_not_fan() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = std::sync::Arc::new(mk_ctx(tmp.path().to_path_buf()));
+        {
+            let cat = ctx.catalog.lock();
+            art_insert(&cat, &art("conc")).unwrap();
+        }
+        let c1 = ctx.clone();
+        let c2 = ctx.clone();
+        let h1 = tokio::spawn(async move {
+            ArtifactEventCreate
+                .call(
+                    &c1,
+                    json!({
+                        "artifact_id": "conc",
+                        "kind": "note",
+                        "payload": {"text": "first"}
+                    }),
+                )
+                .await
+                .unwrap()
+        });
+        let h2 = tokio::spawn(async move {
+            ArtifactEventCreate
+                .call(
+                    &c2,
+                    json!({
+                        "artifact_id": "conc",
+                        "kind": "note",
+                        "payload": {"text": "second"}
+                    }),
+                )
+                .await
+                .unwrap()
+        });
+        let r1 = h1.await.unwrap();
+        let r2 = h2.await.unwrap();
+
+        let id1 = r1["event_id"].as_str().unwrap().to_string();
+        let id2 = r2["event_id"].as_str().unwrap().to_string();
+        let p1 = r1["parent_event_id"].as_str().map(|s| s.to_string());
+        let p2 = r2["parent_event_id"].as_str().map(|s| s.to_string());
+
+        // Exactly one event must have no parent (the lock-winner) and the
+        // other must point to it. Without the lock, both would race
+        // `latest_for_artifact` and both would return parent_event_id=None.
+        match (p1.as_deref(), p2.as_deref()) {
+            (None, Some(p)) => assert_eq!(p, id1, "second event must chain off first"),
+            (Some(p), None) => assert_eq!(p, id2, "second event must chain off first"),
+            other => panic!(
+                "expected one None and one Some(other_id); got {other:?} (id1={id1}, id2={id2})"
+            ),
+        }
+
+        let cat = ctx.catalog.lock();
+        let count: i64 = cat
+            .conn
+            .query_row(
+                "SELECT count(*) FROM events WHERE artifact_id='conc'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 2);
+    }
+
+
+    #[tokio::test]
+    async fn field_patch_unwritable_field_errors_and_writes_no_event() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        // Write a real artifact file on disk so frontmatter ops have a target.
+        let rel_path = "a-fp.md";
+        std::fs::write(
+            tmp.path().join(rel_path),
+            "---\nid: a-fp\nrepo: r\nrel_path: a-fp.md\nkind: spec\nstatus: active\n---\n# body\n",
+        )
+        .unwrap();
+        {
+            let cat = ctx.catalog.lock();
+            art_insert(
+                &cat,
+                &ArtifactRow {
+                    rel_path: rel_path.into(),
+                    ..art("a-fp")
+                },
+            )
+            .unwrap();
+        }
+        let err = ArtifactEventCreate
+            .call(
+                &ctx,
+                json!({
+                    "artifact_id": "a-fp",
+                    "kind": "field_patch",
+                    "payload": {"field": "owners", "to": ["alice"]}
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.downcast_ref::<RecoverableError>().is_some(),
+            "expected RecoverableError, got: {err:#}"
+        );
+        assert!(
+            err.to_string().contains("not writable"),
+            "expected 'not writable' in error, got: {err:#}"
+        );
+        // No event row may be written when the disk write would have been a no-op.
+        let cat = ctx.catalog.lock();
+        let count: i64 = cat
+            .conn
+            .query_row(
+                "SELECT count(*) FROM events WHERE artifact_id='a-fp'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 0,
+            "field_patch on unwritable field must not insert an event row"
+        );
+    }
+
 }

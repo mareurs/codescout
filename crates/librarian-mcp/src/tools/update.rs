@@ -158,15 +158,25 @@ impl Tool for ArtifactUpdate {
 }
 
 /// Write a single named frontmatter field to the artifact's file on disk.
-/// Supported field names: "status", "title", "topic", "time_scope".
-/// Unknown field names are silently skipped (no error) — the event is still
-/// recorded; only the disk round-trip is deferred for unsupported fields.
+///
+/// Supported field names: `"status"`, `"title"`, `"topic"`, `"time_scope"`.
+/// Any other field name is rejected with a [`RecoverableError`] so callers
+/// (e.g. `event_create::call` for `field_patch` events) can surface a
+/// useful error rather than silently writing an event row that has no
+/// matching change on disk.
 pub(crate) fn write_field_to_frontmatter(
     ctx: &ToolContext,
     artifact_id: &str,
     field: &str,
     value: &Value,
 ) -> Result<()> {
+    const WRITABLE: &[&str] = &["status", "title", "topic", "time_scope"];
+    if !WRITABLE.contains(&field) {
+        return Err(crate::tools::RecoverableError::with_hint(
+            format!("frontmatter field `{field}` is not writable"),
+            format!("writable scalar fields: {}", WRITABLE.join(", ")),
+        ));
+    }
     let cat = ctx.catalog.lock();
     let row = artifact::get(&cat, artifact_id)?
         .ok_or_else(|| anyhow::anyhow!("unknown artifact `{artifact_id}`"))?;
@@ -178,30 +188,28 @@ pub(crate) fn write_field_to_frontmatter(
         .ok_or_else(|| anyhow::anyhow!("unknown repo `{}`", row.repo))?;
     let full = root.path.join(&row.rel_path);
     let original = std::fs::read_to_string(&full)?;
-    let new_content = crate::frontmatter::update_in_place(&original, |fm| {
-        match field {
-            "status" => {
-                if let Some(s) = value.as_str() {
-                    fm.status = Some(s.into());
-                }
+    let new_content = crate::frontmatter::update_in_place(&original, |fm| match field {
+        "status" => {
+            if let Some(s) = value.as_str() {
+                fm.status = Some(s.into());
             }
-            "title" => {
-                if let Some(s) = value.as_str() {
-                    fm.title = Some(s.into());
-                }
-            }
-            "topic" => {
-                if let Some(s) = value.as_str() {
-                    fm.topic = Some(s.into());
-                }
-            }
-            "time_scope" => {
-                if let Some(s) = value.as_str() {
-                    fm.time_scope = Some(s.into());
-                }
-            }
-            _ => { /* unsupported field: skip silently */ }
         }
+        "title" => {
+            if let Some(s) = value.as_str() {
+                fm.title = Some(s.into());
+            }
+        }
+        "topic" => {
+            if let Some(s) = value.as_str() {
+                fm.topic = Some(s.into());
+            }
+        }
+        "time_scope" => {
+            if let Some(s) = value.as_str() {
+                fm.time_scope = Some(s.into());
+            }
+        }
+        _ => unreachable!("guarded by WRITABLE check above"),
     })?;
     std::fs::write(&full, &new_content)?;
     Ok(())

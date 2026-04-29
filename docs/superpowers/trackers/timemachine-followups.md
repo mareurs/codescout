@@ -62,38 +62,48 @@ edge insert; asserts both `events` and `event_edges` are empty after.
 
 **Where:** `crates/librarian-mcp/src/tools/event_create.rs`.
 
-**Issue:** Frontmatter write happens before the lock is taken. Two
-concurrent `status_change` callers on the same artifact can interleave file
-writes in arbitrary order. Probability low (single-user MCP) but spec said
-"edits frontmatter on disk *first*, then writes the event" implying a single
-ordered atomic unit.
+**Issue:** Frontmatter write happened before the lock was taken. Two
+concurrent `status_change` callers on the same artifact could interleave
+file writes in arbitrary order. `latest_for_artifact` could also race so
+both calls saw the same parent and the resulting graph fanned instead
+of chained.
 
-**Fix shape:** option A — take a per-artifact-id mutex (via `Arc<Mutex<()>>`
-keyed by artifact_id) around frontmatter write + event insert. Option B —
-serialize all writes through a single coarse lock (simpler, lower throughput,
-fine at v1 scale).
+**Resolution:** added a per-artifact `WriteLockRegistry` (a static
+`OnceLock<HashMap<String, Arc<tokio::sync::Mutex<()>>>>` in
+`event_create.rs`). `event_create::call` acquires the per-artifact-id
+lock immediately after payload validation and holds it for the whole
+function — spanning frontmatter mutation, parent-event lookup, and the
+row + edges transaction. Calls on different artifacts do not contend.
+Test `concurrent_calls_on_same_artifact_chain_not_fan` spawns two
+concurrent calls on a multi-thread runtime and asserts the resulting
+parent edges form a chain (one event with `parent_event_id=None`, the
+other pointing at it) instead of a fan.
 
-**Estimate:** 1 short session. Touches event_create + a small registry
-struct.
-
+**Status:** DONE (phase 2).
 ### 4. `write_field_to_frontmatter` silently skips unknown fields
 
-**Where:** `crates/librarian-mcp/src/tools/update.rs` (extracted helper).
+**Where:** `crates/librarian-mcp/src/tools/update.rs`.
 
-**Issue:** Frontmatter struct uses `#[serde(deny_unknown_fields)]` with a
-fixed set of scalar fields (`status`, `title`, `topic`, `time_scope`). A
-`field_patch` event for `owners`, `tags`, `confidence`, etc. writes the
-event row but **silently** does nothing on disk. Caller has no idea the
-write was a no-op.
+**Issue:** Frontmatter struct uses a fixed set of scalar fields
+(`status`, `title`, `topic`, `time_scope`). A `field_patch` event for
+`owners`, `tags`, `confidence`, etc. wrote the event row but silently
+did nothing on disk — caller had no idea the write was a no-op.
 
-**Fix shape:** either (a) return an error from `write_field_to_frontmatter`
-when the field is not writable, propagated up to `event_create`'s caller —
-event row is NOT written in that case; (b) extend the helper to handle
-array fields (`owners`, `tags`).
+**Resolution:** option (a) from the original fix shape.
+`write_field_to_frontmatter` now returns a `RecoverableError` when the
+field is not in the writable allow-list. Because
+`event_create::call` invokes the helper before opening the database
+transaction, the error propagates up and the event row is *not*
+written. Test
+`field_patch_unwritable_field_errors_and_writes_no_event` asserts both
+the error type and that `events.count == 0` after a `field_patch` for
+`owners`.
 
-**Estimate:** 1 short session. Recommendation: (a) for v1.1; (b) when a
-real `field_patch` for owners/tags is needed.
+Option (b) — extending the helper to also write array fields
+(`owners`, `tags`) — still deferred until a real `field_patch` for
+those fields is needed.
 
+**Status:** DONE (phase 2).
 ### 5. Missing narrative-layer tests (spec §9 #2, #3, #5)
 
 **Where:** `crates/librarian-mcp/src/catalog/events.rs::tests`,
