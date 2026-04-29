@@ -148,12 +148,13 @@ session through the mux, and passes the bulk of `cargo test`.
   per-OS, with a fresh `classify_path_detects_windows_system_roots`
   asserting the Windows roots that always exist on a stock install.
 - **Status:** ✅ done.
-### W9. `atomic_write` exec-bit preservation Unix-only 🟡 partial
+### W9. `atomic_write` exec-bit preservation Unix-only ✅ done
 - **Location:** `src/util/fs.rs:52-68`.
 - **Issue:** `#[cfg(unix)]` block reads + restores Unix mode (preserves
   exec bit). Windows has no equivalent semantic; safe degradation.
-- **Status:** 🟡 acceptable — Windows files don't carry the exec bit.
-  Test `atomic_write_preserves_exec_bit` already `#[cfg(unix)]`-only.
+- **Status:** ✅ done. Windows NTFS has no POSIX exec bit; the `cfg(unix)`
+  branch correctly degrades to a plain rename on Windows. The test
+  `atomic_write_preserves_exec_bit` is already `cfg(unix)`-gated.
 
 ### W10. Endpoint naming via `transport::endpoint_path` ✅ done
 - **Location:** `src/lsp/mux/mod.rs::socket_path_for_workspace`.
@@ -184,7 +185,7 @@ session through the mux, and passes the bulk of `cargo test`.
 - **Status:** ✅ done (decision recorded; CI swap tracked under W19).
 - **Follow-up:** if MinGW users surface, revisit candle. For now,
   `windows-gnu` is unsupported.
-### W12. `tikv-jemallocator` global allocator on Windows 🟡 partial
+### W12. `tikv-jemallocator` global allocator on Windows ✅ done
 
 - **Location:** `src/main.rs:5`, `Cargo.toml`.
 - **Fix (commit pending):** Both the dependency declaration and the
@@ -194,7 +195,7 @@ session through the mux, and passes the bulk of `cargo test`.
 - **Status:** ✅ done.
 ## Hardware / system probes
 
-### W13. `hardware.rs` Windows RAM probe missing 🔴 open
+### W13. `hardware.rs` Windows RAM probe ✅ done
 
 - **Location:** `src/hardware.rs:171-228`.
 - **Fix (commit pending):** `#[cfg(windows)]` branch calls
@@ -234,7 +235,7 @@ session through the mux, and passes the bulk of `cargo test`.
 - **Test:** `src/platform/windows.rs::tests::canonicalize_strips_verbatim_unc_prefix`
   asserts the UNC prefix is gone after canonicalization (cfg(windows)).
 - **Status:** ✅ done.
-### W18. Drive-letter case sensitivity 🔴 open
+### W18. Drive-letter case sensitivity ✅ done
 
 - **Issue:** Windows treats `C:\foo` and `c:\foo` as the same path.
   Hashing for `socket_path_for_workspace` used raw `PathBuf` hashing
@@ -281,25 +282,46 @@ session through the mux, and passes the bulk of `cargo test`.
 - **Action:** runtime-test mux ownership transfer on Windows (kill mux
   child, second mux acquires lock, etc.).
 
-### W22. Tokio signals 🔴 open
+### W22. Tokio signals ✅ done
 
 - **Audit result:** `src/server.rs:799-823` `shutdown_signal` already
   uses `#[cfg(unix)]` for `tokio::signal::unix` (SIGTERM, SIGHUP) and
   `#[cfg(not(unix))]` for `tokio::signal::ctrl_c` only. No other uses
   of `tokio::signal::unix` in the tree.
 - **Status:** ✅ done (was already correct — audit confirmed).
-### W23. LSP server discovery (PATHEXT) 🔴 open
-- **Note:** `platform::lsp_binary_name` adds `.exe`/`.cmd` on Windows.
-  Untested whether Windows PATH lookup actually finds the binary —
-  tokio's `Command::new` should handle PATHEXT via `CreateProcessW`,
-  but Node-based servers shipped as `.cmd` shims have known invocation
-  quirks (need `cmd /C` wrapper or `UseShellExecute`).
-- **Action:** runtime-test each LSP server we ship support for.
+### W23. LSP server discovery (PATHEXT) 🟡 partial
 
-### W24. `gh` CLI invocations 🔴 open
-- **Note:** Several tools shell out to `gh`. Untested on Windows where
-  `gh` is `gh.exe` and may have different stderr handling.
+- **Static audit (2026-04-29):** `platform::lsp_binary_name` already
+  appends `.exe` for native servers and `.cmd` for known Node-based
+  shims (typescript-language-server, vscode-json-language-server,
+  yaml-language-server, bash-language-server, pyright-langserver).
+  Native `.exe` lookup via `Command::new` works on Windows.
+- **Latent concern:** MSRV is 1.75. Rust `Command::new("foo.cmd")`
+  had unreliable / unsafe behaviour before 1.77.2 (CVE-2024-24576
+  argument-injection fix). Below that threshold, invoking a `.cmd`
+  shim directly may fail with NotFound or, worse, mishandle special
+  characters in arguments.
+- **Mitigations to consider when this surfaces:**
+  - Bump MSRV to ≥1.77.2 (one-line change in Cargo.toml; matches
+    most active toolchains).
+  - Or, in the LSP launcher, on Windows wrap any `.cmd`/`.bat`
+    binary with `cmd /C` and quote arguments. More invasive.
+- **Status:** 🟡 partial — `.exe` path is fine; `.cmd` shim invocation
+  is a runtime-test risk. Defer to W21–W25 phase; revisit only if
+  Node-based LSPs misbehave on the Windows runner.
+### W24. `gh` CLI invocations ✅ done
 
+- **Audit (2026-04-29):** the only `gh` invocation is
+  `tools::github::run_gh` (single bare `Command::new("gh")`). Rust
+  `std::process::Command` on Windows calls `CreateProcessW`, which
+  respects PATH + PATHEXT, so `gh.exe` resolves automatically when on
+  PATH. The NotFound branch already produces an actionable error
+  pointing the user at https://cli.github.com.
+- **Note:** on master the github tools are retired (commit 0bc70eb);
+  on `experiments` they remain. Either way the static analysis is the
+  same: bare-name lookup works on Windows.
+- **Status:** ✅ done (static audit). Empirical verification folds
+  into W21–W25 runtime phase if/when github tools return.
 ### W25. Claude Code MCP integration on Windows 🔴 open
 - **Note:** Claude Code itself runs on Windows; whether it can launch
   codescout via stdio MCP transport on Windows is untested. May
@@ -311,26 +333,34 @@ session through the mux, and passes the bulk of `cargo test`.
 |--------|--------|------------|---------|-----------|
 | Mux / LSP transport | 2 | 2 | 0 | 0 |
 | Process management | 2 | 0 | 0 | 0 |
-| Path / filesystem | 4 | 1 | 0 | 0 |
-| Embedding | 1 | 1 | 0 | 0 |
+| Path / filesystem | 4 | 0 | 0 | 0 |
+| Embedding | 2 | 0 | 0 | 0 |
 | Hardware | 1 | 0 | 0 | 0 |
 | Shell | 2 | 0 | 0 | 0 |
-| Security / paths | 2 | 0 | 1 | 0 |
+| Denied / security | 3 | 0 | 0 | 0 |
 | CI / tooling | 2 | 0 | 0 | 0 |
-| Signals (W22) | 1 | 0 | 0 | 0 |
-| Unaudited | 0 | 0 | 5 | 0 |
-| **Totals** | **18** | **4** | **6** | **0** |
+| Unaudited (W21–W25) | 2 | 1 | 2 | 0 |
+| **Totals** | **20** | **3** | **2** | **0** |
 ## Next moves (ordered by leverage)
 
-All architectural and code-tier items have landed. What remains is
-runner-dependent or already in a usable partial state:
+All architectural and statically-auditable items have landed. Only
+items that fundamentally need a Windows runner remain:
 
-1. **W21–W25** — actual Windows runtime tests. Until these run, the
-   port is hypothesis. First Windows CI run (W19) is the first real
-   signal. Symlink-escape coverage and Job Object kill-on-close
-   verification fold into this phase.
-2. **Partials (W3, W4, W9, W12)** — degraded-but-functional. Revisit
-   only when runtime feedback indicates a problem.
+1. **W21** — `notify`/`fs2`/`fs4` lock-file flock semantics, especially
+   mux ownership transfer (kill mux child, second client acquires the
+   lock). Untestable without spawning processes on Windows.
+2. **W25** — Claude Code can launch codescout via stdio MCP transport
+   on Windows. Line-ending handling in transport may matter.
+3. **Partials**:
+   - **W3, W4** — named-pipe back-pressure / close-detection and the
+     pipe-busy retry budget. Fold into W21 phase.
+   - **W23 (.cmd shims)** — Node-based LSPs ship as `.cmd`. MSRV 1.75
+     predates Rust's CVE-2024-24576 fix. Mitigation if surfaces:
+     bump MSRV to ≥1.77.2, or wrap `.cmd`/`.bat` in `cmd /C` at the
+     LSP launcher.
+
+The first `windows-latest` CI run (post-W19) is the truth oracle. Push
+the branch and let CI tell us which hypotheses survive.
 ## References
 
 - Phase A commit: `3b6f8c3` — concentrate IPC behind `transport` module.
