@@ -124,6 +124,37 @@ pub(crate) fn row_from_sql(r: &rusqlite::Row<'_>) -> rusqlite::Result<ArtifactRo
     })
 }
 
+/// Hydrate a frontmatter map from an `ArtifactRow`. Used as the seed for
+/// `state_at::replay_state_at` (which then layers `field_patch` /
+/// `status_change` events on top) and anywhere else that needs an
+/// initial frontmatter view derived from catalog state.
+///
+/// Centralised here so the field list cannot drift between consumers.
+pub fn build_frontmatter_map(art: &ArtifactRow) -> serde_json::Map<String, serde_json::Value> {
+    use serde_json::Value;
+    let mut m = serde_json::Map::new();
+    m.insert("status".into(), Value::String(art.status.clone()));
+    if let Some(ref t) = art.title {
+        m.insert("title".into(), Value::String(t.clone()));
+    }
+    m.insert("kind".into(), Value::String(art.kind.clone()));
+    m.insert(
+        "tags".into(),
+        serde_json::to_value(&art.tags).unwrap_or(Value::Null),
+    );
+    m.insert(
+        "owners".into(),
+        serde_json::to_value(&art.owners).unwrap_or(Value::Null),
+    );
+    if let Some(ref t) = art.topic {
+        m.insert("topic".into(), Value::String(t.clone()));
+    }
+    if let Some(ref t) = art.time_scope {
+        m.insert("time_scope".into(), Value::String(t.clone()));
+    }
+    m
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

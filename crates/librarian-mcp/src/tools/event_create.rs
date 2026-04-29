@@ -49,7 +49,6 @@ const ALLOWED_KINDS: &[&str] = &[
     "verdict",
 ];
 
-
 /// Per-artifact write lock registry.
 ///
 /// `event_create::call` acquires a per-artifact-id lock that spans the
@@ -114,10 +113,7 @@ impl Tool for ArtifactEventCreate {
         // Per-artifact write lock — serialises frontmatter mutation,
         // parent-event lookup, and the row/edges transaction so that two
         // concurrent calls on the same artifact form a chain not a fan.
-        let _write_guard = write_locks()
-            .lock_for(&a.artifact_id)
-            .lock_owned()
-            .await;
+        let _write_guard = write_locks().lock_for(&a.artifact_id).lock_owned().await;
 
         // verdict ↔ intent invariants — checked before any writes
         if let Some(ref target) = a.resolves_intent_event_id {
@@ -699,7 +695,6 @@ mod tests {
         );
     }
 
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrent_calls_on_same_artifact_chain_not_fan() {
         let tmp = TempDir::new().unwrap();
@@ -767,7 +762,6 @@ mod tests {
         assert_eq!(count, 2);
     }
 
-
     #[tokio::test]
     async fn field_patch_unwritable_field_errors_and_writes_no_event() {
         let tmp = TempDir::new().unwrap();
@@ -824,5 +818,4 @@ mod tests {
             "field_patch on unwritable field must not insert an event row"
         );
     }
-
 }

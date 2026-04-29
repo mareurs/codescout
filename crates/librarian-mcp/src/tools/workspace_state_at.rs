@@ -53,7 +53,9 @@ impl Tool for WorkspaceStateAt {
         "Time-travel snapshot: return all artifacts in scope as they stood at the given \
          commit/timestamp, with freshness_at_as_of (replay up to cutoff) vs freshness_now \
          (current state). Useful for answering 'what was stale at release X?' questions. \
-         Capped at 200 artifacts; hints.more_in_scope reports remainder."
+         Capped at 200 artifacts; hints.more_in_scope reports remainder. Note: the \
+         single-artifact sibling `librarian_artifact_state_at` returns just `freshness` \
+         (the at-as-of value) rather than the at-as-of + now pair this tool surfaces."
     }
 
     fn input_schema(&self) -> Value {

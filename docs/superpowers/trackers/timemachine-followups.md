@@ -120,66 +120,74 @@ those fields is needed.
 **Status:** DONE (phase 1).
 ### 6. Frontmatter hydration duplicated `state_at` ↔ `get.rs`
 
-**Where:** `crates/librarian-mcp/src/tools/state_at.rs::replay_state_at`
-seeds a frontmatter map from `ArtifactRow`; `crates/librarian-mcp/src/tools/get.rs`
-does similar work. Field list will drift.
+**Where:** `crates/librarian-mcp/src/catalog/artifact.rs`,
+`crates/librarian-mcp/src/tools/state_at.rs`.
 
-**Fix shape:** extract `pub(crate) fn build_frontmatter_map(art: &ArtifactRow) -> Map<String, Value>`
-in `catalog::artifact` (or a new `catalog::frontmatter` module). Call from
-both consumers.
+**Issue (re-evaluated):** the duplication originally claimed in this
+item turned out to be one-sided — `tools/get.rs` parses frontmatter
+from disk via `frontmatter::parse(content)` and does *not* hydrate from
+`ArtifactRow` the way `state_at::replay_state_at` did. Only one
+in-memory hydration path existed, so there was no immediate drift to
+fix. Refactor done anyway because the helper makes the schema
+authoritative in one place for any future caller (e.g. a per-artifact
+timeline view) and shrinks `replay_state_at`.
 
-**Estimate:** 1 short session. Mechanical refactor.
+**Resolution:** added
+`crate::catalog::artifact::build_frontmatter_map(art) -> Map<String, Value>`
+and switched `replay_state_at` to call it. Field list (status, title,
+kind, tags, owners, topic, time_scope) lives in one place.
 
+**Status:** DONE (phase 3).
 ### 7. `replay_state_at` post-fetch filter on `created_at <= cutoff`
 
 **Where:** `crates/librarian-mcp/src/tools/state_at.rs::replay_state_at`.
 
-**Issue:** Currently calls `events::timeline_for_artifact(_, _, None, usize::MAX)`
-then filters in Rust by `created_at <= cutoff_ts`. Wasteful for artifacts
+**Issue:** `replay_state_at` previously called
+`events::timeline_for_artifact(_, _, None, None, usize::MAX)` and
+filtered in Rust by `created_at <= cutoff_ts`. Wasteful for artifacts
 with hundreds of events.
 
-**Fix shape:** extend `events::timeline_for_artifact` to accept an optional
-`until` (already added in fix #2 / commit `4988e52`!). Switch `replay_state_at`
-to pass `until=Some(cutoff_ts)`.
+**Resolution:** switched to
+`events::timeline_for_artifact(_, _, None, Some(cutoff_ts), usize::MAX)`
+so the cutoff is pushed into SQL. The `until` parameter was added in
+commit `4988e52` (the SQL push-down for the live `timeline` tool); this
+item was just the consumer-side switch.
 
-**Estimate:** 5-line edit. Actually small enough to combine with another
-item or land standalone.
-
+**Status:** DONE (phase 3).
 ### 8. State_at vs workspace_state_at freshness-field-name asymmetry
 
-**Where:** `crates/librarian-mcp/src/tools/state_at.rs` returns
-`"freshness"` (scalar); `workspace_state_at.rs` returns
-`"freshness_at_as_of"` (+ `"freshness_now"` per-artifact).
+**Where:** `crates/librarian-mcp/src/tools/state_at.rs`,
+`crates/librarian-mcp/src/tools/workspace_state_at.rs`.
 
-**Issue:** By design (workspace surfaces both at-as-of + now-diff;
-state_at is single-artifact so the bare label suffices), but it can
-confuse callers switching between the two tools.
+**Issue:** `state_at` returns `"freshness"`; `workspace_state_at`
+returns `"freshness_at_as_of"` + `"freshness_now"`. Asymmetric by
+design (workspace surfaces both views, state_at single-artifact uses
+the bare label) but caller-confusing.
 
-**Fix shape:** option A — document the asymmetry in tool descriptions.
-Option B — make state_at also return `freshness_at_as_of` + `freshness_now`
-for consistency. (B is a breaking response-shape change.)
+**Resolution:** documentation-only fix per the original recommendation
+(option A). Both tool descriptions now cross-reference each other and
+name the asymmetric fields explicitly. No schema change — a breaking
+response-shape unification stays parked for v2.
 
-**Estimate:** documentation-only fix is 1 short session. Schema change is
-breaking and should wait for v2.
-
+**Status:** DONE (phase 3, doc-only).
 ### 9. Timeline ordering within same millisecond
 
-**Where:** `crates/librarian-mcp/src/catalog/events.rs::timeline_for_artifact`
-and friends.
+**Where:** `crates/librarian-mcp/src/catalog/events.rs::timeline_for_artifact`,
+`crates/librarian-mcp/src/tools/timeline.rs`.
 
-**Issue:** `ORDER BY created_at DESC, id DESC` — id is ULID, lexicographic.
-Within the same ms, ULID's random bits dominate, so ordering is not
-strictly creation-order. Smoke test surfaced this when looking up events
-by array position; fix was to key by known event id.
+**Issue:** `ORDER BY created_at DESC, id DESC` — id is ULID,
+lexicographic. Within the same millisecond, ULID's random bits
+dominate, so ordering is not strictly creation-order. Surfaced by the
+smoke test when looking up events by array position.
 
-**Fix shape:** likely **defer** — ULIDs are time-ordered to ms resolution
-which matches `created_at`'s precision. Within-ms collisions are rare in
-real workflows. Document the behavior in tool descriptions if/when callers
-hit it.
+**Resolution:** documentation-only fix per the original recommendation.
+`artifact_timeline`'s tool description now spells out the
+`created_at DESC, id DESC` ordering rule, calls out that within-ms
+ordering may not match strict creation order, and tells callers to pin
+lookups by event id rather than array position. A monotonic counter
+column remains a post-v2 consideration.
 
-**Estimate:** 0 (document-only) for v1.x; consider a monotonic counter
-column post v2.
-
+**Status:** DONE (phase 3, doc-only).
 ## Resolved during review
 
 These were called out in the code review but turned out to be false alarms
@@ -193,6 +201,7 @@ on closer inspection (recorded so we don't keep re-litigating):
 
 ## Re-eval
 
-Re-read this list at the start of each follow-up TimeMachine session.
-Prioritize 1, 2, 5 (correctness + safety + test coverage) over 3, 4
-(quality-of-life). 6, 7, 8, 9 are nice-to-have.
+All items resolved as of phase 3. Tracker is now archival — keep for
+reference but no further work expected. If new TimeMachine follow-ups
+emerge from later sessions, open a fresh tracker rather than
+reviving this one.

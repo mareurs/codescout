@@ -53,30 +53,15 @@ pub(crate) fn replay_state_at(
     art: &crate::catalog::artifact::ArtifactRow,
     cutoff_ts: i64,
 ) -> Result<ReplayedState> {
-    let all = events::timeline_for_artifact(cat, &art.id, None, None, usize::MAX)?;
-    // timeline_for_artifact returns newest-first; filter to ≤ cutoff and reverse
-    // for chronological replay.
-    let mut filtered: Vec<_> = all
-        .into_iter()
-        .filter(|e| e.created_at <= cutoff_ts)
-        .collect();
-    filtered.reverse(); // oldest-first
+    // Push the cutoff into SQL via `until` so we don't pull post-cutoff
+    // events just to drop them in Rust.
+    let mut filtered =
+        events::timeline_for_artifact(cat, &art.id, None, Some(cutoff_ts), usize::MAX)?;
+    // timeline_for_artifact returns newest-first; reverse for chronological replay.
+    filtered.reverse();
 
     // Seed frontmatter from the current artifact row (fallback for un-patched fields).
-    let mut frontmatter: Map<String, Value> = Map::new();
-    frontmatter.insert("status".into(), Value::String(art.status.clone()));
-    if let Some(ref t) = art.title {
-        frontmatter.insert("title".into(), Value::String(t.clone()));
-    }
-    frontmatter.insert("kind".into(), Value::String(art.kind.clone()));
-    frontmatter.insert("tags".into(), serde_json::to_value(&art.tags)?);
-    frontmatter.insert("owners".into(), serde_json::to_value(&art.owners)?);
-    if let Some(ref t) = art.topic {
-        frontmatter.insert("topic".into(), Value::String(t.clone()));
-    }
-    if let Some(ref t) = art.time_scope {
-        frontmatter.insert("time_scope".into(), Value::String(t.clone()));
-    }
+    let mut frontmatter = crate::catalog::artifact::build_frontmatter_map(art);
 
     let mut latest_event_row: Option<events::EventRow> = None;
     let mut latest_reviewed_at: Option<i64> = None;
@@ -161,7 +146,11 @@ impl Tool for ArtifactStateAt {
     fn description(&self) -> &'static str {
         "Reconstruct an artifact's status + frontmatter + freshness as it stood at a given \
          commit or timestamp. Replays status_change / field_patch events in chronological order \
-         up to the cutoff; un-patched fields fall back to the current artifact-row value."
+         up to the cutoff; un-patched fields fall back to the current artifact-row value. \
+         Returns a single `freshness` scalar (the value at the cutoff). The sibling \
+         `librarian_workspace_state_at` returns `freshness_at_as_of` + `freshness_now` per \
+         artifact instead, since it surfaces both the at-as-of view and the current diff \
+         in one batch."
     }
 
     fn input_schema(&self) -> Value {

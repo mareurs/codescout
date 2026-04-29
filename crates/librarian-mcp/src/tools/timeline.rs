@@ -35,7 +35,10 @@ impl Tool for ArtifactTimeline {
     fn description(&self) -> &'static str {
         "Return events for an artifact, newest first. Each event includes resolved \
          parent_event_id, triggered_by_source, mutates_artifacts, resolves_intent_id, \
-         resolved_by_verdict_id."
+         resolved_by_verdict_id. \
+         Ordering is `created_at DESC, id DESC` (id is ULID, time-ordered to ms). \
+         Within the same millisecond, ULID's random tail dominates so order may not \
+         match strict creation order — pin lookups by event id rather than array position."
     }
 
     fn input_schema(&self) -> Value {
