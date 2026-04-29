@@ -159,17 +159,28 @@ item was just the consumer-side switch.
 **Where:** `crates/librarian-mcp/src/tools/state_at.rs`,
 `crates/librarian-mcp/src/tools/workspace_state_at.rs`.
 
-**Issue:** `state_at` returns `"freshness"`; `workspace_state_at`
-returns `"freshness_at_as_of"` + `"freshness_now"`. Asymmetric by
-design (workspace surfaces both views, state_at single-artifact uses
-the bare label) but caller-confusing.
+**Issue:** `artifact_state_at` returned `"freshness"` and `"status"` and
+`"latest_event"`; `workspace_state_at` returned `"freshness_at_as_of" +
+"freshness_now" + "freshness_changed"`, `"status_at_as_of"`,
+`"latest_event_at_as_of"`. Asymmetric — caller-confusing.
 
-**Resolution:** documentation-only fix per the original recommendation
-(option A). Both tool descriptions now cross-reference each other and
-name the asymmetric fields explicitly. No schema change — a breaking
-response-shape unification stays parked for v2.
+**Resolution (option B, breaking):** unified `artifact_state_at`
+response shape to match `workspace_state_at`. New keys:
+`status_at_as_of`, `freshness_at_as_of`, `freshness_now`,
+`freshness_changed`, `latest_event_at_as_of`. `frontmatter` and
+`supersession_chain` keep their names. Also added top-level `as_of`
+(cutoff timestamp ms) for symmetry with workspace tool. Tool
+description updated to enumerate the new field set. Tests
+(`replay_status_change`, `commit_lookup_uses_authored_at`) and the
+TimeMachine smoke test were updated to read the new keys; smoke also
+asserts presence of `freshness_now` and `freshness_changed`.
 
-**Status:** DONE (phase 3, doc-only).
+`freshness_now` is computed the same way as in `workspace_state_at`:
+latest event of any kind + latest reviewed event, both ignoring the
+cutoff, fed into `freshness::compute`.
+
+**Status:** DONE (post-phase-3 follow-up). No back-compat shim —
+callers must read the new keys.
 ### 9. Timeline ordering within same millisecond
 
 **Where:** `crates/librarian-mcp/src/catalog/events.rs::timeline_for_artifact`,

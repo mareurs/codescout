@@ -147,10 +147,10 @@ impl Tool for ArtifactStateAt {
         "Reconstruct an artifact's status + frontmatter + freshness as it stood at a given \
          commit or timestamp. Replays status_change / field_patch events in chronological order \
          up to the cutoff; un-patched fields fall back to the current artifact-row value. \
-         Returns a single `freshness` scalar (the value at the cutoff). The sibling \
-         `librarian_workspace_state_at` returns `freshness_at_as_of` + `freshness_now` per \
-         artifact instead, since it surfaces both the at-as-of view and the current diff \
-         in one batch."
+         Response shape mirrors `librarian_workspace_state_at`: \
+         `status_at_as_of`, `frontmatter`, `freshness_at_as_of` (replay value), \
+         `freshness_now` (current value ignoring cutoff), `freshness_changed`, \
+         `latest_event_at_as_of`, `supersession_chain`."
     }
 
     fn input_schema(&self) -> Value {
@@ -170,21 +170,56 @@ impl Tool for ArtifactStateAt {
 
         let cutoff_ts = resolve_cutoff_ts(ctx, a.commit.as_deref(), a.timestamp)?;
 
-        // Load artifact row + all events up to the cutoff (single lock scope).
-        let (art, state) = {
+        // Load artifact row + replay events up to the cutoff, and compute
+        // freshness_now (current state, ignoring cutoff) — single lock scope.
+        let (state, freshness_now) = {
+            use rusqlite::{params, OptionalExtension};
             let cat = ctx.catalog.lock();
             let art = artifact::get(&cat, &a.artifact_id)?
                 .ok_or_else(|| anyhow!("artifact not found: {}", a.artifact_id))?;
             let state = replay_state_at(&cat, &art, cutoff_ts)?;
-            (art, state)
+
+            // freshness_now mirrors workspace_state_at: latest event of any kind +
+            // latest reviewed event, both without the cutoff.
+            let latest_any: Option<String> = cat
+                .conn
+                .query_row(
+                    "SELECT kind FROM events WHERE artifact_id=?1 \
+                     ORDER BY created_at DESC, id DESC LIMIT 1",
+                    params![art.id],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()?;
+            let latest_reviewed_now: Option<i64> = cat
+                .conn
+                .query_row(
+                    "SELECT MAX(created_at) FROM events \
+                     WHERE artifact_id=?1 AND kind='reviewed'",
+                    params![art.id],
+                    |r| r.get::<_, Option<i64>>(0),
+                )
+                .optional()?
+                .flatten();
+
+            let fn_now = crate::freshness::compute(crate::freshness::FreshnessInputs {
+                latest_event_kind: latest_any.as_deref(),
+                latest_reviewed_at: latest_reviewed_now,
+                file_updated_at: art.file_mtime,
+                topo_distance_from_head: None,
+                freshness_horizon: crate::freshness::FRESHNESS_HORIZON_DEFAULT,
+            });
+
+            (state, fn_now)
         };
-        let _ = art; // art is captured in state already
 
         Ok(json!({
-            "status": state.status,
+            "as_of": cutoff_ts,
+            "status_at_as_of": state.status,
             "frontmatter": Value::Object(state.frontmatter),
-            "freshness": state.freshness_at_as_of,
-            "latest_event": state.latest_event_summary,
+            "freshness_at_as_of": state.freshness_at_as_of,
+            "freshness_now": freshness_now,
+            "freshness_changed": state.freshness_at_as_of != freshness_now,
+            "latest_event_at_as_of": state.latest_event_summary,
             "supersession_chain": state.supersession_chain,
         }))
     }
@@ -264,7 +299,10 @@ mod tests {
             .call(&ctx, json!({"artifact_id": "a1", "timestamp": 20}))
             .await
             .unwrap();
-        assert_eq!(result["status"], "done", "at ts=20 status should be done");
+        assert_eq!(
+            result["status_at_as_of"], "done",
+            "at ts=20 status should be done"
+        );
 
         // Query at ts=5 — event not yet seen → status should be "active" (seeded)
         let result = ArtifactStateAt
@@ -272,7 +310,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            result["status"], "active",
+            result["status_at_as_of"], "active",
             "at ts=5 status should be active"
         );
     }
@@ -380,7 +418,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            result["status"], "done",
+            result["status_at_as_of"], "done",
             "at commit abc (authored_at=15) status should be done, not archived"
         );
     }

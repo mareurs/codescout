@@ -324,13 +324,21 @@ async fn timemachine_full_chain() {
         .await
         .expect("state_at should succeed");
     assert_eq!(
-        state_resp["freshness"].as_str().unwrap_or(""),
+        state_resp["freshness_at_as_of"].as_str().unwrap_or(""),
         "fresh",
-        "state_at after reviewed event must return freshness=fresh"
+        "state_at after reviewed event must return freshness_at_as_of=fresh"
     );
     assert!(
-        !state_resp["latest_event"].is_null(),
-        "state_at must include latest_event object"
+        !state_resp["freshness_now"].is_null(),
+        "state_at must surface freshness_now alongside freshness_at_as_of"
+    );
+    assert!(
+        state_resp["freshness_changed"].is_boolean(),
+        "state_at must surface freshness_changed bool"
+    );
+    assert!(
+        !state_resp["latest_event_at_as_of"].is_null(),
+        "state_at must include latest_event_at_as_of object"
     );
 
     // -----------------------------------------------------------------------
