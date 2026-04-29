@@ -6,9 +6,142 @@ use serde_json::{json, Map, Value};
 
 use super::{Tool, ToolContext};
 use crate::catalog::{artifact, events};
-use crate::freshness::{compute, FreshnessInputs};
 
 pub struct ArtifactStateAt;
+
+/// Intermediate result of replaying events for a single artifact up to a cutoff.
+/// Returned by [`replay_state_at`] and consumed by both `artifact_state_at`
+/// and `workspace_state_at`.
+pub(crate) struct ReplayedState {
+    pub(crate) status: Value,
+    pub(crate) frontmatter: Map<String, Value>,
+    pub(crate) freshness_at_as_of: crate::freshness::Freshness,
+    pub(crate) latest_event_summary: Option<Value>,
+    pub(crate) supersession_chain: Vec<String>,
+}
+
+/// Resolve a commit hash or raw timestamp to a cutoff `i64` epoch-ms value.
+pub(crate) fn resolve_cutoff_ts(
+    ctx: &ToolContext,
+    commit: Option<&str>,
+    timestamp: Option<i64>,
+) -> Result<i64> {
+    if let Some(hash) = commit {
+        let cat = ctx.catalog.lock();
+        let ts = cat
+            .conn
+            .query_row(
+                "SELECT authored_at FROM commits WHERE hash=?1",
+                rusqlite::params![hash],
+                |r| r.get::<_, Option<i64>>(0),
+            )
+            .ok()
+            .flatten()
+            .ok_or_else(|| anyhow!("commit {hash} not indexed; run librarian_reindex"))?;
+        Ok(ts)
+    } else {
+        Ok(timestamp.unwrap())
+    }
+}
+
+/// Replay all events for `art` up to (and including) `cutoff_ts`, returning
+/// the reconstructed state and freshness-at-as-of.
+///
+/// Caller must hold the catalog lock and pass `&Catalog` directly.
+pub(crate) fn replay_state_at(
+    cat: &crate::catalog::Catalog,
+    art: &crate::catalog::artifact::ArtifactRow,
+    cutoff_ts: i64,
+) -> Result<ReplayedState> {
+    let all = events::timeline_for_artifact(cat, &art.id, None, usize::MAX)?;
+    // timeline_for_artifact returns newest-first; filter to ≤ cutoff and reverse
+    // for chronological replay.
+    let mut filtered: Vec<_> = all
+        .into_iter()
+        .filter(|e| e.created_at <= cutoff_ts)
+        .collect();
+    filtered.reverse(); // oldest-first
+
+    // Seed frontmatter from the current artifact row (fallback for un-patched fields).
+    let mut frontmatter: Map<String, Value> = Map::new();
+    frontmatter.insert("status".into(), Value::String(art.status.clone()));
+    if let Some(ref t) = art.title {
+        frontmatter.insert("title".into(), Value::String(t.clone()));
+    }
+    frontmatter.insert("kind".into(), Value::String(art.kind.clone()));
+    frontmatter.insert("tags".into(), serde_json::to_value(&art.tags)?);
+    frontmatter.insert("owners".into(), serde_json::to_value(&art.owners)?);
+    if let Some(ref t) = art.topic {
+        frontmatter.insert("topic".into(), Value::String(t.clone()));
+    }
+    if let Some(ref t) = art.time_scope {
+        frontmatter.insert("time_scope".into(), Value::String(t.clone()));
+    }
+
+    let mut latest_event_row: Option<events::EventRow> = None;
+    let mut latest_reviewed_at: Option<i64> = None;
+    let mut latest_kind: Option<String> = None;
+    let mut superseded_by: Option<String> = None;
+
+    for ev in filtered {
+        latest_kind = Some(ev.kind.clone());
+        let p: Value = serde_json::from_str(&ev.payload).unwrap_or(Value::Null);
+        match ev.kind.as_str() {
+            "status_change" => {
+                if let Some(s) = p.get("to").and_then(|v| v.as_str()) {
+                    frontmatter.insert("status".into(), Value::String(s.into()));
+                }
+            }
+            "field_patch" => {
+                if let (Some(field), Some(to)) = (
+                    p.get("field").and_then(|v| v.as_str()),
+                    p.get("to").cloned(),
+                ) {
+                    frontmatter.insert(field.into(), to);
+                }
+            }
+            "reviewed" => {
+                latest_reviewed_at = Some(ev.created_at);
+            }
+            "superseded_by" => {
+                superseded_by = p
+                    .get("target_artifact_id")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+            }
+            _ => {}
+        }
+        latest_event_row = Some(ev);
+    }
+
+    let freshness_at_as_of = crate::freshness::compute(crate::freshness::FreshnessInputs {
+        latest_event_kind: latest_kind.as_deref(),
+        latest_reviewed_at,
+        file_updated_at: art.file_mtime,
+        topo_distance_from_head: None,
+        freshness_horizon: 50,
+    });
+
+    let supersession_chain: Vec<String> = superseded_by.into_iter().collect();
+    let status_now = frontmatter.get("status").cloned().unwrap_or(Value::Null);
+
+    let latest_event_summary = latest_event_row.as_ref().map(|e| {
+        json!({
+            "id": e.id,
+            "kind": e.kind,
+            "created_at": e.created_at,
+            "head_commit": e.head_commit,
+        })
+    });
+
+    Ok(ReplayedState {
+        status: status_now,
+        frontmatter,
+        freshness_at_as_of,
+        latest_event_summary,
+        supersession_chain,
+    })
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct Args {
@@ -46,116 +179,24 @@ impl Tool for ArtifactStateAt {
             _ => {}
         }
 
-        // Resolve cutoff timestamp.
-        let cutoff_ts: i64 = if let Some(ref hash) = a.commit {
-            let cat = ctx.catalog.lock();
-            let ts = cat
-                .conn
-                .query_row(
-                    "SELECT authored_at FROM commits WHERE hash=?1",
-                    rusqlite::params![hash],
-                    |r| r.get::<_, Option<i64>>(0),
-                )
-                .ok()
-                .flatten()
-                .ok_or_else(|| anyhow!("commit {hash} not indexed; run librarian_reindex"))?;
-            ts
-        } else {
-            a.timestamp.unwrap()
-        };
+        let cutoff_ts = resolve_cutoff_ts(ctx, a.commit.as_deref(), a.timestamp)?;
 
         // Load artifact row + all events up to the cutoff (single lock scope).
-        let (art, rows) = {
+        let (art, state) = {
             let cat = ctx.catalog.lock();
             let art = artifact::get(&cat, &a.artifact_id)?
                 .ok_or_else(|| anyhow!("artifact not found: {}", a.artifact_id))?;
-            let all = events::timeline_for_artifact(&cat, &a.artifact_id, None, usize::MAX)?;
-            // timeline_for_artifact returns newest-first; we want chronological order
-            // and only events up to the cutoff.
-            let mut filtered: Vec<_> = all
-                .into_iter()
-                .filter(|e| e.created_at <= cutoff_ts)
-                .collect();
-            filtered.reverse(); // oldest-first for replay
-            (art, filtered)
+            let state = replay_state_at(&cat, &art, cutoff_ts)?;
+            (art, state)
         };
-
-        // Seed frontmatter from the current artifact row (provides the fallback
-        // for fields not touched by any event).
-        let mut frontmatter: Map<String, Value> = Map::new();
-        frontmatter.insert("status".into(), Value::String(art.status.clone()));
-        if let Some(ref t) = art.title {
-            frontmatter.insert("title".into(), Value::String(t.clone()));
-        }
-        frontmatter.insert("kind".into(), Value::String(art.kind.clone()));
-        frontmatter.insert("tags".into(), serde_json::to_value(&art.tags)?);
-        frontmatter.insert("owners".into(), serde_json::to_value(&art.owners)?);
-        if let Some(ref t) = art.topic {
-            frontmatter.insert("topic".into(), Value::String(t.clone()));
-        }
-        if let Some(ref t) = art.time_scope {
-            frontmatter.insert("time_scope".into(), Value::String(t.clone()));
-        }
-
-        // Replay deltas in chronological order up to the cutoff.
-        let mut latest_event: Option<&events::EventRow> = None;
-        let mut latest_reviewed_at: Option<i64> = None;
-        let mut latest_kind: Option<String> = None;
-        let mut superseded_by: Option<String> = None;
-
-        for ev in &rows {
-            latest_event = Some(ev);
-            latest_kind = Some(ev.kind.clone());
-            let p: Value = serde_json::from_str(&ev.payload).unwrap_or(Value::Null);
-            match ev.kind.as_str() {
-                "status_change" => {
-                    if let Some(s) = p.get("to").and_then(|v| v.as_str()) {
-                        frontmatter.insert("status".into(), Value::String(s.into()));
-                    }
-                }
-                "field_patch" => {
-                    if let (Some(field), Some(to)) = (
-                        p.get("field").and_then(|v| v.as_str()),
-                        p.get("to").cloned(),
-                    ) {
-                        frontmatter.insert(field.into(), to);
-                    }
-                }
-                "reviewed" => {
-                    latest_reviewed_at = Some(ev.created_at);
-                }
-                "superseded_by" => {
-                    superseded_by = p
-                        .get("target_artifact_id")
-                        .and_then(|v| v.as_str())
-                        .map(String::from);
-                }
-                _ => {}
-            }
-        }
-
-        let freshness = compute(FreshnessInputs {
-            latest_event_kind: latest_kind.as_deref(),
-            latest_reviewed_at,
-            file_updated_at: art.file_mtime,
-            topo_distance_from_head: None,
-            freshness_horizon: 50,
-        });
-
-        let supersession_chain: Vec<String> = superseded_by.into_iter().collect();
-        let status_now = frontmatter.get("status").cloned().unwrap_or(Value::Null);
+        let _ = art; // art is captured in state already
 
         Ok(json!({
-            "status": status_now,
-            "frontmatter": Value::Object(frontmatter),
-            "freshness": freshness,
-            "latest_event": latest_event.map(|e| json!({
-                "id": e.id,
-                "kind": e.kind,
-                "created_at": e.created_at,
-                "head_commit": e.head_commit,
-            })),
-            "supersession_chain": supersession_chain,
+            "status": state.status,
+            "frontmatter": Value::Object(state.frontmatter),
+            "freshness": state.freshness_at_as_of,
+            "latest_event": state.latest_event_summary,
+            "supersession_chain": state.supersession_chain,
         }))
     }
 }
