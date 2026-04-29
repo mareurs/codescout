@@ -138,22 +138,25 @@ session through the mux, and passes the bulk of `cargo test`.
 
 ## Embedding stack
 
-### W11. `local-embed` won't build for `x86_64-pc-windows-gnu` 🚫 blocked
+### W11. `local-embed` Windows build path ✅ decided
+
 - **Cause:** `ort-sys` (ONNX Runtime FFI) ships prebuilts for
   `x86_64-pc-windows-msvc` only. The `gnu` toolchain is unsupported
-  upstream.
-- **Workarounds:**
-  - Use MSVC target on actual Windows. `cargo build` on a
-    `windows-latest` runner (or with `xwin` cross-build on Linux) should
-    succeed.
-  - Drop `local-embed` from the Windows feature set; users rely on
-    `remote-embed` (Ollama, OpenAI, etc.) for semantic search.
-  - Switch backend (`ort-tract`, `candle`); each carries its own cost.
-- **Recommendation:** ship Windows with `local-embed` off by default;
-  document `remote-embed` as the supported semantic-search path. Revisit
-  if MSVC cross-build proves easy enough to ship in CI.
-- **Status:** 🚫 blocked on upstream `ort-sys` packaging.
-
+  upstream — Microsoft does not publish MinGW binaries.
+- **Decision (2026-04-29):** ship the Windows release artifact as
+  `x86_64-pc-windows-msvc`. Drop `windows-gnu` from the supported set.
+  ORT's `download-binaries` feature handles the rest — no Rust code
+  changes. Build via the `windows-latest` GitHub Actions runner (native
+  MSVC) or `cargo-xwin` from Linux.
+- **Why MSVC over alternatives:** `ort` prebuilts give us first-class
+  perf with zero build engineering. `candle` (pure Rust) is the
+  documented fallback if we ever need a SDK-licence-free path; it
+  builds on both Windows triples but is ~3× slower on CPU and requires
+  attention-mask/mean-pool correctness work. `tract` is a similar
+  fallback. Neither is needed today.
+- **Status:** ✅ done (decision recorded; CI swap tracked under W19).
+- **Follow-up:** if MinGW users surface, revisit candle. For now,
+  `windows-gnu` is unsupported.
 ### W12. `tikv-jemallocator` global allocator on Windows 🟡 partial
 
 - **Location:** `src/main.rs:5`, `Cargo.toml`.
@@ -215,17 +218,15 @@ session through the mux, and passes the bulk of `cargo test`.
 - **Status:** ✅ done.
 ## CI / tooling
 
-### W19. CI `windows-latest` matrix job 🔴 open
+### W19. CI `windows-latest` matrix job ✅ done
 
-- **Action (done):** existing `.github/workflows/ci.yml` already had a
-  `windows-latest` row but ran feature combos that pull `local-embed`
-  (W11), guaranteed to fail. Updated matrix to:
-  - exclude `default` and `local-embed` rows on Windows
-  - add `windows-baseline` row using
-    `--no-default-features --features remote-embed,http,dashboard`
-  - keep `no-features` row on Windows for minimal-build coverage.
-- **Status:** ✅ done. Re-evaluate when W11 is decided (then either drop
-  the exclude or extend it).
+- **Done (2026-04-29):** removed `windows-latest` excludes for `default`
+  and `local-embed`; removed the `windows-baseline` carve-out row.
+  All three feature combos now run on every OS. `windows-latest` is
+  MSVC, so `ort`'s `download-binaries` resolves prebuilts.
+- **Status:** ✅ done. First Windows CI run is the validation gate;
+  if `local-embed` fails on `windows-latest`, revisit W11 (candle
+  fallback).
 ### W20. `dunce`-style canonicalize helper 🔴 open
 - **Action:** decide whether to take a dep on `dunce` (small, pure-Rust
   UNC normaliser) or hand-roll a stripper in `util/fs.rs`. Required
@@ -272,31 +273,30 @@ session through the mux, and passes the bulk of `cargo test`.
 | Mux / LSP transport | 2 | 2 | 0 | 0 |
 | Process management | 1 | 1 | 0 | 0 |
 | Path / filesystem | 2 | 1 | 1 | 0 |
-| Embedding | 1 | 0 | 0 | 1 |
+| Embedding | 1 | 1 | 0 | 0 |
 | Hardware | 1 | 0 | 0 | 0 |
 | Shell | 2 | 0 | 0 | 0 |
 | Security / paths | 1 | 0 | 2 | 0 |
 | CI / tooling | 1 | 0 | 1 | 0 |
 | Signals (W22) | 1 | 0 | 0 | 0 |
 | Unaudited | 0 | 0 | 5 | 0 |
-| **Totals** | **12** | **4** | **9** | **1** |
+| **Totals** | **13** | **5** | **9** | **0** |
 ## Next moves (ordered by leverage)
 
-Low-hanging fruit landed (W5 first-pass, W12, W13, W18, W19, W22). Remaining
-items need brainstorming or a real Windows machine:
+Low-hanging fruit landed (W5 first-pass, W11 decision + W19 CI swap, W12,
+W13, W18, W22). Remaining items need brainstorming or a real Windows
+machine:
 
-1. **W11 decision** — ship Windows with `local-embed` off (current
-   posture) OR adopt MSVC cross-build via `xwin` to get `ort-sys`
-   prebuilts. Decision blocks W19 matrix expansion.
-2. **W7, W17, W20** — path/security pass: dunce dep adoption, Windows
+1. **W7, W17, W20** — path/security pass: dunce dep adoption, Windows
    symlink validation, UNC normalisation. One bundled commit.
-3. **W8** — audit hardcoded `/tmp` write-root in `path_security.rs`;
+2. **W8** — audit hardcoded `/tmp` write-root in `path_security.rs`;
    route through `platform::temp_dir()`.
-4. **W5 upgrade** — swap `taskkill` for Win32 Job Objects
+3. **W5 upgrade** — swap `taskkill` for Win32 Job Objects
    (`CreateJobObject` + `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`). Removes
    the `taskkill` race window.
-5. **W21–W25** — actual Windows runtime tests. Until these run, the
-   port is hypothesis.
+4. **W21–W25** — actual Windows runtime tests. Until these run, the
+   port is hypothesis. First Windows CI run (W19) is the first real
+   signal.
 ## References
 
 - Phase A commit: `3b6f8c3` — concentrate IPC behind `transport` module.

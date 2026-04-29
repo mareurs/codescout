@@ -37,11 +37,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        # Each entry combines with every os. Windows excludes the
-        # `local-embed`-bearing rows below — `ort-sys` does not ship
-        # `x86_64-pc-windows-gnu` prebuilts, and the `default` feature set
-        # also pulls in `local-embed`. Tracked in
-        # docs/trackers/windows-compat-2026-04.md (W11).
+        # `windows-latest` GH runners are MSVC, so `ort`'s
+        # `download-binaries` resolves prebuilts cleanly. `windows-gnu`
+        # is unsupported (W11). All three feature combos run on every OS.
         include:
           - name: default
             flags: ""
@@ -49,14 +47,6 @@ jobs:
             flags: "--features local-embed --no-default-features"
           - name: no-features
             flags: "--no-default-features"
-          - os: windows-latest
-            name: windows-baseline
-            flags: "--no-default-features --features remote-embed,http,dashboard"
-        exclude:
-          - os: windows-latest
-            name: default
-          - os: windows-latest
-            name: local-embed
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
