@@ -148,6 +148,49 @@ touches a Kotlin monorepo.
 Next probe to write: `examples/lsp_document_leak_probe` — open and close
 1000 files via `find_symbol`/`hover` against a real LSP, watch
 `vm_data_kb`. If it grows linearly, the LSP DocumentState is the leak.
+## Phase 2 — LSP-document hypothesis is also rejected by code review (2026-04-30)
+
+Read of the LSP state structs:
+
+- `DocumentState.files: HashMap<String, (HashSet<String>, i64)>`
+  (`src/lsp/mux/protocol.rs:62`) — URI → (client tags, version). No content.
+- `LspClient.open_files: StdMutex<HashMap<PathBuf, i32>>`
+  (`src/lsp/client.rs:213`) — path → version int. No content.
+
+Codescout does not store LSP file content; that lives in rust-analyzer /
+kotlin-lsp's own process address space, which is invisible to codescout's
+RSS. Even at 1M tracked URIs the codescout-side overhead is ~100 MB, not
+60 GB. **LSP DocumentState ruled out.**
+
+## What we know vs. don't know after this session
+
+Confirmed:
+- The leak is per-instance, not per-binary: 30 of 31 codescout processes
+  stayed at the 5 GB jemalloc baseline at the Apr 28 OOM. Only 1 grew.
+- The growth is small allocations (`pgtables_bytes=116 MB` covers ~30M PTEs
+  over 120 GB of address space at 4 KB granularity), not few-large-mmaps.
+- Local fastembed (`local:AllMiniLML6V2Q`) does not leak meaningfully across
+  `index_project` calls (Phase 2 step 3 result above).
+- LSP `DocumentState` and `LspClient.open_files` cannot account for 60 GB
+  RSS — they hold IDs and counters, not content.
+
+Open questions (need live data):
+- Does the remote embedder path (Ollama / OpenAI HTTP) leak per call?
+- Does repeated `activate_project` across many workspaces retain old
+  per-project state in `Agent::inner`?
+- Does the rmcp service hold message history?
+- Some allocation pattern we haven't yet pictured.
+
+The cheap next move is **wait for the next OOM with the heartbeat memory
+instrumentation in place** (commit `ef45b6e`). When an instance grows past
+its 5 GB baseline we will have a 30-second-resolution time-series of
+`vm_size_kb` / `vm_rss_kb` / `vm_data_kb` and can correlate against
+per-project `usage.db` to identify the offending tool sequence. Heap
+profiling under heaptrack is the obvious follow-up once we know which
+project / tool sequence to reproduce against.
+
+Further speculative probes without that data will keep coming back
+negative.
 ## Evidence
 
 ### Apr 14 — explicit kernel OOM records (ring buffer intact)
