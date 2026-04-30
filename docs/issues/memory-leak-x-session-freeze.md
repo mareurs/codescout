@@ -162,6 +162,22 @@ kotlin-lsp's own process address space, which is invisible to codescout's
 RSS. Even at 1M tracked URIs the codescout-side overhead is ~100 MB, not
 60 GB. **LSP DocumentState ruled out.**
 
+## Phase 2 step 5 result — activate_project switching does NOT leak (2026-04-30)
+
+`examples/activate_leak_probe` creates 8 synthetic Cargo projects in
+tempdirs, then round-robins `Agent::activate` across them 50 times
+(400 total activations). Memory time-series:
+
+| iter | VmSize (kB) | VmRSS (kB) | VmData (kB) |
+|------|-------------|------------|-------------|
+| baseline | 4,342,460 | 7,836 | 140,880 |
+| 1 | 4,411,376 | 13,560 | 144,400 |
+| 200 | 4,411,376 | 13,696 | 144,504 |
+| 400 | 4,411,376 | 13,696 | 144,504 |
+
+VmSize is byte-identical from iter 1 onwards. VmRSS grows 136 kB total
+across 399 activations = noise floor. **Per-project state in `Agent::inner`
+is correctly dropped on switch.** Hypothesis ruled out.
 ## What we know vs. don't know after this session
 
 Confirmed:
