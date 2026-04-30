@@ -197,6 +197,7 @@ mod tests {
             root: root.into(),
             subdir: subdir.into(),
             umbrella: umbrella.map(Into::into),
+            ..Default::default()
         }
     }
 

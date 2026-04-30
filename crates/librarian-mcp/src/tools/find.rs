@@ -335,6 +335,7 @@ mod tests {
                 root: "claude".into(),
                 subdir: "code-explorer".into(),
                 umbrella: None,
+                ..Default::default()
             })),
         }
     }

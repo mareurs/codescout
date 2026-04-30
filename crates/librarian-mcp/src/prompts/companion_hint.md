@@ -82,6 +82,13 @@ With no umbrellas declared, `scope: "umbrella"` errors — use `repo` or `all`.
 - **No file watcher.** Files added/moved outside `artifact_create`/`_update` are
   invisible until `librarian_reindex`. On busy workspaces, reindex once at the
   start of a session.
+- **`librarian_reindex` is project-scoped by default** (matching read tools).
+  Pass `scope: "repo"|"umbrella"|"all"` to widen. `force=true` only wipes the
+  targeted scope's rows — sibling-project rows under the same workspace root
+  are preserved.
+- **Per-project classifier overrides:** drop a `<project>/.codescout/librarian.toml`
+  with `[[rule]]` entries to declare kinds for that project's paths without
+  editing the global `workspace.toml`. Project rules > workspace rules > built-in defaults.
 - **File is source of truth.** Catalog is a derived index; writes round-trip
   through frontmatter on disk.
 - **Status flow:** `unknown → draft → active → (blocked ↔ active) → done →

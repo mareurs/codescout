@@ -15,13 +15,16 @@ use std::path::{Path, PathBuf};
 
 use crate::workspace::WorkspaceConfig;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CurrentProject {
     /// Workspace root name this project lives under.
     pub root: String,
     /// Relative path from the root to the project directory. Empty string
     /// when the project IS the root itself.
     pub subdir: String,
+    /// Absolute filesystem path of the project directory. Used to discover
+    /// per-project config files (e.g. `<path>/.codescout/librarian.toml`).
+    pub path: PathBuf,
     /// Name of the umbrella that includes this project, if any.
     pub umbrella: Option<String>,
 }
@@ -37,8 +40,6 @@ impl CurrentProject {
     }
 }
 
-/// Resolve the current project. Returns `None` when `cwd` lies outside every
-/// configured root — callers should then fall back to workspace-wide scope.
 pub fn resolve(cwd: &Path, ws: &WorkspaceConfig) -> Option<CurrentProject> {
     let cwd = cwd.canonicalize().ok().unwrap_or_else(|| cwd.to_path_buf());
 
@@ -64,6 +65,7 @@ pub fn resolve(cwd: &Path, ws: &WorkspaceConfig) -> Option<CurrentProject> {
     Some(CurrentProject {
         root,
         subdir,
+        path: project_dir,
         umbrella,
     })
 }
@@ -222,12 +224,14 @@ mod tests {
             root: "r".into(),
             subdir: String::new(),
             umbrella: None,
+            ..Default::default()
         };
         assert_eq!(cp.member_key(), "r");
         let cp2 = CurrentProject {
             root: "r".into(),
             subdir: "a/b".into(),
             umbrella: None,
+            ..Default::default()
         };
         assert_eq!(cp2.member_key(), "r/a/b");
     }

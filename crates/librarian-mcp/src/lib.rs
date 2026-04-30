@@ -36,7 +36,6 @@ pub async fn build_tool_context() -> Result<tools::ToolContext> {
             cfg_path.display()
         )
     })?;
-    let rules = classify::compile_rules(&ws.rules)?;
     let db_path = std::env::var("LIBRARIAN_DB")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
@@ -81,6 +80,23 @@ pub async fn build_tool_context() -> Result<tools::ToolContext> {
     } else {
         tracing::info!("current project unresolved — defaulting to workspace-wide scope");
     }
+
+    // Layered rules: project overrides > workspace > built-in defaults.
+    // First-match-wins, so order matters.
+    let mut rules: Vec<classify::CompiledRule> = Vec::new();
+    if let Some(cp) = current_project.as_deref() {
+        let project_rules = classify::load_project_rules(&cp.path)?;
+        if !project_rules.is_empty() {
+            tracing::info!(
+                "loaded {} project-local classifier rule(s) from {}",
+                project_rules.len(),
+                cp.path.join(classify::PROJECT_RULES_REL).display()
+            );
+        }
+        rules.extend(project_rules);
+    }
+    rules.extend(classify::compile_rules(&ws_arc.rules)?);
+    rules.extend(classify::default_rules()?);
 
     Ok(tools::ToolContext {
         catalog: std::sync::Arc::new(parking_lot::Mutex::new(catalog)),
@@ -240,8 +256,9 @@ pub async fn reindex_cli(repo: Option<&str>, force: bool) -> Result<()> {
         .map(PathBuf::from)
         .map_or_else(|_| workspace::default_config_path(), Ok)?;
     let ws = workspace::load(&cfg_path)?;
-    let rules = classify::compile_rules(&ws.rules)?;
     let ignore = workspace::compile_ignore(&ws.ignore)?;
+    let mut rules = classify::compile_rules(&ws.rules)?;
+    rules.extend(classify::default_rules()?);
     let db_path = std::env::var("LIBRARIAN_DB")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
@@ -298,6 +315,7 @@ pub async fn reindex_cli(repo: Option<&str>, force: bool) -> Result<()> {
             &rules,
             &root.name,
             &root.path,
+            None,
             &ignore,
             embedding.as_ref(),
         )

@@ -62,6 +62,56 @@ configured catalog, and the library lookups + tool descriptions are token
 overhead they don't need. Keeping the cargo feature off by default in
 publish builds keeps the production binary lean.
 
+## Default scope: project (not workspace)
+
+All listing tools default to `scope="project"`, returning only artifacts
+under the agent's current sub-project. The current project resolves from
+cwd → nearest `.git` ancestor → workspace root from `~/.config/librarian/workspace.toml`.
+
+`librarian_reindex` follows the same default. A force-wipe under
+`scope="project"` only deletes rows whose `rel_path` starts with the
+current sub-project's subdir — sibling projects under the same workspace
+root are preserved.
+
+| Scope | Coverage |
+|-------|----------|
+| `project` (default) | Current sub-project only |
+| `repo` | Whole workspace root (all sub-projects under it) |
+| `umbrella` | All members of the declared umbrella for the current project |
+| `all` | Workspace-wide |
+
+Read tools surface a `scope` block + `hints` (`more_in_repo`,
+`more_in_workspace`) so the LLM can widen on demand. Reindex echoes its
+`scope` and resolved `targets` in the response.
+
+## Per-project classifier overrides
+
+Drop a `<project>/.codescout/librarian.toml` to declare classification
+rules for that project's paths without touching the global
+`~/.config/librarian/workspace.toml`. Schema matches the global file's
+`[[rule]]` blocks. Rule precedence is **project > workspace > built-in
+defaults**, first-match-wins.
+
+```toml
+# <project>/.codescout/librarian.toml
+[[rule]]
+glob = "code-explorer/docs/reviews/**/*.md"
+kind = "memory"
+time_scope = "dated_snapshot"
+
+[[rule]]
+glob = "code-explorer/docs/agents/*.md"
+kind = "doc"
+```
+
+Built-in defaults already cover common patterns: `CHANGELOG.md`,
+`CONTRIBUTING.md`, `docs/ARCHITECTURE.md`, `docs/QUICK-START.md`,
+`docs/concepts/**`, `docs/configuration/**`, `docs/experimental/**`,
+`docs/issues/**` (tracker), `docs/TODO-*.md` (tracker), `docs/review-*.md`
+(memory, dated), `**/prompts/*.md`, `src/**/prompts/*.md`,
+`crates/**/prompts/*.md`. The override file is for project-specific
+patterns the defaults can't reasonably guess.
+
 ## Migration from standalone librarian-mcp
 
 Earlier sessions ran `librarian-mcp` as a separate stdio MCP server. That

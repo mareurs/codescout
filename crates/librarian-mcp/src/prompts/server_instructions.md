@@ -18,7 +18,7 @@ through file frontmatter.
 | Patch frontmatter or body                        | `artifact_update`      |
 | Add relation edge (supersedes, implements, …)    | `artifact_link`        |
 | Append observation note                          | `artifact_observe`     |
-| Manual re-scan of repos                          | `librarian_reindex`    |
+| Manual re-scan (project-scoped by default)       | `librarian_reindex`    |
 
 ## Filter AST
 
@@ -105,11 +105,22 @@ derived index.
 
 ## When indexing is stale
 
-`librarian_reindex {repo?, force?}` to manually trigger. No file watcher —
-files moved / created outside this tool won't appear until the next
-reindex. On a busy workspace, call reindex at the start of a session.
+`librarian_reindex {scope?, repo?, force?}` to manually trigger. Defaults
+to `scope="project"` (current sub-project only) — sibling-project rows under
+the same workspace root are NOT touched. Pass `scope="repo"|"umbrella"|"all"`
+to widen, mirroring read-tool semantics. `force=true` wipes only the
+targeted scope's rows before re-walking.
 
+No file watcher — files moved / created outside this tool won't appear
+until the next reindex. On a busy workspace, call reindex at the start of
+a session.
 
+### Per-project classifier overrides
+
+A project may ship `<project>/.codescout/librarian.toml` with `[[rule]]`
+entries to declare kinds for its own paths. Project rules win over the
+workspace-wide rules in `workspace.toml`, which win over librarian's
+built-in defaults. Schema matches `workspace.toml`'s `[[rule]]` blocks.
 ## Event authorship
 
 - Before non-trivial artifact work (revising a spec/plan/ADR, supersession,

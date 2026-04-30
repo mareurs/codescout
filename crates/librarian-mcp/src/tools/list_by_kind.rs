@@ -395,6 +395,7 @@ mod tests {
             root: "claude".into(),
             subdir: "code-explorer".into(),
             umbrella: None,
+            ..Default::default()
         };
         let ctx = mk_ctx_with(cat, ws_with_root(), Some(cp));
 
@@ -430,6 +431,7 @@ mod tests {
             root: "claude".into(),
             subdir: "code-explorer".into(),
             umbrella: None,
+            ..Default::default()
         };
         let ctx = mk_ctx_with(cat, ws_with_root(), Some(cp));
 
@@ -456,6 +458,7 @@ mod tests {
             root: "claude".into(),
             subdir: "code-explorer".into(),
             umbrella: None,
+            ..Default::default()
         };
         let ctx = mk_ctx_with(cat, ws_with_root(), Some(cp));
 
@@ -522,6 +525,7 @@ mod tests {
             root: "infra".into(),
             subdir: "svc-a".into(),
             umbrella: Some("platform".into()),
+            ..Default::default()
         };
         let ctx = mk_ctx_with(cat, ws, Some(cp));
 
@@ -545,6 +549,7 @@ mod tests {
             root: "claude".into(),
             subdir: "code-explorer".into(),
             umbrella: None,
+            ..Default::default()
         };
         let ctx = mk_ctx_with(cat, ws_with_root(), Some(cp));
 
@@ -568,6 +573,7 @@ mod tests {
             root: "claude".into(),
             subdir: "code-explorer".into(),
             umbrella: None,
+            ..Default::default()
         };
         let ctx = mk_ctx_with(cat, ws_with_root(), Some(cp));
         let v = ArtifactListByKind
