@@ -422,6 +422,10 @@ impl ProjectConfig {
     /// Load from `.codescout/project.toml`, or return a sensible default
     /// derived from the directory name.  Global config (~/.config/codescout/config.toml)
     /// is loaded first as the base layer; project.toml is merged on top.
+    ///
+    /// Env var overrides (highest precedence, override everything):
+    ///   `CODESCOUT_EMBED_MODEL` — embedding model identifier
+    ///   `CODESCOUT_EMBED_URL`   — embedding endpoint URL
     pub fn load_or_default(root: &Path) -> Result<Self> {
         use crate::config::global::GlobalConfig;
 
@@ -429,7 +433,16 @@ impl ProjectConfig {
             .map(|g| g.to_toml_value())
             .unwrap_or_else(|| toml::Value::Table(toml::map::Map::new()));
 
-        Self::load_with_global_base(root, global_base)
+        let mut config = Self::load_with_global_base(root, global_base)?;
+
+        if let Ok(model) = std::env::var("CODESCOUT_EMBED_MODEL") {
+            config.embeddings.model = model;
+        }
+        if let Ok(url) = std::env::var("CODESCOUT_EMBED_URL") {
+            config.embeddings.url = Some(url);
+        }
+
+        Ok(config)
     }
 
     /// Inner implementation — accepts an already-resolved global base so tests can
@@ -1066,6 +1079,54 @@ model = "local:AllMiniLML6V2Q"
         }
         assert_eq!(cfg.embeddings.model, default_embed_model());
         assert!(cfg.security.shell_enabled);
+    }
+
+    #[test]
+    fn env_vars_override_model_and_url() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let saved_home = std::env::var_os("HOME");
+        let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
+        let saved_model = std::env::var_os("CODESCOUT_EMBED_MODEL");
+        let saved_url = std::env::var_os("CODESCOUT_EMBED_URL");
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", dir.path());
+        std::env::remove_var("XDG_CONFIG_HOME");
+        unsafe {
+            std::env::set_var("CODESCOUT_EMBED_MODEL", "EnvModel");
+            std::env::set_var("CODESCOUT_EMBED_URL", "http://env-host/v1");
+        }
+
+        let project_dir = dir.path().join("proj");
+        let codescout_dir = project_dir.join(".codescout");
+        std::fs::create_dir_all(&codescout_dir).unwrap();
+        std::fs::write(
+            codescout_dir.join("project.toml"),
+            "[project]\nname = \"proj\"\n\n[embeddings]\nmodel = \"project-model\"\n",
+        )
+        .unwrap();
+        let cfg = ProjectConfig::load_or_default(&project_dir).unwrap();
+
+        match saved_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        match saved_xdg {
+            Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
+            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        }
+        unsafe {
+            match saved_model {
+                Some(v) => std::env::set_var("CODESCOUT_EMBED_MODEL", v),
+                None => std::env::remove_var("CODESCOUT_EMBED_MODEL"),
+            }
+            match saved_url {
+                Some(v) => std::env::set_var("CODESCOUT_EMBED_URL", v),
+                None => std::env::remove_var("CODESCOUT_EMBED_URL"),
+            }
+        }
+
+        assert_eq!(cfg.embeddings.model, "EnvModel");
+        assert_eq!(cfg.embeddings.url.as_deref(), Some("http://env-host/v1"));
     }
 
     #[test]
