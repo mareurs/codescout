@@ -15,6 +15,98 @@ no window manager. Appears as a hard freeze; only a reboot recovers it.
 
 ---
 
+## Update 2026-04-30 — Apr-18 fixes were INSUFFICIENT
+
+The streaming pipeline refactor and jemalloc switch (both shipped after 2026-04-18)
+did NOT eliminate the leak. Three further OOM events recorded:
+
+| Date | PID | total-vm | anon-rss | Source |
+|------|-----|----------|----------|--------|
+| 2026-04-28 12:36:54 | 1325794 | 142,089,552 kB (~142 GB) | 59,899,252 kB (~60 GB) | kernel oom-killer |
+| 2026-04-29 14:29:29 |  961626 | 142,009,676 kB (~142 GB) | 66,846,988 kB (~67 GB) | kernel oom-killer |
+| 2026-04-30 09:30:55 | 3726624 | (systemd-level kill) | — | `user@1000.service: Killing process` |
+
+Pattern is consistent: codescout grows to ~142 GB virtual / 60–67 GB RSS over
+hours-to-days of uptime, then gets OOM-killed. The 142 GB ceiling is suspiciously
+flat across both kernel kills — likely an `RLIMIT_AS` / cgroup cap, not the true
+ceiling. Real ceiling probably higher.
+
+**Implication:** the build_index peak-overlap fix and jemalloc allocator are not
+sufficient. The remaining live retained memory (60+ GB anon-rss) is from
+something else, likely:
+
+- ONNX Runtime session caches (per shape variant, never freed)
+- Long-lived sqlite-vec / catalog connections holding pages
+- LSP client buffers / file content caches accumulating across reindex calls
+- `did_open` document state in the LSP mux not being released
+
+Need a fresh investigation: heaptrack against a long-running instance that has
+hit ≥10 GB RSS, focused on what the live allocations point to.
+## Phase 1 — Systematic evidence gathering (2026-04-30)
+
+### Process accounting at the Apr 28 12:36 OOM
+
+From the kernel oom-killer dump:
+
+- **31 codescout instances** alive in the `app-org.kde.konsole-*` cgroups.
+- **30 of them flat** at `total_vm ≈ 1,245,000 pages = 5.0 GB` and `rss ≈ 1,500–2,500 pages = ~8 MB`. This is the jemalloc steady-state reservation for an idle process.
+- **Only PID 1325794** had grown:
+  - `total_vm = 35,522,388 pages = 142 GB`
+  - `anon-rss = 14,976,502 pages = 60 GB`
+  - `pgtables_bytes = 121,688,064 = 116 MB`
+
+`pgtables=116 MB` covers ~30 M page-table entries → 30 M × 4 KB pages mapped → fully-populated 120 GB of address space at 4 KB granularity. **The pattern is many small allocations, not a few huge mmaps.**
+
+After `oom_reaper` ran: anon-rss dropped to 8,956 kB. So the live working set was 60 GB but most of it was anon memory the kernel could reap once SIGKILL'd.
+
+### Snapshot of currently running instances (2026-04-30, after the latest fixes)
+
+| Class | Uptime | VmSize | VmRSS | VmData |
+|-------|--------|--------|-------|--------|
+| Long-running idle | 3–4 h | ~5.0 GB | 50–100 MB | 500–800 MB |
+| Active (debug bin) | 30 min | ~5.0 GB | ~80 MB | ~520 MB |
+| Background mux | 10 min | ~4.7 GB | ~28 MB | ~210 MB |
+
+**No process is currently growing.** The leak is not time-based — the offending instance has to be doing specific work.
+
+### Activity around the Apr 28 OOM (per-project usage.db)
+
+The `southpole` project (largest workspace) shows 83 tool calls in the hour before the kill — predominantly `read_markdown`, `grep`, `run_command`, `list_dir`. No `index_project`, no `semantic_search`, no `rename_symbol` in that exact window.
+
+7-day aggregate of memory-relevant tools (Apr 21–28):
+
+| project | tool | count | max latency |
+|---|---|---|---|
+| code-explorer | `find_symbol` | 478 | 10.3 s |
+| backend-kotlin | `find_symbol` | 207 | 8.8 s |
+| code-explorer | `list_symbols` | 189 | 3.1 s |
+| code-explorer | `semantic_search` | 83 | 0.1 s |
+| backend-kotlin | `list_symbols` | 74 | 5.7 s |
+| backend-kotlin | `index_project` | 2 | 21 ms |
+
+Heavy LSP usage (`find_symbol` / `list_symbols` cross-project), plus `semantic_search`. `index_project` calls were no-op staleness checks (≤21 ms — full reindex would take seconds-to-minutes).
+
+### Hypothesis ranking after Phase 1
+
+The 60 GB live anon allocations + 30M PTEs pattern argues against:
+- **OutputBuffer** — bounded LRU (max 20 entries, ≪ GB).
+- **Few-large-mmaps** like a single Vec — would show as a small number of 1-GB+ mappings, not 30M small ones.
+
+It argues *for*:
+- **ONNX Runtime / fastembed model arenas** — the embed crate creates a fresh embedder inside each `index_project` call (`src/embed/index.rs:1968`, `:2138`) without going through `Agent::get_or_create_embedder`. ONNX Runtime sessions are well-known to retain per-shape inference arenas across drops; the C++ side does not free them when the Rust `Drop` runs.
+- **Tree-sitter / LSP document caches** that grow per `did_open` and never free across project switches.
+- **Per-project state retained on `activate_project`** when switching workspaces.
+
+## Phase 2 plan — instrumentation before fixes
+
+We are guessing the suspect. Need ground truth from the live process before we patch.
+
+1. **Memory in the heartbeat log.** Extend `tracing::info!(\"heartbeat ...\")` in `src/server.rs` to include `vm_size_kb`, `vm_rss_kb`, `vm_data_kb` from `/proc/self/status`. 30s cadence already there. Cheap, always-on. Lets us see exactly when an instance starts growing and correlate against the next tool call recorded in usage.db.
+2. **Heaptrack on one instance.** Run one debug instance under `heaptrack target/release/codescout start --debug` for normal usage. When it crosses 10 GB RSS, send SIGTERM and analyse the flamegraph for the culprit allocator chain.
+3. **Drive-test the embedder hypothesis.** Synthetic loop: call `index_project` 50× in a row on a small project. Watch `vm_size_kb` between iterations. If it grows monotonically, the embedder/ONNX path is confirmed and the fix is to route the indexer through `Agent::get_or_create_embedder` (cache hit instead of fresh creation each time).
+4. **Drive-test the LSP-document hypothesis.** Synthetic loop: open and close 1000 files via `find_symbol` / `goto_definition`. Watch `vm_size_kb`. If it grows, the LSP DocumentState fan-out is leaking `did_open` content.
+
+Step 1 is the cheap, low-risk move. Until that ships, every OOM teaches us nothing new because we have no per-instance memory time-series.
 ## Evidence
 
 ### Apr 14 — explicit kernel OOM records (ring buffer intact)

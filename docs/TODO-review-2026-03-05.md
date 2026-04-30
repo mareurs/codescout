@@ -51,10 +51,13 @@ Full analysis in `docs/review-2026-03-05.md`.
 
 ## Suggestions
 
-- [ ] **SG-1: Remove dead code from tool restructure**
-  `memory.rs`, `ast.rs`, `semantic.rs`, `git.rs`, `library.rs`, `usage.rs` —
-  10 unregistered tool structs still `pub`. `tests/integration.rs:174` still
-  imports old API. Remove or mark `pub(crate)`/`#[deprecated]`.
+- [x] **SG-1: Remove dead code from tool restructure** — partial 2026-04-30.
+  `memory.rs` cleaned: 4 legacy structs (`WriteMemory`, `ReadMemory`,
+  `ListMemories`, `DeleteMemory`) gated on `#[cfg(test)]` + `pub(crate)`;
+  integration test migrated to consolidated `Memory.call(json!({"action":...}))`
+  API. Other modules (`ast.rs`, `semantic.rs`, `git.rs`, `library.rs`,
+  `usage.rs`) — re-audit needed; if no in-tree references remain, delete
+  outright.
 
 - [x] **SG-2: Capture original error instead of re-running `validate_symbol_range`**
   `src/tools/symbol.rs:833` — Re-runs validation purely for error message
@@ -88,9 +91,10 @@ Full analysis in `docs/review-2026-03-05.md`.
 - [x] **SG-9: `command_summary.rs` not in CLAUDE.md project structure**
   `CLAUDE.md` — New file not listed. Add entry under `src/tools/`.
 
-- [ ] **SG-10: `as_u64_lenient` should be a shared utility**
-  `src/tools/file.rs:12-15` — Handles MCP integer-as-string quirk. Move to
-  shared location when a second use site appears.
+- [x] **SG-10: `as_u64_lenient` should be a shared utility** — OBSOLETE 2026-04-30.
+  `src/tools/file.rs` no longer exists (split into `read_file.rs` etc.) and the
+  `as_u64_lenient` helper was removed; callers now use plain `Value::as_u64()`.
+  Nothing left to centralize.
 
 ## Cross-Cutting Recommendations
 
@@ -105,7 +109,7 @@ Full analysis in `docs/review-2026-03-05.md`.
   `read_file` (proactive buffering), `run_command` (byte budget), `onboarding`
   (custom override). Document as "tools producing large output" section.
 
-- [ ] **CC-3: Clean up dual API surface from tool restructure**
-  Schedule sprint to migrate tests from old structs (`WriteMemory.call(...)`)
-  to new consolidated APIs (`Memory.call(json!({"action":"write"}))`), then
-  remove or `pub(crate)` the 10 old tool structs.
+- [x] **CC-3: Clean up dual API surface from tool restructure** — partial 2026-04-30.
+  Memory tool surface migrated (integration test on consolidated API; legacy
+  structs `#[cfg(test)] pub(crate)` so they no longer leak from release
+  builds). Sibling modules still need the same treatment — see SG-1.

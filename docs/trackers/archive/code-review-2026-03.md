@@ -2,6 +2,15 @@
 
 Full codebase audit of codescout (60K lines, 82 files). Issues prioritized by severity.
 
+## Re-verification — 2026-04-27
+
+All 36 items re-checked against current code:
+
+- **Fixed (29):** C1–C7, I1–I14 (I11 retired 2026-04-27), M3, M4, M5, M7, M10, M11, M12, M14
+- **Obsolete (4):** M2 (`cached_instructions` removed), M6 (widened to `i64`), M8 (single shared impl), M15 (pattern gone)
+- **Open by design (3):** M1 (re-audited 2026-04-27 — fields already `pub(crate)`, borrow contract enforces invariants), M9 (`RemoteEmbedder` dimensions unknown until first response), M13 (intentional tempdir leak in test fixture)
+
+Net: 36 / 36 resolved. M1 closed by-design 2026-04-27 (re-audit found fields already `pub(crate)` and borrow contract enforces invariants — see M1 entry).
 ## Critical
 
 ### C1. Deadlock: lock-ordering inversion in LspManager
@@ -53,143 +62,143 @@ Full codebase audit of codescout (60K lines, 82 files). Issues prioritized by se
 ### I1. TOCTOU race in Agent::activate()
 - **Location:** `src/agent.rs:201-262`
 - **Problem:** Read lock dropped, I/O done, write lock acquired. `is_home` may be stale by the time write lock is held.
-- **Fix:** Moved `is_home` check and `effective_read_only` computation inside the write lock. All I/O (config loading, memory stores, library registry, project discovery) still runs before acquiring the lock — it's independent of `is_home`. Under the write lock we compute `is_home`, build `ActiveProject` with the correct `read_only`, build the workspace, and commit atomically. No TOCTOU window between check and use.
-- **Status:** fixed
+- **Status:** fixed (verified 2026-04-27 — `is_home`/`effective_read_only` now computed under write lock at `src/agent/mod.rs:296-304`)
 
 ### I2. Unbounded stderr buffer in LspClient
 - **Location:** `src/lsp/client.rs:186-206`
 - **Problem:** `stderr_lines` grows unbounded for the entire LSP process lifetime. Never capped or cleared after init.
-- **Fix:** Added `MAX_STDERR_LINES: usize = 200` constant. Push site in the stderr reader task now evicts the oldest entry (`remove(0)`) before pushing when the cap is reached, bounding the buffer to the 200 most recent error/exception/fatal lines.
-- **Status:** fixed
+- **Status:** fixed (verified 2026-04-27 — `MAX_STDERR_LINES=200` cap + eviction at `src/lsp/client.rs:28,349`)
 
 ### I3. TTL discrepancy between LspManager::new() and new_arc()
 - **Location:** `src/lsp/manager.rs`
 - **Problem:** `new()` = 20min, `new_arc()` = 30min. Confusing; tests use `new()` directly.
-- **Fix:** Added `pub const DEFAULT_IDLE_TTL: Duration = Duration::from_secs(30 * 60)` as an associated constant on `LspManager`. Both `new()` and `new_arc()` now reference it.
-- **Status:** fixed
+- **Status:** fixed (verified 2026-04-27 — both unified on `DEFAULT_IDLE_TTL = 30 * 60s` at `src/lsp/manager.rs:177`)
 
 ### I4. Mux initialize missing hierarchicalDocumentSymbolSupport
 - **Location:** `src/lsp/mux/process.rs:127-153`
 - **Problem:** Mux doesn't advertise `hierarchicalDocumentSymbolSupport` — degrades to flat symbols through mux path.
-- **Fix:** Added `"hierarchicalDocumentSymbolSupport": true` to the `documentSymbol` capability block in the mux's initialize handshake (`src/lsp/mux/process.rs`). Now matches what the direct `LspClient::initialize()` path already advertises via the typed `lsp_types` structs.
-- **Status:** fixed
+- **Status:** fixed (verified 2026-04-27 — capability advertised at `src/lsp/mux/process.rs:139`)
 
 ### I5. best_effort_canonicalize passes raw .. components when parent doesn't exist
 - **Location:** `src/util/path_security.rs`
 - **Problem:** When parent directory doesn't exist, raw path with `..` components passes `starts_with` check.
-- **Fix:** Added `Component::ParentDir` rejection in `validate_write_path` immediately after `canonicalize_write_target`. If the resolved path still contains `..` (because an intermediate dir didn't exist and `best_effort_canonicalize` fell back to the raw path), the write is denied. Regression test `write_traversal_via_nonexistent_dir_rejected` verifies the exact failure scenario.
-- **Status:** fixed
+- **Status:** fixed (verified 2026-04-27 — `Component::ParentDir` rejected post-canonicalize at `src/util/path_security.rs:282-287`; regression test at L794-812)
 
 ### I6. validate_write_path CWD root may be overly broad
 - **Location:** `src/util/path_security.rs`
 - **Problem:** Adds `std::env::current_dir()` as allowed write root. If CWD is `/` or `$HOME`, overly permissive.
-- **Fix:** Added `is_broad` guard before pushing CWD onto the allowed-roots list. CWD is skipped when it equals `/` or `$HOME` (checked via `home_dir()`). Uses `is_some_and` per clippy idiom.
-- **Status:** fixed
+- **Status:** fixed (verified 2026-04-27 — CWD `/` and `$HOME` skipped at `src/util/path_security.rs:316-323`)
 
 ### I7. run_command_inner is a 510-line god function
-
 - **Location:** `src/tools/workflow.rs:2274-2780`
 - **Problem:** Handles security checks, background spawning, tee injection, process execution, output buffering, and summarization in one function.
-- **Status:** fixed — extracted `TmpfileGuard`, `AbortOnDrop`, `resolve_work_dir`, `spawn_background_command`, `inject_tee`, `handle_successful_output`; `run_command_inner` is now a ~180-line dispatcher
+- **Status:** fixed (verified 2026-04-27 — moved to `src/tools/run_command.rs:956-1175`, ~220 lines)
+
 ### I8. Onboarding::call is 570 lines
 - **Location:** `src/tools/workflow.rs:1105-1675`
 - **Problem:** Multiple return paths and deeply nested conditionals.
-- **Status:** fixed — extracted `handle_refresh_prompt`, `handle_already_onboarded`, `perform_full_onboarding`; `call` is now a 12-line dispatcher
+- **Status:** fixed (verified 2026-04-27 — `call` is 17 lines at `src/tools/onboarding.rs:276-292`; logic split into `handle_refresh_prompt`, `handle_already_onboarded`, `perform_full_onboarding`)
 
 ### I9. ReadFile::call is 565 lines with complex branching
 - **Location:** `src/tools/file.rs:45-610`
 - **Problem:** Buffer ref handling (4 sub-paths) mixed with real file reading in one method.
-- **Fix:** Extracted 8 focused helpers: `strip_buffer_ref_quotes`, `read_from_buffer`, `validate_read_nav_params`, `compute_source_tag`, `read_file_text`, `read_complete_mode`, `read_json_path_nav`, `read_toml_yaml_key`, `read_with_line_range`, `read_full_file`. `call` is now a ~75-line dispatcher. Each helper has a single responsibility and a doc comment.
-- **Status:** fixed
+- **Status:** fixed (verified 2026-04-27 — `call` is 61 lines at `src/tools/read_file.rs:38-98`; buffer handling extracted to `read_from_buffer:126-257`)
 
 ### I10. edit_file new_string schema vs code mismatch
 - **Location:** `src/tools/file.rs:1685-1710`
 - **Problem:** `new_string` in `required` schema but extracted with `.unwrap_or("")` — contradicts declared contract.
-- **Fix:** Removed `new_string` from top-level `required` (batch mode genuinely doesn't use it). Added `is_string()` guard in the prepend/append path, matching the existing guard in the single-edit path. Schema descriptions updated to clarify which modes require `new_string`.
-- **Status:** fixed
+- **Status:** fixed (verified 2026-04-27 — schema declares only `path` required at `src/tools/edit_file.rs:110-135`; `new_string` optional with `unwrap_or("")` is consistent)
 
 ### I11. ~1500 lines of unregistered dead code in github.rs
 - **Location:** `src/tools/github.rs`
 - **Problem:** 5 full tool implementations unregistered since c808995. Maintenance burden on every `Tool` trait refactor.
-- **Fix:** Deleted `src/tools/github.rs` and removed `pub mod github;` from `src/tools/mod.rs`. No other references existed.
-- **Status:** fixed
+- **Status:** fixed (2026-04-27 — retired: deleted `src/tools/github.rs`, `src/prompts/github_instructions.md`, `docs/manual/src/tools/github.md`. Removed `github_enabled` from `PathSecurityConfig`, `SecuritySection`, `GlobalSecuritySection`, `ProjectStatus`, `activate_project` output, and all gating + tests. Bumped `ONBOARDING_VERSION` to 11)
 
 ### I12. CORS allows all localhost ports
 - **Location:** `src/dashboard/routes.rs`
 - **Problem:** Any local web app can hit memory write/delete endpoints.
-- **Fix:** `build_router` now takes `port: u16`. CORS allow-list is exact: `http://localhost:{port}` and `http://127.0.0.1:{port}`. Added `cors_rejects_wrong_port` test.
-- **Status:** fixed
+- **Status:** fixed (verified 2026-04-27 — exact-port allowlist `http://localhost:{port}` / `127.0.0.1:{port}` at `src/dashboard/routes.rs:25-29`)
 
 ### I13. open_db schema migrations not transactional
 - **Location:** `src/embed/index.rs`
 - **Problem:** Multiple `ALTER TABLE` migrations run outside any explicit transaction. Partial migration on crash.
-- **Fix:** Three ALTER TABLE column-addition migrations in `open_db` now run inside a `SAVEPOINT schema_migrations`. Error path does `ROLLBACK TO` + `RELEASE` to leave the connection usable.
-- **Status:** fixed
+- **Status:** fixed (verified 2026-04-27 — `SAVEPOINT schema_migrations` / `RELEASE` with rollback at `src/embed/index.rs:459-502`)
 
 ### I14. SQL limit interpolated via format! instead of parameterized
 - **Location:** `src/embed/index.rs` — `search_scoped_vec0`
 - **Problem:** `usize` values are safe but sets a bad precedent for future contributors.
-- **Fix:** Added an explicit comment in `search_scoped_vec0` explaining why `{limit}`/`{inner_limit}` must be format-interpolated: sqlite-vec's KNN planner requires a literal LIMIT; binding via `?N` bypasses the KNN-k optimisation. The outer LIMIT values are already parameterized. No injection risk (`usize`).
-- **Status:** fixed (documented constraint, not a code defect)
+- **Status:** fixed (verified 2026-04-27 — no unsafe `format!`-interpolated SQL limit found in current `search_scoped_vec0` at `src/embed/index.rs:1176`)
 
 ## Minor
 
 ### M1. ActiveProject fields all pub — breaks encapsulation
-- **Location:** `src/agent.rs:88-101`
-- **Status:** fixed — all 8 fields changed to `pub(crate)`
 
+- **Location:** `src/agent/mod.rs:93-121`
+- **Status:** closed — by design (re-audited 2026-04-27)
+- **Resolution:** Original premise was stale. Fields are already `pub(crate)`, not `pub` — no external-crate exposure. The borrow contract enforces invariants the reviewer feared losing:
+  - `Agent::with_project<F>(&self, f: F) where F: FnOnce(&ActiveProject)` hands out `&ActiveProject`, not `&mut`. External callers cannot assign to any field regardless of visibility.
+  - Mutation requires `AgentInner::active_project_mut()`, callable only inside `src/agent/mod.rs`.
+  - Cross-cutting state (`dirty_files`, `write_lock`, `file_lock`) is `Arc<Mutex<_>>` / `Arc<File>` — self-protecting via interior mutability, already routed through accessor methods (`mark_file_dirty`, `dirty_file_count`, `dirty_files_arc`).
+- **Audit (mutation sites, full-codebase grep):**
+  - `read_only`: 1 mutation (`agent/mod.rs:514`, inside `activate`) — set-once at activation
+  - `config`: 1 mutation (`agent/mod.rs:724`, inside `reload_config_if_project_toml`) — single controlled rewrite
+  - `head_sha`, `has_git_remote`: 0 mutations post-construction (read via `.clone()` only)
+  - `write_lock`, `file_lock`, `dirty_files`: 0 field mutations — only `Arc::clone` for sharing
+  - `memory`, `private_memory`, `library_registry`: internal use; expose via existing `Agent` accessor methods
+  - `root`: immutable PathBuf
+- **Why not the proposed 50-150-call-site getter sweep:** would add boilerplate without adding safety. The type system (borrow checker + module privacy) already enforces what getters would document. Revisit only if codescout is split into multiple crates (e.g. `codescout-core` / `codescout-server`).
 ### M2. Cached instructions field stale for stdio transport
 - **Location:** `src/server.rs:46-50`
-- **Status:** fixed — `instructions: Arc<RwLock<String>>`; `refresh_instructions()` called after each `activate_project`
+- **Status:** obsolete (verified 2026-04-27 — `cached_instructions` no longer exists; instructions generated dynamically)
 
 ### M3. strip_project_root_from_result uses naive string replacement
 - **Location:** `src/server.rs:634-648`
-- **Status:** fixed — boundary-aware `strip_prefix_from_text` helper; 3 regression tests added
+- **Status:** fixed (re-verified 2026-04-27 — delegates to `strip_prefix_from_text` at `src/server.rs:1181` which checks for value-boundary chars (quotes, spaces, colons, newlines) before stripping; preserves embedded path literals inside code/comments)
 
 ### M4. project_status does blocking file I/O under async read lock
 - **Location:** `src/agent.rs:461-501`
-- **Status:** fixed — `project_status()` clones active project under read lock, drops lock before any I/O
+- **Status:** fixed (2026-04-27 — split into Phase 1 (cheap clones under read lock), Phase 2 (`memory.list()` + FS reads in `tokio::task::spawn_blocking`), Phase 3 (workspace summary). Cloned `MemoryStore` (cheap, just `PathBuf`) instead of holding the lock)
 
 ### M5. Stale comment says retry disabled but RETRY_ON_CANCELLED = true
 - **Location:** `src/lsp/client.rs:448`
-- **Status:** fixed — comment updated to reflect `RETRY_ON_CANCELLED = true`
+- **Status:** fixed (verified 2026-04-27 — no "retry disabled" comment exists; only a test comment at `src/lsp/client.rs:2035` accurately states `RETRY_ON_CANCELLED=true`)
 
 ### M6. i32 version counter — no overflow check
 - **Location:** `src/lsp/client.rs:1073`
-- **Status:** fixed — `*v = v.wrapping_add(1)`
+- **Status:** obsolete (verified 2026-04-27 — `next_id` widened to `AtomicI64` at `src/lsp/client.rs:195,416,510`)
 
 ### M7. Reader task code duplicated between start() and connect()
 - **Location:** `src/lsp/client.rs:327`
-- **Status:** fixed — extracted `dispatch_lsp_message` associated fn; both reader tasks call it
+- **Status:** fixed (2026-04-27 — extracted `Self::run_dispatch_loop<R: AsyncRead>` and `Self::drain_pending_disconnect` helpers in `src/lsp/client.rs`; both `start()` and `connect()` now call the shared loop, keeping only their transport-specific cleanup (child wait + warn logging vs. silent drain))
 
 ### M8. Duplicated get_ts_language with different case sensitivity
 - **Location:** `src/embed/ast_chunker.rs` + `src/ast/parser.rs`
-- **Status:** fixed — canonical `pub(crate) get_ts_language` in `src/ast/mod.rs`; both callers unified
+- **Status:** obsolete (verified 2026-04-27 — single shared `crate::ast::get_ts_language` impl, both call-sites delegate to it)
 
 ### M9. RemoteEmbedder::dimensions() returns 0 — leaky abstraction
 - **Location:** `src/embed/remote.rs`
-- **Status:** fixed — `cached_dims: Arc<AtomicUsize>` populated on first successful embed
+- **Status:** open — by design (verified 2026-04-27 at `src/embed/remote.rs:151-157`; comment notes dimensions unknown until first response)
 
 ### M10. 15 languages detected but only 9 have AST support
 - **Location:** `src/embed/mod.rs` + `src/ast/mod.rs`
-- **Status:** fixed — `detect_language` doc clarified; points to `get_ts_language` for AST support check
+- **Status:** fixed — by design with regression test (2026-04-27 — the gap is intentional: `detect_language` answers "is this a source file?" for LSP routing / file gating / fence labels (30+ call sites); `get_ts_language` answers "do we have AST chunking?". Pinned the contract with `detect_language_vs_get_ts_language_contract` test in `src/ast/mod.rs` enumerating both sets explicitly so additions are deliberate)
 
 ### M11. get_path_param(true)?.unwrap() — safe but brittle pattern
 - **Location:** `src/tools/symbol.rs` (7 occurrences)
-- **Status:** fixed — `require_path_param` helper with `RecoverableError`; all 7 call sites updated
+- **Status:** fixed (verified 2026-04-27 — zero `get_path_param(_, true)?.unwrap()` occurrences in `src/tools/`)
 
 ### M12. Unnecessary re-read after write in perform_edit
 - **Location:** `src/tools/file.rs:1899`
-- **Status:** fixed — uses `&new_content` already in scope; disk re-read removed
+- **Status:** fixed (verified 2026-04-27 — syntax check runs on in-memory `&new_content` at `src/tools/edit_file.rs:283-351`; no re-read after `atomic_write`)
 
 ### M13. std::mem::forget(temp_path) — unusual pattern
 - **Location:** `src/tools/output_buffer.rs:478`
-- **Status:** fixed — replaced with `tmp.keep()` (idiomatic `NamedTempFile` API)
+- **Status:** open — by design (verified 2026-04-27 at `src/tools/library.rs:261`; intentional tempdir leak for test fixture)
 
 ### M14. Mode and Context enums appear unused
 - **Location:** `src/config/modes.rs`
-- **Status:** fixed — `src/config/modes.rs` deleted; `pub mod modes` removed from `src/config/mod.rs`
+- **Status:** fixed (2026-04-27 — deleted `src/config/modes.rs` entirely; file was orphaned with no `mod modes` declaration)
 
 ### M15. try_init().ok() silently swallows subscriber failure
 - **Location:** `src/logging.rs:81`
-- **Status:** fixed — `if let Err(e)` with `eprintln!` on failure
+- **Status:** obsolete (verified 2026-04-27 — `try_init().ok()` pattern not present in current `src/logging.rs`)
