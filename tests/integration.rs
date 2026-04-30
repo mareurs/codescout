@@ -175,7 +175,7 @@ async fn workflow_analyze_ast() {
 #[tokio::test]
 async fn workflow_project_memory_config() {
     use codescout::tools::config::{ActivateProject, ProjectStatus};
-    use codescout::tools::memory::{ListMemories, ReadMemory, WriteMemory};
+    use codescout::tools::memory::Memory;
 
     let (dir, ctx) = project_with_files(&[("src/main.rs", "fn main() {}\n")]).await;
 
@@ -193,17 +193,24 @@ async fn workflow_project_memory_config() {
     assert!(config["project_root"].is_string());
 
     // Step 3: Write memory
-    WriteMemory
+    Memory
         .call(
-            json!({ "topic": "architecture/decisions", "content": "We chose Rust for performance." }),
+            json!({
+                "action": "write",
+                "topic": "architecture/decisions",
+                "content": "We chose Rust for performance."
+            }),
             &ctx,
         )
         .await
         .unwrap();
 
     // Step 4: Read it back
-    let read = ReadMemory
-        .call(json!({ "topic": "architecture/decisions" }), &ctx)
+    let read = Memory
+        .call(
+            json!({ "action": "read", "topic": "architecture/decisions" }),
+            &ctx,
+        )
         .await
         .unwrap();
     assert!(read["content"]
@@ -212,7 +219,10 @@ async fn workflow_project_memory_config() {
         .contains("Rust for performance"));
 
     // Step 5: List memories
-    let list = ListMemories.call(json!({}), &ctx).await.unwrap();
+    let list = Memory
+        .call(json!({ "action": "list" }), &ctx)
+        .await
+        .unwrap();
     let topics: Vec<&str> = list["topics"]
         .as_array()
         .unwrap()

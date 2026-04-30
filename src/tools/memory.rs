@@ -5,11 +5,16 @@ use std::collections::{HashMap, HashSet};
 use super::{parse_bool_param, RecoverableError, Tool, ToolContext};
 use serde_json::{json, Value};
 
-pub struct WriteMemory;
-pub struct ReadMemory;
-pub struct ListMemories;
-pub struct DeleteMemory;
+#[cfg(test)]
+pub(crate) struct WriteMemory;
+#[cfg(test)]
+pub(crate) struct ReadMemory;
+#[cfg(test)]
+pub(crate) struct ListMemories;
+#[cfg(test)]
+pub(crate) struct DeleteMemory;
 
+#[cfg(test)]
 #[async_trait::async_trait]
 impl Tool for WriteMemory {
     fn name(&self) -> &str {
@@ -50,6 +55,7 @@ impl Tool for WriteMemory {
     }
 }
 
+#[cfg(test)]
 #[async_trait::async_trait]
 impl Tool for ReadMemory {
     fn name(&self) -> &str {
@@ -98,6 +104,7 @@ impl Tool for ReadMemory {
     }
 }
 
+#[cfg(test)]
 #[async_trait::async_trait]
 impl Tool for ListMemories {
     fn name(&self) -> &str {
@@ -178,6 +185,7 @@ fn format_list_memories(result: &Value) -> String {
     out
 }
 
+#[cfg(test)]
 #[async_trait::async_trait]
 impl Tool for DeleteMemory {
     fn name(&self) -> &str {
