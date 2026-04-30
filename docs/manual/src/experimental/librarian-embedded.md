@@ -32,18 +32,20 @@ cargo build --release --no-default-features \
 
 ## Runtime override
 
-Even with the feature compiled in, librarian registration can be disabled
-per session or per project without rebuilding.
+Even with the feature compiled in, librarian registration is **disabled by
+default**. Opt in per session via env var, or per project via `project.toml`.
 
 | Knob | Value | Effect |
 |------|-------|--------|
-| `LIBRARIAN_ENABLED` env | `0` / `false` / `off` / `no` | Disable for this codescout process |
-| `LIBRARIAN_ENABLED` env | `1` / `true` / `on` / `yes` | Force enable (overrides project.toml) |
-| `[librarian] enabled = false` in `<project>/.codescout/project.toml` | bool | Per-project disable when env unset |
-| (default) | — | Enabled when feature compiled in |
+| `LIBRARIAN_ENABLED` env | `1` / `true` / `on` / `yes` | Enable for this codescout process |
+| `LIBRARIAN_ENABLED` env | `0` / `false` / `off` / `no` | Force disable (overrides project.toml) |
+| `[librarian] enabled = true` in `<project>/.codescout/project.toml` | bool | Per-project enable when env unset |
+| (default) | — | **Disabled** (experimental) |
 
 The env var wins; project.toml is consulted only when the env var is unset.
 
+To enable globally, set `LIBRARIAN_ENABLED=1` in the codescout MCP server
+launch env (e.g. the `env` block of `.mcp.json` or your shell rc).
 ## What you lose with `librarian` off
 
 - The 15 librarian tools disappear from `tools/list`.

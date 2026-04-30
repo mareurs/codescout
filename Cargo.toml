@@ -126,10 +126,11 @@ parking_lot = "0.12"
 
 [features]
 default = ["remote-embed", "local-embed", "dashboard", "http", "librarian"]
-# Embedded librarian-mcp (workspace doc/spec/plan index). Default-on for dev
-# builds; turn off for production publishes via `--no-default-features`.
-# Runtime override: `LIBRARIAN_ENABLED=0` or `[librarian] enabled = false` in
-# `.codescout/project.toml` disables registration even when compiled.
+# Embedded librarian-mcp (workspace doc/spec/plan index). Compiled in by
+# default for dev; turn off for production publishes via `--no-default-features`.
+# Runtime registration is **disabled by default** even when compiled in
+# (experimental). Opt in via `LIBRARIAN_ENABLED=1` env or
+# `[librarian] enabled = true` in `<project>/.codescout/project.toml`.
 librarian = ["dep:librarian-mcp"]
 dashboard = ["dep:axum", "dep:tower-http", "dep:open"]
 http = ["dep:axum", "dep:tower-http", "rmcp/transport-streamable-http-server"]

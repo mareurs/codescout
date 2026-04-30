@@ -3567,7 +3567,7 @@ mod tests {
             prompt.contains("doc://codescout-tool-guide"),
             "system prompt must point agents to the tool-guide resource"
         );
-        assert_eq!(ONBOARDING_VERSION, 12);
+        assert_eq!(ONBOARDING_VERSION, 13);
     }
 
     #[test]
