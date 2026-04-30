@@ -523,6 +523,46 @@ impl CodeScoutServer {
     }
 }
 
+/// Snapshot of `/proc/self/status` memory fields, in kB.
+///
+/// Logged from the heartbeat task so OOM forensics has a per-instance time
+/// series. All four fields default to 0 on platforms that don't expose
+/// `/proc/self/status` (Windows, macOS) or on parse failure — heartbeat
+/// continues regardless.
+#[derive(Default, Copy, Clone)]
+struct SelfMemoryKb {
+    vm_size_kb: u64,
+    vm_rss_kb: u64,
+    vm_data_kb: u64,
+    vm_peak_kb: u64,
+}
+
+fn read_self_memory_kb() -> SelfMemoryKb {
+    let mut out = SelfMemoryKb::default();
+    let Ok(text) = std::fs::read_to_string("/proc/self/status") else {
+        return out;
+    };
+    for line in text.lines() {
+        let Some((key, rest)) = line.split_once(':') else {
+            continue;
+        };
+        let value_kb = rest
+            .split_whitespace()
+            .next()
+            .and_then(|n| n.parse::<u64>().ok())
+            .unwrap_or(0);
+        match key {
+            "VmSize" => out.vm_size_kb = value_kb,
+            "VmRSS" => out.vm_rss_kb = value_kb,
+            "VmData" => out.vm_data_kb = value_kb,
+            "VmPeak" => out.vm_peak_kb = value_kb,
+            _ => {}
+        }
+    }
+    out
+}
+
+
 /// Returns true for tools that manage their own timeout internally and must not
 /// be wrapped by the server-level `tool_timeout_secs` guard.
 ///
@@ -1036,11 +1076,16 @@ pub async fn run(
                 } else {
                     0
                 };
+                let mem = read_self_memory_kb();
                 tracing::info!(
                     instance = %instance_tag_hb,
                     uptime_secs,
                     active_projects,
                     ?lsp_servers,
+                    vm_size_kb = mem.vm_size_kb,
+                    vm_rss_kb = mem.vm_rss_kb,
+                    vm_data_kb = mem.vm_data_kb,
+                    vm_peak_kb = mem.vm_peak_kb,
                     "heartbeat"
                 );
             }
