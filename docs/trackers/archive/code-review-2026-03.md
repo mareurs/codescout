@@ -1,13 +1,3 @@
----
-id: null
-kind: null
-status: archived
-title: null
-owners: []
-tags: []
-topic: null
-time_scope: null
----
 # Code Review Tracker — March 2026
 
 Full codebase audit of codescout (60K lines, 82 files). Issues prioritized by severity.
