@@ -144,8 +144,20 @@ pub struct OnboardingContext<'a> {
 }
 
 /// Build the onboarding prompt, substituting detected project information.
+///
+/// In workspace mode (multiple projects discovered) the single-project
+/// `ONBOARDING_PROMPT` is omitted entirely — keeping its Phase 1/Phase 2
+/// instructions in the prompt caused orchestrators to spawn an extra "root"
+/// subagent in addition to the per-project ones, duplicating exploration of
+/// the dominant sub-project.
 pub fn build_onboarding_prompt(ctx: &OnboardingContext) -> String {
-    let mut prompt = ONBOARDING_PROMPT.to_string();
+    let workspace_mode = ctx.is_workspace && ctx.projects.len() > 1;
+
+    let mut prompt = if workspace_mode {
+        WORKSPACE_ONBOARDING_PROMPT.to_string()
+    } else {
+        ONBOARDING_PROMPT.to_string()
+    };
 
     prompt.push_str("\n\n---\n\n");
 
@@ -204,13 +216,11 @@ pub fn build_onboarding_prompt(ctx: &OnboardingContext) -> String {
         prompt.push_str("**Semantic index:** not built\n\n");
     }
 
-    if ctx.is_workspace && ctx.projects.len() > 1 {
+    if workspace_mode {
         prompt.push_str(&format!(
             "**Workspace mode:** {} projects detected\n\n",
             ctx.projects.len()
         ));
-        prompt.push_str(WORKSPACE_ONBOARDING_PROMPT);
-        prompt.push_str("\n\n");
         prompt.push_str("**Discovered projects:**\n\n");
         prompt.push_str("| Project | Root | Languages | Build |\n");
         prompt.push_str("|---------|------|-----------|-------|\n");

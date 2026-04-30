@@ -1,8 +1,8 @@
 # WORKSPACE MODE — Multi-Project Onboarding
 
-> **This section replaces the single-project Phase 1 and Phase 2 below** when multiple projects are detected. Follow these phases instead.
+You are onboarding a **multi-project workspace**. The projects are listed in the "Discovered projects" table that follows this prompt.
 
-You are onboarding a **multi-project workspace**. The projects are listed in the "Discovered projects" table above.
+> Single-project Phase 1 / Phase 2 instructions do NOT apply here — there is exactly one set of phases, and they are the ones below. Do NOT spawn a "root" exploration subagent in addition to the per-project ones.
 
 ---
 
@@ -48,7 +48,7 @@ Deep-dive the `{project_root}/` directory and write 3 per-project memories:
 {list other projects with 1-sentence descriptions}
 
 ## How to Write Memories
-Use: `memory(action: "write", project: "{project_id}", topic: "...", content: "...")`
+Use: `memory(action: "write", project_id: "{project_id}", topic: "...", content: "...")`
 
 ## Exploration Steps (scoped to {project_root}/)
 1. `list_dir("{project_root}")` — see structure
@@ -58,10 +58,10 @@ Use: `memory(action: "write", project: "{project_id}", topic: "...", content: ".
 5. `semantic_search` for 3+ concepts specific to this project
 6. Read test files to understand testing patterns
 7. **Record search scope examples** in your `architecture` or `conventions` memory:
-   - 3–5 good `semantic_search(query, project: "{project_id}")` query examples
+   - 3–5 good `semantic_search(query, project_id: "{project_id}")` query examples
      that are specific enough to return only results from THIS project
    - 1–2 query terms that are too broad (would return false-positives from
-     sibling projects) and should always be scoped with `project: "{project_id}"`
+     sibling projects) and should always be scoped with `project_id: "{project_id}"`
 
 ## Rules
 - Be specific: file paths, function names, concrete patterns
@@ -80,7 +80,7 @@ Do NOT begin Phase 2 until ALL of the following are true:
 
 1. Every Agent subagent call has **returned** (not just been dispatched)
 2. You have verified each project's memories were written — for each project run:
-   `memory(action: "read", project: "{id}", topic: "project-overview")`
+   `memory(action: "read", project_id: "{id}", topic: "project-overview")`
    If a project's memory is missing, re-dispatch that subagent before continuing.
 3. You have a complete list of which projects succeeded and which (if any) failed.
 
@@ -96,17 +96,17 @@ Writing workspace memories from incomplete per-project data produces wrong memor
 After all subagent deep dives complete and the Workspace Deep Dives gate is verified, read back per-project memories and write 5 workspace-level memories.
 
 **Read per-project memories first:**
-- `memory(action: "read", project: "{id}", topic: "architecture")` for each project
-- `memory(action: "read", project: "{id}", topic: "conventions")` for each project
+- `memory(action: "read", project_id: "{id}", topic: "architecture")` for each project
+- `memory(action: "read", project_id: "{id}", topic: "conventions")` for each project
 
-**Then write these 5 workspace-level memories** (no `project:` parameter = workspace-level):
+**Then write these 5 workspace-level memories** (no `project_id:` parameter = workspace-level):
 
 #### `architecture` (workspace-level)
 ```
 # Workspace Architecture
 
 ## Project Map
-- {project_id}/ — {1-sentence purpose} (see `memory(project: "{id}", topic: "architecture")`)
+- {project_id}/ — {1-sentence purpose} (see `memory(project_id: "{id}", topic: "architecture")`)
 
 ## Cross-Project Dependencies
 {project_a} → {project_b} ({what is shared})
@@ -123,7 +123,7 @@ After all subagent deep dives complete and the Workspace Deep Dives gate is veri
 [Commit style, PR process, CI rules, monorepo-wide patterns]
 
 ## Per-Project
-[For each project: "see `memory(project: "{id}", topic: "conventions")`"]
+[For each project: "see `memory(project_id: "{id}", topic: "conventions")`"]
 ```
 
 #### `development-commands` — shared dev commands (build, test, lint for the whole repo)
@@ -147,6 +147,6 @@ When `onboarding(force: true)` is called:
 
 2. **Dispatch subagents only for new + stale projects**
 
-3. **Removed projects**: If a project directory no longer exists but has memories, inform the user and suggest `memory(action: "delete", project: "{id}", topic: "...")` for cleanup.
+3. **Removed projects**: If a project directory no longer exists but has memories, inform the user and suggest `memory(action: "delete", project_id: "{id}", topic: "...")` for cleanup.
 
 4. **Workspace memory merge**: After subagent updates, re-run Phase 2 synthesis but merge changes rather than overwriting — note what changed.
