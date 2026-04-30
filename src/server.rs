@@ -562,7 +562,6 @@ fn read_self_memory_kb() -> SelfMemoryKb {
     out
 }
 
-
 /// Returns true for tools that manage their own timeout internally and must not
 /// be wrapped by the server-level `tool_timeout_secs` guard.
 ///

@@ -107,6 +107,47 @@ We are guessing the suspect. Need ground truth from the live process before we p
 4. **Drive-test the LSP-document hypothesis.** Synthetic loop: open and close 1000 files via `find_symbol` / `goto_definition`. Watch `vm_size_kb`. If it grows, the LSP DocumentState fan-out is leaking `did_open` content.
 
 Step 1 is the cheap, low-risk move. Until that ships, every OOM teaches us nothing new because we have no per-instance memory time-series.
+## Phase 2 step 3 result — fastembed local is NOT the leaker (2026-04-30)
+
+`examples/embed_leak_probe` runs `build_index(force=true)` 30× on a synthetic
+10-file project with `local:AllMiniLML6V2Q`. Memory time-series:
+
+| iter | VmSize (kB) | VmRSS (kB) | VmData (kB) | VmPeak (kB) |
+|------|-------------|------------|-------------|-------------|
+| baseline | 4,385,684 | 13,644 | 141,112 | 4,385,684 |
+| 1 | 4,927,288 | 34,376 | 168,948 | 4,929,048 |
+| 5 | 4,928,340 | 46,092 | 186,852 | 4,929,388 |
+| 10 | 4,927,596 | 45,684 | 190,480 | 4,929,532 |
+| 15 | 4,927,772 | 49,436 | 195,216 | 4,929,532 |
+| 30 | 4,928,752 | 49,328 | 199,920 | 4,929,696 |
+
+`VmData` grows ~31 MB across 30 iterations but the rate decays
+(0.5 MB/iter early → 0.3 MB/iter late). Asymptotic settling — likely
+fastembed's ONNX session reusing arenas + tree-sitter parser caches warming
+up — **not the runaway leak that produces 60 GB RSS in production**.
+
+So the embedder hypothesis is downgraded for the local path. **Open
+question:** does the same probe with a remote (Ollama / OpenAI) embedder
+behave differently? The remote path differs structurally (HTTP client +
+JSON serialisation per batch); leak in that path could plausibly manifest
+only under remote configs.
+
+### Refocus: LSP document/state path
+
+The Apr 28 OOM happened during heavy `find_symbol` / `list_symbols` work on
+`southpole` (Kotlin) plus `code-explorer` (Rust) — totals from
+`usage.db`: 478 + 207 = 685 LSP symbol calls in the week before OOM.
+
+Each `find_symbol` may trigger `did_open` for files visited; the LSP mux
+fans these out per client tag. If `DocumentState` retains content blobs
+without bounded eviction, repeated visits across thousands of files would
+accumulate linearly. 60 GB RSS at, say, 50 KB per stored file content =
+~1.2M stored documents — plausible for a long-running session that
+touches a Kotlin monorepo.
+
+Next probe to write: `examples/lsp_document_leak_probe` — open and close
+1000 files via `find_symbol`/`hover` against a real LSP, watch
+`vm_data_kb`. If it grows linearly, the LSP DocumentState is the leak.
 ## Evidence
 
 ### Apr 14 — explicit kernel OOM records (ring buffer intact)
