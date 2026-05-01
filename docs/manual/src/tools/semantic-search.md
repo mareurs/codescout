@@ -112,7 +112,7 @@ The `content` field contains the full source text of each chunk. Combine with
   indicate the concept is not well represented in the index.
 - If results are poor, check `project_status` to confirm the index is up to date,
   and `index_project` to rebuild if files have changed.
-- For finding a symbol by name, `find_symbol` is faster and more precise.
+- For finding a symbol by name, `symbols` is faster and more precise.
   Semantic search is for concepts, not identifiers.
 
 ### Workspace project scoping

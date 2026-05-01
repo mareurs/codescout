@@ -60,8 +60,8 @@ The Language Server Protocol is how IDEs answer questions like "where is this
 defined?" and "who calls this?". codescout runs LSP servers on your behalf
 and exposes their answers as agent-friendly tools.
 
-- `find_symbol` — locate any symbol by name across the project
-- `list_symbols` — the outline of a file or directory: classes,
+- `symbols` — locate any symbol by name across the project
+- `symbols` — the outline of a file or directory: classes,
   functions, structs, in tree form
 - `references` — all callers/usages of a given symbol
 - `replace_symbol` — replace a function body by name, not by line number
@@ -214,7 +214,7 @@ disambiguate, and still misses that the error type changed in a recent refactor.
 **With codescout:**
 
 ```
-list_symbols("src/auth.rs")
+symbols("src/auth.rs")
   → authenticate_user [fn, line 142], SessionStore [struct, line 12], ...
 
 references("authenticate_user", "src/auth.rs")
@@ -223,7 +223,7 @@ references("authenticate_user", "src/auth.rs")
 run_command("git log src/auth.rs")
   → 3 days ago: "refactor: change AuthError to return structured payload"
 
-find_symbol("AuthError", include_body=true)
+symbols("AuthError", include_body=true)
   → enum AuthError { ... } with full definition
 ```
 

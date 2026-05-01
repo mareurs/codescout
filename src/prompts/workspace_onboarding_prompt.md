@@ -12,7 +12,7 @@ Before deep-diving any single project, get a high-level understanding of ALL pro
 
 **For each project in the workspace:**
 1. `list_dir("{project_root}")` — see top-level structure
-2. `list_symbols` on the main source directory
+2. `symbols` on the main source directory
 3. `read_file` the build config (Cargo.toml / package.json / go.mod)
 4. Note: purpose, tech stack, size (rough file count), key entry points
 
@@ -52,9 +52,9 @@ Use: `memory(action: "write", project_id: "{project_id}", topic: "...", content:
 
 ## Exploration Steps (scoped to {project_root}/)
 1. `list_dir("{project_root}")` — see structure
-2. `list_symbols` on ALL source files in the project
+2. `symbols` on ALL source files in the project
 3. `read_file` on build config, README if present
-4. `find_symbol(include_body=true)` on 3-5 key functions/types
+4. `symbols(name=..., include_body=true)` on 3-5 key functions/types
 5. `semantic_search` for 3+ concepts specific to this project
 6. Read test files to understand testing patterns
 7. **Record search scope examples** in your `architecture` or `conventions` memory:

@@ -29,7 +29,7 @@ use crate::lsp::SymbolInfo;
 /// Special case (BUG-037): `impl Trait for Type` items may have outer attributes
 /// (`#[async_trait]`, `#[cfg(...)]`) that rust-analyzer intentionally excludes from
 /// `range.start`. Walking back to include them in the editing range would silently
-/// drop them — the LLM's `new_body` starts at `impl` (matching what `find_symbol`
+/// drop them — the LLM's `new_body` starts at `impl` (matching what `symbols`
 /// shows) and does not include the attribute. To avoid this, we only trigger the
 /// BUG-031 walk-back when doc comments are present above the attribute block. When
 /// no doc comments are found (only `#[...]` lines), the LSP's `range.start` is

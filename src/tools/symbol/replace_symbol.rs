@@ -32,7 +32,7 @@ impl Tool for ReplaceSymbol {
     fn description(&self) -> &str {
         "Replace the entire body of a named symbol with new source code. \
          new_body should include the full declaration: attributes, doc comments, \
-         signature, and body — matching what find_symbol(include_body=true) returns."
+         signature, and body — matching what symbols(include_body=true) returns."
     }
     fn input_schema(&self) -> Value {
         json!({
@@ -85,7 +85,7 @@ impl Tool for ReplaceSymbol {
                     start + 1,
                     lines.len(),
                 ),
-                "The LSP may have stale data. Try list_symbols(path) to refresh.",
+                "The LSP may have stale data. Try symbols(path) to refresh.",
             )
             .into());
         }
@@ -138,7 +138,7 @@ impl Tool for ReplaceSymbol {
                          new_body must be the complete declaration (attributes, doc comments, \
                          signature, and body), not just body statements. File restored."
                     ),
-                    "Use find_symbol(symbol, include_body=true) to see the expected format.",
+                    "Use symbols(symbol=..., include_body=true) to see the expected format.",
                 )
                 .into());
             }
@@ -166,7 +166,7 @@ impl Tool for ReplaceSymbol {
                          File restored.",
                         dropped.join(", ")
                     ),
-                    "Try list_symbols(path) to refresh, then retry; or narrow the edit via \
+                    "Try symbols(path) to refresh, then retry; or narrow the edit via \
                      edit_file with unique anchors.",
                 )
                 .into());

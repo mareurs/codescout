@@ -1443,7 +1443,7 @@ mod tests {
             "must contain exploration phase"
         );
         assert!(
-            prompt.contains("list_symbols"),
+            prompt.contains("symbols"),
             "must contain exploration instructions"
         );
 
@@ -3414,7 +3414,7 @@ mod tests {
         let draft = build_system_prompt_draft(&langs, &entries, None, None, &[]);
         assert!(draft.contains("## Navigation Strategy\n"));
         assert!(
-            draft.contains("list_symbols(\"src/main.rs\")"),
+            draft.contains("symbols(\"src/main.rs\")"),
             "single-project nav should use first entry point"
         );
         assert!(
@@ -3462,7 +3462,7 @@ mod tests {
             "should have per-project memory hint for backend"
         );
         assert!(
-            draft.contains("list_symbols(\"backend\")"),
+            draft.contains("symbols(\"backend\")"),
             "should use project root as placeholder entry point"
         );
     }

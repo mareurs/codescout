@@ -104,7 +104,7 @@ pub(super) fn format_hover(val: &Value) -> String {
     out
 }
 
-pub(super) fn format_find_symbol(val: &Value) -> String {
+pub(super) fn format_search_symbols(val: &Value) -> String {
     let symbols = match val["symbols"].as_array() {
         Some(arr) => arr,
         None => return String::new(),
@@ -210,7 +210,7 @@ pub(super) fn format_find_symbol(val: &Value) -> String {
     out
 }
 
-pub(super) fn format_list_symbols(val: &Value) -> String {
+pub(super) fn format_overview_symbols(val: &Value) -> String {
     // File mode
     if let Some(file) = val["file"].as_str() {
         let symbols = match val["symbols"].as_array() {
@@ -450,10 +450,10 @@ pub(super) fn format_rename_symbol(result: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::format_list_symbols;
+    use super::format_overview_symbols;
 
     #[test]
-    fn format_list_symbols_class_overview_mode() {
+    fn format_overview_symbols_class_overview_mode() {
         let val = serde_json::json!({
             "directory": "src/main/kotlin",
             "mode": "class_overview",
@@ -462,9 +462,9 @@ mod tests {
                 { "path": "src/main/kotlin/domain", "file_count": 8,  "classes": ["Course", "Student"] }
             ],
             "total_files": 45,
-            "hint": "Found 45 files — drill down with list_symbols('<subdir>')."
+            "hint": "Found 45 files — drill down with symbols('<subdir>')."
         });
-        let result = format_list_symbols(&val);
+        let result = format_overview_symbols(&val);
         assert!(result.contains("src/main/kotlin"));
         assert!(result.contains("45 files"));
         assert!(result.contains("api"));
@@ -476,7 +476,7 @@ mod tests {
     }
 
     #[test]
-    fn format_list_symbols_directory_map_mode() {
+    fn format_overview_symbols_directory_map_mode() {
         let val = serde_json::json!({
             "directory": "ktor-server/src",
             "mode": "directory_map",
@@ -487,7 +487,7 @@ mod tests {
             "total_files": 120,
             "hint": "Found 120 files — too large for symbol overview."
         });
-        let result = format_list_symbols(&val);
+        let result = format_overview_symbols(&val);
         assert!(result.contains("ktor-server/src"));
         assert!(result.contains("120 files"));
         assert!(result.contains("src/main"));
@@ -496,7 +496,7 @@ mod tests {
     }
 
     #[test]
-    fn format_list_symbols_directory_map_with_overflow() {
+    fn format_overview_symbols_directory_map_with_overflow() {
         let subdirs: Vec<serde_json::Value> = (0..15)
             .map(|i| serde_json::json!({ "path": format!("sub/{i}"), "file_count": 10 }))
             .collect();
@@ -508,7 +508,7 @@ mod tests {
             "overflow": { "shown": 15, "total": 23, "hint": "Showing 15 of 23 directories (largest first)." },
             "hint": "Found 300 files."
         });
-        let result = format_list_symbols(&val);
+        let result = format_overview_symbols(&val);
         assert!(result.contains("Showing 15 of 23"));
     }
 }

@@ -11,8 +11,8 @@ Without guardrails, code intelligence tools can produce enormous output:
 
 | Tool | Worst case |
 |------|------------|
-| `list_symbols(dir)` | Walks the entire project, dumps every symbol in every file |
-| `find_symbol(pattern)` | Project-wide search with thousands of matches |
+| `symbols(dir)` | Walks the entire project, dumps every symbol in every file |
+| `symbols(pattern)` | Project-wide search with thousands of matches |
 | `references` | Popular symbols referenced in hundreds of files |
 | `list_dir(recursive=true)` | Full directory tree of a large monorepo |
 | `run_command("git blame file")` (no line range) | Every line in a long file |
@@ -106,7 +106,7 @@ You want to understand the authentication logic in a service layer.
 **Step 1 — get the map:**
 
 ```json
-{ "tool": "list_symbols", "arguments": { "path": "src/services/" } }
+{ "tool": "symbols", "arguments": { "path": "src/services/" } }
 ```
 
 Response (compact, exploring mode):
@@ -143,7 +143,7 @@ consumed: a few dozen tokens.
 
 ```json
 {
-  "tool": "find_symbol",
+  "tool": "symbols",
   "arguments": {
     "pattern": "verify_token",
     "relative_path": "src/services/auth.rs",

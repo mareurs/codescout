@@ -9,13 +9,13 @@
 
 | Old tool | Replacement | Notes |
 |----------|-------------|-------|
-| `list_functions` | `list_symbols` | Returns symbol tree with line ranges; requires LSP server |
-| `list_docs` | `list_symbols` + `find_symbol(include_body=true)` | Read the symbol body to inspect doc comments |
+| `list_functions` | `symbols` | Returns symbol tree with line ranges; requires LSP server |
+| `list_docs` | `symbols` + `symbols(include_body=true)` | Read the symbol body to inspect doc comments |
 
-`list_symbols` covers all 9 LSP-supported languages (not just the 4 with tree-sitter grammars) and returns richer output including types, nesting, and references. For languages where the LSP server hasn't started yet, `search_pattern` can locate doc comment blocks (`///`, `/**`) using a regex.
+`symbols` covers all 9 LSP-supported languages (not just the 4 with tree-sitter grammars) and returns richer output including types, nesting, and references. For languages where the LSP server hasn't started yet, `search_pattern` can locate doc comment blocks (`///`, `/**`) using a regex.
 
 ## Why They Were Removed
 
-The offline advantage (no LSP startup) was outweighed by the maintenance cost of a parallel navigation path. `list_symbols` starts the language server on the first call and keeps it running — subsequent calls are instant. For the initial cold start, the latency difference is negligible for interactive use.
+The offline advantage (no LSP startup) was outweighed by the maintenance cost of a parallel navigation path. `symbols` starts the language server on the first call and keeps it running — subsequent calls are instant. For the initial cold start, the latency difference is negligible for interactive use.
 
-See [Symbol Navigation](symbol-navigation.md) for the full `list_symbols` reference.
+See [Symbol Navigation](symbol-navigation.md) for the full `symbols` reference.

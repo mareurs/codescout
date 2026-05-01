@@ -32,7 +32,7 @@ curl -s -X POST http://127.0.0.1:PORT/mcp \
   "total_calls": 4217,
   "tools": [
     {
-      "name": "find_symbol",
+      "name": "symbols",
       "calls": 1830,
       "errors": 4,
       "overflows": 12,

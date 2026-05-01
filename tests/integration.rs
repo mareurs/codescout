@@ -397,11 +397,11 @@ async fn workflow_onboarding_explore() {
     drop(dir);
 }
 
-/// Exercises find_symbol with file, directory, nested directory, glob, and
+/// Exercises symbols search with file, directory, nested directory, glob, and
 /// name_path patterns — all via tree-sitter fallback (no LSP).
 #[tokio::test]
-async fn workflow_find_symbol_path_types() {
-    use codescout::tools::symbol::FindSymbol;
+async fn workflow_symbols_path_types() {
+    use codescout::tools::symbol::Symbols;
 
     let (_dir, ctx) = project_with_files(&[
         (
@@ -420,7 +420,7 @@ async fn workflow_find_symbol_path_types() {
     .await;
 
     // 1. File path — baseline
-    let r = FindSymbol
+    let r = Symbols
         .call(json!({ "query": "add", "path": "src/main.rs" }), &ctx)
         .await
         .unwrap();
@@ -431,7 +431,7 @@ async fn workflow_find_symbol_path_types() {
     );
 
     // 2. Directory path — bug #1 regression
-    let r = FindSymbol
+    let r = Symbols
         .call(json!({ "query": "helper", "path": "src" }), &ctx)
         .await
         .unwrap();
@@ -442,7 +442,7 @@ async fn workflow_find_symbol_path_types() {
     );
 
     // 3. Nested directory path — bug #1 nested
-    let r = FindSymbol
+    let r = Symbols
         .call(json!({ "query": "multiply", "path": "src/utils" }), &ctx)
         .await
         .unwrap();
@@ -453,7 +453,7 @@ async fn workflow_find_symbol_path_types() {
     );
 
     // 4. Glob path
-    let r = FindSymbol
+    let r = Symbols
         .call(json!({ "query": "add", "path": "src/**/*.rs" }), &ctx)
         .await
         .unwrap();
@@ -465,7 +465,7 @@ async fn workflow_find_symbol_path_types() {
 
     // 5. Name_path pattern project-wide — bug #2 regression
     // tree-sitter uses "Calculator/compute" as name_path (no "impl" prefix)
-    let r = FindSymbol
+    let r = Symbols
         .call(json!({ "query": "Calculator/compute" }), &ctx)
         .await
         .unwrap();

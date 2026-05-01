@@ -1,7 +1,7 @@
-# `list_symbols` progressive directory overview
+# `symbols` progressive directory overview
 ## What it does
 
-When `list_symbols` is called on a directory (rather than a single file), it
+When `symbols` is called on a directory (rather than a single file), it
 now selects one of three output modes based on how many files are in the tree,
 rather than always attempting a full symbol dump that overflows for large
 directories.
@@ -16,7 +16,7 @@ directories.
 
 The response includes a `mode` field so agents know which level of detail they
 received, and a `hint` with the recommended next step (e.g. drill down with
-`list_symbols('<subdir>')`).
+`symbols('<subdir>')`).
 
 ## Forcing a mode
 
@@ -30,10 +30,10 @@ Accepted values: `"full_tree"`, `"class_overview"`, `"directory_map"`.
 
 ## Why this matters
 
-Previously, calling `list_symbols("src/")` on a large project returned a
+Previously, calling `symbols("src/")` on a large project returned a
 truncated dump with no structure. The new modes give agents a useful
 coarse-to-fine navigation path: start at `directory_map`, pick a subdirectory,
-drill down to `class_overview`, then open specific files with `find_symbol`.
+drill down to `class_overview`, then open specific files with `symbols`.
 
 ## Known limits
 

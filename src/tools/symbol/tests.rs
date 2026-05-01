@@ -3,11 +3,10 @@
 //! Moved wholesale during Phase 1b.4; imports made explicit in Phase 1b.5.
 
 use super::display::{
-    format_find_references, format_find_symbol, format_goto_definition, format_hover,
-    format_list_symbols,
+    format_find_references, format_goto_definition, format_hover, format_overview_symbols,
+    format_search_symbols,
 };
-use super::find_symbol::{build_by_file, make_find_symbol_hint};
-use super::list_symbols::{
+use super::list_overview::{
     ast_class_names_for_dir, count_files_by_subdir, find_split_point, flat_symbol_count,
     LIST_SYMBOLS_SINGLE_FILE_FLAT_CAP,
 };
@@ -15,6 +14,7 @@ use super::path_helpers::{
     classify_reference_path, format_library_path, resolve_library_roots, tag_external_path,
     uri_to_path,
 };
+use super::symbols::{build_by_file, make_search_symbols_hint};
 use super::*;
 use crate::agent::Agent;
 use crate::lsp::SymbolInfo;
@@ -126,7 +126,7 @@ async fn get_symbols_overview_returns_symbols() {
         return;
     };
 
-    let result = ListSymbols
+    let result = Symbols
         .call(
             json!({
                 "path": "src/main.rs",
@@ -160,14 +160,14 @@ async fn get_symbols_overview_returns_symbols() {
 }
 
 #[tokio::test]
-async fn find_symbol_project_wide_uses_workspace_symbol() {
+async fn symbols_project_wide_uses_workspace_symbol() {
     let Some((_dir, ctx)) = rust_project_ctx().await else {
         eprintln!("Skipping: rust-analyzer not installed");
         return;
     };
 
     // Trigger LSP startup and background indexing via a file-restricted call.
-    let _ = FindSymbol
+    let _ = Symbols
         .call(json!({ "query": "main", "path": "src/main.rs" }), &ctx)
         .await;
 
@@ -175,7 +175,7 @@ async fn find_symbol_project_wide_uses_workspace_symbol() {
     // until rust-analyzer finishes background indexing (typically < 3s).
     let mut found = false;
     for _ in 0..10 {
-        let result = FindSymbol
+        let result = Symbols
             .call(json!({ "query": "Point" }), &ctx)
             .await
             .unwrap();
@@ -523,13 +523,13 @@ fn validate_symbol_range_recurses_into_children() {
 }
 
 #[tokio::test]
-async fn find_symbol_by_name() {
+async fn symbols_by_name() {
     let Some((_dir, ctx)) = rust_project_ctx().await else {
         eprintln!("Skipping: rust-analyzer not installed");
         return;
     };
 
-    let result = FindSymbol
+    let result = Symbols
         .call(
             json!({
                 "query": "add",
@@ -560,7 +560,7 @@ async fn get_symbols_overview_accepts_detail_level() {
         )),
     };
     // Should error because no project, but NOT because of unknown param
-    let err = ListSymbols
+    let err = Symbols
         .call(json!({ "path": "x", "detail_level": "full" }), &ctx)
         .await
         .unwrap_err();
@@ -587,7 +587,7 @@ async fn path_not_found_is_recoverable_error() {
         )),
     };
 
-    let err = ListSymbols
+    let err = Symbols
         .call(json!({ "path": "nonexistent/file.py" }), &ctx)
         .await
         .unwrap_err();
@@ -616,7 +616,7 @@ async fn path_not_found_hint_mentions_list_dir() {
         )),
     };
 
-    let err = ListSymbols
+    let err = Symbols
         .call(json!({ "path": "missing.rs" }), &ctx)
         .await
         .unwrap_err();
@@ -647,7 +647,7 @@ async fn glob_no_match_is_recoverable_error() {
         )),
     };
 
-    let err = ListSymbols
+    let err = Symbols
         .call(json!({ "path": "src/**/*.nonexistent" }), &ctx)
         .await
         .unwrap_err();
@@ -672,8 +672,8 @@ async fn tools_error_without_project() {
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
     };
-    assert!(ListSymbols.call(json!({"path": "x"}), &ctx).await.is_err());
-    assert!(FindSymbol.call(json!({"query": "x"}), &ctx).await.is_err());
+    assert!(Symbols.call(json!({"path": "x"}), &ctx).await.is_err());
+    assert!(Symbols.call(json!({"query": "x"}), &ctx).await.is_err());
     assert!(References
         .call(json!({"symbol": "x", "path": "y"}), &ctx)
         .await
@@ -708,7 +708,7 @@ fn uri_to_path_parses_unix_uri() {
 }
 
 #[tokio::test]
-async fn find_symbol_project_wide_treesitter_fallback() {
+async fn symbols_project_wide_treesitter_fallback() {
     // No rust-analyzer needed — this test verifies the tree-sitter fallback
     // that kicks in when workspace/symbol returns empty.
     let dir = tempdir().unwrap();
@@ -734,7 +734,7 @@ async fn find_symbol_project_wide_treesitter_fallback() {
 
     // Project-wide search (no relative_path) — LSP will fail/return empty,
     // so tree-sitter fallback should find the symbol.
-    let result = FindSymbol
+    let result = Symbols
         .call(json!({ "query": "unique_benchmark_fn" }), &ctx)
         .await
         .unwrap();
@@ -750,7 +750,7 @@ async fn find_symbol_project_wide_treesitter_fallback() {
         .any(|s| s["name"].as_str().unwrap() == "unique_benchmark_fn"));
 
     // Also check struct is findable
-    let result2 = FindSymbol
+    let result2 = Symbols
         .call(json!({ "query": "UniqueTestStruct" }), &ctx)
         .await
         .unwrap();
@@ -792,7 +792,7 @@ async fn get_symbols_overview_finds_nested_files() {
     };
 
     // Project-wide (no path) — should find both root and nested files
-    let result = ListSymbols.call(json!({}), &ctx).await.unwrap();
+    let result = Symbols.call(json!({}), &ctx).await.unwrap();
 
     let files = result["files"].as_array().unwrap();
     let file_names: Vec<&str> = files.iter().map(|f| f["file"].as_str().unwrap()).collect();
@@ -814,7 +814,7 @@ async fn get_symbols_overview_finds_nested_files() {
 }
 
 #[tokio::test]
-async fn list_symbols_small_tree_recurses_fully() {
+async fn symbols_overview_small_tree_recurses_fully() {
     // When targeting a specific subdirectory with a small file count (≤ RECURSE_SMALL),
     // the new three-mode dispatch recurses fully to give complete symbol output.
     let dir = tempdir().unwrap();
@@ -840,10 +840,7 @@ async fn list_symbols_small_tree_recurses_fully() {
     };
 
     // Target "src" specifically — small tree (2 files) → full recursive symbol mode
-    let result = ListSymbols
-        .call(json!({ "path": "src" }), &ctx)
-        .await
-        .unwrap();
+    let result = Symbols.call(json!({ "path": "src" }), &ctx).await.unwrap();
 
     let files = result["files"].as_array().unwrap();
     let file_names: Vec<&str> = files.iter().map(|f| f["file"].as_str().unwrap()).collect();
@@ -861,7 +858,7 @@ async fn list_symbols_small_tree_recurses_fully() {
 }
 
 #[test]
-fn find_symbol_in_tree() {
+fn symbols_in_tree() {
     let symbols = vec![SymbolInfo {
         name: "Foo".into(),
         name_path: "Foo".into(),
@@ -1304,15 +1301,15 @@ println!("{} {}", x, y);
 }
 
 #[tokio::test]
-async fn find_symbol_schema_includes_scope() {
-    let tool = FindSymbol;
+async fn symbols_schema_includes_scope() {
+    let tool = Symbols;
     let schema = tool.input_schema();
     assert!(schema["properties"]["scope"].is_object());
 }
 
 #[tokio::test]
 async fn get_symbols_overview_schema_includes_scope() {
-    let tool = ListSymbols;
+    let tool = Symbols;
     let schema = tool.input_schema();
     assert!(schema["properties"]["scope"].is_object());
 }
@@ -1363,13 +1360,13 @@ async fn tag_external_path_discovers_and_registers() {
 }
 
 #[tokio::test]
-async fn find_symbol_directory_relative_path() {
+async fn symbols_directory_relative_path() {
     let Some((_dir, ctx)) = rust_project_ctx().await else {
         return; // skip if rust-analyzer not available
     };
 
     // "src" is a directory — should walk it and find symbols inside
-    let result = FindSymbol
+    let result = Symbols
         .call(json!({ "query": "add", "path": "src" }), &ctx)
         .await
         .unwrap();
@@ -1377,7 +1374,7 @@ async fn find_symbol_directory_relative_path() {
     let symbols = result["symbols"].as_array().unwrap();
     assert!(
         !symbols.is_empty(),
-        "find_symbol with directory relative_path should find symbols"
+        "symbols with directory relative_path should find symbols"
     );
     assert!(symbols.iter().any(|s| s["name"] == "add"));
 }
@@ -1494,10 +1491,10 @@ async fn rich_project_ctx() -> (tempfile::TempDir, ToolContext) {
 }
 
 #[tokio::test]
-async fn find_symbol_path_type_file() {
+async fn symbols_path_type_file() {
     let (_dir, ctx) = rich_project_ctx().await;
 
-    let result = FindSymbol
+    let result = Symbols
         .call(json!({ "query": "add", "path": "src/main.rs" }), &ctx)
         .await
         .unwrap();
@@ -1505,16 +1502,16 @@ async fn find_symbol_path_type_file() {
     let symbols = result["symbols"].as_array().unwrap();
     assert!(
         !symbols.is_empty(),
-        "find_symbol with file relative_path should find symbols"
+        "symbols with file relative_path should find symbols"
     );
     assert!(symbols.iter().any(|s| s["name"] == "add"));
 }
 
 #[tokio::test]
-async fn find_symbol_path_type_directory() {
+async fn symbols_path_type_directory() {
     let (_dir, ctx) = rich_project_ctx().await;
 
-    let result = FindSymbol
+    let result = Symbols
         .call(json!({ "query": "helper", "path": "src" }), &ctx)
         .await
         .unwrap();
@@ -1522,17 +1519,17 @@ async fn find_symbol_path_type_directory() {
     let symbols = result["symbols"].as_array().unwrap();
     assert!(
         !symbols.is_empty(),
-        "find_symbol with directory relative_path should find symbols: {:?}",
+        "symbols with directory relative_path should find symbols: {:?}",
         result
     );
     assert!(symbols.iter().any(|s| s["name"] == "helper"));
 }
 
 #[tokio::test]
-async fn find_symbol_path_type_nested_directory() {
+async fn symbols_path_type_nested_directory() {
     let (_dir, ctx) = rich_project_ctx().await;
 
-    let result = FindSymbol
+    let result = Symbols
         .call(json!({ "query": "multiply", "path": "src/utils" }), &ctx)
         .await
         .unwrap();
@@ -1540,17 +1537,17 @@ async fn find_symbol_path_type_nested_directory() {
     let symbols = result["symbols"].as_array().unwrap();
     assert!(
         !symbols.is_empty(),
-        "find_symbol with nested directory relative_path should find symbols: {:?}",
+        "symbols with nested directory relative_path should find symbols: {:?}",
         result
     );
     assert!(symbols.iter().any(|s| s["name"] == "multiply"));
 }
 
 #[tokio::test]
-async fn find_symbol_path_type_glob() {
+async fn symbols_path_type_glob() {
     let (_dir, ctx) = rich_project_ctx().await;
 
-    let result = FindSymbol
+    let result = Symbols
         .call(json!({ "query": "add", "path": "src/**/*.rs" }), &ctx)
         .await
         .unwrap();
@@ -1558,16 +1555,16 @@ async fn find_symbol_path_type_glob() {
     let symbols = result["symbols"].as_array().unwrap();
     assert!(
         !symbols.is_empty(),
-        "find_symbol with glob relative_path should find symbols: {:?}",
+        "symbols with glob relative_path should find symbols: {:?}",
         result
     );
 }
 
 #[tokio::test]
-async fn find_symbol_empty_directory_returns_empty() {
+async fn symbols_empty_directory_returns_empty() {
     let (_dir, ctx) = rich_project_ctx().await;
 
-    let result = FindSymbol
+    let result = Symbols
         .call(json!({ "query": "anything", "path": "src/empty" }), &ctx)
         .await
         .unwrap();
@@ -1577,10 +1574,10 @@ async fn find_symbol_empty_directory_returns_empty() {
 }
 
 #[tokio::test]
-async fn find_symbol_name_path_pattern_in_directory() {
+async fn symbols_name_path_pattern_in_directory() {
     let (_dir, ctx) = rich_project_ctx().await;
 
-    let result = FindSymbol
+    let result = Symbols
         .call(
             json!({ "query": "impl Calculator/compute", "path": "src" }),
             &ctx,
@@ -1591,19 +1588,19 @@ async fn find_symbol_name_path_pattern_in_directory() {
     let symbols = result["symbols"].as_array().unwrap();
     assert!(
         !symbols.is_empty(),
-        "find_symbol with name_path pattern in directory should find symbols: {:?}",
+        "symbols with name_path pattern in directory should find symbols: {:?}",
         result
     );
     assert!(symbols.iter().any(|s| s["name"] == "compute"));
 }
 
 #[tokio::test]
-async fn find_symbol_name_path_pattern_project_wide() {
+async fn symbols_name_path_pattern_project_wide() {
     let (_dir, ctx) = rich_project_ctx().await;
 
     // tree-sitter merges impl methods under the type name directly
     // (no "impl" prefix), so name_path is "Calculator/compute"
-    let result = FindSymbol
+    let result = Symbols
         .call(json!({ "query": "Calculator/compute" }), &ctx)
         .await
         .unwrap();
@@ -1611,7 +1608,7 @@ async fn find_symbol_name_path_pattern_project_wide() {
     let symbols = result["symbols"].as_array().unwrap();
     assert!(
         !symbols.is_empty(),
-        "find_symbol with name_path pattern project-wide should find symbols via tree-sitter: {:?}",
+        "symbols with name_path pattern project-wide should find symbols via tree-sitter: {:?}",
         result
     );
     assert!(symbols.iter().any(|s| s["name"] == "compute"));
@@ -1874,12 +1871,12 @@ fn build_by_file_no_overflow_under_cap() {
 }
 
 #[test]
-fn make_find_symbol_hint_contains_top_file_and_kind_and_offset() {
+fn make_search_symbols_hint_contains_top_file_and_kind_and_offset() {
     let by_file = vec![
         ("src/components/WeeklyGrid.tsx".to_string(), 12usize),
         ("src/screens/Home.tsx".to_string(), 3),
     ];
-    let hint = make_find_symbol_hint(50, &by_file);
+    let hint = make_search_symbols_hint(50, &by_file);
     assert!(
         hint.contains("src/components/WeeklyGrid.tsx"),
         "should show top file path"
@@ -2006,7 +2003,7 @@ fn symbol_to_json_never_includes_source_field() {
 }
 
 #[test]
-fn list_symbols_flat_cap_triggers_on_symbol_with_many_children() {
+fn symbols_overview_flat_cap_triggers_on_symbol_with_many_children() {
     // 20 top-level symbols each with 10 children = 220 flat entries > FLAT_CAP(150).
     // Greedy take: each symbol costs 11 flat entries; 150/11 = 13 symbols fit.
     let symbols: Vec<Value> = (0..20)
@@ -2039,7 +2036,7 @@ fn list_symbols_flat_cap_triggers_on_symbol_with_many_children() {
 }
 
 #[test]
-fn list_symbols_flat_cap_not_triggered_for_leaf_heavy_symbols() {
+fn symbols_overview_flat_cap_not_triggered_for_leaf_heavy_symbols() {
     // 50 top-level leaf symbols (no children) = 50 flat entries — under FLAT_CAP.
     let symbols: Vec<Value> = (0..50)
         .map(|i| json!({ "name": format!("fn{i}") }))
@@ -2050,7 +2047,7 @@ fn list_symbols_flat_cap_not_triggered_for_leaf_heavy_symbols() {
 }
 
 #[test]
-fn list_symbols_single_file_cap_unit() {
+fn symbols_overview_single_file_cap_unit() {
     // Unit test: simulate the cap logic on a Vec<Value> of 150 symbol entries.
     use crate::tools::output::OutputGuard;
     let symbols: Vec<Value> = (0..150)
@@ -2061,7 +2058,7 @@ fn list_symbols_single_file_cap_unit() {
     let total = symbols.len();
     let hint = format!(
         "File has {total} symbols. Use depth=1 for top-level overview, \
-         or find_symbol(name_path='ClassName/methodName', include_body=true) for a specific symbol."
+         or symbols(name_path='ClassName/methodName', include_body=true) for a specific symbol."
     );
     let g = OutputGuard {
         max_results: SINGLE_FILE_CAP,
@@ -2073,7 +2070,7 @@ fn list_symbols_single_file_cap_unit() {
     let ov = overflow.expect("overflow must be present");
     assert_eq!(ov.total, 150);
     assert_eq!(ov.shown, 100);
-    assert!(ov.hint.contains("find_symbol"));
+    assert!(ov.hint.contains("symbols"));
     assert!(ov.hint.contains("symbol"));
     assert!(
         ov.by_file.is_none(),
@@ -2082,7 +2079,7 @@ fn list_symbols_single_file_cap_unit() {
 }
 
 #[test]
-fn list_symbols_single_file_no_overflow_under_cap_unit() {
+fn symbols_overview_single_file_no_overflow_under_cap_unit() {
     use crate::tools::output::OutputGuard;
     let symbols: Vec<Value> = (0..40)
         .map(|i| json!({ "name": format!("sym{i}") }))
@@ -2693,7 +2690,7 @@ fn editing_start_line_trusts_range_when_it_already_covers_docs() {
 /// the `impl` keyword, excluding the outer `#[async_trait]` attribute.
 /// `editing_start_line` must return the `impl` line unchanged — walking back
 /// to include the attribute in the editing range would silently drop it, since
-/// the LLM's `new_body` starts at `impl` (matching what `find_symbol` shows).
+/// the LLM's `new_body` starts at `impl` (matching what `symbols` shows).
 #[test]
 fn editing_start_line_does_not_walk_back_to_outer_attribute_on_impl_block() {
     let sym = crate::lsp::SymbolInfo {
@@ -3977,10 +3974,10 @@ fn hover_multiline_doc() {
     assert!(!result.contains("```"));
 }
 
-// --- format_find_symbol tests ---
+// --- format_search_symbols tests ---
 
 #[test]
-fn find_symbol_no_body() {
+fn symbols_no_body() {
     let val = serde_json::json!({
         "symbols": [
             {
@@ -3996,7 +3993,7 @@ fn find_symbol_no_body() {
         ],
         "total": 2
     });
-    let result = format_find_symbol(&val);
+    let result = format_search_symbols(&val);
     assert!(result.starts_with("2 matches\n"));
     assert!(result.contains("Struct"));
     assert!(result.contains("Function"));
@@ -4007,7 +4004,7 @@ fn find_symbol_no_body() {
 }
 
 #[test]
-fn find_symbol_with_body() {
+fn symbols_with_body() {
     let val = serde_json::json!({
         "symbols": [
             {
@@ -4019,7 +4016,7 @@ fn find_symbol_with_body() {
         ],
         "total": 1
     });
-    let result = format_find_symbol(&val);
+    let result = format_search_symbols(&val);
     assert!(result.starts_with("1 match\n"));
     assert!(result.contains("Function"));
     assert!(result.contains("OutputGuard/cap_items"));
@@ -4029,7 +4026,7 @@ fn find_symbol_with_body() {
 }
 
 #[test]
-fn find_symbol_with_long_body_shows_hint_not_truncated_body() {
+fn symbols_with_long_body_shows_hint_not_truncated_body() {
     // A body > 500 chars should not be inlined — it would get truncated by
     // COMPACT_SUMMARY_MAX_BYTES mid-function, misleading agents into thinking
     // the body is incomplete. Instead, show a navigation hint.
@@ -4049,7 +4046,7 @@ fn find_symbol_with_long_body_shows_hint_not_truncated_body() {
         ],
         "total": 1
     });
-    let result = format_find_symbol(&val);
+    let result = format_search_symbols(&val);
     // Must mention the line count and the extraction path
     assert!(
         result.contains("52-line body"),
@@ -4067,7 +4064,7 @@ fn find_symbol_with_long_body_shows_hint_not_truncated_body() {
 }
 
 #[test]
-fn find_symbol_with_overflow() {
+fn symbols_with_overflow() {
     let val = serde_json::json!({
         "symbols": [
             {
@@ -4083,29 +4080,29 @@ fn find_symbol_with_overflow() {
             "by_file": [["src/a.rs", 50], ["src/b.rs", 30]]
         }
     });
-    let result = format_find_symbol(&val);
+    let result = format_search_symbols(&val);
     assert!(result.contains("20 matches (100 total)"));
     assert!(result.contains("20 of 100"));
     assert!(result.contains("narrow with path="));
 }
 
 #[test]
-fn find_symbol_empty() {
+fn symbols_empty() {
     let val = serde_json::json!({
         "symbols": [],
         "total": 0
     });
-    assert_eq!(format_find_symbol(&val), "0 matches");
+    assert_eq!(format_search_symbols(&val), "0 matches");
 }
 
 #[test]
-fn find_symbol_missing_symbols_key() {
+fn symbols_missing_symbols_key() {
     let val = serde_json::json!({});
-    assert_eq!(format_find_symbol(&val), "");
+    assert_eq!(format_search_symbols(&val), "");
 }
 
 #[test]
-fn find_symbol_alignment() {
+fn symbols_alignment() {
     let val = serde_json::json!({
         "symbols": [
             {
@@ -4121,7 +4118,7 @@ fn find_symbol_alignment() {
         ],
         "total": 2
     });
-    let result = format_find_symbol(&val);
+    let result = format_search_symbols(&val);
     assert!(result.contains("Struct  "));
     assert!(result.contains("Function"));
     assert!(result.contains("src/a.rs:1-5"));
@@ -4129,7 +4126,7 @@ fn find_symbol_alignment() {
 }
 
 #[test]
-fn find_symbol_single_line_location() {
+fn symbols_single_line_location() {
     let val = serde_json::json!({
         "symbols": [
             {
@@ -4140,15 +4137,15 @@ fn find_symbol_single_line_location() {
         ],
         "total": 1
     });
-    let result = format_find_symbol(&val);
+    let result = format_search_symbols(&val);
     assert!(result.contains("src/lib.rs:42"));
     assert!(!result.contains("42-42"));
 }
 
-// --- format_list_symbols tests ---
+// --- format_overview_symbols tests ---
 
 #[test]
-fn list_symbols_file_mode() {
+fn symbols_overview_file_mode() {
     let val = serde_json::json!({
         "file": "src/tools/output.rs",
         "symbols": [
@@ -4166,7 +4163,7 @@ fn list_symbols_file_mode() {
             }
         ]
     });
-    let result = format_list_symbols(&val);
+    let result = format_overview_symbols(&val);
     assert!(result.starts_with("src/tools/output.rs — 2 symbols\n"));
     assert!(result.contains("Enum"));
     assert!(result.contains("OutputMode"));
@@ -4182,7 +4179,7 @@ fn list_symbols_file_mode() {
 }
 
 #[test]
-fn list_symbols_directory_mode() {
+fn symbols_overview_directory_mode() {
     let val = serde_json::json!({
         "directory": "src/tools",
         "files": [
@@ -4201,7 +4198,7 @@ fn list_symbols_directory_mode() {
             }
         ]
     });
-    let result = format_list_symbols(&val);
+    let result = format_overview_symbols(&val);
     assert!(result.starts_with("src/tools\n"));
     assert!(result.contains("src/tools/ast.rs — 1 symbol\n"));
     assert!(result.contains("src/tools/config.rs — 2 symbols\n"));
@@ -4211,7 +4208,7 @@ fn list_symbols_directory_mode() {
 }
 
 #[test]
-fn list_symbols_pattern_mode() {
+fn symbols_overview_pattern_mode() {
     let val = serde_json::json!({
         "pattern": "src/**/*.rs",
         "files": [
@@ -4223,34 +4220,34 @@ fn list_symbols_pattern_mode() {
             }
         ]
     });
-    let result = format_list_symbols(&val);
+    let result = format_overview_symbols(&val);
     assert!(result.starts_with("src/**/*.rs\n"));
     assert!(result.contains("src/main.rs — 1 symbol\n"));
     assert!(result.contains("main"));
 }
 
 #[test]
-fn list_symbols_empty_file() {
+fn symbols_overview_empty_file() {
     let val = serde_json::json!({
         "file": "src/empty.rs",
         "symbols": []
     });
-    let result = format_list_symbols(&val);
+    let result = format_overview_symbols(&val);
     assert!(result.contains("0 symbols"));
 }
 
 #[test]
-fn list_symbols_empty_directory() {
+fn symbols_overview_empty_directory() {
     let val = serde_json::json!({
         "directory": "src/empty",
         "files": []
     });
-    let result = format_list_symbols(&val);
+    let result = format_overview_symbols(&val);
     assert_eq!(result, "src/empty — 0 symbols");
 }
 
 #[test]
-fn list_symbols_with_overflow() {
+fn symbols_overview_with_overflow() {
     let val = serde_json::json!({
         "directory": "src",
         "files": [
@@ -4263,13 +4260,13 @@ fn list_symbols_with_overflow() {
         ],
         "overflow": { "shown": 10, "total": 50, "hint": "Narrow with a more specific glob or file path" }
     });
-    let result = format_list_symbols(&val);
+    let result = format_overview_symbols(&val);
     assert!(result.contains("10 of 50"));
     assert!(result.contains("Narrow with a more specific glob"));
 }
 
 #[test]
-fn list_symbols_children_with_fields() {
+fn symbols_overview_children_with_fields() {
     let val = serde_json::json!({
         "file": "src/model.rs",
         "symbols": [
@@ -4283,7 +4280,7 @@ fn list_symbols_children_with_fields() {
             }
         ]
     });
-    let result = format_list_symbols(&val);
+    let result = format_overview_symbols(&val);
     assert!(!result.contains("Field"));
     assert!(result.contains("port"));
     assert!(result.contains("host"));
@@ -4292,7 +4289,7 @@ fn list_symbols_children_with_fields() {
 }
 
 #[test]
-fn list_symbols_children_with_methods() {
+fn symbols_overview_children_with_methods() {
     let val = serde_json::json!({
         "file": "src/service.rs",
         "symbols": [
@@ -4306,26 +4303,26 @@ fn list_symbols_children_with_methods() {
             }
         ]
     });
-    let result = format_list_symbols(&val);
+    let result = format_overview_symbols(&val);
     assert!(result.contains("Function  new"));
     assert!(result.contains("Function  run"));
 }
 
 #[test]
-fn list_symbols_missing_symbols_key() {
+fn symbols_overview_missing_symbols_key() {
     let val = serde_json::json!({});
-    assert_eq!(format_list_symbols(&val), "");
+    assert_eq!(format_overview_symbols(&val), "");
 }
 
 #[test]
-fn list_symbols_singular_symbol_word() {
+fn symbols_overview_singular_symbol_word() {
     let val = serde_json::json!({
         "file": "src/single.rs",
         "symbols": [
             { "name": "main", "symbol": "main", "kind": "Function", "start_line": 1, "end_line": 5 }
         ]
     });
-    let result = format_list_symbols(&val);
+    let result = format_overview_symbols(&val);
     assert!(result.contains("1 symbol\n"));
     assert!(!result.contains("1 symbols"));
 }
@@ -4401,7 +4398,7 @@ fn format_find_references_five_or_fewer_no_trailer() {
 }
 
 #[tokio::test]
-async fn find_symbol_falls_back_to_document_symbols_on_bad_workspace_range() {
+async fn symbols_falls_back_to_document_symbols_on_bad_workspace_range() {
     use crate::lsp::{mock::MockLspClient, mock::MockLspProvider, SymbolInfo, SymbolKind};
 
     let dir = tempfile::tempdir().unwrap();
@@ -4460,7 +4457,7 @@ async fn find_symbol_falls_back_to_document_symbols_on_bad_workspace_range() {
         )),
     };
 
-    let result = FindSymbol
+    let result = Symbols
         .call(
             json!({
                 "query": "helper",
@@ -4470,7 +4467,7 @@ async fn find_symbol_falls_back_to_document_symbols_on_bad_workspace_range() {
         )
         .await;
 
-    let val = result.expect("find_symbol should recover via document_symbols fallback");
+    let val = result.expect("symbols should recover via document_symbols fallback");
     let symbols = val["symbols"].as_array().expect("symbols array");
     assert_eq!(symbols.len(), 1, "should find exactly one symbol");
 
@@ -4874,7 +4871,7 @@ fn find_matching_symbol_returns_none_when_line_too_far() {
 }
 
 #[tokio::test]
-async fn find_symbol_propagates_error_when_fallback_also_fails() {
+async fn symbols_propagates_error_when_fallback_also_fails() {
     use crate::lsp::{mock::MockLspClient, mock::MockLspProvider, SymbolInfo, SymbolKind};
 
     let dir = tempfile::tempdir().unwrap();
@@ -4920,7 +4917,7 @@ async fn find_symbol_propagates_error_when_fallback_also_fails() {
         )),
     };
 
-    let result = FindSymbol
+    let result = Symbols
         .call(
             json!({
                 "query": "helper",
@@ -5173,7 +5170,7 @@ fn test_ctx_with_agent(agent: Agent) -> ToolContext {
 }
 
 #[tokio::test]
-async fn list_symbols_scope_libraries_includes_library_files() {
+async fn symbols_overview_scope_libraries_includes_library_files() {
     let project_dir = tempdir().unwrap();
     std::fs::create_dir_all(project_dir.path().join(".codescout")).unwrap();
     let lib_dir = tempdir().unwrap();
@@ -5197,7 +5194,7 @@ async fn list_symbols_scope_libraries_includes_library_files() {
     }
 
     let ctx = test_ctx_with_agent(agent);
-    let tool = ListSymbols;
+    let tool = Symbols;
     let result = tool
         .call(json!({"scope": "libraries"}), &ctx)
         .await
@@ -5214,7 +5211,7 @@ async fn list_symbols_scope_libraries_includes_library_files() {
 }
 
 #[tokio::test]
-async fn list_symbols_scope_project_excludes_libraries() {
+async fn symbols_overview_scope_project_excludes_libraries() {
     let project_dir = tempdir().unwrap();
     std::fs::create_dir_all(project_dir.path().join(".codescout")).unwrap();
     let lib_dir = tempdir().unwrap();
@@ -5238,7 +5235,7 @@ async fn list_symbols_scope_project_excludes_libraries() {
     }
 
     let ctx = test_ctx_with_agent(agent);
-    let tool = ListSymbols;
+    let tool = Symbols;
     let result = tool.call(json!({"scope": "project"}), &ctx).await.unwrap();
 
     let empty = vec![];
@@ -5254,7 +5251,7 @@ async fn list_symbols_scope_project_excludes_libraries() {
 }
 
 #[tokio::test]
-async fn find_symbol_scope_libraries_searches_library_dirs() {
+async fn symbols_scope_libraries_searches_library_dirs() {
     let project_dir = tempdir().unwrap();
     std::fs::create_dir_all(project_dir.path().join(".codescout")).unwrap();
     let lib_dir = tempdir().unwrap();
@@ -5281,7 +5278,7 @@ async fn find_symbol_scope_libraries_searches_library_dirs() {
     }
 
     let ctx = test_ctx_with_agent(agent);
-    let tool = FindSymbol;
+    let tool = Symbols;
     let result = tool
         .call(
             json!({
@@ -5304,7 +5301,7 @@ async fn find_symbol_scope_libraries_searches_library_dirs() {
 }
 
 #[tokio::test]
-async fn find_symbol_scope_all_searches_both() {
+async fn symbols_scope_all_searches_both() {
     let project_dir = tempdir().unwrap();
     std::fs::create_dir_all(project_dir.path().join(".codescout")).unwrap();
     let lib_dir = tempdir().unwrap();
@@ -5328,7 +5325,7 @@ async fn find_symbol_scope_all_searches_both() {
     }
 
     let ctx = test_ctx_with_agent(agent);
-    let tool = FindSymbol;
+    let tool = Symbols;
     let result = tool
         .call(
             json!({
@@ -5353,7 +5350,7 @@ async fn find_symbol_scope_all_searches_both() {
 }
 
 #[tokio::test]
-async fn find_symbol_scope_project_default_excludes_libraries() {
+async fn symbols_scope_project_default_excludes_libraries() {
     let project_dir = tempdir().unwrap();
     std::fs::create_dir_all(project_dir.path().join(".codescout")).unwrap();
     let lib_dir = tempdir().unwrap();
@@ -5377,7 +5374,7 @@ async fn find_symbol_scope_project_default_excludes_libraries() {
     }
 
     let ctx = test_ctx_with_agent(agent);
-    let tool = FindSymbol;
+    let tool = Symbols;
     let result = tool
         .call(
             json!({
@@ -5400,9 +5397,9 @@ async fn find_symbol_scope_project_default_excludes_libraries() {
     }
 }
 
-/// find_symbol with multiple matches returns all of them.
+/// symbols with multiple matches returns all of them.
 #[tokio::test]
-async fn find_symbol_with_multiple_matches_returns_all() {
+async fn symbols_with_multiple_matches_returns_all() {
     let dir = tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("src/a")).unwrap();
     std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
@@ -5435,7 +5432,7 @@ async fn find_symbol_with_multiple_matches_returns_all() {
         )),
     };
 
-    let result = FindSymbol
+    let result = Symbols
         .call(json!({ "query": "process" }), &ctx)
         .await
         .unwrap();
@@ -5454,13 +5451,13 @@ async fn find_symbol_with_multiple_matches_returns_all() {
 }
 
 #[tokio::test]
-async fn find_symbol_rejects_regex_alternation() {
+async fn symbols_rejects_regex_alternation() {
     let dir = tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
     let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
     let ctx = test_ctx_with_agent(agent);
 
-    let err = FindSymbol
+    let err = Symbols
         .call(json!({"query": "foo|bar"}), &ctx)
         .await
         .unwrap_err();
@@ -5481,13 +5478,13 @@ async fn find_symbol_rejects_regex_alternation() {
 }
 
 #[tokio::test]
-async fn find_symbol_rejects_regex_wildcard() {
+async fn symbols_rejects_regex_wildcard() {
     let dir = tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
     let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
     let ctx = test_ctx_with_agent(agent);
 
-    let err = FindSymbol
+    let err = Symbols
         .call(json!({"query": "foo.*bar"}), &ctx)
         .await
         .unwrap_err();
@@ -5501,25 +5498,25 @@ async fn find_symbol_rejects_regex_wildcard() {
 }
 
 #[tokio::test]
-async fn find_symbol_allows_plain_pattern() {
+async fn symbols_allows_plain_pattern() {
     let dir = tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
     std::fs::write(dir.path().join("test.rs"), "fn my_function() {}\n").unwrap();
     let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
     let ctx = test_ctx_with_agent(agent);
 
-    let result = FindSymbol.call(json!({"query": "my_function"}), &ctx).await;
+    let result = Symbols.call(json!({"query": "my_function"}), &ctx).await;
     assert!(result.is_ok(), "plain pattern should not be rejected");
 }
 
 #[tokio::test]
-async fn find_symbol_allows_name_path_with_regex_chars() {
+async fn symbols_allows_name_path_with_regex_chars() {
     let dir = tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
     let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
     let ctx = test_ctx_with_agent(agent);
 
-    let result = FindSymbol.call(json!({"symbol": "foo|bar"}), &ctx).await;
+    let result = Symbols.call(json!({"symbol": "foo|bar"}), &ctx).await;
     assert!(
         result.is_ok(),
         "name_path should skip regex check, got err: {:?}",
@@ -5675,7 +5672,7 @@ fn ast_class_names_for_dir_does_not_recurse_into_subdirs() {
 }
 
 #[tokio::test]
-async fn list_symbols_nested_dir_returns_overview_mode() {
+async fn symbols_overview_nested_dir_returns_overview_mode() {
     let dir = tempdir().unwrap();
     let root = dir.path();
     std::fs::create_dir_all(root.join(".codescout")).unwrap();
@@ -5688,10 +5685,7 @@ async fn list_symbols_nested_dir_returns_overview_mode() {
     }
     let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
     let ctx = test_ctx_with_agent(agent);
-    let result = ListSymbols
-        .call(json!({ "path": "." }), &ctx)
-        .await
-        .unwrap();
+    let result = Symbols.call(json!({ "path": "." }), &ctx).await.unwrap();
 
     // 40 files in two subdirs → class_overview (31–80 range)
     assert_eq!(result["mode"].as_str(), Some("class_overview"));
@@ -5713,7 +5707,7 @@ async fn list_symbols_nested_dir_returns_overview_mode() {
 }
 
 #[tokio::test]
-async fn list_symbols_force_mode_symbols_bypasses_threshold() {
+async fn symbols_overview_force_mode_symbols_bypasses_threshold() {
     let dir = tempdir().unwrap();
     let root = dir.path();
     std::fs::create_dir_all(root.join(".codescout")).unwrap();
@@ -5725,7 +5719,7 @@ async fn list_symbols_force_mode_symbols_bypasses_threshold() {
     }
     let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
     let ctx = test_ctx_with_agent(agent);
-    let result = ListSymbols
+    let result = Symbols
         .call(json!({ "path": ".", "force_mode": "symbols" }), &ctx)
         .await
         .unwrap();

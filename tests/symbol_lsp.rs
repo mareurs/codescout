@@ -6,7 +6,7 @@
 
 use codescout::agent::Agent;
 use codescout::lsp::{MockLspClient, MockLspProvider, SymbolInfo, SymbolKind};
-use codescout::tools::symbol::{FindSymbol, InsertCode, RemoveSymbol, ReplaceSymbol, SymbolAt};
+use codescout::tools::symbol::{InsertCode, RemoveSymbol, ReplaceSymbol, SymbolAt, Symbols};
 use codescout::tools::{Tool, ToolContext};
 use serde_json::json;
 
@@ -276,10 +276,10 @@ async fn replace_symbol_rejects_truncated_end_line() {
     );
 }
 
-// ── Read/write symmetry: find_symbol body → replace_symbol round-trip ────────
+// ── Read/write symmetry: symbols body → replace_symbol round-trip ────────
 
-/// Round-trip: find_symbol(include_body) → modify → replace_symbol preserves attributes.
-/// This is the bug that motivated the full-range body change: find_symbol returned
+/// Round-trip: symbols(include_body) → modify → replace_symbol preserves attributes.
+/// This is the bug that motivated the full-range body change: symbols returned
 /// body from start_line (no attributes), but replace_symbol replaced from
 /// editing_start_line (with attributes), consuming #[test] etc.
 #[tokio::test]
@@ -300,7 +300,7 @@ async fn replace_symbol_round_trip_preserves_attributes() {
     .await;
 
     // Step 1: Read the symbol body (simulates what the agent does)
-    let find_result = FindSymbol
+    let find_result = Symbols
         .call(
             json!({
                 "symbol": "target",
@@ -316,7 +316,7 @@ async fn replace_symbol_round_trip_preserves_attributes() {
     let body = find_result["symbols"][0]["body"].as_str().unwrap();
     assert!(
         body.contains("#[test]"),
-        "find_symbol body should include attribute; got:\n{body}"
+        "symbols body should include attribute; got:\n{body}"
     );
 
     // Step 2: Agent modifies the body (changes old_body to new_body, keeps attrs)
@@ -370,7 +370,7 @@ async fn replace_symbol_round_trip_preserves_python_decorator() {
     })
     .await;
 
-    let find_result = FindSymbol
+    let find_result = Symbols
         .call(
             json!({
                 "symbol": "target",
@@ -431,7 +431,7 @@ async fn replace_symbol_round_trip_preserves_java_annotation() {
     })
     .await;
 
-    let find_result = FindSymbol
+    let find_result = Symbols
         .call(
             json!({
                 "symbol": "target",
@@ -497,7 +497,7 @@ async fn replace_symbol_round_trip_no_attributes() {
     })
     .await;
 
-    let find_result = FindSymbol
+    let find_result = Symbols
         .call(
             json!({
                 "symbol": "target",
@@ -851,7 +851,7 @@ async fn replace_symbol_round_trip_agent_changes_attribute() {
     })
     .await;
 
-    let find_result = FindSymbol
+    let find_result = Symbols
         .call(
             json!({
                 "symbol": "target",
@@ -910,7 +910,7 @@ async fn replace_symbol_round_trip_agent_changes_doc_comment() {
     })
     .await;
 
-    let find_result = FindSymbol
+    let find_result = Symbols
         .call(
             json!({
                 "symbol": "target",
@@ -1011,9 +1011,9 @@ async fn insert_code_before_with_range_start_line_inserts_above_attribute() {
     );
 }
 
-/// find_symbol body_start_line field present and correct in integration context.
+/// symbols body_start_line field present and correct in integration context.
 #[tokio::test]
-async fn find_symbol_body_start_line_field_with_attributes() {
+async fn symbols_body_start_line_field_with_attributes() {
     let src = "#[test]\n/// doc\nfn target() {\n    body();\n}\n";
 
     let (_dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
@@ -1023,7 +1023,7 @@ async fn find_symbol_body_start_line_field_with_attributes() {
     })
     .await;
 
-    let result = FindSymbol
+    let result = Symbols
         .call(
             json!({
                 "symbol": "target",
@@ -1056,9 +1056,9 @@ async fn find_symbol_body_start_line_field_with_attributes() {
     );
 }
 
-/// find_symbol without include_body should NOT have body_start_line.
+/// symbols without include_body should NOT have body_start_line.
 #[tokio::test]
-async fn find_symbol_no_body_start_line_without_include_body() {
+async fn symbols_no_body_start_line_without_include_body() {
     let src = "#[test]\nfn target() {}\n";
 
     let (_dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
@@ -1068,7 +1068,7 @@ async fn find_symbol_no_body_start_line_without_include_body() {
     })
     .await;
 
-    let result = FindSymbol
+    let result = Symbols
         .call(
             json!({
                 "symbol": "target",
@@ -1617,7 +1617,7 @@ async fn remove_symbol_range_start_line_excludes_doc_comment() {
     );
 }
 
-// ── find_symbol: name_path exact match (BUG-011) ──────────────────────────────
+// ── symbols: name_path exact match (BUG-011) ──────────────────────────────
 
 /// Searching by name_path must return only the exact symbol, not child symbols
 /// whose name_path happens to contain the query as a substring.
@@ -1625,7 +1625,7 @@ async fn remove_symbol_range_start_line_excludes_doc_comment() {
 /// Regression for BUG-011: `collect_matching` used `contains()`, so a Variable
 /// child with name_path "my_fn/local_var" matched a query for "my_fn".
 #[tokio::test]
-async fn find_symbol_name_path_does_not_return_local_variable_children() {
+async fn symbols_name_path_does_not_return_local_variable_children() {
     use codescout::lsp::SymbolKind;
 
     let src = "fn my_fn() {\n    let local_var = 1;\n}\n";
@@ -1660,7 +1660,7 @@ async fn find_symbol_name_path_does_not_return_local_variable_children() {
     })
     .await;
 
-    let result = FindSymbol
+    let result = Symbols
         .call(
             json!({
                 "symbol": "my_fn",

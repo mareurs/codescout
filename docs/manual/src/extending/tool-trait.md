@@ -12,7 +12,7 @@ Defined in `src/tools/mod.rs`:
 ```rust
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
-    /// Tool name as exposed over MCP (e.g. "find_symbol").
+    /// Tool name as exposed over MCP (e.g. "symbols").
     /// Must be unique across all registered tools.
     fn name(&self) -> &str;
 
@@ -38,7 +38,7 @@ the tool. Must be unique across all registered tools — the
 `tool_names_are_unique` test enforces this.
 
 Convention: `snake_case`, matching the struct name in lowercase
-(e.g. `FindSymbol` -> `"find_symbol"`).
+(e.g. `Symbols` -> `"symbols"`).
 
 ### `description()`
 

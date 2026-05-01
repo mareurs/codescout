@@ -1,4 +1,8 @@
-//! `find_symbol` — find symbols by name pattern across the project.
+//! `symbols` — symbol navigation by name search and/or file/dir overview.
+//!
+//! Path-only-no-name → file/dir overview (formerly `list_symbols`).
+//! Name search → matching symbols (formerly `find_symbol`).
+//! Both → scoped name search.
 
 use std::path::PathBuf;
 
@@ -11,7 +15,8 @@ use crate::tools::{
     is_regex_like, optional_bool_param, optional_u64_param, RecoverableError, Tool, ToolContext,
 };
 
-use super::display::format_find_symbol;
+use super::display::{format_overview_symbols, format_search_symbols};
+use super::list_overview::list_overview;
 use super::path_helpers::{
     format_library_path, get_path_param, is_glob, resolve_glob, resolve_library_roots, LspTimer,
 };
@@ -20,7 +25,7 @@ use crate::symbol::query::{
     symbol_to_json, validate_symbol_range,
 };
 
-pub struct FindSymbol;
+pub struct Symbols;
 
 const FIND_SYMBOL_MAX_RESULTS: usize = 50;
 const BY_FILE_CAP: usize = 15;
@@ -41,9 +46,9 @@ pub(super) fn build_by_file(matches: &[Value]) -> (Vec<(String, usize)>, usize) 
     (sorted, overflow)
 }
 
-/// Build the actionable overflow hint for find_symbol. Uses the top file from by_file
+/// Build the actionable overflow hint for symbols search. Uses the top file from by_file
 /// as the concrete example path so the hint is copy-paste ready.
-pub(super) fn make_find_symbol_hint(shown: usize, by_file: &[(String, usize)]) -> String {
+pub(super) fn make_search_symbols_hint(shown: usize, by_file: &[(String, usize)]) -> String {
     let top_file = by_file
         .first()
         .map(|(f, _)| f.as_str())
@@ -57,56 +62,69 @@ pub(super) fn make_find_symbol_hint(shown: usize, by_file: &[(String, usize)]) -
 }
 
 #[async_trait::async_trait]
-impl Tool for FindSymbol {
+impl Tool for Symbols {
     fn name(&self) -> &str {
-        "find_symbol"
+        "symbols"
     }
     fn description(&self) -> &str {
-        "Find symbols by name pattern across the project. Returns matching symbols with location."
+        "Symbol navigation. Path only \u{2192} file/dir overview. name/query/symbol \u{2192} search across project. Both \u{2192} scoped search."
     }
 
     fn long_docs(&self) -> Option<&str> {
         Some(
             "## When to use\n\
              \n\
-             - Know the name → use `find_symbol` (substring match on symbol names).\n\
-             - Know the concept → use `semantic_search` first, then drill into symbols.\n\
-             - Need all symbols in a file → use `list_symbols` instead.\n\
+             - Browse a file/directory \u{2192} pass only `path` (overview mode, formerly `list_symbols`).\n\
+             - Know the name \u{2192} pass `name`/`query` (substring match on symbol names).\n\
+             - Pinpoint a specific symbol \u{2192} pass `symbol`/`name_path` (exact name-path).\n\
+             - Know the concept \u{2192} use `semantic_search` first, then drill into symbols.\n\
              \n\
              ## Key parameters\n\
              \n\
-             - `query`: substring match (e.g. `\"handle\"` finds `handle_request`, `handle_error`).\n\
-             - `symbol`: exact name-path (e.g. `\"MyStruct/my_method\"`) — skips substring search, ignores `kind`.\n\
+             - `name` / `query`: substring match (e.g. `\"handle\"` finds `handle_request`, `handle_error`).\n\
+             - `symbol` / `name_path`: exact name-path (e.g. `\"MyStruct/my_method\"`) — skips substring search, ignores `kind`.\n\
              - `kind`: filter to `function`, `struct`, `interface`, `enum`, `module`, `constant`, `type`, `class`.\n\
              - `include_body=true`: returns full source of each match.\n\
-             - `path`: restrict to a file or glob (e.g. `\"src/tools/**/*.rs\"`).\n\
+             - `path`: file, directory, or glob. Without a name argument, returns an overview of that path.\n\
+             - `depth`: children depth (overview default 1, search default 0).\n\
+             - `include_docs=true` (overview only): attach tree-sitter docstrings to each symbol.\n\
              \n\
              ## Output and pagination\n\
              \n\
-             Exploring mode returns up to 50 results with a `by_file` distribution map.\n\
+             Search mode returns up to 50 results with a `by_file` distribution map.\n\
+             Overview mode returns a file-by-file or directory map response.\n\
              Use `detail_level=\"full\"` + `offset`/`limit` to page through large result sets.\n\
              \n\
              ## Gotchas\n\
              \n\
              - Regex patterns are rejected — use plain substrings. Use `grep` for text search.\n\
-             - `kind` is ignored when `symbol` (name-path) is provided.\n\
+             - `kind` is ignored when `symbol`/`name_path` is provided.\n\
              - LSP must be running for body extraction; tree-sitter fallback gives signatures only.",
         )
     }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
+            "description": "Path only \u{2192} file/dir overview (formerly list_symbols). Name \u{2192} search (formerly find_symbol). Both \u{2192} scoped search.",
             "properties": {
-                "query": { "type": "string", "description": "Symbol name or substring to search for" },
-                "symbol": { "type": "string", "description": "Symbol identifier (e.g. 'MyStruct/my_method'). Alternative to query." },
-                "path": { "type": "string", "description": "File or glob to restrict search (e.g. 'src/**/*.rs')" },
+                "name": { "type": "string", "description": "Substring or exact symbol name (alias of query)." },
+                "query": { "type": "string", "description": "Symbol name or substring to search for." },
+                "symbol": { "type": "string", "description": "Exact name-path (e.g. 'MyStruct/my_method'). Alternative to query." },
+                "name_path": { "type": "string", "description": "Hierarchical path like 'Class/method' (alias of symbol)." },
+                "path": { "type": "string", "description": "File, directory, or glob. Without a name argument, returns an overview of that path." },
                 "kind": {
                     "type": "string",
-                    "description": "Filter by kind (interface = Rust traits).",
+                    "description": "Filter by kind (interface = Rust traits). Ignored when name_path is given.",
                     "enum": ["function", "class", "struct", "interface", "type", "enum", "module", "constant"]
                 },
                 "include_body": { "type": "boolean", "default": false },
-                "depth": { "type": "integer", "default": 0, "description": "Children depth to include" },
+                "depth": { "type": "integer", "description": "Children depth (overview default 1; search default 0)." },
+                "include_docs": { "type": "boolean", "default": false, "description": "Overview only: include tree-sitter docstrings." },
+                "force_mode": {
+                    "type": "string",
+                    "enum": ["auto", "symbols"],
+                    "description": "Overview only: 'symbols' forces full symbol output regardless of directory size. Default: 'auto'."
+                },
                 "detail_level": { "type": "string", "description": "'full' for bodies (default: compact)" },
                 "offset": { "type": "integer", "description": "Pagination offset" },
                 "limit": { "type": "integer", "description": "Max results (default 50)" },
@@ -115,10 +133,21 @@ impl Tool for FindSymbol {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
+        // Path-only-no-name overview path (formerly list_symbols).
+        // Dispatch to overview when no name argument was provided.
+        let has_name_arg = input["query"].is_string()
+            || input["symbol"].is_string()
+            || input["name"].is_string()
+            || input["name_path"].is_string();
+        if !has_name_arg {
+            return list_overview(input, ctx).await;
+        }
+
         let pattern = input["query"]
             .as_str()
             .or_else(|| input["symbol"].as_str())
             .or_else(|| input["name"].as_str()) // common LLM alias
+            .or_else(|| input["name_path"].as_str())
             .ok_or_else(|| {
                 // List the keys the LLM actually sent so it can self-correct.
                 let got_keys: Vec<&str> = input
@@ -138,15 +167,15 @@ impl Tool for FindSymbol {
                 )
             })?;
         let mut guard = OutputGuard::from_input(&input);
-        // find_symbol uses a tighter exploring cap than the default 200.
+        // Search uses a tighter exploring cap than the default 200.
         if matches!(guard.mode, OutputMode::Exploring) {
             guard.max_results = FIND_SYMBOL_MAX_RESULTS;
         }
 
         // kind filter only applies to pattern-based searches, not exact name_path lookups.
-        let is_name_path = input["symbol"].is_string();
+        let is_name_path = input["symbol"].is_string() || input["name_path"].is_string();
 
-        // Reject regex-like patterns early — find_symbol does substring matching,
+        // Reject regex-like patterns early — symbols(name=...) does substring matching,
         // not regex. Point the LLM to grep instead.
         if !is_name_path && is_regex_like(pattern) {
             let trigger = if pattern.contains('|') {
@@ -161,10 +190,10 @@ impl Tool for FindSymbol {
             return Err(RecoverableError::with_hint(
                 format!(
                     "pattern looks like a regex (found {trigger}) — \
-                     find_symbol searches symbol names, not text"
+                     symbols searches symbol names, not text"
                 ),
                 "Use grep(pattern=\"...\") for regex text search, \
-                 or make separate find_symbol calls for each symbol name",
+                 or make separate symbols calls for each symbol name",
             )
             .into());
         }
@@ -203,7 +232,7 @@ impl Tool for FindSymbol {
             } else {
                 let full = root.join(rel);
                 if full.is_dir() {
-                    // Walk directory to find source files (same pattern as ListSymbols)
+                    // Walk directory to find source files
                     let walker = ignore::WalkBuilder::new(&full)
                         .hidden(true)
                         .git_ignore(true)
@@ -462,7 +491,7 @@ impl Tool for FindSymbol {
         // Build by_file distribution from the full result set BEFORE truncation.
         let (by_file_entries, by_file_overflow_count) = build_by_file(&matches);
         let hint = if matches.len() > guard.max_results {
-            make_find_symbol_hint(guard.max_results, &by_file_entries)
+            make_search_symbols_hint(guard.max_results, &by_file_entries)
         } else {
             String::from("Restrict with a file path or glob pattern")
         };
@@ -473,7 +502,7 @@ impl Tool for FindSymbol {
                 ov.by_file = Some(by_file_entries);
                 ov.by_file_overflow = by_file_overflow_count;
                 // Rewrite hint with the real `shown` value now we know it.
-                ov.hint = make_find_symbol_hint(ov.shown, ov.by_file.as_deref().unwrap_or(&[]));
+                ov.hint = make_search_symbols_hint(ov.shown, ov.by_file.as_deref().unwrap_or(&[]));
             }
         }
 
@@ -486,7 +515,7 @@ impl Tool for FindSymbol {
                     obj.remove("body");
                     obj.insert(
                         "body_omitted".to_string(),
-                        json!("use find_symbol with symbol for full body"),
+                        json!("use symbols with symbol for full body"),
                     );
                 }
             }
@@ -501,7 +530,16 @@ impl Tool for FindSymbol {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(format_find_symbol(result))
+        // Overview-mode responses use `directory` or `pattern` keys, or have a
+        // `files` array. Search-mode responses are `{ symbols: [...] }`.
+        let is_overview = result.get("directory").is_some()
+            || result.get("pattern").is_some()
+            || result.get("files").is_some();
+        if is_overview {
+            Some(format_overview_symbols(result))
+        } else {
+            Some(format_search_symbols(result))
+        }
     }
 
     fn json_path_hint(&self, val: &Value) -> String {

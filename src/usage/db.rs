@@ -437,7 +437,7 @@ mod tests {
         let (_dir, conn) = tmp();
         write_record(
             &conn,
-            "find_symbol",
+            "symbols",
             42,
             "success",
             false,
@@ -491,7 +491,7 @@ mod tests {
         let (_dir, conn) = tmp();
         write_record(
             &conn,
-            "list_symbols",
+            "references",
             80,
             "success",
             true,
@@ -569,18 +569,18 @@ mod tests {
     #[test]
     fn query_stats_counts_correctly() {
         let (_dir, conn) = tmp();
-        insert_call(&conn, "find_symbol", 100, "success", false);
-        insert_call(&conn, "find_symbol", 200, "success", false);
-        insert_call(&conn, "find_symbol", 300, "error", false);
+        insert_call(&conn, "symbols", 100, "success", false);
+        insert_call(&conn, "symbols", 200, "success", false);
+        insert_call(&conn, "symbols", 300, "error", false);
         insert_call(&conn, "semantic_search", 500, "success", true);
 
         let stats = query_stats(&conn, "30d").unwrap();
         assert_eq!(stats.total_calls, 4);
         assert_eq!(stats.by_tool.len(), 2);
 
-        // find_symbol should be first (3 calls > 1)
+        // symbols should be first (3 calls > 1)
         let fs = &stats.by_tool[0];
-        assert_eq!(fs.tool, "find_symbol");
+        assert_eq!(fs.tool, "symbols");
         assert_eq!(fs.calls, 3);
         assert_eq!(fs.errors, 1);
         assert_eq!(fs.overflows, 0);
@@ -595,7 +595,7 @@ mod tests {
         let (_dir, conn) = tmp();
         // Insert 10 calls with known latencies 10..100ms
         for i in 1..=10 {
-            insert_call(&conn, "find_symbol", i * 10, "success", false);
+            insert_call(&conn, "symbols", i * 10, "success", false);
         }
         let stats = query_stats(&conn, "30d").unwrap();
         let fs = &stats.by_tool[0];
@@ -628,7 +628,7 @@ mod tests {
         let (_dir, conn) = tmp();
         write_record(
             &conn,
-            "find_symbol",
+            "symbols",
             50,
             "success",
             false,
@@ -656,7 +656,7 @@ mod tests {
         .unwrap();
         write_record(
             &conn,
-            "list_symbols",
+            "references",
             30,
             "recoverable_error",
             false,
@@ -672,7 +672,7 @@ mod tests {
         let errors = recent_errors(&conn, 10).unwrap();
         assert_eq!(errors.len(), 2);
         // Most recent first
-        assert_eq!(errors[0].tool, "list_symbols");
+        assert_eq!(errors[0].tool, "references");
         assert_eq!(errors[1].tool, "semantic_search");
     }
 
@@ -831,7 +831,7 @@ mod tests {
         let (_dir, conn) = tmp();
         write_record(
             &conn,
-            "find_symbol",
+            "symbols",
             42,
             "error",
             false,
@@ -861,17 +861,7 @@ mod tests {
     fn write_record_traceability_fields_nullable() {
         let (_dir, conn) = tmp();
         write_record(
-            &conn,
-            "find_symbol",
-            42,
-            "success",
-            false,
-            None,
-            "abc1234",
-            None,
-            "sess-1",
-            None,
-            None,
+            &conn, "symbols", 42, "success", false, None, "abc1234", None, "sess-1", None, None,
         )
         .unwrap();
         let (ps, inp, out): (Option<String>, Option<String>, Option<String>) = conn

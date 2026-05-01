@@ -86,7 +86,7 @@ pub(crate) async fn fetch_definition(ctx: &ToolContext, input: &Value) -> anyhow
                 line_1,
                 full_path.display()
             ),
-            "Check the line number — use list_symbols or grep to find correct lines",
+            "Check the line number — use symbols(path) or grep to find correct lines",
         )
     })?;
 
@@ -134,7 +134,7 @@ pub(crate) async fn fetch_definition(ctx: &ToolContext, input: &Value) -> anyhow
             "from": from,
             "hint": "no definition resolvable at this position — LSP couldn't bind the symbol. \
                      Verify the cursor is on a symbol name (or pass `col`), \
-                     or use find_symbol for name-based lookup.",
+                     or use symbols(name=...) for name-based lookup.",
         }));
     }
 
@@ -211,7 +211,7 @@ pub(crate) async fn fetch_hover(ctx: &ToolContext, input: &Value) -> anyhow::Res
                 line_1,
                 full_path.display()
             ),
-            "Check the line number — use list_symbols or grep to find correct lines",
+            "Check the line number — use symbols(path) or grep to find correct lines",
         )
     })?;
 
@@ -279,7 +279,7 @@ pub(crate) async fn fetch_hover(ctx: &ToolContext, input: &Value) -> anyhow::Res
                 "content": null,
                 "location": location,
                 "hint": "no hover info at this position — LSP has no type/doc info. \
-                         Re-verify line/col via list_symbols, or use find_symbol for name-based lookup.",
+                         Re-verify line/col via symbols(path), or use symbols(name=...) for name-based lookup.",
             });
             if source_tag != "project" {
                 result["source"] = json!(source_tag);
@@ -307,7 +307,7 @@ impl Tool for SymbolAt {
             "### Workflow: Dependency Tracing — \"How does data flow from A to B?\"\n\n\
              | Step | Tool | Purpose |\n\
              |------|------|---------|\n\
-             | 1 | `find_symbol(entry_point)` | Locate starting function |\n\
+             | 1 | `symbols(name=entry_point)` | Locate starting function |\n\
              | 2 | `symbol_at` with `fields: [\"def\"]` on called functions | Follow the call chain forward |\n\
              | 3 | `symbol_at` with `fields: [\"hover\"]` on parameters/return values | See resolved types at each stage |\n\
              | 4 | `references` at destination | Confirm which callers reach this point |",
@@ -321,7 +321,7 @@ impl Tool for SymbolAt {
             "properties": {
                 "path": { "type": "string", "description": "File path (relative or absolute)" },
                 "line": { "type": "integer", "description": "1-indexed line number" },
-                "col": { "type": "integer", "description": "1-indexed column. Preferred — LSP-native, no identifier-mismatch risk. When known (e.g. from list_symbols), pass directly." },
+                "col": { "type": "integer", "description": "1-indexed column. Preferred — LSP-native, no identifier-mismatch risk. When known (e.g. from symbols), pass directly." },
                 "identifier": { "type": "string", "description": "Optional fallback when col not known. The substring is searched on the line; mismatch errors. Prefer col." },
                 "fields": {
                     "type": "array",

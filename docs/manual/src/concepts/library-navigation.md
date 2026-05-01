@@ -1,7 +1,7 @@
 # Library Navigation
 
 Library navigation lets you explore third-party dependency source code using the
-same symbol tools you use for your own project — `find_symbol`, `list_symbols`,
+same symbol tools you use for your own project — `symbols`, `symbols`,
 `symbol_at`, `semantic_search` — without switching contexts or manually
 locating package directories.
 

@@ -20,7 +20,7 @@ Results are capped at **200 items** (or 200 files for directory-spanning tools).
 If more results exist, the response includes an `overflow` object explaining
 what was omitted and how to narrow the query.
 
-**Example — exploring mode response for `list_symbols`:**
+**Example — exploring mode response for `symbols`:**
 
 ```json
 {
@@ -51,7 +51,7 @@ Results are paginated via `offset` and `limit` (default page size: **50**).
 The first page starts at `offset: 0`. Subsequent pages use the `next_offset`
 value from the overflow object.
 
-**Example — focused mode response for `find_symbol`:**
+**Example — focused mode response for `symbols`:**
 
 ```json
 {
@@ -74,7 +74,7 @@ Pass `detail_level: "full"` to any tool that supports it:
 
 ```json
 {
-  "tool": "find_symbol",
+  "tool": "symbols",
   "arguments": {
     "pattern": "verify_token",
     "relative_path": "src/services/auth.rs",
@@ -86,7 +86,7 @@ Pass `detail_level: "full"` to any tool that supports it:
 
 ```json
 {
-  "tool": "list_symbols",
+  "tool": "symbols",
   "arguments": {
     "path": "src/services/",
     "detail_level": "full",
@@ -135,9 +135,9 @@ When `next_offset` is absent (or `null`), you are on the last page.
 **Paginating through results:**
 
 ```json
-{ "tool": "find_symbol", "arguments": { "pattern": "Error", "detail_level": "full", "offset": 0,  "limit": 50 } }
-{ "tool": "find_symbol", "arguments": { "pattern": "Error", "detail_level": "full", "offset": 50, "limit": 50 } }
-{ "tool": "find_symbol", "arguments": { "pattern": "Error", "detail_level": "full", "offset": 100, "limit": 50 } }
+{ "tool": "symbols", "arguments": { "pattern": "Error", "detail_level": "full", "offset": 0,  "limit": 50 } }
+{ "tool": "symbols", "arguments": { "pattern": "Error", "detail_level": "full", "offset": 50, "limit": 50 } }
+{ "tool": "symbols", "arguments": { "pattern": "Error", "detail_level": "full", "offset": 100, "limit": 50 } }
 ```
 
 ## Tools That Support Both Modes
@@ -146,8 +146,8 @@ These tools respect `detail_level`, `offset`, and `limit`:
 
 | Tool | Exploring output | Focused output |
 |------|-----------------|----------------|
-| `list_symbols` | Names, kinds, files, lines | Full symbol trees with bodies |
-| `find_symbol` | Names, kinds, locations | + bodies (when `include_body=true`) |
+| `symbols` | Names, kinds, files, lines | Full symbol trees with bodies |
+| `symbols` | Names, kinds, locations | + bodies (when `include_body=true`) |
 | `references` | Reference locations | Paginated reference list |
 | `list_dir` | File paths | Paginated entries |
 | `search_pattern` | Top matches | Paginated full matches |
@@ -162,7 +162,7 @@ switching:
 |------|-----------|
 | `search_pattern` | Always returns up to `max_results` matches (default: 50) |
 | `find_file` | Always returns up to `max_results` paths (default: 100) |
-| `list_symbols` | Returns all symbols in a file (bounded by nature) |
+| `symbols` | Returns all symbols in a file (bounded by nature) |
 
 For these tools, use their own `limit` or `max_results` parameter to control
 output size. They do not use the `detail_level` / `offset` / `limit` pattern.

@@ -547,7 +547,7 @@ fn split_outside_quotes(s: &str, seps: &[&str]) -> Vec<String> {
 ///
 /// Two-part heuristic: both a blocked command name AND a source file extension must be
 /// present in the command string. Use codescout tools instead:
-/// - `read_file`, `list_symbols`, `find_symbol` for reading
+/// - `read_file`, `symbols` for reading
 /// - `grep` for regex extraction
 ///
 /// Known limits:
@@ -591,13 +591,13 @@ pub fn check_source_file_access(command: &str) -> Option<String> {
     let first_cmd = blocked.split_whitespace().next().unwrap_or("");
     let hint = match first_cmd {
         "sed" | "awk" => {
-            "use read_file(path, start_line, end_line), list_symbols(path), \
-             find_symbol(name, include_body=true), or grep(regex) instead. \
+            "use read_file(path, start_line, end_line), symbols(path), \
+             symbols(name=..., include_body=true), or grep(regex) instead. \
              Re-run with acknowledge_risk: true if you need raw shell access."
         }
         _ => {
-            "use read_file(path, start_line, end_line) or list_symbols(path) + \
-             find_symbol(name, include_body=true) instead. \
+            "use read_file(path, start_line, end_line) or symbols(path) + \
+             symbols(name=..., include_body=true) instead. \
              Re-run with acknowledge_risk: true if you need raw shell access."
         }
     };
@@ -1058,8 +1058,7 @@ mod tests {
             "grep",
             "glob",
             "read_markdown",
-            "find_symbol",
-            "list_symbols",
+            "symbols",
             "list_functions",
             "onboarding",
             "activate_project",
@@ -1250,11 +1249,11 @@ mod tests {
     }
 
     #[test]
-    fn source_file_access_hint_mentions_list_symbols() {
+    fn source_file_access_hint_mentions_symbols() {
         let hint = check_source_file_access("head -5 lib.rs").unwrap();
         assert!(
-            hint.contains("list_symbols"),
-            "hint should mention list_symbols, got: {hint}"
+            hint.contains("symbols"),
+            "hint should mention symbols, got: {hint}"
         );
     }
 

@@ -541,7 +541,7 @@ impl Availability {
 /// A single MCP tool exposed to the LLM.
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
-    /// Tool name as exposed over MCP (e.g. "find_symbol")
+    /// Tool name as exposed over MCP (e.g. "symbols")
     fn name(&self) -> &str;
 
     /// Short description shown to the LLM
@@ -608,7 +608,7 @@ pub trait Tool: Send + Sync {
     /// Used to build a specific, actionable hint when the tool result is stored
     /// in an `@tool_*` buffer. The default (`"$.field"`) is a generic placeholder;
     /// override to guide agents directly to the right extraction path (e.g.
-    /// `"$.symbols[0].body"` for `find_symbol` with `include_body=true`).
+    /// `"$.symbols[0].body"` for `symbols` with `include_body=true`).
     fn json_path_hint(&self, _val: &Value) -> String {
         "$.field".to_string()
     }
@@ -664,7 +664,7 @@ pub trait Tool: Send + Sync {
 
 /// Returns true if the input looks like it was intended as a regex pattern
 /// rather than a plain symbol name or literal text.
-// Used by find_symbol and search_pattern.
+// Used by symbols and search_pattern.
 pub(crate) fn is_regex_like(s: &str) -> bool {
     // Alternation: `foo|bar` but not `|leading` or `trailing|`
     if s.contains('|') {

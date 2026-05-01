@@ -21,7 +21,7 @@ This information was previously invisible to the embedding model — chunks were
 ## When it won't help
 
 - Queries that don't map to any code structure (cross-file architectural questions)
-- Bare symbol lookups — use `find_symbol` instead, it's exact
+- Bare symbol lookups — use `symbols` instead, it's exact
 
 ## Schema migration
 

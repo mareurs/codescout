@@ -166,7 +166,7 @@ via `libc::kill`, ensuring cleanup even if the graceful path is bypassed.
 Tree-sitter provides offline parsing that works without a language server. It
 is faster than LSP for simple structural queries and has zero startup cost.
 
-The AST engine is used internally for richer symbol extraction and semantic chunking. It is not exposed as a standalone tool — use `list_symbols` (LSP-backed) for interactive symbol navigation.
+The AST engine is used internally for richer symbol extraction and semantic chunking. It is not exposed as a standalone tool — use `symbols` (LSP-backed) for interactive symbol navigation.
 
 Supported languages for tree-sitter: Rust, Python, TypeScript, Go, Java,
 Kotlin. See the [Language Support](language-support.md) page for the full

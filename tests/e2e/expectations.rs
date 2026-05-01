@@ -8,7 +8,7 @@ pub struct LangExpectation {
     /// File or directory path relative to the fixture root.
     #[serde(alias = "file")]
     pub path: Option<String>,
-    /// For find_symbol: the symbol name to search for.
+    /// For symbols(name=...): the symbol name to search for.
     pub symbol: Option<String>,
     /// Expected symbol names in the output.
     pub contains_symbols: Option<Vec<String>>,

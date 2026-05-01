@@ -38,7 +38,7 @@ or search tool:
 | `"all"` | Project source + all libraries |
 
 Tools that accept `scope`:
-`find_symbol`, `list_symbols`, `references`, `semantic_search`
+`symbols`, `symbols`, `references`, `semantic_search`
 
 All results include a `"source"` field (`"project"` or `"lib:<name>"`) to
 distinguish origin.
@@ -114,6 +114,6 @@ After indexing, `semantic_search` with `scope: "lib:<name>"` searches within tha
 **Tips:**
 
 - Only index libraries you actively need to search semantically. LSP symbol
-  navigation (`find_symbol`, `list_symbols`) works without indexing.
+  navigation (`symbols`, `symbols`) works without indexing.
 - Indexing a large library (e.g. `tokio`) may take a few minutes on the first
   run. The library path is shown in `list_libraries` output.

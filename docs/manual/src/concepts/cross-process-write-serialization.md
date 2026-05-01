@@ -34,7 +34,7 @@ write_lock_timeout_secs = 10  # default: 5
 
 The following tools acquire the write lock: `create_file`, `edit_file`, `edit_markdown`, `replace_symbol`, `insert_code`, `remove_symbol`, `rename_symbol`, and `memory` write actions (`write`, `remember`, `forget`, `delete`, `refresh_anchors`).
 
-Read tools (`read_file`, `find_symbol`, `list_symbols`, etc.) skip the lock entirely — no overhead on reads.
+Read tools (`read_file`, `symbols`, `symbols`, etc.) skip the lock entirely — no overhead on reads.
 
 ## Lock File
 

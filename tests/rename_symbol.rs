@@ -43,13 +43,13 @@ async fn project(files: &[(&str, &str)]) -> (tempfile::TempDir, ToolContext) {
 
 /// Warm up an LSP server by opening a file and waiting for symbols.
 ///
-/// Triggers `textDocument/didOpen` via ListSymbols, then polls until the
+/// Triggers `textDocument/didOpen` via Symbols, then polls until the
 /// server returns actual symbols (proving it has parsed the file).
 async fn warmup(ctx: &ToolContext, path: &str) {
-    use codescout::tools::symbol::ListSymbols;
+    use codescout::tools::symbol::Symbols;
     let input = json!({ "path": path });
     for _ in 0u32..60 {
-        match ListSymbols.call(input.clone(), ctx).await {
+        match Symbols.call(input.clone(), ctx).await {
             Ok(v) if v["symbols"].as_array().map(|a| a.len()).unwrap_or(0) > 0 => return,
             _ => {}
         }

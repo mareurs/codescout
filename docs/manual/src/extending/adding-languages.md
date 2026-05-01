@@ -6,7 +6,7 @@ previous. You can ship a partial implementation and add deeper support later.
 | Level | What it enables | Effort |
 |-------|-----------------|--------|
 | Detection only | File detection, semantic search chunking, basic file ops | 1 line |
-| LSP support | All symbol tools (`find_symbol`, `list_symbols`, references, rename) | ~10 lines |
+| LSP support | All symbol tools (`symbols`, `symbols`, references, rename) | ~10 lines |
 | Tree-sitter grammar | Richer offline AST extraction, improved symbol fallback | ~50–200 lines |
 
 ---
@@ -135,8 +135,8 @@ touch this function.
 
 **What this enables:**
 
-- `list_symbols` — symbol tree for files and directories
-- `find_symbol` — search symbols by name across the project
+- `symbols` — symbol tree for files and directories
+- `symbols` — search symbols by name across the project
 - `references` — find all callers/references
 - `replace_symbol` — edit a symbol's source code
 - `insert_code` — insert code before or after symbols
@@ -294,7 +294,7 @@ If the language has a documentation comment convention, add a corresponding
 
 **What this enables:**
 
-- Richer offline symbol extraction used internally by `list_symbols` and semantic chunking
+- Richer offline symbol extraction used internally by `symbols` and semantic chunking
 - Better fallback when the LSP server is unavailable or slow to start
 
 ---

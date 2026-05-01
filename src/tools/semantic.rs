@@ -61,7 +61,7 @@ impl Tool for SemanticSearch {
              \n\
              Use `semantic_search` when you know the *concept* but not the symbol name.\n\
              Examples: \"retry logic\", \"parse JWT token\", \"database connection pool\".\n\
-             For known symbol names, prefer `find_symbol` (faster, exact).\n\
+             For known symbol names, prefer `symbols` (faster, exact).\n\
              \n\
              ## Prerequisites\n\
              \n\
@@ -79,7 +79,7 @@ impl Tool for SemanticSearch {
              ## Output\n\
              \n\
              Each result has `file`, `start_line`, `end_line`, and `score` (0.0–1.0).\n\
-             Use `find_symbol` or `read_file(start_line=N, end_line=M)` to read the chunk body.\n\
+             Use `symbols` or `read_file(start_line=N, end_line=M)` to read the chunk body.\n\
              \n\
              ## Tips\n\
              \n\

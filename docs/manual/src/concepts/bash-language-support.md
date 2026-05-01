@@ -12,7 +12,7 @@ search but no symbols were extracted and no LSP server was started.
 | Capability | Available |
 |---|---|
 | Semantic search indexing | ✅ |
-| `list_symbols` / `find_symbol` | ✅ (function definitions) |
+| `symbols` / `symbols` | ✅ (function definitions) |
 | `symbol_at` / `references` | ✅ (requires LSP) |
 
 ## Setup

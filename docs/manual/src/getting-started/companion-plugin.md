@@ -32,7 +32,7 @@ claude /plugin list
 ```
 
 Then start a session and ask Claude which tool it would use to search for a function by name.
-It should cite `find_symbol`, not `grep`.
+It should cite `symbols`, not `grep`.
 
 ## Full Documentation
 

@@ -27,7 +27,7 @@ For system-administration projects that legitimately need full filesystem access
 - **Dangerous command check bypassed** — `run_command` executes without a
   speed bump.
 
-Source-file shell access guidance (prefer `read_file`/`find_symbol` over `cat`)
+Source-file shell access guidance (prefer `read_file`/`symbols` over `cat`)
 remains active in both profiles. It improves tool output quality, not security.
 
 ## Configuration

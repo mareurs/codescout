@@ -27,7 +27,7 @@ The `Tool` trait lives in `src/tools/mod.rs`:
 ```rust
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
-    /// Tool name as exposed over MCP (e.g. "find_symbol")
+    /// Tool name as exposed over MCP (e.g. "symbols")
     fn name(&self) -> &str;
 
     /// Short description shown to the LLM

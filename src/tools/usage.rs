@@ -184,24 +184,21 @@ mod tests {
         let result = serde_json::json!({
             "window": "1h",
             "by_tool": [
-                {"tool": "find_symbol", "calls": 47, "errors": 0, "overflows": 0, "p50_ms": 12, "p99_ms": 50, "error_rate_pct": 0.0, "overflow_rate_pct": 0.0},
+                {"tool": "symbols", "calls": 47, "errors": 0, "overflows": 0, "p50_ms": 12, "p99_ms": 50, "error_rate_pct": 0.0, "overflow_rate_pct": 0.0},
                 {"tool": "run_command", "calls": 18, "errors": 2, "overflows": 0, "p50_ms": 340, "p99_ms": 800, "error_rate_pct": 11.1, "overflow_rate_pct": 0.0},
-                {"tool": "list_symbols", "calls": 0, "errors": 0, "overflows": 0, "p50_ms": 0, "p99_ms": 0, "error_rate_pct": 0.0, "overflow_rate_pct": 0.0}
+                {"tool": "references", "calls": 0, "errors": 0, "overflows": 0, "p50_ms": 0, "p99_ms": 0, "error_rate_pct": 0.0, "overflow_rate_pct": 0.0}
             ]
         });
         let out = format_get_usage_stats(&result);
         assert!(out.contains("1h"), "should show window, got: {out}");
-        assert!(
-            out.contains("find_symbol"),
-            "should show tool name, got: {out}"
-        );
+        assert!(out.contains("symbols"), "should show tool name, got: {out}");
         assert!(out.contains("47"), "should show call count, got: {out}");
         assert!(
             out.contains("run_command"),
             "should show tool with errors, got: {out}"
         );
         assert!(
-            !out.contains("list_symbols"),
+            !out.contains("references"),
             "should omit tools with 0 calls, got: {out}"
         );
     }

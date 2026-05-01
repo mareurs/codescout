@@ -12,7 +12,7 @@ source files. For structural code changes, use `replace_symbol`, `insert_code`,
 
 These are non-negotiable. Violating the letter IS violating the spirit.
 
-1. **NO `read_file` ON SOURCE CODE.** Use `list_symbols` + `find_symbol(include_body=true)`.
+1. **NO `read_file` ON SOURCE CODE.** Use `symbols(path)` + `symbols(name=..., include_body=true)`.
    `read_file` on source returns a summary, not raw content. Symbol tools give you
    structured, token-efficient navigation. `read_file` is for config, markdown, and data files.
 
@@ -46,13 +46,13 @@ These are non-negotiable. Violating the letter IS violating the spirit.
 | ❌ Never do this | ✅ Do this instead | Why |
 |---|---|---|
 | `run_command("jq '.key' @file_ref")` to query JSON | `read_file(path, json_path="$.key")` | Navigation params > shell buffer queries |
-| Repeat a broad `find_symbol` after overflow | Narrow with `path=`, `kind=`, or more specific pattern | Follow the overflow hint |
+| Repeat a broad `symbols(name=...)` after overflow | Narrow with `path=`, `kind=`, or more specific pattern | Follow the overflow hint |
 | Ignore `by_file` in overflow response | Use top file from `by_file` as `path=` filter | The hint tells you exactly where to look |
 | `activate_project` for a single lookup | Pass `project_id: "<id>"` on the tool call | No state mutation, no risk of forgetting to return |
 | `edit_file` / `create_file` to rewrite an entire markdown section | `edit_markdown(path, heading, action, content)` | Heading-addressed, no string matching needed |
 | `grep("fn_name")` to find all callers | `references(symbol, path)` | LSP finds actual usages; regex matches comments, strings, partial names |
 | `read_file` on a `.md` file | `read_markdown(path)` | Heading navigation > line guessing |
-| `find_symbol(query="foo\|bar")` | `grep(pattern="foo\|bar")` or separate `find_symbol` calls | `find_symbol` rejects regex-like patterns |
+| `symbols(query="foo\|bar")` | `grep(pattern="foo\|bar")` or separate `symbols` calls | `symbols` rejects regex-like patterns |
 ## Tool Routing & Gotchas
 
 Tool descriptions and parameters are in the MCP tool schemas — this section
@@ -60,7 +60,7 @@ covers only cross-tool routing and non-obvious behaviors.
 
 ### Source Code: Symbol Tools, Not File Tools
 
-- **Reading source:** `list_symbols(path)` → `find_symbol(name, include_body=true)`.
+- **Reading source:** `symbols(path)` → `symbols(name=..., include_body=true)`.
   `read_file` on source returns a summary, not raw content.
 - **Editing code:** `replace_symbol`, `insert_code`, `remove_symbol` for structural
   changes. `edit_file` is for imports, literals, comments, config only.
@@ -69,7 +69,7 @@ covers only cross-tool routing and non-obvious behaviors.
 
 ### Search Routing
 
-- **Know the name** → `find_symbol(query)` or `list_symbols(path)`
+- **Know the name** → `symbols(name=...)` or `symbols(path)`
 - **Know the concept** → `semantic_search(query)` then drill with symbol tools
 - **Know a text pattern** → `grep(pattern)`
 - **Know a filename** → `glob(pattern)`
@@ -88,7 +88,7 @@ covers only cross-tool routing and non-obvious behaviors.
   for line slices (also works on `@file_*` buffer refs).
 - `edit_file` `edits=[...]` batch mode is atomic (one write). Prefer over
   sequential single edits on the same file.
-- `list_symbols` directory responses vary by tree size: Small tree (≤30 files) or
+- `symbols` directory responses vary by tree size: Small tree (≤30 files) or
   `force_mode: "symbols"` returns `{ "directory": ..., "files": [...] }` (existing shape).
   Medium tree (31–80 files) returns `{ "mode": "class_overview", "subdirectories": [...], ... }`.
   Large tree (>80 files) returns `{ "mode": "directory_map", "subdirectories": [...], ... }`.
@@ -97,7 +97,7 @@ covers only cross-tool routing and non-obvious behaviors.
 
 ### Library Routing
 
-Pass `scope="lib:<name>"` on `find_symbol`, `list_symbols`, `references`,
+Pass `scope="lib:<name>"` on `symbols`, `references`,
 `semantic_search`, or `index_project` to target a registered library.
 Libraries are auto-discovered when `symbol_at` resolves outside
 the project root. All read-only tools work on libraries; write tools are project-only.
@@ -178,7 +178,7 @@ Multi-tool chains for common tasks. Follow the steps in order.
 
 | Step | Tool | Purpose |
 |------|------|---------|
-| 1 | `find_symbol(name, include_body=true)` | Read current implementation |
+| 1 | `symbols(name=..., include_body=true)` | Read current implementation |
 | 2 | `references(symbol, path)` | Find all callers and dependents |
 | 3 | `symbol_at` with `fields: ["hover"]` on key call sites | Reveal concrete types (especially generics/traits) |
 | 4 | Edit with full knowledge of blast radius | |

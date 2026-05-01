@@ -27,8 +27,8 @@ tool = "get_symbols_overview"
 
 
 [find_method_body]
-description = "find_symbol with include_body returns method source"
-tool = "find_symbol"
+description = "symbols with include_body returns method source"
+tool = "symbols"
 
   [find_method_body.rust]
   file = "src/models/book.rs"

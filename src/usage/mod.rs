@@ -176,7 +176,7 @@ mod content_tests {
         let input = json!({"query": "test_symbol", "path": "src/lib.rs"});
 
         let _ = recorder
-            .record_content("find_symbol", &input, || async {
+            .record_content("symbols", &input, || async {
                 Ok(vec![Content::text("found it")])
             })
             .await;
@@ -247,7 +247,7 @@ mod content_tests {
         let input = json!({"query": "test_symbol"});
 
         let _ = recorder
-            .record_content("find_symbol", &input, || async {
+            .record_content("symbols", &input, || async {
                 Ok(vec![Content::text("found it")])
             })
             .await;

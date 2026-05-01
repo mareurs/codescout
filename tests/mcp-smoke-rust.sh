@@ -163,7 +163,7 @@ test_replace_content_removed() {
 
 test_blocked_error_has_hints() {
     call read_file '{"path": "src/main.rs"}'
-    if assert_contains "get_symbols_overview" && assert_contains "find_symbol"; then
+    if assert_contains "get_symbols_overview" && assert_contains "symbols"; then
         pass 1 "blocked error includes symbol tool hints"
     else
         fail 1 "blocked error includes symbol tool hints" "missing tool suggestions"
@@ -195,21 +195,21 @@ test_symbols_overview() {
     fi
 }
 
-test_find_symbol() {
-    call find_symbol '{"pattern": "route_tool_error"}'
+test_symbols() {
+    call symbols '{"pattern": "route_tool_error"}'
     if assert_contains "route_tool_error" && assert_contains "server.rs" && assert_symbols_found; then
-        pass 1 "find_symbol locates route_tool_error"
+        pass 1 "symbols locates route_tool_error"
     else
-        fail 1 "find_symbol locates route_tool_error" "function not found"
+        fail 1 "symbols locates route_tool_error" "function not found"
     fi
 }
 
-test_find_symbol_with_body() {
-    call find_symbol '{"pattern": "route_tool_error", "include_body": true}'
+test_symbols_with_body() {
+    call symbols '{"pattern": "route_tool_error", "include_body": true}'
     if assert_contains "RecoverableError" && assert_symbols_found; then
-        pass 1 "find_symbol with include_body returns source"
+        pass 1 "symbols with include_body returns source"
     else
-        fail 1 "find_symbol with include_body returns source" "body not returned or missing RecoverableError"
+        fail 1 "symbols with include_body returns source" "body not returned or missing RecoverableError"
     fi
 }
 
@@ -222,40 +222,40 @@ test_list_functions() {
     fi
 }
 
-test_find_symbol_directory() {
-    call find_symbol '{"pattern": "route_tool_error", "relative_path": "src"}'
+test_symbols_directory() {
+    call symbols '{"pattern": "route_tool_error", "relative_path": "src"}'
     if assert_symbols_found && assert_contains "route_tool_error"; then
-        pass 1 "find_symbol with directory relative_path finds symbols"
+        pass 1 "symbols with directory relative_path finds symbols"
     else
-        fail 1 "find_symbol with directory relative_path finds symbols" "not found via directory path"
+        fail 1 "symbols with directory relative_path finds symbols" "not found via directory path"
     fi
 }
 
-test_find_symbol_glob() {
-    call find_symbol '{"pattern": "route_tool_error", "relative_path": "src/**/*.rs"}'
+test_symbols_glob() {
+    call symbols '{"pattern": "route_tool_error", "relative_path": "src/**/*.rs"}'
     if assert_symbols_found && assert_contains "server.rs"; then
-        pass 1 "find_symbol with glob relative_path finds symbols"
+        pass 1 "symbols with glob relative_path finds symbols"
     else
-        fail 1 "find_symbol with glob relative_path finds symbols" "not found via glob path"
+        fail 1 "symbols with glob relative_path finds symbols" "not found via glob path"
     fi
 }
 
-test_find_symbol_name_path() {
-    call find_symbol '{"pattern": "impl Tool for FindSymbol/call", "relative_path": "src/tools/symbol.rs"}'
+test_symbols_name_path() {
+    call symbols '{"pattern": "impl Tool for Symbols/call", "relative_path": "src/tools/symbol.rs"}'
     if assert_symbols_found && assert_contains "call"; then
-        pass 1 "find_symbol with name_path pattern finds method"
+        pass 1 "symbols with name_path pattern finds method"
     else
-        fail 1 "find_symbol with name_path pattern finds method" "name_path pattern not matched"
+        fail 1 "symbols with name_path pattern finds method" "name_path pattern not matched"
     fi
 }
 
 test_symbols_overview
-test_find_symbol
-test_find_symbol_with_body
+test_symbols
+test_symbols_with_body
 test_list_functions
-test_find_symbol_directory
-test_find_symbol_glob
-test_find_symbol_name_path
+test_symbols_directory
+test_symbols_glob
+test_symbols_name_path
 
 # ── Category 3: Search Workflows ────────────────────────────────────────────
 
@@ -327,12 +327,12 @@ echo ""
 echo "=== Multi-step Exploration ==="
 
 test_explore_error_routing() {
-    call find_symbol '{"pattern": "route_tool_error"}'
+    call symbols '{"pattern": "route_tool_error"}'
     if ! assert_contains "route_tool_error"; then
         fail 1 "explore: find error routing function" "function not found"
         return
     fi
-    call find_symbol '{"pattern": "route_tool_error", "include_body": true}'
+    call symbols '{"pattern": "route_tool_error", "include_body": true}'
     if assert_contains "RecoverableError" && assert_contains "CallToolResult"; then
         pass 2 "explore: find and read error routing implementation"
     else
@@ -350,12 +350,12 @@ test_explore_tool_architecture() {
 }
 
 test_explore_directory_then_drilldown() {
-    call find_symbol '{"pattern": "OutputGuard", "relative_path": "src/tools"}'
+    call symbols '{"pattern": "OutputGuard", "relative_path": "src/tools"}'
     if ! assert_symbols_found; then
         fail 2 "explore: directory search then drilldown" "OutputGuard not found in src/tools"
         return
     fi
-    call find_symbol '{"pattern": "OutputGuard", "relative_path": "src/tools/output.rs", "include_body": true}'
+    call symbols '{"pattern": "OutputGuard", "relative_path": "src/tools/output.rs", "include_body": true}'
     if assert_symbols_found && assert_contains "max_results"; then
         pass 2 "explore: directory search then drilldown into OutputGuard"
     else

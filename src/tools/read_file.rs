@@ -521,8 +521,8 @@ fn read_full_file(
                 == crate::tools::file_summary::FileSummaryType::Source
             {
                 format!(
-                    "File has {} lines. For source code, prefer list_symbols(path) \
-                     + find_symbol(query, include_body=true) to read specific functions. \
+                    "File has {} lines. For source code, prefer symbols(path) \
+                     + symbols(query=..., include_body=true) to read specific functions. \
                      Or use offset/limit to read a line range.",
                     total_lines
                 )

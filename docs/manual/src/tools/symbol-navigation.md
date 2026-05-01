@@ -11,7 +11,7 @@ All symbol navigation tools require an LSP server for the target language. If
 the LSP server is not running or is still indexing, some tools fall back to
 tree-sitter for basic results.
 
-**Scope parameter:** `find_symbol`, `list_symbols`, and `references` accept an optional `scope` string to search library code as well as project code. See [Library Navigation](library-navigation.md) for the full scope reference.
+**Scope parameter:** `symbols`, `symbols`, and `references` accept an optional `scope` string to search library code as well as project code. See [Library Navigation](library-navigation.md) for the full scope reference.
 
 ### Workspace project scoping
 
@@ -19,7 +19,7 @@ In a [multi-project workspace](../concepts/multi-project-workspace.md), pass
 `project` to scope operations to a specific project:
 
 ```json
-{ "tool": "find_symbol", "arguments": { "pattern": "UserService", "project": "backend" } }
+{ "tool": "symbols", "arguments": { "pattern": "UserService", "project": "backend" } }
 ```
 
 `scope` and `project` are independent axes: `scope` selects project vs library
@@ -31,7 +31,7 @@ uses the workspace-level context.
 
 ---
 
-## `list_symbols`
+## `symbols`
 
 **Purpose:** Return the symbol tree (functions, classes, methods, structs, etc.)
 for a file, directory, or glob pattern. Use this to orient yourself before
@@ -51,7 +51,7 @@ reading or editing.
 
 ```json
 {
-  "tool": "list_symbols",
+  "tool": "symbols",
   "arguments": {
     "relative_path": "src/auth/middleware.rs"
   }
@@ -81,7 +81,7 @@ from `start_line` to `end_line`.
 
 ```json
 {
-  "tool": "list_symbols",
+  "tool": "symbols",
   "arguments": {
     "relative_path": "src/handlers/"
   }
@@ -95,7 +95,7 @@ project root (`.`), walks the entire source tree recursively.
 
 ```json
 {
-  "tool": "list_symbols",
+  "tool": "symbols",
   "arguments": {
     "relative_path": "src/**/*.py",
     "depth": 0
@@ -118,7 +118,7 @@ very high-level map without the per-method detail.
 
 ---
 
-## `find_symbol`
+## `symbols`
 
 **Purpose:** Find symbols by name pattern across the project or within a
 specific file. Returns matching symbols with their location and, optionally,
@@ -140,7 +140,7 @@ their source body.
 
 ```json
 {
-  "tool": "find_symbol",
+  "tool": "symbols",
   "arguments": {
     "pattern": "authenticate_user"
   }
@@ -169,7 +169,7 @@ their source body.
 
 ```json
 {
-  "tool": "find_symbol",
+  "tool": "symbols",
   "arguments": {
     "pattern": "authenticate_user",
     "relative_path": "src/auth/service.rs",
@@ -202,7 +202,7 @@ their source body.
 
 ```json
 {
-  "tool": "find_symbol",
+  "tool": "symbols",
   "arguments": {
     "pattern": "test_",
     "relative_path": "tests/**/*.rs"
@@ -299,8 +299,8 @@ import) a given symbol. This is the "find all usages" feature from your IDE.
 
 - Both `name_path` and `relative_path` are required. The LSP needs to locate
   the symbol's definition position before it can find references.
-- `name_path` must match the `name_path` value from `list_symbols` or
-  `find_symbol` output, not just the bare name. For a top-level function, the
+- `name_path` must match the `name_path` value from `symbols` or
+  `symbols` output, not just the bare name. For a top-level function, the
   name_path is just the function name (e.g. `"validate_token"`). For a method,
   it is `"StructName/method_name"`.
 - Each reference includes a `context` line showing the source at that location,
@@ -364,7 +364,7 @@ start to its end — no line numbers required.
 - The `new_body` replaces the entire span from the symbol's `start_line` to its
   `end_line`. Include everything: the function signature, decorators if they are
   within the span, and the closing brace.
-- Read the current body first with `find_symbol` + `include_body: true` before
+- Read the current body first with `symbols` + `include_body: true` before
   rewriting, to confirm you understand the existing signature and indentation.
 - Use `replace_symbol` for any change that touches a significant portion
   of the function. For small surgical changes (renaming a variable, changing
@@ -497,7 +497,7 @@ operation. Every reference in every file is updated atomically.
 - `name_path` must identify the definition unambiguously. If there are two
   symbols with the same name in a file (e.g. a field and a method), use the
   full `name_path` with the parent (e.g. `"MyStruct/value"`) to distinguish them.
-- After renaming, verify with `find_symbol` on the new name to confirm all
+- After renaming, verify with `symbols` on the new name to confirm all
   occurrences were updated.
 - LSP rename support varies by server. Most servers handle functions, methods,
   classes, variables, and fields. Some do not rename string literals or

@@ -79,7 +79,7 @@ pub fn build_server_instructions(project_status: Option<&ProjectStatus>) -> Stri
                     ));
                 }
                 instructions.push_str(
-                    "\nUse `project: \"<id>\"` in `find_symbol` / `semantic_search` / `memory` to scope to a specific project.\n",
+                    "\nUse `project: \"<id>\"` in `symbols` / `semantic_search` / `memory` to scope to a specific project.\n",
                 );
             }
         }

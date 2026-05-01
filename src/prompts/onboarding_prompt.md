@@ -148,7 +148,7 @@ strategy you judge best. The gate checklist below is your hard constraint.
 Before writing ANY memory, verify ALL of these are true. If any is unchecked, complete it first.
 
 - [ ] Listed top-level structure AND ran `list_dir` on each major subdirectory
-- [ ] Ran `list_symbols` on the top-level source AND on at least 4 subdirectories individually
+- [ ] Ran `symbols` on the top-level source AND on at least 4 subdirectories individually
 - [ ] Read the FULL body (not just signature) of at least 5 core types/functions
 - [ ] Read ALL architecture docs found, completely (not skimmed)
 - [ ] Traced two distinct data flows from entry point to terminal output
@@ -188,7 +188,7 @@ If you notice any of these thoughts, STOP. Return to Phase 2 immediately.
 - "I'll write the memory now and add details if something is wrong later"
 - "I already understand this type of codebase"
 - You have read fewer than 5 code bodies with `include_body=true`
-- You have run `list_symbols` on fewer than 3 modules/directories
+- You have run `symbols` on fewer than 3 modules/directories
 - You have traced only one data flow
 - You have run fewer than 5 concept-level queries (semantic_search or grep)
 
@@ -244,7 +244,7 @@ OR `staleness.stale_files` is non-empty):** Run the merge flow:
 
 1. The existing content is in `protected_memories[topic].content`.
 2. For entries referencing files listed in `staleness.stale_files` (or all
-   entries if `untracked`): use `find_symbol`, `read_file`, `grep`
+   entries if `untracked`): use `symbols`, `read_file`, `grep`
    to verify whether each entry is still accurate.
 3. Identify new discoveries from your Phase 2 exploration that belong in
    this memory.
@@ -433,7 +433,7 @@ are always excluded from protection.
 After creating the 6 memories above, synthesize a concise system prompt (15-30 lines)
 for this project. This prompt is injected into EVERY codescout session
 automatically — it must be short and high-value. Do NOT repeat information from the
-static tool guidance (how to use find_symbol, list_symbols, etc.) — that's already
+static tool guidance (how to use symbols, etc.) — that's already
 provided to you separately.
 
 **What to include:**
@@ -448,7 +448,7 @@ provided to you separately.
 - Full architecture details (the `architecture` memory covers this)
 - Command lists, glossary, detailed conventions (memories cover these)
 - Anything over 30 lines (keep it concise — this is injected every session)
-- Natural-language commands to "read", "open", or "view" source files — future sessions will have `read_file` blocked on any file whose extension maps to a language in `ast::detect_language` (`.rs`, `.py`, `.ts`, `.tsx`, `.js`, `.jsx`, `.go`, `.java`, `.kt`, `.c`, `.cpp`, `.cs`, `.rb`, `.html`, `.css`, `.scss`, `.less`, `.php`, `.swift`, `.scala`, `.ex`, `.hs`, `.lua`, `.sh`, `.bash`). Instead always reference `find_symbol(include_body=true)`, `list_symbols`, `grep`, or `semantic_search`. Only `.md` (→ `read_markdown`) and data formats like `.json`, `.toml`, `.yaml` go through `read_file`.
+- Natural-language commands to "read", "open", or "view" source files — future sessions will have `read_file` blocked on any file whose extension maps to a language in `ast::detect_language` (`.rs`, `.py`, `.ts`, `.tsx`, `.js`, `.jsx`, `.go`, `.java`, `.kt`, `.c`, `.cpp`, `.cs`, `.rb`, `.html`, `.css`, `.scss`, `.less`, `.php`, `.swift`, `.scala`, `.ex`, `.hs`, `.lua`, `.sh`, `.bash`). Instead always reference `symbols(name=..., include_body=true)`, `symbols`, `grep`, or `semantic_search`. Only `.md` (→ `read_markdown`) and data formats like `.json`, `.toml`, `.yaml` go through `read_file`.
 - Native host tool names (`Read`, `Grep`, `Glob`, `Edit`, `Bash`) — those are blocked in codescout-enabled sessions; only codescout MCP tools belong in recommendations.
 
 **Template:**
@@ -467,8 +467,8 @@ provided to you separately.
 ## Navigation Strategy
 [Recommended exploration order for new tasks. Every step must name a
 codescout tool — never "read X" in natural language. Example:
-  1. `list_symbols("src/core")` — survey module structure
-  2. `find_symbol("Orchestrator", include_body=true)` — read core type end-to-end
+  1. `symbols("src/core")` — survey module structure
+  2. `symbols(name="Orchestrator", include_body=true)` — read core type end-to-end
   3. `semantic_search("retry backoff")` — find cross-cutting logic
   4. `grep(pattern="FOO_KEY", path="src/hooks")` — locate literal occurrences
   5. `read_markdown("docs/ARCHITECTURE.md")` — for markdown only
@@ -509,14 +509,14 @@ After confirming all 6 memories and the system prompt with the user, deliver thi
   Fetch via `resources/read <uri>` when you need more than a tool's short description.
 - **Quick start for new tasks:**
   1. `memory(action: "read", topic: "architecture")` — orient yourself
-  2. `list_symbols("src/")` — see the module structure
+  2. `symbols("src/")` — see the module structure
   3. `semantic_search("your concept")` — find relevant code
-  4. `find_symbol("Name", include_body=true)` — read the implementation
+  4. `symbols(name="Name", include_body=true)` — read the implementation
 - **Library support:**
   - Libraries are **auto-discovered** when `symbol_at` resolves outside the project root.
   - `list_libraries` — view all registered libraries and their index/version status.
   - `index_project(scope="lib:<name>")` — index a specific library for semantic search.
-  - Once registered, use `scope="lib:<name>"` with `find_symbol`, `list_symbols`,
+  - Once registered, use `scope="lib:<name>"` with `symbols`, `symbols`,
     `grep`, and `semantic_search` to navigate library code.
 
 ---

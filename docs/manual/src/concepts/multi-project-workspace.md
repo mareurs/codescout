@@ -30,7 +30,7 @@ Each project gets its own LSP servers, memory store, and semantic index.
 Most tools accept a `project` parameter to scope the operation:
 
 ```
-find_symbol("MyStruct", project: "backend")
+symbols("MyStruct", project: "backend")
 semantic_search("authentication flow", project: "frontend")
 memory(action: "read", project: "backend", topic: "architecture")
 ```

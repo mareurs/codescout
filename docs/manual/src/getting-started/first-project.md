@@ -108,7 +108,7 @@ See the classes, functions, and types defined in a directory — one compact lin
 no bodies:
 
 ```json
-{ "name": "list_symbols", "arguments": { "path": "src/" } }
+{ "name": "symbols", "arguments": { "path": "src/" } }
 ```
 
 Sample output (Rust project):
@@ -131,14 +131,14 @@ src/server.rs
 Locate every definition of a symbol across the entire project:
 
 ```json
-{ "name": "find_symbol", "arguments": { "pattern": "main" } }
+{ "name": "symbols", "arguments": { "pattern": "main" } }
 ```
 
 To see the full function body alongside the location, add `include_body`:
 
 ```json
 {
-  "name": "find_symbol",
+  "name": "symbols",
   "arguments": { "pattern": "main", "include_body": true }
 }
 ```
@@ -177,9 +177,9 @@ A practical sequence for exploring an unfamiliar codebase:
 1. `onboarding` — discover and remember the project structure.
 2. `index_project` — build the semantic search index.
 3. `list_dir` on the root and key subdirectories — build a mental map.
-4. `list_symbols("src/")` — see what is defined at the top level.
-5. `semantic_search("entry point")` or `find_symbol("main")` — find where execution starts.
-6. From there, use `references` to trace callers and `list_symbols` to
+4. `symbols("src/")` — see what is defined at the top level.
+5. `semantic_search("entry point")` or `symbols("main")` — find where execution starts.
+6. From there, use `references` to trace callers and `symbols` to
    navigate deeper into subsystems.
 
 After the first session, onboarding memories persist in `.codescout/memories/` and the

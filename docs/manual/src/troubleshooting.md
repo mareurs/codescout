@@ -130,7 +130,7 @@ retry the tool call.
 
 A tree-sitter grammar was requested for a language that does not have one bundled.
 
-**Fix:** Use LSP-based tools instead. `list_symbols` provides similar
+**Fix:** Use LSP-based tools instead. `symbols` provides similar
 information (file structure, symbol names and kinds) and works for all 9 LSP
 languages.
 

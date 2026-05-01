@@ -7,38 +7,38 @@ pub(crate) fn language_navigation_hints(lang: &str) -> Option<&'static str> {
     match lang {
         "rust" => Some(
             "- symbol: `StructName/method`, `impl Trait for Type/method`\n\
-             - find_symbol(kind=\"struct\") for data types, kind=\"function\" for free fns\n\
-             - impl blocks: `find_symbol(\"impl MyStruct\")` or list_symbols shows `impl Trait for Type`\n\
-             - Example: `find_symbol(\"Server/handle_request\")` finds a method on Server",
+             - symbols(kind=\"struct\") for data types, kind=\"function\" for free fns\n\
+             - impl blocks: `symbols(name=\"impl MyStruct\")` or symbols(path) shows `impl Trait for Type`\n\
+             - Example: `symbols(name=\"Server/handle_request\")` finds a method on Server",
         ),
         "python" => Some(
             "- symbol: `ClassName/method_name`, `module_func`\n\
-             - find_symbol(kind=\"class\") for classes, kind=\"function\" for functions/methods\n\
+             - symbols(kind=\"class\") for classes, kind=\"function\" for functions/methods\n\
              - Decorators aren't in symbol — search for the function name\n\
-             - Example: `find_symbol(\"UserService/create\")` finds a method on UserService",
+             - Example: `symbols(name=\"UserService/create\")` finds a method on UserService",
         ),
         "typescript" | "javascript" | "tsx" | "jsx" => Some(
             "- symbol: `ClassName/method`, `exportedFunction`\n\
-             - find_symbol(kind=\"class\") for classes, kind=\"function\" for functions/arrow fns\n\
+             - symbols(kind=\"class\") for classes, kind=\"function\" for functions/arrow fns\n\
              - React components are functions — use kind=\"function\" not kind=\"class\"\n\
-             - Example: `find_symbol(\"AuthProvider/login\")` finds a class method",
+             - Example: `symbols(name=\"AuthProvider/login\")` finds a class method",
         ),
         "go" => Some(
             "- symbol: `TypeName/MethodName`, `PackageFunc`\n\
-             - find_symbol(kind=\"function\") covers both functions and methods\n\
-             - Receiver methods: `find_symbol(\"Server/ListenAndServe\")`\n\
-             - Interfaces: find_symbol(kind=\"interface\") then list_symbols for signatures",
+             - symbols(kind=\"function\") covers both functions and methods\n\
+             - Receiver methods: `symbols(name=\"Server/ListenAndServe\")`\n\
+             - Interfaces: symbols(kind=\"interface\") then symbols(path) for signatures",
         ),
         "java" | "kotlin" => Some(
             "- symbol: `ClassName/methodName`, `InnerClass`\n\
-             - find_symbol(kind=\"class\") for classes/interfaces, kind=\"function\" for methods\n\
+             - symbols(kind=\"class\") for classes/interfaces, kind=\"function\" for methods\n\
              - Annotations aren't in symbol — search by method name\n\
-             - Example: `find_symbol(\"UserRepository/findById\")`",
+             - Example: `symbols(name=\"UserRepository/findById\")`",
         ),
         "c" | "cpp" => Some(
             "- symbol: `ClassName/method`, `namespace_func`\n\
-             - find_symbol(kind=\"struct\") or kind=\"class\" depending on codebase style\n\
-             - Header vs implementation: find_symbol shows both — use path= to narrow",
+             - symbols(kind=\"struct\") or kind=\"class\" depending on codebase style\n\
+             - Header vs implementation: symbols shows both — use path= to narrow",
         ),
         _ => None,
     }
@@ -215,7 +215,7 @@ pub(crate) fn build_system_prompt_draft(
     // Entry points section
     draft.push_str("## Entry Points\n");
     if entry_points.is_empty() {
-        draft.push_str("- Explore with `list_dir(\".\")` then `list_symbols` on key files\n");
+        draft.push_str("- Explore with `list_dir(\".\")` then `symbols` on key files\n");
     } else {
         for ep in entry_points {
             draft.push_str(&format!("- `{}` — start here\n", ep));
@@ -225,7 +225,7 @@ pub(crate) fn build_system_prompt_draft(
 
     // Key abstractions — placeholder for the LLM to fill
     draft.push_str("## Key Abstractions\n");
-    draft.push_str("- [Discover with `list_symbols` on main source directories]\n\n");
+    draft.push_str("- [Discover with `symbols` on main source directories]\n\n");
 
     // Search tips
     draft.push_str("## Search Tips\n");
@@ -308,7 +308,7 @@ pub(crate) fn build_system_prompt_draft(
             };
             draft.push_str(&format!("### {}{}\n", p.id, langs));
             draft.push_str(&format!(
-                "1. `list_symbols(\"{}\")` — [fill in entry point during onboarding]\n",
+                "1. `symbols(\"{}\")` — [fill in entry point during onboarding]\n",
                 p.relative_root.display()
             ));
             draft.push_str(&format!(
@@ -340,15 +340,15 @@ pub(crate) fn build_system_prompt_draft(
         draft.push_str("1. `memory(action=\"read\", topic=\"architecture\")` — orient yourself\n");
         if !entry_points.is_empty() {
             draft.push_str(&format!(
-                "2. `list_symbols(\"{}\")` — see main structure\n",
+                "2. `symbols(\"{}\")` — see main structure\n",
                 entry_points[0]
             ));
         } else {
-            draft.push_str("2. `list_symbols(\"src/\")` — see main structure\n");
+            draft.push_str("2. `symbols(\"src/\")` — see main structure\n");
         }
         draft.push_str("3. `semantic_search(\"your concept\")` — find relevant code\n");
-        draft.push_str("4. `find_symbol(\"Name\", include_body=true)` — read implementation\n");
-        draft.push_str("   - regex-like patterns belong in `grep`, not `find_symbol`\n");
+        draft.push_str("4. `symbols(name=\"Name\", include_body=true)` — read implementation\n");
+        draft.push_str("   - regex-like patterns belong in `grep`, not `symbols`\n");
         draft.push_str(
             "5. `memory(action=\"recall\", query=\"...\")` — search memories by meaning\n\n",
         );
@@ -449,7 +449,7 @@ pub(crate) fn build_system_prompt_draft(
             ));
         }
         draft.push_str(
-            "\nUse `scope=\"lib:<name>\"` with `find_symbol`, `list_symbols`, `grep`, \
+            "\nUse `scope=\"lib:<name>\"` with `symbols`, `grep`, \
              and `semantic_search` to navigate library code. \
              Run `index_project(scope=\"lib:<name>\")` to enable semantic search for a library.\n",
         );
@@ -753,14 +753,14 @@ pub(crate) fn build_per_project_prompt(
     ));
     prompt.push_str(
         "### Step 2: Full Symbol Survey\n\n\
-         - Run `list_symbols` on the main source directory\n\
-         - Run `list_symbols` on EACH subdirectory individually\n\
+         - Run `symbols` on the main source directory\n\
+         - Run `symbols` on EACH subdirectory individually\n\
          - Survey at least 5 distinct source files\n\n",
     );
     prompt.push_str(
         "### Step 3: Read Core Implementations\n\n\
          - Identify 5+ central types/functions from Step 2\n\
-         - `find_symbol(name, include_body=true)` for each\n\
+         - `symbols(name=..., include_body=true)` for each\n\
          - Read the FULL body, not just signatures\n\n",
     );
     prompt.push_str(
@@ -780,7 +780,7 @@ pub(crate) fn build_per_project_prompt(
     );
     prompt.push_str(
         "### Step 7: Examine Tests\n\n\
-         - `list_symbols` on test directory\n\
+         - `symbols` on test directory\n\
          - Read 2-3 test files for patterns\n\n",
     );
 

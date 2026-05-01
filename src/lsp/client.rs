@@ -97,7 +97,7 @@ fn is_idempotent_lsp_method(method: &str) -> bool {
 /// the *whole* project is indexed (minutes for large Rust/Kotlin projects),
 /// and a 45s retry budget + 30s per-attempt timeout blows through the MCP
 /// 60s tool timeout. For that method we keep the short warm budget and let
-/// callers (e.g. `find_symbol`) fail over to tree-sitter quickly.
+/// callers (e.g. `symbols`) fail over to tree-sitter quickly.
 fn uses_cold_start_retry_budget(method: &str) -> bool {
     !matches!(method, "workspace/symbol")
 }
@@ -1374,7 +1374,7 @@ mod tests {
     fn workspace_symbol_skips_cold_start_retry_budget() {
         // Rationale: rust-analyzer answers -32800 for workspace/symbol until the
         // whole project is indexed (minutes). Cold-start budget (10×3s + 30s
-        // per-attempt timeout) blows the 60s MCP tool timeout. find_symbol
+        // per-attempt timeout) blows the 60s MCP tool timeout. symbols
         // falls back to tree-sitter when workspace/symbol errors, so fail fast.
         assert!(!uses_cold_start_retry_budget("workspace/symbol"));
         // Per-file ops become answerable as soon as the server parses the file,

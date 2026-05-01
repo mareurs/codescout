@@ -3,7 +3,7 @@ use codescout::agent::Agent;
 use codescout::lsp::manager::LspManager;
 use codescout::tools::ast::ListFunctions;
 use codescout::tools::file::Grep;
-use codescout::tools::symbol::{FindSymbol, ListSymbols, References};
+use codescout::tools::symbol::{References, Symbols};
 use codescout::tools::{Tool, ToolContext};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -145,7 +145,7 @@ async fn run_expectations_inner(
 async fn run_single(ctx: &ToolContext, exp: &LangExpectation, tool: &str) -> Result<(), String> {
     match tool {
         "get_symbols_overview" => run_symbols_overview(ctx, exp).await,
-        "find_symbol" => run_find_symbol(ctx, exp).await,
+        "symbols" => run_symbols(ctx, exp).await,
         "find_referencing_symbols" => run_find_references(ctx, exp).await,
         "list_functions" => run_list_functions(ctx, exp).await,
         "search_for_pattern" => run_search_pattern(ctx, exp).await,
@@ -155,7 +155,7 @@ async fn run_single(ctx: &ToolContext, exp: &LangExpectation, tool: &str) -> Res
 
 async fn run_symbols_overview(ctx: &ToolContext, exp: &LangExpectation) -> Result<(), String> {
     let path = exp.path.as_deref().ok_or("Missing 'path'")?;
-    let result = ListSymbols
+    let result = Symbols
         .call(json!({ "path": path }), ctx)
         .await
         .map_err(|e| format!("Tool error: {e}"))?;
@@ -166,7 +166,7 @@ async fn run_symbols_overview(ctx: &ToolContext, exp: &LangExpectation) -> Resul
     Ok(())
 }
 
-async fn run_find_symbol(ctx: &ToolContext, exp: &LangExpectation) -> Result<(), String> {
+async fn run_symbols(ctx: &ToolContext, exp: &LangExpectation) -> Result<(), String> {
     let symbol = exp.symbol.as_deref().ok_or("Missing 'symbol'")?;
     let mut params = json!({ "query": symbol });
 
@@ -178,7 +178,7 @@ async fn run_find_symbol(ctx: &ToolContext, exp: &LangExpectation) -> Result<(),
         params["include_body"] = json!(true);
     }
 
-    let result = FindSymbol
+    let result = Symbols
         .call(params, ctx)
         .await
         .map_err(|e| format!("Tool error: {e}"))?;
@@ -193,9 +193,7 @@ async fn run_find_symbol(ctx: &ToolContext, exp: &LangExpectation) -> Result<(),
         let result_str = serde_json::to_string(&result).unwrap_or_default();
         for needle in expected_body {
             if !result_str.contains(needle) {
-                return Err(format!(
-                    "find_symbol(\"{symbol}\") body missing \"{needle}\""
-                ));
+                return Err(format!("symbols(\"{symbol}\") body missing \"{needle}\""));
             }
         }
     }

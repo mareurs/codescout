@@ -20,7 +20,7 @@ fn long_docs(&self) -> Option<&str> { None }
 ```
 
 Tools with long documentation override it. Currently populated for the five most
-complex tools: `find_symbol`, `list_symbols`, `semantic_search`, `run_command`,
+complex tools: `symbols`, `symbols`, `semantic_search`, `run_command`,
 `memory`.
 
 ## doc://codescout-tool-guide

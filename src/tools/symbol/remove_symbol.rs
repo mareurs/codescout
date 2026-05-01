@@ -74,7 +74,7 @@ impl Tool for RemoveSymbol {
                     start + 1,
                     lines.len(),
                 ),
-                "The LSP may have stale data. Try list_symbols(path) to refresh.",
+                "The LSP may have stale data. Try symbols(path) to refresh.",
             )
             .into());
         }

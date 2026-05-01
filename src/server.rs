@@ -33,8 +33,7 @@ use crate::tools::{
     read_file::ReadFile,
     semantic::{IndexProject, IndexStatus, SemanticSearch},
     symbol::{
-        FindSymbol, InsertCode, ListSymbols, References, RemoveSymbol, RenameSymbol, ReplaceSymbol,
-        SymbolAt,
+        InsertCode, References, RemoveSymbol, RenameSymbol, ReplaceSymbol, SymbolAt, Symbols,
     },
     Onboarding, RunCommand, Tool, ToolContext,
 };
@@ -108,10 +107,9 @@ impl CodeScoutServer {
             Arc::new(RunCommand),
             Arc::new(Onboarding),
             // Symbol tools (stub — require LSP)
-            Arc::new(FindSymbol),
+            Arc::new(Symbols),
             Arc::new(References),
             Arc::new(SymbolAt),
-            Arc::new(ListSymbols),
             Arc::new(ReplaceSymbol),
             Arc::new(RemoveSymbol),
             Arc::new(InsertCode),
@@ -1329,9 +1327,8 @@ mod tests {
             "read_markdown",
             "run_command",
             "onboarding",
-            "find_symbol",
+            "symbols",
             "references",
-            "list_symbols",
             "replace_symbol",
             "insert_code",
             "rename_symbol",
@@ -1774,7 +1771,7 @@ mod tests {
 
     #[test]
     fn other_tools_do_not_skip_server_timeout() {
-        for name in &["read_file", "edit_file", "find_symbol", "semantic_search"] {
+        for name in &["read_file", "edit_file", "symbols", "semantic_search"] {
             assert!(
                 !tool_skips_server_timeout(name),
                 "tool '{}' should be subject to the server-level timeout",
@@ -2127,7 +2124,7 @@ mod tests {
         assert!(server.is_write_call("onboarding", &json!({})));
         assert!(server.is_write_call("register_library", &json!({})));
         assert!(!server.is_write_call("read_file", &json!({})));
-        assert!(!server.is_write_call("find_symbol", &json!({})));
+        assert!(!server.is_write_call("symbols", &json!({})));
     }
 
     #[tokio::test]

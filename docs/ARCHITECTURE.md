@@ -131,7 +131,7 @@ Each tool implements the `Tool` trait (`name`, `description`, `input_schema`, `a
 |----------|------|-------|
 | File | `file.rs` | `read_file`, `list_dir`, `search_pattern`, `find_file`, `create_file`, `edit_file` |
 | Workflow | `workflow.rs` | `onboarding`, `run_command` |
-| Symbol | `symbol.rs` | `find_symbol`, `list_symbols`, `symbol_at`, `references`, `replace_symbol`, `remove_symbol`, `insert_code`, `rename_symbol` (all navigation tools support `scope` param) |
+| Symbol | `symbol.rs` | `symbols`, `symbol_at`, `references`, `replace_symbol`, `remove_symbol`, `insert_code`, `rename_symbol` (all navigation tools support `scope` param) |
 | Semantic | `semantic.rs` | `semantic_search`, `index_project`, `index_status` |
 | Library | `library.rs` | `list_libraries` |
 | Memory | `memory.rs` | `memory` (dispatches `read` / `write` / `list` / `delete` / `remember` / `recall` / `forget` / `refresh_anchors` via `action` param) |

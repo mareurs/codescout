@@ -180,7 +180,7 @@ pub fn validate_symbol_range(sym: &SymbolInfo) -> anyhow::Result<()> {
                     ast_end + 1,
                 ),
                 "The LSP server may have returned a selection range instead of the full symbol range. \
-                 Try edit_file for this symbol, or check list_symbols to verify the range.",
+                 Try edit_file for this symbol, or check symbols(path) to verify the range.",
             ));
         }
     }
@@ -221,7 +221,7 @@ pub fn validate_symbol_position(sym: &SymbolInfo, lines: &[&str]) -> anyhow::Res
                 lines.len(),
             ),
             "The LSP may have stale data after a prior edit. \
-             Call list_symbols(path) to refresh, then retry.",
+             Call symbols(path) to refresh, then retry.",
         )
         .into());
     }
@@ -241,7 +241,7 @@ pub fn validate_symbol_position(sym: &SymbolInfo, lines: &[&str]) -> anyhow::Res
                 sl + 1,
             ),
             "The file was recently modified and the LSP hasn't re-indexed yet. \
-             Call list_symbols(path) to refresh, then retry the operation.",
+             Call symbols(path) to refresh, then retry the operation.",
         )
         .into());
     }
@@ -281,7 +281,7 @@ pub fn validate_symbol_position(sym: &SymbolInfo, lines: &[&str]) -> anyhow::Res
                     sl + 1,
                 ),
                 "The LSP returned a position inside a comment. Refresh via \
-                 list_symbols(path) and retry; if this persists, use edit_file \
+                 symbols(path) and retry; if this persists, use edit_file \
                  for this symbol.",
             )
             .into());
@@ -300,7 +300,7 @@ pub fn validate_symbol_position(sym: &SymbolInfo, lines: &[&str]) -> anyhow::Res
                 sl + 1,
             ),
             "The file was recently modified and the LSP hasn't re-indexed yet. \
-             Call list_symbols(path) to refresh, then retry the operation.",
+             Call symbols(path) to refresh, then retry the operation.",
         )
         .into());
     }
@@ -547,7 +547,7 @@ pub fn find_unique_symbol_by_name_path<'a>(
     match matches.len() {
         0 => Err(RecoverableError::with_hint(
             format!("symbol not found: {name_path}"),
-            "Use list_symbols(path) to see available symbols, or check the name_path spelling.",
+            "Use symbols(path) to see available symbols, or check the name_path spelling.",
         )
         .into()),
         1 => Ok(matches.into_iter().next().unwrap()),

@@ -64,7 +64,7 @@ When you supply both `start_line` and `end_line`, the tool returns exactly those
 
 **Tips:**
 
-- Use `list_symbols` or `find_symbol` to locate the line range of a function before calling `read_file` — this lets you fetch exactly what you need without reading the whole file.
+- Use `symbols` or `symbols` to locate the line range of a function before calling `read_file` — this lets you fetch exactly what you need without reading the whole file.
 - For large files, prefer reading in chunks with explicit `start_line`/`end_line` over reading the whole file.
 - If you want to search for a pattern rather than read, use `search_pattern` instead.
 
@@ -173,7 +173,7 @@ The search walks the directory tree using the same `.gitignore`-aware walker as 
 
 - Use `path` to narrow the search when you already know which part of the codebase is relevant — this is significantly faster on large repos.
 - Increase `max_results` if you expect many matches and need to see them all.
-- When you know a symbol name, `find_symbol` is more precise than a regex search because it uses the LSP index. Use `search_pattern` when you are looking for text patterns, string literals, comments, or constructs that the LSP does not model as symbols.
+- When you know a symbol name, `symbols` is more precise than a regex search because it uses the LSP index. Use `search_pattern` when you are looking for text patterns, string literals, comments, or constructs that the LSP does not model as symbols.
 - To find files by name (not content), use `find_file`.
 
 ---

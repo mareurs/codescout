@@ -532,7 +532,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_symbols_include_docs_returns_docstrings() {
+    async fn symbols_include_docs_returns_docstrings() {
         let content = r#"
 /// A documented function.
 fn documented() {}
@@ -540,7 +540,7 @@ fn documented() {}
 fn undocumented() {}
 "#;
         let (dir, ctx) = project_ctx_with_file("test.rs", content).await;
-        let tool = crate::tools::symbol::ListSymbols;
+        let tool = crate::tools::symbol::Symbols;
         let result = tool
             .call(json!({ "path": "test.rs", "include_docs": true }), &ctx)
             .await

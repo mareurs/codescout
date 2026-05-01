@@ -150,7 +150,7 @@ The following three tools address code by symbol name and are backed by the Lang
 
 All three require:
 
-- `name_path` — the symbol's name path as returned by `find_symbol` or `list_symbols`, e.g. `"MyStruct/my_method"`.
+- `name_path` — the symbol's name path as returned by `symbols` or `symbols`, e.g. `"MyStruct/my_method"`.
 - `path` — the file containing the symbol, relative to the project root.
 
 ### `replace_symbol`
@@ -266,6 +266,6 @@ All three require:
 
 **Tips for symbol tools:**
 
-- Use `find_symbol` or `list_symbols` first to obtain the correct `name_path`. Nested symbols use a slash-separated path: `"OuterStruct/inner_method"`.
+- Use `symbols` or `symbols` first to obtain the correct `name_path`. Nested symbols use a slash-separated path: `"OuterStruct/inner_method"`.
 - `rename_symbol` requires a running LSP server for the file's language. If the LSP is unavailable, the tool returns an error — fall back to `search_pattern` combined with `edit_file` in that case, but be aware it will not respect scoping.
 - After a `replace_symbol` edit, the file content shifts. If you plan to make additional `edit_file` edits in the same file, use `search_pattern` to verify the exact text you want to match before editing.

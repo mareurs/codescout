@@ -905,7 +905,7 @@ mod tests {
     #[test]
     fn store_tool_generates_tool_ref() {
         let buf = OutputBuffer::new(10);
-        let id = buf.store_tool("list_symbols", "{\"symbols\":[]}".to_string());
+        let id = buf.store_tool("symbols", "{\"symbols\":[]}".to_string());
         assert!(
             id.starts_with("@tool_"),
             "expected @tool_ prefix, got {}",
@@ -917,19 +917,19 @@ mod tests {
     fn store_tool_stores_as_stdout_no_stderr() {
         let buf = OutputBuffer::new(10);
         let json = "{\"symbols\":[1,2,3]}".to_string();
-        let id = buf.store_tool("list_symbols", json.clone());
+        let id = buf.store_tool("symbols", json.clone());
         let entry = buf.get(&id).unwrap();
         assert_eq!(entry.stdout, json);
         assert_eq!(entry.stderr, "");
         assert_eq!(entry.exit_code, 0);
-        assert_eq!(entry.command, "list_symbols");
+        assert_eq!(entry.command, "symbols");
     }
 
     #[test]
     fn resolve_refs_substitutes_tool_ref() {
         let buf = OutputBuffer::new(10);
         let json = "{\"symbols\":[]}".to_string();
-        let id = buf.store_tool("list_symbols", json);
+        let id = buf.store_tool("symbols", json);
         let cmd = format!("jq '.symbols' {}", id);
         let (resolved, _paths, _is_buf_only, _refreshed) = buf.resolve_refs(&cmd).unwrap();
         assert!(

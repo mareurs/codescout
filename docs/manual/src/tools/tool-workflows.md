@@ -39,7 +39,7 @@ output feeds the next.
 
 | Step | Tool | Purpose |
 |------|------|---------|
-| 1 | `find_symbol(name, include_body=true)` | Read the current implementation |
+| 1 | `symbols(name, include_body=true)` | Read the current implementation |
 | 2 | `references(name_path, path)` | Find all callers and dependents |
 | 3 | `symbol_at` with `fields: ["hover"]` on key call sites | Reveal concrete types flowing through (especially generics/traits) |
 | 4 | Edit with full knowledge of impact | |
@@ -60,7 +60,7 @@ matches — including imports, type annotations, comments, and tests.
 
 | Step | Tool | Purpose |
 |------|------|---------|
-| 1 | `find_symbol(entry_point)` | Locate the starting function |
+| 1 | `symbols(entry_point)` | Locate the starting function |
 | 2 | `symbol_at` with `fields: ["def"]` on called functions | Follow the call chain forward |
 | 3 | `symbol_at` with `fields: ["hover"]` on parameters/return values | See resolved types at each stage |
 | 4 | `references` at the destination | Confirm which callers reach this point |

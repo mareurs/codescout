@@ -10,23 +10,23 @@ keeps context usage low.
 You have a file path, function name, class name, or method name. Use the
 structure-aware tools that navigate by name directly.
 
-**`find_symbol(pattern)`** — locate a symbol by name substring across the
+**`symbols(pattern)`** — locate a symbol by name substring across the
 project or within a specific file. Fast because it goes through the language
 server index.
 
 ```json
 {
-  "tool": "find_symbol",
+  "tool": "symbols",
   "arguments": { "pattern": "AuthService", "relative_path": "src/services/auth.rs" }
 }
 ```
 
-**`list_symbols(path)`** — list all symbols in a file, directory, or
+**`symbols(path)`** — list all symbols in a file, directory, or
 glob pattern. Use this when you have a file and want to see what is in it
 before deciding which symbol to read.
 
 ```json
-{ "tool": "list_symbols", "arguments": { "path": "src/services/auth.rs" } }
+{ "tool": "symbols", "arguments": { "path": "src/services/auth.rs" } }
 ```
 ```
 
@@ -47,7 +47,7 @@ body:
 
 ```json
 {
-  "tool": "find_symbol",
+  "tool": "symbols",
   "arguments": {
     "pattern": "verify_token",
     "relative_path": "src/services/auth.rs",
@@ -81,9 +81,9 @@ read the full symbols.
 
 1. `semantic_search("how are database errors handled")` — get a list of
    relevant files and line ranges.
-2. `list_symbols(found_file)` — see the symbol structure around those
+2. `symbols(found_file)` — see the symbol structure around those
    lines.
-3. `find_symbol(name, include_body=true, detail_level="full")` — read the
+3. `symbols(name, include_body=true, detail_level="full")` — read the
    specific function body.
 
 ## You Know Nothing
@@ -104,7 +104,7 @@ is usually enough to identify where to look next.
 **Step 2 — scan a promising file or directory:**
 
 ```json
-{ "tool": "list_symbols", "arguments": { "path": "src/services/" } }
+{ "tool": "symbols", "arguments": { "path": "src/services/" } }
 ```
 
 This shows all symbols across the directory in compact form. You get names,
@@ -122,13 +122,13 @@ which concerns, what patterns are used, where the main logic lives.
 
 **Step 4 — drill into specifics:**
 
-Once you have a target, use `find_symbol` in Focused mode to read actual code.
+Once you have a target, use `symbols` in Focused mode to read actual code.
 
 ## Common Anti-Patterns
 
-**Reading entire files with `read_file` instead of using `find_symbol`.**
+**Reading entire files with `read_file` instead of using `symbols`.**
 `read_file` without explicit line ranges dumps the full file content into
-context. If you know the function name, use `find_symbol(include_body=true)`
+context. If you know the function name, use `symbols(include_body=true)`
 instead — you get the function body without the surrounding boilerplate.
 
 **Using `search_pattern` (grep) when `semantic_search` would serve better.**
@@ -139,7 +139,7 @@ search finds related code even when the words you think of do not appear in the
 source.
 
 **Switching to Focused mode before knowing what you want.**
-Calling `list_symbols` with `detail_level: "full"` on a large directory
+Calling `symbols` with `detail_level: "full"` on a large directory
 floods the context with every function body in every file. Use Exploring mode
 to identify the target, then use Focused mode on that specific target.
 
@@ -152,11 +152,11 @@ tracing usages of a known symbol.
 
 | You know... | Start with |
 |-------------|------------|
-| File path | `list_symbols(file)` |
-| Function/class name | `find_symbol(pattern)` |
+| File path | `symbols(file)` |
+| Function/class name | `symbols(pattern)` |
 | Who calls a function | `references(name_path, file)` |
 | A concept or behaviour | `semantic_search(query)` |
-| Nothing (unfamiliar area) | `list_dir` → `list_symbols` → `semantic_search` |
+| Nothing (unfamiliar area) | `list_dir` → `symbols` → `semantic_search` |
 | Exact string or import | `search_pattern(regex)` |
 
 ## Further Reading

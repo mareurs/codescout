@@ -11,12 +11,12 @@ below.
 LSP-backed tools for locating and editing code by name rather than by line
 number. These tools require an LSP server to be running for the target language.
 
-The navigation tools (`find_symbol`, `list_symbols`, `references`) accept an optional **`scope`** parameter to search library code as well as project code — see [Library Navigation](#library-navigation) below.
+The navigation tools (`symbols`, `symbols`, `references`) accept an optional **`scope`** parameter to search library code as well as project code — see [Library Navigation](#library-navigation) below.
 
 | Tool | Description |
 |------|-------------|
-| `find_symbol` | Find symbols by name pattern across the project or within a file |
-| `list_symbols` | Symbol tree for a file, directory, or glob — classes, functions, structs |
+| `symbols` | Find symbols by name pattern across the project or within a file |
+| `symbols` | Symbol tree for a file, directory, or glob — classes, functions, structs |
 | `symbol_at` | Inspect a symbol at a position via LSP — definition location and/or hover (type + docs); auto-discovers libraries |
 | `references` | All callers and usages of a given symbol |
 | `replace_symbol` | Replace the entire body of a named symbol with new source |
@@ -112,8 +112,8 @@ for.
 
 | You want to... | Use this |
 |----------------|----------|
-| See what functions/classes a file contains | `list_symbols` |
-| Find where a function is defined | `find_symbol` |
+| See what functions/classes a file contains | `symbols` |
+| Find where a function is defined | `symbols` |
 | Jump to a symbol's definition | `symbol_at` with `fields: ["def"]` |
 | Get type info or docs for a symbol | `symbol_at` with `fields: ["hover"]` |
 | Find all callers of a function | `references` |
@@ -134,19 +134,19 @@ for.
 
 ### Choosing Between Symbol Navigation and Semantic Search
 
-Use **symbol navigation** (`find_symbol`, `list_symbols`) when you know
+Use **symbol navigation** (`symbols`, `symbols`) when you know
 the name of what you are looking for. LSP tools are precise and fast.
 
 Use **semantic search** when you know the concept but not the name: "retry
 logic", "token validation", "connection pool initialization". Semantic search
 finds code that _means_ what you describe, regardless of what it is called.
 
-### Choosing Between `find_symbol` and `list_symbols`
+### Choosing Between `symbols` and `symbols`
 
-`list_symbols` answers "what is in this file or directory?" — it gives
-you the map. `find_symbol` answers "where is this specific thing?" — it finds
+`symbols` answers "what is in this file or directory?" — it gives
+you the map. `symbols` answers "where is this specific thing?" — it finds
 a target by name, optionally across the whole project. Start with
-`list_symbols` to orient, then use `find_symbol` to drill in.
+`symbols` to orient, then use `symbols` to drill in.
 
 ### Choosing Between LSP Editing and Direct Editing
 

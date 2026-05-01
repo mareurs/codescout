@@ -628,7 +628,7 @@ mod tests {
     async fn read_file_tool_ref_with_line_range() {
         let ctx = test_ctx().await;
         let content = "line1\nline2\nline3\nline4\nline5".to_string();
-        let id = ctx.output_buffer.store_tool("list_symbols", content);
+        let id = ctx.output_buffer.store_tool("symbols", content);
         let result = ReadFile
             .call(json!({ "path": id, "start_line": 2, "end_line": 4 }), &ctx)
             .await

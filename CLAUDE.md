@@ -21,7 +21,7 @@ See codescout memory `development-commands` for the full command reference.
 - **When you notice anything unexpected**, add an entry to that file **before continuing** — even a one-liner. Capture: what you did, what you expected, what happened, and a probable cause.
 - Do not wait until you finish the task. Log it immediately while context is fresh.
 
-This applies to ALL unexpected tool behavior: `edit_file`, `rename_symbol`, `replace_symbol`, `find_symbol`, `semantic_search`, etc.
+This applies to ALL unexpected tool behavior: `edit_file`, `rename_symbol`, `replace_symbol`, `symbols`, `semantic_search`, etc.
 
 ## Git Workflow
 
@@ -175,9 +175,9 @@ full detail, paginated via offset/limit. Enforced via `OutputGuard`
 (`src/tools/output.rs`), a project-wide pattern not per-tool logic.
 
 **Tool Selection by Knowledge Level** — Know the name → LSP/AST tools
-(`find_symbol`, `list_symbols`, `symbol_at`). Know the concept →
+(`symbols`, `symbol_at`). Know the concept →
 semantic search first, then drill down. Know nothing → `list_dir` +
-`list_symbols` at top level, then semantic search.
+`symbols` at top level, then semantic search.
 
 **Agent-Agnostic Design** — Tool descriptions, error messages, and server
 instructions are the primary interface for LLMs. They must feel natural for
@@ -270,8 +270,8 @@ This project has a companion Claude Code plugin at **`../claude-plugins/codescou
 The `PreToolUse` hook will **block** any attempt to use the native `Read`, `Grep`, or `Glob` tools on source code files (`.rs`, `.ts`, `.py`, etc). You will see `PreToolUse:Read hook error` if you try.
 
 **You MUST use codescout's own MCP tools to read source code:**
-- `mcp__codescout__list_symbols(path)` — see all symbols in a file/dir
-- `mcp__codescout__find_symbol(name, include_body=true)` — read a function body
+- `mcp__codescout__symbols(path)` — see all symbols in a file/dir
+- `mcp__codescout__symbols(name=..., include_body=true)` — read a function body
 - `mcp__codescout__search_pattern(pattern)` — regex search
 - `mcp__codescout__semantic_search(query)` — concept-level search
 - `mcp__codescout__read_file(path)` — for non-source files (markdown, toml, json)
@@ -303,5 +303,5 @@ Memories (Claude auto-loads these; listed for reference):
 - `conventions` — Commit style, branch strategy, error handling rules, pre-commit requirements; per-project patterns
 - `development-commands` — Full command reference (cargo, scripts, release)
 - `language-patterns` — Rust anti-patterns and idiomatic patterns
-- `gotchas` — Cross-project path resolution pitfalls, find_symbol truncation, Kotlin LSP, embedding model restrictions, memory leak
+- `gotchas` — Cross-project path resolution pitfalls, symbols truncation, Kotlin LSP, embedding model restrictions, memory leak
 - `domain-glossary`, `project-overview`, `system-prompt`, `onboarding` — project self-description

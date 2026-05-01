@@ -13,7 +13,7 @@ debugging agent), that subagent starts with a blank slate. It has the MCP tools
 available, but it has never seen the `server_instructions`. Its default instinct
 is to reach for the native tools it was trained on: `Read`, `Grep`, `Glob`,
 `Bash cat`. Without intervention it will happily read whole files, grep walls of
-text, and never touch `find_symbol` or `semantic_search`.
+text, and never touch `symbols` or `semantic_search`.
 
 The routing plugin exists to close that gap. It injects guidance into every
 agent and every subagent, and hard-blocks the native tool patterns that

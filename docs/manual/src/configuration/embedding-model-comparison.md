@@ -52,7 +52,7 @@ No single model dominates all tiers.
 
 Analysis of 31,674 tool calls across 70+ real projects:
 
-- `find_symbol` — **17.8%** of all calls (the workhorse)
+- `symbols` — **17.8%** of all calls (the workhorse)
 - `grep` — **2.3%**
 - `semantic_search` — **1.1%** (349 calls total)
 

@@ -273,7 +273,7 @@ mod tests {
     async fn empty_snapshot_produces_empty_report() {
         let provider = ToolUsageProvider::new(FakeSource {
             snap: UsageSnapshot::default(),
-            registered: vec!["find_symbol".into(), "list_dir".into()],
+            registered: vec!["symbols".into(), "list_dir".into()],
         });
         let bytes = provider.read(URI).await.unwrap();
         let ResourceBytes::Text(json) = bytes else {
@@ -285,7 +285,7 @@ mod tests {
         // Both registered tools are unused.
         assert_eq!(
             parsed["unused_tools"],
-            serde_json::json!(["find_symbol", "list_dir"])
+            serde_json::json!(["list_dir", "symbols"])
         );
         assert_eq!(parsed["prune_candidates"], serde_json::json!([]));
     }
@@ -296,13 +296,13 @@ mod tests {
             snap: UsageSnapshot {
                 total_calls: 200,
                 by_tool: vec![
-                    make_stats("find_symbol", 197), // above threshold
+                    make_stats("symbols", 197),     // above threshold
                     make_stats("rename_symbol", 2), // below threshold, but > 0 → prune candidate
                     make_stats("symbol_at", 1),     // below threshold → prune candidate
                 ],
             },
             registered: vec![
-                "find_symbol".into(),
+                "symbols".into(),
                 "rename_symbol".into(),
                 "symbol_at".into(),
                 "list_dir".into(), // never called → unused
@@ -360,9 +360,9 @@ mod tests {
         let provider = ToolUsageProvider::new(FakeSource {
             snap: UsageSnapshot {
                 total_calls: 10,
-                by_tool: vec![make_stats("find_symbol", 10)],
+                by_tool: vec![make_stats("symbols", 10)],
             },
-            registered: vec!["find_symbol".into()],
+            registered: vec!["symbols".into()],
         });
         let ResourceBytes::Text(json) = provider.read(URI).await.unwrap() else {
             panic!()

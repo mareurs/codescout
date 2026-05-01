@@ -2,7 +2,7 @@
 
 Two improvements to the core tool API: consistent parameter naming across all
 symbol and search tools, and automatic detection of regex intent in
-`find_symbol` to prevent confusing errors.
+`symbols` to prevent confusing errors.
 
 ---
 
@@ -15,11 +15,10 @@ are removed — update any saved prompts or scripts.
 
 | Tool | Old param | New param |
 |---|---|---|
-| `find_symbol` | `name_path` | `symbol` |
-| `find_symbol` | `pattern` | `query` |
+| `symbols` | `name_path` | `symbol` |
+| `symbols` | `pattern` | `query` |
 | `references` | `name_path` | `symbol` |
-| `goto_definition` | `name_path` | `symbol` |
-| `hover` | `name_path` | `symbol` |
+| `symbol_at` | `name_path` | `symbol` |
 | `replace_symbol` | `name_path` | `symbol` |
 | `remove_symbol` | `name_path` | `symbol` |
 | `rename_symbol` | `name_path` | `symbol` |
@@ -38,15 +37,15 @@ agents already have for these operations.
 
 ---
 
-## Query-Shape Detection in find_symbol
+## Query-Shape Detection in symbols
 
-`find_symbol` now detects when a `query` looks like a regex pattern and
+`symbols` now detects when a `query` looks like a regex pattern and
 returns a corrective hint instead of silently returning wrong results.
 
 ### Problem it solves
 
-Agents occasionally pass regex patterns to `find_symbol` expecting it to
-match multiple symbols — but `find_symbol` does substring matching on symbol
+Agents occasionally pass regex patterns to `symbols` expecting it to
+match multiple symbols — but `symbols` does substring matching on symbol
 names, not regex. A query like `handle_.*_event` matches nothing (or
 coincidentally matches a symbol with `.*` in its name), giving a misleading
 empty result.
@@ -60,7 +59,7 @@ is returned:
 ```json
 {
   "error": "query looks like a regex pattern — use grep(pattern=...) for regex search",
-  "hint": "find_symbol matches by substring; grep searches file content by pattern"
+  "hint": "symbols matches by substring; grep searches file content by pattern"
 }
 ```
 
@@ -77,7 +76,7 @@ is returned:
 
 ```
 // Find a symbol by name substring
-find_symbol(query="handle_event")
+symbols(query="handle_event")
 
 // Find code matching a pattern across files
 grep(pattern="handle_.*_event")
