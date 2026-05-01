@@ -7,7 +7,9 @@
 
 ## Goal
 
-Reduce codescout's MCP tool count from 25 to 19 by merging tools with overlapping responsibilities, before introducing the `call_graph` tool. Cleaner prompt surface, less LLM attention spent on tool disambiguation, no semantic loss.
+Reduce codescout's MCP tool count from 25 to 20 by merging tools with overlapping responsibilities, before introducing the `call_graph` tool. Cleaner prompt surface, less LLM attention spent on tool disambiguation, no semantic loss.
+
+(19 numbered tools below + `onboarding` = 20 registered tools.)
 
 ## Non-Goals
 
@@ -43,7 +45,7 @@ Reduce codescout's MCP tool count from 25 to 19 by merging tools with overlappin
 
 **Removed (folded):** `find_symbol`, `list_symbols`, `find_references`, `goto_definition`, `hover`, `list_dir`, `find_file`, `activate_project`, `project_status`, `list_libraries`, `register_library`, `index_project`, `index_status`.
 
-**Net:** 25 − 13 + 6 + 1 placeholder = 19.
+**Net registered tools:** 25 − 13 + 6 + 1 placeholder + onboarding = 20 (19 numbered + onboarding).
 
 ## Per-Tool Schema Decisions
 
