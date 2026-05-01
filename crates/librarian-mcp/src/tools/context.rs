@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::catalog::{artifact, links};
+use crate::catalog::{artifact, augmentation, links};
 use crate::filter::FilterNode;
 
 use super::scope::{apply_scope, Scope};
@@ -191,6 +191,26 @@ impl Tool for LibrarianContext {
             }
         };
 
+        // Fetch augmentation rows for all candidates.
+        let aug_map: std::collections::HashMap<String, augmentation::AugmentationRow> = {
+            let cat = ctx.catalog.lock();
+            augmentation::get_batch(&cat, &candidate_ids)?
+        };
+
+        // Sort: trackers (augmented) first, then other augmented, then plain.
+        let mut sorted_ids = candidate_ids.clone();
+        sorted_ids.sort_by_key(|id| {
+            let is_tracker = rows_map
+                .get(id.as_str())
+                .is_some_and(|r| r.kind == "tracker");
+            let is_augmented = aug_map.contains_key(id.as_str());
+            match (is_tracker, is_augmented) {
+                (true, _) => 0u8,
+                (false, true) => 1,
+                _ => 2,
+            }
+        });
+
         let root_map: std::collections::HashMap<String, std::path::PathBuf> = ctx
             .workspace
             .roots
@@ -201,7 +221,7 @@ impl Tool for LibrarianContext {
         let mut markdown = String::new();
         let mut included_ids: Vec<String> = Vec::new();
 
-        for id in &candidate_ids {
+        for id in &sorted_ids {
             let row = match rows_map.get(id) {
                 Some(r) => r,
                 None => continue,
@@ -221,10 +241,29 @@ impl Tool for LibrarianContext {
             };
             let first_30: String = body.lines().take(30).collect::<Vec<_>>().join("\n");
             let title = row.title.as_deref().unwrap_or("(untitled)");
-            let section = format!(
-                "## {}  — {}/{}  ({}/{})\n{}\n\n",
-                title, row.kind, row.status, row.repo, row.rel_path, first_30
-            );
+            let section = if let Some(aug) = aug_map.get(id.as_str()) {
+                let refreshed = aug.last_refreshed_at.as_deref().unwrap_or("never");
+                format!(
+                    "<!-- [LIVE]: {} | last refreshed: {} | refresh #{} -->\n\
+                     > Prompt: {}\n\n\
+                     ## {}  — {}/{}  ({}/{})\n{}\n\n",
+                    title,
+                    refreshed,
+                    aug.refresh_count,
+                    aug.prompt,
+                    title,
+                    row.kind,
+                    row.status,
+                    row.repo,
+                    row.rel_path,
+                    first_30
+                )
+            } else {
+                format!(
+                    "## {}  — {}/{}  ({}/{})\n{}\n\n",
+                    title, row.kind, row.status, row.repo, row.rel_path, first_30
+                )
+            };
             if !markdown.is_empty() && (markdown.len() + section.len()) > char_cap {
                 break;
             }
@@ -475,5 +514,102 @@ mod tests {
         assert_eq!(included.len(), 1);
         assert_eq!(included[0], "in");
         assert_eq!(v["scope"]["applied"], "project");
+    }
+
+    #[tokio::test]
+    async fn live_header_present_for_augmented_artifact() {
+        use crate::catalog::augmentation::{self, AugmentationRow};
+        use std::io::Write;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        // Write the artifact file to disk.
+        let mut f = std::fs::File::create(root.join("tracker.md")).unwrap();
+        writeln!(f, "# My Tracker\n\nsome content").unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let mut row = sample_row(
+            "ctx-aug",
+            "r",
+            "tracker.md",
+            "My Tracker",
+            Some("live-test"),
+        );
+        row.kind = "tracker".into();
+        artifact::upsert(&cat, &row).unwrap();
+        augmentation::upsert(
+            &cat,
+            &AugmentationRow {
+                artifact_id: "ctx-aug".to_string(),
+                prompt: "Maintain state".to_string(),
+                params: "{}".to_string(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            },
+        )
+        .unwrap();
+
+        let ctx = mk_ctx(root, cat);
+        let result = LibrarianContext
+            .call(&ctx, json!({"topic": "live-test"}))
+            .await
+            .unwrap();
+
+        let md = result["markdown"].as_str().unwrap();
+        assert!(md.contains("[LIVE]"), "expected [LIVE] in:\n{md}");
+        assert!(md.contains("Maintain state"), "expected prompt in:\n{md}");
+    }
+
+    #[tokio::test]
+    async fn augmented_artifacts_sorted_before_plain() {
+        use crate::catalog::augmentation::{self, AugmentationRow};
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        // Write files for both artifacts.
+        std::fs::write(root.join("plain.md"), "# Plain\nbody").unwrap();
+        std::fs::write(root.join("aug.md"), "# Augmented\nbody").unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        // Insert plain first so it would appear first without sorting.
+        artifact::upsert(
+            &cat,
+            &sample_row("plain", "r", "plain.md", "Plain", Some("sort-test")),
+        )
+        .unwrap();
+        artifact::upsert(
+            &cat,
+            &sample_row("aug", "r", "aug.md", "Augmented", Some("sort-test")),
+        )
+        .unwrap();
+        augmentation::upsert(
+            &cat,
+            &AugmentationRow {
+                artifact_id: "aug".to_string(),
+                prompt: "keep fresh".to_string(),
+                params: "{}".to_string(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            },
+        )
+        .unwrap();
+
+        let ctx = mk_ctx(root, cat);
+        let result = LibrarianContext
+            .call(&ctx, json!({"topic": "sort-test"}))
+            .await
+            .unwrap();
+
+        let included = result["included_ids"].as_array().unwrap();
+        assert_eq!(included.len(), 2);
+        // Augmented artifact should appear before plain.
+        assert_eq!(included[0], "aug");
+        assert_eq!(included[1], "plain");
     }
 }
