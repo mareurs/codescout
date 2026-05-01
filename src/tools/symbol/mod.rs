@@ -1,6 +1,8 @@
 //! Symbol-level tools backed by the LSP client.
 
+pub mod call_edges;
 mod call_graph;
+
 mod display;
 mod insert_code;
 mod list_overview;
