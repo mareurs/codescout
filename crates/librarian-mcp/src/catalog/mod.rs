@@ -9,6 +9,7 @@ pub mod events;
 pub mod find;
 pub mod links;
 pub mod observations;
+pub mod augmentation;
 pub mod sources;
 
 pub struct Catalog {
