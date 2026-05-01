@@ -28,6 +28,12 @@ fn validate_rel_path(rel: &str) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Deserialize)]
+pub struct AugmentSpec {
+    pub prompt: String,
+    pub params: Option<Value>,
+}
+
 #[derive(Deserialize)]
 struct Args {
     repo: String,
@@ -39,6 +45,10 @@ struct Args {
     owners: Vec<String>,
     #[serde(default)]
     tags: Vec<String>,
+    /// Optional initial status. Defaults to "draft".
+    status: Option<String>,
+    /// If set, attach an augmentation row atomically after creating the artifact.
+    augment: Option<AugmentSpec>,
 }
 
 #[async_trait]
@@ -48,7 +58,7 @@ impl Tool for ArtifactCreate {
     }
 
     fn description(&self) -> &'static str {
-        "Create a new artifact. Writes frontmatter + body to the file. Fails if path exists."
+        "Create a new artifact. Writes frontmatter + body to the file. Fails if path exists. Optional `status` (default: draft) and `augment` (prompt + params) for atomic tracker-style creation."
     }
 
     fn input_schema(&self) -> Value {
@@ -62,7 +72,20 @@ impl Tool for ArtifactCreate {
                 "title": {"type": "string"},
                 "body": {"type": "string"},
                 "owners": {"type": "array", "items": {"type": "string"}},
-                "tags": {"type": "array", "items": {"type": "string"}}
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "status": {
+                    "type": "string",
+                    "description": "Initial status. Defaults to \"draft\"."
+                },
+                "augment": {
+                    "type": "object",
+                    "description": "Attach augmentation atomically. Pass prompt + optional params.",
+                    "properties": {
+                        "prompt": {"type": "string"},
+                        "params": {"type": "object"}
+                    },
+                    "required": ["prompt"]
+                }
             }
         })
     }
@@ -85,10 +108,11 @@ impl Tool for ArtifactCreate {
             std::fs::create_dir_all(parent)?;
         }
         let id = artifact_id(&a.repo, &a.rel_path);
+        let status = a.status.as_deref().unwrap_or("draft").to_string();
         let fm = Frontmatter {
             id: Some(id.clone()),
             kind: Some(a.kind.clone()),
-            status: Some("draft".into()),
+            status: Some(status.clone()),
             title: Some(a.title.clone()),
             owners: a.owners.clone(),
             tags: a.tags.clone(),
@@ -100,10 +124,10 @@ impl Tool for ArtifactCreate {
         let now = chrono::Utc::now().timestamp_millis();
         let row = ArtifactRow {
             id: id.clone(),
-            repo: a.repo,
-            rel_path: a.rel_path,
+            repo: a.repo.clone(),
+            rel_path: a.rel_path.clone(),
             kind: a.kind,
-            status: "draft".into(),
+            status: status.clone(),
             title: Some(a.title),
             owners: a.owners,
             tags: a.tags,
@@ -117,6 +141,32 @@ impl Tool for ArtifactCreate {
             confidence: 1.0,
         };
         artifact::upsert(&ctx.catalog.lock(), &row)?;
+        if let Some(aug_spec) = &a.augment {
+            let params_str = aug_spec
+                .params
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?
+                .unwrap_or_else(|| "{}".to_string());
+            let now_ts = chrono::Utc::now()
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                .to_string();
+            let cat = ctx.catalog.lock();
+            crate::catalog::augmentation::upsert(
+                &cat,
+                &crate::catalog::augmentation::AugmentationRow {
+                    artifact_id: id.clone(),
+                    prompt: aug_spec.prompt.clone(),
+                    params: params_str,
+                    last_refreshed_at: None,
+                    refresh_count: 0,
+                    created_at: now_ts.clone(),
+                    updated_at: now_ts,
+                    render_template: None,
+                    params_schema: None,
+                },
+            )?;
+        }
         Ok(json!({"id": id, "repo": row.repo, "rel_path": row.rel_path}))
     }
 }
@@ -221,5 +271,70 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("relative"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn create_with_augment_writes_augmentation_row() {
+        use crate::catalog::{augmentation, Catalog};
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        let result = ArtifactCreate
+            .call(
+                &ctx,
+                json!({
+                    "repo": "r",
+                    "rel_path": "trackers/my-tracker.md",
+                    "kind": "tracker",
+                    "title": "My Tracker",
+                    "body": "initial body",
+                    "status": "active",
+                    "augment": {
+                        "prompt": "Keep this tracker up to date.",
+                        "params": {"threshold": 5}
+                    }
+                }),
+            )
+            .await
+            .unwrap();
+
+        let id = result["id"].as_str().unwrap().to_string();
+        let cat = ctx.catalog.lock();
+        let aug = augmentation::get(&cat, &id).unwrap();
+        assert!(aug.is_some(), "augmentation row must be created");
+        let aug = aug.unwrap();
+        assert_eq!(aug.prompt, "Keep this tracker up to date.");
+        let params: serde_json::Value = serde_json::from_str(&aug.params).unwrap();
+        assert_eq!(params["threshold"], 5);
+    }
+
+    #[tokio::test]
+    async fn create_with_explicit_status_active() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        ArtifactCreate
+            .call(
+                &ctx,
+                json!({
+                    "repo": "r",
+                    "rel_path": "trackers/active.md",
+                    "kind": "tracker",
+                    "title": "Active",
+                    "body": "",
+                    "status": "active"
+                }),
+            )
+            .await
+            .unwrap();
+
+        let cat = ctx.catalog.lock();
+        let row = crate::catalog::artifact::get(
+            &cat,
+            &crate::ids::artifact_id("r", "trackers/active.md"),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(row.status, "active");
     }
 }
