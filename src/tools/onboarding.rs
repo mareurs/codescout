@@ -16,7 +16,7 @@ use super::{parse_bool_param, Tool, ToolContext};
 /// Bump this when system prompt surfaces change significantly.
 /// Missing or lower stored version triggers auto-refresh of the system prompt.
 /// See CLAUDE.md § "Onboarding Version" for when to bump.
-pub(crate) const ONBOARDING_VERSION: u32 = 15;
+pub(crate) const ONBOARDING_VERSION: u32 = 16;
 
 /// Returns true if the stored onboarding version is stale (needs refresh).
 /// `None` means pre-versioning project — always stale.

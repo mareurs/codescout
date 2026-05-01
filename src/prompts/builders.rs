@@ -350,10 +350,13 @@ pub(crate) fn build_system_prompt_draft(
         draft.push_str("4. `symbols(name=\"Name\", include_body=true)` — read implementation\n");
         draft.push_str("   - regex-like patterns belong in `grep`, not `symbols`\n");
         draft.push_str(
-            "5. `memory(action=\"recall\", query=\"...\")` — search memories by meaning\n\n",
+            "5. `call_graph(symbol=\"Name\", direction=\"callers\")` — transitive blast radius; `direction=\"callees\"` for flow tracing\n",
         );
         draft.push_str(
-            "6. `read_markdown(\"path/to/file.md\")` — returns heading map + `@file_ref` for large files. \
+            "6. `memory(action=\"recall\", query=\"...\")` — search memories by meaning\n\n",
+        );
+        draft.push_str(
+            "7. `read_markdown(\"path/to/file.md\")` — returns heading map + `@file_ref` for large files. \
              **IRON LAW #6:** subsequent reads MUST use `@file_ref` (not the original path): \
              `read_markdown(\"@file_ref\", heading=\"## Section\")` or `start_line=/end_line=`.\n\n",
         );

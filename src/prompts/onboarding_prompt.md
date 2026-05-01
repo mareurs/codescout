@@ -471,7 +471,8 @@ codescout tool — never "read X" in natural language. Example:
   2. `symbols(name="Orchestrator", include_body=true)` — read core type end-to-end
   3. `semantic_search("retry backoff")` — find cross-cutting logic
   4. `grep(pattern="FOO_KEY", path="src/hooks")` — locate literal occurrences
-  5. `read_markdown("docs/ARCHITECTURE.md")` — for markdown only
+  5. `call_graph(symbol="handle_request", direction="callers")` — transitive blast radius or flow tracing
+  6. `read_markdown("docs/ARCHITECTURE.md")` — for markdown only
 ]
 
 ## Project Rules
