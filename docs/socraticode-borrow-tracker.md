@@ -34,6 +34,13 @@ Features worth porting from `../socraticode` to codescout. One at a time.
 - **`symbol_at` minor follow-ups** — (1) add tests for `fields` validation paths (unknown-string, non-string-entry, empty-array, non-array); (2) extract shared col-resolution into `resolve_col(source_line, col_param, identifier, fallback)` to remove ~30 lines of duplication between `fetch_definition` / `fetch_hover`; (3) replace 5-tuple return of `read_position_inputs` with a `PositionInputs` struct.
 - **`symbols` minor follow-ups** — (1) `format_compact` dispatch by JSON-key presence is brittle; add internal `_mode` discriminator OR regression test asserting both shapes route to the right formatter; (2) empty-string `name`/`query` silently returns all symbols (cap=50) — should treat as missing or `RecoverableError`; (3) `query` + `symbol` simultaneously: `pattern` follows `query` precedence but `is_name_path` follows `symbol` precedence → behavior mismatch; either reject or align precedence; (4) rename `FIND_SYMBOL_MAX_RESULTS` → `SYMBOLS_SEARCH_MAX_RESULTS`; (5) `description()` could mention `name_path` for symmetry with schema; (6) replace `"references"` placeholder in `src/usage/db.rs` and `src/tools/usage.rs` test fixtures with an obviously-fake string to prevent future overlap with real `references` usage stats.
 
+## Spec/plan corrections discovered during implementation
+
+- **Tool names**: spec referred to `find_file` and `search_pattern` but actual registered names are `glob` and `grep`. Plan tasks reference the wrong names; implementers should use real names.
+- **Missed tools**: `edit_markdown` and `read_markdown` exist as registered tools and were absent from spec inventory. Both stay unchanged through L3.
+- **Final count revision**: post-L3 tool count is **22**, not 20. Recount: 25 original − 13 removed + 6 merged + 1 stub (`call_graph`) + 2 missed (`edit_markdown`, `read_markdown` always there) − 1 onboarding accounting fix (already counted) = 22 effective. The `server_tool_count_is_l3_target` test in Task 9 must assert 22.
+- **`grep` vs `search_pattern` naming**: spec listed `search_pattern` as unchanged. Actual name is `grep`. Decision (deferred): keep as `grep` for now (no rename in L3); revisit naming consistency at end of L3 or in a follow-up.
+
 ## Deferred decisions
 
 Captured here so they don't get lost during sequencing.
