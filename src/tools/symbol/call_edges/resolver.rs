@@ -191,8 +191,7 @@ async fn resolve_via_ts(
                     continue;
                 };
 
-                let byte =
-                    position_to_byte(&src, loc.range.start.line, loc.range.start.character);
+                let byte = position_to_byte(&src, loc.range.start.line, loc.range.start.character);
 
                 if !super::ts_classifier::position_is_call(&tree, byte, language_id) {
                     continue;
@@ -293,9 +292,11 @@ fn enclosing_function_name(
     let fn_kinds: &[&str] = match language_id {
         "rust" => &["function_item"],
         "python" => &["function_definition"],
-        "typescript" | "javascript" | "tsx" | "jsx" => {
-            &["function_declaration", "method_definition", "arrow_function"]
-        }
+        "typescript" | "javascript" | "tsx" | "jsx" => &[
+            "function_declaration",
+            "method_definition",
+            "arrow_function",
+        ],
         "kotlin" => &["function_declaration"],
         "java" => &["method_declaration"],
         _ => return None,
