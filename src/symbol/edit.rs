@@ -1,8 +1,7 @@
 //! Edit-range computation, atomic writes, and post-edit sweeps.
 //!
 //! Extracted from `mod.rs` during refactor Phase 1b.3 — no behavior changes.
-//! Write-path helpers shared by `insert_code`, `remove_symbol`, `replace_symbol`,
-//! and `rename_symbol`.
+//! Write-path helpers shared by `edit_code`.
 
 use std::path::{Path, PathBuf};
 

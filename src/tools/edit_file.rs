@@ -51,12 +51,12 @@ fn detect_lsp_language(path: &str) -> Option<&'static str> {
 /// Called only after the gate confirms a definition keyword is present.
 fn infer_edit_hint(old_string: &str, new_string: &str) -> &'static str {
     if new_string.is_empty() {
-        return "remove_symbol(symbol, path) — deletes the symbol and its doc comments/attributes";
+        return "edit_code(symbol, path, action='remove') — deletes the symbol and its doc comments/attributes";
     }
     if new_string.len() > old_string.len() {
-        return "insert_code(symbol, path, code, position) — inserts before or after a named symbol";
+        return "edit_code(symbol, path, action='insert', body=..., position=...) — inserts before or after a named symbol";
     }
-    "replace_symbol(symbol, path, new_body) — replaces the symbol body via LSP"
+    "edit_code(symbol, path, action='replace', body=...) — replaces the symbol body via LSP"
 }
 
 /// Returns Err if `old_string` looks like a structural rewrite on an
@@ -260,7 +260,7 @@ impl Tool for EditFile {
         if old_string.is_empty() {
             return Err(super::RecoverableError::with_hint(
                 "old_string must not be empty",
-                "To create a new file use create_file. To insert at a specific line use insert_code. To prepend or append to a file use insert: \"prepend\" or \"append\".",
+                "To create a new file use create_file. To insert adjacent to a symbol use edit_code(action='insert'). To prepend or append to a file use insert: \"prepend\" or \"append\".",
             )
             .into());
         }
@@ -2922,13 +2922,13 @@ mod tests {
     #[test]
     fn infer_edit_hint_remove_when_new_string_empty() {
         let hint = infer_edit_hint("fn foo() {\n    bar();\n}", "");
-        assert!(hint.contains("remove_symbol"), "got: {hint}");
+        assert!(hint.contains("edit_code"), "got: {hint}");
     }
 
     #[test]
     fn infer_edit_hint_replace_symbol_for_rust_fn() {
         let hint = infer_edit_hint("fn foo() {\n    old();\n}", "fn foo() {\n    new();\n}");
-        assert!(hint.contains("replace_symbol"), "got: {hint}");
+        assert!(hint.contains("edit_code"), "got: {hint}");
     }
 
     #[test]
@@ -2938,19 +2938,19 @@ mod tests {
             "def process(x):\n    return x",
             "def process(x):\n    return y",
         );
-        assert!(hint.contains("replace_symbol"), "got: {hint}");
+        assert!(hint.contains("edit_code"), "got: {hint}");
     }
 
     #[test]
     fn infer_edit_hint_replace_symbol_for_class() {
         let hint = infer_edit_hint("class Foo {\n    x: i32\n}", "class Foo {\n    y: i32\n}");
-        assert!(hint.contains("replace_symbol"), "got: {hint}");
+        assert!(hint.contains("edit_code"), "got: {hint}");
     }
 
     #[test]
     fn infer_edit_hint_insert_code_when_new_is_longer() {
         let hint = infer_edit_hint("placeholder", "fn extra() {\n    todo!();\n}\nplaceholder");
-        assert!(hint.contains("insert_code"), "got: {hint}");
+        assert!(hint.contains("edit_code"), "got: {hint}");
     }
 
     #[tokio::test]
@@ -3046,8 +3046,8 @@ mod tests {
         );
         let hint = recoverable.hint().unwrap_or("");
         assert!(
-            hint.contains("remove_symbol"),
-            "hint should mention remove_symbol, got: {hint}"
+            hint.contains("edit_code"),
+            "hint should mention edit_code, got: {hint}"
         );
     }
 
@@ -3464,7 +3464,7 @@ mod tests {
     async fn batch_edit_blocks_structural_rewrite() {
         // Multi-line edit that replaces a Rust function body must be blocked in
         // batch mode — same semantic as single-edit mode. Caller should be
-        // pushed toward replace_symbol.
+        // pushed toward edit_code.
         let (dir, ctx) = project_ctx().await;
         let path = dir.path().join("src").join("lib.rs");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -3490,10 +3490,18 @@ mod tests {
             .await;
 
         assert!(result.is_err(), "batch must reject structural rewrite");
-        let err = format!("{:?}", result.unwrap_err());
+        let err = result.unwrap_err();
+        let recoverable = err
+            .downcast_ref::<RecoverableError>()
+            .expect("should be RecoverableError");
         assert!(
-            err.contains("symbol definition") || err.contains("replace_symbol"),
-            "error should guide to replace_symbol, got: {err}"
+            err.to_string().contains("symbol definition"),
+            "error should mention symbol definition, got: {err}"
+        );
+        let hint = recoverable.hint().unwrap_or("");
+        assert!(
+            hint.contains("edit_code"),
+            "hint should mention edit_code, got: {hint}"
         );
 
         // Original content untouched.

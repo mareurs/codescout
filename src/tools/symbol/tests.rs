@@ -3748,7 +3748,7 @@ fn find_references_format_compact_shows_count() {
 #[test]
 fn rename_symbol_format_compact_shows_sites() {
     use serde_json::json;
-    let tool = RenameSymbol;
+    let tool = EditCode;
     let result = json!({ "total_edits": 5, "textual_match_count": 1, "files_changed": 2, "new_name": "bar" });
     let text = tool.format_compact(&result).unwrap();
     assert!(text.contains("bar"), "got: {text}");
@@ -3757,7 +3757,7 @@ fn rename_symbol_format_compact_shows_sites() {
 #[test]
 fn insert_code_format_compact_shows_location() {
     use serde_json::json;
-    let tool = InsertCode;
+    let tool = EditCode;
     let result = json!({ "status": "ok", "inserted_at_line": 42, "position": "after" });
     let text = tool.format_compact(&result).unwrap();
     assert!(text.contains("42"), "got: {text}");
@@ -3765,7 +3765,7 @@ fn insert_code_format_compact_shows_location() {
 
 #[test]
 fn replace_symbol_format_compact_shows_range() {
-    let tool = ReplaceSymbol;
+    let tool = EditCode;
     let r = json!({ "status": "ok", "replaced_lines": "124-145" });
     let t = tool.format_compact(&r).unwrap();
     assert!(t.contains("L124"), "got: {t}");
@@ -3773,7 +3773,7 @@ fn replace_symbol_format_compact_shows_range() {
 
 #[test]
 fn remove_symbol_format_compact_shows_range() {
-    let tool = RemoveSymbol;
+    let tool = EditCode;
     let r = json!({ "status": "ok", "removed_lines": "201-215", "line_count": 14 });
     let t = tool.format_compact(&r).unwrap();
     assert!(t.contains("201"), "got: {t}");

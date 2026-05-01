@@ -5,8 +5,7 @@ semantic search (embeddings), and project memory.
 **Subagents and spawned agents SHOULD use codescout too.** If you spawn a subagent
 or delegate to another agent, instruct it to use codescout tools for all code
 navigation and editing — do not fall back to native Read/Grep/Glob/Edit/Write on
-source files. For structural code changes, use `replace_symbol`, `insert_code`,
-`remove_symbol` — never the host's native Edit tool.
+source files. For structural code changes, use `edit_code` — never the host's native Edit tool.
 
 ## Iron Laws
 
@@ -16,8 +15,7 @@ These are non-negotiable. Violating the letter IS violating the spirit.
    `read_file` on source returns a summary, not raw content. Symbol tools give you
    structured, token-efficient navigation. `read_file` is for config, markdown, and data files.
 
-2. **NO `edit_file` FOR STRUCTURAL CODE CHANGES.** Use `replace_symbol`, `insert_code`,
-   `remove_symbol`, or `rename_symbol`. `edit_file` is for imports, literals, comments, config.
+2. **NO `edit_file` FOR STRUCTURAL CODE CHANGES.** Use `edit_code`. `edit_file` is for imports, literals, comments, config.
    Multi-line edits containing definition keywords (`fn`, `class`, `struct`, etc.) on
    LSP-supported languages return a hard error — the tool tells you which symbol tool to use.
 
@@ -63,8 +61,8 @@ covers only cross-tool routing and non-obvious behaviors.
 
 - **Reading source:** `symbols(path)` → `symbols(name=..., include_body=true)`.
   `read_file` on source returns a summary, not raw content.
-- **Editing code:** `replace_symbol`, `insert_code`, `remove_symbol` for structural
-  changes. `edit_file` is for imports, literals, comments, config only.
+- **Editing code:** `edit_code` for structural changes (rename, remove, replace, insert).
+  `edit_file` is for imports, literals, comments, config only.
 - **Markdown files:** `read_markdown` / `edit_markdown`, not `read_file` / `edit_file`.
   `edit_file` on `.md` files is gated to `edit_markdown` (except `insert="prepend"|"append"`).
 
@@ -79,7 +77,7 @@ covers only cross-tool routing and non-obvious behaviors.
 
 ### Gotchas
 
-- **MUST FOLLOW:** `rename_symbol` may corrupt string literals containing the
+- **MUST FOLLOW:** `edit_code(action="rename")` may corrupt string literals containing the
   old name. Always verify compilation (`cargo check` / `tsc --noEmit` / etc.)
   after use, especially if the symbol name is a common word.
 - `run_command` output > 50 lines is buffered as `@cmd_*` ref. Query with
@@ -191,7 +189,7 @@ Multi-tool chains for common tasks. Follow the steps in order.
 | Step | Tool | Purpose |
 |------|------|---------|
 | 1 | `references(symbol, path)` | Map all usages before renaming |
-| 2 | `rename_symbol(symbol, path, new_name)` | LSP-powered rename across files |
+| 2 | `edit_code(action="rename", symbol, path, new_name)` | LSP-powered rename across files |
 | 3 | `grep(old_name)` | Catch stragglers in comments, strings, docs |
 | 4 | `run_command("cargo check")` | Verify compilation |
 
@@ -216,4 +214,4 @@ Use these when a tool's short description leaves questions, or when you need arc
 4. **Check `features_md` from `onboarding` before suggesting features.** Don't propose work that's already done.
 5. **Semantic search for "how does X work?"** Then drill into results with symbol tools.
 6. **Read `language-patterns` memory before writing or editing code.** `memory(action="read", topic="language-patterns", sections=["<your language>"])` returns only the patterns for your language. Consult it before code changes or code review.
-7. **Symbol edits over `edit_file` for code.** `replace_symbol`, `insert_code`, `remove_symbol` for structural changes. `edit_file` for imports, literals, comments.
+7. **Symbol edits over `edit_file` for code.** `edit_code` for structural changes (rename, remove, replace, insert). `edit_file` for imports, literals, comments.

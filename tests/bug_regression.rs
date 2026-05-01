@@ -14,7 +14,7 @@ use codescout::agent::Agent;
 use codescout::lsp::LspManager;
 use codescout::tools::markdown::EditMarkdown;
 use codescout::tools::output_buffer::OutputBuffer;
-use codescout::tools::symbol::{InsertCode, RemoveSymbol, ReplaceSymbol};
+use codescout::tools::symbol::EditCode;
 use codescout::tools::{Tool, ToolContext};
 use serde_json::json;
 use std::sync::Arc;
@@ -96,12 +96,13 @@ pub fn add(a: i32, b: i32) -> i32 {
     result
 }"#;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "add",
-                "new_body": new_body
+                "action": "replace",
+                "body": new_body
             }),
             &ctx,
         )
@@ -156,12 +157,13 @@ def sub(a: int, b: int) -> int:
     result = a + b
     return result"#;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "lib.py",
                 "symbol": "add",
-                "new_body": new_body
+                "action": "replace",
+                "body": new_body
             }),
             &ctx,
         )
@@ -221,12 +223,13 @@ export function add(a: number, b: number): number {
     return result;
 }"#;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.ts",
                 "symbol": "add",
-                "new_body": new_body
+                "action": "replace",
+                "body": new_body
             }),
             &ctx,
         )
@@ -285,12 +288,13 @@ func Add(a, b int) int {
 	return result
 }"#;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "math.go",
                 "symbol": "Add",
-                "new_body": new_body
+                "action": "replace",
+                "body": new_body
             }),
             &ctx,
         )
@@ -364,12 +368,13 @@ mod tests {
         assert_eq!(add(0, 0), 0);
     }"#;
 
-    InsertCode
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "tests/test_add_positive",
-                "code": new_test,
+                "action": "insert",
+                "body": new_test,
                 "position": "after"
             }),
             &ctx,
@@ -427,12 +432,13 @@ export function second(): number {
     return 2;
 }"#;
 
-    InsertCode
+    EditCode
         .call(
             json!({
                 "path": "src/lib.ts",
                 "symbol": "first",
-                "code": new_fn,
+                "action": "insert",
+                "body": new_fn,
                 "position": "after"
             }),
             &ctx,
@@ -498,11 +504,12 @@ pub fn process(items: &[i32]) -> Vec<i32> {
     let (dir, ctx) = project_with_files(&[("Cargo.toml", src), ("src/lib.rs", code)]).await;
 
     // First removal: remove the enum
-    RemoveSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
-                "symbol": "Filter"
+                "symbol": "Filter",
+                "action": "remove"
             }),
             &ctx,
         )
@@ -521,11 +528,12 @@ pub fn process(items: &[i32]) -> Vec<i32> {
 
     // Second removal: remove the impl block
     // This is where BUG-032 would strike — stale line numbers
-    let result = RemoveSymbol
+    let result = EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
-                "symbol": "impl Filter"
+                "symbol": "impl Filter",
+                "action": "remove"
             }),
             &ctx,
         )
@@ -584,7 +592,7 @@ def helper() -> str:
     let (dir, ctx) = project_with_files(&[("lib.py", code)]).await;
 
     // Remove the class
-    RemoveSymbol
+    EditCode
         .call(json!({ "path": "lib.py", "symbol": "Filter" }), &ctx)
         .await
         .unwrap();
@@ -600,7 +608,7 @@ def helper() -> str:
     );
 
     // Remove process — uses positions that may be stale
-    let result = RemoveSymbol
+    let result = EditCode
         .call(json!({ "path": "lib.py", "symbol": "process" }), &ctx)
         .await;
 
@@ -749,12 +757,13 @@ impl Foo {
         99
     }"#;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "impl Foo/alpha",
-                "new_body": new_body
+                "action": "replace",
+                "body": new_body
             }),
             &ctx,
         )
@@ -799,12 +808,13 @@ class Foo:
 
     let new_body = "    def alpha(self) -> int:\n        return 99";
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "main.py",
                 "symbol": "Foo/alpha",
-                "new_body": new_body
+                "action": "replace",
+                "body": new_body
             }),
             &ctx,
         )

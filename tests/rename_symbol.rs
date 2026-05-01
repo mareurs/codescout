@@ -11,7 +11,7 @@
 
 use codescout::agent::Agent;
 use codescout::lsp::LspManager;
-use codescout::tools::symbol::RenameSymbol;
+use codescout::tools::symbol::EditCode;
 use codescout::tools::{Tool, ToolContext};
 use serde_json::json;
 use std::sync::Arc;
@@ -73,9 +73,10 @@ async fn rename(
     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
     // Phase 2: Attempt the rename with retry for transient errors
-    let input = json!({ "symbol": name_path, "path": path, "new_name": new_name });
+    let input =
+        json!({ "symbol": name_path, "path": path, "new_name": new_name, "action": "rename" });
     for attempt in 0u32..10 {
-        match RenameSymbol.call(input.clone(), ctx).await {
+        match EditCode.call(input.clone(), ctx).await {
             Ok(v) => return v,
             Err(e) => {
                 let msg = e.to_string();

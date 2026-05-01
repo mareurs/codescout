@@ -6,7 +6,7 @@
 
 use codescout::agent::Agent;
 use codescout::lsp::{MockLspClient, MockLspProvider, SymbolInfo, SymbolKind};
-use codescout::tools::symbol::{InsertCode, RemoveSymbol, ReplaceSymbol, SymbolAt, Symbols};
+use codescout::tools::symbol::{EditCode, SymbolAt, Symbols};
 use codescout::tools::{Tool, ToolContext};
 use serde_json::json;
 
@@ -114,12 +114,13 @@ async fn replace_symbol_trusts_lsp_start_line() {
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "target",
-                "new_body": "    fn target() {\n        new_body();\n    }"
+                "action": "replace",
+                "body": "    fn target() {\n        new_body();\n    }"
             }),
             &ctx,
         )
@@ -162,12 +163,13 @@ async fn replace_symbol_trusts_lsp_start_with_paren_close() {
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "target",
-                "new_body": "    fn target() {\n        new_body();\n    }"
+                "action": "replace",
+                "body": "    fn target() {\n        new_body();\n    }"
             }),
             &ctx,
         )
@@ -201,12 +203,13 @@ async fn replace_symbol_clean_start_line() {
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "foo",
-                "new_body": "fn foo() {\n    new();\n}"
+                "action": "replace",
+                "body": "fn foo() {\n    new();\n}"
             }),
             &ctx,
         )
@@ -250,12 +253,13 @@ async fn replace_symbol_rejects_truncated_end_line() {
     })
     .await;
 
-    let err = ReplaceSymbol
+    let err = EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "target",
-                "new_body": "fn target() {\n    new_body();\n}"
+                "action": "replace",
+                "body": "fn target() {\n    new_body();\n}"
             }),
             &ctx,
         )
@@ -323,12 +327,13 @@ async fn replace_symbol_round_trip_preserves_attributes() {
     let new_body = body.replace("old_body()", "new_body()");
 
     // Step 3: Replace with the modified body
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "target",
-                "new_body": new_body
+                "action": "replace",
+                "body": new_body
             }),
             &ctx,
         )
@@ -390,12 +395,13 @@ async fn replace_symbol_round_trip_preserves_python_decorator() {
 
     let new_body = body.replace("old_body()", "new_body()");
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.py",
                 "symbol": "target",
-                "new_body": new_body
+                "action": "replace",
+                "body": new_body
             }),
             &ctx,
         )
@@ -455,12 +461,13 @@ async fn replace_symbol_round_trip_preserves_java_annotation() {
 
     let new_body = body.replace("oldBody()", "newBody()");
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/Main.java",
                 "symbol": "target",
-                "new_body": new_body
+                "action": "replace",
+                "body": new_body
             }),
             &ctx,
         )
@@ -512,12 +519,13 @@ async fn replace_symbol_round_trip_no_attributes() {
     let body = find_result["symbols"][0]["body"].as_str().unwrap();
     let new_body = body.replace("old_body()", "new_body()");
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "target",
-                "new_body": new_body
+                "action": "replace",
+                "body": new_body
             }),
             &ctx,
         )
@@ -552,12 +560,13 @@ async fn replace_symbol_rejects_body_only_new_body_and_restores_file() {
 
     // Pass body-only code — no `fn target()` signature.
     let body_only = "    new_body();\n";
-    let err = ReplaceSymbol
+    let err = EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "target",
-                "new_body": body_only
+                "action": "replace",
+                "body": body_only
             }),
             &ctx,
         )
@@ -606,12 +615,13 @@ class Foo {
 
     // Pass body-only code — no `void target()` signature.
     let body_only = "        newBody();\n";
-    let err = ReplaceSymbol
+    let err = EditCode
         .call(
             json!({
                 "path": "src/Foo.java",
                 "symbol": "Foo/target",
-                "new_body": body_only
+                "action": "replace",
+                "body": body_only
             }),
             &ctx,
         )
@@ -718,12 +728,13 @@ impl Foo {
     .await;
 
     let new_body = "    fn a(&self) -> i32 {\n        99\n    }";
-    let err = ReplaceSymbol
+    let err = EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "impl Foo/a",
-                "new_body": new_body
+                "action": "replace",
+                "body": new_body
             }),
             &ctx,
         )
@@ -775,12 +786,13 @@ fn target() {
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "target",
-                "new_body": "fn target() {\n    new_body();\n}"
+                "action": "replace",
+                "body": "fn target() {\n    new_body();\n}"
             }),
             &ctx,
         )
@@ -820,12 +832,13 @@ fn target() {
     })
     .await;
 
-    let err = ReplaceSymbol
+    let err = EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "target",
-                "new_body": "fn target() {\n    new_body();\n}"
+                "action": "replace",
+                "body": "fn target() {\n    new_body();\n}"
             }),
             &ctx,
         )
@@ -871,12 +884,13 @@ async fn replace_symbol_round_trip_agent_changes_attribute() {
         .replace("#[test]", "#[tokio::test]")
         .replace("old_body()", "new_body()");
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "target",
-                "new_body": new_body
+                "action": "replace",
+                "body": new_body
             }),
             &ctx,
         )
@@ -930,12 +944,13 @@ async fn replace_symbol_round_trip_agent_changes_doc_comment() {
         )
         .replace("old_body()", "new_body()");
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "target",
-                "new_body": new_body
+                "action": "replace",
+                "body": new_body
             }),
             &ctx,
         )
@@ -977,13 +992,14 @@ async fn insert_code_before_with_range_start_line_inserts_above_attribute() {
     })
     .await;
 
-    InsertCode
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "target",
                 "position": "before",
-                "code": "// inserted above"
+                "action": "insert",
+                "body": "// inserted above"
             }),
             &ctx,
         )
@@ -1114,13 +1130,14 @@ async fn insert_code_before_walks_past_attributes_and_doc_comments() {
     })
     .await;
 
-    InsertCode
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "Foo",
                 "position": "before",
-                "code": "const BEFORE: u32 = 1;\n"
+                "action": "insert",
+                "body": "const BEFORE: u32 = 1;\n"
             }),
             &ctx,
         )
@@ -1165,13 +1182,14 @@ async fn insert_code_before_trusts_lsp_start() {
     })
     .await;
 
-    InsertCode
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "target",
                 "position": "before",
-                "code": "    // inserted\n"
+                "action": "insert",
+                "body": "    // inserted\n"
             }),
             &ctx,
         )
@@ -1203,13 +1221,14 @@ async fn insert_code_after_lands_past_symbol() {
     })
     .await;
 
-    InsertCode
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "foo",
                 "position": "after",
-                "code": "fn bar() {}\n"
+                "action": "insert",
+                "body": "fn bar() {}\n"
             }),
             &ctx,
         )
@@ -1254,13 +1273,14 @@ async fn insert_code_after_caps_overextended_lsp_end() {
     })
     .await;
 
-    InsertCode
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "target",
                 "position": "after",
-                "code": "// inserted\n"
+                "action": "insert",
+                "body": "// inserted\n"
             }),
             &ctx,
         )
@@ -1331,13 +1351,14 @@ async fn insert_code_after_rejects_truncated_end_in_nested_fn() {
     })
     .await;
 
-    let result = InsertCode
+    let result = EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "tests/target_test",
                 "position": "after",
-                "code": "    #[test]\n    fn new_test() {}\n"
+                "action": "insert",
+                "body": "    #[test]\n    fn new_test() {}\n"
             }),
             &ctx,
         )
@@ -1409,13 +1430,14 @@ impl Foo {
     })
     .await;
 
-    InsertCode
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "impl Foo/a",
                 "position": "after",
-                "code": "    fn beta(&self) {}\n"
+                "action": "insert",
+                "body": "    fn beta(&self) {}\n"
             }),
             &ctx,
         )
@@ -1453,11 +1475,12 @@ async fn remove_symbol_caps_overextended_lsp_end() {
     })
     .await;
 
-    RemoveSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
-                "symbol": "target"
+                "symbol": "target",
+                "action": "remove"
             }),
             &ctx,
         )
@@ -1499,11 +1522,12 @@ async fn remove_symbol_uses_range_start_line_to_include_doc_comment() {
     })
     .await;
 
-    RemoveSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
-                "symbol": "TARGET"
+                "symbol": "TARGET",
+                "action": "remove"
             }),
             &ctx,
         )
@@ -1547,11 +1571,12 @@ async fn remove_symbol_heuristic_fallback_includes_doc_comment() {
     })
     .await;
 
-    RemoveSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
-                "symbol": "TARGET"
+                "symbol": "TARGET",
+                "action": "remove"
             }),
             &ctx,
         )
@@ -1592,11 +1617,12 @@ async fn remove_symbol_range_start_line_excludes_doc_comment() {
     })
     .await;
 
-    RemoveSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
-                "symbol": "TARGET"
+                "symbol": "TARGET",
+                "action": "remove"
             }),
             &ctx,
         )
@@ -1757,7 +1783,7 @@ async fn symbol_at_def_unknown_identifier_falls_back_to_first_nonwhitespace() {
 // Each test below is a sandwich regression:
 //   Baseline  — Rust `fn` continues to work (covered by replace_symbol_clean_start_line).
 //   Stale     — the language's function keyword was NOT in the old Rust allowlist, so
-//               is_valid_symbol_start_line would have returned false and ReplaceSymbol
+//               is_valid_symbol_start_line would have returned false and EditCode
 //               would have returned Err("symbol location appears stale").
 //   Fixed     — ReplaceSymbol now succeeds and the new body appears in the file.
 
@@ -1773,10 +1799,11 @@ async fn replace_symbol_works_for_python() {
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({ "path": "greet.py", "symbol": "greet",
-                    "new_body": "def greet():\n    return 'new'" }),
+                    "action": "replace",
+                "body": "def greet():\n    return 'new'" }),
             &ctx,
         )
         .await
@@ -1806,10 +1833,11 @@ async fn replace_symbol_works_for_typescript() {
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({ "path": "greet.ts", "symbol": "greet",
-                    "new_body": "function greet(): string {\n    return 'new';\n}" }),
+                    "action": "replace",
+                "body": "function greet(): string {\n    return 'new';\n}" }),
             &ctx,
         )
         .await
@@ -1836,10 +1864,11 @@ async fn replace_symbol_works_for_javascript() {
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({ "path": "greet.js", "symbol": "greet",
-                    "new_body": "function greet() {\n    return 'new';\n}" }),
+                    "action": "replace",
+                "body": "function greet() {\n    return 'new';\n}" }),
             &ctx,
         )
         .await
@@ -1866,10 +1895,11 @@ async fn replace_symbol_works_for_go() {
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({ "path": "greet.go", "symbol": "Greet",
-                    "new_body": "func Greet() string {\n\treturn \"new\"\n}" }),
+                    "action": "replace",
+                "body": "func Greet() string {\n\treturn \"new\"\n}" }),
             &ctx,
         )
         .await
@@ -1897,10 +1927,11 @@ async fn replace_symbol_works_for_java() {
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({ "path": "Greet.java", "symbol": "greet",
-                    "new_body": "public String greet() {\n    return \"new\";\n}" }),
+                    "action": "replace",
+                "body": "public String greet() {\n    return \"new\";\n}" }),
             &ctx,
         )
         .await
@@ -1927,10 +1958,11 @@ async fn replace_symbol_works_for_kotlin() {
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({ "path": "Greet.kt", "symbol": "greet",
-                    "new_body": "fun greet(): String {\n    return \"new\"\n}" }),
+                    "action": "replace",
+                "body": "fun greet(): String {\n    return \"new\"\n}" }),
             &ctx,
         )
         .await
@@ -1957,10 +1989,11 @@ async fn replace_symbol_works_for_c() {
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({ "path": "greet.c", "symbol": "greet",
-                    "new_body": "int greet() {\n    return 1;\n}" }),
+                    "action": "replace",
+                "body": "int greet() {\n    return 1;\n}" }),
             &ctx,
         )
         .await
@@ -1987,10 +2020,11 @@ async fn replace_symbol_works_for_cpp() {
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({ "path": "greet.cpp", "symbol": "greet",
-                    "new_body": "std::string greet() {\n    return \"new\";\n}" }),
+                    "action": "replace",
+                "body": "std::string greet() {\n    return \"new\";\n}" }),
             &ctx,
         )
         .await
@@ -2021,10 +2055,11 @@ async fn replace_symbol_works_for_ruby() {
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({ "path": "greet.rb", "symbol": "greet",
-                    "new_body": "def greet\n  'new'\nend" }),
+                    "action": "replace",
+                "body": "def greet\n  'new'\nend" }),
             &ctx,
         )
         .await
@@ -2061,12 +2096,13 @@ async fn replace_symbol_caps_overextended_lsp_end() {
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "target",
-                "new_body": "fn target() {\n    new_body();\n}"
+                "action": "replace",
+                "body": "fn target() {\n    new_body();\n}"
             }),
             &ctx,
         )
@@ -2176,12 +2212,13 @@ mod tests {
 
     // Replace first_test with a new body
     let new_body = "    #[test]\n    fn first_test() {\n        assert_eq!(1, 1);\n    }";
-    let result = ReplaceSymbol
+    let result = EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "tests/first_test",
-                "new_body": new_body,
+                "action": "replace",
+                "body": new_body,
             }),
             &ctx,
         )
@@ -2276,12 +2313,13 @@ impl Foo {
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "Foo/method",
-                "new_body": "    /// Does something.\n    fn method(&self) {\n        new_body();\n    }",
+                "action": "replace",
+                "body": "    /// Does something.\n    fn method(&self) {\n        new_body();\n    }",
             }),
             &ctx,
         )
@@ -2347,12 +2385,13 @@ impl Foo {
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "Foo/method",
-                "new_body": "    /// Updated doc.\n    #[inline]\n    fn method(&self) {\n        new_body();\n    }",
+                "action": "replace",
+                "body": "    /// Updated doc.\n    #[inline]\n    fn method(&self) {\n        new_body();\n    }",
             }),
             &ctx,
         )
@@ -2430,12 +2469,13 @@ class MyService:
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "service.py",
                 "symbol": "MyService/handle",
-                "new_body": "    @staticmethod\n    def handle(request):\n        return new_response()",
+                "action": "replace",
+                "body": "    @staticmethod\n    def handle(request):\n        return new_response()",
             }),
             &ctx,
         )
@@ -2514,12 +2554,13 @@ export class UserService {
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "service.ts",
                 "symbol": "UserService/validate",
-                "new_body": "    private validate(input: string): boolean {\n        return true;\n    }",
+                "action": "replace",
+                "body": "    private validate(input: string): boolean {\n        return true;\n    }",
             }),
             &ctx,
         )
@@ -2597,12 +2638,13 @@ public class Handler {
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "Handler.java",
                 "symbol": "Handler/process",
-                "new_body": "    @Override\n    public void process(Request req) {\n        newLogic();\n    }",
+                "action": "replace",
+                "body": "    @Override\n    public void process(Request req) {\n        newLogic();\n    }",
             }),
             &ctx,
         )
@@ -2680,12 +2722,13 @@ class Repository {
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "Repository.kt",
                 "symbol": "Repository/load",
-                "new_body": "    @Throws(IOException::class)\n    fun load(id: String): Data {\n        return newLoad(id)\n    }",
+                "action": "replace",
+                "body": "    @Throws(IOException::class)\n    fun load(id: String): Data {\n        return newLoad(id)\n    }",
             }),
             &ctx,
         )
@@ -2776,12 +2819,13 @@ mod inner {
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "inner/Bar/do_thing",
-                "new_body": "        pub fn do_thing(&self) {\n            new();\n        }",
+                "action": "replace",
+                "body": "        pub fn do_thing(&self) {\n            new();\n        }",
             }),
             &ctx,
         )
@@ -2823,12 +2867,13 @@ pub fn other() {}
     })
     .await;
 
-    ReplaceSymbol
+    EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
                 "symbol": "standalone",
-                "new_body": "/// Top-level function.\npub fn standalone() {\n    new_impl();\n}",
+                "action": "replace",
+                "body": "/// Top-level function.\npub fn standalone() {\n    new_impl();\n}",
             }),
             &ctx,
         )

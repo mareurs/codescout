@@ -30,10 +30,7 @@ use crate::tools::{
     progress,
     read_file::ReadFile,
     semantic::{Index, SemanticSearch},
-    symbol::{
-        CallGraph, InsertCode, References, RemoveSymbol, RenameSymbol, ReplaceSymbol, SymbolAt,
-        Symbols,
-    },
+    symbol::{CallGraph, EditCode, References, SymbolAt, Symbols},
     tree::Tree,
     Onboarding, RunCommand, Tool, ToolContext,
 };
@@ -110,10 +107,7 @@ impl CodeScoutServer {
             Arc::new(References),
             Arc::new(SymbolAt),
             Arc::new(CallGraph),
-            Arc::new(ReplaceSymbol),
-            Arc::new(RemoveSymbol),
-            Arc::new(InsertCode),
-            Arc::new(RenameSymbol),
+            Arc::new(EditCode),
             // Memory tools
             Arc::new(Memory),
             // Semantic search tools
@@ -1332,10 +1326,7 @@ mod tests {
             "symbols",
             "references",
             "call_graph",
-            "replace_symbol",
-            "insert_code",
-            "rename_symbol",
-            "remove_symbol",
+            "edit_code",
             "symbol_at",
             "memory",
             "semantic_search",
@@ -1375,8 +1366,8 @@ mod tests {
             .count();
         assert_eq!(
             core_count,
-            22,
-            "L3 target is 22 core tools; got {}: {:?}",
+            19,
+            "L3 target is 19 core tools; got {}: {:?}",
             core_count,
             server.tools.iter().map(|t| t.name()).collect::<Vec<_>>()
         );
@@ -1385,6 +1376,7 @@ mod tests {
     fn is_librarian_tool(name: &str) -> bool {
         name.starts_with("artifact_")
             || name.starts_with("librarian_")
+            || name.starts_with("tracker_")
             || name == "workspace_state_at"
     }
 
@@ -1988,7 +1980,7 @@ mod tests {
         let caps = server.current_capabilities().await;
 
         // In a fresh temp dir with no languages configured, has_lsp should be false.
-        // LSP tools (symbol_at, references, rename_symbol) must be hidden.
+        // LSP tools (symbol_at, references) must be hidden.
         if !caps.has_lsp {
             let visible: Vec<&str> = server
                 .tools
@@ -1996,7 +1988,7 @@ mod tests {
                 .filter(|t| t.availability(&caps).is_available(&caps))
                 .map(|t| t.name())
                 .collect();
-            for lsp_tool in &["symbol_at", "references", "rename_symbol"] {
+            for lsp_tool in &["symbol_at", "references"] {
                 assert!(
                     !visible.contains(lsp_tool),
                     "LSP tool '{}' should be hidden when has_lsp=false",
@@ -2033,7 +2025,7 @@ mod tests {
             .map(|t| t.name())
             .collect();
 
-        for lsp_tool in &["symbol_at", "references", "rename_symbol"] {
+        for lsp_tool in &["symbol_at", "references"] {
             assert!(
                 visible.contains(lsp_tool),
                 "LSP tool '{}' should be visible when has_lsp=true",
@@ -2132,10 +2124,10 @@ mod tests {
         let (_dir, server) = make_server().await;
         assert!(server.is_write_call("edit_file", &json!({})));
         assert!(server.is_write_call("create_file", &json!({})));
-        assert!(server.is_write_call("replace_symbol", &json!({})));
-        assert!(server.is_write_call("insert_code", &json!({})));
-        assert!(server.is_write_call("remove_symbol", &json!({})));
-        assert!(server.is_write_call("rename_symbol", &json!({})));
+        assert!(server.is_write_call("edit_code", &json!({"action": "replace"})));
+        assert!(server.is_write_call("edit_code", &json!({"action": "insert"})));
+        assert!(server.is_write_call("edit_code", &json!({"action": "remove"})));
+        assert!(server.is_write_call("edit_code", &json!({"action": "rename"})));
         assert!(server.is_write_call("edit_markdown", &json!({})));
         assert!(server.is_write_call("index", &json!({"action": "build"})));
         assert!(!server.is_write_call("index", &json!({"action": "status"})));

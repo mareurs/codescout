@@ -385,8 +385,7 @@ pub fn check_tool_access(tool_name: &str, config: &PathSecurityConfig) -> Result
                 );
             }
         }
-        "create_file" | "edit_file" | "replace_symbol" | "insert_code" | "rename_symbol"
-        | "remove_symbol" | "library" | "edit_markdown" => {
+        "create_file" | "edit_file" | "edit_code" | "library" | "edit_markdown" => {
             if !config.file_write_enabled {
                 bail!(
                     "File writes are disabled for this project. If this project was activated in read-only mode, call workspace(action='activate', read_only: false) to enable writes."
@@ -982,7 +981,7 @@ mod tests {
         let config = PathSecurityConfig::default();
         assert!(config.file_write_enabled);
         assert!(check_tool_access("create_file", &config).is_ok());
-        assert!(check_tool_access("replace_symbol", &config).is_ok());
+        assert!(check_tool_access("edit_code", &config).is_ok());
     }
 
     #[test]
@@ -991,15 +990,7 @@ mod tests {
             file_write_enabled: false,
             ..PathSecurityConfig::default()
         };
-        for tool in &[
-            "create_file",
-            "edit_file",
-            "remove_symbol",
-            "replace_symbol",
-            "insert_code",
-            "rename_symbol",
-            "library",
-        ] {
+        for tool in &["create_file", "edit_file", "edit_code", "library"] {
             assert!(
                 check_tool_access(tool, &config).is_err(),
                 "{} should be blocked",

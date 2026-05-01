@@ -296,14 +296,14 @@ mod tests {
             snap: UsageSnapshot {
                 total_calls: 200,
                 by_tool: vec![
-                    make_stats("symbols", 197),     // above threshold
-                    make_stats("rename_symbol", 2), // below threshold, but > 0 → prune candidate
-                    make_stats("symbol_at", 1),     // below threshold → prune candidate
+                    make_stats("symbols", 197), // above threshold
+                    make_stats("edit_code", 2), // below threshold, but > 0 → prune candidate
+                    make_stats("symbol_at", 1), // below threshold → prune candidate
                 ],
             },
             registered: vec![
                 "symbols".into(),
-                "rename_symbol".into(),
+                "edit_code".into(),
                 "symbol_at".into(),
                 "tree".into(), // never called → unused
             ],
@@ -316,7 +316,7 @@ mod tests {
         assert_eq!(parsed["total_calls"], 200);
         assert_eq!(
             parsed["prune_candidates"],
-            serde_json::json!(["rename_symbol", "symbol_at"])
+            serde_json::json!(["edit_code", "symbol_at"])
         );
         assert_eq!(parsed["unused_tools"], serde_json::json!(["tree"]));
     }
