@@ -1,6 +1,6 @@
 //! `tracker_design` — teaching tool. Returns a system_prompt + a library of
 //! archetypes + the existing-tracker landscape so the agent can compose a
-//! well-shaped tracker spec and call `tracker_create` with confidence.
+//! well-shaped tracker spec and call `artifact_create` with confidence.
 //!
 //! Archetype-driven (not intent-driven) for v1: server stays stateless, no
 //! synthesis cost, transparent to the agent. Intent-driven tailoring is
@@ -38,8 +38,8 @@ impl Tool for TrackerDesign {
     fn description(&self) -> &'static str {
         "Returns a teaching system_prompt + archetype library + existing-tracker \
          landscape to guide the agent through composing a tracker. Call this \
-         BEFORE tracker_create when the user asks to create a tracker — pick \
-         an archetype, fill in the spec, then call tracker_create."
+         BEFORE artifact_create when the user asks to create a tracker — pick \
+         an archetype, fill in the spec, then call artifact_create."
     }
 
     fn input_schema(&self) -> Value {
@@ -91,7 +91,7 @@ impl Tool for TrackerDesign {
             "existing_trackers": existing,
             "existing_trackers_total": total_trackers,
             "intent": a.intent,
-            "next_step": "Pick archetype. Compose spec (prompt, params, render_template, params_schema, body). Call tracker_create.",
+            "next_step": "Pick archetype. Compose spec (prompt, params, render_template, params_schema, body). Call artifact_create with kind=tracker, status=active, and augment={prompt,params}.",
         });
 
         if total_trackers > EXISTING_TRACKERS_CAP {
@@ -381,7 +381,7 @@ The archetype's `prompt_template` is a starting point — customize for the user
 - **Early life:** loose schema with `additionalProperties: true`. Let the shape settle over 2-3 refreshes before locking down.
 - **Mature:** add `required`, `enum`, `pattern` constraints. Schema lock prevents drift across refreshes.
 - **Skip schema entirely** for `reflective` trackers — they don't have meaningful structured params.
-- **Validation triggers** on `artifact_augment` (initial seed) and every `artifact_update_params` merge. Violations leave params untouched and return a recoverable error.
+- **Validation triggers** on `artifact_augment` (initial seed) and every `artifact_augment(merge=true)` merge. Violations leave params untouched and return a recoverable error.
 
 ## Step 5 — Compose the render_template
 
@@ -419,7 +419,7 @@ The `existing_trackers` field in this response lists current trackers. Before cr
 
 ## Final step
 
-Call `tracker_create` with:
+Call `artifact_create` with `kind=tracker`, `status=active`, and `augment={prompt,params}`:
 - `path`: `docs/trackers/<slug>.md` (or project equivalent)
 - `title`: human-readable
 - `topic`: terse keyword for search
@@ -469,7 +469,7 @@ mod tests {
         assert_eq!(v["design_version"], "1");
         assert!(v["system_prompt"].as_str().unwrap().len() > 1000);
         assert_eq!(v["archetypes"].as_array().unwrap().len(), 6);
-        assert!(v["next_step"].as_str().unwrap().contains("tracker_create"));
+        assert!(v["next_step"].as_str().unwrap().contains("artifact_create"));
     }
 
     #[tokio::test]
