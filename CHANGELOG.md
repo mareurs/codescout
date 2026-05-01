@@ -256,7 +256,7 @@ All notable changes to codescout are documented here.
   git history creation, onboarding+explore
 
 
-## [Unreleased]
+## [0.10.0] — 2026-05-01
 
 ### Breaking changes — tool surface compression (L3)
 
