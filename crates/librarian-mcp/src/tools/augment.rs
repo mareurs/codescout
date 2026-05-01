@@ -72,7 +72,11 @@ impl Tool for ArtifactAugment {
 
         if a.merge {
             // RFC 7396 merge-patch path
-            let patch = a.params.as_ref().cloned().unwrap_or(Value::Object(Default::default()));
+            let patch = a
+                .params
+                .as_ref()
+                .cloned()
+                .unwrap_or(Value::Object(Default::default()));
             if let Some(existing) = augmentation::get(&cat, &a.id)? {
                 if let Some(schema_text) = existing.params_schema.as_deref() {
                     let mut current: Value = serde_json::from_str(&existing.params)
@@ -80,10 +84,8 @@ impl Tool for ArtifactAugment {
                     augmentation::apply_merge_patch(&mut current, &patch);
                     crate::tools::schema_validate::validate_against_stored(schema_text, &current)
                         .map_err(|e| {
-                            RecoverableError::new(format!(
-                                "merged params violate params_schema: {e}"
-                            ))
-                        })?;
+                        RecoverableError::new(format!("merged params violate params_schema: {e}"))
+                    })?;
                 }
             }
             let found = augmentation::merge_params(&cat, &a.id, &patch)?;
@@ -102,7 +104,10 @@ impl Tool for ArtifactAugment {
         })?;
 
         if artifact::get(&cat, &a.id)?.is_none() {
-            return Err(RecoverableError::new(format!("artifact '{}' not found", a.id)));
+            return Err(RecoverableError::new(format!(
+                "artifact '{}' not found",
+                a.id
+            )));
         }
 
         let params_str = a
@@ -327,12 +332,17 @@ mod tests {
             .unwrap();
 
         let cat = ctx.catalog.lock();
-        let aug = crate::catalog::augmentation::get(&cat, "aug-1").unwrap().unwrap();
+        let aug = crate::catalog::augmentation::get(&cat, "aug-1")
+            .unwrap()
+            .unwrap();
         assert_eq!(aug.prompt, "do stuff", "prompt must be unchanged");
         let params: serde_json::Value = serde_json::from_str(&aug.params).unwrap();
         assert_eq!(params["a"], 1, "a must survive merge");
         assert_eq!(params["c"], 3, "c must be added");
-        assert!(params.get("b").map(|v| v.is_null()).unwrap_or(true), "b must be deleted");
+        assert!(
+            params.get("b").map(|v| v.is_null()).unwrap_or(true),
+            "b must be deleted"
+        );
     }
 
     #[tokio::test]
@@ -340,11 +350,17 @@ mod tests {
         let ctx = mk_ctx();
         seed_artifact(&ctx, "aug-2");
         let err = ArtifactAugment
-            .call(&ctx, json!({"id": "aug-2", "merge": true, "params": {"x": 1}}))
+            .call(
+                &ctx,
+                json!({"id": "aug-2", "merge": true, "params": {"x": 1}}),
+            )
             .await;
         assert!(err.is_err());
         let msg = err.unwrap_err().to_string();
-        assert!(msg.contains("artifact_augment"), "error must mention artifact_augment");
+        assert!(
+            msg.contains("artifact_augment"),
+            "error must mention artifact_augment"
+        );
     }
 
     #[tokio::test]
@@ -358,5 +374,4 @@ mod tests {
         let msg = err.unwrap_err().to_string();
         assert!(msg.contains("prompt"), "error must mention prompt");
     }
-
 }

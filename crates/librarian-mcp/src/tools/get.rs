@@ -1074,9 +1074,11 @@ mod tests {
         artifact::upsert(&cat, &mk_row("x")).unwrap();
         let ctx = mk_ctx(cat);
         let err = ArtifactGet
-            .call(&ctx, json!({"id": "x", "include_links": true, "links_direction": "sideways"}))
+            .call(
+                &ctx,
+                json!({"id": "x", "include_links": true, "links_direction": "sideways"}),
+            )
             .await;
         assert!(err.is_err());
     }
-
 }

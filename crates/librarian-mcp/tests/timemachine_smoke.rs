@@ -13,9 +13,8 @@ use librarian_mcp::{
     catalog::Catalog,
     tools::{
         create::ArtifactCreate, event_create::ArtifactEventCreate, get::ArtifactGet,
-        graph::ArtifactGraph, link::ArtifactLink,
-        state_at::ArtifactStateAt, timeline::ArtifactTimeline,
-        workspace_state_at::WorkspaceStateAt, Tool, ToolContext,
+        graph::ArtifactGraph, link::ArtifactLink, state_at::ArtifactStateAt,
+        timeline::ArtifactTimeline, workspace_state_at::WorkspaceStateAt, Tool, ToolContext,
     },
     workspace::{Root, WorkspaceConfig},
 };
@@ -563,9 +562,12 @@ async fn timemachine_full_chain() {
         )
         .await
         .expect("artifact_get with include_links should succeed");
-    let outgoing = links_resp["links"]["outgoing"].as_array().expect("must be array");
+    let outgoing = links_resp["links"]["outgoing"]
+        .as_array()
+        .expect("must be array");
     assert_eq!(
-        outgoing.len(), 1,
+        outgoing.len(),
+        1,
         "event_create kind=superseded_by must dual-write a supersedes artifact_link from foo→spec"
     );
     assert_eq!(

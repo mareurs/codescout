@@ -55,12 +55,16 @@ fn merge_kind_status(
     let mut parts: Vec<FilterNode> = Vec::new();
     if let Some(k) = kind {
         parts.push(FilterNode::Leaf(
-            [("kind".to_string(), json!({"eq": k}))].into_iter().collect(),
+            [("kind".to_string(), json!({"eq": k}))]
+                .into_iter()
+                .collect(),
         ));
     }
     if let Some(s) = status {
         parts.push(FilterNode::Leaf(
-            [("status".to_string(), json!({"eq": s}))].into_iter().collect(),
+            [("status".to_string(), json!({"eq": s}))]
+                .into_iter()
+                .collect(),
         ));
     }
     if let Some(f) = filter {
@@ -72,7 +76,6 @@ fn merge_kind_status(
         _ => Some(FilterNode::And { and: parts }),
     }
 }
-
 
 #[async_trait]
 impl Tool for ArtifactFind {
@@ -691,17 +694,31 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         fn row(id: &str, kind: &str) -> ArtifactRow {
             ArtifactRow {
-                id: id.into(), repo: "claude".into(), rel_path: format!("code-explorer/{id}.md"),
-                kind: kind.into(), status: "active".into(), title: Some(id.into()),
-                owners: vec![], tags: vec![], topic: None, time_scope: None,
-                source: None, created_at: 0, updated_at: 0, file_mtime: 0,
-                file_sha256: "".into(), confidence: 1.0,
+                id: id.into(),
+                repo: "claude".into(),
+                rel_path: format!("code-explorer/{id}.md"),
+                kind: kind.into(),
+                status: "active".into(),
+                title: Some(id.into()),
+                owners: vec![],
+                tags: vec![],
+                topic: None,
+                time_scope: None,
+                source: None,
+                created_at: 0,
+                updated_at: 0,
+                file_mtime: 0,
+                file_sha256: "".into(),
+                confidence: 1.0,
             }
         }
         upsert(&cat, &row("spec-1", "spec")).unwrap();
         upsert(&cat, &row("plan-1", "plan")).unwrap();
         let ctx = mk_ctx(cat);
-        let result = ArtifactFind.call(&ctx, json!({"kind": "spec"})).await.unwrap();
+        let result = ArtifactFind
+            .call(&ctx, json!({"kind": "spec"}))
+            .await
+            .unwrap();
         let items = result["items"].as_array().unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["id"], "spec-1");
@@ -713,22 +730,39 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         fn row(id: &str, kind: &str, status: &str) -> ArtifactRow {
             ArtifactRow {
-                id: id.into(), repo: "claude".into(), rel_path: format!("code-explorer/{id}.md"),
-                kind: kind.into(), status: status.into(), title: Some(id.into()),
-                owners: vec![], tags: vec![], topic: None, time_scope: None,
-                source: None, created_at: 0, updated_at: 0, file_mtime: 0,
-                file_sha256: "".into(), confidence: 1.0,
+                id: id.into(),
+                repo: "claude".into(),
+                rel_path: format!("code-explorer/{id}.md"),
+                kind: kind.into(),
+                status: status.into(),
+                title: Some(id.into()),
+                owners: vec![],
+                tags: vec![],
+                topic: None,
+                time_scope: None,
+                source: None,
+                created_at: 0,
+                updated_at: 0,
+                file_mtime: 0,
+                file_sha256: "".into(),
+                confidence: 1.0,
             }
         }
         upsert(&cat, &row("spec-active", "spec", "active")).unwrap();
         upsert(&cat, &row("spec-draft", "spec", "draft")).unwrap();
         upsert(&cat, &row("plan-active", "plan", "active")).unwrap();
         let ctx = mk_ctx(cat);
-        let result = ArtifactFind.call(&ctx, json!({
-            "kind": "spec",
-            "filter": {"status": {"eq": "active"}},
-            "include_archived": true
-        })).await.unwrap();
+        let result = ArtifactFind
+            .call(
+                &ctx,
+                json!({
+                    "kind": "spec",
+                    "filter": {"status": {"eq": "active"}},
+                    "include_archived": true
+                }),
+            )
+            .await
+            .unwrap();
         let items = result["items"].as_array().unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["id"], "spec-active");
@@ -740,20 +774,33 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         fn row(id: &str, status: &str) -> ArtifactRow {
             ArtifactRow {
-                id: id.into(), repo: "claude".into(), rel_path: format!("code-explorer/{id}.md"),
-                kind: "spec".into(), status: status.into(), title: Some(id.into()),
-                owners: vec![], tags: vec![], topic: None, time_scope: None,
-                source: None, created_at: 0, updated_at: 0, file_mtime: 0,
-                file_sha256: "".into(), confidence: 1.0,
+                id: id.into(),
+                repo: "claude".into(),
+                rel_path: format!("code-explorer/{id}.md"),
+                kind: "spec".into(),
+                status: status.into(),
+                title: Some(id.into()),
+                owners: vec![],
+                tags: vec![],
+                topic: None,
+                time_scope: None,
+                source: None,
+                created_at: 0,
+                updated_at: 0,
+                file_mtime: 0,
+                file_sha256: "".into(),
+                confidence: 1.0,
             }
         }
         upsert(&cat, &row("a", "active")).unwrap();
         upsert(&cat, &row("d", "draft")).unwrap();
         let ctx = mk_ctx(cat);
-        let result = ArtifactFind.call(&ctx, json!({"status": "active", "include_archived": true})).await.unwrap();
+        let result = ArtifactFind
+            .call(&ctx, json!({"status": "active", "include_archived": true}))
+            .await
+            .unwrap();
         let items = result["items"].as_array().unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["id"], "a");
     }
-
 }
