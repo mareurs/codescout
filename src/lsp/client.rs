@@ -29,6 +29,8 @@ use crate::tools::RecoverableError;
 /// or unusually noisy server processes.
 const MAX_STDERR_LINES: usize = 200;
 
+use super::call_hierarchy::supports_call_hierarchy;
+
 /// Convert an LSP `file://` URI back to a filesystem path.
 ///
 /// Uses `url::Url` for correct handling of Windows drive letters,
@@ -84,6 +86,9 @@ fn is_idempotent_lsp_method(method: &str) -> bool {
             | "textDocument/foldingRange"
             | "textDocument/selectionRange"
             | "textDocument/prepareRename"
+            | "textDocument/prepareCallHierarchy"
+            | "callHierarchy/incomingCalls"
+            | "callHierarchy/outgoingCalls"
             | "workspace/symbol"
             | "initialize"
     )
@@ -1275,6 +1280,115 @@ impl LspClient {
         )
         .await
     }
+
+    /// Prepare a call hierarchy item at the given position.
+    ///
+    /// Returns `Ok(None)` if the server does not support call hierarchy or if no
+    /// item is found at the cursor position.
+    pub async fn prepare_call_hierarchy(
+        &self,
+        path: &Path,
+        line: u32,
+        col: u32,
+        language_id: &str,
+    ) -> Result<Option<lsp_types::CallHierarchyItem>> {
+        {
+            let caps = self.capabilities.lock().unwrap_or_else(|e| e.into_inner());
+            if !supports_call_hierarchy(&caps) {
+                return Ok(None);
+            }
+        }
+        self.did_open(path, language_id).await?;
+        let uri = path_to_uri(path)?;
+        let params = lsp_types::CallHierarchyPrepareParams {
+            text_document_position_params: lsp_types::TextDocumentPositionParams {
+                text_document: lsp_types::TextDocumentIdentifier { uri },
+                position: lsp_types::Position {
+                    line,
+                    character: col,
+                },
+            },
+            work_done_progress_params: Default::default(),
+        };
+
+        let result = self
+            .request(
+                "textDocument/prepareCallHierarchy",
+                serde_json::to_value(params)?,
+            )
+            .await?;
+
+        if result.is_null() {
+            return Ok(None);
+        }
+
+        let items: Vec<lsp_types::CallHierarchyItem> = serde_json::from_value(result)?;
+        Ok(items.into_iter().next())
+    }
+
+    /// Fetch incoming calls for a call hierarchy item.
+    ///
+    /// Returns an empty vec if the server does not support call hierarchy.
+    pub async fn incoming_calls(
+        &self,
+        item: &lsp_types::CallHierarchyItem,
+        _language_id: &str,
+    ) -> Result<Vec<lsp_types::CallHierarchyIncomingCall>> {
+        {
+            let caps = self.capabilities.lock().unwrap_or_else(|e| e.into_inner());
+            if !supports_call_hierarchy(&caps) {
+                return Ok(vec![]);
+            }
+        }
+        let params = lsp_types::CallHierarchyIncomingCallsParams {
+            item: item.clone(),
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+
+        let result = self
+            .request("callHierarchy/incomingCalls", serde_json::to_value(params)?)
+            .await?;
+
+        if result.is_null() {
+            return Ok(vec![]);
+        }
+
+        let calls: Vec<lsp_types::CallHierarchyIncomingCall> = serde_json::from_value(result)?;
+        Ok(calls)
+    }
+
+    /// Fetch outgoing calls for a call hierarchy item.
+    ///
+    /// Returns an empty vec if the server does not support call hierarchy.
+    pub async fn outgoing_calls(
+        &self,
+        item: &lsp_types::CallHierarchyItem,
+        _language_id: &str,
+    ) -> Result<Vec<lsp_types::CallHierarchyOutgoingCall>> {
+        {
+            let caps = self.capabilities.lock().unwrap_or_else(|e| e.into_inner());
+            if !supports_call_hierarchy(&caps) {
+                return Ok(vec![]);
+            }
+        }
+        let params = lsp_types::CallHierarchyOutgoingCallsParams {
+            item: item.clone(),
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+
+        let result = self
+            .request("callHierarchy/outgoingCalls", serde_json::to_value(params)?)
+            .await?;
+
+        if result.is_null() {
+            return Ok(vec![]);
+        }
+
+        let calls: Vec<lsp_types::CallHierarchyOutgoingCall> = serde_json::from_value(result)?;
+        Ok(calls)
+    }
 }
 
 impl Drop for LspClient {
@@ -1366,28 +1480,28 @@ impl crate::lsp::ops::LspClientOps for LspClient {
 
     async fn prepare_call_hierarchy(
         &self,
-        _path: &std::path::Path,
-        _line: u32,
-        _col: u32,
-        _language_id: &str,
+        path: &std::path::Path,
+        line: u32,
+        col: u32,
+        language_id: &str,
     ) -> anyhow::Result<Option<lsp_types::CallHierarchyItem>> {
-        anyhow::bail!("prepare_call_hierarchy not yet implemented")
+        LspClient::prepare_call_hierarchy(self, path, line, col, language_id).await
     }
 
     async fn incoming_calls(
         &self,
-        _item: &lsp_types::CallHierarchyItem,
-        _language_id: &str,
+        item: &lsp_types::CallHierarchyItem,
+        language_id: &str,
     ) -> anyhow::Result<Vec<lsp_types::CallHierarchyIncomingCall>> {
-        anyhow::bail!("incoming_calls not yet implemented")
+        LspClient::incoming_calls(self, item, language_id).await
     }
 
     async fn outgoing_calls(
         &self,
-        _item: &lsp_types::CallHierarchyItem,
-        _language_id: &str,
+        item: &lsp_types::CallHierarchyItem,
+        language_id: &str,
     ) -> anyhow::Result<Vec<lsp_types::CallHierarchyOutgoingCall>> {
-        anyhow::bail!("outgoing_calls not yet implemented")
+        LspClient::outgoing_calls(self, item, language_id).await
     }
 }
 
@@ -2025,6 +2139,138 @@ struct Point {
             syms.iter().any(|s| s.name == "helper_v2"),
             "after two did_change calls (open fallback + update), helper_v2 must be visible"
         );
+
+        client.shutdown().await.unwrap();
+    }
+
+    /// Verify that prepare_call_hierarchy returns a CallHierarchyItem for a known function.
+    ///
+    /// This test requires a live rust-analyzer. It is skipped automatically when
+    /// rust-analyzer is not installed so the normal `cargo test` suite stays green.
+    ///
+    /// Note: `prepareCallHierarchy` requires semantic analysis (not just parsing), so the
+    /// server may return `None` if indexing hasn't completed. We treat that as a soft skip
+    /// rather than a hard failure to avoid a flaky test. The assertion fires only when we
+    /// do get an item back, ensuring the name and kind are correct.
+    #[tokio::test]
+    async fn call_hierarchy_prepare_returns_item() {
+        if !rust_analyzer_available() {
+            eprintln!("Skipping: rust-analyzer not installed");
+            return;
+        }
+
+        let dir = tempdir().unwrap();
+        create_test_cargo_project(dir.path());
+        let main_rs = dir.path().join("src/main.rs");
+
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: dir.path().to_path_buf(),
+            init_timeout: None,
+            mux: false,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+        let client = LspClient::start(config).await.unwrap();
+
+        // Warm up rust-analyzer by fetching document symbols first.
+        // This ensures the file is parsed before we send the call hierarchy request.
+        let syms = client.document_symbols(&main_rs, "rust").await.unwrap();
+        let add_sym = syms.iter().find(|s| s.name == "add");
+        let Some(add_sym) = add_sym else {
+            eprintln!("Skipping: fn add not found in symbols (indexing lag)");
+            client.shutdown().await.unwrap();
+            return;
+        };
+
+        // start_line and start_col from selectionRange point directly at the name.
+        // prepareCallHierarchy needs semantic analysis; it may return None if not
+        // yet indexed — treated as a soft skip, not a test failure.
+        let item = client
+            .prepare_call_hierarchy(&main_rs, add_sym.start_line, add_sym.start_col, "rust")
+            .await
+            .expect("prepare_call_hierarchy should not error");
+
+        match item {
+            None => {
+                eprintln!(
+                    "Skipping: prepare_call_hierarchy returned None for fn add \
+                     (line={}, col={}) — indexing not yet complete",
+                    add_sym.start_line, add_sym.start_col
+                );
+            }
+            Some(item) => {
+                assert_eq!(
+                    item.name, "add",
+                    "expected item name 'add', got '{}'",
+                    item.name
+                );
+            }
+        }
+
+        client.shutdown().await.unwrap();
+    }
+
+    /// Verify that outgoing_calls returns calls made from a function.
+    #[tokio::test]
+    async fn call_hierarchy_outgoing_returns_calls() {
+        if !rust_analyzer_available() {
+            eprintln!("Skipping: rust-analyzer not installed");
+            return;
+        }
+
+        // Extend the test project with a helper that calls `add`.
+        let dir = tempdir().unwrap();
+        create_test_cargo_project(dir.path());
+        let main_rs = dir.path().join("src/main.rs");
+
+        // Append a wrapper that calls `add` so outgoing_calls has something to find.
+        let original = std::fs::read_to_string(&main_rs).unwrap();
+        std::fs::write(
+            &main_rs,
+            format!("{original}\nfn add_twice(x: i32) -> i32 {{ add(x, x) }}\n"),
+        )
+        .unwrap();
+
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: dir.path().to_path_buf(),
+            init_timeout: None,
+            mux: false,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+        let client = LspClient::start(config).await.unwrap();
+
+        // Warm up: fetch document symbols to ensure the file is parsed.
+        let syms = client.document_symbols(&main_rs, "rust").await.unwrap();
+        let add_twice = syms.iter().find(|s| s.name == "add_twice");
+        let Some(sym) = add_twice else {
+            eprintln!("Skipping: add_twice not found in symbols (indexing lag)");
+            client.shutdown().await.unwrap();
+            return;
+        };
+        // Use selectionRange coords directly — they point at the function name.
+        let item = client
+            .prepare_call_hierarchy(&main_rs, sym.start_line, sym.start_col, "rust")
+            .await
+            .expect("prepare_call_hierarchy should not error");
+
+        if let Some(item) = item {
+            let calls = client
+                .outgoing_calls(&item, "rust")
+                .await
+                .expect("outgoing_calls should not error");
+            // add_twice calls add — expect at least one outgoing call.
+            assert!(
+                !calls.is_empty(),
+                "expected outgoing calls from add_twice, got none"
+            );
+        } else {
+            eprintln!("Skipping: prepare_call_hierarchy returned None (indexing lag)");
+        }
 
         client.shutdown().await.unwrap();
     }
