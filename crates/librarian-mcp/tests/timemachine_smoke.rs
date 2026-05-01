@@ -2,9 +2,9 @@
 ///
 /// Exercises the full tool chain in-process: ArtifactCreate → ArtifactEventCreate
 /// → ArtifactTimeline → ArtifactStateAt → WorkspaceStateAt → ArtifactGet →
-/// ArtifactGraph → ArtifactObserve → ArtifactLink.
+/// ArtifactGraph → ArtifactEventCreate (note) → ArtifactLink.
 ///
-/// Mirrors the `mk_ctx` helper pattern from `src/tools/observe.rs::tests`
+/// Mirrors the `mk_ctx` helper pattern from `src/tools/event_create.rs::tests`
 /// (inlined here because `pub(crate)` is not accessible from an external
 /// integration test crate).
 use std::sync::Arc;
@@ -13,7 +13,7 @@ use librarian_mcp::{
     catalog::Catalog,
     tools::{
         create::ArtifactCreate, event_create::ArtifactEventCreate, get::ArtifactGet,
-        graph::ArtifactGraph, link::ArtifactLink, links::ArtifactLinks, observe::ArtifactObserve,
+        graph::ArtifactGraph, link::ArtifactLink, links::ArtifactLinks,
         state_at::ArtifactStateAt, timeline::ArtifactTimeline,
         workspace_state_at::WorkspaceStateAt, Tool, ToolContext,
     },
@@ -461,19 +461,20 @@ async fn timemachine_full_chain() {
     );
 
     // -----------------------------------------------------------------------
-    // 16. artifact_observe(id=tracker, text="dual-write") →
+    // 16. artifact_event_create(artifact_id=tracker, kind="note", payload={text:"dual-write"}) →
     //     timeline kinds=["note"] now contains an event with text="dual-write"
     // -----------------------------------------------------------------------
-    ArtifactObserve
+    ArtifactEventCreate
         .call(
             &ctx,
             json!({
-                "id": tracker_id,
-                "text": "dual-write"
+                "artifact_id": tracker_id,
+                "kind": "note",
+                "payload": {"text": "dual-write"}
             }),
         )
         .await
-        .expect("artifact_observe should succeed");
+        .expect("artifact_event_create note should succeed");
 
     let note_timeline = ArtifactTimeline
         .call(
