@@ -40,6 +40,17 @@ These are non-negotiable. Violating the letter IS violating the spirit.
    progressive-disclosure contract. Applies to `read_file`, `read_markdown`,
    and any tool that consumes `@file_*`.
 
+7. **`grep` IS FOR DATA FILES AND STRING LITERALS, NOT CODE STRUCTURE.**
+   Use `symbols`, `references`, or `semantic_search` for code.
+   Decision tree:
+   - "What does symbol X look like?" → `symbols(name=X, include_body=true)`
+   - "What's in this file/dir?" → `symbols(path=...)`
+   - "How does X work / what calls Y?" → `semantic_search` or `references(symbol, path)`
+   - "Find a string literal in JSONL/YAML/config" → `grep` ✓
+
+   `grep` on code gives raw text you must interpret; `symbols` gives structured
+   output (signature, body, line range) in fewer tokens with zero ambiguity.
+
 ## Anti-Patterns — STOP if you catch yourself doing these
 
 | ❌ Never do this | ✅ Do this instead | Why |
@@ -52,6 +63,7 @@ These are non-negotiable. Violating the letter IS violating the spirit.
 | `grep("fn_name")` to find all callers | `references(symbol, path)` | LSP finds actual usages; regex matches comments, strings, partial names |
 | `read_file` on a `.md` file | `read_markdown(path)` | Heading navigation > line guessing |
 | `symbols(query="foo\|bar")` | `grep(pattern="foo\|bar")` or separate `symbols` calls | `symbols` rejects regex-like patterns |
+| Call `edit_code(...)` without loading schema | `ToolSearch("select:mcp__codescout__edit_code")` before first call each session | Schema is deferred — fails with "missing 'action' parameter" until loaded |
 ## Tool Routing & Gotchas
 
 Tool descriptions and parameters are in the MCP tool schemas — this section
@@ -90,8 +102,8 @@ Language `kind` quirks:
 ### Search Routing
 
 - **Know the name** → `symbols(name=...)` or `symbols(path)`
-- **Know the concept** → `semantic_search(query)` then drill with symbol tools
-- **Know a text pattern** → `grep(pattern)`
+- **Know the concept / "How does X work?"** → `semantic_search(query)` — faster and more relevant than grep for conceptual questions; drill with symbol tools after
+- **Know a text pattern in data/config files** → `grep(pattern)` (not for code structure — see Iron Law #7)
 - **Know a filename** → `tree(glob=...)`
 - **All callers of X** → `references(symbol, path)` (not `grep`)
 - **Transitive call graphs** → `call_graph(symbol, direction, max_depth)` — `direction="callers"` for blast-radius sizing; `direction="callees"` for flow tracing. `call_graph(depth=1, direction="callers")` also filters refs to call sites only.
