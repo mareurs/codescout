@@ -85,6 +85,9 @@ pub struct PathSecurityConfig {
     pub shell_dangerous_patterns: Vec<String>,
     /// Approx raw source-byte threshold above which `index(action='build')` requires confirmation.
     pub max_index_bytes: u64,
+    /// When true, `edit_file` on source code files returns a RecoverableError
+    /// directing callers to `edit_code` instead. Debug/enforcement flag.
+    pub debug_enforce_symbol_tools: bool,
 }
 
 impl Default for PathSecurityConfig {
@@ -100,6 +103,7 @@ impl Default for PathSecurityConfig {
             library_paths: Vec::new(),
             shell_dangerous_patterns: Vec::new(),
             max_index_bytes: 500 * 1024 * 1024,
+            debug_enforce_symbol_tools: false,
         }
     }
 }

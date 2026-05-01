@@ -233,6 +233,7 @@ pub(crate) fn build_system_prompt_draft(
         draft.push_str(&format!("- This is a {} project\n", languages.join("/")));
     }
     draft.push_str("- Use specific terms over generic ones (e.g., avoid 'data', 'utils')\n");
+    draft.push_str("- For call relationships and impact analysis: `call_graph(symbol, path)` — traces callers/callees\n");
     if projects_slice.len() > 1 {
         draft.push_str(
             "- **Workspace mode:** always scope `semantic_search` with `project: \"<id>\"` — \

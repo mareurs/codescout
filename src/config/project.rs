@@ -174,6 +174,10 @@ pub struct SecuritySection {
     /// user confirmation via MCP elicitation. Default: 500 MB.
     #[serde(default = "default_max_index_bytes")]
     pub max_index_bytes: u64,
+    /// When true, `edit_file` on source code files returns a RecoverableError
+    /// directing callers to `edit_code` instead. Debug/enforcement flag.
+    #[serde(default)]
+    pub debug_enforce_symbol_tools: bool,
 }
 
 impl Default for SecuritySection {
@@ -189,6 +193,7 @@ impl Default for SecuritySection {
             shell_dangerous_patterns: Vec::new(),
             write_lock_timeout_secs: 5,
             max_index_bytes: default_max_index_bytes(),
+            debug_enforce_symbol_tools: false,
         }
     }
 }
@@ -230,6 +235,7 @@ impl SecuritySection {
             library_paths: Vec::new(),
             shell_dangerous_patterns: self.shell_dangerous_patterns.clone(),
             max_index_bytes: self.max_index_bytes,
+            debug_enforce_symbol_tools: self.debug_enforce_symbol_tools,
         }
     }
 }

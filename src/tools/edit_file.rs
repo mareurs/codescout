@@ -150,6 +150,20 @@ impl Tool for EditFile {
             }
         }
 
+        // Gate: debug_enforce_symbol_tools — block all edits on source code files.
+        if crate::util::path_security::is_source_path(path) {
+            let security = ctx.agent.security_config().await;
+            if security.debug_enforce_symbol_tools {
+                return Err(super::RecoverableError::with_hint(
+                    "edit_file is blocked for source code files (debug_enforce_symbol_tools is enabled)",
+                    "Use edit_code(symbol, path, action='replace'|'insert'|'remove'|'rename') for structural \
+                     changes, or edit_code(action='rename') for renames. \
+                     edit_file is only permitted on config, markdown, and data files.",
+                )
+                .into());
+            }
+        }
+
         // Batch mode — edits array takes precedence over single old_string.
         let edits = super::optional_array_param(&input, "edits");
         let has_old_string = input["old_string"].as_str().is_some();
@@ -3048,6 +3062,51 @@ mod tests {
         assert!(
             hint.contains("edit_code"),
             "hint should mention edit_code, got: {hint}"
+        );
+    }
+    #[tokio::test]
+    async fn edit_file_blocked_on_source_file_when_debug_enforce_symbol_tools() {
+        let dir = tempdir().unwrap();
+        let codescout_dir = dir.path().join(".codescout");
+        std::fs::create_dir_all(&codescout_dir).unwrap();
+        std::fs::write(
+            codescout_dir.join("project.toml"),
+            "[project]\nname = \"test\"\n\n[security]\ndebug_enforce_symbol_tools = true\n",
+        )
+        .unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let ctx = ToolContext {
+            agent,
+            lsp: LspManager::new_arc(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+        };
+
+        let src_file = dir.path().join("src/lib.rs");
+        std::fs::create_dir_all(src_file.parent().unwrap()).unwrap();
+        std::fs::write(&src_file, "fn hello() {}\n").unwrap();
+
+        let result = EditFile
+            .call(
+                json!({"path": "src/lib.rs", "old_string": "fn hello()", "new_string": "fn hello_world()"}),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err(), "should block source edits when debug_enforce_symbol_tools=true");
+        let err = result.unwrap_err();
+        let recoverable = err.downcast_ref::<RecoverableError>().expect("should be RecoverableError");
+        assert!(
+            err.to_string().contains("debug_enforce_symbol_tools"),
+            "error should mention the flag, got: {err}"
+        );
+        assert!(
+            recoverable.hint().unwrap_or("").contains("edit_code"),
+            "hint should point to edit_code, got: {:?}", recoverable.hint()
         );
     }
 
