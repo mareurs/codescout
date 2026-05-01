@@ -254,3 +254,22 @@ All notable changes to codescout are documented here.
 - 141 tests: 136 unit + 5 end-to-end integration tests
 - Integration tests cover: read→search→replace, AST analysis, memory+config roundtrip,
   git history creation, onboarding+explore
+
+
+## [Unreleased]
+
+### Breaking changes — tool surface compression (L3)
+
+| Old name | New name |
+|----------|----------|
+| `find_symbol`, `list_symbols` | `symbols` |
+| `find_references` | `references` |
+| `goto_definition`, `hover` | `symbol_at(fields: ["def", "hover"])` |
+| `list_dir`, `find_file` | `tree` |
+| `activate_project`, `project_status` | `workspace(action: activate / status / list_projects)` |
+| `list_libraries`, `register_library` | `library(action: list / register)` |
+| `index_project`, `index_status` | `index(action: build / status)` |
+
+Added: `call_graph` stub (implementation tracked in item A).
+
+---

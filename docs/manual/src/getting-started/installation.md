@@ -179,7 +179,7 @@ can build without any embedding feature:
 cargo install codescout --no-default-features
 ```
 
-Semantic search tools (`semantic_search`, `index_project`) will return a clear error if called
+Semantic search tools (`semantic_search`, `index`) will return a clear error if called
 without an embedding backend compiled in.
 
 ## Next Steps

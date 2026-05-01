@@ -170,11 +170,11 @@ The embedding index has not been built for this project.
 **Fix:** Build the index, then verify:
 
 ```json
-{ "tool": "index_project", "arguments": {} }
-{ "tool": "project_status", "arguments": {} }
+{ "tool": "index", "arguments": { "action": "build" } }
+{ "tool": "workspace", "arguments": { "action": "status" } }
 ```
 
-`project_status` shows the number of indexed files and chunks. If both are zero,
+`workspace(action: status)` shows the number of indexed files and chunks. If both are zero,
 the index build failed -- check server logs for errors.
 
 ### "Connection refused" when indexing
@@ -219,13 +219,13 @@ models are incompatible -- mixing them produces meaningless similarity scores.
 **Fix:** Rebuild the index from scratch:
 
 ```json
-{ "tool": "index_project", "arguments": { "force": true } }
+{ "tool": "index", "arguments": { "action": "build", "force": true } }
 ```
 
 Then verify the models match:
 
 ```json
-{ "tool": "project_status", "arguments": {} }
+{ "tool": "workspace", "arguments": { "action": "status" } }
 ```
 
 The response includes `configured_model` and `indexed_with_model`. They must
@@ -274,10 +274,10 @@ cargo install --path . --features local-embed
 Configuration is loaded when a project is activated. Editing the file after
 activation does not automatically reload it.
 
-**Fix:** Call `activate_project` again to reload the configuration:
+**Fix:** Call `workspace(action: activate)` again to reload the configuration:
 
 ```json
-{ "tool": "activate_project", "arguments": { "path": "/path/to/project" } }
+{ "tool": "workspace", "arguments": { "action": "activate", "path": "/path/to/project" } }
 ```
 
 Or restart the MCP server.
@@ -290,7 +290,7 @@ a project from the working directory.
 **Fix:** Set the project explicitly:
 
 ```json
-{ "tool": "activate_project", "arguments": { "path": "/path/to/project" } }
+{ "tool": "workspace", "arguments": { "action": "activate", "path": "/path/to/project" } }
 ```
 
 Or restart the server with `--project`:
@@ -444,11 +444,11 @@ If none of the above resolves your issue:
 
    This shows every tool call, LSP message, and embedding operation.
 
-3. **Check the configuration.** Use the `project_status` tool to see the
+3. **Check the configuration.** Use the `workspace` tool to see the
    active configuration as the server sees it:
 
    ```json
-   { "tool": "project_status", "arguments": {} }
+   { "tool": "workspace", "arguments": { "action": "status" } }
    ```
 
 4. **File an issue.** Open a GitHub issue with:

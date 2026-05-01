@@ -99,13 +99,13 @@ The Agent manages the active project state. It holds:
 
 The Agent is thread-safe via `Arc<RwLock<AgentInner>>`. It is cloned and shared
 across all tool calls and, in HTTP mode, across all connections. Calling
-`activate_project` swaps the inner project state atomically.
+`workspace(action: activate)` swaps the inner project state atomically.
 
 ### Tool Registry
 
 **Source:** `src/server.rs`
 
-All 29 tools are registered at startup in `CodeScoutServer::from_parts()` as
+All 22 tools are registered at startup in `CodeScoutServer::from_parts()` as
 a `Vec<Arc<dyn Tool>>`. Dispatch is by name: `call_tool()` iterates the vector
 and matches on `tool.name()`.
 

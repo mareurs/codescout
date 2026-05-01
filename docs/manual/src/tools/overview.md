@@ -1,6 +1,6 @@
 # Tools Overview
 
-codescout exposes 29 tools organized into seven categories. This page is a
+codescout exposes 22 tools organized into seven categories. This page is a
 quick map. Each category has a dedicated reference page linked from the headings
 below.
 
@@ -45,14 +45,13 @@ language support.
 ## [Semantic Search](semantic-search.md)
 
 Find code by meaning rather than by name or pattern. Requires an embedding
-index built with `index_project` — see the [Setup Guide](../semantic-search-guide.md). Use the optional `scope` parameter to search
+index built with `index(action: build)` — see the [Setup Guide](../semantic-search-guide.md). Use the optional `scope` parameter to search
 within a specific library (see [Library Navigation](#library-navigation)).
 
 | Tool | Description |
 |------|-------------|
 | `semantic_search` | Search code by natural language description or code snippet |
-| `index_project` | Build or incrementally update the embedding index |
-| `index_status` | Show index stats: file count, chunk count, model, last update, and optional drift scores |
+| `index` | Build or incrementally update the embedding index (`action: build`) or show index stats (`action: status`) |
 
 ---
 
@@ -64,7 +63,7 @@ root; you can also register them manually.
 
 | Tool | Description |
 |------|-------------|
-| `list_libraries` | Show all registered libraries, their root paths, and index status |
+| `library` | Show all registered libraries and their index status (`action: list`), or register a new library (`action: register`) |
 
 **Scope parameter** — once a library is registered, pass `scope` to any
 navigation or search tool to target it:
@@ -100,8 +99,7 @@ Project setup, shell execution, and server configuration.
 |------|-------------|
 | `onboarding` | Initial project discovery: detect languages, read key files, write startup memory |
 | `run_command` | Run a shell command in the project root and return stdout/stderr |
-| `activate_project` | Switch the active project to a different directory |
-| `project_status` | Display the active project root, configuration, and index status |
+| `workspace` | Switch the active project (`action: activate`), display project state (`action: status`), or list all projects (`action: list_projects`) |
 
 ---
 
@@ -121,10 +119,10 @@ for.
 | Add a new function next to an existing one | `insert_code` |
 | Rename a function everywhere | `rename_symbol` |
 | Find code that does something (concept, not name) | `semantic_search` |
-| Find code by concept inside a library | `semantic_search` with `scope: "lib:<name>"` (after `index_project` on the library) |
-| See what third-party libraries are registered | `list_libraries` |
-| Check index health, file count, drift scores | `index_status` |
-| Check project config and usage stats | `project_status` |
+| Find code by concept inside a library | `semantic_search` with `scope: "lib:<name>"` (after `index(action: build)` on the library) |
+| See what third-party libraries are registered | `library(action: list)` |
+| Check index health, file count, drift scores | `index(action: status)` |
+| Check project config and usage stats | `workspace(action: status)` |
 | Search for a string or regex across files | `grep` |
 | Find files matching a name pattern | `tree` (with glob) |
 | Read a specific part of a file | `read_file` (with `start_line`/`end_line`) |

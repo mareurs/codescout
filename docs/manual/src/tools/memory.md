@@ -267,7 +267,7 @@ Re-hash the path anchors for a topic to clear a staleness warning without rewrit
 
 **Output:** `"ok"`
 
-**When to use:** `project_status` includes a `memory_staleness` section listing topics whose anchored source files have changed since the memory was last written. If you review the memory and confirm it is still accurate (the files changed but the memory's facts did not), call `refresh_anchors` to acknowledge — this updates the file hashes without changing the memory content. If the memory is genuinely outdated, use `write` to update it (which automatically re-anchors).
+**When to use:** `workspace(action: status)` includes a `memory_staleness` section listing topics whose anchored source files have changed since the memory was last written. If you review the memory and confirm it is still accurate (the files changed but the memory's facts did not), call `refresh_anchors` to acknowledge — this updates the file hashes without changing the memory content. If the memory is genuinely outdated, use `write` to update it (which automatically re-anchors).
 
 ---
 

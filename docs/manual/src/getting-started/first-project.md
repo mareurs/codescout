@@ -24,10 +24,10 @@ The first time codescout activates in a project it:
    grammar support).
 3. Starts LSP servers for the detected languages, ready to answer symbol queries.
 
-You can check the generated configuration at any time with the `project_status` tool:
+You can check the generated configuration at any time with the `workspace` tool:
 
 ```json
-{ "name": "project_status", "arguments": {} }
+{ "name": "workspace", "arguments": { "action": "status" } }
 ```
 
 
@@ -61,7 +61,7 @@ Semantic search requires an embedding index. Build it once, then keep it up to d
 codebase changes:
 
 ```json
-{ "name": "index_project", "arguments": {} }
+{ "name": "index", "arguments": { "action": "build" } }
 ```
 
 Indexing chunks every source file, embeds each chunk, and stores the vectors in
@@ -71,7 +71,7 @@ Indexing chunks every source file, embeds each chunk, and stores the vectors in
 Verify the index was built successfully:
 
 ```json
-{ "name": "project_status", "arguments": {} }
+{ "name": "workspace", "arguments": { "action": "status" } }
 ```
 
 Sample output:
@@ -175,7 +175,7 @@ relevant; results below 0.5 are often tangential.
 A practical sequence for exploring an unfamiliar codebase:
 
 1. `onboarding` — discover and remember the project structure.
-2. `index_project` — build the semantic search index.
+2. `index(action: build)` — build the semantic search index.
 3. `tree` on the root and key subdirectories — build a mental map.
 4. `symbols("src/")` — see what is defined at the top level.
 5. `semantic_search("entry point")` or `symbols("main")` — find where execution starts.

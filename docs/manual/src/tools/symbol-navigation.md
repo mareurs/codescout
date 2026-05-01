@@ -547,7 +547,7 @@ Uses LSP to identify the exact line range covered by the symbol — no manual li
 definition location(s) (`def`) and/or type information + doc comments (`hover`).
 Pass the `fields` parameter to choose which queries to run; the default runs
 both. When a definition lives outside the project root, the library is
-auto-discovered and registered in `list_libraries`.
+auto-discovered and registered in `library(action: list)`.
 
 **Parameters:**
 
@@ -595,7 +595,7 @@ auto-discovered and registered in `list_libraries`.
 
 When the definition is in a library (outside the project root), each entry in
 `def.definitions` carries a `source` tag (e.g. `"lib:serde"`) and the library
-is added to `list_libraries`.
+is added to `library(action: list)`.
 
 **Example — hover only:**
 
@@ -621,7 +621,7 @@ is added to `list_libraries`.
   `identifier` to locate by name on the line; prefer `col` to avoid
   identifier-mismatch errors.
 - When the definition is in an external library, run
-  `index_project(scope="lib:<name>")` to enable `semantic_search` across it.
+  `index(action: build, scope: "lib:<name>")` to enable `semantic_search` across it.
 - For hover, if `content` is null, the language server has no information at
   that position — try adjusting `line`/`col` or supplying `identifier`.
 

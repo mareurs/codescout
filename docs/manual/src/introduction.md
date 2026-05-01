@@ -82,9 +82,9 @@ meaning using embeddings, not keywords.
   backoff", "how errors are serialized" — returns ranked code chunks. The
   optional `scope` parameter restricts search to project code, a specific
   library, or all sources.
-- `index_project` — build or incrementally update the embedding index (smart
+- `index(action: build)` — build or incrementally update the embedding index (smart
   change detection via git diff → mtime → SHA-256 fallback)
-- `index_status` — show index stats: file count, chunk count, embedding model,
+- `index(action: status)` — show index stats: file count, chunk count, embedding model,
   last update time, and optional per-file drift scores
 
 The embedding backend is configurable: OpenAI, Ollama, or any compatible
@@ -109,13 +109,13 @@ Navigate third-party dependency source code without leaving your agent workflow.
 Libraries auto-register when LSP `symbol_at` returns paths outside the
 project root.
 
-- `list_libraries` — see all registered libraries and their status (use `index_project` with a library path to build a semantic index for it)
+- `library(action: list)` — see all registered libraries and their status (use `index(action: build)` with a library scope to build a semantic index for it)
 
 ### The Rest
 
 Beyond these pillars: 6 file operation tools (directory listing, file
 reading, pattern search, file search, file creation, find-and-replace editing), 2 workflow tools
-(project onboarding, shell commands), 2 config tools, and 5 GitHub tools — **29 tools total**.
+(project onboarding, shell commands), 2 config tools, and 5 GitHub tools — **22 tools total**.
 
 ### Token Efficiency by Design
 

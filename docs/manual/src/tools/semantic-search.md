@@ -11,7 +11,7 @@ at `.codescout/embeddings.db`. The embedding model is configurable (see
 [Project Configuration](../configuration/project-toml.md)); the default works
 with any OpenAI-compatible endpoint or a local Ollama server.
 
-You must build the index before searching. Use `index_project` once, then
+You must build the index before searching. Use `index(action: build)` once, then
 `semantic_search` as many times as you like. Incremental re-indexing is cheap:
 only files that changed since the last run are re-embedded.
 
@@ -110,8 +110,8 @@ The `content` field contains the full source text of each chunk. Combine with
   version of a pattern.
 - Scores above 0.85 are typically a strong match. Scores below 0.6 usually
   indicate the concept is not well represented in the index.
-- If results are poor, check `project_status` to confirm the index is up to date,
-  and `index_project` to rebuild if files have changed.
+- If results are poor, check `workspace(action: status)` to confirm the index is up to date,
+  and `index(action: build)` to rebuild if files have changed.
 - For finding a symbol by name, `symbols` is faster and more precise.
   Semantic search is for concepts, not identifiers.
 
@@ -126,29 +126,31 @@ Omit `project` to search across the workspace-level context. See
 
 ---
 
-## `index_project`
+## `index(action: build)`
 
 **Purpose:** Build or incrementally update the semantic search index for the
 active project. Only re-embeds files whose content has changed since the last
-run unless `force` is set.
+run unless `force` is set. Use `index(action: build)`.
 
 **Parameters:**
 
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
+| `action` | string | yes | — | `"build"` |
 | `force` | boolean | no | `false` | Force full reindex, ignoring cached file hashes |
-| `scope` | string | no | `"project"` | What to index: `"project"` (default) for the active project, or `"lib:<name>"` to index a registered library. Replaces the former `index_library` tool. |
+| `scope` | string | no | `"project"` | What to index: `"project"` (default) for the active project, or `"lib:<name>"` to index a registered library. |
 
 **Example (incremental update):**
 
 ```json
-{}
+{ "action": "build" }
 ```
 
 **Example (full reindex):**
 
 ```json
 {
+  "action": "build",
   "force": true
 }
 ```
@@ -186,12 +188,12 @@ top-5 most-drifted files:
 the current HEAD commit, results include:
 
 ```json
-{ "stale": true, "behind_commits": 3, "hint": "Index is behind HEAD. Run index_project to update." }
+{ "stale": true, "behind_commits": 3, "hint": "Index is behind HEAD. Run index(action: build) to update." }
 ```
 
 **Tips:**
 
-- Run `index_project` once when you first activate a project, then again after
+- Run `index(action: build)` once when you first activate a project, then again after
   large refactors or when many files have changed.
 - The incremental mode (default) uses a git diff → mtime → SHA-256 fallback
   chain. It is safe to run frequently — unchanged files are skipped at
@@ -203,29 +205,30 @@ the current HEAD commit, results include:
   may take a few minutes the first time.
 
 ---
-
-## `index_status`
+## `index(action: status)`
 
 **Purpose:** Show the health of the semantic index — file count, chunk count,
 embedding model, last update time, and optional per-file drift scores.
+Use `index(action: status)`.
 
 **Parameters:**
 
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
+| `action` | string | yes | — | `"status"` |
 | `threshold` | float | no | — | When set, include drift scores for files whose `avg_drift` exceeds this value (0.0–1.0). Higher = more changed. |
 | `path` | string | no | — | Limit drift reporting to a specific file or directory. |
 
 **Example (basic stats):**
 
 ```json
-{}
+{ "action": "status" }
 ```
 
 **Example (drift scores for significantly changed files):**
 
 ```json
-{ "threshold": 0.3 }
+{ "action": "status", "threshold": 0.3 }
 ```
 
 **Output:**
@@ -248,4 +251,3 @@ Opt out of drift detection with `drift_detection_enabled = false` in `.codescout
 > **See also:** [Dashboard](../concepts/dashboard.md) — the Overview page
 > surfaces index staleness and per-file drift scores visually, without a tool
 > call.
-

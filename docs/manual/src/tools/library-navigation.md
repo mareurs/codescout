@@ -45,17 +45,24 @@ distinguish origin.
 
 ---
 
-## `list_libraries`
+## `library(action: list / register)`
 
 **Purpose:** Show all registered libraries, their root paths, and whether a
-semantic index has been built for each.
+semantic index has been built for each. Use `library(action: list)`.
+You can also register a new library manually with `library(action: register)`.
 
-**Parameters:** None.
+**Parameters:**
 
-**Example:**
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `action` | string | yes | — | `"list"` or `"register"` |
+| `path` | string | for `register` | — | Root path of the library to register |
+| `name` | string | no | — | Friendly name for the library (inferred from manifest if omitted) |
+
+**Example (list):**
 
 ```json
-{}
+{ "action": "list" }
 ```
 
 **Output:**
@@ -81,24 +88,20 @@ semantic index has been built for each.
 **Tips:**
 
 - Libraries with `"indexed": false` support symbol navigation (LSP + tree-sitter)
-  but not `semantic_search`. Run `index_project` with the library's root path to add semantic search.
+  but not `semantic_search`. Run `index(action: build)` with the library's root path to add semantic search.
 - The registry is stored in `.codescout/libraries.json`. You can inspect it
   directly if you need to edit or remove an entry.
 
 ---
-
 ## Indexing a Library for Semantic Search
 
-> **Note:** The `index_library` tool was removed in the v1 tool restructure.
-> Use `index_project` directly, passing the library's root path.
-
-Once a library is registered (via `list_libraries` or auto-discovery), build its
-semantic index by pointing `index_project` at its root:
+Once a library is registered (via `library(action: list)` or auto-discovery), build its
+semantic index by pointing `index(action: build)` at its root:
 
 ```json
 {
-  "tool": "index_project",
-  "arguments": { "path": "/home/user/.cargo/registry/src/.../serde-1.0.195/" }
+  "tool": "index",
+  "arguments": { "action": "build", "scope": "lib:serde" }
 }
 ```
 
@@ -116,4 +119,4 @@ After indexing, `semantic_search` with `scope: "lib:<name>"` searches within tha
 - Only index libraries you actively need to search semantically. LSP symbol
   navigation (`symbols`, `symbols`) works without indexing.
 - Indexing a large library (e.g. `tokio`) may take a few minutes on the first
-  run. The library path is shown in `list_libraries` output.
+  run. The library path is shown in `library(action: list)` output.

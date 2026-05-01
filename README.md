@@ -88,9 +88,9 @@ process per workspace.
 
 → [Kotlin LSP Multiplexer docs](docs/manual/src/concepts/kotlin-lsp-multiplexer.md)
 
-## Tools (25)
+## Tools (22)
 
-`Symbol navigation (9)` · `File operations (6)` · `Semantic search (3)` · `Memory (1)` · `Library navigation (2)` · `Workflow & Config (4)`
+`Symbol navigation (9)` · `File operations (6)` · `Semantic search (3)` · `Memory (1)` · `Library navigation (1)` · `Workflow & Config (2)`
 
 Supported languages: Rust, Python, TypeScript/JavaScript, Go, Java, Kotlin, C/C++, C#, Ruby.
 
@@ -100,7 +100,7 @@ Supported languages: Rust, Python, TypeScript/JavaScript, Go, Java, Kotlin, C/C+
 
 codescout bundles **all-MiniLM-L6-v2** (quantized, 22 MB) as its default embedding model.
 It runs locally via ONNX — no external server, no API key, no GPU needed. On first
-`index_project`, the model is downloaded once to `~/.cache/huggingface/hub/`.
+`index(action: build)`, the model is downloaded once to `~/.cache/huggingface/hub/`.
 
 For users with Ollama or a GPU, codescout also supports external embedding servers
 (Ollama, OpenAI, llama.cpp, vLLM, TEI) via the standard `/v1/embeddings` API.

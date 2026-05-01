@@ -93,7 +93,7 @@ export OPENAI_API_KEY=sk-...
 Once `project.toml` is configured (or using the default), build the index:
 
 ```json
-{ "name": "index_project", "arguments": {} }
+{ "name": "index", "arguments": { "action": "build" } }
 ```
 
 What happens internally:
@@ -117,7 +117,7 @@ are batched and network latency is low — typically 3–5x faster for large
 projects. A 10,000-line project usually indexes in under two minutes with
 either backend.
 
-**Incremental updates:** Running `index_project` again after editing a few
+**Incremental updates:** Running `index(action: build)` again after editing a few
 files is cheap. codescout hashes each file's content and only re-embeds
 files whose hash has changed since the last run. Unchanged files are skipped
 at negligible cost.
@@ -127,13 +127,13 @@ at negligible cost.
 index must be rebuilt:
 
 ```json
-{ "name": "index_project", "arguments": { "force": true } }
+{ "name": "index", "arguments": { "action": "build", "force": true } }
 ```
 
 You can check index health at any time:
 
 ```json
-{ "name": "project_status", "arguments": {} }
+{ "name": "workspace", "arguments": { "action": "status" } }
 ```
 
 The output shows `config.embeddings.model` (from `project.toml`) and
@@ -237,14 +237,14 @@ documentation and comments. Code-specific models
 (`local:JinaEmbeddingsV2BaseCode`) tend to perform
 better on function signatures and code identifiers.
 
-After changing the model, always run `index_project` with `force: true`.
+After changing the model, always run `index(action: build)` with `force: true`.
 
 ## Troubleshooting
 
 **"No results" or empty results list**
 
-The index may not be built yet. Run `project_status` to check. If
-`index.indexed` is false, run `index_project`. If the index exists but results are
+The index may not be built yet. Run `workspace(action: status)` to check. If
+`index.indexed` is false, run `index(action: build)`. If the index exists but results are
 empty, the query may be too generic — try a more specific description.
 
 **"Connection refused" when indexing**
@@ -260,14 +260,14 @@ whatever model is configured) and retry.
 
 **Stale results after editing many files**
 
-Run `index_project` without arguments. The incremental update will re-embed
+Run `index(action: build)` without extra arguments. The incremental update will re-embed
 only the files that changed.
 
 **Results seem wrong after changing the model**
 
 The index was built with a different model and the vectors are no longer
-compatible. Run `index_project` with `force: true`. You can confirm the
-mismatch by checking `project_status`: if the config model and the index model
+compatible. Run `index(action: build)` with `force: true`. You can confirm the
+mismatch by checking `workspace(action: status)`: if the config model and the index model
 differ, a force reindex is required.
 
 **Indexing is very slow**

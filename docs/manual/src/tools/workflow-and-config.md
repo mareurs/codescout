@@ -12,7 +12,7 @@ These tools manage the agent's working context: which project is active, whether
 |------|------|----------|---------|-------------|
 | `force` | boolean | no | `false` | Re-run full discovery even if already onboarded |
 
-Requires an active project (set one with `activate_project` first).
+Requires an active project (set one with `workspace(action: activate)` first).
 **Example:**
 
 ```json
@@ -199,21 +199,22 @@ On Unix the command runs under `sh -c`. On Windows it runs under `cmd /C`.
 
 ---
 
-## `activate_project`
+## `workspace` (activate / status / list_projects)
 
-**Purpose:** Switch the active project to a different directory. All subsequent tool calls operate relative to the new project root.
+**Purpose:** Switch the active project to a different directory. All subsequent tool calls operate relative to the new project root. Use `workspace(action: activate, path: ...)`.
 
 **Parameters:**
 
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
+| `action` | string | yes | — | `"activate"` |
 | `path` | string | yes | — | Absolute path to the project root directory |
 | `read_only` | boolean | no | `true` for non-home projects | Block write tools on this project |
 
 **Example:**
 
 ```json
-{ "path": "/home/user/projects/my-service" }
+{ "action": "activate", "path": "/home/user/projects/my-service" }
 ```
 
 **Output:**
@@ -243,20 +244,20 @@ The tool returns an error if the path does not exist or is not a directory.
 **Read-only default:** Non-home projects activate in read-only mode by default — all write
 tools are blocked until you pass `read_only: false`. This prevents accidental edits when
 browsing another project for reference. See
-[Read-Only `activate_project`](activate-project-read-only.md) for the full behavior matrix.
+[Read-Only `workspace`](activate-project-read-only.md) for the full behavior matrix.
 
-**Tips:** When working across multiple projects in a single session, call `activate_project` to switch between them. After activating, call `onboarding` to see whether the new project has been set up. The server starts with no active project — you must call `activate_project` (or have it activated via the `--project` CLI flag) before using any tool that requires a project context.
+**Tips:** When working across multiple projects in a single session, call `workspace(action: activate)` to switch between them. After activating, call `onboarding` to see whether the new project has been set up. The server starts with no active project — you must call `workspace(action: activate)` (or have it activated via the `--project` CLI flag) before using any tool that requires a project context.
 
 ---
+## `workspace(action: status)`
 
-## `project_status`
-
-**Purpose:** Display the full state of the active project in one call: config, semantic index health, library registry, and memory staleness. Combines what was previously `get_config` and `index_status`.
+**Purpose:** Display the full state of the active project in one call: config, semantic index health, library registry, and memory staleness. Use `workspace(action: status)`. Combines what was previously `get_config` and `index(action: status)`.
 
 **Parameters:**
 
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
+| `action` | string | yes | — | `"status"` |
 | `threshold` | number | no | — | When provided, includes drift data: minimum `avg_drift` to include (0.0–1.0) |
 | `path` | string | no | — | SQL LIKE pattern to filter drift results by file path (e.g. `"src/tools/%"`) |
 | `detail_level` | string | no | `"exploring"` | Drift output detail: `"full"` includes most-drifted chunk content |
@@ -264,13 +265,13 @@ browsing another project for reference. See
 **Example (basic):**
 
 ```json
-{}
+{ "action": "status" }
 ```
 
 **Example (with drift query):**
 
 ```json
-{ "threshold": 0.2 }
+{ "action": "status", "threshold": 0.2 }
 ```
 
 **Output:**
@@ -313,7 +314,7 @@ When topics appear in `stale`, review them and either rewrite the memory (`actio
 
 **Tips:**
 
-- Use `project_status` to verify which project is active and to check security settings before attempting shell commands or indexing.
+- Use `workspace(action: status)` to verify which project is active and to check security settings before attempting shell commands or indexing.
 - Pass `threshold: 0.1` after re-indexing to surface files that changed semantically — a whitespace reformat scores near `0.0`, a full function rewrite approaches `1.0`.
 - If you need to change configuration, edit `.codescout/project.toml` directly — the config is re-read on each tool call, so changes take effect immediately without restarting the server.
 - For full per-tool call stats with charts and time-window filtering, see the [Dashboard](../concepts/dashboard.md).

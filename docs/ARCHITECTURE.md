@@ -113,7 +113,7 @@ Two-tier persistent store:
 
 - **File store** — Markdown files in `.codescout/memories/`. Supports nested topics (path-like), directory traversal protection, CRUD operations. Topics accessible via `memory(action: read/write/list/delete)`.
 - **Semantic store** — Vector embeddings of memory entries in `.codescout/embeddings.db` (shared with the code index). Supports natural-language recall via `memory(action: remember/recall/forget)`. Each write operation cross-embeds into this store (best-effort, non-fatal if unavailable).
-- **Anchor sidecars** — `.anchors.toml` files alongside each memory track which source files the memory references. Used by `project_status` to surface `memory_staleness`. Regenerated on each `write`; manually cleared via `memory(action: refresh_anchors)`.
+- **Anchor sidecars** — `.anchors.toml` files alongside each memory track which source files the memory references. Used by `workspace` to surface `memory_staleness`. Regenerated on each `write`; manually cleared via `memory(action: refresh_anchors)`.
 
 ### Usage Recorder (`src/usage/`)
 
@@ -132,10 +132,10 @@ Each tool implements the `Tool` trait (`name`, `description`, `input_schema`, `a
 | File | `file.rs` | `read_file`, `tree`, `grep`, `create_file`, `edit_file` |
 | Workflow | `workflow.rs` | `onboarding`, `run_command` |
 | Symbol | `symbol.rs` | `symbols`, `symbol_at`, `references`, `replace_symbol`, `remove_symbol`, `insert_code`, `rename_symbol` (all navigation tools support `scope` param) |
-| Semantic | `semantic.rs` | `semantic_search`, `index_project`, `index_status` |
-| Library | `library.rs` | `list_libraries` |
+| Semantic | `semantic.rs` | `semantic_search`, `index` (action: build / status) |
+| Library | `library.rs` | `library` (action: list / register) |
 | Memory | `memory.rs` | `memory` (dispatches `read` / `write` / `list` / `delete` / `remember` / `recall` / `forget` / `refresh_anchors` via `action` param) |
-| Config | `config.rs` | `activate_project`, `project_status` |
+| Config | `config.rs` | `workspace` (action: activate / status / list_projects) |
 
 ### Utilities (`src/util/`)
 

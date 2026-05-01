@@ -30,19 +30,19 @@ missing:
 
 - LSP tools (`symbol_at`, `references`, `rename_symbol`) —
   hidden when no LSP provider is wired for the project's language.
-- Embedding tools (`semantic_search`, `index_project`, `index_status`) — hidden
+- Embedding tools (`semantic_search`, `index`) — hidden
   when embeddings are disabled at build time.
-- Library tools (`register_library`, `list_libraries`) — hidden when no
+- Library tools (`library`) — hidden when no
   supported language is detected in the registry.
 
-`activate_project` emits `notifications/tools/list_changed` when the set
+`workspace(action: activate)` emits `notifications/tools/list_changed` when the set
 shifts, so Claude Code refreshes its tool palette automatically.
 
 ## Progress notifications
 
 Long-running operations emit `notifications/progress` (throttled to 2 Hz):
 
-- `index_project` — per-batch progress + start / complete text
+- `index(action: build)` — per-batch progress + start / complete text
 - `semantic_search` — "loading embedding model" → "searching"
 - `run_command` — elapsed-time heartbeat every 3s during long commands
 
@@ -52,7 +52,7 @@ the LSP provider interface — tracked for a future release).
 ## Why this matters
 
 Claude Code re-sends every MCP tool description and server-instruction block
-**every turn** with no delta caching on the client side. Codescout ships 25+
+**every turn** with no delta caching on the client side. Codescout ships 22
 tools. Shrinking descriptions and moving reference material into on-demand
 resources compounds into a significant per-turn token saving on long sessions,
 without losing any information the agent might need.

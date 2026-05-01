@@ -1,6 +1,6 @@
-# Read-Only Default for `activate_project`
+# Read-Only Default for `workspace(action: activate)`
 
-When you call `activate_project` with a path different from the home project (the one
+When you call `workspace(action: activate)` with a path different from the home project (the one
 codescout started with), the project is now activated in **read-only mode** by default.
 All write tools (`edit_file`, `create_file`, `replace_symbol`, `insert_code`,
 `rename_symbol`, `remove_symbol`) are blocked until you explicitly opt in.
@@ -22,23 +22,22 @@ navigation safe without any extra ceremony.
 
 ## Response
 
-`activate_project` now includes a `read_only` field in its response:
+`workspace(action: activate)` now includes a `read_only` field in its response:
 
 ```json
 {
   "status": "ok",
   "activated": { "project_root": "/path/to/other-project", "..." },
   "read_only": true,
-  "hint": "Switched project. CWD: /path/to/other-project — ⚠ remember to activate_project(...) when done. This project is activated in read-only mode. To enable writes, call activate_project with read_only: false."
+  "hint": "Switched project. CWD: /path/to/other-project — ⚠ remember to call workspace(action: activate) to return when done. This project is activated in read-only mode. To enable writes, call workspace(action: activate) with read_only: false."
 }
 ```
-
 ## Usage
 
 ```
 // Browse another project (read-only, safe)
-activate_project("/path/to/other-project")
+workspace(action: activate, path: "/path/to/other-project")
 
 // Activate with write access explicitly enabled
-activate_project("/path/to/other-project", read_only: false)
+workspace(action: activate, path: "/path/to/other-project", read_only: false)
 ```

@@ -34,7 +34,7 @@
 - [Library Navigation](concepts/library-navigation.md)
   - [Auto-Registration](concepts/multi-ecosystem-auto-registration.md)
 - [Multi-Project Workspaces](concepts/multi-project-workspace.md)
-  - [activate_project Output](concepts/activate-project-output-optimization.md)
+  - [workspace Output](concepts/activate-project-output-optimization.md)
   - [Project Hints](concepts/project-hints.md)
 
 - [MCP Resources](concepts/mcp-resources.md)
@@ -54,7 +54,7 @@
 
 - [Security & Permissions](concepts/security.md)
   - [Security Profiles](concepts/security-profiles.md)
-  - [Compact Schemas & `activate_project` Safety](concepts/compact-schemas-and-activate-project-safety.md)
+  - [Compact Schemas & `workspace` Safety](concepts/compact-schemas-and-activate-project-safety.md)
   - [PostCompact Cache Flush](concepts/post-compact-cache-flush.md)
   - [Cross-Process Write Serialization](concepts/cross-process-write-serialization.md)
 
@@ -92,7 +92,7 @@
   - [AST Analysis](tools/ast.md)
   - [Memory](tools/memory.md)
   - [Workflow & Config](tools/workflow-and-config.md)
-    - [Read-Only `activate_project`](tools/activate-project-read-only.md)
+    - [Read-Only `workspace`](tools/activate-project-read-only.md)
     - [Tool Workflows](tools/tool-workflows.md)
     - [Onboarding Improvements](concepts/onboarding-improvements.md)
 

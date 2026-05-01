@@ -38,4 +38,4 @@ Read tools (`read_file`, `symbols`, `symbols`, etc.) skip the lock entirely — 
 
 ## Lock File
 
-The lock file lives at `.codescout/write.lock` inside the project root. It is created automatically on `activate_project` and is gitignored.
+The lock file lives at `.codescout/write.lock` inside the project root. It is created automatically on `workspace(action: activate)` and is gitignored.
