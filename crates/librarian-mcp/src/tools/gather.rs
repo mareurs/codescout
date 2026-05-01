@@ -264,7 +264,15 @@ fn gather_observations(
     Ok(json!(items))
 }
 
+fn guard_relative_path(path: &str) -> Result<()> {
+    if path.contains("..") || std::path::Path::new(path).is_absolute() {
+        anyhow::bail!("path must be relative and must not contain '..'");
+    }
+    Ok(())
+}
+
 fn gather_file(ctx: &ToolContext, path: &str) -> Result<Value> {
+    guard_relative_path(path)?;
     let base = project_root(ctx).unwrap_or_else(|| std::path::PathBuf::from("."));
     let full = base.join(path);
     let content = std::fs::read_to_string(&full)
@@ -278,6 +286,9 @@ fn gather_grep(
     path: Option<&str>,
     limit: usize,
 ) -> Result<Value> {
+    if let Some(p) = path {
+        guard_relative_path(p)?;
+    }
     use walkdir::WalkDir;
     let base = project_root(ctx).unwrap_or_else(|| std::path::PathBuf::from("."));
     let search_root = path.map(|p| base.join(p)).unwrap_or(base);
@@ -310,3 +321,99 @@ fn gather_grep(
     Ok(json!(matches))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::catalog::Catalog;
+    use crate::workspace::{Root, WorkspaceConfig};
+    use parking_lot::Mutex;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    fn mk_ctx(tmp: &TempDir) -> ToolContext {
+        let cat = Catalog::open_in_memory().unwrap();
+        ToolContext {
+            catalog: Arc::new(Mutex::new(cat)),
+            workspace: Arc::new(WorkspaceConfig {
+                roots: vec![Root {
+                    name: "repo".into(),
+                    path: tmp.path().to_path_buf(),
+                }],
+                ignore: vec![],
+                rules: vec![],
+                umbrellas: vec![],
+            }),
+            rules: Arc::new(vec![]),
+            embedding: None,
+            current_project: None,
+        }
+    }
+
+    #[test]
+    fn guard_relative_path_rejects_dotdot() {
+        assert!(guard_relative_path("../etc/passwd").is_err());
+        assert!(guard_relative_path("foo/../bar").is_err());
+    }
+
+    #[test]
+    fn guard_relative_path_rejects_absolute() {
+        assert!(guard_relative_path("/etc/passwd").is_err());
+    }
+
+    #[test]
+    fn guard_relative_path_accepts_normal() {
+        assert!(guard_relative_path("src/main.rs").is_ok());
+        assert!(guard_relative_path("a/b/c.txt").is_ok());
+    }
+
+    #[test]
+    fn gather_file_rejects_dotdot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(&tmp);
+        let result = gather_file(&ctx, "../etc/passwd");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn gather_file_reads_existing_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("test.txt"), "hello content").unwrap();
+        let ctx = mk_ctx(&tmp);
+        let result = gather_file(&ctx, "test.txt").unwrap();
+        assert_eq!(result, serde_json::json!("hello content"));
+    }
+
+    #[test]
+    fn gather_grep_rejects_dotdot_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(&tmp);
+        let result = gather_grep(&ctx, "pattern", Some("../etc"), 10);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn gather_grep_limits_results() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Write a file with 10 matching lines
+        let content = (0..10)
+            .map(|i| format!("match line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(tmp.path().join("test.txt"), content).unwrap();
+        let ctx = mk_ctx(&tmp);
+        let result = gather_grep(&ctx, "match line", None, 5).unwrap();
+        let arr = result.as_array().unwrap();
+        assert!(arr.len() <= 5);
+    }
+
+    #[tokio::test]
+    async fn unknown_source_produces_warning() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(&tmp);
+        let sources = vec![GatherSource::Unknown];
+        let (results, warnings) = gather_all(&sources, &ctx, None).await.unwrap();
+        assert!(results.is_empty());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("unknown"));
+    }
+}

@@ -20,8 +20,6 @@ pub fn upsert(cat: &Catalog, row: &AugmentationRow) -> Result<()> {
          ON CONFLICT(artifact_id) DO UPDATE SET
            prompt = excluded.prompt,
            params = excluded.params,
-           last_refreshed_at = excluded.last_refreshed_at,
-           refresh_count = excluded.refresh_count,
            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
         rusqlite::params![
             row.artifact_id,
@@ -195,6 +193,31 @@ mod tests {
         upsert(&cat, &updated).unwrap();
         let row = get(&cat, "art1").unwrap().unwrap();
         assert_eq!(row.prompt, "New prompt");
+        assert_eq!(row.refresh_count, 0);
+    }
+
+    #[test]
+    fn upsert_preserves_refresh_count_on_update() {
+        let cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("art1")).unwrap();
+        upsert(&cat, &aug("art1")).unwrap();
+        // Simulate a refresh having happened
+        commit_refresh(&cat, "art1").unwrap();
+        // Re-augment with new prompt
+        let mut updated = aug("art1");
+        updated.prompt = "Updated prompt".to_string();
+        upsert(&cat, &updated).unwrap();
+        // refresh_count must NOT be reset
+        let row = get(&cat, "art1").unwrap().unwrap();
+        assert_eq!(
+            row.refresh_count, 1,
+            "refresh_count must survive re-augment"
+        );
+        assert!(
+            row.last_refreshed_at.is_some(),
+            "last_refreshed_at must survive re-augment"
+        );
+        assert_eq!(row.prompt, "Updated prompt");
     }
 
     #[test]
