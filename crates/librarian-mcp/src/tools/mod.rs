@@ -127,5 +127,10 @@ pub fn all_tools() -> Vec<Arc<dyn Tool>> {
         Arc::new(workspace_state_at::WorkspaceStateAt),
         Arc::new(reindex::LibrarianReindex),
         Arc::new(context::LibrarianContext),
+        Arc::new(augment::ArtifactAugment),
+        Arc::new(update_params::ArtifactUpdateParams),
+        Arc::new(refresh::ArtifactRefresh),
+        Arc::new(refresh_commit::ArtifactRefreshCommit),
+        Arc::new(tracker_create::TrackerCreate),
     ]
 }

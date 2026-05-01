@@ -19,7 +19,12 @@ through file frontmatter.
 | Add relation edge (supersedes, implements, …)    | `artifact_link`        |
 | Append observation note                          | `artifact_observe`     |
 | Manual re-scan (project-scoped by default)       | `librarian_reindex`    |
-
+| Attach/update prompt+params on artifact          | `artifact_augment`     |
+| Tune gather params mid-session                   | `artifact_update_params` |
+| Gather context for refresh (read-only)           | `artifact_refresh`     |
+| Commit completed refresh cycle                   | `artifact_refresh_commit` |
+| Create tracker artifact + augment atomically     | `tracker_create`       |
+| List/find augmented artifacts                    | `artifact_find` with `augmented: true` |
 ## Filter AST
 
 JSON tree. Composition: `and`, `or`, `not`. Leaf ops: `eq`, `ne`, `in`,
@@ -103,7 +108,27 @@ Leaf ops gain `prefix` (LIKE `val%` with `_`/`%` escaped) for safe
 re-index. The file + frontmatter is the source of truth; the catalog is a
 derived index.
 
-## When indexing is stale
+
+## Artifact augmentation and refresh
+
+Any artifact can carry a persistent **prompt** + AI-editable **params** via
+`artifact_augment`. This enables server-assisted context gathering.
+
+**Refresh cycle** (4 steps):
+1. `artifact_refresh(id)` — server gathers context per params, returns package
+   `{ prompt, params, current_body, context, hints }`. Does NOT write.
+2. Synthesize new body from `prompt + context + current_body`.
+3. `artifact_update(id, { body: "<new content>" })` — write back.
+4. `artifact_refresh_commit(id)` — record refresh metadata.
+
+**Tracker kind:** `tracker_create` creates a `kind: tracker` artifact (body = live state)
+and attaches augmentation atomically. Trackers are ranked first in `librarian_context`.
+
+**`[LIVE]` in context:** Augmented artifacts appear with a `<!-- [LIVE] -->` header
+and their prompt as a blockquote directive — read it as a standing instruction.
+
+**Params gather sources:** `git_log`, `artifacts`, `observations`, `file`, `grep`.
+Unknown sources are skipped with a warning (forward compat).## When indexing is stale
 
 `librarian_reindex {scope?, repo?, force?}` to manually trigger. Defaults
 to `scope="project"` (current sub-project only) — sibling-project rows under
