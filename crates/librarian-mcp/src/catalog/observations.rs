@@ -38,6 +38,55 @@ pub fn list_for_artifact(cat: &Catalog, artifact_id: &str) -> Result<Vec<Observa
     rows.collect::<Result<_, _>>().map_err(Into::into)
 }
 
+/// Fetch recent observations, optionally scoped to one artifact and/or a
+/// `since` cutoff (ms-epoch). Returns newest first, capped at `limit`.
+pub fn list_recent(
+    cat: &Catalog,
+    artifact_id: Option<&str>,
+    since_ms: Option<i64>,
+    limit: usize,
+) -> Result<Vec<ObservationRow>> {
+    let mut parts: Vec<String> = Vec::new();
+    let mut param_vals: Vec<rusqlite::types::Value> = Vec::new();
+
+    if let Some(id) = artifact_id {
+        parts.push(format!("artifact_id = ?{}", param_vals.len() + 1));
+        param_vals.push(rusqlite::types::Value::Text(id.to_string()));
+    }
+    if let Some(since) = since_ms {
+        parts.push(format!("created_at > ?{}", param_vals.len() + 1));
+        param_vals.push(rusqlite::types::Value::Integer(since));
+    }
+
+    let where_clause = if parts.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", parts.join(" AND "))
+    };
+
+    let sql = format!(
+        "SELECT id, artifact_id, text, source, created_at
+         FROM artifact_observation {where_clause}
+         ORDER BY created_at DESC LIMIT ?{}",
+        param_vals.len() + 1
+    );
+    param_vals.push(rusqlite::types::Value::Integer(limit as i64));
+
+    let mut stmt = cat.conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(param_vals.iter()), |row| {
+            Ok(ObservationRow {
+                id: row.get(0)?,
+                artifact_id: row.get(1)?,
+                text: row.get(2)?,
+                source: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,5 +162,61 @@ mod tests {
         .unwrap();
         artifact::delete(&cat, "a").unwrap();
         assert!(list_for_artifact(&cat, "a").unwrap().is_empty());
+    }
+
+    #[test]
+    fn list_recent_filters_by_since() {
+        use crate::catalog::artifact::{upsert as art_upsert, ArtifactRow};
+        let cat = Catalog::open_in_memory().unwrap();
+        let now = chrono::Utc::now().timestamp_millis();
+        let art = ArtifactRow {
+            id: "a1".to_string(),
+            repo: "r".to_string(),
+            rel_path: "a.md".to_string(),
+            kind: "tracker".to_string(),
+            status: "active".to_string(),
+            title: None,
+            owners: vec![],
+            tags: vec![],
+            topic: None,
+            time_scope: None,
+            source: None,
+            created_at: now,
+            updated_at: now,
+            file_mtime: now,
+            file_sha256: "x".to_string(),
+            confidence: 1.0,
+        };
+        art_upsert(&cat, &art).unwrap();
+
+        // insert two observations 5s apart
+        let old_ts = now - 5000;
+        let new_ts = now;
+        insert(
+            &cat,
+            &ObservationRow {
+                id: None,
+                artifact_id: "a1".to_string(),
+                text: "old".to_string(),
+                source: None,
+                created_at: old_ts,
+            },
+        )
+        .unwrap();
+        insert(
+            &cat,
+            &ObservationRow {
+                id: None,
+                artifact_id: "a1".to_string(),
+                text: "new".to_string(),
+                source: None,
+                created_at: new_ts,
+            },
+        )
+        .unwrap();
+
+        let recent = list_recent(&cat, None, Some(old_ts + 1), 10).unwrap();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].text, "new");
     }
 }
