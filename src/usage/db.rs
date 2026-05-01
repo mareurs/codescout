@@ -29,7 +29,22 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
             reason            TEXT NOT NULL,
             handshake_ms      INTEGER NOT NULL,
             first_response_ms INTEGER
-        );",
+        );
+
+        CREATE TABLE IF NOT EXISTS call_edges (
+            project_id   TEXT NOT NULL,
+            caller_sym   TEXT NOT NULL,
+            callee_sym   TEXT NOT NULL,
+            file         TEXT NOT NULL,
+            line         INTEGER NOT NULL,
+            col          INTEGER NOT NULL,
+            source       TEXT NOT NULL,
+            computed_at  INTEGER NOT NULL,
+            PRIMARY KEY (project_id, caller_sym, callee_sym, file, line, col)
+        );
+        CREATE INDEX IF NOT EXISTS call_edges_caller ON call_edges(project_id, caller_sym);
+        CREATE INDEX IF NOT EXISTS call_edges_callee ON call_edges(project_id, callee_sym);
+        CREATE INDEX IF NOT EXISTS call_edges_file   ON call_edges(project_id, file);",
     )?;
 
     // Migration: add traceability columns (v0.9)
