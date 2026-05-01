@@ -23,6 +23,7 @@ through file frontmatter.
 | Tune gather params mid-session                   | `artifact_update_params` |
 | Gather context for refresh (read-only)           | `artifact_refresh`     |
 | Commit completed refresh cycle                   | `artifact_refresh_commit` |
+| Design a tracker (archetypes + teaching prompt)  | `tracker_design`       |
 | Create tracker artifact + augment atomically     | `tracker_create`       |
 | List/find augmented artifacts                    | `artifact_find` with `augmented: true` |
 ## Filter AST
@@ -123,6 +124,14 @@ Any artifact can carry a persistent **prompt** + AI-editable **params** via
 
 **Tracker kind:** `tracker_create` creates a `kind: tracker` artifact (body = live state)
 and attaches augmentation atomically. Trackers are ranked first in `librarian_context`.
+
+**Designing a tracker:** When the user asks to create a tracker, call
+`tracker_design` FIRST. It returns a teaching system_prompt + 6 archetypes
+(`deployment_state`, `failure_table`, `metric_baseline`, `audit_issues`,
+`task_list`, `reflective`) + the existing-tracker landscape. Pick an
+archetype, compose the spec (prompt, params, render_template, params_schema,
+body), then call `tracker_create`. Don't skip `tracker_design` — it prevents
+collisions, anti-patterns, and ad-hoc shapes.
 
 **`[LIVE]` in context:** Augmented artifacts appear with a `<!-- [LIVE] -->` header
 and their prompt as a blockquote directive — read it as a standing instruction.
