@@ -95,8 +95,7 @@ impl Tool for ArtifactRefreshStale {
         };
 
         let threshold_iso = {
-            let cutoff =
-                chrono::Utc::now() - chrono::Duration::hours(i64::from(threshold_hours));
+            let cutoff = chrono::Utc::now() - chrono::Duration::hours(i64::from(threshold_hours));
             cutoff.to_rfc3339()
         };
 
