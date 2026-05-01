@@ -137,7 +137,7 @@ languages.
 If the language is not supported at all, only file operations and semantic
 search (after indexing) are available.
 
-### `find_references` returns nothing
+### `references` returns nothing
 
 Two common causes:
 

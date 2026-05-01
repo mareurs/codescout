@@ -50,7 +50,7 @@ These are non-negotiable. Violating the letter IS violating the spirit.
 | Ignore `by_file` in overflow response | Use top file from `by_file` as `path=` filter | The hint tells you exactly where to look |
 | `activate_project` for a single lookup | Pass `project_id: "<id>"` on the tool call | No state mutation, no risk of forgetting to return |
 | `edit_file` / `create_file` to rewrite an entire markdown section | `edit_markdown(path, heading, action, content)` | Heading-addressed, no string matching needed |
-| `grep("fn_name")` to find all callers | `find_references(symbol, path)` | LSP finds actual usages; regex matches comments, strings, partial names |
+| `grep("fn_name")` to find all callers | `references(symbol, path)` | LSP finds actual usages; regex matches comments, strings, partial names |
 | `read_file` on a `.md` file | `read_markdown(path)` | Heading navigation > line guessing |
 | `find_symbol(query="foo\|bar")` | `grep(pattern="foo\|bar")` or separate `find_symbol` calls | `find_symbol` rejects regex-like patterns |
 ## Tool Routing & Gotchas
@@ -73,7 +73,7 @@ covers only cross-tool routing and non-obvious behaviors.
 - **Know the concept** → `semantic_search(query)` then drill with symbol tools
 - **Know a text pattern** → `grep(pattern)`
 - **Know a filename** → `glob(pattern)`
-- **All callers of X** → `find_references(symbol, path)` (not `grep`)
+- **All callers of X** → `references(symbol, path)` (not `grep`)
 
 ### Gotchas
 
@@ -97,7 +97,7 @@ covers only cross-tool routing and non-obvious behaviors.
 
 ### Library Routing
 
-Pass `scope="lib:<name>"` on `find_symbol`, `list_symbols`, `find_references`,
+Pass `scope="lib:<name>"` on `find_symbol`, `list_symbols`, `references`,
 `semantic_search`, or `index_project` to target a registered library.
 Libraries are auto-discovered when `goto_definition`/`hover` resolves outside
 the project root. All read-only tools work on libraries; write tools are project-only.
@@ -179,7 +179,7 @@ Multi-tool chains for common tasks. Follow the steps in order.
 | Step | Tool | Purpose |
 |------|------|---------|
 | 1 | `find_symbol(name, include_body=true)` | Read current implementation |
-| 2 | `find_references(symbol, path)` | Find all callers and dependents |
+| 2 | `references(symbol, path)` | Find all callers and dependents |
 | 3 | `hover` on key call sites | Reveal concrete types (especially generics/traits) |
 | 4 | Edit with full knowledge of blast radius | |
 
@@ -187,7 +187,7 @@ Multi-tool chains for common tasks. Follow the steps in order.
 
 | Step | Tool | Purpose |
 |------|------|---------|
-| 1 | `find_references(symbol, path)` | Map all usages before renaming |
+| 1 | `references(symbol, path)` | Map all usages before renaming |
 | 2 | `rename_symbol(symbol, path, new_name)` | LSP-powered rename across files |
 | 3 | `grep(old_name)` | Catch stragglers in comments, strings, docs |
 | 4 | `run_command("cargo check")` | Verify compilation |

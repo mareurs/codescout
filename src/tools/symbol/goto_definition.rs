@@ -32,7 +32,7 @@ impl Tool for GotoDefinition {
              | 1 | `find_symbol(entry_point)` | Locate starting function |\n\
              | 2 | `goto_definition` on called functions | Follow the call chain forward |\n\
              | 3 | `hover` on parameters/return values | See resolved types at each stage |\n\
-             | 4 | `find_references` at destination | Confirm which callers reach this point |",
+             | 4 | `references` at destination | Confirm which callers reach this point |",
         )
     }
 

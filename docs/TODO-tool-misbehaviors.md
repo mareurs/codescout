@@ -36,7 +36,7 @@ These are fixed in the happy path but still have edge cases worth knowing about.
 ### BUG-048 — `find_symbol` hangs 60s during LSP cold-start indexing
 
 - **Mitigation (2026-04-24):** `workspace/symbol` bypasses the cold-start retry budget in `src/lsp/client.rs` via `uses_cold_start_retry_budget`; `find_symbol` falls over to tree-sitter in ~1 s. Test: `workspace_symbol_skips_cold_start_retry_budget`.
-- **Still watch for:** `/mcp` reconnects on large projects (rust-analyzer reindex). Per-file paths (`list_symbols`, `hover`, `goto_definition`, `find_references`) remain unaffected.
+- **Still watch for:** `/mcp` reconnects on large projects (rust-analyzer reindex). Per-file paths (`list_symbols`, `hover`, `goto_definition`, `references`) remain unaffected.
 
 ### BUG-049 — `find_symbol` hangs ~90s when kotlin-lsp hits "Multiple editing sessions"
 

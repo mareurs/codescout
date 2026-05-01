@@ -196,7 +196,7 @@ future sessions start with context already loaded.
 | Find code by concept | `semantic_search` |
 | Search by text / regex | `search_pattern` |
 | Jump to a definition | `goto_definition` |
-| Find all usages | `find_references` |
+| Find all usages | `references` |
 | Rename a symbol everywhere | `rename_symbol` |
 | Replace a function body | `replace_symbol` |
 | View git blame | `run_command("git blame <file>")` |

@@ -60,7 +60,7 @@ is configured and no tree-sitter grammar is bundled.
 |---------------------------|:------------:|:--------:|:--------------:|
 | `find_symbol`             | Yes          | Yes      | No             |
 | `list_symbols`            | Yes          | Yes      | No             |
-| `find_references`         | Yes          | Yes      | No             |
+| `references`         | Yes          | Yes      | No             |
 | `replace_symbol`          | Yes          | Yes      | No             |
 | `insert_code`             | Yes          | Yes      | No             |
 | `rename_symbol`           | Yes          | Yes      | No             |

@@ -63,7 +63,7 @@ and exposes their answers as agent-friendly tools.
 - `find_symbol` — locate any symbol by name across the project
 - `list_symbols` — the outline of a file or directory: classes,
   functions, structs, in tree form
-- `find_references` — all callers/usages of a given symbol
+- `references` — all callers/usages of a given symbol
 - `replace_symbol` — replace a function body by name, not by line number
 - `remove_symbol` — delete a named symbol entirely
 - `insert_code` — add code relative to a named symbol (`position: "before"` or `position: "after"`)
@@ -218,7 +218,7 @@ disambiguate, and still misses that the error type changed in a recent refactor.
 list_symbols("src/auth.rs")
   → authenticate_user [fn, line 142], SessionStore [struct, line 12], ...
 
-find_references("authenticate_user", "src/auth.rs")
+references("authenticate_user", "src/auth.rs")
   → middleware/auth_guard.rs:88, handlers/login.rs:34, handlers/api.rs:201
 
 run_command("git log src/auth.rs")

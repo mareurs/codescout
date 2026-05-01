@@ -11,7 +11,7 @@ All symbol navigation tools require an LSP server for the target language. If
 the LSP server is not running or is still indexing, some tools fall back to
 tree-sitter for basic results.
 
-**Scope parameter:** `find_symbol`, `list_symbols`, and `find_references` accept an optional `scope` string to search library code as well as project code. See [Library Navigation](library-navigation.md) for the full scope reference.
+**Scope parameter:** `find_symbol`, `list_symbols`, and `references` accept an optional `scope` string to search library code as well as project code. See [Library Navigation](library-navigation.md) for the full scope reference.
 
 ### Workspace project scoping
 
@@ -219,13 +219,13 @@ their source body.
   symbols, which is slower but scoped.
 - `name_path` in the result uses `/` as a separator for nested symbols, e.g.
   `AuthService/authenticate_user`. You need this value for
-  `find_references`, `replace_symbol`, and related editing tools.
+  `references`, `replace_symbol`, and related editing tools.
 - Use `include_body: true` in the same call to avoid a separate read step when
   you already know the symbol name.
 
 ---
 
-## `find_references`
+## `references`
 
 **Purpose:** Find all locations in the codebase that reference (call, use,
 import) a given symbol. This is the "find all usages" feature from your IDE.
@@ -244,7 +244,7 @@ import) a given symbol. This is the "find all usages" feature from your IDE.
 
 ```json
 {
-  "tool": "find_references",
+  "tool": "references",
   "arguments": {
     "name_path": "AuthService/authenticate_user",
     "relative_path": "src/auth/service.rs"
@@ -284,7 +284,7 @@ import) a given symbol. This is the "find all usages" feature from your IDE.
 
 ```json
 {
-  "tool": "find_references",
+  "tool": "references",
   "arguments": {
     "name_path": "Logger/log",
     "relative_path": "src/logging.rs",
@@ -534,7 +534,7 @@ Uses LSP to identify the exact line range covered by the symbol — no manual li
 
 **Tips:**
 
-- Use `find_references` first to confirm nothing still calls the symbol before removing it.
+- Use `references` first to confirm nothing still calls the symbol before removing it.
 - For methods on a struct or class, use the full path: `"MyStruct/my_method"`.
 - The tool removes the exact LSP range — it will not leave behind stray blank lines from adjacent doc comments if they fall outside the symbol's range. Review the diff after removal.
 - If you want to replace rather than delete, use `replace_symbol` instead.

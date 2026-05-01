@@ -17,7 +17,7 @@ are removed — update any saved prompts or scripts.
 |---|---|---|
 | `find_symbol` | `name_path` | `symbol` |
 | `find_symbol` | `pattern` | `query` |
-| `find_references` | `name_path` | `symbol` |
+| `references` | `name_path` | `symbol` |
 | `goto_definition` | `name_path` | `symbol` |
 | `hover` | `name_path` | `symbol` |
 | `replace_symbol` | `name_path` | `symbol` |

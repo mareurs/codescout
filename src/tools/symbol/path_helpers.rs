@@ -97,7 +97,7 @@ pub(super) async fn resolve_library_roots(
         .collect();
 
     // Only check source_available for explicit single-library scope.
-    // Scope::All and Scope::Libraries are used for classification (find_references)
+    // Scope::All and Scope::Libraries are used for classification (references)
     // and must silently skip source-unavailable entries rather than erroring.
     if let crate::library::scope::Scope::Library(_) = scope {
         let unavailable: Vec<&str> = matched
@@ -327,7 +327,7 @@ pub(super) fn uri_to_path(uri: &str) -> Option<PathBuf> {
 }
 
 /// Returns `true` if any component of `path` is a well-known build-artifact directory.
-/// Used by `find_references` to suppress noise from generated/vendored code.
+/// Used by `references` to suppress noise from generated/vendored code.
 pub(super) fn path_in_excluded_dir(path: &std::path::Path) -> bool {
     const EXCLUDED: &[&str] = &[
         "target",

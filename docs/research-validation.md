@@ -54,7 +54,7 @@ redirecting to symbol tools.
 ## 2. LSP-Backed Symbol Navigation
 
 **Design**: 9 tools backed by Language Server Protocol — the same infrastructure
-IDEs use. `find_symbol`, `goto_definition`, `hover`, `find_references`,
+IDEs use. `find_symbol`, `goto_definition`, `hover`, `references`,
 `list_symbols`, `replace_symbol`, `remove_symbol`, `insert_code`, `rename_symbol`.
 
 ### "Language Server CLI Empowers Language Agents with Process Rewards" (Lanser-CLI)

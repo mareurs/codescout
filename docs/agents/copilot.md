@@ -191,7 +191,7 @@ before the next task begins.
 
 **5. Code review** — Happens automatically after each task in `subagent-driven-development`.
 For ad-hoc review, say "Review this implementation." The `requesting-code-review` skill
-dispatches the `code-reviewer` agent, which uses `find_references` and `semantic_search` to
+dispatches the `code-reviewer` agent, which uses `references` and `semantic_search` to
 check impact beyond the changed files.
 
 **6. Finish the branch** — Say "I'm done" or "All tasks complete." The

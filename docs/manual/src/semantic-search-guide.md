@@ -199,7 +199,7 @@ relevant chunks, use the symbol tools to navigate the surrounding code:
 1. `semantic_search` — find the files and line ranges where a concept lives.
 2. `list_symbols` on those files — see the surrounding structure.
 3. `find_symbol` with `include_body: true` — read the exact implementation.
-4. `find_references` — trace callers if needed.
+4. `references` — trace callers if needed.
 
 ## Tuning
 

@@ -148,7 +148,7 @@ These tools respect `detail_level`, `offset`, and `limit`:
 |------|-----------------|----------------|
 | `list_symbols` | Names, kinds, files, lines | Full symbol trees with bodies |
 | `find_symbol` | Names, kinds, locations | + bodies (when `include_body=true`) |
-| `find_references` | Reference locations | Paginated reference list |
+| `references` | Reference locations | Paginated reference list |
 | `list_dir` | File paths | Paginated entries |
 | `search_pattern` | Top matches | Paginated full matches |
 | `semantic_search` | Top matches with scores | Paginated full chunks |

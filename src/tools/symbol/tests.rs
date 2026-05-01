@@ -674,7 +674,7 @@ async fn tools_error_without_project() {
     };
     assert!(ListSymbols.call(json!({"path": "x"}), &ctx).await.is_err());
     assert!(FindSymbol.call(json!({"query": "x"}), &ctx).await.is_err());
-    assert!(FindReferences
+    assert!(References
         .call(json!({"symbol": "x", "path": "y"}), &ctx)
         .await
         .is_err());
@@ -1239,7 +1239,7 @@ println!("{} {}", x, y);
             tokio::time::sleep(std::time::Duration::from_millis(500 * attempt)).await;
         }
 
-        let result = FindReferences
+        let result = References
             .call(
                 json!({
                     "symbol": "add",
@@ -1319,7 +1319,7 @@ async fn get_symbols_overview_schema_includes_scope() {
 
 #[tokio::test]
 async fn find_referencing_symbols_schema_includes_scope() {
-    let tool = FindReferences;
+    let tool = References;
     let schema = tool.input_schema();
     assert!(schema["properties"]["scope"].is_object());
 }
@@ -3742,7 +3742,7 @@ fn find_insert_before_line_walks_past_python_multiline_decorator() {
 #[test]
 fn find_references_format_compact_shows_count() {
     use serde_json::json;
-    let tool = FindReferences;
+    let tool = References;
     let result = json!({ "references": [{"file":"a.rs","line":10}], "total": 1 });
     let text = tool.format_compact(&result).unwrap();
     assert!(text.contains("1 ref"), "got: {text}");

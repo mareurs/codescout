@@ -1,4 +1,4 @@
-//! `find_references` — find all usages of a symbol.
+//! `references` — find all usages of a symbol.
 
 use serde_json::{json, Value};
 
@@ -13,12 +13,12 @@ use super::path_helpers::{
 };
 use crate::symbol::query::find_unique_symbol_by_name_path;
 
-pub struct FindReferences;
+pub struct References;
 
 #[async_trait::async_trait]
-impl Tool for FindReferences {
+impl Tool for References {
     fn name(&self) -> &str {
-        "find_references"
+        "references"
     }
     fn description(&self) -> &str {
         "Find all usages of a symbol. Requires symbol and file."

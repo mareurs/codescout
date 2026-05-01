@@ -3,7 +3,7 @@ use codescout::agent::Agent;
 use codescout::lsp::manager::LspManager;
 use codescout::tools::ast::ListFunctions;
 use codescout::tools::file::Grep;
-use codescout::tools::symbol::{FindReferences, FindSymbol, ListSymbols};
+use codescout::tools::symbol::{FindSymbol, ListSymbols, References};
 use codescout::tools::{Tool, ToolContext};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -219,7 +219,7 @@ async fn run_find_references(ctx: &ToolContext, exp: &LangExpectation) -> Result
         if attempt > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64)).await;
         }
-        match FindReferences
+        match References
             .call(json!({ "symbol": symbol, "path": file }), ctx)
             .await
         {

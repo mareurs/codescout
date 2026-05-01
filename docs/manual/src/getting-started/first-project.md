@@ -179,7 +179,7 @@ A practical sequence for exploring an unfamiliar codebase:
 3. `list_dir` on the root and key subdirectories — build a mental map.
 4. `list_symbols("src/")` — see what is defined at the top level.
 5. `semantic_search("entry point")` or `find_symbol("main")` — find where execution starts.
-6. From there, use `find_references` to trace callers and `list_symbols` to
+6. From there, use `references` to trace callers and `list_symbols` to
    navigate deeper into subsystems.
 
 After the first session, onboarding memories persist in `.codescout/memories/` and the

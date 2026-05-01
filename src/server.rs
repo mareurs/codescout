@@ -33,7 +33,7 @@ use crate::tools::{
     read_file::ReadFile,
     semantic::{IndexProject, IndexStatus, SemanticSearch},
     symbol::{
-        FindReferences, FindSymbol, GotoDefinition, Hover, InsertCode, ListSymbols, RemoveSymbol,
+        FindSymbol, GotoDefinition, Hover, InsertCode, ListSymbols, References, RemoveSymbol,
         RenameSymbol, ReplaceSymbol,
     },
     Onboarding, RunCommand, Tool, ToolContext,
@@ -109,7 +109,7 @@ impl CodeScoutServer {
             Arc::new(Onboarding),
             // Symbol tools (stub — require LSP)
             Arc::new(FindSymbol),
-            Arc::new(FindReferences),
+            Arc::new(References),
             Arc::new(GotoDefinition),
             Arc::new(Hover),
             Arc::new(ListSymbols),
@@ -1331,7 +1331,7 @@ mod tests {
             "run_command",
             "onboarding",
             "find_symbol",
-            "find_references",
+            "references",
             "list_symbols",
             "replace_symbol",
             "insert_code",
@@ -1976,7 +1976,7 @@ mod tests {
         let caps = server.current_capabilities().await;
 
         // In a fresh temp dir with no languages configured, has_lsp should be false.
-        // LSP tools (hover, goto_definition, find_references, rename_symbol) must be hidden.
+        // LSP tools (hover, goto_definition, references, rename_symbol) must be hidden.
         if !caps.has_lsp {
             let visible: Vec<&str> = server
                 .tools
@@ -1984,12 +1984,7 @@ mod tests {
                 .filter(|t| t.availability(&caps).is_available(&caps))
                 .map(|t| t.name())
                 .collect();
-            for lsp_tool in &[
-                "hover",
-                "goto_definition",
-                "find_references",
-                "rename_symbol",
-            ] {
+            for lsp_tool in &["hover", "goto_definition", "references", "rename_symbol"] {
                 assert!(
                     !visible.contains(lsp_tool),
                     "LSP tool '{}' should be hidden when has_lsp=false",
@@ -2026,12 +2021,7 @@ mod tests {
             .map(|t| t.name())
             .collect();
 
-        for lsp_tool in &[
-            "hover",
-            "goto_definition",
-            "find_references",
-            "rename_symbol",
-        ] {
+        for lsp_tool in &["hover", "goto_definition", "references", "rename_symbol"] {
             assert!(
                 visible.contains(lsp_tool),
                 "LSP tool '{}' should be visible when has_lsp=true",

@@ -137,7 +137,7 @@ touch this function.
 
 - `list_symbols` — symbol tree for files and directories
 - `find_symbol` — search symbols by name across the project
-- `find_references` — find all callers/references
+- `references` — find all callers/references
 - `replace_symbol` — edit a symbol's source code
 - `insert_code` — insert code before or after symbols
 - `rename_symbol` — project-wide rename

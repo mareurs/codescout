@@ -38,7 +38,7 @@ or search tool:
 | `"all"` | Project source + all libraries |
 
 Tools that accept `scope`:
-`find_symbol`, `list_symbols`, `find_references`, `semantic_search`
+`find_symbol`, `list_symbols`, `references`, `semantic_search`
 
 All results include a `"source"` field (`"project"` or `"lib:<name>"`) to
 distinguish origin.

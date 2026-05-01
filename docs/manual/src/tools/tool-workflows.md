@@ -40,13 +40,13 @@ output feeds the next.
 | Step | Tool | Purpose |
 |------|------|---------|
 | 1 | `find_symbol(name, include_body=true)` | Read the current implementation |
-| 2 | `find_references(name_path, path)` | Find all callers and dependents |
+| 2 | `references(name_path, path)` | Find all callers and dependents |
 | 3 | `hover` on key call sites | Reveal concrete types flowing through (especially generics/traits) |
 | 4 | Edit with full knowledge of impact | |
 
 **Why not `search_pattern`?** A regex search for a symbol name returns string
 matches — including imports, type annotations, comments, and tests.
-`find_references` returns only *actual usages* that will break if the API changes.
+`references` returns only *actual usages* that will break if the API changes.
 
 **Tips:**
 - Step 2 may overflow on widely-used symbols. Check the `by_file` distribution to focus on the most important callers.
@@ -63,7 +63,7 @@ matches — including imports, type annotations, comments, and tests.
 | 1 | `find_symbol(entry_point)` | Locate the starting function |
 | 2 | `goto_definition` on called functions | Follow the call chain forward |
 | 3 | `hover` on parameters/return values | See resolved types at each stage |
-| 4 | `find_references` at the destination | Confirm which callers reach this point |
+| 4 | `references` at the destination | Confirm which callers reach this point |
 
 **Why not grep?** `goto_definition` follows the *actual* dispatch — through
 trait impls, re-exports, and type aliases. `search_pattern` finds text matches
@@ -81,7 +81,7 @@ but can't follow indirection.
 
 | Step | Tool | Purpose |
 |------|------|---------|
-| 1 | `find_references(name_path, path)` | Map all usages before renaming |
+| 1 | `references(name_path, path)` | Map all usages before renaming |
 | 2 | `rename_symbol(name_path, path, new_name)` | LSP-powered rename across files |
 | 3 | `search_pattern(old_name)` | Catch stragglers in comments, strings, docs |
 | 4 | `run_command("cargo check")` | Verify compilation |

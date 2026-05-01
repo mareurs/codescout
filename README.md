@@ -6,7 +6,7 @@ Works with Claude Code, GitHub Copilot, Cursor, and any MCP-capable agent.
 
 ## What it does
 
-- **Symbol navigation** — `find_symbol`, `list_symbols`, `find_references`, `goto_definition`, `replace_symbol`, backed by LSP across 9 languages
+- **Symbol navigation** — `find_symbol`, `list_symbols`, `references`, `goto_definition`, `replace_symbol`, backed by LSP across 9 languages
 - **Semantic search** — find code by concept using a bundled ONNX embedding model (22 MB, zero setup), not grep
 - **Library navigation** — explore dependency source code with scoped search, version tracking, and auto-discovery
 - **Multi-project workspaces** — register related projects in `workspace.toml` for cross-project navigation with per-project memory and indexing
@@ -17,7 +17,7 @@ Works with Claude Code, GitHub Copilot, Cursor, and any MCP-capable agent.
 | Without codescout | With codescout |
 |---|---|
 | Agent reads full files to find one function | Navigates by symbol name — zero file reads |
-| `grep` returns noise (comments, strings, docs) | `find_references` returns exact call sites |
+| `grep` returns noise (comments, strings, docs) | `references` returns exact call sites |
 | Context burns on navigation overhead | Token-efficient by design — compact by default |
 | State lost between sessions | Persistent memory across sessions |
 | Re-reads same modules from different entry points | Symbol index built once, queried instantly |

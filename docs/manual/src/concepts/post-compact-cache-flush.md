@@ -17,7 +17,7 @@ all active LSP clients are shut down immediately and the call returns early:
 ```
 
 LSP clients restart lazily on the next `goto_definition`, `hover`, or
-`find_references` call — there is no manual restart step and no disruption to
+`references` call — there is no manual restart step and no disruption to
 the session. The normal status fields (`project_root`, `languages`, etc.) are
 not included in the flush response.
 

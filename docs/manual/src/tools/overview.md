@@ -11,7 +11,7 @@ below.
 LSP-backed tools for locating and editing code by name rather than by line
 number. These tools require an LSP server to be running for the target language.
 
-The navigation tools (`find_symbol`, `list_symbols`, `find_references`) accept an optional **`scope`** parameter to search library code as well as project code — see [Library Navigation](#library-navigation) below.
+The navigation tools (`find_symbol`, `list_symbols`, `references`) accept an optional **`scope`** parameter to search library code as well as project code — see [Library Navigation](#library-navigation) below.
 
 | Tool | Description |
 |------|-------------|
@@ -19,7 +19,7 @@ The navigation tools (`find_symbol`, `list_symbols`, `find_references`) accept a
 | `list_symbols` | Symbol tree for a file, directory, or glob — classes, functions, structs |
 | `goto_definition` | Jump to where a symbol is defined via LSP; auto-discovers libraries |
 | `hover` | Get type info and documentation for a symbol at a given position |
-| `find_references` | All callers and usages of a given symbol |
+| `references` | All callers and usages of a given symbol |
 | `replace_symbol` | Replace the entire body of a named symbol with new source |
 | `remove_symbol` | Delete a named symbol entirely from the file |
 | `insert_code` | Insert code immediately before or after a named symbol |
@@ -117,7 +117,7 @@ for.
 | Find where a function is defined | `find_symbol` |
 | Jump to a symbol's definition | `goto_definition` |
 | Get type info or docs for a symbol | `hover` |
-| Find all callers of a function | `find_references` |
+| Find all callers of a function | `references` |
 | Rewrite a function body | `replace_symbol` |
 | Add a new function next to an existing one | `insert_code` |
 | Rename a function everywhere | `rename_symbol` |

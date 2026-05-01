@@ -30,13 +30,13 @@ before deciding which symbol to read.
 ```
 ```
 
-**`find_references(name_path, path)`** — find every location
+**`references(name_path, path)`** — find every location
 that references a specific symbol. Use this when you know the symbol and want
 to trace all its callers or usages.
 
 ```json
 {
-  "tool": "find_references",
+  "tool": "references",
   "arguments": { "name_path": "AuthService/verify_token", "path": "src/services/auth.rs" }
 }
 ```
@@ -143,7 +143,7 @@ Calling `list_symbols` with `detail_level: "full"` on a large directory
 floods the context with every function body in every file. Use Exploring mode
 to identify the target, then use Focused mode on that specific target.
 
-**Using `find_references` without a specific symbol.**
+**Using `references` without a specific symbol.**
 This tool requires a fully-qualified symbol path (`TypeName/method_name` in the
 file that defines it). It is not a search tool — it is a precision tool for
 tracing usages of a known symbol.
@@ -154,7 +154,7 @@ tracing usages of a known symbol.
 |-------------|------------|
 | File path | `list_symbols(file)` |
 | Function/class name | `find_symbol(pattern)` |
-| Who calls a function | `find_references(name_path, file)` |
+| Who calls a function | `references(name_path, file)` |
 | A concept or behaviour | `semantic_search(query)` |
 | Nothing (unfamiliar area) | `list_dir` → `list_symbols` → `semantic_search` |
 | Exact string or import | `search_pattern(regex)` |

@@ -13,7 +13,7 @@ Without guardrails, code intelligence tools can produce enormous output:
 |------|------------|
 | `list_symbols(dir)` | Walks the entire project, dumps every symbol in every file |
 | `find_symbol(pattern)` | Project-wide search with thousands of matches |
-| `find_references` | Popular symbols referenced in hundreds of files |
+| `references` | Popular symbols referenced in hundreds of files |
 | `list_dir(recursive=true)` | Full directory tree of a large monorepo |
 | `run_command("git blame file")` (no line range) | Every line in a long file |
 
