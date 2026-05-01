@@ -3,13 +3,13 @@ use rusqlite::Connection;
 use std::path::Path;
 
 pub mod artifact;
+pub mod augmentation;
 pub mod commits;
 pub mod event_edges;
 pub mod events;
 pub mod find;
 pub mod links;
 pub mod observations;
-pub mod augmentation;
 pub mod sources;
 
 pub struct Catalog {
@@ -44,6 +44,42 @@ fn init_sqlite_vec() {
     });
 }
 
+/// Idempotent post-baseline migrations. SCHEMA_SQL covers v1-v3 (CREATE TABLE
+/// IF NOT EXISTS is naturally idempotent); v4+ uses ALTER TABLE which isn't,
+/// so each migration checks for its own preconditions before running.
+fn run_migrations(conn: &Connection) -> Result<()> {
+    // v4: render_template + params_schema columns on artifact_augmentation
+    if !column_exists(conn, "artifact_augmentation", "render_template")? {
+        conn.execute(
+            "ALTER TABLE artifact_augmentation ADD COLUMN render_template TEXT",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "artifact_augmentation", "params_schema")? {
+        conn.execute(
+            "ALTER TABLE artifact_augmentation ADD COLUMN params_schema TEXT",
+            [],
+        )?;
+    }
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version) VALUES (4)",
+        [],
+    )?;
+    Ok(())
+}
+
+fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table))?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(1)?;
+        if name == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 impl Catalog {
     pub fn open(db_path: &Path) -> Result<Self> {
         if let Some(parent) = db_path.parent() {
@@ -55,6 +91,7 @@ impl Catalog {
             Connection::open(db_path).with_context(|| format!("opening {}", db_path.display()))?;
         conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
         conn.execute_batch(SCHEMA_SQL).context("applying schema")?;
+        run_migrations(&conn).context("running migrations")?;
         // Clean up any artifact_vec rows that lost their parent artifact row
         // (e.g. orphans from before the cascade-delete trigger was added).
         conn.execute_batch("DELETE FROM artifact_vec WHERE id NOT IN (SELECT id FROM artifact);")?;
@@ -66,6 +103,7 @@ impl Catalog {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         conn.execute_batch(SCHEMA_SQL).context("applying schema")?;
+        run_migrations(&conn).context("running migrations")?;
         // Clean up any artifact_vec rows that lost their parent artifact row
         // (e.g. orphans from before the cascade-delete trigger was added).
         conn.execute_batch("DELETE FROM artifact_vec WHERE id NOT IN (SELECT id FROM artifact);")?;
@@ -115,7 +153,29 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 3);
+        assert_eq!(v, 4);
+    }
+
+    #[test]
+    fn migration_v4_adds_render_template_and_params_schema_columns() {
+        let cat = Catalog::open_in_memory().unwrap();
+        assert!(column_exists(&cat.conn, "artifact_augmentation", "render_template").unwrap());
+        assert!(column_exists(&cat.conn, "artifact_augmentation", "params_schema").unwrap());
+    }
+
+    #[test]
+    fn migrations_are_idempotent() {
+        // Open twice on the same on-disk DB; second open must not error.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cat.sqlite");
+        let _ = Catalog::open(&path).unwrap();
+        let _ = Catalog::open(&path).unwrap();
+        let cat = Catalog::open(&path).unwrap();
+        let v: i64 = cat
+            .conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 4);
     }
 
     #[test]
@@ -129,7 +189,9 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        assert!(tables.iter().any(|t| t == "artifact_augmentation"),
-            "expected artifact_augmentation table, got: {tables:?}");
+        assert!(
+            tables.iter().any(|t| t == "artifact_augmentation"),
+            "expected artifact_augmentation table, got: {tables:?}"
+        );
     }
 }

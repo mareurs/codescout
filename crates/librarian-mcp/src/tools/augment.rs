@@ -8,10 +8,16 @@ use serde_json::{json, Value};
 pub struct ArtifactAugment;
 
 #[derive(Deserialize)]
+
 struct Args {
     id: String,
     prompt: String,
     params: Option<Value>,
+    /// MiniJinja template projecting `params` into a markdown snippet.
+    /// Decouples live state from prose body.
+    render_template: Option<String>,
+    /// JSON Schema validating future `params` merges.
+    params_schema: Option<Value>,
 }
 
 #[async_trait]
@@ -38,6 +44,14 @@ impl Tool for ArtifactAugment {
                 "params": {
                     "type": "object",
                     "description": "Optional gather config (gather_from, format, max_tokens). Defaults to {}."
+                },
+                "render_template": {
+                    "type": "string",
+                    "description": "Optional MiniJinja template projecting `params` into a markdown snippet rendered into librarian_context output. Decouples live state from prose body."
+                },
+                "params_schema": {
+                    "type": "object",
+                    "description": "Optional JSON Schema validating params on every merge. Initial params are also validated."
                 }
             }
         })
@@ -60,6 +74,20 @@ impl Tool for ArtifactAugment {
             .transpose()?
             .unwrap_or_else(|| "{}".to_string());
 
+        let params_schema_str = a
+            .params_schema
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
+
+        // If a schema is supplied, validate the initial params against it.
+        if let Some(schema) = &a.params_schema {
+            let parsed_params: Value = serde_json::from_str(&params_str)?;
+            crate::tools::schema_validate::validate(schema, &parsed_params).map_err(|e| {
+                RecoverableError::new(format!("initial params violate params_schema: {e}"))
+            })?;
+        }
+
         let now = chrono::Utc::now()
             .format("%Y-%m-%dT%H:%M:%S%.3fZ")
             .to_string();
@@ -74,6 +102,8 @@ impl Tool for ArtifactAugment {
                 refresh_count: 0,
                 created_at: now.clone(),
                 updated_at: now,
+                render_template: a.render_template,
+                params_schema: params_schema_str,
             },
         )?;
 
@@ -85,7 +115,7 @@ impl Tool for ArtifactAugment {
 mod tests {
     use super::*;
     use crate::catalog::{artifact, augmentation, Catalog};
-    use crate::workspace::{Root, WorkspaceConfig};
+    use crate::workspace::WorkspaceConfig;
     use parking_lot::Mutex;
     use std::sync::Arc;
 
@@ -180,5 +210,61 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.downcast_ref::<RecoverableError>().is_some());
+    }
+
+    #[tokio::test]
+    async fn persists_render_template_and_params_schema() {
+        let ctx = mk_ctx();
+        seed_artifact(&ctx, "rt-art");
+        ArtifactAugment
+            .call(
+                &ctx,
+                json!({
+                    "id": "rt-art",
+                    "prompt": "p",
+                    "render_template": "**Status:** {{ status }}",
+                    "params_schema": {
+                        "type": "object",
+                        "properties": { "status": { "type": "string" } }
+                    },
+                    "params": { "status": "green" }
+                }),
+            )
+            .await
+            .unwrap();
+        let row = augmentation::get(&ctx.catalog.lock(), "rt-art")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row.render_template.as_deref(),
+            Some("**Status:** {{ status }}")
+        );
+        assert!(row.params_schema.as_deref().unwrap().contains("\"status\""));
+    }
+
+    #[tokio::test]
+    async fn rejects_initial_params_violating_schema() {
+        let ctx = mk_ctx();
+        seed_artifact(&ctx, "bad-init");
+        let err = ArtifactAugment
+            .call(
+                &ctx,
+                json!({
+                    "id": "bad-init",
+                    "prompt": "p",
+                    "params_schema": {
+                        "type": "object",
+                        "required": ["status"],
+                        "properties": { "status": { "type": "string" } }
+                    },
+                    "params": {}
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("violate params_schema"),
+            "got: {err}"
+        );
     }
 }

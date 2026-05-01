@@ -42,6 +42,22 @@ impl Tool for ArtifactUpdateParams {
     async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
         let a: Args = serde_json::from_value(args)?;
         let cat = ctx.catalog.lock();
+
+        // If a params_schema is registered, validate the post-merge result
+        // against it BEFORE persisting. We compute the merged value
+        // out-of-band, validate, then commit via merge_params on success.
+        if let Some(existing) = augmentation::get(&cat, &a.id)? {
+            if let Some(schema_text) = existing.params_schema.as_deref() {
+                let mut current: Value = serde_json::from_str(&existing.params)
+                    .unwrap_or(Value::Object(Default::default()));
+                augmentation::apply_merge_patch(&mut current, &a.params);
+                crate::tools::schema_validate::validate_against_stored(schema_text, &current)
+                    .map_err(|e| {
+                        RecoverableError::new(format!("merged params violate params_schema: {e}"))
+                    })?;
+            }
+        }
+
         let found = augmentation::merge_params(&cat, &a.id, &a.params)?;
         if !found {
             return Err(RecoverableError::new(format!(
@@ -110,6 +126,49 @@ mod tests {
                 refresh_count: 0,
                 created_at: "2026-01-01T00:00:00.000Z".to_string(),
                 updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+                render_template: None,
+                params_schema: None,
+            },
+        )
+        .unwrap();
+    }
+
+    fn seed_with_schema(cat: &Catalog, id: &str, params: &str, schema: Value) {
+        let now = chrono::Utc::now().timestamp_millis();
+        artifact::upsert(
+            cat,
+            &artifact::ArtifactRow {
+                id: id.to_string(),
+                repo: "r".to_string(),
+                rel_path: format!("{id}.md"),
+                kind: "tracker".to_string(),
+                status: "active".to_string(),
+                title: None,
+                owners: vec![],
+                tags: vec![],
+                topic: None,
+                time_scope: None,
+                source: None,
+                created_at: now,
+                updated_at: now,
+                file_mtime: now,
+                file_sha256: "x".to_string(),
+                confidence: 1.0,
+            },
+        )
+        .unwrap();
+        augmentation::upsert(
+            cat,
+            &augmentation::AugmentationRow {
+                artifact_id: id.to_string(),
+                prompt: "p".to_string(),
+                params: params.to_string(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+                render_template: None,
+                params_schema: Some(serde_json::to_string(&schema).unwrap()),
             },
         )
         .unwrap();
@@ -156,5 +215,53 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.downcast_ref::<RecoverableError>().is_some());
+    }
+
+    #[tokio::test]
+    async fn schema_violation_blocks_merge() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let schema = json!({
+            "type": "object",
+            "required": ["count"],
+            "properties": { "count": { "type": "integer", "minimum": 0 } }
+        });
+        seed_with_schema(&cat, "v", r#"{"count":1}"#, schema);
+        let ctx = mk_ctx(cat);
+
+        // Merge that would set count to a string — must fail.
+        let err = ArtifactUpdateParams
+            .call(&ctx, json!({"id": "v", "params": {"count": "five"}}))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("violate params_schema"),
+            "expected schema-violation message, got: {err}"
+        );
+
+        // Original params untouched.
+        let row = augmentation::get(&ctx.catalog.lock(), "v")
+            .unwrap()
+            .unwrap();
+        assert!(row.params.contains("\"count\":1"));
+    }
+
+    #[tokio::test]
+    async fn schema_conforming_merge_succeeds() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let schema = json!({
+            "type": "object",
+            "properties": { "count": { "type": "integer", "minimum": 0 } }
+        });
+        seed_with_schema(&cat, "ok", r#"{"count":1}"#, schema);
+        let ctx = mk_ctx(cat);
+
+        ArtifactUpdateParams
+            .call(&ctx, json!({"id": "ok", "params": {"count": 7}}))
+            .await
+            .unwrap();
+        let row = augmentation::get(&ctx.catalog.lock(), "ok")
+            .unwrap()
+            .unwrap();
+        assert!(row.params.contains("\"count\":7"));
     }
 }

@@ -139,6 +139,8 @@ impl Tool for TrackerCreate {
                     refresh_count: 0,
                     created_at: ts.clone(),
                     updated_at: ts,
+                    render_template: None,
+                    params_schema: None,
                 },
             )?;
         }

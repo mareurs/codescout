@@ -10,16 +10,25 @@ pub struct AugmentationRow {
     pub refresh_count: i64,
     pub created_at: String,
     pub updated_at: String,
+    /// Optional MiniJinja template projecting `params` into a markdown snippet
+    /// rendered into `librarian_context` output. Decouples live state (params)
+    /// from prose (artifact body).
+    pub render_template: Option<String>,
+    /// Optional JSON Schema (draft-07+) validating `params` on every merge.
+    pub params_schema: Option<String>,
 }
 
 pub fn upsert(cat: &Catalog, row: &AugmentationRow) -> Result<()> {
     cat.conn.execute(
         "INSERT INTO artifact_augmentation
-           (artifact_id, prompt, params, last_refreshed_at, refresh_count, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+           (artifact_id, prompt, params, last_refreshed_at, refresh_count,
+            created_at, updated_at, render_template, params_schema)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT(artifact_id) DO UPDATE SET
            prompt = excluded.prompt,
            params = excluded.params,
+           render_template = excluded.render_template,
+           params_schema = excluded.params_schema,
            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
         rusqlite::params![
             row.artifact_id,
@@ -29,6 +38,8 @@ pub fn upsert(cat: &Catalog, row: &AugmentationRow) -> Result<()> {
             row.refresh_count,
             row.created_at,
             row.updated_at,
+            row.render_template,
+            row.params_schema,
         ],
     )?;
     Ok(())
@@ -37,7 +48,7 @@ pub fn upsert(cat: &Catalog, row: &AugmentationRow) -> Result<()> {
 pub fn get(cat: &Catalog, artifact_id: &str) -> Result<Option<AugmentationRow>> {
     let mut stmt = cat.conn.prepare(
         "SELECT artifact_id, prompt, params, last_refreshed_at, refresh_count,
-                created_at, updated_at
+                created_at, updated_at, render_template, params_schema
          FROM artifact_augmentation WHERE artifact_id = ?1",
     )?;
     let mut rows = stmt.query_map([artifact_id], row_from_sql)?;
@@ -53,6 +64,8 @@ fn row_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<AugmentationRow> {
         refresh_count: row.get(4)?,
         created_at: row.get(5)?,
         updated_at: row.get(6)?,
+        render_template: row.get(7)?,
+        params_schema: row.get(8)?,
     })
 }
 
@@ -61,16 +74,7 @@ pub fn merge_params(cat: &Catalog, artifact_id: &str, patch: &Value) -> Result<b
         return Ok(false);
     };
     let mut current: Value = serde_json::from_str(&existing.params).unwrap_or_else(|_| json!({}));
-    // RFC 7396 merge-patch
-    if let (Value::Object(target), Value::Object(patch_map)) = (&mut current, patch) {
-        for (k, v) in patch_map {
-            if v.is_null() {
-                target.remove(k);
-            } else {
-                target.insert(k.clone(), v.clone());
-            }
-        }
-    }
+    apply_merge_patch(&mut current, patch);
     let new_params = serde_json::to_string(&current)?;
     cat.conn.execute(
         "UPDATE artifact_augmentation SET params = ?1,
@@ -79,6 +83,21 @@ pub fn merge_params(cat: &Catalog, artifact_id: &str, patch: &Value) -> Result<b
         rusqlite::params![new_params, artifact_id],
     )?;
     Ok(true)
+}
+
+/// RFC 7396 JSON merge-patch applied in place to `target`. `null` keys in the
+/// patch delete; non-null keys overwrite. Non-object patches are no-ops
+/// (the tool schema enforces object at the boundary).
+pub fn apply_merge_patch(target: &mut Value, patch: &Value) {
+    if let (Value::Object(t), Value::Object(p)) = (target, patch) {
+        for (k, v) in p {
+            if v.is_null() {
+                t.remove(k);
+            } else {
+                t.insert(k.clone(), v.clone());
+            }
+        }
+    }
 }
 
 pub fn commit_refresh(cat: &Catalog, artifact_id: &str) -> Result<bool> {
@@ -118,7 +137,7 @@ pub fn get_batch(
         .join(", ");
     let sql = format!(
         "SELECT artifact_id, prompt, params, last_refreshed_at, refresh_count,
-                created_at, updated_at
+                created_at, updated_at, render_template, params_schema
          FROM artifact_augmentation WHERE artifact_id IN ({placeholders})"
     );
     let mut stmt = cat.conn.prepare(&sql)?;
@@ -169,6 +188,8 @@ mod tests {
             refresh_count: 0,
             created_at: "2026-01-01T00:00:00.000Z".to_string(),
             updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            render_template: None,
+            params_schema: None,
         }
     }
 

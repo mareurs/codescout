@@ -243,14 +243,27 @@ impl Tool for LibrarianContext {
             let title = row.title.as_deref().unwrap_or("(untitled)");
             let section = if let Some(aug) = aug_map.get(id.as_str()) {
                 let refreshed = aug.last_refreshed_at.as_deref().unwrap_or("never");
+                // If a render_template is set, project params into a markdown
+                // snippet and inject it between the [LIVE] header and the
+                // body excerpt. Failures degrade to a visible error comment
+                // so the LLM can fix the template, not silent drop.
+                let rendered = aug.render_template.as_deref().map(|tmpl| {
+                    let params: Value = serde_json::from_str(&aug.params)
+                        .unwrap_or(Value::Object(Default::default()));
+                    match crate::tools::render::render_params(tmpl, &params) {
+                        Ok(s) => format!("{s}\n\n"),
+                        Err(e) => format!("<!-- render_template error: {e} -->\n\n"),
+                    }
+                });
                 format!(
                     "<!-- [LIVE]: {} | last refreshed: {} | refresh #{} -->\n\
                      > Prompt: {}\n\n\
-                     ## {}  — {}/{}  ({}/{})\n{}\n\n",
+                     {}## {}  — {}/{}  ({}/{})\n{}\n\n",
                     title,
                     refreshed,
                     aug.refresh_count,
                     aug.prompt,
+                    rendered.as_deref().unwrap_or(""),
                     title,
                     row.kind,
                     row.status,
@@ -548,6 +561,8 @@ mod tests {
                 refresh_count: 0,
                 created_at: "2026-01-01T00:00:00.000Z".to_string(),
                 updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+                render_template: None,
+                params_schema: None,
             },
         )
         .unwrap();
@@ -561,6 +576,105 @@ mod tests {
         let md = result["markdown"].as_str().unwrap();
         assert!(md.contains("[LIVE]"), "expected [LIVE] in:\n{md}");
         assert!(md.contains("Maintain state"), "expected prompt in:\n{md}");
+    }
+
+    #[tokio::test]
+    async fn render_template_projects_params_into_context() {
+        use crate::catalog::augmentation::{self, AugmentationRow};
+        use std::io::Write;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        let mut f = std::fs::File::create(root.join("tracker.md")).unwrap();
+        writeln!(f, "# Eval Tracker\n\nProse-only body.").unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let mut row = sample_row(
+            "ctx-tmpl",
+            "r",
+            "tracker.md",
+            "Eval Tracker",
+            Some("render-test"),
+        );
+        row.kind = "tracker".into();
+        artifact::upsert(&cat, &row).unwrap();
+
+        let template = "**Status:** {{ status }} ({{ failures|length }} failing)";
+        let params = r#"{"status":"red","failures":[{"id":"F-1"},{"id":"F-2"}]}"#;
+        augmentation::upsert(
+            &cat,
+            &AugmentationRow {
+                artifact_id: "ctx-tmpl".to_string(),
+                prompt: "Maintain F-N table".to_string(),
+                params: params.to_string(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+                render_template: Some(template.to_string()),
+                params_schema: None,
+            },
+        )
+        .unwrap();
+
+        let ctx = mk_ctx(root, cat);
+        let result = LibrarianContext
+            .call(&ctx, json!({"topic": "render-test"}))
+            .await
+            .unwrap();
+
+        let md = result["markdown"].as_str().unwrap();
+        assert!(md.contains("[LIVE]"), "expected [LIVE] in:\n{md}");
+        assert!(
+            md.contains("**Status:** red (2 failing)"),
+            "expected rendered template line in:\n{md}"
+        );
+    }
+
+    #[tokio::test]
+    async fn render_template_error_surfaces_in_context() {
+        use crate::catalog::augmentation::{self, AugmentationRow};
+        use std::io::Write;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+        let mut f = std::fs::File::create(root.join("t.md")).unwrap();
+        writeln!(f, "# T\n\nbody").unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let mut row = sample_row("ctx-bad", "r", "t.md", "T", Some("bad-tmpl"));
+        row.kind = "tracker".into();
+        artifact::upsert(&cat, &row).unwrap();
+
+        // Intentionally malformed template
+        augmentation::upsert(
+            &cat,
+            &AugmentationRow {
+                artifact_id: "ctx-bad".to_string(),
+                prompt: "p".to_string(),
+                params: "{}".to_string(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+                render_template: Some("{% for x in %}".to_string()),
+                params_schema: None,
+            },
+        )
+        .unwrap();
+
+        let ctx = mk_ctx(root, cat);
+        let result = LibrarianContext
+            .call(&ctx, json!({"topic": "bad-tmpl"}))
+            .await
+            .unwrap();
+
+        let md = result["markdown"].as_str().unwrap();
+        assert!(
+            md.contains("render_template error"),
+            "expected error comment in:\n{md}"
+        );
     }
 
     #[tokio::test]
@@ -596,6 +710,8 @@ mod tests {
                 refresh_count: 0,
                 created_at: "2026-01-01T00:00:00.000Z".to_string(),
                 updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+                render_template: None,
+                params_schema: None,
             },
         )
         .unwrap();

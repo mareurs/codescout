@@ -34,6 +34,8 @@ parking_lot = "0.12"
 clap = { version = "4", features = ["derive"] }
 ulid = "1"
 git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }
+minijinja = { version = "2", default-features = false, features = ["builtins", "serde"] }
+jsonschema = { version = "0.30", default-features = false }
 
 [dev-dependencies]
 serial_test = "3.4.0"

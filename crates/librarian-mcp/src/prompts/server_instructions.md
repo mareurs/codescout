@@ -128,7 +128,23 @@ and attaches augmentation atomically. Trackers are ranked first in `librarian_co
 and their prompt as a blockquote directive — read it as a standing instruction.
 
 **Params gather sources:** `git_log`, `artifacts`, `observations`, `file`, `grep`.
-Unknown sources are skipped with a warning (forward compat).## When indexing is stale
+Unknown sources are skipped with a warning (forward compat).
+
+**State vs prose split (`render_template` + `params_schema`):**
+Augmentation supports two optional fields that decouple live state (params)
+from narrative (artifact body):
+- `render_template` — a MiniJinja template projecting `params` into a
+  markdown snippet that `librarian_context` injects under the `[LIVE]`
+  header. Use it for status tables, deployment flags, F-N failure rows —
+  anything mechanically derivable. Body stays prose-only and is rewritten
+  rarely; params are merged often without churning prose.
+- `params_schema` — a JSON Schema (draft-07+) validating `params` on
+  `artifact_augment` (initial seed) and every `artifact_update_params`
+  merge. Violations are returned as recoverable errors before the write
+  lands. Use this to lock down tracker shapes (e.g. failure-table rows
+  must have `id`, `status`, `last_seen`).
+
+Both fields are optional; legacy augmentations work unchanged.## When indexing is stale
 
 `librarian_reindex {scope?, repo?, force?}` to manually trigger. Defaults
 to `scope="project"` (current sub-project only) — sibling-project rows under
