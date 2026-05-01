@@ -59,12 +59,19 @@ impl<'a> EdgeCache<'a> {
     }
 
     pub fn upsert(&self, edges: &[Edge]) -> rusqlite::Result<()> {
+        if edges.is_empty() {
+            return Ok(());
+        }
+        // unchecked_transaction: EdgeCache holds &Connection (not &mut), so the
+        // safe transaction() API is unavailable. unchecked_transaction is sound
+        // here because upsert is the only writer on this connection at call time.
+        let tx = self.conn.unchecked_transaction()?;
         for edge in edges {
             let source_str = match edge.source {
                 EdgeSource::Lsp => "lsp",
                 EdgeSource::Ts => "ts",
             };
-            self.conn.execute(
+            tx.execute(
                 "INSERT OR REPLACE INTO call_edges \
                  (project_id, caller_sym, callee_sym, file, line, col, source, computed_at) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%s','now'))",
@@ -79,7 +86,7 @@ impl<'a> EdgeCache<'a> {
                 ],
             )?;
         }
-        Ok(())
+        tx.commit()
     }
 
     pub fn invalidate_file(&self, file: &Path) -> rusqlite::Result<usize> {

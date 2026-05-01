@@ -233,19 +233,22 @@ impl Tool for CallGraph {
         let seed_line = sym_info.start_line;
         let seed_col = sym_info.start_col;
 
-        // Get project root and project_id for the edge cache
+        // Get project root and project_id for the edge cache.
+        // project_id must be derived via the shared helper so it matches what
+        // invalidate_call_edges uses — they must write and delete with the same key.
         let root = ctx.agent.require_project_root().await?;
-        let project_id = {
-            let inner = ctx.agent.inner.read().await;
-            inner
-                .workspace
-                .as_ref()
-                .and_then(|ws| ws.focused.clone())
-                .unwrap_or_else(|| crate::workspace::ROOT_PROJECT_ID.to_string())
-        };
+        let project_id = ctx.agent.call_edges_project_id().await;
 
-        // Open the DB (apply_schema is called inside open_db — idempotent)
-        let conn = Arc::new(Mutex::new(crate::embed::index::open_db(&root)?));
+        // Open the DB on a blocking thread — open_db does filesystem I/O
+        // (mkdir, sqlite open, PRAGMA/DDL migrations) that must not run on the
+        // async executor.
+        let conn = {
+            let root = root.clone();
+            tokio::task::spawn_blocking(move || crate::embed::index::open_db(&root))
+                .await
+                .map_err(|e| anyhow::anyhow!("spawn_blocking panicked: {e}"))??
+        };
+        let conn = Arc::new(Mutex::new(conn));
 
         let cap = if detail_full { 500 } else { 200 };
         let cfg = TraversalConfig {

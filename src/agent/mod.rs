@@ -751,6 +751,21 @@ impl Agent {
         }
     }
 
+    /// Returns the canonical project_id used for call-edge cache entries.
+    ///
+    /// This is the focused sub-project name (e.g. `"code-explorer"`) when a
+    /// workspace is active, or `ROOT_PROJECT_ID` otherwise. Must match the
+    /// value used by the `call_graph` tool when it upserts edges — both sides
+    /// call this method so they always agree.
+    pub async fn call_edges_project_id(&self) -> String {
+        let inner = self.inner.read().await;
+        inner
+            .workspace
+            .as_ref()
+            .and_then(|ws| ws.focused.clone())
+            .unwrap_or_else(|| crate::workspace::ROOT_PROJECT_ID.to_string())
+    }
+
     /// Invalidate call-edge cache entries for `path`.
     ///
     /// Called alongside `lsp.notify_file_changed` at every write-tool call site
@@ -772,6 +787,9 @@ impl Agent {
             return;
         }
 
+        // Derive the canonical project_id the same way the call_graph tool does.
+        let project_id = self.call_edges_project_id().await;
+
         // Spawn blocking so we don't hold the async executor on a sqlite open.
         let path = path.to_path_buf();
         let _ = tokio::task::spawn_blocking(move || {
@@ -779,11 +797,7 @@ impl Agent {
                 Ok(c) => c,
                 Err(_) => return,
             };
-            // project_id is the project root string (matches the convention used
-            // by the call_graph tool when it upserts edges).
-            let project_id = root.to_string_lossy();
-            let cache =
-                crate::tools::symbol::call_edges::cache::EdgeCache::new(&conn, project_id.as_ref());
+            let cache = crate::tools::symbol::call_edges::cache::EdgeCache::new(&conn, &project_id);
             let _ = cache.invalidate_file(&path);
         })
         .await;
