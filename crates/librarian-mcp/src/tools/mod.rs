@@ -10,7 +10,6 @@ pub mod find;
 pub mod gather;
 pub mod get;
 pub mod graph;
-pub mod links;
 pub mod scope;
 
 /// A recoverable tool error: the LLM gave bad input and can self-correct.
@@ -113,7 +112,6 @@ pub fn all_tools() -> Vec<Arc<dyn Tool>> {
     vec![
         Arc::new(find::ArtifactFind),
         Arc::new(get::ArtifactGet),
-        Arc::new(links::ArtifactLinks),
         Arc::new(graph::ArtifactGraph),
         Arc::new(create::ArtifactCreate),
         Arc::new(update::ArtifactUpdate),

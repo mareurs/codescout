@@ -80,6 +80,12 @@ struct Args {
     include_observations: Option<bool>,
     #[serde(default)]
     include_links: Option<bool>,
+    /// Filter links by direction: "out"|"in"|"both". Only applies when include_links=true. Default: "both".
+    #[serde(default)]
+    links_direction: Option<String>,
+    /// Filter links to only this rel type. Only applies when include_links=true.
+    #[serde(default)]
+    links_rel: Option<String>,
     #[serde(default)]
     full: Option<bool>,
     #[serde(default)]
@@ -110,6 +116,15 @@ impl Tool for ArtifactGet {
                 "id": {"type": "string"},
                 "include_observations": {"type": "boolean", "default": false},
                 "include_links": {"type": "boolean", "default": false},
+                "links_direction": {
+                    "type": "string",
+                    "enum": ["out", "in", "both"],
+                    "description": "Filter links by direction. Default: both. Only applies when include_links=true."
+                },
+                "links_rel": {
+                    "type": "string",
+                    "description": "Filter links to only this rel type. Only applies when include_links=true."
+                },
                 "full": {
                     "type": "boolean",
                     "default": false,
@@ -190,17 +205,32 @@ impl Tool for ArtifactGet {
             };
 
             let links_json = if want_links {
-                let out_links = links::outgoing(&cat, &a.id)?;
-                let in_links = links::incoming(&cat, &a.id)?;
+                let direction = a.links_direction.as_deref().unwrap_or("both");
+                let rel_filter = a.links_rel.as_deref();
+
+                let outgoing_items: Vec<Value> = if direction == "out" || direction == "both" {
+                    links::outgoing(&cat, &a.id)?
+                        .into_iter()
+                        .filter(|l| rel_filter.is_none_or(|r| l.rel == r))
+                        .map(|l| json!({"dst_id": l.dst_id, "rel": l.rel}))
+                        .collect()
+                } else {
+                    vec![]
+                };
+
+                let incoming_items: Vec<Value> = if direction == "in" || direction == "both" {
+                    links::incoming(&cat, &a.id)?
+                        .into_iter()
+                        .filter(|l| rel_filter.is_none_or(|r| l.rel == r))
+                        .map(|l| json!({"src_id": l.src_id, "rel": l.rel}))
+                        .collect()
+                } else {
+                    vec![]
+                };
+
                 Some(json!({
-                    "outgoing": out_links.into_iter().map(|l| json!({
-                        "dst_id": l.dst_id,
-                        "rel": l.rel,
-                    })).collect::<Vec<_>>(),
-                    "incoming": in_links.into_iter().map(|l| json!({
-                        "src_id": l.src_id,
-                        "rel": l.rel,
-                    })).collect::<Vec<_>>(),
+                    "outgoing": outgoing_items,
+                    "incoming": incoming_items,
                 }))
             } else {
                 None
@@ -948,4 +978,87 @@ mod tests {
             .unwrap();
         assert!(result["augmentation"].is_null());
     }
+
+    #[tokio::test]
+    async fn include_links_direction_out_hides_incoming() {
+        use crate::catalog::links as lcat;
+        let cat = Catalog::open_in_memory().unwrap();
+        let base = mk_row("center");
+        let src = mk_row("other");
+        artifact::upsert(&cat, &base).unwrap();
+        artifact::upsert(&cat, &src).unwrap();
+        lcat::insert(
+            &cat,
+            &lcat::LinkRow {
+                src_id: "center".into(),
+                dst_id: "other".into(),
+                rel: "implements".into(),
+                created_at: 0,
+            },
+        )
+        .unwrap();
+        lcat::insert(
+            &cat,
+            &lcat::LinkRow {
+                src_id: "other".into(),
+                dst_id: "center".into(),
+                rel: "supersedes".into(),
+                created_at: 0,
+            },
+        )
+        .unwrap();
+        let ctx = mk_ctx(cat);
+        let result = ArtifactGet
+            .call(
+                &ctx,
+                json!({"id": "center", "include_links": true, "links_direction": "out"}),
+            )
+            .await
+            .unwrap();
+        let outgoing = result["links"]["outgoing"].as_array().unwrap();
+        let incoming = result["links"]["incoming"].as_array().unwrap();
+        assert_eq!(outgoing.len(), 1);
+        assert_eq!(incoming.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn include_links_rel_filters_by_rel_type() {
+        use crate::catalog::links as lcat;
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        artifact::upsert(&cat, &mk_row("b")).unwrap();
+        artifact::upsert(&cat, &mk_row("c")).unwrap();
+        lcat::insert(
+            &cat,
+            &lcat::LinkRow {
+                src_id: "a".into(),
+                dst_id: "b".into(),
+                rel: "implements".into(),
+                created_at: 0,
+            },
+        )
+        .unwrap();
+        lcat::insert(
+            &cat,
+            &lcat::LinkRow {
+                src_id: "a".into(),
+                dst_id: "c".into(),
+                rel: "supersedes".into(),
+                created_at: 0,
+            },
+        )
+        .unwrap();
+        let ctx = mk_ctx(cat);
+        let result = ArtifactGet
+            .call(
+                &ctx,
+                json!({"id": "a", "include_links": true, "links_rel": "implements"}),
+            )
+            .await
+            .unwrap();
+        let outgoing = result["links"]["outgoing"].as_array().unwrap();
+        assert_eq!(outgoing.len(), 1);
+        assert_eq!(outgoing[0]["rel"], "implements");
+    }
+
 }
