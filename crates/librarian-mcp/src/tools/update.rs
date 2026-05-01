@@ -28,6 +28,9 @@ struct UpdatePatch {
 struct Args {
     id: String,
     patch: UpdatePatch,
+    /// When true, also call augmentation::commit_refresh after the update.
+    #[serde(default)]
+    commit_refresh: bool,
 }
 
 #[async_trait]
@@ -37,7 +40,7 @@ impl Tool for ArtifactUpdate {
     }
 
     fn description(&self) -> &'static str {
-        "Update an existing artifact's frontmatter fields and/or body. Only provided fields are changed."
+        "Update an existing artifact's frontmatter fields and/or body. Only provided fields are changed. Set commit_refresh=true to atomically record a completed refresh cycle (replaces artifact_refresh_commit)."
     }
 
     fn input_schema(&self) -> Value {
@@ -56,6 +59,11 @@ impl Tool for ArtifactUpdate {
                         "topic": {"type": "string"},
                         "body": {"type": "string"}
                     }
+                },
+                "commit_refresh": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "When true, also record a completed refresh cycle (increments refresh_count, sets last_refreshed_at). Replaces a separate artifact_refresh_commit call."
                 }
             }
         })
@@ -153,7 +161,17 @@ impl Tool for ArtifactUpdate {
         };
         artifact::upsert(&cat, &updated_row)?;
 
-        Ok(json!({"id": a.id, "updated": true}))
+        let committed = if a.commit_refresh {
+            Some(crate::catalog::augmentation::commit_refresh(&cat, &a.id)?)
+        } else {
+            None
+        };
+
+        let mut out = json!({"id": a.id, "updated": true});
+        if let Some(c) = committed {
+            out["committed"] = json!(c);
+        }
+        Ok(out)
     }
 }
 
@@ -347,5 +365,68 @@ mod tests {
             Some("Keep"),
             "title should be unchanged"
         );
+    }
+
+    #[tokio::test]
+    async fn update_with_commit_refresh_increments_refresh_count() {
+        use crate::catalog::augmentation;
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        // Create artifact via ArtifactCreate so the file exists on disk
+        let v = ArtifactCreate
+            .call(
+                &ctx,
+                serde_json::json!({
+                    "repo": "r", "rel_path": "tracker.md",
+                    "kind": "tracker", "title": "T", "body": "body"
+                }),
+            )
+            .await
+            .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        // Seed augmentation row
+        {
+            let ts = "2026-01-01T00:00:00.000Z".to_string();
+            let cat = ctx.catalog.lock();
+            augmentation::upsert(
+                &cat,
+                &augmentation::AugmentationRow {
+                    artifact_id: id.clone(),
+                    prompt: "p".into(),
+                    params: "{}".into(),
+                    last_refreshed_at: None,
+                    refresh_count: 0,
+                    created_at: ts.clone(),
+                    updated_at: ts,
+                    render_template: None,
+                    params_schema: None,
+                },
+            )
+            .unwrap();
+        }
+
+        // Update body + commit refresh in one call
+        let result = ArtifactUpdate
+            .call(
+                &ctx,
+                serde_json::json!({
+                    "id": id,
+                    "patch": {"body": "new body"},
+                    "commit_refresh": true
+                }),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result["id"].as_str().unwrap(), id);
+        assert_eq!(result["updated"], true);
+        assert_eq!(result["committed"], true);
+
+        let cat = ctx.catalog.lock();
+        let aug = augmentation::get(&cat, &id).unwrap().unwrap();
+        assert_eq!(aug.refresh_count, 1);
+        assert!(aug.last_refreshed_at.is_some());
     }
 }
