@@ -140,6 +140,25 @@ the project root. All read-only tools work on libraries; write tools are project
 symbol+embedding index. `library(action="list")` enumerates registered libraries.
 You rarely need `library(action="register")` manually — symbol_at registers
 external dependencies on the fly.
+### Artifact & Tracker Routing
+
+**When to use artifact tools** — tracking decisions, issues, plans, experiments, or anything with evolving state. Prefer artifacts over plain markdown for anything you'd want to query by meaning, link to other artifacts, or time-travel through.
+
+**Entry point:** `librarian_context(topic)` — packs a semantic bundle of relevant artifacts and context. Call this first before any artifact task to orient and avoid duplicates.
+
+**Create workflow:**
+
+1. `artifact_find(semantic="...")` — semantic search first; never create without checking
+2. If **tracker** (multi-entry: issue list, ADR log, experiment record): call `tracker_design` → pick an archetype → then `artifact_create`
+3. If **regular artifact**: `artifact_create` directly (fails if path exists — `artifact_find` guards this)
+4. `artifact_link(source, target)` to connect related artifacts
+
+**Other key tools:**
+- `artifact_graph` — relationships and dependencies between artifacts
+- `artifact_timeline` — chronological history of an artifact
+- `artifact_state_at(id, date)` — snapshot at a point in time
+- `artifact_refresh_stale` — update stale artifacts after codebase changes
+- `artifact_event_create` — log significant events on an artifact
 ## Output System
 
 **File paths in tool output are relative to the project root** (e.g. `src/tools/mod.rs`,
@@ -226,6 +245,17 @@ Multi-tool chains for common tasks. Follow the steps in order.
 | 3 | `grep(old_name)` | Catch stragglers in comments, strings, docs |
 | 4 | `run_command("cargo check")` | Verify compilation |
 
+
+### Tracking a Decision or Issue
+
+| Step | Tool | Purpose |
+|------|------|---------|
+| 1 | `librarian_context(topic)` | Get relevant artifact bundle and staleness warnings |
+| 2 | `artifact_find(semantic="...")` | Search by meaning — don't create duplicates |
+| 3a | `tracker_design` → `artifact_create` | For trackers: pick archetype first, then create |
+| 3b | `artifact_create(...)` | For plain artifacts: create directly |
+| 4 | `artifact_link(source, target)` | Connect to related artifacts |
+| 5 | `artifact_event_create(id, ...)` | Log significant events as they happen |
 
 More workflows (markdown editing, dependency tracing) available via `resources/read doc://codescout-tool-guide`.
 ## MCP Resources

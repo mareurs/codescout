@@ -515,6 +515,7 @@ After confirming all 6 memories and the system prompt with the user, deliver thi
   2. `symbols("src/")` — see the module structure
   3. `semantic_search("your concept")` — find relevant code
   4. `symbols(name="Name", include_body=true)` — read the implementation
+  5. `librarian_context(topic)` → `artifact_find(semantic="...")` → `artifact_create` — track decisions, issues, or plans as artifacts (call `tracker_design` first for structured multi-entry trackers)
 - **Library support:**
   - Libraries are **auto-discovered** when `symbol_at` resolves outside the project root.
   - `library(action="list")` — view all registered libraries and their index/version status.
