@@ -1,83 +1,65 @@
-# Development Commands
+# Development Commands — codescout Workspace
 
-## Workspace-wide (run from `/home/marius/work/claude/code-explorer`)
+## Workspace-Level (run from repo root)
 
 ```bash
-# Build everything
-cargo build
+# Build
+cargo build                    # dev build
+cargo build --release          # release build (required for live MCP testing)
 
-# Build release binary (required before MCP testing)
-cargo build --release
+# Test
+cargo test                     # all tests (workspace)
+cargo test -p codescout        # main crate only
+cargo test -p codescout-embed  # embed crate only
+cargo test -p librarian-mcp    # librarian crate only
 
-# Run all tests
-cargo test
+# Lint / Format
+cargo fmt                      # format all
+cargo fmt --check              # CI check
+cargo clippy -- -D warnings    # lint with errors
 
-# Lint (zero warnings required)
-cargo clippy -- -D warnings
-
-# Format
-cargo fmt
-
-# Full pre-commit check (required before every commit)
-cargo fmt && cargo clippy -- -D warnings && cargo test
+# E2E tests (requires real LSP servers installed)
+cargo test --features e2e-rust     # Rust LSP tests
+cargo test --features e2e-python   # Python LSP tests
+cargo test --features e2e-ts       # TypeScript LSP tests
 ```
 
-## Crate-specific
+## Live MCP Testing
 
 ```bash
-# Build only librarian-mcp
-cargo build -p librarian-mcp
-
-# Test only codescout-embed
-cargo test -p codescout-embed
-
-# Test only integration tests
-cargo test --test integration
-
-# Test LSP symbol tests
-cargo test --test symbol_lsp
-```
-
-## MCP Server (code-explorer)
-
-```bash
-# After cargo build --release, restart MCP server in Claude Code
-/mcp
-# This picks up the new release binary — dev builds are not used
-```
-
-## librarian-mcp CLI
-
-```bash
-# Run as stdio MCP server (default, no args)
-librarian-mcp
-
-# Reindex all workspace repos
-librarian-mcp reindex
-
-# Import codescout project metadata
-librarian-mcp import-codescout
-```
-
-## Fixture Libraries
-
-```bash
-# Java fixture
-cd tests/fixtures/java-library && ./gradlew build
-
-# Kotlin fixture
-cd tests/fixtures/kotlin-library && ./gradlew build
-
-# TypeScript fixture (if tsconfig.json present)
-cd tests/fixtures/typescript-library && tsc
-
-# Python fixture — no build step needed
+cargo build --release          # rebuild first
+# Then restart MCP server in Claude Code:
+#   /mcp → restart codescout
 ```
 
 ## Release (from master only)
 
 ```bash
-# See CLAUDE.md § Release Cycle for full 8-step checklist
-# Key steps: bump Cargo.toml version → cargo build --release → cargo test →
-# git tag vX.Y.Z → cargo publish → git push --tags → gh release create
+# 1. Bump version in Cargo.toml
+# 2. Build + test + clippy
+cargo build --release && cargo test && cargo clippy -- -D warnings
+# 3. Commit + tag
+git add Cargo.toml Cargo.lock && git commit -m "chore: bump version to X.Y.Z"
+git tag vX.Y.Z
+# 4. Publish
+CARGO_REGISTRY_TOKEN=$(grep CARGO_REGISTRY_TOKEN .env | cut -d= -f2) cargo publish
+# 5. Push + release
+git push && git push --tags
+gh release create vX.Y.Z --title "vX.Y.Z" --notes "..."
+# 6. Rebase experiments
+git checkout experiments && git rebase master
+```
+
+## Dashboard
+
+```bash
+codescout dashboard            # starts Axum HTTP dashboard (opt-in feature)
+```
+
+## Semantic Index
+
+```bash
+# Via MCP tool:
+# index(action="build", force=true)    — full reindex
+# index(action="status")               — check progress / drift
 ```

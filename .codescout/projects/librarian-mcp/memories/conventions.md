@@ -1,58 +1,70 @@
 # librarian-mcp — Conventions
 
-## Rust Patterns
+## Language & Framework Patterns
 
-- **Tool trait**: Simpler than codescout's Tool. No `call_content()`, no `OutputGuard`, no `RecoverableError`.
-  Tools return `anyhow::Result<Value>`; errors surfaced as `CallToolResult::error` by the server.
-- **Mutex discipline**: Catalog lock (`parking_lot::Mutex`) is acquired immediately before SQL and
-  dropped immediately after. Never held across `.await`. Embedding calls happen outside the lock.
-- **Write tools**: Return meaningful JSON (e.g. `{"id": ..., "updated": true}`), not `json!("ok")`.
-  This project has no OutputGuard convention — tools emit compact results directly.
-- **Frontmatter round-trips**: `frontmatter::update_in_place()` preserves all existing fields.
-  `frontmatter::write()` serializes via serde_yml. `serde(deny_unknown_fields)` on Frontmatter
-  enforces strict schema — unknown YAML keys cause parse failure.
-- **IDs**: `artifact_id(repo, rel_path)` = sha256(repo + "\n" + rel_path) hex[:16]. Stable across renames
-  only if the (repo, rel_path) tuple is unchanged. Collision probability negligible for realistic corpora.
-- **Path safety**: `validate_rel_path()` in create.rs blocks absolute paths and `..` traversal.
-  `normalize_rel_path()` converts Windows backslashes to `/` for cross-platform ID stability.
+- **Async runtime:** Tokio. `build_tool_context()` is `async`; `Tool::call()` is sync.
+  Heavy async work (embedding) uses `tokio::spawn` + `futures::future::join_all`.
+- **Error handling:**
+  - `RecoverableError::new(msg)` / `::with_hint(msg, hint)` for expected, input-driven
+    failures (bad args, not found, etc.) → tool returns `isError: false` in MCP
+  - `anyhow::bail!` for genuine bugs or unexpected infra failures → `isError: true`
+  - `map_tool_result()` in `server.rs` routes these; every tool returns `Result<Value>`
+- **Write tools return `json!("ok")`** — never echo content back (no-echo principle)
+- **Mutation tools** (`create`, `update`) modify the on-disk `.md` file first, then
+  re-index; the file is the source of truth, the catalog is derived.
+
+## Naming
+
+- Catalog modules: free functions (`upsert`, `get`, `delete`, `insert`, `find`) — no
+  method dispatch on `Catalog`; `Catalog` passed as `&Catalog` parameter
+- Tool structs: `ArtifactXxx` or `LibrarianXxx`; inner `Args` struct holds schemars schema
+- Inner test helpers: `mk_ctx()`, `art(id)`, `ev(id, kind, ts)` — consistent across files
 
 ## Testing Patterns
 
-- **Inline unit tests**: All modules use `#[cfg(test)] mod tests { ... }` with in-memory catalog
-  (`Catalog::open_in_memory()`) and `tempfile::TempDir` for file I/O tests.
-- **Integration test**: `tests/mcp_integration.rs` spawns the real `librarian-mcp` binary via
-  `assert_cmd::cargo::cargo_bin()`, runs JSON-RPC over stdio with `LIBRARIAN_WORKSPACE` and
-  `LIBRARIAN_DB` env vars, checks 11 tools are registered and `artifact_find` returns results.
-- **Async tool tests**: `#[tokio::test]` for tools that use async. No separate runtime setup needed.
-- **Mock embedder**: Tests create a `MockEmbedder` that implements `codescout_embed::Embedder`,
-  wrapped in `EmbeddingService::new(Arc::new(mock))`. Used in semantic search tests.
+- Unit tests inline (`#[cfg(test)]` mod) in each source file — very thorough
+- `Catalog::open_in_memory()` used in all unit tests; no temp files needed for catalog
+- Integration test in `tests/mcp_integration.rs` spawns the real binary, runs JSON-RPC
+  handshake, verifies `tools/list` returns 15 tools and `artifact_find` works end-to-end
+- Test fixture: `tests/fixtures/repo_a/` — 3 markdown files for integration smoke tests
+- `serial_test` crate used where tests share global state
+- Three-query sandwich pattern for cache-invalidation tests (baseline → stale assert → invalidate → fresh assert)
 
-## Naming & Structure
+## Classifier Rules
 
-- Tool structs: PascalCase unit structs (`ArtifactFind`, `ArtifactGet`, `LibrarianReindex`, etc.)
-- One tool per file in `src/tools/`; `all_tools()` in `src/tools/mod.rs` returns `Vec<Arc<dyn Tool>>`
-- Catalog sub-modules: `artifact`, `find`, `links`, `observations` — one concern per file
-- Preview sub-modules: one file per kind (`plan`, `spec`, `memory`, `default`, `headings`, `summary`)
-- `#[serde(deny_unknown_fields)]` on all config/frontmatter structs to catch typos early
+- Rules are TOML `[[rule]]` with `glob`, `kind`, `status?`, `time_scope?` fields
+- First-match wins across the three-layer stack:
+  1. Project-local: `<project>/.codescout/librarian.toml`
+  2. Workspace: `workspace.toml [[rule]]`
+  3. Built-in defaults: `classify::DEFAULT_RULES_TOML` (covers changelogs, issues, specs, plans, ADRs, etc.)
+- `confidence=1.0` when kind comes from frontmatter; `0.5` when inferred from rules
 
-## Configuration / Environment
+## Schema / IDs
 
-- `LIBRARIAN_WORKSPACE` → workspace.toml path (default: `~/.config/librarian/workspace.toml`)
-- `LIBRARIAN_DB` → SQLite DB path (default: `~/.local/share/librarian/catalog.db`)
-- `LIBRARIAN_EMBED_MODEL` → embedding model spec (e.g. `local:AllMiniLML6V2Q`, `openai:text-embedding-3-small`)
-- `LIBRARIAN_EMBED_URL` → custom embedding API endpoint (optional)
-- `LIBRARIAN_EMBED_API_KEY` → API key for remote embedder (optional)
+- `artifact.id` = `artifact_id(repo, rel_path)` — deterministic, hash-based ULID-style string
+- Times are **millisecond epoch integers** — not ISO-8601
+- `tags` and `owners` stored as JSON arrays in TEXT columns; `json_each()` used in SQL for `contains` operator
+- `artifact_vec` is a `vec0` virtual table (sqlite-vec) with 768-dim float embeddings
 
-## Classification System
+## Environment Variables
 
-Rules are TOML-based, loaded from `workspace.toml` `[[rule]]` sections or a separate rules file.
-First-matching glob wins. Unknown-kind artifacts (`kind="unknown"`) are indexed but flagged in
-the `unknown_ids` field of the reindex report. Frontmatter `kind`/`status` takes precedence over
-rule-matched values; rules provide defaults for files without frontmatter.
+| Variable | Purpose |
+|---|---|
+| `LIBRARIAN_WORKSPACE` | Path to `workspace.toml` |
+| `LIBRARIAN_DB` | Path to `catalog.db` |
+| `LIBRARIAN_EMBED_MODEL` | Embedder model name (enables semantic search) |
+| `LIBRARIAN_EMBED_URL` | Remote embedder base URL |
+| `LIBRARIAN_EMBED_API_KEY` | API key for remote embedder |
+| `LIBRARIAN_CWD` | Override for cwd used in project resolution |
 
-## Pre-Commit Requirements
+## CLI Subcommands
 
-```
-cargo fmt && cargo clippy -- -D warnings && cargo test
-```
-Integration test requires the binary to be built: `cargo build` or `cargo build --release` first.
+- `librarian-mcp` (no args) — stdio MCP server mode
+- `librarian-mcp reindex [--repo=...] [--force]` — CLI reindex for seeding/CI
+- `librarian-mcp import-codescout` — import codescout workspace projects into `workspace.toml`
+
+## Preview System
+
+- `preview::extract(kind, row, body, ctx)` routes to kind-specific renderers:
+  `plan`, `spec`, `memory`, `default` (fallback), `headings`, `summary`
+- Used by `artifact_get` and `librarian_context` to produce compact LLM-friendly snippets

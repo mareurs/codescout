@@ -1,62 +1,61 @@
-# Cross-Project Gotchas
+# Gotchas — codescout Workspace
 
-## Embedding Dimension Mismatch
+## Cross-Project
 
-Memory writes produce a `cross-embed failed: Dimension mismatch` warning when the semantic
-index was built with one model (e.g., 384-dim) but the current embedder produces a different
-dimensionality (e.g., 768-dim). The write still succeeds — the warning is non-blocking.
-Fix: re-run `index_project` to rebuild the semantic index with the current model.
+**Embedding dimension mismatch on fixture project memories**
+`memory(write)` on fixture projects (java/kotlin/python/rust/typescript) emits
+`cross-embed failed: Dimension mismatch (expected 384, received 768)` warnings.
+Status is still `ok` — the memory text is saved; only the cross-project embedding index fails.
+Cause: fixture project `.codescout/embeddings/project.db` was indexed with 384-dim model
+but current encoder runs 768-dim. Non-blocking; just noise in logs.
 
-## Kotlin LSP Concurrent Instances
+**Fixture project memory reads fall back to home project**
+`memory(action="read", project="java-library", topic="project-overview")` returns
+the home project's (code-explorer's) memory if the fixture project has no memory store
+or wasn't activated. Always check the returned content matches the expected project.
 
-Kotlin language server conflicts when multiple instances target the same project root. codescout
-uses a Unix-socket MUX proxy (`src/lsp/mux/`) to route multiple clients through a single
-kotlin-language-server instance. Idle TTL: 2 hours for Kotlin, 30 minutes for all other LSPs.
-Details: `docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md`.
+**Subagents share the MCP server state**
+`workspace(action="activate", path=...)` is global state. Any subagent that activates
+a different project MUST restore the home project before exiting, or all subsequent
+tool calls in the parent session break silently.
 
-## MCP Server Uses Release Binary
+## code-explorer Specific
 
-`/mcp` restart in Claude Code picks up `target/release/codescout` — NOT a dev build.
-Always run `cargo build --release` before testing tool changes via the live MCP server.
+**LSP cold start on first symbol query** — rust-analyzer and other LSPs need 5–30s to
+index on first use. Retry logic is built into `LspClient` but the first call may appear
+slow. Use `MockLspProvider` in tests to avoid this.
 
-## Parallel Write Safety
+**Kotlin LSP conflict** — Multiple concurrent Kotlin LSP instances can conflict.
+See `docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md`. TTL is 2h vs 30min
+for other languages.
 
-Never dispatch parallel write tool calls (`edit_file`, `replace_symbol`, `insert_code`,
-`create_file`, `replace_symbol`). rmcp 0.1.5 has a cancellation race; parallel writes can
-produce inconsistent partial state. Always serialize write calls. See MEMORY.md BUG-021.
+**`symbols()` truncation** — `symbols(path)` caps output via OutputGuard. If symbols
+appear missing, use `symbols(path, detail_level="full")` or narrow with `name=` filter.
 
-## fixture libraries: no LSP by default
+**`edit_file` gate on multi-line structural edits** — `edit_file` hard-errors on edits
+containing definition keywords (`fn`, `class`, `struct`, etc.) on LSP-supported languages.
+Use `replace_symbol`, `insert_code`, or `remove_symbol` instead.
 
-Fixture projects have no LSP server auto-started. codescout starts the appropriate language
-server on first LSP tool use per fixture. Cold-start latency can cause the first
-`goto_definition`/`hover` call to time out and retry. The circuit breaker and cold-start
-retry budget are in `src/lsp/`.
+**Three-query sandwich for cache invalidation tests** — A two-query test only checks the
+happy path. Always: baseline → assert stale → invalidate → assert fresh.
+See `did_change_refreshes_stale_symbol_positions` in `src/lsp/client.rs`.
 
-## librarian-mcp: Single SQLite Writer
+**Prompt surface tripwire** — `server::tests::prompt_surfaces_reference_only_real_tools`
+fails if any of the 3 prompt surfaces reference a non-existent tool name. Add to allowlist
+or fix the stale reference.
 
-`Catalog` wraps a single `rusqlite::Connection` behind `parking_lot::Mutex`. There is no
-connection pool. Long embedding operations are done outside the lock, but the lock is held
-for the full sync indexing phase. Do not attempt concurrent catalog mutations.
+## librarian-mcp Specific
 
-## codescout-embed: First-Use Model Download
+**FilterNode SQL injection** — Never build SQL fragments by hand. Always go through
+`filter::compile()` which emits parameterized queries.
 
-`LocalEmbedder` downloads the ONNX model to `~/.cache/huggingface/hub/` on first use (22MB–300MB).
-Subsequent starts are instant. `RemoteEmbedder` (Ollama) has a 300-second HTTP timeout to
-survive GPU discovery delays; ensure Ollama is running before triggering indexing.
+**TimeMachine replay requires git history** — `artifact_state_at` replays via git diff;
+repos without full history (shallow clones) may miss events.
 
-## Prompt Surface Stale References
+## codescout-embed Specific
 
-Three surfaces reference tool names: `server_instructions.md`, `onboarding_prompt.md`,
-`builders.rs`. Renaming or removing a tool without updating all three causes the test
-`prompt_surfaces_reference_only_real_tools` to fail. Always update all three together.
+**fastembed `&mut self` in v5** — fastembed 5 changed `embed` to `&mut self`, requiring
+`Arc<Mutex<LocalEmbedder>>` even for read-only usage. Don't try to make it `Arc<RwLock>`.
 
-## GitHub Tools Not Registered
-
-`src/tools/github.rs` exists but `github_identity`, `github_issue`, `github_pr`, `github_file`,
-`github_repo` are NOT registered in `server.rs`. Use the `gh` CLI via `run_command` instead.
-
-## path_security check_tool_access Must Include New Write Tools
-
-`check_tool_access()` in `src/util/path_security.rs` uses a hardcoded list of tool names per
-category. Adding a write tool without adding it to this function bypasses access controls silently.
-The `*_disabled_blocks_*` test catches this, but only if the test is also updated.
+**Remote embedder lazy dimension caching** — `RemoteEmbedder` caches dimensions via
+`Arc<AtomicUsize>`. The first embed call populates it; before that, `dimensions()` returns 0.

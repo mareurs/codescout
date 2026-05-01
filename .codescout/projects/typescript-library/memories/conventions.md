@@ -1,41 +1,43 @@
-# typescript-library — Conventions
+# Conventions — typescript-library
 
-## Language Patterns
+## Language & Compiler
+- TypeScript strict mode (`"strict": true`) — all implicit `any`, nullability, and
+  type-safety checks enforced.
+- `experimentalDecorators` and `emitDecoratorMetadata` enabled — decorators are used
+  in `extensions/advanced.ts`; avoid relying on this in non-extension code.
+- Target ES2022, CommonJS modules.
 
-### Naming
+## Naming
 - Classes: PascalCase (`Book`, `Catalog`, `CatalogStats`, `BookService`)
-- Interfaces: PascalCase, no `I` prefix (`Searchable`, `FoundResult`, `BookIndex`)
-- Enums: PascalCase, string values are snake_case (`Fiction = 'fiction'`, `NonFiction = 'non_fiction'`)
+- Interfaces: PascalCase (`Searchable`, `FoundResult`, `BookIndex`)
+- Enums: PascalCase name, PascalCase members (`Genre.Fiction`, `Genre.NonFiction`)
+- Type aliases: PascalCase (`SearchResult`, `ReadonlyBook`, `IsAvailable`)
+- Functions: camelCase (`genreLabel`, `isFound`, `createDefaultCatalog`, `findBook`)
 - Constants: SCREAMING_SNAKE_CASE (`MAX_RESULTS`)
-- Private fields: underscore-prefixed (`_title`, `_isbn`, `_genre`, `_copiesAvailable`)
-- Methods: camelCase (`searchText`, `isAvailable`, `genreLabel`, `createDefaultCatalog`)
-- Factory functions: `create*` or `createDefault*` prefix
+- Private class fields: underscore-prefixed camelCase (`_title`, `_isbn`, `_genre`)
 
-### TypeScript Features Demonstrated
-- `strict: true` — all fields typed, no implicit any
-- Private constructor parameters via shorthand (`constructor(private name: string) {}`)
-- Discriminated unions with `kind` literal discriminant
-- Type guards using `is` predicate return type
-- Mapped types (`Readonly<Pick<...>>`)
-- Conditional types (`T extends ... ? true : false`)
-- Index signatures (`[isbn: string]: Book`)
-- Generic bounded type parameters (`<T extends Searchable>`)
-- Function overloads (multiple signatures + single implementation)
-- Experimental decorators (`@logged` on method)
-- Declaration merging (interface + namespace with same name)
-- Default export alongside named exports (`export default class DefaultCatalog`)
-- Barrel/index re-export pattern
+## Class Pattern
+- Constructor parameters use `private _field` naming; public accessor methods are
+  plain methods (not getters) returning the field value.
+- No public field exposure; all state behind accessor methods.
 
-### Module Organization
-- One class/concept per file; related utilities in the same file
-- Imports are relative (`../models/book`, `../interfaces/searchable`)
-- Public API defined solely in `src/index.ts` — consumers import from the barrel
+## Interface / Type Design
+- Discriminated unions use a `kind` string literal field for safe narrowing.
+- Type guards follow the `function isFoo(x: T): x is FooType` pattern.
+- Mapped types (`Readonly`, `Pick`) preferred over manual re-declaration.
+- Conditional types used for structural capability checks (`IsAvailable<T>`).
 
-### Docstring Style
-- JSDoc-style block comments on exported symbols (`/** ... */`)
-- Inline section labels mark TypeScript feature intent (`/** Extension: ... */`)
-- No runtime test framework; no test files in the fixture
+## Module / Export Conventions
+- Each domain concept lives in its own file under `models/`, `interfaces/`, `services/`, or `extensions/`.
+- `src/index.ts` is a barrel that re-exports only the stable public API; extension types from
+  `extensions/advanced.ts` are NOT re-exported (internal/test-only).
+- Default exports used only in `extensions/advanced.ts` (`DefaultCatalog`) as an explicit
+  demonstration of the feature — elsewhere named exports only.
 
-### No Error Handling at Runtime
-This is a fixture, not production code. Functions like `findBook` return `undefined`
-and `Catalog.search` silently returns empty arrays — no thrown errors.
+## Testing
+- No test files are present in this fixture project. It is used as a code intelligence test
+  target, not a tested application.
+
+## Documentation
+- JSDoc `/** ... */` comments on all exported classes, interfaces, and methods.
+- Extension-specific patterns are labelled with "Extension: <pattern-name>" in their JSDoc.

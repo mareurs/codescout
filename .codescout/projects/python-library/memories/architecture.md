@@ -2,78 +2,76 @@
 
 ## Module Structure
 
-### `library/models/`
-- **`genre.py`** — `Genre(Enum)`: five values (FICTION, NON_FICTION, SCIENCE, HISTORY,
-  BIOGRAPHY) plus a `label()` method returning human-readable strings.
-- **`book.py`** — `Book` `@dataclass`: fields `title: str`, `isbn: str`, `genre: Genre`,
-  `copies_available: int = 1`. Identity is ISBN-based (`__eq__`/`__hash__`).
-  `is_available` is a `@property`. `MAX_RESULTS: int = 100` module-level constant.
-
-### `library/interfaces/`
-- **`searchable.py`** — Two interface types:
-  - `Searchable(ABC)`: abstract `search_text() -> str` + default `relevance() -> float`.
-  - `HasISBN(Protocol)` with `@runtime_checkable`: structural typing duck-type check for
-    any object that has an `isbn` property.
-
-### `library/services/`
-- **`catalog.py`** — `Catalog(Generic[T])` where `T` is bound to `Searchable`.
-  Holds `_items: list[T]`, supports `add(item)`, `search(query)` (substring match on
-  `item.search_text()`), and `stats() -> Catalog.Stats`. `Catalog.Stats` is a nested
-  class tracking `total_items` and `name`. `create_default_catalog()` is a free function
-  returning `Catalog(name="Main Library")`.
-
-### `library/extensions/`
-- **`advanced.py`** — Exercises advanced Python features for parser/LSP stress-testing:
-  - `BookList = list[Book]` — type alias
-  - `Playable` — mixin class with `play()` and `duration_minutes()`
-  - `AudioBook(Book, Playable)` — multiple inheritance; overrides `search_text()`
-  - `search_books(*terms: str, **filters: Any) -> BookList` — variadic signature (stub)
-  - `rank_results(books: BookList) -> BookList` — sorts by availability using nested
-    closure `_score`
-
-### `library/__init__.py`
-Re-exports `Book`, `Genre`, `Searchable`, `Catalog` as the public API.
+```
+library/interfaces/searchable.py   — Abstract base + Protocol
+library/models/book.py             — Core domain model
+library/models/genre.py            — Enum taxonomy
+library/services/catalog.py        — Generic service layer
+library/extensions/advanced.py     — Python feature showcase
+library/__init__.py                — Public API surface
+```
 
 ## Key Abstractions
 
-| Abstraction | Kind | Role |
-|---|---|---|
-| `Searchable` | ABC | Contract: any catalog item must implement `search_text()` |
-| `HasISBN` | Protocol | Structural type: duck-typed isbn check |
-| `Book` | dataclass | Core domain entity; identity by ISBN |
-| `Genre` | Enum | Categorical attribute of Book |
-| `Catalog[T]` | Generic class | Container + search over any `Searchable` type |
+### `Searchable` (ABC) — `library/interfaces/searchable.py`
+- Abstract base with `@abstractmethod search_text() -> str`
+- Default `relevance() -> float` returns 0.0 (override for custom ranking)
+- Separate `HasISBN` is a `@runtime_checkable Protocol` for structural typing
+
+### `Book` (dataclass) — `library/models/book.py`
+- Fields: `title: str`, `isbn: str`, `genre: Genre`, `copies_available: int = 1`
+- Identity by ISBN via `__eq__` and `__hash__`
+- `is_available` property: `copies_available > 0`
+- Does **not** extend `Searchable` directly — callers use `AudioBook` for typed catalog use
+
+### `Genre` (Enum) — `library/models/genre.py`
+- Values: FICTION, NON_FICTION, SCIENCE, HISTORY, BIOGRAPHY (string values)
+- `.label()` method produces human-readable display string
+
+### `Catalog[T: Searchable]` (Generic) — `library/services/catalog.py`
+- `T = TypeVar("T", bound=Searchable)` — type-safe container
+- `_items: list[T]` internal storage
+- `search(query: str) -> list[T]` — linear scan via `item.search_text()`
+- Nested `Stats` class holds `total_items` + `name`
+- `create_default_catalog()` factory function
+
+### `AudioBook(Book, Playable)` — `library/extensions/advanced.py`
+- Multiple inheritance: `Book` (dataclass) + `Playable` mixin
+- Implements `search_text()` → `"<title> (narrated by <narrator>)"`
+- Satisfies `Searchable` interface; usable as `Catalog[AudioBook]`
 
 ## Data Flows
 
-### Flow 1: Searching the catalog
-1. `create_default_catalog()` → returns `Catalog(name="Main Library")`
-2. `catalog.add(book)` → appends `Book` to `_items`
-3. `catalog.search("python")` → list comprehension calls `item.search_text()` on each
-   stored item; returns items where query string appears in the search text
-4. `catalog.stats()` → returns `Catalog.Stats(total_items=len(_items), name=_name)`
+### Flow 1 — Add and search items in catalog
+1. Construct `AudioBook(title=..., isbn=..., genre=Genre.FICTION, narrator=...)`
+2. `catalog = Catalog(name="Main Library")`  or `create_default_catalog()`
+3. `catalog.add(book)` → appends to `_items`
+4. `catalog.search("query")` → iterates `_items`, calls `item.search_text()`,
+   returns items where query is a substring
+5. `catalog.stats()` → returns `Stats(total_items=len(_items), name=_name)`
 
-### Flow 2: Ranking results
-1. `rank_results(books)` called with a `BookList`
-2. Nested closure `_score(book)` returns `1.0` if `book.is_available` else `0.5`
-3. `sorted(books, key=_score, reverse=True)` — available books float to top
+### Flow 2 — Ranking available books
+1. `books: BookList` collected (type alias `list[Book]`)
+2. `rank_results(books)` in `extensions/advanced.py`
+3. Inner `_score(book)` closure: returns 1.0 if `book.is_available` else 0.5
+4. `sorted(books, key=_score, reverse=True)` — available books first
 
 ## Design Patterns Demonstrated
 
-- ABC + abstractmethod (nominal interface)
-- `@runtime_checkable` Protocol (structural typing)
-- `Generic[T]` with `TypeVar` bound
-- `@dataclass` with custom `__eq__`/`__hash__` (ISBN-based identity)
+- ABC + abstract method (`Searchable`)
+- `@runtime_checkable Protocol` (`HasISBN`)
+- `@dataclass` with custom equality/hash
+- `Generic[T]` service with `TypeVar` bound
+- Multiple inheritance + MRO (`AudioBook`)
 - Nested class (`Catalog.Stats`)
-- Mixin inheritance (`Playable` + `Book` → `AudioBook`)
-- Nested function / closure (`rank_results` / `_score`)
-- Type alias (`BookList`)
-- Module-level constant with docstring (`MAX_RESULTS`)
+- Type aliases (`BookList = list[Book]`)
+- `*args / **kwargs` signature (`search_books`)
+- Nested function / closure (`rank_results / _score`)
 
-## Useful Search Queries
+## Useful `semantic_search` Queries for This Project
 
-- `semantic_search("generic catalog searchable items", project_id="python-library")`
-- `semantic_search("book availability copies", project_id="python-library")`
-- `semantic_search("abstract interface search text", project_id="python-library")`
+- `semantic_search("abstract interface searchable protocol", project_id="python-library")`
+- `semantic_search("generic catalog type parameter search items", project_id="python-library")`
 - `semantic_search("multiple inheritance mixin audiobook", project_id="python-library")`
-- `semantic_search("rank sort results by score", project_id="python-library")`
+- `semantic_search("dataclass book isbn genre availability", project_id="python-library")`
+- `semantic_search("rank sort books by availability score", project_id="python-library")`

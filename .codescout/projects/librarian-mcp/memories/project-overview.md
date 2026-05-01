@@ -1,55 +1,48 @@
 # librarian-mcp — Project Overview
 
-## Purpose
+## What It Does
 
-librarian-mcp is a standalone Rust MCP server that acts as a workspace artifact registry.
-It indexes markdown documents across multiple git repositories, parses YAML frontmatter to
-classify and catalog them, and exposes 11 MCP tools for LLM agents to discover, read, write,
-and traverse relationships between artifacts (specs, plans, memories, ADRs, etc.).
+librarian-mcp is a standalone MCP server that turns a collection of markdown
+repositories into a queryable artifact catalog. It walks `.md` files, classifies
+them by kind (spec, plan, memory, adr, doc, …), stores rich metadata in SQLite,
+exposes 15 tools over JSON-RPC, and optionally embeds documents for semantic
+search.
+
+## Primary Value
+
+- **Workspace-wide or project-scoped artifact discovery** — find specs, plans,
+  ADRs, roadmaps, etc. across multiple repos via a composable filter AST.
+- **TimeMachine event log** — append-only event stream (note, reviewed,
+  status_change, intent, verdict, superseded_by …) lets you replay artifact state
+  at any past commit or timestamp.
+- **Context packing** — `librarian_context` collects and token-caps the most
+  relevant artifacts for an LLM prompt in one call.
+- **Semantic search** — optional vector embeddings via `codescout-embed`
+  (remote or local), stored in `sqlite-vec` vec0 virtual tables.
 
 ## Tech Stack
 
-- **Language:** Rust (2021 edition, async with tokio)
-- **MCP protocol:** rmcp 1.3 (server, macros, transport-io, schemars)
-- **Storage:** rusqlite + sqlite-vec (vec0 virtual tables for KNN semantic search, float[768])
-- **Embedding:** codescout-embed sibling crate (local ONNX / remote OpenAI-compat API)
-- **Markdown parsing:** pulldown-cmark (frontmatter stripping, H1 extraction)
-- **YAML frontmatter:** serde_yml
-- **File walking:** ignore + walkdir (respects .gitignore)
-- **Glob classification rules:** globset
-- **SHA-256 content hashing:** sha2
-- **CLI:** clap (derive)
-
-## Key Dependencies
-
-- `codescout-embed` (workspace crate) — embedding abstraction, also used for semantic search
-- `rusqlite` — all persistent storage (WAL mode, foreign keys on)
-- `sqlite-vec` — vec0 virtual table extension, registered as SQLite auto-extension at startup
+- **Language:** Rust (async, tokio)
+- **MCP transport:** rmcp 1.3 (stdio, JSON-RPC 2.0)
+- **Storage:** SQLite via rusqlite; `sqlite-vec` for 768-dim float embeddings
+- **Embeddings:** `codescout-embed` crate (remote / local, opt-in)
+- **Config format:** TOML (`workspace.toml`) + optional per-project
+  `.codescout/librarian.toml` classifier overrides
+- **Markdown parsing:** `pulldown-cmark` (headings, frontmatter extraction)
+- **Frontmatter:** YAML via `serde_yml`
 
 ## Runtime Requirements
 
-- `LIBRARIAN_WORKSPACE` env var → path to `workspace.toml` (default: `~/.config/librarian/workspace.toml`)
-- `LIBRARIAN_DB` env var → path to SQLite catalog DB (default: `~/.local/share/librarian/catalog.db`)
-- Optional: `LIBRARIAN_EMBED_MODEL` / `LIBRARIAN_EMBED_URL` / `LIBRARIAN_EMBED_API_KEY` for semantic search
+- `LIBRARIAN_WORKSPACE` — path to `workspace.toml` (defaults to
+  `~/.config/librarian/workspace.toml`)
+- `LIBRARIAN_DB` — path to catalog SQLite file (defaults to
+  `~/.local/share/librarian/catalog.db`)
+- `LIBRARIAN_EMBED_MODEL` — optional; enables semantic search
+- `LIBRARIAN_EMBED_URL`, `LIBRARIAN_EMBED_API_KEY` — optional embedder config
+- `LIBRARIAN_CWD` — optional override for cwd-based project detection
 
-## Binary Layout
+## Key Dependencies
 
-- `crates/librarian-mcp/src/main.rs` — entry point; clap CLI with `import-codescout` and `reindex` subcommands
-- `crates/librarian-mcp/src/lib.rs` — `run_stdio_server()`, `import_codescout()`, `reindex_cli()`
-- `crates/librarian-mcp/src/` — all modules
-- `crates/librarian-mcp/tests/mcp_integration.rs` — subprocess MCP integration test
-
-## Workspace Config Format (`workspace.toml`)
-
-```toml
-[[roots]]
-name = "repo-a"
-path = "/home/user/work/repo-a"
-
-[[rule]]
-glob = "**/docs/specs/*.md"
-kind = "spec"
-status = "active"
-
-[ignore]  # optional glob patterns
-```
+- `codescout-embed` (sibling crate, features: remote-embed + local-embed)
+- `rmcp`, `rusqlite`, `sqlite-vec`, `git2` (vendored libgit2)
+- `walkdir`, `ignore`, `globset`, `sha2`, `ulid`, `chrono`, `serde_yml`

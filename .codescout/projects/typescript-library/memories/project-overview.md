@@ -1,33 +1,37 @@
-# typescript-library — Project Overview
+# Project Overview — typescript-library
 
 ## Purpose
-Test fixture for the code-explorer (codescout) project. Provides a realistic
-TypeScript library codebase with a variety of language features used to validate
-LSP navigation, symbol extraction, and semantic search on TypeScript/JavaScript.
-
-## Domain
-A library catalog system: books, genres, search functionality.
+A TypeScript fixture library that models a book catalog system. It serves as a test fixture
+for the codescout code intelligence engine, covering a wide range of TypeScript language
+features: generics, interfaces, enums, decorators, function overloads, discriminated unions,
+type guards, mapped types, conditional types, namespace merging, and index signatures.
 
 ## Tech Stack
-- Language: TypeScript (strict mode, ES2022 target)
-- Module system: CommonJS
-- Compiler: tsc with experimentalDecorators + emitDecoratorMetadata enabled
-- No runtime dependencies; no test framework (pure fixture)
+- **Language:** TypeScript (target ES2022, CommonJS modules)
+- **Compiler:** tsc with strict mode, experimentalDecorators, emitDecoratorMetadata
+- **Runtime:** Node.js (no runtime dependencies beyond Node built-ins)
+- **Build output:** `dist/` directory (rootDir: `src/`)
+- **Entry point:** `src/index.ts`
 
-## Key Files
-- `src/index.ts` — public barrel exports; re-exports Book, MAX_RESULTS, Genre,
-  Searchable, Catalog, createDefaultCatalog
-- `src/models/book.ts` — `Book` class + `MAX_RESULTS` constant
-- `src/models/genre.ts` — `Genre` enum + `genreLabel` utility
-- `src/interfaces/searchable.ts` — `Searchable` interface
-- `src/interfaces/types.ts` — union types, type guards, mapped/conditional types
-- `src/services/catalog.ts` — generic `Catalog<T>` class + `CatalogStats`
-- `src/extensions/advanced.ts` — overloads, decorators, namespace merging, default export
+## Key Dependencies
+None — this is a zero-dependency fixture project.
 
-## No Tests
-This fixture has no test files of its own; it is exercised by the host
-code-explorer test suite (integration tests, LSP symbol tests).
+## Project Structure
+```
+src/
+  index.ts                  # Public barrel export
+  models/
+    book.ts                 # Book class + MAX_RESULTS constant
+    genre.ts                # Genre enum + genreLabel helper
+  interfaces/
+    searchable.ts           # Searchable interface
+    types.ts                # SearchResult union + type utilities
+  services/
+    catalog.ts              # Catalog<T> generic class + CatalogStats
+  extensions/
+    advanced.ts             # Overloads, decorators, namespaces, default export
+```
 
-## Build Config
-tsconfig.json: `strict: true`, `outDir: dist`, `rootDir: src`,
-`experimentalDecorators: true`, `emitDecoratorMetadata: true`.
+## Runtime Requirements
+- TypeScript compiler (tsc) for build
+- No runtime framework, test runner, or external deps present

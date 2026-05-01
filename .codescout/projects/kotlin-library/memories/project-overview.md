@@ -1,33 +1,38 @@
 # kotlin-library — Project Overview
 
 ## Purpose
-A minimal Kotlin fixture used by the codescout (code-explorer) project for LSP integration
-testing. It is not a real application library — it exists to provide a realistic Kotlin
-codebase with enough type diversity that the LSP tests can exercise symbol navigation,
-go-to-definition, hover, find-references, and related features.
+
+A small Kotlin library fixture used as a test target for codescout's LSP and symbol
+navigation tools. It models a simplified book catalog domain and deliberately exercises
+a range of Kotlin language features so that codescout can be verified against them.
 
 ## Tech Stack
-- Language: Kotlin (JVM), Kotlin 2.1.0
-- Build: Gradle with Kotlin DSL (`build.gradle.kts`)
-- Group/artifact: `library:kotlin-library:0.1.0`
-- Dependencies: `kotlin("stdlib")` only — no test framework, no external libraries
-- Repository: Maven Central
 
-## Package Structure
-All 6 sources live under `src/main/kotlin/library/`:
-- `models/Book.kt` — `Book` data class with companion object; `MAX_RESULTS = 100` constant
-- `models/Genre.kt` — `Genre` enum with 5 values and a `label()` display method
-- `interfaces/Searchable.kt` — `Searchable` interface with `searchText()` and `relevance()`
-- `services/Catalog.kt` — `Catalog<T>` generic class, nested `CatalogStats`, factory functions,
-  suspend extension `searchAsync`, extension `Book.toSearchText()`
-- `extensions/Results.kt` — `SearchResult` sealed class (Found/NotFound/Error variants);
-  `BookRegistry` singleton object
-- `extensions/Advanced.kt` — `ISBN` value/inline class; `LazyBook` with delegated property;
-  `createBookWithDefaults` scope function
+- **Language:** Kotlin (JVM target, stdlib only)
+- **Build system:** Gradle with Kotlin DSL (`build.gradle.kts`)
+- **Kotlin version:** 2.1.0
+- **Group / version:** `library` / `0.1.0`
+- **Dependencies:** `kotlin("stdlib")` only — no third-party runtime deps
+- **Test suite:** None — this is a fixture, not a production library
 
-## No Tests
-There is no `src/test/` directory. This fixture is exercised exclusively by codescout's
-own Rust test suite via the Kotlin LSP (kotlin-language-server).
+## Package Layout
 
-## Key Constants
-- `MAX_RESULTS = 100` (top-level constant in `Book.kt`, `library.models` package)
+```
+library/
+  interfaces/   Searchable interface
+  models/       Book (data class), Genre (enum)
+  services/     Catalog<T> generic class + top-level factory/extension fns
+  extensions/   ISBN value class, LazyBook, SearchResult sealed class,
+                BookRegistry singleton object, createBookWithDefaults scope fn
+```
+
+## Key Files
+
+| File | Role |
+|---|---|
+| `models/Book.kt` | Core domain type; `data class` with companion factory |
+| `models/Genre.kt` | Enum with a display-label helper |
+| `interfaces/Searchable.kt` | Search contract; `Catalog` is bounded on this |
+| `services/Catalog.kt` | Generic collection + search; KDoc coroutine/extension extras |
+| `extensions/Results.kt` | Sealed result hierarchy + `BookRegistry` singleton |
+| `extensions/Advanced.kt` | `@JvmInline` value class, `by lazy`, scope functions |

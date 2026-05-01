@@ -1,52 +1,46 @@
 # rust-library — Conventions
 
-## Language & Patterns
+## Language Patterns
 
-- **Rust edition 2021**, no external dependencies
-- All public types use `pub struct` / `pub enum`; fields are private by default
-  (e.g. `Book` fields), exposed via `&self` accessor methods
-- Constructors named `new()` returning `Self`; free functions named
-  `create_default_*` for preconfigured instances
-- Trait implementations in the same file as the trait definition
-  (`Searchable` + `impl Searchable for Book` both in `searchable.rs`)
+### Naming
+- Structs and enums: `PascalCase` (`Book`, `Genre`, `Catalog`, `SearchResult`, `BookIterator`, `BookRef`, `CatalogStats`)
+- Traits: `PascalCase` (`Searchable`)
+- Functions and methods: `snake_case` (`search_text`, `is_available`, `borrow_title`, `available_titles`, `create_default_catalog`)
+- Constants: `SCREAMING_SNAKE_CASE` (`MAX_RESULTS`)
+- Modules: `snake_case` (`models`, `traits`, `services`, `extensions`)
 
-## Naming Conventions
+### Module Organization
+- Each module directory has a `mod.rs` that only re-exports child modules via `pub mod <name>;`
+- Implementation lives in individual files (`book.rs`, `catalog.rs`, etc.), not in `mod.rs`
+- `src/lib.rs` is the crate root — declares top-level modules, no inline logic
 
-- Types: `PascalCase` — `Book`, `Genre`, `Catalog`, `SearchResult`, `BookRef`
-- Methods/functions: `snake_case` — `search_text`, `is_available`, `borrow_title`
-- Constants: `SCREAMING_SNAKE_CASE` — `MAX_RESULTS`
-- Modules: `snake_case` — `models`, `traits`, `services`, `extensions`
-- Re-export aliases use `as` to rename: `Genre as BookGenre`
+### Structs
+- Fields are private by default; public accessors provided as methods (`title()`, `isbn()`, etc.)
+- Constructor pattern: associated `new()` function rather than struct literal at call sites
+- Owned fields (`String`) in structs; borrow-returning methods return `&str`
 
-## Documentation
+### Traits
+- Traits use doc comments on each method
+- Default implementations used for optional behavior (`relevance()` returns `1.0`)
+- Trait impls placed in the trait's own file (`searchable.rs`) rather than in the implementor's file
 
-- Every public type and method has a `///` doc comment
-- Comments on extensions explicitly label the Rust feature being demonstrated
-  (e.g., `/// Extension: lifetime annotations.`, `/// Extension: derive macros`)
+### Error / Result Modeling
+- No `Result`/`?` operator usage in this fixture; errors modeled as an enum variant (`SearchResult::Error(String)`)
+- No `thiserror` / `anyhow` dependencies
+
+### Generics
+- Trait bounds written inline on `impl` blocks: `impl<T: Searchable> Catalog<T>`
+- `impl Trait` used for iterator return types to avoid naming the concrete type
+
+### Lifetimes
+- Explicit lifetime annotations used only where inference is insufficient (`borrow_title<'a>`)
 
 ## Testing Approach
+- No tests exist in this fixture (no `#[cfg(test)]` blocks, no `tests/` directory)
+- The codebase exists purely as a navigation/analysis target for codescout tooling tests
+- `BookIterator::next()` is intentionally stubbed and annotated as such
 
-- No in-fixture tests; this library exists as a test target for the parent
-  codescout crate
-- The parent suite tests symbol discovery, LSP navigation, and semantic search
-  against this fixture's symbols
-
-## Error / Result Handling
-
-- No `Result`/`Error` types in the fixture; `SearchResult::Error` variant is a
-  domain error representation, not a Rust `std::error::Error` impl
-- The `is_match()` method uses `matches!` macro as idiomatic boolean check on enum
-
-## Rust Features Explicitly Exercised (for codescout testing)
-
-| Feature | Location |
-|---|---|
-| Trait with default method | `traits/searchable.rs` — `relevance()` |
-| Generic struct with trait bound | `services/catalog.rs` — `Catalog<T: Searchable>` |
-| `impl Trait` return type | `extensions/advanced.rs` — `available_titles` |
-| Explicit lifetime annotation | `extensions/advanced.rs` — `borrow_title<'a>` |
-| Enum with struct/tuple variants | `extensions/results.rs` — `SearchResult` |
-| Custom `Iterator` impl + associated type | `extensions/results.rs` — `BookIterator` |
-| Derive macros | `models/genre.rs`, `extensions/advanced.rs` |
-| `pub use` re-export alias | `extensions/advanced.rs`, `lib.rs` |
-| `matches!` macro | `extensions/results.rs` — `is_match()` |
+## Documentation Style
+- All public items have `///` doc comments
+- Comments are concise, single-sentence descriptions
+- Annotated stubs note their purpose: `"In real code we'd use a different approach; this is for testing symbol discovery"`

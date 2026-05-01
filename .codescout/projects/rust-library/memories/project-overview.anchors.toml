@@ -3,8 +3,8 @@
 
 [[anchors]]
 path = "Cargo.toml"
-hash = "d4f64490c3772ed10af6fa878058eb7d3ab22e562f3f179815e1b7fd1448e545"
+hash = "c92567de78888ddf9dc3e3f5e583d92d2bce1a4f7980225be0013dbb5226afd4"
 
 [[anchors]]
 path = "src/lib.rs"
-hash = "73744073d0950435f69fc7d496398e926ebbd28f68f4c45cfb8e5170992474df"
+hash = "d7fabcbfe4c95b8c9d583f5c8a3c35d3fad097eb6a7e9290a0a768c4093fc883"

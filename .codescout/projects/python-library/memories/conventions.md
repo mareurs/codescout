@@ -1,48 +1,40 @@
 # python-library — Conventions
 
-## Language Patterns
+## Language & Style
 
-- **Python 3.10+** features used throughout; `from __future__ import annotations` in all
-  non-trivial files to enable forward references without quotes.
-- **Dataclasses** preferred over plain classes for value objects (`Book`).
-- **Enums** for categorical domain values (`Genre`).
-- **ABCs** (abstract base classes) for nominal interfaces (`Searchable`).
-- **Protocols** with `@runtime_checkable` for structural/duck-type interfaces (`HasISBN`).
-- **Generics** via `TypeVar` + `Generic[T]` with `bound=` constraint (`Catalog[T]`).
-- **Type aliases** as module-level variables: `BookList = list[Book]`.
+- `from __future__ import annotations` in every module (deferred evaluation of type hints, Python 3.10+)
+- Type annotations on all function signatures and class fields
+- `@dataclass` for value objects (Book); plain classes for services and ABCs
+- Enum over string literals for categorical values (Genre)
 
-## Naming Conventions
+## Naming
 
-- Classes: `PascalCase` — `Book`, `Genre`, `Catalog`, `Searchable`, `AudioBook`
-- Functions/methods: `snake_case` — `search_text`, `rank_results`, `create_default_catalog`
-- Private attributes: single underscore prefix — `_items`, `_name`, `_score` (closure)
-- Constants: `UPPER_SNAKE_CASE` — `MAX_RESULTS`, enum values `FICTION`, `NON_FICTION`
-- TypeVars: single uppercase letter — `T`
+- Classes: `PascalCase` (`Book`, `AudioBook`, `Catalog`, `Genre`)
+- Functions and methods: `snake_case` (`search_text`, `is_available`, `rank_results`)
+- Constants: `UPPER_SNAKE_CASE` (`MAX_RESULTS`, `FICTION`, `NON_FICTION`)
+- Private attributes: single leading underscore (`_items`, `_name`, `_score`)
+- Type variables: single uppercase letter (`T`)
 
-## Module Organization
+## Module / Package Conventions
 
-- `models/` — pure data types (no service dependencies)
-- `interfaces/` — abstract contracts, no concrete logic
-- `services/` — business logic; depends on models + interfaces
-- `extensions/` — advanced/edge-case features; depends on models + interfaces
-- `__init__.py` at package root re-exports the four core public symbols
+- Each subpackage has an `__init__.py` with a module docstring only (no re-exports except top-level)
+- Top-level `library/__init__.py` re-exports the four main public symbols: `Book`, `Genre`, `Searchable`, `Catalog`
+- `extensions/advanced.py` is explicitly a showcase of advanced Python constructs, not production code
 
-## Testing
+## Interface Design
 
-No test files exist in this fixture. It is consumed by codescout's own test suite
-(in the parent `tests/` directory) for symbol navigation, LSP, and semantic search
-regression tests. The fixture demonstrates Python parser edge cases, not application behavior.
+- Abstractions live in `interfaces/` (ABC and Protocol)
+- `Catalog` is generic over `Searchable` — only types implementing `search_text()` are valid items
+- `Book` itself is **not** `Searchable`; `AudioBook` is the concrete searchable book type
+- `HasISBN` Protocol uses `@runtime_checkable` for `isinstance()` checks
 
-## Import Style
+## Testing Approach
 
-- Absolute imports throughout: `from library.models.book import Book`
-- No relative imports used
-- Minimal stdlib imports; no third-party dependencies
+- No test files exist inside this fixture
+- The fixture is exercised by codescout's own integration/unit tests in the host project
+- `pytest` is listed as a build command in project hints but no test suite is present
 
-## Documentation
+## Error Handling
 
-- Module-level docstrings in every `__init__.py`
-- Class-level docstrings on all public classes
-- Method docstrings on public/abstract methods
-- Module-level constant docstring via string literal after assignment (`MAX_RESULTS`)
-- Comments in `extensions/advanced.py` note which language feature each construct exercises
+- No explicit error handling in this fixture — it is a clean-path demonstration codebase
+- Type safety is enforced at the annotation level; no runtime validation or exceptions defined

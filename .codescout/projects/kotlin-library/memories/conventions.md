@@ -1,42 +1,48 @@
 # kotlin-library — Conventions
 
 ## Language & Style
-- All files use KDoc (`/** ... */`) on every declaration — required for LSP hover tests
-- Package names mirror directory structure: `library.models`, `library.interfaces`,
-  `library.services`, `library.extensions`
-- `val` everywhere; no `var` in the main source
-- Named arguments for `Book(...)` construction in scope functions
-- Default parameter values used in primary constructors (`copiesAvailable = 1`)
-  and free functions (`maxItems: Int = 100`)
+
+- **Kotlin 2.1.0** targeting JVM; no Java interop layer beyond `@JvmInline`
+- All public types and functions carry KDoc `/** ... */` doc comments
+- Expression-body functions preferred for single-expression logic:
+  `fun isAvailable(): Boolean = copiesAvailable > 0`
+- Named arguments used when constructing data classes with multiple params
 
 ## Naming
-- Classes/interfaces: PascalCase — `Book`, `Catalog`, `SearchResult`, `BookRegistry`
-- Functions/properties: camelCase — `searchText()`, `isAvailable()`, `copiesAvailable`
-- Constants: SCREAMING_SNAKE_CASE — `MAX_RESULTS`
-- Enum variants: SCREAMING_SNAKE_CASE — `FICTION`, `NON_FICTION`, `SCIENCE`
 
-## Kotlin Feature Coverage (designed for LSP test breadth)
-The fixture deliberately demonstrates one of each major Kotlin construct:
-- `data class` with companion object (`Book`)
-- `enum class` with member function (`Genre`)
-- `interface` with default implementation (`Searchable.relevance()`)
-- Generic class with bounded type param (`Catalog<T : Searchable>`)
-- Nested data class (`Catalog.CatalogStats`)
-- Sealed class with data class / object / data class variants (`SearchResult`)
-- `object` singleton (`BookRegistry`)
-- `@JvmInline value class` (`ISBN`)
-- Delegated property (`by lazy`) (`LazyBook.formattedTitle`)
-- Suspend extension function (`Catalog<T>.searchAsync()`)
-- Scope function (`let`) with lambda receiver
-- Top-level free functions (`createDefaultCatalog`, `createNamedCatalog`, `createBookWithDefaults`)
-- `require()` precondition with message lambda
+- Classes/interfaces: `PascalCase` (Book, Catalog, Searchable, SearchResult)
+- Functions/properties: `camelCase` (searchText, isAvailable, copiesAvailable)
+- Constants / enum entries: `UPPER_SNAKE_CASE` (MAX_RESULTS, FICTION, NON_FICTION)
+- Packages: all-lowercase, dot-separated (`library.models`, `library.services`)
+- File names match the primary type they declare (`Book.kt`, `Genre.kt`)
 
-## Testing Approach
-No unit tests in this fixture. All verification is done by codescout's Rust integration
-tests (`tests/`) which spin up kotlin-language-server against this fixture and assert
-correct LSP responses (symbol positions, hover content, go-to-definition targets, etc.).
+## Type Design
+
+- `data class` for value objects (Book, CatalogStats, SearchResult.Found)
+- `enum class` with member functions for categorization (Genre.label())
+- `sealed class` for exhaustive result/error hierarchies (SearchResult)
+- `object` for singletons and companion factories (BookRegistry, Book.Companion)
+- `@JvmInline value class` for typed wrappers with no runtime overhead (ISBN)
+
+## Extension Pattern
+
+Advanced.kt and the bottom of Catalog.kt follow a deliberate "extension showcase" pattern:
+each declaration is annotated with a `/** Extension: ... */` KDoc explaining what Kotlin
+feature it demonstrates. This is intentional test-fixture commentary, not production style.
 
 ## Build
-- Gradle wrapper via `./gradlew`; Kotlin JVM plugin 2.1.0
-- `./gradlew build` compiles; `./gradlew test` runs (no tests, exits cleanly)
-- No Gradle plugins beyond the core Kotlin JVM plugin
+
+- Gradle Kotlin DSL only — no `build.gradle` (Groovy)
+- No test source set configured; `./gradlew test` would be a no-op
+- `./gradlew build` compiles to `build/` (only `build/reports/` present in repo)
+
+## Error Handling
+
+No exception-based error handling in this fixture. Errors are modelled as
+`SearchResult.Error(message, code)` — a value in the sealed hierarchy — following
+the Kotlin "railway-oriented" convention of avoiding thrown exceptions for expected failures.
+
+## No Tests
+
+This project is a codescout fixture, not a shipping library. There are no test sources.
+All verification happens via codescout's own integration tests in the parent project.

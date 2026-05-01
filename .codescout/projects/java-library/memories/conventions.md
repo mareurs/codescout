@@ -1,42 +1,36 @@
-# java-library — Conventions
+# Conventions
 
-## Language Patterns
+## Language & Version
+Java 21 — the codebase uses modern Java features deliberately as a navigation test surface:
+- **Records** for immutable data (`Book`, `SearchResult.Found`, `SearchResult.NotFound`, `SearchResult.Error`)
+- **Sealed interfaces** for closed hierarchies (`SearchResult permits Found, NotFound, Error`)
+- **Default methods** on interfaces (`Searchable.relevance()`, `SearchResult.isMatch()`)
+- **Pattern matching** (`instanceof Found` in `isMatch()`)
+- **Streams + `toList()`** (Java 16+) in `Catalog.search`
 
-- **Records** for immutable value types: `Book` uses `record` syntax with
-  compact constructors.
-- **Sealed interfaces** for exhaustive type hierarchies: `SearchResult` uses
-  `sealed interface` with `permits` + nested `record` implementations.
-- **Generics with bounded wildcards**: `Catalog<T extends Searchable>` and
-  `List<? extends Searchable>` in `BookProcessor`.
-- **Default interface methods**: `Searchable.relevance()` provides a default
-  that subclasses may override.
-- **Static factory methods**: `Catalog.createDefault()` instead of constructors
-  for named construction.
-- **Static nested vs inner classes**: `CatalogStats` (static — no outer ref),
-  `ProcessingContext` (inner — holds outer ref), demonstrated side-by-side.
+## Naming
+- Classes/interfaces/enums: `UpperCamelCase` — `Book`, `Catalog`, `SearchResult`, `BookProcessor`
+- Enum constants: `SCREAMING_SNAKE_CASE` — `FICTION`, `NON_FICTION`
+- Fields/methods: `lowerCamelCase` — `searchText()`, `isAvailable()`, `copiesAvailable`
+- Packages: all lowercase, dot-separated — `library.models`, `library.services`
+- Static constants: `SCREAMING_SNAKE_CASE` — `MAX_RESULTS`
 
-## Naming Conventions
+## Documentation Style
+Every public type and method has a Javadoc comment. Extension/demo features are explicitly
+labeled: `/** Extension: sealed interface hierarchy. */`, `/** Extension: custom annotation. */`.
+This labeling convention signals which constructs are present specifically to exercise LSP
+edge cases.
 
-- Packages: all lowercase, dot-separated (`library.models`, `library.services`)
-- Classes/Interfaces: PascalCase (`BookProcessor`, `SearchResult`)
-- Methods: camelCase (`searchText`, `isAvailable`, `createDefault`)
-- Constants: UPPER_SNAKE_CASE (`MAX_RESULTS`)
-- Enum values: UPPER_SNAKE_CASE (`NON_FICTION`)
-- Annotations: PascalCase with `@` (`@Indexed`)
-
-## Javadoc Style
-
-All public types and methods have `/** ... */` Javadoc comments. The fixture
-uses the `/** Extension: ... */` prefix pattern to annotate which Java feature
-each element demonstrates (e.g. `/** Extension: sealed interface hierarchy. */`).
-
-## Testing
-
-No tests in this fixture (`src/test` directory does not exist). The project
-exists purely for symbol-extraction and LSP integration testing of the
-codescout tooling.
+## Structural Patterns
+- Static nested classes for closely related data (`CatalogStats` inside `Catalog`)
+- Non-static inner class for context-bearing helpers (`ProcessingContext` inside `BookProcessor`)
+- Static factory methods preferred over raw constructors for named construction (`createDefault()`)
+- Compact constructors in records for defaulting fields (`Book(String, String, Genre)`)
 
 ## Build
+Plain Gradle `java` plugin, no wrapper, no test source set. The project intentionally has
+no external dependencies — every type is defined in-project or from the JDK.
 
-Gradle with only the `java` plugin — no Kotlin, no Spring, no JUnit declared.
-Java 21 source and target compatibility. No external dependencies beyond JDK.
+## Testing
+No unit tests in this fixture. It is consumed by codescout's own integration tests
+(in `tests/`) which navigate its symbols via LSP and tree-sitter.

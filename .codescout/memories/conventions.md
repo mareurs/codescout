@@ -1,69 +1,43 @@
-# Workspace Conventions
+# Workspace Conventions — codescout
 
-## Commit Style
+## Shared Across All Rust Projects (code-explorer, codescout-embed, librarian-mcp)
 
-- Conventional commits: `feat(scope): ...`, `fix(scope): ...`, `chore: ...`, `docs: ...`
-- Scope = crate name or subsystem: `onboarding`, `lsp`, `embed`, `librarian`, `review/date`
-- Single well-tested commit per fix/feature — batch related changes, don't commit intermediates
-- Co-author line: `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>` on AI-assisted commits
+### Pre-commit Checklist
+```
+cargo fmt
+cargo clippy -- -D warnings
+cargo test
+cargo build --release   # required before live MCP testing
+```
 
-## Branch Strategy
+### Error Handling
+- `RecoverableError` for expected input-driven failures → `isError: false`
+- `anyhow::bail!` for genuine bugs → `isError: true`
+- Never leak full error chains to callers; log server-side only
 
-- `master` — protected, production-quality only; cherry-picked commits from `experiments`
-- `experiments` — all experimental/in-progress work; iterate freely here
-- Feature branches for large parallel tracks if needed
-- Never commit directly to master; never force-push master
+### Naming
+- Files: `snake_case.rs`; MCP tool names: `snake_case`; constants: `SCREAMING_SNAKE_CASE`
+- Test functions name the invariant, not the action
 
-## PR / Ship Process
+### Git Workflow
+- `experiments` branch for all in-progress work; `master` protected
+- Cherry-pick to master only when tests pass + clippy clean
+- Feature commits on `experiments` require docs in `docs/manual/src/experimental/`
+- See code-explorer `conventions` memory for full cherry-pick + graduation procedure
 
-1. Work on `experiments`; verify: `cargo fmt && cargo clippy -- -D warnings && cargo test`
-2. For tools: also `cargo build --release` + `/mcp` restart + manual MCP verification
-3. Cherry-pick clean commit to master: `git cherry-pick <sha>`
-4. Push master; rebase experiments: `git checkout experiments && git rebase master`
+## Per-Project Conventions
 
-## Experimental Feature Docs
+- **code-explorer:** `memory(project="code-explorer", topic="conventions")`
+  — Tool authoring rules, OutputGuard, write-tool `json!("ok")`, prompt surface updates
+- **codescout-embed:** `memory(project="codescout-embed", topic="conventions")`
+  — Embedder trait impl rules, backend feature flag patterns, chunk size formula
+- **librarian-mcp:** `memory(project="librarian-mcp", topic="conventions")`
+  — FilterNode safety, SQL injection protection, TimeMachine patterns
 
-When adding a feature commit to `experiments`:
-- Create `docs/manual/src/experimental/<feature-name>.md` with `> ⚠ Experimental` callout
-- Add entry to `docs/manual/src/experimental/index.md`
-- On graduation to master: `git mv` doc to target chapter, remove callout, update SUMMARY.md
+## Fixture Projects (tests/fixtures/)
 
-## Promotion History (experiments → master)
-
-Historical log of feature clusters promoted from `experiments` to `master` lives in
-`docs/trackers/archive/experiments-to-master.md` (archived 2026-04-27 — was misclassified as
-an active tracker). Use it to look up:
-- Which feature clusters have already graduated (e.g. cargo workspace, jemalloc, bash support,
-  librarian-mcp, mux rust rollout, metadata-enriched chunks).
-- Which graduated as ⚠ experimental vs fully promoted (still carry the experimental callout).
-
-For *current* in-flight promotion candidates, use `git log experiments ^master` rather than a
-tracker file — git is the source of truth.
-
-## CI Rules (enforced pre-commit)
-
-- `cargo fmt` — no formatting diffs
-- `cargo clippy -- -D warnings` — zero warnings
-- `cargo test` — all tests pass (1142 tests: 1110 unit + 10 integration + 22 symbol_lsp)
-- `panic = "abort"` in release profile (Cargo.toml) — no zombie server processes
-
-## Error Handling (code-explorer)
-
-- `RecoverableError` for expected input-driven failures → `isError: false` (sibling calls survive)
-- `anyhow::bail!` for genuine tool failures → `isError: true` (fatal)
-- Write tools return `json!("ok")` — never echo content back
-
-## Tool Development Rules
-
-When adding a new tool: update 6 locations (struct, server registration, test list, path_security
-check_tool_access, disabled-blocks test, server_instructions.md).
-
-When renaming a tool: update all 3 prompt surfaces (server_instructions.md, onboarding_prompt.md,
-builders.rs) and bump ONBOARDING_VERSION in src/tools/onboarding.rs.
-
-## Per-Project Specifics
-
-- **code-explorer**: see CLAUDE.md § Prompt Surface Consistency; Tool trait at `src/tools/mod.rs:543`
-- **librarian-mcp**: simpler Tool trait (no call_content/OutputGuard); parking_lot::Mutex for catalog
-- **codescout-embed**: feature-gated compilation (local-embed / remote-embed); no tool trait
-- **fixture libraries**: read-only test targets; never add external dependencies
+All 5 fixtures (java/kotlin/python/rust/typescript) share the same intentional design:
+- Model a `Catalog<T: Searchable>` pattern in each language
+- No tests, no runtime deps — static navigation targets only
+- Java 21 / Kotlin / Python 3.x / Rust stable / TypeScript strict mode
+- Naming: `Book`, `Genre`, `Catalog`, `Searchable`, `SearchResult` — consistent across all languages

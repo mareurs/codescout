@@ -2,41 +2,45 @@
 
 ## Purpose
 
-A small Python library management system serving as a **test fixture** for codescout's
-Python symbol navigation, LSP, and semantic-search capabilities. It is intentionally
-designed to exercise diverse Python language features: dataclasses, enums, ABCs,
-Protocols, generics, mixins, multiple inheritance, type aliases, *args/**kwargs, and
-nested functions/closures.
-
-## Location
-
-`tests/fixtures/python-library/` within the code-explorer workspace.
+A minimal Python library management system used as a fixture for testing
+codescout's Python code-intelligence features (symbol navigation, semantic
+search, LSP). It is **not** a production application — it exists to exercise
+Python-specific language constructs in a realistic domain.
 
 ## Tech Stack
 
-- **Language:** Python ≥ 3.10
-- **Build/Manifest:** `pyproject.toml` (minimal; no external dependencies)
-- **No test suite** — the fixture itself is exercised by codescout's own integration tests
+- **Language:** Python 3.10+
+- **Build/manifest:** `pyproject.toml` (PEP 517/518, no build backend specified)
+- **Core stdlib used:** `dataclasses`, `enum`, `abc`, `typing` (Generic, TypeVar, Protocol)
+- **No third-party runtime dependencies**
+- **No test suite** in the fixture (tests live in the codescout host project)
 
-## Package Structure
+## Package Layout
 
 ```
-library/               # top-level package
-  __init__.py          # re-exports: Book, Genre, Searchable, Catalog
+library/
+  __init__.py          # Re-exports: Book, Genre, Searchable, Catalog
   models/
     book.py            # Book dataclass + MAX_RESULTS constant
     genre.py           # Genre enum
   interfaces/
     searchable.py      # Searchable ABC + HasISBN Protocol
   services/
-    catalog.py         # Catalog[T] generic + create_default_catalog()
+    catalog.py         # Generic Catalog[T] service + create_default_catalog()
   extensions/
-    advanced.py        # Playable mixin, AudioBook, search_books, rank_results, BookList type alias
+    advanced.py        # Advanced Python features: multiple inheritance, type
+                       # aliases, *args/**kwargs, nested functions, closures
 ```
 
-## Key Dependencies (stdlib only)
+## Key Concepts
 
-- `abc` — ABC, abstractmethod
-- `dataclasses` — dataclass, field
-- `enum` — Enum
-- `typing` — Generic, TypeVar, Protocol, runtime_checkable, Any
+- `Book` — immutable-style `@dataclass`; identity by ISBN (`__eq__`, `__hash__`)
+- `Genre` — `Enum` with a human-readable `.label()` method
+- `Catalog[T: Searchable]` — generic container; searches via `item.search_text()`
+- `AudioBook` — extends `Book` + `Playable` mixin (multiple inheritance / MRO demo)
+- `MAX_RESULTS = 100` — module-level constant
+
+## Runtime Requirements
+
+- Python ≥ 3.10 (uses `from __future__ import annotations` throughout)
+- Run with: `python -m library` or `pytest` (no tests present in fixture)

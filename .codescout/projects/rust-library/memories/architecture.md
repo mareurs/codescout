@@ -2,88 +2,73 @@
 
 ## Module Structure
 
-Four top-level modules declared in `src/lib.rs`:
-
-| Module | File(s) | Responsibility |
+| Module | File(s) | Role |
 |---|---|---|
-| `models` | `genre.rs`, `book.rs` | Core domain types |
-| `traits` | `searchable.rs` | Behavioral abstractions (Rust trait) |
-| `services` | `catalog.rs` | Business logic, generic over `Searchable` types |
-| `extensions` | `results.rs`, `advanced.rs` | Richer types, iterators, lifetime examples |
+| `models` | `book.rs`, `genre.rs` | Domain data: `Book` struct, `Genre` enum |
+| `traits` | `searchable.rs` | `Searchable` trait definition + `Book` impl |
+| `services` | `catalog.rs` | Generic `Catalog<T: Searchable>`, `CatalogStats`, `create_default_catalog()` |
+| `extensions` | `results.rs`, `advanced.rs` | Extension patterns: `SearchResult` enum, `BookIterator`, `BookRef`, lifetime fns |
 
 ## Key Abstractions
 
-### `Book` (src/models/book.rs)
-Struct with private fields: `title: String`, `isbn: String`, `genre: Genre`,
-`copies_available: u32`. Public accessors: `title()`, `isbn()`, `genre()`,
-`is_available()`. Constructor: `Book::new(title, isbn, genre)` sets
-`copies_available = 1`.
+### `Book` (models/book.rs)
+Struct with fields: `title: String`, `isbn: String`, `genre: Genre`, `copies_available: u32`.
+Methods: `new()`, `title()`, `isbn()`, `is_available()`, `genre()`.
+Constant `MAX_RESULTS: usize = 10`.
 
-### `Genre` (src/models/genre.rs)
-Enum: `Fiction | NonFiction | Science | History | Biography`.
-Derives `Debug, Clone, PartialEq`. Method `label() -> &str` via match.
+### `Genre` (models/genre.rs)
+Enum with variants: `Fiction`, `NonFiction`, `Science`, `History`, `Biography`.
+`label()` method returns a human-readable `&str` via exhaustive match.
 
-### `Searchable` (src/traits/searchable.rs)
+### `Searchable` (traits/searchable.rs)
 Trait with:
-- Required: `search_text(&self) -> String`
-- Default impl: `relevance(&self) -> f64` returns `0.0`
+- `search_text(&self) -> String` — required
+- `relevance(&self) -> f64` — provided default (returns `1.0`)
+`Book` implements it: `search_text` returns `"<title> (<isbn>)"`.
 
-`Book` implements it: `search_text` returns `"title (isbn)"`,
-`relevance` returns `1.0` if available else `0.5`.
+### `Catalog<T: Searchable>` (services/catalog.rs)
+Generic struct holding `Vec<T>` and a `name: String`.
+Methods: `new(name)`, `add(&mut self, item)`, `search(&self, query) -> Vec<&T>` (substring match via `search_text()`), `stats() -> CatalogStats`.
+Free function `create_default_catalog()` returns `Catalog<Book>` named `"Main Library"`.
 
-### `Catalog<T: Searchable>` (src/services/catalog.rs)
-Generic struct over any `Searchable` type. Methods:
-- `new(name) -> Self`
-- `add(&mut self, item: T)`
-- `search(&self, query: &str) -> Vec<&T>` — filters by `search_text().contains(query)`
-- `stats(&self) -> CatalogStats` — returns `total_items` + `name`
+### `SearchResult` (extensions/results.rs)
+Enum variants: `Found(Book)`, `NotFound`, `Error(String)`.
+`is_match()` method returns true only for `Found`.
 
-Free function `create_default_catalog() -> Catalog<Book>` for convenience.
+### `BookIterator` (extensions/results.rs)
+Struct wrapping `Vec<Book>` with an `index: usize`.
+Implements `Iterator<Item = Book>` — `next()` is a stub (always returns `None`; annotated as a test fixture).
 
-### `SearchResult` (src/extensions/results.rs)
-Rich enum with struct and tuple variants:
-- `Found { book: Book, score: f64 }`
-- `NotFound(String)` — query string
-- `Error { message: String, code: u32 }`
-Method `is_match()` uses `matches!` macro.
+### `BookRef` / lifetime functions (extensions/advanced.rs)
+`BookRef { title: String, available: bool }` — owned snapshot.
+`borrow_title<'a>(book: &'a Book) -> &'a str` — demonstrates explicit lifetime annotation.
+`available_titles(books: &[Book]) -> impl Iterator<Item = &str>` — demonstrates `impl Trait` return.
 
-### Extensions (src/extensions/advanced.rs)
-- `BookRef { title: String, available: bool }` — derives `Debug, Clone, PartialEq`
-- `borrow_title<'a>(book: &'a Book) -> &'a str` — explicit lifetime annotation
-- `available_titles(books: &[Book]) -> impl Iterator<Item = &str>` — `impl Trait` return
-- `pub use crate::models::genre::Genre as BookGenre` — re-export alias
+## Data Flows
 
-### `BookIterator` (src/extensions/results.rs)
-Struct implementing `Iterator<Item = Book>` with manual `next()` and internal
-`index: usize`. (Stub impl for symbol-discovery testing.)
+### Search flow (representative)
+1. Caller builds `Book` via `Book::new(title, isbn, genre)`
+2. Adds to `Catalog<Book>` via `catalog.add(book)`
+3. Calls `catalog.search("rust")` → iterates items, calls `item.search_text()` (delegates to `Book`'s `Searchable` impl), collects refs where substring matches
+4. Returns `Vec<&Book>`
 
-## Data Flow
+### Stats flow (secondary)
+1. Caller calls `catalog.stats()`
+2. `Catalog::stats()` constructs `CatalogStats { total_items: self.items.len(), name: self.name.clone() }`
+3. Returns value type (no heap allocation beyond clone of name)
 
-### Search path
-1. Caller holds `Catalog<Book>`
-2. Calls `catalog.search("query")`
-3. `search` iterates `self.items`, calls `item.search_text()` (dispatches via `Searchable` vtable-free monomorphization)
-4. Filters by `contains(query)`, collects `Vec<&Book>`
+## Design Patterns Demonstrated
+- Generic structs with trait bounds (`Catalog<T: Searchable>`)
+- Trait with provided default method (`Searchable::relevance`)
+- Enum-based result type (`SearchResult`)
+- Custom `Iterator` implementation (`BookIterator`)
+- Explicit lifetime annotations (`borrow_title<'a>`)
+- `impl Trait` return type (`available_titles`)
+- Free factory function (`create_default_catalog`)
 
-### Available-titles path (functional / `impl Trait`)
-1. Caller passes `&[Book]` to `available_titles(books)`
-2. Returns lazy `impl Iterator<Item = &str>` chaining `.filter(is_available).map(title)`
-3. Caller drives the iterator; lifetimes tie `&str` slices to the input slice
-
-## Design Patterns Used
-
-- Trait-bound generics (`Catalog<T: Searchable>`) — monomorphized, zero overhead
-- Default method implementations in traits (`relevance`)
-- `impl Trait` in return position for opaque iterator types
-- Explicit lifetime annotations to express borrowing relationships
-- `matches!` macro for concise enum arm checking
-- Derive macros for `Debug`, `Clone`, `PartialEq`
-- `pub use` re-exports for ergonomic API surface
-
-## Useful semantic_search queries for this project
-
-- `semantic_search("trait implementation for searchable types", project_id="rust-library")`
-- `semantic_search("generic catalog search with trait bound", project_id="rust-library")`
-- `semantic_search("lifetime annotations and borrowing", project_id="rust-library")`
-- `semantic_search("enum variants pattern matching", project_id="rust-library")`
-- `semantic_search("iterator adapter filter map collect", project_id="rust-library")`
+## Useful `semantic_search` Queries
+- `semantic_search("catalog search books query", project_id="rust-library")`
+- `semantic_search("iterator implementation and lifetime references", project_id="rust-library")`
+- `semantic_search("error handling and result types", project_id="rust-library")`
+- `semantic_search("generic type parameters and trait bounds", project_id="rust-library")`
+- `semantic_search("book availability and copies", project_id="rust-library")`

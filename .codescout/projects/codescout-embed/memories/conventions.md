@@ -1,64 +1,50 @@
-# Conventions — codescout-embed
+# codescout-embed — Conventions
 
 ## Language & Style
-- Pure Rust, workspace edition/license/authors inherited via `workspace = true`
-- `async_trait` used for all async trait methods — required by the `Embedder`
-  trait definition; all impls must carry `#[async_trait::async_trait]`
-- Error handling: `anyhow::Result` throughout; `anyhow::bail!` for hard errors,
-  `anyhow::anyhow!` for constructing error values
-- No `thiserror` custom types in this crate — `anyhow` is sufficient at this layer
+- Rust 2021 edition; workspace-level `edition`, `license`, `authors` fields
+- `async-trait` for async trait methods (`#[async_trait::async_trait]`)
+- `anyhow::Result` throughout; `thiserror` available but not currently used in structs
 
-## Naming & Public API
-- `Embedding = Vec<f32>` — the fundamental output type
-- `RawChunk` — pre-embed text chunk with line provenance
-- Factory functions are free functions in `lib.rs`, not constructors:
-  `create_embedder`, `create_embedder_with_config`, `embed_one`,
-  `chunk_size_for_model`
-- Backend constructors live in `impl` blocks: `RemoteEmbedder::openai`,
-  `::ollama`, `::custom`, `::from_url`; `LocalEmbedder::new`
+## Error Handling
+- `anyhow::bail!` for user-facing configuration errors with actionable messages
+- Error messages include concrete alternatives and example config snippets
+- `unwrap()` only in tests or truly infallible paths (e.g. `Client::build`)
+- `spawn_blocking` join errors propagated via `map_err` with context
 
 ## Feature Gates
-- All `local-embed`-gated code uses `#[cfg(feature = "local-embed")]` at item level
-- All `remote-embed`-gated code uses `#[cfg(feature = "remote-embed")]`
-- Feature-independent code (chunker, trait, factory fn skeleton) compiles always
-- The `let _ = &api_key;` suppression pattern used in `create_embedder_with_config`
-  when `remote-embed` is disabled — avoids unused-variable warnings
+- All remote HTTP code under `#[cfg(feature = "remote-embed")]`
+- All fastembed/ONNX code under `#[cfg(feature = "local-embed")]`
+- `lib.rs` guards module `pub mod` declarations with the same cfg attributes
+- Dead-variable suppression via `let _ = &var` under `#[cfg(not(feature = ...))]`
 
-## Line Number Convention
-- All public chunker output uses **1-indexed** line numbers (both `start_line`
-  and `end_line`). Internal loop indices are 0-indexed and converted on output:
-  `start_line: start_line + 1`.
+## Naming
+- Model strings use prefix convention: `local:ModelName`, `ollama:model-name`, `openai:model-name`
+- fastembed model variant names match `fastembed::EmbeddingModel` enum variants exactly (PascalCase)
+- Public chunker functions: `split` (generic), `split_markdown` (returns `RawChunk`), `chunk_markdown` (returns `Vec<String>`)
 
-## Async Patterns
-- CPU-heavy ONNX session creation runs on `tokio::task::spawn_blocking`
-- `Mutex<fastembed::TextEmbedding>` is std (not tokio) — blocked inside
-  `spawn_blocking`; the async `embed` method spawns a new blocking task per call
+## Testing
+- Unit tests in `mod tests` at bottom of each file
+- `#[ignore = "requires running Ollama"]` for integration tests needing external services
+- Chunker tests verify: coverage of all lines, line number accuracy, overlap behavior, content match
+- `local.rs` tests use only `parse_model` (sync, no ONNX needed) — no `#[tokio::test]`
+- Remote tests test constructor logic (sync); actual HTTP tests are `#[ignore]`
+- Smoke test in `lib.rs` verifies crate compiles: `assert_eq!(2 + 2, 4)`
 
-## Security Invariants
-- Never send an API key over plaintext HTTP to a non-loopback host: enforced
-  in both `RemoteEmbedder::custom` and `::from_url`
-- `OPENAI_API_KEY` env var is the fallback for openai: prefix
-- `EMBED_API_KEY` env var is the fallback for custom/from_url paths
-- `OLLAMA_HOST` env var overrides the default `http://localhost:11434`
+## Chunk Size Formula
+- `chunk_size = (max_tokens × 0.85 × 3) as usize`
+- 0.85 factor: 15% headroom for tokenization variance and control tokens
+- 3 chars/token: conservative lower bound for code
+- Unknown models fall back to 512 tokens
+- Not user-configurable — derived from model spec to prevent misconfiguration
 
-## Testing Approach
-- Chunker has an inline `#[cfg(test)] mod tests` with unit tests covering:
-  empty input, single chunk, 1-indexed start, overlap invariants,
-  line continuity across chunks, markdown heading splits
-- Remote embedder tests are in `#[cfg(test)] mod tests` in `remote.rs`:
-  covers URL normalisation, loopback/HTTPS security, query prefix detection
-- Local embedder tests: gated behind `#[cfg(feature = "local-embed")]` and
-  `#[cfg_attr(not(feature = "local-embed"), ignore)]` — only run in CI with
-  the feature enabled
-- `lib.rs` has a trivial `smoke::crate_builds` test (no network/model needed)
-- Tests that require a live server are not present — by design, to keep CI fast
+## HTTP Safety
+- 300-second per-request timeout on embed HTTP client
+- 2-second timeout on `probe_ollama`
+- 32 MiB cap on response bodies
+- API keys forbidden over plaintext HTTP unless loopback host
+- Batch size: 32 texts per request
+- Retry: 3 attempts, exponential backoff starting at 500ms, only on 5xx
 
-## Model String Format Summary
-| Prefix         | Backend              | Notes                              |
-|----------------|----------------------|------------------------------------|
-| `local:`       | LocalEmbedder (ONNX) | e.g. `local:AllMiniLML6V2Q`        |
-| `ollama:`      | RemoteEmbedder       | probes reachability at startup     |
-| `openai:`      | RemoteEmbedder       | requires API key                   |
-| `custom:`      | — (hard error)       | use `url` field in project.toml    |
-| (no prefix)    | local fallback       | tries LocalEmbedder, else error    |
-| url + any      | RemoteEmbedder       | url takes priority over prefix     |
+## Workspace Integration
+- `edition.workspace = true`, `license.workspace = true`, `authors.workspace = true`
+- `anyhow`, `serde`, `serde_json`, `tokio`, `tracing`, `thiserror` from workspace

@@ -1,107 +1,57 @@
-# codescout Workspace — System Prompt
-
-You are working in the `codescout` Rust workspace at `/home/marius/work/claude/code-explorer`.
-
-## Projects
-
-| ID | Root | Purpose |
-|----|------|---------| 
-| `code-explorer` | `.` | Main codescout MCP server (27 tools, Rust) |
-| `codescout-embed` | `crates/codescout-embed/` | Shared embedding abstraction crate |
-| `librarian-mcp` | `crates/librarian-mcp/` | Standalone artifact registry MCP server |
-| `rust-library` | `tests/fixtures/rust-library/` | Rust LSP/symbol test fixture |
-| `python-library` | `tests/fixtures/python-library/` | Python LSP/symbol test fixture |
-| `typescript-library` | `tests/fixtures/typescript-library/` | TypeScript LSP/symbol test fixture |
-| `java-library` | `tests/fixtures/java-library/` | Java LSP/symbol test fixture |
-| `kotlin-library` | `tests/fixtures/kotlin-library/` | Kotlin LSP/symbol test fixture |
+# codescout — Code Explorer Guidance
 
 ## Entry Points
-
-### code-explorer
-- `src/server.rs::CodeScoutServer::from_parts` — all 27 tools registered here
-- `src/tools/mod.rs:543` — `Tool` trait definition
+- `src/server.rs::CodeScoutServer::from_parts` — all tools registered here; start for tool inventory
+- `src/tools/mod.rs` — `Tool` trait definition; read before adding or modifying any tool
 - `src/agent.rs::Agent::new` — project activation and state wiring
-
-### codescout-embed
-- `src/lib.rs` — public API: `create_embedder`, `create_embedder_with_config`, `chunk_size_for_model`
-- `src/embedder.rs` — `Embedder` trait
-- `src/chunker.rs` — `split`, `split_markdown`, `chunk_markdown`
-
-### librarian-mcp
-- `src/lib.rs` — `run_stdio_server()`, entry point
-- `src/server.rs` — `LibrarianServer`: rmcp ServerHandler
-- `src/tools/mod.rs` — `Tool` trait + `all_tools()`
-- `src/catalog/mod.rs` — `Catalog` (rusqlite wrapper)
-- `src/indexer.rs` — `index_repo_sync()` / `index_repo()`
+- `crates/codescout-embed/src/lib.rs` — embedding factory + chunk size formula
+- `crates/librarian-mcp/src/tools/mod.rs` — librarian ToolContext + all 15 tools
 
 ## Key Abstractions
-
-### code-explorer
-- `Tool` trait — `name/description/input_schema/call/call_content/format_compact/availability`
-- `OutputGuard` — progressive disclosure: Exploring (cap 200) vs Focused (paginated)
-- `RecoverableError` — expected failures → `isError:false`; `anyhow::bail!` → `isError:true`
-- `Agent` / `ActiveProject` — project state; tools access via `ctx.agent.with_project()`
-- `WriteGuard` — async mutex + fs4 cross-process lock; acquired for all mutating calls
-- `LspProvider` / `LspClientOps` — trait abstraction; `MockLspClient` for tests
-
-### codescout-embed
-- `Embedder` trait — `dimensions()`, `embed(texts)`, `embed_query(text)`
-- `LocalEmbedder` — fastembed ONNX; constructor runs on `spawn_blocking`
-- `RemoteEmbedder` — OpenAI-compat HTTP; 32-text batches, 3 retries, exp backoff
-- `create_embedder_with_config(model, url, api_key)` — resolution order: url > local: > ollama: > openai:
-
-### librarian-mcp
-- `Tool` trait — simpler: `name/description/input_schema/call` only
-- `ToolContext` — `catalog`, `workspace`, `rules`, `embedding` (optional)
-- `FilterNode` — recursive JSON filter AST → SQL via `compile()`
-- `ArtifactRow` — canonical catalog row; `id` = sha256(repo+"\\n"+rel_path)[:16]
-- `EmbeddingService` — thin wrapper over codescout-embed `Embedder`
+- `Tool` trait (`src/tools/mod.rs`) — name/description/schema/call/call_content/format_compact
+- `OutputGuard` (`src/tools/output.rs`) — progressive disclosure; every tool with variable output uses it
+- `RecoverableError` (`src/tools/mod.rs`) — recoverable vs fatal error routing
+- `LspProvider` / `LspClientOps` (`src/lsp/ops.rs`) — LSP abstraction; `MockLspClient` for tests
+- `Agent` / `ActiveProject` (`src/agent.rs`) — project state; all tools access via `ctx.agent.with_project()`
+- `Embedder` trait (`crates/codescout-embed/src/embedder.rs`) — local ONNX or remote HTTP backend
 
 ## Search Tips
-
-### code-explorer
-```
-semantic_search("OutputGuard cap_items overflow hint", project="code-explorer")
-semantic_search("RecoverableError recoverable isError guidance", project="code-explorer")
-semantic_search("LSP client document symbols workspace symbols", project="code-explorer")
-semantic_search("incremental embedding index build changed files", project="code-explorer")
-semantic_search("write guard cross-process file lock mutex", project="code-explorer")
-```
-
-### codescout-embed
-```
-semantic_search("chunk overlap line tracking", project_id="codescout-embed")
-semantic_search("remote embedder retry backoff batch size", project_id="codescout-embed")
-semantic_search("model prefix resolution factory embedder", project_id="codescout-embed")
-```
-
-### librarian-mcp
-```
-semantic_search("artifact catalog sqlite indexer walk frontmatter", project_id="librarian-mcp")
-semantic_search("filter AST compile SQL fragment leaf op", project_id="librarian-mcp")
-semantic_search("KNN semantic search embedding vec0 backfill", project_id="librarian-mcp")
-```
+- Good queries: "OutputGuard cap_items", "route_tool_error", "RecoverableError", "strip_project_root"
+- codescout-embed: "Embedder trait backend", "chunk_size_for_model", "RemoteEmbedder batching"
+- librarian-mcp: "FilterNode compile SQL", "TimeMachine state_at", "index_repo_sync pipeline"
+- Avoid: "tool", "error", "file" (too broad)
+- For a specific tool: `symbols("src/tools/<category>.rs")` + `symbols(name=..., include_body=true)`
+- For LSP flow: `semantic_search("get_or_start", project_id="code-explorer")`
 
 ## Navigation Strategy
-
-1. **New task on a specific tool** → `list_symbols("src/tools/<file>.rs")` then
-   `find_symbol("<ToolName>", include_body=true)`
-2. **Cross-cutting change** → `search_pattern` across `src/` + check all 3 prompt surfaces
-3. **Bug in symbol editing** → `read_markdown("docs/TODO-tool-misbehaviors.md")` first
-4. **LSP behavior question** → `list_symbols("src/lsp/client.rs")` then targeted `find_symbol`
-5. **Embedding/indexing question** → activate `codescout-embed` project, then `find_symbol`
-6. **Artifact registry question** → activate `librarian-mcp`, `list_symbols("src/tools/")`
-7. **Unknown concept** → `semantic_search` in the most likely project first, then broaden
+1. New task on a tool → `symbols("src/tools/<file>.rs")` + read body ranges
+2. Cross-cutting change → `semantic_search` across src/ + check all 3 prompt surfaces
+3. Bug in symbol editing → read `docs/TODO-tool-misbehaviors.md` first
+4. LSP behavior question → `symbols("src/lsp/client.rs")` then targeted reads
+5. Embedding question → `symbols("crates/codescout-embed/src/")` first
+6. Librarian question → `symbols("crates/librarian-mcp/src/")` first
+7. Fixture inspection → `symbols("tests/fixtures/<lang>-library/src/")` — read-only targets
 
 ## Project Rules
+- `cargo fmt && cargo clippy -- -D warnings && cargo test` before every completion
+- Write tools return `json!("ok")` only — never echo content back
+- `RecoverableError` for expected failures, `anyhow::bail!` for genuine bugs
+- Read `docs/PROGRESSIVE_DISCOVERABILITY.md` before adding any tool with variable-length output
+- When renaming tools: update all 3 prompt surfaces (see `CLAUDE.md § Prompt Surface Consistency`)
+- GitHub tools shell to `gh` CLI — not HTTP; `sqlite-vec` is fully active (vec0 virtual tables with KNN search)
+- Subagents MUST restore home project after activating a different workspace project
 
-- **Always run** `cargo fmt && cargo clippy -- -D warnings && cargo test` before completing any task
-- **Release binary for MCP**: `cargo build --release` then `/mcp` restart — dev builds ignored
-- **Write tools return `json!("ok")`** — never echo content back
-- **Three prompt surfaces** in code-explorer must stay consistent: `server_instructions.md`,
-  `onboarding_prompt.md`, `builders.rs`; bump `ONBOARDING_VERSION` on tool-name/param changes
-- **New tool checklist**: 6 locations (struct, server.rs, test, check_tool_access, disabled test, server_instructions.md)
-- **No parallel writes** — serialize all write tool calls (BUG-021)
-- **Activate home project with write access** at session start: `activate_project(".", read_only: false)`
-- **Always restore home project** after switching to another project
-- **Master is protected** — cherry-pick from experiments only; never force-push master
+## Workspace Projects
+| Project | Root | Languages | Role |
+|---------|------|-----------|------|
+| code-explorer | . | rust | Main MCP server |
+| codescout-embed | crates/codescout-embed | rust | Embedding library |
+| librarian-mcp | crates/librarian-mcp | rust | Markdown doc indexer |
+| java-library | tests/fixtures/java-library | kotlin, java | Test fixture |
+| kotlin-library | tests/fixtures/kotlin-library | kotlin, java | Test fixture |
+| python-library | tests/fixtures/python-library | python | Test fixture |
+| rust-library | tests/fixtures/rust-library | rust | Test fixture |
+| typescript-library | tests/fixtures/typescript-library | typescript, javascript | Test fixture |
+
+GitHub: @mareurs | repo: mareurs/codescout
+→ For issues/PRs/repo ops, use codescout github tools with owner="mareurs" repo="codescout".

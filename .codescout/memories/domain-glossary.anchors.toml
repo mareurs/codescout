@@ -11,27 +11,23 @@ hash = "3780a914063ee4973c233c17fd9299424725ea08cd775e0e4d2415e4d414a88a"
 
 [[anchors]]
 path = "docs/PROGRESSIVE_DISCOVERABILITY.md"
-hash = "3b9c3e076173632d958cf21410f2afa3fffca73c4d098bc110845ad86df317b3"
+hash = "dd5fd6f8fdbb6662d9eb0f6510e4b3e706df309723350e93abad061a2d6b54d6"
 
 [[anchors]]
 path = "src/tools/mod.rs"
-hash = "45d346d7236cf306500a9451d4c88ed95dc147dfaba66434c3a99e5b12282699"
+hash = "c2cc571f5922441fe1c1e9fbcbc0926e219e9debd2cbed5ed00c034f316300ab"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "2afe8c59252ad158c8782b579ad2de170cee91166bc70c0b6e6c61de80c44bf0"
+hash = "e6c22cf1254f9eeab6edac384dc89985cfd2f46b20a134ea5e7d54d52b229277"
 
 [[anchors]]
 path = "src/tools/output_buffer.rs"
-hash = "a324041fc3de894c344b06a89b88f158e3aa4cf315e00d2ea2535d12ffb0e890"
+hash = "521194730f585c90fc9c36c96504ac3f5ee6195a3538d9d7f393dec9d4080236"
 
 [[anchors]]
 path = "src/lsp/ops.rs"
-hash = "27e1357fa649731548d5688e71741b91b8c5747cf56d80323f326d2f0a3833c0"
-
-[[anchors]]
-path = "src/tools/github.rs"
-hash = "39879f5cccfaa0c7236dc255e61fe44565e9ff8ec9c53b9839e4ff6d1c624581"
+hash = "1a89cfda5c177d26f0b354dff3d56896cc12948686acdaa790575b8891d7922f"
 
 [[anchors]]
 path = "src/tools/section_coverage.rs"
@@ -43,7 +39,7 @@ hash = "ae41e8f7e849d4bad2d0e635d350673313ff7d71301ce85ab319939d6ef715e1"
 
 [[anchors]]
 path = "Cargo.toml"
-hash = "d4f64490c3772ed10af6fa878058eb7d3ab22e562f3f179815e1b7fd1448e545"
+hash = "c92567de78888ddf9dc3e3f5e583d92d2bce1a4f7980225be0013dbb5226afd4"
 
 [[anchors]]
 path = "src/memory/classify.rs"
@@ -55,7 +51,7 @@ hash = "a482f238a9c54a16fb21274728d66a09d96ff5230bd7b890722b582b406d7d32"
 
 [[anchors]]
 path = ".codescout/project.toml"
-hash = "f18c4e4edc7eb3f58475f12b7f6654a888c2061f10843c238e276258126aca31"
+hash = "d1093e6b2d7d7598663034ee8d5e59378fd5d60e92ebe7def7b5cf93ee5ee382"
 
 [[anchors]]
 path = "src/library/scope.rs"
@@ -67,7 +63,7 @@ hash = "72cb96da5382cf70741ed8a61914e9eed3691497ffb101f2a9b85d91d5eefb86"
 
 [[anchors]]
 path = "src/server.rs"
-hash = "77f61edcf6cf14fc31b35626bdac5accea90b1ed67fdb64af45bb94c6622d4f6"
+hash = "65f7410ca589b2fbfb063e8aa12355cc1fb3f9ce318868283c8bb72776397c4a"
 
 [[anchors]]
 path = "src/memory/anchors.rs"

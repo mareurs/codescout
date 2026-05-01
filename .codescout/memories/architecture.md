@@ -1,56 +1,45 @@
-# Workspace Architecture
+# Workspace Architecture — codescout
 
 ## Project Map
 
-- **code-explorer** (`src/`) — Main `codescout` MCP server binary. 27 registered tools covering
-  file ops, LSP symbol navigation, semantic search, project memory, shell execution, and git.
-  Primary consumer of codescout-embed and librarian-mcp.
-
-- **codescout-embed** (`crates/codescout-embed/`) — Shared embedding primitives crate. Backend-
-  agnostic `Embedder` trait with LocalEmbedder (fastembed/ONNX) and RemoteEmbedder (OpenAI-compat
-  HTTP). Used by both code-explorer and librarian-mcp.
-
-- **librarian-mcp** (`crates/librarian-mcp/`) — Standalone MCP server for workspace artifact
-  registry. Indexes markdown across git repos, classifies via frontmatter/glob rules, exposes
-  11 MCP tools for discovery, traversal, and context packing. Uses codescout-embed for semantic
-  search over indexed documents.
-
-- **rust-library** (`tests/fixtures/rust-library/`) — Rust test fixture for codescout's LSP and
-  symbol navigation tests. Book catalog domain; exercises structs, enums, traits, generics,
-  lifetimes, and re-exports.
-
-- **python-library** (`tests/fixtures/python-library/`) — Python test fixture. Exercises
-  dataclasses, enums, ABCs, Protocols, generics, mixins, type aliases.
-
-- **typescript-library** (`tests/fixtures/typescript-library/`) — TypeScript test fixture. Exercises
-  decorators, generics, overloads, mapped/conditional types, namespace merging.
-
-- **java-library** (`tests/fixtures/java-library/`) — Java 21 test fixture. Exercises records,
-  sealed interfaces, generics, annotations.
-
-- **kotlin-library** (`tests/fixtures/kotlin-library/`) — Kotlin test fixture. Exercises data
-  classes, sealed classes, inline/value classes, suspend extensions, scope functions.
+| Project | Root | Purpose |
+|---------|------|---------|
+| `code-explorer` | `.` | Main codescout MCP server — IDE-grade code intelligence over stdio/HTTP |
+| `codescout-embed` | `crates/codescout-embed/` | Shared embedding library (local ONNX + remote HTTP backends) |
+| `librarian-mcp` | `crates/librarian-mcp/` | Standalone MCP server for indexing markdown docs across git repos |
+| `java-library` | `tests/fixtures/java-library/` | Java 21 fixture: records, sealed interfaces, generics, annotations |
+| `kotlin-library` | `tests/fixtures/kotlin-library/` | Kotlin fixture: sealed classes, coroutines, delegates, value classes |
+| `python-library` | `tests/fixtures/python-library/` | Python fixture: dataclasses, ABC, Protocol, generics |
+| `rust-library` | `tests/fixtures/rust-library/` | Rust fixture: traits, generics, lifetimes, custom iterators |
+| `typescript-library` | `tests/fixtures/typescript-library/` | TypeScript fixture: discriminated unions, decorators, mapped types |
 
 ## Cross-Project Dependencies
 
 ```
-code-explorer  ──depends on──►  codescout-embed  (embedding backends)
-librarian-mcp  ──depends on──►  codescout-embed  (embedding backends)
-code-explorer  ──ships with──►  librarian-mcp    (companion binary in workspace)
-code-explorer  ──tests against─►  rust/python/typescript/java/kotlin fixture libraries
-```
+code-explorer
+  └── codescout-embed   (crates/codescout-embed, path dep)
+  └── librarian-mcp     (no code dep; sibling MCP server, shared config)
 
-All fixture libraries have zero external dependencies (stdlib only) and no test suites of
-their own — they are exercised exclusively by code-explorer's Rust integration tests.
+codescout-embed
+  └── (no internal deps)
+
+librarian-mcp
+  └── codescout-embed   (crates/codescout-embed, path dep for embeddings)
+
+fixtures (java/kotlin/python/rust/typescript)
+  └── (no deps; static targets for codescout tests)
+```
 
 ## Shared Infrastructure
 
-- **SQLite storage**: code-explorer and librarian-mcp both use rusqlite (bundled) + sqlite-vec
-  (vec0 virtual tables) for persistent state and KNN vector search.
-- **MCP protocol**: all three active Rust projects use rmcp (same workspace dependency version).
-- **Async runtime**: tokio throughout all Rust crates.
-- **Vector dimensionality**: float[768] in librarian-mcp; code-explorer matches the chosen
-  embedding model's dimensions (model-dependent).
-- **Cargo workspace**: single `Cargo.toml` at repo root governs all crates; shared dependency
-  versions for rmcp, tokio, rusqlite, serde, anyhow, etc.
-- **CI**: `cargo fmt && cargo clippy -- -D warnings && cargo test` required before every commit.
+- **CI:** `.github/workflows/ci.yml` — runs `cargo test`, `cargo clippy`, `cargo fmt --check` on push/PR
+- **Workspace Cargo.toml:** single `[workspace]` at root; all Rust crates share dep versions
+- **Embedding model cache:** `~/.cache/huggingface/hub/` shared across code-explorer + librarian-mcp
+- **Test fixtures:** `tests/fixtures/` — all 5 language fixtures are read-only navigation targets; codescout's integration tests reference them directly
+- **Shared config dir:** `.codescout/` — workspace.toml, memories/, embeddings/ live here
+
+## Key Shared Abstractions
+
+- `Embedder` trait (codescout-embed) — consumed by both code-explorer and librarian-mcp
+- `Catalog<T: Searchable>` pattern — mirrored in all 5 fixture languages (intentional parallel design)
+- `Searchable` interface/trait — same concept in all 5 fixture languages for codescout test coverage

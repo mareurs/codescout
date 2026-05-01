@@ -1,116 +1,105 @@
 # librarian-mcp — Architecture
 
-## Module Structure
+## Module Map
 
 ```
 src/
-  lib.rs             — run_stdio_server(), import_codescout(), reindex_cli(); wires workspace,
-                       catalog, embedding service, and ToolContext; entry point for all modes
-  main.rs            — clap CLI: no args=stdio server; reindex subcommand; import-codescout subcommand
-  server.rs          — LibrarianServer: rmcp ServerHandler, dispatches to Tool trait via all_tools()
-  tools/
-    mod.rs           — Tool trait (name/description/input_schema/call), ToolContext, all_tools()
-    find.rs          — ArtifactFind: filter AST + optional semantic KNN search
-    get.rs           — ArtifactGet: single artifact + links + observations + kind-specific preview
-    list_by_kind.rs  — ArtifactListByKind: paginated list for one kind
-    links.rs         — ArtifactLinks: outgoing + incoming edges for one artifact
-    graph.rs         — ArtifactGraph: BFS expansion up to depth 1-3 with rel filter
-    create.rs        — ArtifactCreate: write frontmatter+body to disk, upsert catalog row
-    update.rs        — ArtifactUpdate: patch frontmatter fields and/or body in-place
-    link.rs          — ArtifactLink: insert directed relation edge (src, dst, rel)
-    observe.rs       — ArtifactObserve: append observation note to an artifact
-    reindex.rs       — LibrarianReindex: walk repos, classify, upsert; optional force wipe
-    context.rs       — LibrarianContext: topic/anchor-driven markdown context packer
+  lib.rs              — entry: build_tool_context(), import_codescout(), reindex_cli()
+  server.rs           — LibrarianServer (rmcp ServerHandler); tool dispatch via map_tool_result()
+  workspace.rs        — WorkspaceConfig (roots, ignore globs, rules, umbrellas); load/compile
+  current_project.rs  — CurrentProject (root, subdir, path, umbrella); resolve() from cwd
+  classify.rs         — Rule/CompiledRule/Classification; first-match-wins glob classifier
+  indexer.rs          — index_repo_sync() + index_repo(); walk→classify→upsert→embed pipeline
+  embedding.rs        — EmbeddingService wrapping codescout_embed::Embedder
+  frontmatter.rs      — YAML frontmatter parser (serde_yml); returns (Option<Frontmatter>, body)
+  filter.rs           — FilterNode (And/Or/Not/Leaf) + LeafOp; compiles to SqlFragment
+  freshness.rs        — Freshness enum (Fresh/Unknown/Stale/Superseded); compute() from inputs
+  ids.rs              — artifact_id(repo, rel_path) → deterministic string ID
+  util.rs             — normalize_rel_path()
   catalog/
-    mod.rs           — Catalog struct (rusqlite::Connection), open()/open_in_memory(), schema init
-    schema.sql       — Tables: artifact, artifact_link, artifact_observation; vec0: artifact_vec;
-                       cascade-delete trigger; indexes on kind/status, repo, link dst
-    artifact.rs      — upsert(), get(), delete(), delete_orphan_repos(), row_from_sql()
-    find.rs          — find() (SQL filter) + find_semantic() (KNN with iterative K backfill)
-    links.rs         — insert(), outgoing(), incoming() for artifact_link
-    observations.rs  — insert(), list_for_artifact() for artifact_observation
-  indexer.rs         — index_repo_sync() (sync walk+upsert), index_repo() (async with embeddings),
-                       write_embeddings(), first_h1(), EmbedQueueItem, IndexReport
-  classify.rs        — Rule / CompiledRule (globset), load_rules(), classify() (first-match-wins)
-  filter.rs          — FilterNode enum (And/Or/Not/Leaf), compile() → SqlFragment with param shifting
-  frontmatter.rs     — Frontmatter struct, parse(), write(), update_in_place()
-  ids.rs             — artifact_id(): sha256(repo+"\n"+rel_path) hex[:16]
-  embedding.rs       — EmbeddingService: thin wrapper over codescout_embed::Embedder
-  workspace.rs       — WorkspaceConfig (roots+ignore+rules), load(), compile_ignore()
-  util.rs            — sha_of_bytes(), normalize_rel_path() (backslash→slash on Windows)
+    mod.rs            — Catalog { conn: Connection }; open/open_in_memory; schema bootstrap
+    schema.sql        — v1 tables (artifact, artifact_link, artifact_vec, artifact_observation)
+                        + v2 TimeMachine (events, commits, sources, event_edges)
+    artifact.rs       — upsert/get/delete/delete_orphan_repos; ArtifactRow
+    events.rs         — EventRow; insert/latest_for_artifact/timeline_for_artifact/open_intents/orphan_verdicts
+    links.rs          — LinkRow; insert/outgoing/incoming
+    find.rs           — FindOpts; find() (SQL) + find_semantic() (sqlite-vec KNN + post-filter)
+    observations.rs   — artifact_observation rows
+    commits.rs        — git commit metadata for TimeMachine cutoff resolution
+    sources.rs        — external source ingestion records
+    event_edges.rs    — causal edges between events
+  tools/
+    mod.rs            — Tool trait (name/description/input_schema/call); ToolContext; all_tools()
+    find.rs           — ArtifactFind — filter+semantic search with scope, archived-hide, hints
+    get.rs            — ArtifactGet — fetch one artifact + links + observations + freshness
+    create.rs         — ArtifactCreate — write file + frontmatter + catalog upsert
+    update.rs         — ArtifactUpdate — patch frontmatter fields or body + re-index
+    link.rs           — ArtifactLink — insert artifact_link; auto-supersede on rel="supersedes"
+    observe.rs        — ArtifactObserve — append observation + dual-write note event
+    event_create.rs   — ArtifactEventCreate — manually log TimeMachine events
+    timeline.rs       — ArtifactTimeline — event log for one artifact
+    state_at.rs       — ArtifactStateAt — replay artifact state at commit/timestamp
+    workspace_state_at.rs — WorkspaceStateAt — snapshot across all artifacts at a point in time
+    list_by_kind.rs   — ArtifactListByKind — scoped listing with count hints
+    links.rs          — ArtifactLinks — outgoing/incoming graph edges
+    graph.rs          — ArtifactGraph — BFS neighborhood (depth 1–3)
+    context.rs        — LibrarianContext — topic/anchor → token-capped markdown context bundle
+    reindex.rs        — LibrarianReindex — on-demand scan; scope mirrors read-tool semantics
+    scope.rs          — Scope enum + ScopeApplied; apply_scope() builds repo+rel_path filters
   preview/
-    mod.rs           — extract(kind, row, body, ctx) dispatch
-    plan.rs          — checklist extraction (open/done tasks, progress %)
-    spec.rs          — sections/headings extraction
-    memory.rs        — related artifact lookup via catalog
-    default.rs       — fallback: first N lines + heading map
-    headings.rs      — heading map extraction helper
-    summary.rs       — summary extraction helper
+    mod.rs            — extract(kind, row, body, ctx) — routes to kind-specific renderer
+    spec.rs / plan.rs / memory.rs / default.rs / headings.rs / summary.rs
   prompts/
-    server_instructions.md — injected server instructions (iron laws, tool routing, filter AST)
+    server_instructions.md  — injected as MCP server info
+    companion_hint.md       — companion plugin hint
 ```
 
 ## Key Abstractions
 
-1. **`Tool` trait** (`src/tools/mod.rs`) — `name() / description() / input_schema() / call()`.
-   Simpler than codescout's Tool; no `call_content()` or OutputGuard. All errors propagated as
-   `anyhow::Error`; `LibrarianServer::call_tool()` formats them as `CallToolResult::error`.
+- **`Tool` trait** — `name()`, `description()`, `input_schema()`, `call(&ToolContext, Value) → Result<Value>`
+- **`ToolContext`** — shared state: `Arc<Mutex<Catalog>>`, `Arc<WorkspaceConfig>`, `Arc<Vec<CompiledRule>>`, `Option<Arc<EmbeddingService>>`, `Option<Arc<CurrentProject>>`
+- **`Catalog`** — wraps a single `rusqlite::Connection`; all catalog modules receive `&Catalog`
+- **`FilterNode`** — recursive JSON filter tree; `filter::compile()` → `SqlFragment { sql, params }` for injection-safe parameterized queries
+- **`Freshness`** — computed from latest event kind, last-reviewed timestamp, file mtime, topo distance from HEAD, and a configurable horizon
+- **`RecoverableError`** — wraps expected failures; `map_tool_result()` maps these to `isError: false` (non-fatal); `anyhow::bail!` maps to `isError: true`
 
-2. **`ToolContext`** — `catalog: Arc<Mutex<Catalog>>`, `workspace: Arc<WorkspaceConfig>`,
-   `rules: Arc<Vec<CompiledRule>>`, `embedding: Option<Arc<EmbeddingService>>`. Lock is
-   `parking_lot::Mutex`; tools lock+unlock immediately; async embedding done outside the lock.
+## Data Flow: Indexing
 
-3. **`Catalog`** — wrapper around `rusqlite::Connection`. Single writer (no connection pool).
-   Initialized once at startup with `PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL`.
-   sqlite-vec registered as a global auto-extension (Once-guarded).
+1. `build_tool_context()` loads workspace config + layered classifier rules
+   (project-local → workspace → built-in defaults)
+2. `index_repo_sync()` walks `.md` files under a root (optionally narrowed to a
+   subdir), computes SHA-256, parses frontmatter, classifies via first-match glob,
+   compares to existing row — skips if content + meta unchanged
+3. Changed/new rows upserted to `artifact`; deleted files removed; embed queue
+   populated (content changes only, not re-classification)
+4. `index_repo()` async wrapper drains embed queue concurrently
+   (`EMBED_CONCURRENCY=4`) via `codescout_embed`, writes vectors to `artifact_vec`
 
-4. **`FilterNode`** — recursive JSON AST (And/Or/Not/Leaf). `compile()` produces `SqlFragment`
-   (sql string + rusqlite params). Leaf ops: eq/ne/in/nin/gt/lt/gte/lte/contains. Array columns
-   (tags, owners) use `json_each()` for `contains`. Field allowlist prevents SQL injection.
+## Data Flow: Query (artifact_find)
 
-5. **`ArtifactRow`** — the canonical catalog row type. `owners`/`tags` stored as JSON arrays
-   in TEXT columns and deserialized in `row_from_sql`. `id` is 16-char hex SHA-256 of (repo, rel_path).
+1. `ArtifactFind::call()` deserializes `Args` (filter, limit, offset, semantic, scope, include_archived)
+2. `scope::apply_scope()` wraps the user filter with repo/rel_path clauses based on `CurrentProject`
+3. `combine_user_with_archived_hide()` injects `status NOT IN [archived, superseded]` unless the user filter already constrains status
+4. If `semantic` text provided: embed query → `find_semantic()` (KNN in `artifact_vec`, post-filter by metadata), else `find()` (SQL WHERE)
+5. Response includes `rows`, `count`, `hints` (more_in_repo, more_in_umbrella, more_in_workspace, hidden_archived, expand suggestions)
 
-6. **Preview system** — `artifact_get` dispatches to kind-specific extractors in `preview/`.
-   `plan` → task checklist, `spec` → sections, `memory` → related artifacts, default → heading map.
+## Data Flow: TimeMachine (artifact_state_at)
 
-## Data Flow: Indexing (reindex tool or CLI)
+1. `resolve_cutoff_ts()` converts commit SHA → authored_at from `commits` table, or uses raw timestamp
+2. `replay_state_at()` fetches all events for the artifact up to `cutoff_ts`, walks them to reconstruct `status`, `frontmatter patches`, `supersession_chain`
+3. Returns `ReplayedState { status, frontmatter, freshness_at_as_of, latest_event_summary, supersession_chain }`
 
-1. `LibrarianReindex::call()` or `reindex_cli()` → iterate workspace roots
-2. **Phase 1 (sync, lock held)**: `index_repo_sync()` — walk `.md` files, parse frontmatter,
-   apply classification rules (first-match-wins), compare mtime+sha256 to existing row,
-   upsert changed rows, collect `EmbedQueueItem`s for new/changed artifacts
-3. Lock dropped between phases
-4. **Phase 2 (async, no lock)**: if embedding service present, embed each artifact title+body
-5. **Phase 3 (sync, lock held)**: `write_embeddings()` → bulk upsert into `artifact_vec` (vec0)
+## Scope System
 
-## Data Flow: Semantic Search (`artifact_find` with `semantic` param)
-
-1. Tool embeds query text via `EmbeddingService::embed_artifact()`
-2. `find_semantic()` → KNN query on `artifact_vec` MATCH vec_f32(?): top-K candidates
-3. Fetch full ArtifactRows for candidate IDs; apply filter AST as post-filter
-4. If too few results and K < 2000: double K and retry (iterative backfill)
-5. Results returned in KNN distance order (closest first)
-
-## Data Flow: Read (artifact_find / artifact_get)
-
-1. MCP client → `LibrarianServer::call_tool()` → find matching `Arc<dyn Tool>` by name
-2. Deserialize `args: Value` → tool-specific `Args` struct via `serde_json::from_value()`
-3. Lock catalog mutex → run SQL query → unlock → return JSON Value
-4. Server wraps result as `CallToolResult::success(vec![Content::text(...)])`
-
-## Database Schema Summary
-
-- `artifact`: id (16-hex), repo, rel_path, kind, status, title, owners (JSON), tags (JSON),
-  topic, time_scope, source, created_at/updated_at (ms epoch), file_mtime, file_sha256, confidence
-- `artifact_link`: (src_id, dst_id, rel) PK with CASCADE DELETE; rel is free-form string
-- `artifact_observation`: append-only notes on artifacts, CASCADE DELETE
-- `artifact_vec`: sqlite-vec virtual table, float[768] embeddings, cascade via trigger
+- `Scope` enum: `Project | Repo | Umbrella | All`
+- `apply_scope()` builds a `FilterNode` narrowing by `repo` eq + `rel_path` prefix
+- Default = `Project`; falls back to `All` when cwd is outside every configured root (`scope_fallback` in hints)
+- Umbrella scope joins all member subdirs under one umbrella declared in `workspace.toml`
 
 ## Good semantic_search Queries
 
-- `semantic_search("artifact catalog sqlite indexer walk frontmatter", project_id="librarian-mcp")`
-- `semantic_search("filter AST compile SQL fragment leaf op", project_id="librarian-mcp")`
-- `semantic_search("KNN semantic search embedding vec0 backfill", project_id="librarian-mcp")`
-- `semantic_search("frontmatter parse YAML kind status title", project_id="librarian-mcp")`
-- `semantic_search("preview kind plan spec memory extract", project_id="librarian-mcp")`
+- `semantic_search("artifact upsert freshness indexer pipeline", project="librarian-mcp")`
+- `semantic_search("timemachine event log replay state commit", project="librarian-mcp")`
+- `semantic_search("filter AST SQL compilation injection safe", project="librarian-mcp")`
+- `semantic_search("scope workspace project umbrella cwd resolution", project="librarian-mcp")`
+- `semantic_search("context pack token budget topic anchor", project="librarian-mcp")`
