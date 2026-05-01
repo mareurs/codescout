@@ -451,7 +451,7 @@ pub(crate) fn build_system_prompt_draft(
         draft.push_str(
             "\nUse `scope=\"lib:<name>\"` with `symbols`, `grep`, \
              and `semantic_search` to navigate library code. \
-             Run `index_project(scope=\"lib:<name>\")` to enable semantic search for a library.\n",
+             Run `index(action=\"build\", scope=\"lib:<name>\")` to enable semantic search for a library.\n",
         );
     }
 

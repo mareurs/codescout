@@ -99,12 +99,12 @@ covers only cross-tool routing and non-obvious behaviors.
 ### Library Routing
 
 Pass `scope="lib:<name>"` on `symbols`, `references`,
-`semantic_search`, or `index_project` to target a registered library.
+`semantic_search`, or `index(action='build')` to target a registered library.
 Libraries are auto-discovered when `symbol_at` resolves outside
 the project root. All read-only tools work on libraries; write tools are project-only.
 
 **Lifecycle:** `library(action="register", path)` adds a library to the registry
-(one-time, per project). Then `index_project(scope="lib:<name>")` builds the
+(one-time, per project). Then `index(action='build', scope="lib:<name>")` builds the
 symbol+embedding index. `library(action="list")` enumerates registered libraries.
 You rarely need `library(action="register")` manually — symbol_at registers
 external dependencies on the fly.

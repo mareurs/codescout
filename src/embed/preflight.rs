@@ -1,4 +1,4 @@
-//! Preflight check for `index_project`: scope guard against pathologically broad
+//! Preflight check for `index(action='build')`: scope guard against pathologically broad
 //! roots (home dir, system paths) and oversized source trees. Triggers an MCP
 //! elicitation in the caller when confirmation is required.
 

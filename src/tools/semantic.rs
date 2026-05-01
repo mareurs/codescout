@@ -37,6 +37,7 @@ fn apply_file_diversity_cap(
 pub struct SemanticSearch;
 pub struct IndexProject;
 pub struct IndexStatus;
+pub struct Index;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 struct IndexConfirm {
@@ -65,8 +66,8 @@ impl Tool for SemanticSearch {
              \n\
              ## Prerequisites\n\
              \n\
-             The project index must be built: run `index_project()` first.\n\
-             Check status with `index_status()`.\n\
+             The project index must be built: run `index(action='build')` first.\n\
+             Check status with `index(action='status')`.\n\
              \n\
              ## Key parameters\n\
              \n\
@@ -144,7 +145,7 @@ impl Tool for SemanticSearch {
                             lib_name
                         ),
                         format!(
-                            "Download sources, then index_project(scope='lib:{}') before searching.",
+                            "Download sources, then index(action='build', scope='lib:{}') before searching.",
                             lib_name
                         ),
                     )
@@ -178,7 +179,7 @@ impl Tool for SemanticSearch {
                 crate::embed::index::check_model_mismatch(&conn, &model2).map_err(|e| {
                     super::RecoverableError::with_hint(
                         e.to_string(),
-                        "Run index_project(force: true) to rebuild the index with the current model.",
+                        "Run index(action='build', force=true) to rebuild the index with the current model.",
                     )
                 })?;
             }
@@ -283,7 +284,7 @@ impl Tool for SemanticSearch {
                 result["git_sync"] = json!({
                     "status": "behind",
                     "behind_commits": staleness.behind_commits,
-                    "note": "Recent commits not yet indexed — run index_project to include new code. Existing results are unaffected."
+                    "note": "Recent commits not yet indexed — run index(action='build') to include new code. Existing results are unaffected."
                 });
             }
         }
@@ -295,7 +296,7 @@ impl Tool for SemanticSearch {
                 "file_count": dirty,
                 "note": format!(
                     "{} file{} modified in this session but not yet re-indexed — \
-                     run index_project() to include recent changes in semantic search.",
+                     run index(action='build') to include recent changes in semantic search.",
                     dirty,
                     if dirty == 1 { " was" } else { "s were" }
                 )
@@ -314,7 +315,7 @@ impl Tool for SemanticSearch {
                             "indexed": e.version_indexed,
                             "current": e.version,
                             "hint": format!(
-                                "{} was updated — run index_project(scope='lib:{}') to re-index",
+                                "{} was updated — run index(action='build', scope='lib:{}') to re-index",
                                 e.name, e.name
                             )
                         })
@@ -752,7 +753,7 @@ impl Tool for IndexStatus {
         if !db_path.exists() {
             return Ok(json!({
                 "indexed": false,
-                "message": "No index found. Run index_project first.",
+                "message": "No index found. Run index(action='build') first.",
             }));
         }
 
@@ -801,7 +802,7 @@ impl Tool for IndexStatus {
                 json!({
                     "status": "behind",
                     "behind_commits": staleness.behind_commits,
-                    "note": "Recent commits are not yet indexed. All previously indexed code is still queryable — run index_project to include new code."
+                    "note": "Recent commits are not yet indexed. All previously indexed code is still queryable — run index(action='build') to include new code."
                 })
             } else {
                 json!({ "status": "up_to_date" })
@@ -863,7 +864,7 @@ impl Tool for IndexStatus {
                     guard.cap_items(items, "Use detail_level='full' with offset for pagination");
                 let total = overflow.as_ref().map_or(items.len(), |o| o.total);
                 let mut drift_result = json!({
-                    "note": "Drift scores are informational — they do not affect query results. High drift means code has changed since indexing; run index_project to update.",
+                    "note": "Drift scores are informational — they do not affect query results. High drift means code has changed since indexing; run index(action='build') to update.",
                     "results": items,
                     "total": total,
                 });
@@ -929,6 +930,93 @@ impl Tool for IndexStatus {
 
     fn availability(&self, _caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
         crate::tools::Availability::RequiresEmbeddings
+    }
+}
+
+#[async_trait::async_trait]
+impl Tool for Index {
+    fn name(&self) -> &str {
+        "index"
+    }
+
+    fn is_write(&self, input: &Value) -> bool {
+        input.get("action").and_then(Value::as_str) == Some("build")
+    }
+
+    fn description(&self) -> &str {
+        "Semantic index operations. Actions: \
+         `build` (build/update the project's semantic index; pass `scope='lib:<name>'` to index a registered library), \
+         `status` (show index stats and optional drift scores)."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["build", "status"],
+                    "description": "Operation to perform."
+                },
+                "force": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "For action='build': force full reindex, ignoring cached file hashes."
+                },
+                "scope": {
+                    "type": "string",
+                    "default": "project",
+                    "description": "For action='build': 'project' (default) or 'lib:<name>' to index a registered library."
+                },
+                "threshold": {
+                    "type": "number",
+                    "description": "For action='status': minimum avg_drift to include (range 0.0-1.0). When provided, includes drift data."
+                },
+                "path": {
+                    "type": "string",
+                    "description": "For action='status': glob pattern to filter drift files (SQL LIKE syntax)."
+                },
+                "detail_level": {
+                    "type": "string",
+                    "enum": ["exploring", "full"],
+                    "description": "For action='status': output detail for drift entries."
+                }
+            },
+            "required": ["action"]
+        })
+    }
+
+    async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
+        let action = input
+            .get("action")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                super::RecoverableError::with_hint(
+                    "index requires 'action' parameter",
+                    "Pass action='build' or action='status'.",
+                )
+            })?;
+        match action {
+            "build" => IndexProject.call(input, ctx).await,
+            "status" => IndexStatus.call(input, ctx).await,
+            other => Err(super::RecoverableError::with_hint(
+                format!("unknown index action: {}", other),
+                "Valid actions: 'build', 'status'.",
+            )
+            .into()),
+        }
+    }
+
+    fn format_compact(&self, result: &Value) -> Option<String> {
+        if result.get("indexed").is_some() || result.get("file_count").is_some() {
+            IndexStatus.format_compact(result)
+        } else {
+            IndexProject.format_compact(result)
+        }
+    }
+
+    fn availability(&self, caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
+        IndexProject.availability(caps)
     }
 }
 
@@ -1018,7 +1106,7 @@ fn format_semantic_search(val: &Value) -> String {
         out.push('\n');
         if let Some(n) = val["git_sync"]["behind_commits"].as_u64() {
             out.push_str(&format!(
-                "\n  {n} commits not yet indexed (results still valid — run index_project to include new code)"
+                "\n  {n} commits not yet indexed (results still valid — run index(action='build') to include new code)"
             ));
         }
     }
@@ -1059,7 +1147,7 @@ fn format_index_status(result: &Value) -> String {
             .filter(|&n| n > 0)
         {
             out.push_str(&format!(
-                " · {behind} commits not yet indexed (queryable, run index_project to catch up)"
+                " · {behind} commits not yet indexed (queryable, run index(action='build') to catch up)"
             ));
         }
     }
@@ -1669,7 +1757,7 @@ mod tests {
         });
         let result = format_semantic_search(&val);
         assert!(result.contains("5 commits not yet indexed"));
-        assert!(result.contains("index_project"));
+        assert!(result.contains("index(action='build')"));
     }
 
     #[test]
@@ -1976,5 +2064,35 @@ mod tests {
             "expected elicit-unavailable abort, got: {msg}"
         );
         // TODO: add confirm=true and confirm=false tests once a MockPeer exists.
+    }
+
+    #[tokio::test]
+    async fn index_action_unknown_errors() {
+        let (_dir, ctx) = project_ctx().await;
+        let err = Index
+            .call(json!({ "action": "wat" }), &ctx)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("unknown index action"),
+            "expected unknown action error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn index_action_missing_errors() {
+        let (_dir, ctx) = project_ctx().await;
+        let err = Index.call(json!({}), &ctx).await.unwrap_err();
+        assert!(
+            err.to_string().contains("index requires 'action'"),
+            "expected missing action error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn index_is_write_depends_on_action() {
+        assert!(Index.is_write(&json!({ "action": "build" })));
+        assert!(!Index.is_write(&json!({ "action": "status" })));
+        assert!(!Index.is_write(&json!({})));
     }
 }

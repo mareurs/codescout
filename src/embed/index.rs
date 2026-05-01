@@ -687,7 +687,7 @@ pub fn ensure_vec_memories(conn: &Connection) -> Result<()> {
         None => {
             return Err(crate::tools::RecoverableError::with_hint(
                 "semantic index not built yet — cannot store memory embeddings",
-                "Run index_project first, then try remember again.",
+                "Run index(action='build') first, then try remember again.",
             )
             .into());
         }
@@ -733,7 +733,7 @@ fn validate_memory_embedding_dims(conn: &Connection, embedding_len: usize) -> Re
                  with {} — the memory was not stored",
                 embedding_len, stored_dims,
             ),
-            "Run index_project(force=true) to rebuild the semantic index with \
+            "Run index(action='build', force=true) to rebuild the semantic index with \
              the current model, then retry memory(action=\"write\").",
         )
         .into());

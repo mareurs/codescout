@@ -55,7 +55,7 @@ fn is_https_or_loopback(url: &str) -> bool {
 impl RemoteEmbedder {
     /// Build a reqwest client with a per-request timeout so that a hung
     /// embedding server (e.g. Ollama during GPU discovery failure) doesn't
-    /// block `index_project` forever.
+    /// block `index(action='build')` forever.
     fn http_client() -> Client {
         Client::builder()
             .timeout(std::time::Duration::from_secs(300))

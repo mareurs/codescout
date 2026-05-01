@@ -100,7 +100,7 @@ pub struct EmbeddingsSection {
     pub _chunk_overlap_ignored: Option<usize>,
     /// Enable semantic drift detection during index builds (default: true).
     ///
-    /// When enabled, `index_project` compares old and new chunk embeddings to
+    /// When enabled, `index(action='build')` compares old and new chunk embeddings to
     /// score how much each file's *meaning* changed (not just its bytes). Results
     /// are stored in the `drift_report` table and surfaced via the `check_drift` tool.
     ///

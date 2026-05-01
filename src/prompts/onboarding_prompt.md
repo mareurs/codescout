@@ -95,7 +95,7 @@ this to the user:
 > non-obvious connections.
 >
 > **Options:**
-> 1. **Build now** — I'll call `index_project` and wait for it to finish.
+> 1. **Build now** — I'll call `index(action='build')` and wait for it to finish.
 >    Requires an embedding backend (bundled ONNX is the default, Ollama/OpenAI optional — see
 >    `docs/manual/src/configuration/embedding-backends.md` for setup).
 >    Takes 1–5 minutes depending on codebase size.
@@ -107,7 +107,7 @@ this to the user:
 
 Wait for the user's choice before proceeding.
 
-- **Option 1:** Call `index_project({})`. Poll `index_status({})` every 15
+- **Option 1:** Call `index(action='build')`. Poll `index(action='status')` every 15
   seconds until the response shows completion or failure. If it fails, inform
   the user of the error and fall back to option 3.
 - **Option 2:** Stop and wait for the user to return.
@@ -515,7 +515,7 @@ After confirming all 6 memories and the system prompt with the user, deliver thi
 - **Library support:**
   - Libraries are **auto-discovered** when `symbol_at` resolves outside the project root.
   - `library(action="list")` — view all registered libraries and their index/version status.
-  - `index_project(scope="lib:<name>")` — index a specific library for semantic search.
+  - `index(action='build', scope="lib:<name>")` — index a specific library for semantic search.
   - Once registered, use `scope="lib:<name>"` with `symbols`, `symbols`,
     `grep`, and `semantic_search` to navigate library code.
 

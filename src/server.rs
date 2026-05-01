@@ -29,7 +29,7 @@ use crate::tools::{
     memory::Memory,
     progress,
     read_file::ReadFile,
-    semantic::{IndexProject, IndexStatus, SemanticSearch},
+    semantic::{Index, SemanticSearch},
     symbol::{
         InsertCode, References, RemoveSymbol, RenameSymbol, ReplaceSymbol, SymbolAt, Symbols,
     },
@@ -116,8 +116,7 @@ impl CodeScoutServer {
             Arc::new(Memory),
             // Semantic search tools
             Arc::new(SemanticSearch),
-            Arc::new(IndexProject),
-            Arc::new(IndexStatus),
+            Arc::new(Index),
             // Config tools
             Arc::new(Workspace),
             // Library tools
@@ -563,7 +562,7 @@ fn read_self_memory_kb() -> SelfMemoryKb {
 ///   server-level timeout is unaware of that value and would fire first, making
 ///   the per-request `timeout_secs` parameter effectively ignored.
 fn tool_skips_server_timeout(name: &str) -> bool {
-    matches!(name, "index_project" | "index_library" | "run_command")
+    matches!(name, "index" | "index_library" | "run_command")
 }
 
 /// Whether to register the embedded librarian tool surface for this session.
@@ -1337,8 +1336,7 @@ mod tests {
             "symbol_at",
             "memory",
             "semantic_search",
-            "index_project",
-            "index_status",
+            "index",
             "workspace",
             "library",
         ];
@@ -1764,7 +1762,7 @@ mod tests {
 
     #[test]
     fn indexing_tools_skip_server_timeout() {
-        assert!(tool_skips_server_timeout("index_project"));
+        assert!(tool_skips_server_timeout("index"));
         assert!(tool_skips_server_timeout("index_library"));
     }
 
@@ -2119,7 +2117,8 @@ mod tests {
         assert!(server.is_write_call("remove_symbol", &json!({})));
         assert!(server.is_write_call("rename_symbol", &json!({})));
         assert!(server.is_write_call("edit_markdown", &json!({})));
-        assert!(server.is_write_call("index_project", &json!({})));
+        assert!(server.is_write_call("index", &json!({"action": "build"})));
+        assert!(!server.is_write_call("index", &json!({"action": "status"})));
         assert!(server.is_write_call("onboarding", &json!({})));
         assert!(server.is_write_call("library", &json!({"action": "register"})));
         assert!(!server.is_write_call("library", &json!({"action": "list"})));

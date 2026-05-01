@@ -83,7 +83,7 @@ pub struct PathSecurityConfig {
     pub library_paths: Vec<PathBuf>,
     /// Additional regex patterns to flag as dangerous commands.
     pub shell_dangerous_patterns: Vec<String>,
-    /// Approx raw source-byte threshold above which `index_project` requires confirmation.
+    /// Approx raw source-byte threshold above which `index(action='build')` requires confirmation.
     pub max_index_bytes: u64,
 }
 
@@ -393,7 +393,7 @@ pub fn check_tool_access(tool_name: &str, config: &PathSecurityConfig) -> Result
                 );
             }
         }
-        "semantic_search" | "index_project" => {
+        "semantic_search" | "index" => {
             if !config.indexing_enabled {
                 bail!(
                     "Indexing tools are disabled. Set security.indexing_enabled = true in .codescout/project.toml to enable."
@@ -1034,7 +1034,7 @@ mod tests {
             indexing_enabled: false,
             ..PathSecurityConfig::default()
         };
-        for tool in &["semantic_search", "index_project"] {
+        for tool in &["semantic_search", "index"] {
             assert!(
                 check_tool_access(tool, &config).is_err(),
                 "{} should be blocked",

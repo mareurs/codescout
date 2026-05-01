@@ -52,7 +52,7 @@ pub fn build_server_instructions(project_status: Option<&ProjectStatus>) -> Stri
                 .push_str("- **Semantic index:** Built — `semantic_search` is ready to use\n");
         } else {
             instructions.push_str(
-                "- **Semantic index:** Not built — run `index_project` to enable `semantic_search`\n",
+                "- **Semantic index:** Not built — run `index(action='build')` to enable `semantic_search`\n",
             );
         }
 
@@ -289,7 +289,7 @@ mod tests {
         };
         let result = build_server_instructions(Some(&status));
         assert!(result.contains("run `onboarding`"));
-        assert!(result.contains("run `index_project`"));
+        assert!(result.contains("run `index(action='build')`"));
     }
 
     #[test]
