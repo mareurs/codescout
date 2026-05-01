@@ -1363,6 +1363,32 @@ impl crate::lsp::ops::LspClientOps for LspClient {
     async fn did_change(&self, path: &std::path::Path) -> anyhow::Result<()> {
         LspClient::did_change(self, path).await
     }
+
+    async fn prepare_call_hierarchy(
+        &self,
+        _path: &std::path::Path,
+        _line: u32,
+        _col: u32,
+        _language_id: &str,
+    ) -> anyhow::Result<Option<lsp_types::CallHierarchyItem>> {
+        anyhow::bail!("prepare_call_hierarchy not yet implemented")
+    }
+
+    async fn incoming_calls(
+        &self,
+        _item: &lsp_types::CallHierarchyItem,
+        _language_id: &str,
+    ) -> anyhow::Result<Vec<lsp_types::CallHierarchyIncomingCall>> {
+        anyhow::bail!("incoming_calls not yet implemented")
+    }
+
+    async fn outgoing_calls(
+        &self,
+        _item: &lsp_types::CallHierarchyItem,
+        _language_id: &str,
+    ) -> anyhow::Result<Vec<lsp_types::CallHierarchyOutgoingCall>> {
+        anyhow::bail!("outgoing_calls not yet implemented")
+    }
 }
 
 #[cfg(test)]

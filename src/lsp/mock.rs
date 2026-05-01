@@ -215,6 +215,32 @@ impl LspClientOps for MockLspClient {
         }
         Ok(())
     }
+
+    async fn prepare_call_hierarchy(
+        &self,
+        _path: &Path,
+        _line: u32,
+        _col: u32,
+        _language_id: &str,
+    ) -> anyhow::Result<Option<lsp_types::CallHierarchyItem>> {
+        Ok(None)
+    }
+
+    async fn incoming_calls(
+        &self,
+        _item: &lsp_types::CallHierarchyItem,
+        _language_id: &str,
+    ) -> anyhow::Result<Vec<lsp_types::CallHierarchyIncomingCall>> {
+        Ok(vec![])
+    }
+
+    async fn outgoing_calls(
+        &self,
+        _item: &lsp_types::CallHierarchyItem,
+        _language_id: &str,
+    ) -> anyhow::Result<Vec<lsp_types::CallHierarchyOutgoingCall>> {
+        Ok(vec![])
+    }
 }
 
 pub struct MockLspProvider {
