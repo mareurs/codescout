@@ -276,8 +276,8 @@ mod tests {
     #[tokio::test]
     async fn graph_includes_event_nodes_when_requested() {
         use crate::catalog::artifact::upsert as art_upsert;
+        use crate::tools::event_create::tests::mk_ctx as mk_ctx_with_root;
         use crate::tools::event_create::ArtifactEventCreate;
-        use crate::tools::observe::tests::mk_ctx as mk_ctx_with_root;
         use tempfile::TempDir;
 
         let tmp = TempDir::new().unwrap();
@@ -346,8 +346,8 @@ mod tests {
     #[tokio::test]
     async fn graph_excludes_events_by_default() {
         use crate::catalog::artifact::upsert as art_upsert;
+        use crate::tools::event_create::tests::mk_ctx as mk_ctx_with_root;
         use crate::tools::event_create::ArtifactEventCreate;
-        use crate::tools::observe::tests::mk_ctx as mk_ctx_with_root;
         use tempfile::TempDir;
 
         let tmp = TempDir::new().unwrap();

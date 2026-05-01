@@ -271,7 +271,7 @@ mod tests {
     use super::*;
     use crate::catalog::artifact::{upsert as art_insert, ArtifactRow};
     use crate::catalog::events::{insert as ev_insert, EventRow};
-    use crate::tools::observe::tests::mk_ctx;
+    use crate::tools::event_create::tests::mk_ctx;
     use tempfile::TempDir;
     use ulid::Ulid;
 

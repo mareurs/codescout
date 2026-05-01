@@ -114,8 +114,8 @@ impl Tool for ArtifactTimeline {
 mod tests {
     use super::*;
     use crate::catalog::artifact::{upsert as art_insert, ArtifactRow};
+    use crate::tools::event_create::tests::mk_ctx;
     use crate::tools::event_create::ArtifactEventCreate;
-    use crate::tools::observe::tests::mk_ctx;
     use tempfile::TempDir;
 
     fn art(id: &str) -> ArtifactRow {

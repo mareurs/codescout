@@ -292,6 +292,21 @@ impl Tool for ArtifactEventCreate {
             }
             event_edges::insert_many_in_tx(&tx, &edges)?;
             tx.commit()?;
+
+            // Dual-write: note events also record an ObservationRow for
+            // backwards compat with artifact_get(include_observations=true).
+            if a.kind == "note" {
+                if let Some(text) = a.payload.get("text").and_then(|v| v.as_str()) {
+                    let obs = crate::catalog::observations::ObservationRow {
+                        id: None,
+                        artifact_id: a.artifact_id.clone(),
+                        text: text.to_string(),
+                        source: a.author.clone(),
+                        created_at: now,
+                    };
+                    let _ = crate::catalog::observations::insert(&cat, &obs);
+                }
+            }
         }
 
         Ok(json!({
@@ -389,11 +404,34 @@ fn apply_payload_to_frontmatter(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::catalog::artifact::{upsert as art_insert, ArtifactRow};
-    use crate::tools::observe::tests::mk_ctx;
+    use crate::tools::ToolContext;
+    use crate::workspace::WorkspaceConfig;
+    use std::sync::Arc;
     use tempfile::TempDir;
+
+    pub(crate) fn mk_ctx(tmp_root: std::path::PathBuf) -> ToolContext {
+        use crate::workspace::Root;
+        ToolContext {
+            catalog: Arc::new(parking_lot::Mutex::new(
+                crate::catalog::Catalog::open_in_memory().unwrap(),
+            )),
+            workspace: Arc::new(WorkspaceConfig {
+                roots: vec![Root {
+                    name: "r".into(),
+                    path: tmp_root,
+                }],
+                ignore: vec![],
+                rules: vec![],
+                umbrellas: vec![],
+            }),
+            rules: Arc::new(vec![]),
+            embedding: None,
+            current_project: None,
+        }
+    }
 
     thread_local! {
         /// When set true, `call()` aborts with an error after inserting the
@@ -446,6 +484,34 @@ mod tests {
             .unwrap();
         let event_id = result["event_id"].as_str().unwrap();
         assert!(!event_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn note_event_also_writes_observation_row() {
+        use crate::catalog::observations;
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        {
+            let cat = ctx.catalog.lock();
+            art_insert(&cat, &art("obs-art")).unwrap();
+        }
+
+        ArtifactEventCreate
+            .call(
+                &ctx,
+                json!({
+                    "artifact_id": "obs-art",
+                    "kind": "note",
+                    "payload": {"text": "hello observation"}
+                }),
+            )
+            .await
+            .unwrap();
+
+        let cat = ctx.catalog.lock();
+        let obs = observations::list_for_artifact(&cat, "obs-art").unwrap();
+        assert_eq!(obs.len(), 1);
+        assert_eq!(obs[0].text, "hello observation");
     }
 
     #[tokio::test]

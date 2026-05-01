@@ -91,8 +91,6 @@ pub mod update;
 
 pub mod link;
 
-pub mod observe;
-
 pub mod event_create;
 pub mod state_at;
 pub mod workspace_state_at;
@@ -122,7 +120,6 @@ pub fn all_tools() -> Vec<Arc<dyn Tool>> {
         Arc::new(create::ArtifactCreate),
         Arc::new(update::ArtifactUpdate),
         Arc::new(link::ArtifactLink),
-        Arc::new(observe::ArtifactObserve),
         Arc::new(event_create::ArtifactEventCreate),
         Arc::new(timeline::ArtifactTimeline),
         Arc::new(state_at::ArtifactStateAt),
