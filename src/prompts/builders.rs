@@ -324,11 +324,11 @@ pub(crate) fn build_system_prompt_draft(
         draft.push_str("**Cross-project navigation:**\n");
         draft.push_str("- **Quick lookups** (1–3 calls): pass `project: \"<id>\"` to scope the call — no state change.\n");
         draft.push_str("- **Sustained exploration** (reading memories, semantic search, many tool calls): \
-                         use `activate_project(\"<id>\")`, but **always `activate_project` back to your original \
+                         use `workspace(action=\"activate\", path=\"<id>\")`, but **always `workspace(action=\"activate\")` back to your original \
                          project when done.** Forgetting to return leaves all subsequent tool calls operating \
                          against the wrong project.\n");
         draft.push_str("- **Subagents:** the MCP server state is shared with the parent conversation. \
-                         You **MUST** `activate_project` back to the original project before completing your task.\n\n");
+                         You **MUST** `workspace(action=\"activate\")` back to the original project before completing your task.\n\n");
         draft.push_str(
             "**Markdown files** (memories, plans, docs): \
              `read_markdown(\"path\")` — returns heading map + `@file_ref` for large files. \
@@ -498,7 +498,7 @@ pub(crate) fn build_subagent_preamble() -> String {
     s.push_str("You are an onboarding subagent for codescout. ");
     s.push_str("Your job is to thoroughly explore this codebase and write project memories ");
     s.push_str("that will be used by every future session.\n\n");
-    s.push_str("FIRST ACTION: Call activate_project(\".\", read_only: false) to initialize the ");
+    s.push_str("FIRST ACTION: Call workspace(action=\"activate\", path=\".\", read_only=false) to initialize the ");
     s.push_str("project context. All subsequent tool calls depend on this.\n\n");
     s.push_str("Then follow the exploration and memory-writing instructions below exactly.\n\n");
     s.push_str("---\n\n");
@@ -534,7 +534,7 @@ response with this structured summary:\n\n",
 informative but concise — aim for 300-500 tokens total.\n\n",
     );
     s.push_str(
-        "LAST ACTION: Call activate_project(\".\") before returning to ensure the parent's \
+        "LAST ACTION: Call workspace(action=\"activate\", path=\".\") before returning to ensure the parent's \
 project state is unchanged.",
     );
     s
@@ -674,7 +674,7 @@ pub(crate) fn build_prompt_refresh_subagent_prompt(memory_topics: &[String]) -> 
 System prompt refresh — the stored onboarding version is behind the current codescout version.
 
 Steps:
-1. activate_project(\".\", read_only: false) — enable writes
+1. workspace(action=\"activate\", path=\".\", read_only=false) — enable writes
 2. Read each project memory that contributes to the system prompt:
 {memory_reads}
 3. Read the current system-prompt.md (if it exists) to understand its structure
@@ -686,7 +686,7 @@ Steps:
    - ## Project Rules
 5. Write the updated content to .codescout/system-prompt.md
 6. Do NOT re-explore the codebase — the memories already contain the relevant knowledge
-7. activate_project(\".\") — restore normal state
+7. workspace(action=\"activate\", path=\".\") — restore normal state
 
 When done, report: \"System prompt refreshed (vN → vM).\"",
         memory_reads = memory_reads,

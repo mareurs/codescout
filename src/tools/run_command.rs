@@ -1247,11 +1247,11 @@ mod tests {
             "preamble must identify the subagent role"
         );
         assert!(
-            preamble.contains("activate_project"),
+            preamble.contains("workspace(action=\"activate\""),
             "preamble must instruct subagent to activate project"
         );
         assert!(
-            preamble.contains("read_only: false"),
+            preamble.contains("read_only=false"),
             "preamble must request write access"
         );
     }
@@ -1268,7 +1268,7 @@ mod tests {
             "epilogue must request memory list"
         );
         assert!(
-            epilogue.contains("activate_project"),
+            epilogue.contains("workspace(action=\"activate\""),
             "epilogue must instruct subagent to restore project state"
         );
     }
@@ -1297,7 +1297,7 @@ mod tests {
     fn prompt_refresh_subagent_prompt_contains_memory_reads() {
         let topics = vec!["architecture".to_string(), "conventions".to_string()];
         let prompt = build_prompt_refresh_subagent_prompt(&topics);
-        assert!(prompt.contains("activate_project"));
+        assert!(prompt.contains("workspace(action=\"activate\""));
         assert!(prompt.contains("architecture"));
         assert!(prompt.contains("conventions"));
         assert!(prompt.contains("system-prompt.md"));
@@ -1704,7 +1704,7 @@ mod tests {
         // subagent_prompt must contain preamble, body, and epilogue
         let prompt = result["subagent_prompt"].as_str().unwrap();
         assert!(
-            prompt.contains("activate_project"),
+            prompt.contains("workspace(action=\"activate\""),
             "subagent_prompt must contain preamble"
         );
         assert!(
@@ -2075,8 +2075,8 @@ mod tests {
             result["subagent_prompt"]
                 .as_str()
                 .unwrap()
-                .contains("activate_project"),
-            "subagent_prompt must contain activate_project"
+                .contains("workspace(action=\"activate\""),
+            "subagent_prompt must contain workspace activate"
         );
     }
 

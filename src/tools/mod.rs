@@ -451,13 +451,13 @@ pub async fn guard_worktree_write(ctx: &ToolContext) -> anyhow::Result<()> {
     }
     let wt_list: Vec<String> = worktrees.iter().map(|p| p.display().to_string()).collect();
     let hint = format!(
-        "Call activate_project(\"{}\") to select the write target (or use \"{}\") for the main repo.",
+        "Call workspace(action='activate', path=\"{}\") to select the write target (or use \"{}\") for the main repo.",
         wt_list[0],
         root.display()
     );
     Err(RecoverableError::with_hint(
         format!(
-            "Write blocked: git worktrees detected but activate_project has not been called. \
+            "Write blocked: git worktrees detected but workspace(action='activate') has not been called. \
              Worktrees: [{}]",
             wt_list.join(", ")
         ),

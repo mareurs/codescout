@@ -29,8 +29,8 @@ impl Tool for ListLibraries {
         let inner = ctx.agent.inner.read().await;
         let project = inner.active_project().ok_or_else(|| {
             super::RecoverableError::with_hint(
-                "No active project. Use activate_project first.",
-                "Call activate_project(\"/path/to/project\") to set the active project.",
+                "No active project. Use workspace(action='activate') first.",
+                "Call workspace(action='activate', path=\"/path/to/project\") to set the active project.",
             )
         })?;
 
@@ -177,7 +177,7 @@ impl Tool for RegisterLibrary {
             let project = inner.active_project_mut().ok_or_else(|| {
                 super::RecoverableError::with_hint(
                     "No active project.",
-                    "Call activate_project first.",
+                    "Call workspace(action='activate') first.",
                 )
             })?;
             project.library_registry.register(

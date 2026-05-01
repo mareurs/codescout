@@ -380,7 +380,10 @@ async fn resolve_memory_dir(
     } else {
         // No workspace — fall back to the active project's memory dir.
         let p = inner.active_project().ok_or_else(|| {
-            super::RecoverableError::with_hint("No active project.", "Call activate_project first.")
+            super::RecoverableError::with_hint(
+                "No active project.",
+                "Call workspace(action='activate') first.",
+            )
         })?;
         Ok(p.memory.dir().to_path_buf())
     }
@@ -736,7 +739,7 @@ impl Tool for Memory {
                     let p = inner.active_project().ok_or_else(|| {
                         super::RecoverableError::with_hint(
                             "No active project.",
-                            "Call activate_project first.",
+                            "Call workspace(action='activate') first.",
                         )
                     })?;
                     (p.root.clone(), p.config.embeddings.model.clone())
@@ -770,7 +773,7 @@ impl Tool for Memory {
                     let p = inner.active_project().ok_or_else(|| {
                         super::RecoverableError::with_hint(
                             "No active project.",
-                            "Call activate_project first.",
+                            "Call workspace(action='activate') first.",
                         )
                     })?;
                     (p.root.clone(), p.config.embeddings.model.clone())
@@ -834,7 +837,7 @@ impl Tool for Memory {
                     let p = inner.active_project().ok_or_else(|| {
                         super::RecoverableError::with_hint(
                             "No active project.",
-                            "Call activate_project first.",
+                            "Call workspace(action='activate') first.",
                         )
                     })?;
                     p.root.clone()

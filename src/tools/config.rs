@@ -4,6 +4,84 @@ use super::{optional_bool_param, parse_bool_param, Tool, ToolContext};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
+pub struct Workspace;
+
+#[async_trait::async_trait]
+impl Tool for Workspace {
+    fn name(&self) -> &str {
+        "workspace"
+    }
+
+    fn description(&self) -> &str {
+        "Project workspace operations. Actions: \
+         `activate` (switch active project; pass `path` and optional `read_only`), \
+         `status` (current project + index + memories), \
+         `list_projects` (workspace members)."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["activate", "status", "list_projects"],
+                    "description": "Operation to perform."
+                },
+                "path": {
+                    "type": "string",
+                    "description": "For action='activate': project path or workspace project id."
+                },
+                "read_only": {
+                    "type": "boolean",
+                    "description": "For action='activate': open in read-only mode (default: false)."
+                },
+                "post_compact": {
+                    "type": "boolean",
+                    "description": "For action='status': flush all LSP clients (used after context compaction)."
+                }
+            },
+            "required": ["action"]
+        })
+    }
+
+    async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
+        let action = input
+            .get("action")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                super::RecoverableError::with_hint(
+                    "workspace requires 'action' parameter",
+                    "Pass action='activate' | 'status' | 'list_projects'.",
+                )
+            })?;
+        match action {
+            "activate" => ActivateProject.call(input, ctx).await,
+            "status" => ProjectStatus.call(input, ctx).await,
+            "list_projects" => {
+                let full = ProjectStatus.call(json!({}), ctx).await?;
+                Ok(json!({ "workspace": full.get("workspace") }))
+            }
+            other => Err(super::RecoverableError::with_hint(
+                format!("unknown workspace action: {}", other),
+                "Valid actions: 'activate', 'status', 'list_projects'.",
+            )
+            .into()),
+        }
+    }
+
+    fn format_compact(&self, result: &Value) -> Option<String> {
+        // `activate` responses carry `auto_libs` or `project_root` at the top level;
+        // `status` responses carry `index`/`memory_staleness`; `list_projects` carries
+        // only `workspace`. Use shape detection.
+        if result.get("project_hints").is_some() {
+            Some(format_activate_project(result))
+        } else {
+            Some(format_project_status(result))
+        }
+    }
+}
+
 pub struct ActivateProject;
 impl ActivateProject {
     pub const NAME: &'static str = "activate_project";
@@ -344,11 +422,11 @@ async fn build_activation_response(
     let home_root = ctx.agent.home_root().await;
     let hint = match scenario {
         HintScenario::FirstActivation => format!(
-            "CWD: {}. Run project_status() for health checks and memory staleness.",
+            "CWD: {}. Run workspace(action='status') for health checks and memory staleness.",
             project_root_str
         ),
         HintScenario::ReturnToHome => format!(
-            "Returned to home project. CWD: {}. Run project_status() to check memory staleness.",
+            "Returned to home project. CWD: {}. Run workspace(action='status') to check memory staleness.",
             project_root_str
         ),
         HintScenario::SwitchAway if read_only => {
@@ -357,7 +435,7 @@ async fn build_activation_response(
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
             format!(
-                "Browsing {} (read-only). CWD: {} — remember to activate_project(\"{}\") when done.",
+                "Browsing {} (read-only). CWD: {} — remember to workspace(action='activate', path=\"{}\") when done.",
                 project_name, project_root_str, home_str,
             )
         }
@@ -367,7 +445,7 @@ async fn build_activation_response(
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
             format!(
-                "Switched project (read-write). CWD: {} — remember to activate_project(\"{}\") when done.",
+                "Switched project (read-write). CWD: {} — remember to workspace(action='activate', path=\"{}\") when done.",
                 project_root_str, home_str,
             )
         }
@@ -824,9 +902,9 @@ mod tests {
         let input = json!({ "path": dir2.path().to_str().unwrap() });
         let result = ActivateProject.call(input, &ctx).await.unwrap();
         let hint = result["hint"].as_str().unwrap();
-        // Non-home default is RO: "Browsing … (read-only). CWD: … — remember to activate_project(…)"
+        // Non-home default is RO: "Browsing … (read-only). CWD: … — remember to workspace(action='activate', …)"
         assert!(
-            hint.contains("remember to activate_project"),
+            hint.contains("remember to workspace"),
             "hint should warn to switch back: {hint}"
         );
         assert!(
@@ -1239,8 +1317,8 @@ depends_on = ["test"]
             .unwrap();
         let hint = result["hint"].as_str().unwrap();
         assert!(
-            hint.contains("project_status"),
-            "RW hint should promote project_status, got: {hint}"
+            hint.contains("workspace(action='status')"),
+            "RW hint should promote workspace status, got: {hint}"
         );
     }
 
@@ -1388,7 +1466,7 @@ depends_on = ["test"]
 
         let hint = result["hint"].as_str().unwrap();
         assert!(
-            hint.contains("remember to activate_project"),
+            hint.contains("remember to workspace"),
             "RO hint should warn about switching back, got: {hint}"
         );
         assert!(
@@ -1435,6 +1513,115 @@ depends_on = ["test"]
         assert!(
             memories.is_empty(),
             "empty project should have empty memories array"
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_action_activate_dispatches_to_activate_project() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let ctx = ToolContext {
+            agent: Agent::new(None).await.unwrap(),
+            lsp: lsp(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+        };
+        let result = Workspace
+            .call(
+                json!({
+                    "action": "activate",
+                    "path": dir.path().to_str().unwrap(),
+                    "read_only": false,
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["status"], "ok");
+        assert!(result.get("project_hints").is_some());
+    }
+
+    #[tokio::test]
+    async fn workspace_action_status_dispatches_to_project_status() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let ctx = ToolContext {
+            agent: Agent::new(None).await.unwrap(),
+            lsp: lsp(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+        };
+        ActivateProject
+            .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        let result = Workspace
+            .call(json!({ "action": "status" }), &ctx)
+            .await
+            .unwrap();
+        assert!(result["project_root"].is_string());
+        assert!(result["languages"].is_array());
+        assert!(result["index"].is_object());
+    }
+
+    #[tokio::test]
+    async fn workspace_action_list_projects_returns_workspace_field() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let ctx = ToolContext {
+            agent: Agent::new(None).await.unwrap(),
+            lsp: lsp(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+        };
+        ActivateProject
+            .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        let result = Workspace
+            .call(json!({ "action": "list_projects" }), &ctx)
+            .await
+            .unwrap();
+        // The result must contain the "workspace" key (value may be null when no
+        // workspace.toml is present — that's still a successful list_projects call).
+        assert!(result.as_object().unwrap().contains_key("workspace"));
+        // And no other fields should leak through.
+        assert_eq!(result.as_object().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn workspace_action_unknown_errors() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let ctx = ToolContext {
+            agent: Agent::new(None).await.unwrap(),
+            lsp: lsp(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+        };
+        let err = Workspace
+            .call(json!({ "action": "wat" }), &ctx)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("unknown workspace action"),
+            "expected unknown action error, got: {err}"
         );
     }
 }

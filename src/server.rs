@@ -20,7 +20,7 @@ use serde_json::Value;
 
 use crate::agent::Agent;
 use crate::tools::{
-    config::{ActivateProject, ProjectStatus},
+    config::Workspace,
     create_file::CreateFile,
     edit_file::EditFile,
     grep::Grep,
@@ -119,8 +119,7 @@ impl CodeScoutServer {
             Arc::new(IndexProject),
             Arc::new(IndexStatus),
             // Config tools
-            Arc::new(ActivateProject),
-            Arc::new(ProjectStatus),
+            Arc::new(Workspace),
             // Library tools
             Arc::new(ListLibraries),
             Arc::new(RegisterLibrary),
@@ -696,7 +695,13 @@ impl ServerHandler for CodeScoutServer {
         req: CallToolRequestParams,
         req_ctx: RequestContext<RoleServer>,
     ) -> std::result::Result<CallToolResult, McpError> {
-        let is_activate = req.name == crate::tools::config::ActivateProject::NAME;
+        let is_activate = req.name == "workspace"
+            && req
+                .arguments
+                .as_ref()
+                .and_then(|m| m.get("action"))
+                .and_then(|v| v.as_str())
+                == Some("activate");
         let progress = Some(progress::ProgressReporter::new(
             req_ctx.peer.clone(),
             req_ctx.id.clone(),
@@ -1335,8 +1340,7 @@ mod tests {
             "semantic_search",
             "index_project",
             "index_status",
-            "activate_project",
-            "project_status",
+            "workspace",
             "list_libraries",
             "register_library",
         ];
@@ -1984,7 +1988,7 @@ mod tests {
                 );
             }
             // Non-LSP tools must still be visible.
-            for always_tool in &["read_file", "tree", "memory", "activate_project"] {
+            for always_tool in &["read_file", "tree", "memory", "workspace"] {
                 assert!(
                     visible.contains(always_tool),
                     "Always-available tool '{}' should remain visible",

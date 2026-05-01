@@ -40,7 +40,10 @@ impl Tool for GetUsageStats {
             .with_project(|p| Ok(p.root.clone()))
             .await
             .map_err(|_| {
-                RecoverableError::with_hint("no active project", "run activate_project first")
+                RecoverableError::with_hint(
+                    "no active project",
+                    "run workspace(action='activate') first",
+                )
             })?;
 
         let conn = crate::usage::db::open_db(&project_root)?;

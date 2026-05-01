@@ -25,13 +25,14 @@ These are non-negotiable. Violating the letter IS violating the spirit.
    in a follow-up: `cargo test` → `grep FAILED @cmd_id`. Never `cargo test 2>&1 | grep FAILED`.
    The buffer system exists to save your context window — use it.
 
-4. **ALWAYS RESTORE THE ACTIVE PROJECT.** After `activate_project` to a different project,
-   you MUST `activate_project` back to the original before finishing your task. The MCP server
-   is shared state — forgetting to return silently breaks all subsequent tool calls.
-   Subagents share the server with their parent — they MUST restore too.
+4. **ALWAYS RESTORE THE ACTIVE PROJECT.** After `workspace(action="activate", path=...)` to
+   a different project, you MUST call `workspace(action="activate", path=...)` back to the
+   original before finishing your task. The MCP server is shared state — forgetting to return
+   silently breaks all subsequent tool calls. Subagents share the server with their parent —
+   they MUST restore too.
 
 5. **ACTIVATE THE HOME PROJECT WITH WRITE ACCESS AT SESSION START.** At the start of every
-   session, call `activate_project(".", read_only: false)`. This ensures write tools work on
+   session, call `workspace(action="activate", path=".", read_only=false)`. This ensures write tools work on
    the current working directory — the server may have been left in an unknown state by a
    previous session or subagent.
 
@@ -48,7 +49,7 @@ These are non-negotiable. Violating the letter IS violating the spirit.
 | `run_command("jq '.key' @file_ref")` to query JSON | `read_file(path, json_path="$.key")` | Navigation params > shell buffer queries |
 | Repeat a broad `symbols(name=...)` after overflow | Narrow with `path=`, `kind=`, or more specific pattern | Follow the overflow hint |
 | Ignore `by_file` in overflow response | Use top file from `by_file` as `path=` filter | The hint tells you exactly where to look |
-| `activate_project` for a single lookup | Pass `project_id: "<id>"` on the tool call | No state mutation, no risk of forgetting to return |
+| `workspace(action="activate")` for a single lookup | Pass `project_id: "<id>"` on the tool call | No state mutation, no risk of forgetting to return |
 | `edit_file` / `create_file` to rewrite an entire markdown section | `edit_markdown(path, heading, action, content)` | Heading-addressed, no string matching needed |
 | `grep("fn_name")` to find all callers | `references(symbol, path)` | LSP finds actual usages; regex matches comments, strings, partial names |
 | `read_file` on a `.md` file | `read_markdown(path)` | Heading navigation > line guessing |
@@ -156,7 +157,7 @@ to continue.
 
 ### Worktrees
 
-After `EnterWorktree`, call `activate_project` with the worktree path — write tools are
+After `EnterWorktree`, call `workspace(action="activate", path=...)` with the worktree path — write tools are
 NOT automatically coupled to the shell's working directory. If you forget, writes silently
 modify the main repo. To clean up: `git worktree prune` from the main repo root.
 

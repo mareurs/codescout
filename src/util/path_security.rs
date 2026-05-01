@@ -389,7 +389,7 @@ pub fn check_tool_access(tool_name: &str, config: &PathSecurityConfig) -> Result
         | "remove_symbol" | "register_library" | "edit_markdown" => {
             if !config.file_write_enabled {
                 bail!(
-                    "File writes are disabled for this project. If this project was activated in read-only mode, call activate_project with read_only: false to enable writes."
+                    "File writes are disabled for this project. If this project was activated in read-only mode, call workspace(action='activate', read_only: false) to enable writes."
                 );
             }
         }
@@ -1060,7 +1060,7 @@ mod tests {
             "symbols",
             "list_functions",
             "onboarding",
-            "activate_project",
+            "workspace",
         ] {
             assert!(
                 check_tool_access(tool, &config).is_ok(),
