@@ -13,7 +13,7 @@ use librarian_mcp::{
     catalog::Catalog,
     tools::{
         create::ArtifactCreate, event_create::ArtifactEventCreate, get::ArtifactGet,
-        graph::ArtifactGraph, link::ArtifactLink, links::ArtifactLinks,
+        graph::ArtifactGraph, link::ArtifactLink,
         state_at::ArtifactStateAt, timeline::ArtifactTimeline,
         workspace_state_at::WorkspaceStateAt, Tool, ToolContext,
     },
@@ -550,30 +550,31 @@ async fn timemachine_full_chain() {
         .expect("superseded_by event_create should succeed");
 
     // Check that the dual-write created a supersedes link from foo → spec.
-    let links_resp = ArtifactLinks
+    // (artifact_links was consolidated into artifact_get with include_links=true)
+    let links_resp = ArtifactGet
         .call(
             &ctx,
             json!({
                 "id": foo_id,
-                "direction": "out",
-                "rel": "supersedes"
+                "include_links": true,
+                "links_direction": "out",
+                "links_rel": "supersedes"
             }),
         )
         .await
-        .expect("artifact_links should succeed");
-    let link_count = links_resp["count"].as_u64().unwrap_or(0);
+        .expect("artifact_get with include_links should succeed");
+    let outgoing = links_resp["links"]["outgoing"].as_array().expect("must be array");
     assert_eq!(
-        link_count, 1,
+        outgoing.len(), 1,
         "event_create kind=superseded_by must dual-write a supersedes artifact_link from foo→spec"
     );
-    let link_items = links_resp["items"].as_array().expect("must be array");
     assert_eq!(
-        link_items[0]["dst_id"].as_str().unwrap_or(""),
+        outgoing[0]["dst_id"].as_str().unwrap_or(""),
         spec_id,
         "supersedes link must point to spec_id"
     );
     assert_eq!(
-        link_items[0]["rel"].as_str().unwrap_or(""),
+        outgoing[0]["rel"].as_str().unwrap_or(""),
         "supersedes",
         "link rel must be supersedes"
     );
