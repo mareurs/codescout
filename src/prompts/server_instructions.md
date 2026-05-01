@@ -75,6 +75,7 @@ covers only cross-tool routing and non-obvious behaviors.
 - **Know a text pattern** → `grep(pattern)`
 - **Know a filename** → `tree(glob=...)`
 - **All callers of X** → `references(symbol, path)` (not `grep`)
+- **Transitive call graphs** → `call_graph` (reserved — returns "not yet implemented")
 
 ### Gotchas
 

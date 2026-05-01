@@ -1,5 +1,6 @@
 //! Symbol-level tools backed by the LSP client.
 
+mod call_graph;
 mod display;
 mod insert_code;
 mod list_overview;
@@ -14,6 +15,7 @@ mod symbols;
 #[cfg(test)]
 mod tests;
 
+pub use call_graph::CallGraph;
 pub use insert_code::InsertCode;
 pub use references::References;
 pub use remove_symbol::RemoveSymbol;
