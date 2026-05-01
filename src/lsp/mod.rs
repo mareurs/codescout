@@ -7,7 +7,9 @@ pub mod mock;
 pub mod servers;
 pub mod symbols;
 pub use mock::{MockLspClient, MockLspProvider};
+pub mod call_hierarchy;
 pub mod ops;
+
 pub use ops::{LspClientOps, LspProvider};
 pub mod mux;
 pub mod transport;
