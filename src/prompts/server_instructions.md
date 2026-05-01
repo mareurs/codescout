@@ -66,6 +66,27 @@ covers only cross-tool routing and non-obvious behaviors.
 - **Markdown files:** `read_markdown` / `edit_markdown`, not `read_file` / `edit_file`.
   `edit_file` on `.md` files is gated to `edit_markdown` (except `insert="prepend"|"append"`).
 
+
+### Symbol Navigation Patterns
+
+- **Hierarchical nav** — impl/class methods, all languages:
+  `symbols(name_path="MyStruct/my_method", include_body=true)`
+- **Kind filter + path scope:**
+  `symbols(path="src/tools/", kind="struct")`
+- **Find across project then read body:**
+  `symbols(name="edit_code")` → `symbols(name_path="ToolName/edit_code", include_body=true)`
+
+Language `kind` quirks:
+
+| Language      | `kind=`       | Note                                        |
+|---------------|---------------|---------------------------------------------|
+| Rust          | `"interface"` | traits — rust-analyzer emits Interface kind |
+| Rust          | `"struct"`    | structs; impl methods via `name_path`        |
+| TypeScript    | `"interface"` | TS interfaces                               |
+| TypeScript    | `"type"`      | type aliases                                |
+| Kotlin / Java | `"class"`     | classes, objects, annotations               |
+| Python        | `"class"`     | classes; methods via `name_path`            |
+
 ### Search Routing
 
 - **Know the name** → `symbols(name=...)` or `symbols(path)`
