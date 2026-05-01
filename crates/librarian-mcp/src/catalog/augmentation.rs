@@ -62,12 +62,9 @@ pub fn merge_params(cat: &Catalog, artifact_id: &str, patch: &Value) -> Result<b
     let Some(existing) = get(cat, artifact_id)? else {
         return Ok(false);
     };
-    let mut current: Value = serde_json::from_str(&existing.params)
-        .unwrap_or_else(|_| json!({}));
+    let mut current: Value = serde_json::from_str(&existing.params).unwrap_or_else(|_| json!({}));
     // RFC 7396 merge-patch
-    if let (Value::Object(target), Value::Object(patch_map)) =
-        (&mut current, patch)
-    {
+    if let (Value::Object(target), Value::Object(patch_map)) = (&mut current, patch) {
         for (k, v) in patch_map {
             if v.is_null() {
                 target.remove(k);
@@ -93,15 +90,15 @@ pub fn commit_refresh(cat: &Catalog, artifact_id: &str) -> Result<bool> {
              last_refreshed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
          WHERE artifact_id = ?1",
-        [artifact_id],
+        rusqlite::params![artifact_id],
     )?;
     Ok(n > 0)
 }
 
 pub fn list_all_ids(cat: &Catalog) -> Result<Vec<String>> {
-    let mut stmt = cat.conn.prepare(
-        "SELECT artifact_id FROM artifact_augmentation ORDER BY artifact_id",
-    )?;
+    let mut stmt = cat
+        .conn
+        .prepare("SELECT artifact_id FROM artifact_augmentation ORDER BY artifact_id")?;
     let ids = stmt
         .query_map([], |row| row.get(0))?
         .collect::<Result<Vec<String>, _>>()?;
@@ -131,7 +128,10 @@ pub fn get_batch(
     let rows = stmt
         .query_map(params.as_slice(), row_from_sql)?
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(rows.into_iter().map(|r| (r.artifact_id.clone(), r)).collect())
+    Ok(rows
+        .into_iter()
+        .map(|r| (r.artifact_id.clone(), r))
+        .collect())
 }
 
 #[cfg(test)]
