@@ -21,6 +21,7 @@ rmcp = { version = "1.3", features = ["server", "macros", "transport-io", "schem
 schemars = "1"
 globset = "0.4"
 walkdir = "2"
+regex = "1"
 ignore = "0.4"
 sha2 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }

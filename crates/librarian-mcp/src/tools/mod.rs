@@ -7,6 +7,7 @@ use crate::classify::CompiledRule;
 use crate::workspace::WorkspaceConfig;
 
 pub mod find;
+pub mod gather;
 pub mod get;
 pub mod graph;
 pub mod links;
