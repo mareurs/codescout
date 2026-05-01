@@ -10,3 +10,6 @@
 - [workspace_state_at](./workspace-state-at.md) — Time-travel snapshot: all artifacts in scope at a given commit/timestamp, with `freshness_at_as_of` vs `freshness_now` diff.
 - [Heartbeat memory fields](./heartbeat-memory-fields.md) — debug-mode heartbeat now logs `vm_size_kb` / `vm_rss_kb` / `vm_data_kb` / `vm_peak_kb` from `/proc/self/status`; gives per-instance memory time-series for OOM forensics.
 - [call_graph](./call-graph.md) — transitive call graph for any symbol; supports `callers`, `callees`, and `both` directions with LSP + tree-sitter fallback, sqlite edge caching, and per-file cache invalidation.
+- [Augmentation: render_template + params_schema](./augmentation-render-template.md) — MiniJinja template projecting params into `librarian_context` output; JSON Schema validation on every params write.
+- [tracker_design](./tracker-design.md) — pre-creation teaching tool returning 6 archetypes + 7-step design guide + existing-tracker landscape; call before `tracker_create`.
+- [artifact_refresh_stale](./artifact-refresh-stale.md) — discovery tool listing augmented artifacts due for refresh, oldest-first (never-refreshed first).
