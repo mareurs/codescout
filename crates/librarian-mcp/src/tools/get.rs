@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{Tool, ToolContext};
+use super::{RecoverableError, Tool, ToolContext};
 use crate::catalog::{artifact, augmentation, links, observations};
 use rusqlite;
 
@@ -206,6 +206,12 @@ impl Tool for ArtifactGet {
 
             let links_json = if want_links {
                 let direction = a.links_direction.as_deref().unwrap_or("both");
+                if !matches!(direction, "out" | "in" | "both") {
+                    return Err(RecoverableError::new(format!(
+                        "invalid links_direction '{}' — must be \"out\", \"in\", or \"both\"",
+                        direction
+                    )));
+                }
                 let rel_filter = a.links_rel.as_deref();
 
                 let outgoing_items: Vec<Value> = if direction == "out" || direction == "both" {
@@ -1059,6 +1065,18 @@ mod tests {
         let outgoing = result["links"]["outgoing"].as_array().unwrap();
         assert_eq!(outgoing.len(), 1);
         assert_eq!(outgoing[0]["rel"], "implements");
+    }
+
+    #[tokio::test]
+    async fn invalid_links_direction_errors() {
+        use crate::catalog::Catalog;
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("x")).unwrap();
+        let ctx = mk_ctx(cat);
+        let err = ArtifactGet
+            .call(&ctx, json!({"id": "x", "include_links": true, "links_direction": "sideways"}))
+            .await;
+        assert!(err.is_err());
     }
 
 }
