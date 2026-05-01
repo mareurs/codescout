@@ -132,7 +132,9 @@ strategy you judge best. The gate checklist below is your hard constraint.
   contain decisions you need for accurate memories.
 - **Trace at least 2 data flows.** Follow concrete operations end-to-end through
   the code, with actual function/method names — not just "the request goes through
-  the middleware layer."
+  the middleware layer." Use `call_graph(symbol, direction="callees", max_depth=3)`
+  to trace call chains; use `call_graph(direction="callers")` to size blast radius
+  before edits.
 - **Search by concept.** Run at least 5 semantic or keyword searches for concepts
   the codebase likely embodies (error handling, caching, authentication, etc.).
   Discover what the code does that README/docs don't mention.
@@ -151,7 +153,7 @@ Before writing ANY memory, verify ALL of these are true. If any is unchecked, co
 - [ ] Ran `symbols` on the top-level source AND on at least 4 subdirectories individually
 - [ ] Read the FULL body (not just signature) of at least 5 core types/functions
 - [ ] Read ALL architecture docs found, completely (not skimmed)
-- [ ] Traced two distinct data flows from entry point to terminal output
+- [ ] Traced two distinct data flows from entry point to terminal output (use `call_graph(direction="callees")` for at least one)
 - [ ] Ran at least 5 concept-level queries (`semantic_search` or `grep` fallback)
 - [ ] Read 2–3 test files and understood the testing pattern
 - [ ] Verified build/dev commands against actual repo contents

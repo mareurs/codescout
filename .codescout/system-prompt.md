@@ -23,12 +23,12 @@
 - Avoid: "tool", "error", "file" (too broad)
 - For a specific tool: `symbols("src/tools/<category>.rs")` + `symbols(name=..., include_body=true)`
 - For LSP flow: `semantic_search("get_or_start", project_id="code-explorer")`
-- For call relationships: `call_graph(symbol, path)` — traces callers and callees; use before refactoring to assess impact
+- For call relationships: `call_graph(symbol, direction, max_depth)` — `direction="callers"` for blast radius, `direction="callees"` for flow tracing; use before refactoring
 ## Navigation Strategy
 
 1. New task on a tool → `symbols("src/tools/<file>.rs")` + read body ranges
 2. Cross-cutting change → `semantic_search` across `src/` + check all 3 prompt surfaces
-3. Impact analysis before refactoring → `call_graph(symbol, path)` to trace callers/callees
+3. Impact analysis before refactoring → `call_graph(symbol, direction="callers", max_depth=3)` for blast radius; `direction="callees"` for flow tracing
 4. Bug in symbol editing → read `docs/TODO-tool-misbehaviors.md` first
 5. LSP behavior question → `symbols("src/lsp/client.rs")` then targeted reads
 6. Embedding question → `symbols("crates/codescout-embed/src/")` first
@@ -44,3 +44,19 @@
 - When renaming tools: update all 3 prompt surfaces (see `CLAUDE.md § Prompt Surface Consistency`)
 - GitHub tools shell to `gh` CLI — not HTTP; `sqlite-vec` is fully active (vec0 virtual tables with KNN search)
 - Subagents MUST restore home project after activating a different workspace project
+
+## Workspace Projects
+
+| Project | Root | Languages | Role |
+|---------|------|-----------|------|
+| code-explorer | . | rust | Main MCP server |
+| codescout-embed | crates/codescout-embed | rust | Embedding library |
+| librarian-mcp | crates/librarian-mcp | rust | Markdown doc indexer |
+| java-library | tests/fixtures/java-library | kotlin, java | Test fixture |
+| kotlin-library | tests/fixtures/kotlin-library | kotlin, java | Test fixture |
+| python-library | tests/fixtures/python-library | python | Test fixture |
+| rust-library | tests/fixtures/rust-library | rust | Test fixture |
+| typescript-library | tests/fixtures/typescript-library | typescript, javascript | Test fixture |
+
+GitHub: @mareurs | repo: mareurs/codescout
+→ For issues/PRs/repo ops, use codescout github tools with owner="mareurs" repo="codescout".
