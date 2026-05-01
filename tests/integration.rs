@@ -353,8 +353,8 @@ async fn workflow_ollama_index_and_search() {
 
 #[tokio::test]
 async fn workflow_onboarding_explore() {
-    use codescout::tools::list_dir::ListDir;
     use codescout::tools::onboarding::Onboarding;
+    use codescout::tools::tree::Tree;
 
     let (dir, ctx) = project_with_files(&[
         ("src/main.rs", "fn main() {}\n"),
@@ -374,7 +374,7 @@ async fn workflow_onboarding_explore() {
     // Step 3: List directory
 
     // Step 3: List directory
-    let list = ListDir
+    let list = Tree
         .call(json!({ "path": dir.path().display().to_string() }), &ctx)
         .await
         .unwrap();

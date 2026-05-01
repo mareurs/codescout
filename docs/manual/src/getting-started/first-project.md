@@ -93,13 +93,13 @@ Once onboarding and indexing are done, try these tools to get a feel for what is
 See the top-level layout of the project:
 
 ```json
-{ "name": "list_dir", "arguments": { "path": "." } }
+{ "name": "tree", "arguments": { "path": "." } }
 ```
 
 Drill into a subdirectory:
 
 ```json
-{ "name": "list_dir", "arguments": { "path": "src", "recursive": true } }
+{ "name": "tree", "arguments": { "path": "src", "recursive": true } }
 ```
 
 ### List Symbols
@@ -176,7 +176,7 @@ A practical sequence for exploring an unfamiliar codebase:
 
 1. `onboarding` — discover and remember the project structure.
 2. `index_project` — build the semantic search index.
-3. `list_dir` on the root and key subdirectories — build a mental map.
+3. `tree` on the root and key subdirectories — build a mental map.
 4. `symbols("src/")` — see what is defined at the top level.
 5. `semantic_search("entry point")` or `symbols("main")` — find where execution starts.
 6. From there, use `references` to trace callers and `symbols` to

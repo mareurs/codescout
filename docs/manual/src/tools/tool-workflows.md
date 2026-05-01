@@ -44,7 +44,7 @@ output feeds the next.
 | 3 | `symbol_at` with `fields: ["hover"]` on key call sites | Reveal concrete types flowing through (especially generics/traits) |
 | 4 | Edit with full knowledge of impact | |
 
-**Why not `search_pattern`?** A regex search for a symbol name returns string
+**Why not `grep`?** A regex search for a symbol name returns string
 matches — including imports, type annotations, comments, and tests.
 `references` returns only *actual usages* that will break if the API changes.
 
@@ -66,7 +66,7 @@ matches — including imports, type annotations, comments, and tests.
 | 4 | `references` at the destination | Confirm which callers reach this point |
 
 **Why not grep?** `symbol_at` follows the *actual* dispatch — through
-trait impls, re-exports, and type aliases. `search_pattern` finds text matches
+trait impls, re-exports, and type aliases. `grep` finds text matches
 but can't follow indirection.
 
 **Tips:**
@@ -83,10 +83,10 @@ but can't follow indirection.
 |------|------|---------|
 | 1 | `references(name_path, path)` | Map all usages before renaming |
 | 2 | `rename_symbol(name_path, path, new_name)` | LSP-powered rename across files |
-| 3 | `search_pattern(old_name)` | Catch stragglers in comments, strings, docs |
+| 3 | `grep(old_name)` | Catch stragglers in comments, strings, docs |
 | 4 | `run_command("cargo check")` | Verify compilation |
 
-**Why both `rename_symbol` and `search_pattern`?** LSP rename handles code
+**Why both `rename_symbol` and `grep`?** LSP rename handles code
 references precisely, but it can miss occurrences in string literals, comments,
 and documentation. Step 3 catches those stragglers. Step 1 gives you the
 expected count to verify against.

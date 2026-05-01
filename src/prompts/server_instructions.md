@@ -72,7 +72,7 @@ covers only cross-tool routing and non-obvious behaviors.
 - **Know the name** → `symbols(name=...)` or `symbols(path)`
 - **Know the concept** → `semantic_search(query)` then drill with symbol tools
 - **Know a text pattern** → `grep(pattern)`
-- **Know a filename** → `glob(pattern)`
+- **Know a filename** → `tree(glob=...)`
 - **All callers of X** → `references(symbol, path)` (not `grep`)
 
 ### Gotchas

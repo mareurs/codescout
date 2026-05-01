@@ -12,7 +12,7 @@
 | `list_functions` | `symbols` | Returns symbol tree with line ranges; requires LSP server |
 | `list_docs` | `symbols` + `symbols(include_body=true)` | Read the symbol body to inspect doc comments |
 
-`symbols` covers all 9 LSP-supported languages (not just the 4 with tree-sitter grammars) and returns richer output including types, nesting, and references. For languages where the LSP server hasn't started yet, `search_pattern` can locate doc comment blocks (`///`, `/**`) using a regex.
+`symbols` covers all 9 LSP-supported languages (not just the 4 with tree-sitter grammars) and returns richer output including types, nesting, and references. For languages where the LSP server hasn't started yet, `grep` can locate doc comment blocks (`///`, `/**`) using a regex.
 
 ## Why They Were Removed
 

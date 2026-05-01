@@ -14,7 +14,7 @@ Without guardrails, code intelligence tools can produce enormous output:
 | `symbols(dir)` | Walks the entire project, dumps every symbol in every file |
 | `symbols(pattern)` | Project-wide search with thousands of matches |
 | `references` | Popular symbols referenced in hundreds of files |
-| `list_dir(recursive=true)` | Full directory tree of a large monorepo |
+| `tree(recursive=true)` | Full directory tree of a large monorepo |
 | `run_command("git blame file")` (no line range) | Every line in a long file |
 
 Filling the context window with irrelevant symbols, boilerplate bodies, and

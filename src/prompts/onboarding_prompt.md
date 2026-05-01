@@ -147,7 +147,7 @@ strategy you judge best. The gate checklist below is your hard constraint.
 
 Before writing ANY memory, verify ALL of these are true. If any is unchecked, complete it first.
 
-- [ ] Listed top-level structure AND ran `list_dir` on each major subdirectory
+- [ ] Listed top-level structure AND ran `tree` on each major subdirectory
 - [ ] Ran `symbols` on the top-level source AND on at least 4 subdirectories individually
 - [ ] Read the FULL body (not just signature) of at least 5 core types/functions
 - [ ] Read ALL architecture docs found, completely (not skimmed)

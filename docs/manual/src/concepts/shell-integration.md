@@ -50,7 +50,7 @@ level. The error message suggests the appropriate codescout equivalent:
 | Blocked pattern | Redirect to |
 |---|---|
 | `cat src/foo.rs` | `read_file("src/foo.rs")` or `symbols("Foo")` |
-| `grep 'fn parse' src/` | `search_pattern("fn parse", path="src/")` |
+| `grep 'fn parse' src/` | `grep("fn parse", path="src/")` |
 | `head -20 main.py` | `read_file("main.py", start_line=1, end_line=20)` |
 
 This enforces token-efficient navigation. Reading an entire file to find one

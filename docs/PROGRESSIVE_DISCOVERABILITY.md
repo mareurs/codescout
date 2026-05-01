@@ -143,7 +143,7 @@ paginate.** Larger caps waste tokens on results the agent won't read.
 | `symbols` (single-file overview) | 100 top-level symbols | Agent scans structure to find target |
 | `search_pattern` | 200 lines | Regex matches need more context to evaluate |
 | `semantic_search` | 10 chunks | Ranked results; top 10 is almost always sufficient |
-| `list_dir` | 200 entries | Directory listings are compact |
+| `tree` | 200 entries | Directory listings are compact |
 
 **Why 50 for `symbols` pattern search, not 200?** The original 200 cap was set before `by_file` existed.
 With `by_file`, the agent gets a complete file distribution even when only 50 symbols are returned.
@@ -162,7 +162,7 @@ Bad:
 
 Good:
 ```json
-{"error": "path not found: src/compnents", "hint": "Did you mean src/components? Use list_dir('.') to see available directories."}
+{"error": "path not found: src/compnents", "hint": "Did you mean src/components? Use tree('.') to see available directories."}
 ```
 
 This pattern is already established in the codebase (`RecoverableError::with_hint`). Extend it to
@@ -272,7 +272,7 @@ Understanding the consumer is essential for designing good tool output. Key beha
    (often wrong) or abandons the approach. Concrete hints have dramatically better follow-through.
 
 5. **`by_file` as decision aid.** When the LLM sees a file distribution, it can match file paths
-   against its understanding of the project (from prior `list_dir` calls or its conversation
+   against its understanding of the project (from prior `tree` calls or its conversation
    context) to pick the right file. This is faster and more reliable than scanning 50 result
    items.
 

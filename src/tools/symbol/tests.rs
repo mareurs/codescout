@@ -625,8 +625,8 @@ async fn path_not_found_hint_mentions_list_dir() {
         .downcast_ref::<crate::tools::RecoverableError>()
         .expect("should be RecoverableError");
     assert!(
-        rec.hint().unwrap_or("").contains("list_dir"),
-        "hint should mention list_dir, got: {:?}",
+        rec.hint().unwrap_or("").contains("tree"),
+        "hint should mention tree, got: {:?}",
         rec.hint()
     );
 }

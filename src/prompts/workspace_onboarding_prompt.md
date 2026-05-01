@@ -11,7 +11,7 @@ You are onboarding a **multi-project workspace**. The projects are listed in the
 Before deep-diving any single project, get a high-level understanding of ALL projects.
 
 **For each project in the workspace:**
-1. `list_dir("{project_root}")` — see top-level structure
+1. `tree("{project_root}")` — see top-level structure
 2. `symbols` on the main source directory
 3. `read_file` the build config (Cargo.toml / package.json / go.mod)
 4. Note: purpose, tech stack, size (rough file count), key entry points
@@ -51,7 +51,7 @@ Deep-dive the `{project_root}/` directory and write 3 per-project memories:
 Use: `memory(action: "write", project_id: "{project_id}", topic: "...", content: "...")`
 
 ## Exploration Steps (scoped to {project_root}/)
-1. `list_dir("{project_root}")` — see structure
+1. `tree("{project_root}")` — see structure
 2. `symbols` on ALL source files in the project
 3. `read_file` on build config, README if present
 4. `symbols(name=..., include_body=true)` on 3-5 key functions/types

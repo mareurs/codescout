@@ -129,7 +129,7 @@ Each tool implements the `Tool` trait (`name`, `description`, `input_schema`, `a
 
 | Category | File | Tools |
 |----------|------|-------|
-| File | `file.rs` | `read_file`, `list_dir`, `search_pattern`, `find_file`, `create_file`, `edit_file` |
+| File | `file.rs` | `read_file`, `tree`, `grep`, `create_file`, `edit_file` |
 | Workflow | `workflow.rs` | `onboarding`, `run_command` |
 | Symbol | `symbol.rs` | `symbols`, `symbol_at`, `references`, `replace_symbol`, `remove_symbol`, `insert_code`, `rename_symbol` (all navigation tools support `scope` param) |
 | Semantic | `semantic.rs` | `semantic_search`, `index_project`, `index_status` |

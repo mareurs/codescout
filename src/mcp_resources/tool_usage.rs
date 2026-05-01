@@ -273,7 +273,7 @@ mod tests {
     async fn empty_snapshot_produces_empty_report() {
         let provider = ToolUsageProvider::new(FakeSource {
             snap: UsageSnapshot::default(),
-            registered: vec!["symbols".into(), "list_dir".into()],
+            registered: vec!["symbols".into(), "tree".into()],
         });
         let bytes = provider.read(URI).await.unwrap();
         let ResourceBytes::Text(json) = bytes else {
@@ -285,7 +285,7 @@ mod tests {
         // Both registered tools are unused.
         assert_eq!(
             parsed["unused_tools"],
-            serde_json::json!(["list_dir", "symbols"])
+            serde_json::json!(["symbols", "tree"])
         );
         assert_eq!(parsed["prune_candidates"], serde_json::json!([]));
     }
@@ -305,7 +305,7 @@ mod tests {
                 "symbols".into(),
                 "rename_symbol".into(),
                 "symbol_at".into(),
-                "list_dir".into(), // never called → unused
+                "tree".into(), // never called → unused
             ],
         });
 
@@ -318,7 +318,7 @@ mod tests {
             parsed["prune_candidates"],
             serde_json::json!(["rename_symbol", "symbol_at"])
         );
-        assert_eq!(parsed["unused_tools"], serde_json::json!(["list_dir"]));
+        assert_eq!(parsed["unused_tools"], serde_json::json!(["tree"]));
     }
 
     #[tokio::test]

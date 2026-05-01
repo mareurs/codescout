@@ -549,7 +549,7 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
                 "path is neither file nor directory: {}",
                 full_path.display()
             ),
-            "Verify the path exists with list_dir.",
+            "Verify the path exists with tree.",
         )
         .into())
     }

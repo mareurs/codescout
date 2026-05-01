@@ -10,10 +10,8 @@ pub mod create_file;
 pub mod edit_file;
 pub mod file_summary;
 pub(crate) mod format;
-pub mod glob;
 pub mod grep;
 pub mod library;
-pub mod list_dir;
 pub mod memory;
 pub mod output;
 pub mod output_buffer;
@@ -27,6 +25,7 @@ pub mod onboarding;
 pub mod read_file;
 pub mod run_command;
 pub mod section_coverage;
+pub mod tree;
 pub use onboarding::Onboarding;
 pub use run_command::RunCommand;
 
@@ -824,9 +823,9 @@ mod tests {
 
     #[test]
     fn recoverable_error_stores_hint() {
-        let e = RecoverableError::with_hint("path not found", "use list_dir to explore");
+        let e = RecoverableError::with_hint("path not found", "use tree to explore");
         assert_eq!(e.message, "path not found");
-        assert_eq!(e.hint(), Some("use list_dir to explore"));
+        assert_eq!(e.hint(), Some("use tree to explore"));
     }
 
     #[test]

@@ -137,7 +137,7 @@ gate logic.
 **Tips:**
 
 - `old_string` must match exactly — include any leading whitespace and indentation.
-- Use `search_pattern` first to verify the exact text if you are unsure what to match.
+- Use `grep` first to verify the exact text if you are unsure what to match.
 - If you get a multiple-matches error, expand `old_string` to include enough surrounding context to make it unique, or use `replace_all: true`.
 - Use `insert: "prepend"` or `insert: "append"` to add content at the start or end of a file when there is no anchor string to match.
 - For adding a completely new top-level definition adjacent to an existing one, `insert_code` is more convenient — it addresses the location by symbol name rather than requiring an exact text match.
@@ -267,5 +267,5 @@ All three require:
 **Tips for symbol tools:**
 
 - Use `symbols` or `symbols` first to obtain the correct `name_path`. Nested symbols use a slash-separated path: `"OuterStruct/inner_method"`.
-- `rename_symbol` requires a running LSP server for the file's language. If the LSP is unavailable, the tool returns an error — fall back to `search_pattern` combined with `edit_file` in that case, but be aware it will not respect scoping.
-- After a `replace_symbol` edit, the file content shifts. If you plan to make additional `edit_file` edits in the same file, use `search_pattern` to verify the exact text you want to match before editing.
+- `rename_symbol` requires a running LSP server for the file's language. If the LSP is unavailable, the tool returns an error — fall back to `grep` combined with `edit_file` in that case, but be aware it will not respect scoping.
+- After a `replace_symbol` edit, the file content shifts. If you plan to make additional `edit_file` edits in the same file, use `grep` to verify the exact text you want to match before editing.

@@ -353,10 +353,9 @@ async fn perform_edit(
 #[cfg(test)]
 mod tests {
     use super::super::create_file::CreateFile;
-    use super::super::glob::Glob;
     use super::super::grep::{format_grep, Grep};
-    use super::super::list_dir::{common_path_prefix, format_list_dir, ListDir};
     use super::super::read_file::{format_read_file, ReadFile};
+    use super::super::tree::{common_path_prefix, format_list_dir, Tree};
     use super::super::RecoverableError;
     use super::*;
     use crate::agent::Agent;
@@ -930,16 +929,16 @@ mod tests {
         );
     }
 
-    // ── ListDir ───────────────────────────────────────────────────────────────
+    // ── Tree (list_dir mode) ─────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn list_dir_returns_shallow_entries() {
+    async fn tree_returns_shallow_entries() {
         let ctx = test_ctx().await;
         let dir = tempdir().unwrap();
         std::fs::write(dir.path().join("a.rs"), "").unwrap();
         std::fs::write(dir.path().join("b.rs"), "").unwrap();
 
-        let result = ListDir
+        let result = Tree
             .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
             .await
             .unwrap();
@@ -956,14 +955,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_dir_shallow_does_not_descend() {
+    async fn tree_shallow_does_not_descend() {
         let ctx = test_ctx().await;
         let dir = tempdir().unwrap();
         let sub = dir.path().join("sub");
         std::fs::create_dir(&sub).unwrap();
         std::fs::write(sub.join("deep.rs"), "").unwrap();
 
-        let result = ListDir
+        let result = Tree
             .call(
                 json!({ "path": dir.path().to_str().unwrap(), "recursive": false }),
                 &ctx,
@@ -982,14 +981,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_dir_recursive_descends() {
+    async fn tree_recursive_descends() {
         let ctx = test_ctx().await;
         let dir = tempdir().unwrap();
         let sub = dir.path().join("sub");
         std::fs::create_dir(&sub).unwrap();
         std::fs::write(sub.join("deep.rs"), "").unwrap();
 
-        let result = ListDir
+        let result = Tree
             .call(
                 json!({ "path": dir.path().to_str().unwrap(), "recursive": true }),
                 &ctx,
@@ -1007,7 +1006,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_dir_caps_output_in_exploring_mode() {
+    async fn tree_caps_output_in_exploring_mode() {
         let ctx = test_ctx().await;
         let dir = tempdir().unwrap();
         // Create more files than the default cap (200)
@@ -1024,7 +1023,7 @@ mod tests {
         // we verify the mechanism works by checking that >200 entries
         // DO produce overflow. Instead, let's verify the non-overflow
         // case works (no overflow key) and that the entries are correct.
-        let result = ListDir
+        let result = Tree
             .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
             .await
             .unwrap();
@@ -1035,7 +1034,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_dir_max_depth_limits_descent() {
+    async fn tree_max_depth_limits_descent() {
         let ctx = test_ctx().await;
         let dir = tempdir().unwrap();
         // depth1/depth2/depth3/deep.rs — should not appear with max_depth=2
@@ -1044,7 +1043,7 @@ mod tests {
         std::fs::write(deep.join("deep.rs"), "").unwrap();
         std::fs::write(dir.path().join("depth1").join("shallow.rs"), "").unwrap();
 
-        let result = ListDir
+        let result = Tree
             .call(
                 json!({ "path": dir.path().to_str().unwrap(), "max_depth": 2 }),
                 &ctx,
@@ -1065,7 +1064,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_dir_recursive_exploring_caps_at_depth_3() {
+    async fn tree_recursive_exploring_caps_at_depth_3() {
         let ctx = test_ctx().await;
         let dir = tempdir().unwrap();
         // Build a 4-level deep tree
@@ -1074,7 +1073,7 @@ mod tests {
         std::fs::write(deep.join("leaf.rs"), "").unwrap();
         std::fs::write(dir.path().join("a").join("b").join("mid.rs"), "").unwrap();
 
-        let result = ListDir
+        let result = Tree
             .call(
                 json!({ "path": dir.path().to_str().unwrap(), "recursive": true }),
                 &ctx,
@@ -1097,14 +1096,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_dir_recursive_focused_no_depth_cap() {
+    async fn tree_recursive_focused_no_depth_cap() {
         let ctx = test_ctx().await;
         let dir = tempdir().unwrap();
         let deep = dir.path().join("a").join("b").join("c").join("d");
         std::fs::create_dir_all(&deep).unwrap();
         std::fs::write(deep.join("leaf.rs"), "").unwrap();
 
-        let result = ListDir
+        let result = Tree
             .call(
                 json!({
                     "path": dir.path().to_str().unwrap(),
@@ -1312,20 +1311,20 @@ mod tests {
         assert_eq!(contents, "new content");
     }
 
-    // ── Glob ─────────────────────────────────────────────────────────────
+    // ── Tree (glob mode) ─────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn glob_matches_pattern() {
+    async fn tree_glob_matches_pattern() {
         let ctx = test_ctx().await;
         let dir = tempdir().unwrap();
         std::fs::write(dir.path().join("foo.rs"), "").unwrap();
         std::fs::write(dir.path().join("bar.rs"), "").unwrap();
         std::fs::write(dir.path().join("baz.txt"), "").unwrap();
 
-        let result = Glob
+        let result = Tree
             .call(
                 json!({
-                    "pattern": "*.rs",
+                    "glob": "*.rs",
                     "path": dir.path().to_str().unwrap()
                 }),
                 &ctx,
@@ -1339,7 +1338,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn glob_recursive() {
+    async fn tree_glob_recursive() {
         let ctx = test_ctx().await;
         let dir = tempdir().unwrap();
         let sub = dir.path().join("src");
@@ -1347,10 +1346,10 @@ mod tests {
         std::fs::write(sub.join("lib.rs"), "").unwrap();
         std::fs::write(dir.path().join("main.rs"), "").unwrap();
 
-        let result = Glob
+        let result = Tree
             .call(
                 json!({
-                    "pattern": "**/*.rs",
+                    "glob": "**/*.rs",
                     "path": dir.path().to_str().unwrap()
                 }),
                 &ctx,
@@ -1363,17 +1362,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn glob_respects_limit() {
+    async fn tree_glob_respects_limit() {
         let ctx = test_ctx().await;
         let dir = tempdir().unwrap();
         for i in 0..10 {
             std::fs::write(dir.path().join(format!("f{}.rs", i)), "").unwrap();
         }
 
-        let result = Glob
+        let result = Tree
             .call(
                 json!({
-                    "pattern": "*.rs",
+                    "glob": "*.rs",
                     "path": dir.path().to_str().unwrap(),
                     "limit": 3
                 }),
@@ -1387,15 +1386,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn glob_no_matches() {
+    async fn tree_glob_no_matches() {
         let ctx = test_ctx().await;
         let dir = tempdir().unwrap();
         std::fs::write(dir.path().join("readme.md"), "").unwrap();
 
-        let result = Glob
+        let result = Tree
             .call(
                 json!({
-                    "pattern": "*.rs",
+                    "glob": "*.rs",
                     "path": dir.path().to_str().unwrap()
                 }),
                 &ctx,
@@ -1406,10 +1405,10 @@ mod tests {
         assert_eq!(result["files"].as_array().unwrap().len(), 0);
     }
 
-    // ── ListDir .git exclusion ──────────────────────────────────────────────
+    // ── Tree (list_dir mode) .git exclusion ─────────────────────────────────
 
     #[tokio::test]
-    async fn list_dir_recursive_excludes_git() {
+    async fn tree_recursive_excludes_git() {
         let ctx = test_ctx().await;
         let dir = tempdir().unwrap();
 
@@ -1428,7 +1427,7 @@ mod tests {
         std::fs::write(src_dir.join("main.rs"), "fn main() {}").unwrap();
         std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
 
-        let result = ListDir
+        let result = Tree
             .call(
                 json!({ "path": dir.path().to_str().unwrap(), "recursive": true }),
                 &ctx,
@@ -1502,7 +1501,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn glob_skips_hidden_dirs() {
+    async fn tree_glob_skips_hidden_dirs() {
         let ctx = test_ctx().await;
         let dir = tempdir().unwrap();
 
@@ -1514,9 +1513,9 @@ mod tests {
         std::fs::create_dir_all(&wt_dir).unwrap();
         std::fs::write(wt_dir.join("main.rs"), "").unwrap();
 
-        let result = Glob
+        let result = Tree
             .call(
-                json!({ "pattern": "**/*.rs", "path": dir.path().to_str().unwrap() }),
+                json!({ "glob": "**/*.rs", "path": dir.path().to_str().unwrap() }),
                 &ctx,
             )
             .await
@@ -1589,10 +1588,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn glob_missing_pattern_errors() {
+    async fn tree_without_glob_falls_back_to_list_dir() {
         let ctx = test_ctx().await;
-        let result = Glob.call(json!({}), &ctx).await;
-        assert!(result.is_err(), "glob without pattern should error");
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "").unwrap();
+        let result = Tree
+            .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            result.get("entries").is_some(),
+            "no glob -> list_dir shape with entries; got: {result}"
+        );
+        assert!(result.get("files").is_none());
     }
 
     #[tokio::test]
@@ -1644,8 +1652,8 @@ mod tests {
             rec.message
         );
         assert!(
-            rec.hint().unwrap_or("").contains("list_dir"),
-            "hint should suggest list_dir; got: {:?}",
+            rec.hint().unwrap_or("").contains("tree"),
+            "hint should suggest tree; got: {:?}",
             rec.hint()
         );
     }
@@ -1673,9 +1681,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_dir_nonexistent_path_errors() {
+    async fn tree_nonexistent_path_errors() {
         let ctx = test_ctx().await;
-        let result = ListDir
+        let result = Tree
             .call(json!({ "path": "/nonexistent/directory" }), &ctx)
             .await
             .unwrap();
@@ -2900,9 +2908,9 @@ mod tests {
     }
 
     #[test]
-    fn glob_format_compact_shows_count() {
+    fn tree_glob_format_compact_shows_count() {
         use serde_json::json;
-        let tool = Glob;
+        let tool = Tree;
         let result = json!({ "files": ["src/a.rs", "src/b.rs"], "total": 2 });
         let text = tool.format_compact(&result).unwrap();
         assert!(text.contains("2 files"), "got: {text}");

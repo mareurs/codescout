@@ -60,7 +60,7 @@ scores across different embedding models; they are not on the same scale.
 |--------------------------------|--------------------------------------------------|
 | The exact name                 | `symbols(pattern)`                           |
 | The file it's in               | `symbols(path)`                             |
-| A text fragment                | `search_pattern(regex)`                          |
+| A text fragment                | `grep(regex)`                          |
 | The concept, not the name      | `semantic_search(query)`                         |
 | The concept, inside a library  | `semantic_search(query, scope: "lib:<name>")`    |
 

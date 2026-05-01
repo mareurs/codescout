@@ -176,7 +176,7 @@ full detail, paginated via offset/limit. Enforced via `OutputGuard`
 
 **Tool Selection by Knowledge Level** — Know the name → LSP/AST tools
 (`symbols`, `symbol_at`). Know the concept →
-semantic search first, then drill down. Know nothing → `list_dir` +
+semantic search first, then drill down. Know nothing → `tree` +
 `symbols` at top level, then semantic search.
 
 **Agent-Agnostic Design** — Tool descriptions, error messages, and server

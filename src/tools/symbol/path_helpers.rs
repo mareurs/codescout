@@ -59,7 +59,7 @@ pub(super) async fn resolve_read_path(
     if !full.exists() {
         return Err(RecoverableError::with_hint(
             format!("path not found: {}", full.display()),
-            "Use list_dir to explore the directory structure, \
+            "Use tree to explore the directory structure, \
              or get_symbols_overview on a directory path.",
         )
         .into());
@@ -202,7 +202,7 @@ pub(super) async fn resolve_glob(
     if matches.is_empty() {
         return Err(RecoverableError::with_hint(
             format!("no files matched glob pattern: {}", path_or_glob),
-            "Try a broader pattern or use list_dir to verify the path exists.",
+            "Try a broader pattern or use tree to verify the path exists.",
         )
         .into());
     }

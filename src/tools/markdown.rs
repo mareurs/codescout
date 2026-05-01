@@ -88,7 +88,7 @@ impl Tool for ReadMarkdown {
             if resolved.is_dir() {
                 return Err(RecoverableError::with_hint(
                     format!("'{}' is a directory, not a file", path),
-                    "Use list_dir to browse directory contents, or provide a specific file path",
+                    "Use tree to browse directory contents, or provide a specific file path",
                 )
                 .into());
             }
@@ -96,7 +96,7 @@ impl Tool for ReadMarkdown {
             let text = std::fs::read_to_string(&resolved).map_err(|e| match e.kind() {
                 std::io::ErrorKind::NotFound => RecoverableError::with_hint(
                     format!("file not found: '{}'", path),
-                    "Check the path with list_dir, or use find_file to locate the file",
+                    "Check the path with tree, or use tree with `glob` to locate the file",
                 )
                 .into(),
                 _ => anyhow::anyhow!("failed to read {}: {}", resolved.display(), e),

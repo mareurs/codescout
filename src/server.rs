@@ -23,10 +23,8 @@ use crate::tools::{
     config::{ActivateProject, ProjectStatus},
     create_file::CreateFile,
     edit_file::EditFile,
-    glob::Glob,
     grep::Grep,
     library::{ListLibraries, RegisterLibrary},
-    list_dir::ListDir,
     markdown::{EditMarkdown, ReadMarkdown},
     memory::Memory,
     progress,
@@ -35,6 +33,7 @@ use crate::tools::{
     symbol::{
         InsertCode, References, RemoveSymbol, RenameSymbol, ReplaceSymbol, SymbolAt, Symbols,
     },
+    tree::Tree,
     Onboarding, RunCommand, Tool, ToolContext,
 };
 use crate::usage::UsageRecorder;
@@ -96,10 +95,9 @@ impl CodeScoutServer {
         let mut tools: Vec<Arc<dyn Tool>> = vec![
             // File tools (fully implemented)
             Arc::new(ReadFile),
-            Arc::new(ListDir),
+            Arc::new(Tree),
             Arc::new(Grep),
             Arc::new(CreateFile),
-            Arc::new(Glob),
             Arc::new(EditFile),
             Arc::new(EditMarkdown),
             Arc::new(ReadMarkdown),
@@ -1318,10 +1316,9 @@ mod tests {
         let (_dir, server) = make_server().await;
         let expected_tools = [
             "read_file",
-            "list_dir",
+            "tree",
             "grep",
             "create_file",
-            "glob",
             "edit_file",
             "edit_markdown",
             "read_markdown",
@@ -1654,12 +1651,12 @@ mod tests {
     fn recoverable_error_body_includes_hint_when_present() {
         let err = anyhow::Error::new(crate::tools::RecoverableError::with_hint(
             "not found",
-            "use list_dir to explore",
+            "use tree to explore",
         ));
         let result = route_tool_error(err);
         let text = &result.content[0].as_text().unwrap().text;
         let body: serde_json::Value = serde_json::from_str(text).unwrap();
-        assert_eq!(body["hint"], "use list_dir to explore");
+        assert_eq!(body["hint"], "use tree to explore");
     }
 
     #[test]
@@ -1785,7 +1782,7 @@ mod tests {
         let (dir, server) = make_server().await;
         let root = dir.path().to_string_lossy().to_string();
 
-        let req = CallToolRequestParams::new("list_dir")
+        let req = CallToolRequestParams::new("tree")
             .with_arguments(serde_json::from_value(serde_json::json!({"path": "."})).unwrap());
         let result = server
             .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
@@ -1800,7 +1797,7 @@ mod tests {
 
         assert!(
             !text.is_empty(),
-            "list_dir returned empty output — the strip test is not actually exercising anything"
+            "tree returned empty output — the strip test is not actually exercising anything"
         );
         assert!(
             !text.contains(&root),
@@ -1987,7 +1984,7 @@ mod tests {
                 );
             }
             // Non-LSP tools must still be visible.
-            for always_tool in &["read_file", "list_dir", "memory", "activate_project"] {
+            for always_tool in &["read_file", "tree", "memory", "activate_project"] {
                 assert!(
                     visible.contains(always_tool),
                     "Always-available tool '{}' should remain visible",

@@ -215,7 +215,7 @@ pub(crate) fn build_system_prompt_draft(
     // Entry points section
     draft.push_str("## Entry Points\n");
     if entry_points.is_empty() {
-        draft.push_str("- Explore with `list_dir(\".\")` then `symbols` on key files\n");
+        draft.push_str("- Explore with `tree(\".\")` then `symbols` on key files\n");
     } else {
         for ep in entry_points {
             draft.push_str(&format!("- `{}` — start here\n", ep));
@@ -745,8 +745,8 @@ pub(crate) fn build_per_project_prompt(
     prompt.push_str("Explore ONLY your project root. Do NOT explore sibling projects.\n\n");
     prompt.push_str(&format!(
         "### Step 1: Map the Codebase Structure\n\n\
-         - `list_dir(\"{root}\")` — top-level structure\n\
-         - `list_dir` on each subdirectory\n\
+         - `tree(\"{root}\")` — top-level structure\n\
+         - `tree` on each subdirectory\n\
          - `read_file` on the build config\n\
          - `read_markdown(\"README.md\")` if present\n\n",
         root = project.relative_root.display()
@@ -788,7 +788,7 @@ pub(crate) fn build_per_project_prompt(
     prompt.push_str(
         "### Phase 2 Gate Checklist\n\n\
          Before writing ANY memory, verify ALL true:\n\
-         - [ ] Listed structure AND ran list_dir on major subdirectories\n\
+         - [ ] Listed structure AND ran tree on major subdirectories\n\
          - [ ] Symbol survey on 5+ source files\n\
          - [ ] Read full body of 5+ core implementations\n\
          - [ ] Read all architecture docs\n\

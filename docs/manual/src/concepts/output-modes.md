@@ -149,8 +149,8 @@ These tools respect `detail_level`, `offset`, and `limit`:
 | `symbols` | Names, kinds, files, lines | Full symbol trees with bodies |
 | `symbols` | Names, kinds, locations | + bodies (when `include_body=true`) |
 | `references` | Reference locations | Paginated reference list |
-| `list_dir` | File paths | Paginated entries |
-| `search_pattern` | Top matches | Paginated full matches |
+| `tree` | File paths | Paginated entries |
+| `grep` | Top matches | Paginated full matches |
 | `semantic_search` | Top matches with scores | Paginated full chunks |
 
 ## Tools With Fixed Output
@@ -160,8 +160,8 @@ switching:
 
 | Tool | Behaviour |
 |------|-----------|
-| `search_pattern` | Always returns up to `max_results` matches (default: 50) |
-| `find_file` | Always returns up to `max_results` paths (default: 100) |
+| `grep` | Always returns up to `max_results` matches (default: 50) |
+| `tree` (with glob) | Always returns up to `max_results` paths (default: 100) |
 | `symbols` | Returns all symbols in a file (bounded by nature) |
 
 For these tools, use their own `limit` or `max_results` parameter to control

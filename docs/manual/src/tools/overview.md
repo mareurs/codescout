@@ -34,9 +34,9 @@ language support.
 | Tool | Description |
 |------|-------------|
 | `read_file` | Read lines from a file, with optional range and pagination |
-| `list_dir` | List files and directories, optionally recursive |
-| `search_pattern` | Search file contents with a regex pattern |
-| `find_file` | Find files by glob pattern, respecting `.gitignore` |
+| `tree` | List files and directories, optionally recursive |
+| `grep` | Search file contents with a regex pattern |
+| `tree` (with glob) | Find files by glob pattern, respecting `.gitignore` |
 | `create_file` | Create or overwrite a file with given content |
 | `edit_file` | Find-and-replace editing within a file |
 
@@ -125,8 +125,8 @@ for.
 | See what third-party libraries are registered | `list_libraries` |
 | Check index health, file count, drift scores | `index_status` |
 | Check project config and usage stats | `project_status` |
-| Search for a string or regex across files | `search_pattern` |
-| Find files matching a name pattern | `find_file` |
+| Search for a string or regex across files | `grep` |
+| Find files matching a name pattern | `tree` (with glob) |
 | Read a specific part of a file | `read_file` (with `start_line`/`end_line`) |
 | Remember a decision for the next session | `memory` with `action: "write"` |
 | Run a build or test command | `run_command` |

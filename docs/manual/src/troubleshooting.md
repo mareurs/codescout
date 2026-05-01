@@ -395,7 +395,7 @@ process. Startup time varies:
 | `kotlin-language-server` | 5-15 seconds |
 
 **Fix:** This is expected. Subsequent calls are fast because the server stays
-running. If startup time is a problem for Java or Kotlin, use `search_pattern`
+running. If startup time is a problem for Java or Kotlin, use `grep`
 or `semantic_search` for initial exploration — they have no startup delay.
 
 ### Large project causes tool timeouts

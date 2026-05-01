@@ -38,7 +38,7 @@ wrong place. The error message lists the detected worktree paths and the exact
 ## Layer 2 — Navigation Exclusions
 
 Worktree directories (`.claude/worktrees/`, `.worktrees/`) are excluded from
-`find_file` and `list_dir` results. Without this, file searches and directory
+`tree` (with glob) and `tree` results. Without this, file searches and directory
 listings in the main project would surface duplicate copies of every source
 file from every active worktree — polluting navigation and confusing symbol
 lookups.

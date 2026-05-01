@@ -131,8 +131,8 @@ Once you have a target, use `symbols` in Focused mode to read actual code.
 context. If you know the function name, use `symbols(include_body=true)`
 instead — you get the function body without the surrounding boilerplate.
 
-**Using `search_pattern` (grep) when `semantic_search` would serve better.**
-`search_pattern` matches literal text. It works well for finding exact
+**Using `grep` (grep) when `semantic_search` would serve better.**
+`grep` matches literal text. It works well for finding exact
 strings, imports, or call sites where you know the exact text. When you want
 code that implements a concept ("retry logic", "cache invalidation"), semantic
 search finds related code even when the words you think of do not appear in the
@@ -157,7 +157,7 @@ tracing usages of a known symbol.
 | Who calls a function | `references(name_path, file)` |
 | A concept or behaviour | `semantic_search(query)` |
 | Nothing (unfamiliar area) | `list_dir` → `symbols` → `semantic_search` |
-| Exact string or import | `search_pattern(regex)` |
+| Exact string or import | `grep(regex)` |
 
 ## Further Reading
 

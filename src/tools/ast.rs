@@ -50,7 +50,7 @@ impl Tool for ListFunctions {
         if !path.exists() {
             return Err(super::RecoverableError::with_hint(
                 format!("File not found: {}", path.display()),
-                "Check the path with list_dir or find_file.",
+                "Check the path with tree.",
             )
             .into());
         }
@@ -123,7 +123,7 @@ impl Tool for ListDocs {
         if !path.exists() {
             return Err(super::RecoverableError::with_hint(
                 format!("File not found: {}", path.display()),
-                "Check the path with list_dir or find_file.",
+                "Check the path with tree.",
             )
             .into());
         }

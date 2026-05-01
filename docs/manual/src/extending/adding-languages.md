@@ -52,8 +52,8 @@ used throughout the codebase. Keep it lowercase, no spaces.
 
 - `detect_language()` calls throughout the codebase recognize your file type
 - The semantic search chunker can split files of this type into chunks
-- `list_dir` reports the language for each file
-- `search_pattern` and `find_file` include these files in results
+- `tree` reports the language for each file
+- `grep` and `tree` (with glob) include these files in results
 
 This is enough to ship. Many languages in the current codebase (e.g. `php`,
 `swift`, `scala`, `elixir`, `haskell`, `lua`, `bash`) have detection only.

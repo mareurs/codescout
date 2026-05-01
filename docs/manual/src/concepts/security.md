@@ -37,7 +37,7 @@ intentional: the boundary needs to be hard for the safety guarantee to hold.
 
 ## Read Policy
 
-`read_file`, `search_pattern`, `find_file`, and all symbol tools can read from
+`read_file`, `grep`, `tree` (with glob), and all symbol tools can read from
 any path on the filesystem, subject to one restriction: the **built-in deny
 list**.
 

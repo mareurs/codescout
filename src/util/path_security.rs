@@ -1054,9 +1054,8 @@ mod tests {
         // Read tools should always work
         for tool in &[
             "read_file",
-            "list_dir",
+            "tree",
             "grep",
-            "glob",
             "read_markdown",
             "symbols",
             "list_functions",

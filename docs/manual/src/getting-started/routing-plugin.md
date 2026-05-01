@@ -78,7 +78,7 @@ you start a Claude Code session.
 ### Verification
 
 After installation, start a new Claude Code session and ask Claude which tools it will use for
-code search. You should see it cite `search_pattern`, `symbols`, and `semantic_search`
+code search. You should see it cite `grep`, `symbols`, and `semantic_search`
 rather than `grep`. You can also check installed plugins:
 
 ```bash
@@ -93,9 +93,9 @@ claude /plugin list
 
 Injects the following guidance at the start of every session:
 
-- Prefer `search_pattern` over `grep` for regex search across files.
+- Prefer `grep` over `grep` for regex search across files.
 - Prefer `symbols` and `symbols` over `cat`/`Read` when exploring code structure.
-- Prefer `list_dir` over `ls` and `find_file` over `find`.
+- Prefer `tree` over `ls` and `tree` (with glob) over `find`.
 - Use `semantic_search` when looking for code by concept rather than by name.
 - Reserve built-in file tools for writing new content and reading files that codescout does
   not index (binary files, generated artifacts, etc.).
@@ -119,11 +119,11 @@ The interception hook fires before any of these built-in tools execute:
 
 | Built-in called | Redirected to |
 |---|---|
-| `grep` | `search_pattern` |
+| `grep` | `grep` |
 | `Read` | `symbols` or `symbols` (for source files) |
 | `cat` | `symbols` or `symbols` (for source files) |
-| `find` | `find_file` |
-| `ls` | `list_dir` |
+| `find` | `tree` (with glob) |
+| `ls` | `tree` |
 
 The hook does not blindly block all uses of these tools. It applies heuristics to distinguish
 between reading source code (redirect) and reading configuration, logs, or other non-code files
