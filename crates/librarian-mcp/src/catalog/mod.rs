@@ -9,6 +9,7 @@ pub mod events;
 pub mod find;
 pub mod links;
 pub mod observations;
+pub mod augmentation;
 pub mod sources;
 
 pub struct Catalog {
@@ -114,6 +115,21 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 2);
+        assert_eq!(v, 3);
+    }
+
+    #[test]
+    fn schema_has_augmentation_table() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let tables: Vec<String> = cat
+            .conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(tables.iter().any(|t| t == "artifact_augmentation"),
+            "expected artifact_augmentation table, got: {tables:?}");
     }
 }

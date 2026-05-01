@@ -32,10 +32,15 @@ ephemeral session state (don't persist).
 | Add relation edge (supersedes, implements …)  | `artifact_link`         |
 | Append observation note                       | `artifact_observe`      |
 | Manual re-scan                                | `librarian_reindex`     |
+| Attach/update prompt+params on artifact       | `artifact_augment`      |
+| Tune gather params mid-session                | `artifact_update_params` |
+| Gather context for refresh (read-only)        | `artifact_refresh`      |
+| Commit completed refresh cycle                | `artifact_refresh_commit` |
+| Create tracker artifact + augment atomically  | `tracker_create`        |
+| List/find augmented artifacts                 | `artifact_find` with `augmented: true` |
 
 Example: `artifact_list_by_kind {kind: "tracker"}` — live trackers in the
 **current sub-project** (default scope). Pass `scope: "all"` to widen.
-
 ## Filter AST (one-liner)
 
 JSON tree. `and|or|not` compose; leaves use `eq|ne|in|nin|gt|lt|gte|lte|contains|prefix`.

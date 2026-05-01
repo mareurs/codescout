@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 
 use super::scope::{apply_scope, Scope, ScopeApplied};
 use super::{Tool, ToolContext};
+use crate::catalog::augmentation;
 use crate::catalog::find::{count_matching, find, FindOpts};
 use crate::filter::FilterNode;
 
@@ -31,6 +32,9 @@ struct Args {
     /// already constrains `status`.
     #[serde(default)]
     include_archived: bool,
+    /// Filter to augmented (true) or non-augmented (false) artifacts. Omit to return all.
+    #[serde(default)]
+    augmented: Option<bool>,
 }
 
 fn default_limit() -> usize {
@@ -67,6 +71,10 @@ impl Tool for ArtifactFind {
                 "include_archived": {
                     "type": "boolean",
                     "default": false
+                },
+                "augmented": {
+                    "type": "boolean",
+                    "description": "Filter to augmented (true) or non-augmented (false) artifacts. Omit to return all."
                 }
             }
         })
@@ -87,13 +95,55 @@ impl Tool for ArtifactFind {
             None
         };
 
-        let user_constrains_status = a
-            .filter
+        // Build augmented pre-filter if requested, then merge with user filter.
+        let user_filter: Option<FilterNode> = if let Some(want_augmented) = a.augmented {
+            let ids = {
+                let cat = ctx.catalog.lock();
+                augmentation::list_all_ids(&cat)?
+            };
+            if want_augmented {
+                if ids.is_empty() {
+                    return Ok(json!({"count": 0, "items": [], "scope": Value::Null, "hints": {}}));
+                }
+                let id_values: Vec<Value> = ids.into_iter().map(|id| json!(id)).collect();
+                let in_node = FilterNode::Leaf(
+                    [("id".to_string(), json!({"in": id_values}))]
+                        .into_iter()
+                        .collect(),
+                );
+                Some(match a.filter {
+                    Some(f) => FilterNode::And {
+                        and: vec![f, in_node],
+                    },
+                    None => in_node,
+                })
+            } else if ids.is_empty() {
+                // Nothing is augmented → "non-augmented" = everything; user filter unchanged.
+                a.filter
+            } else {
+                let id_values: Vec<Value> = ids.into_iter().map(|id| json!(id)).collect();
+                let nin_node = FilterNode::Leaf(
+                    [("id".to_string(), json!({"nin": id_values}))]
+                        .into_iter()
+                        .collect(),
+                );
+                Some(match a.filter {
+                    Some(f) => FilterNode::And {
+                        and: vec![f, nin_node],
+                    },
+                    None => nin_node,
+                })
+            }
+        } else {
+            a.filter
+        };
+
+        let user_constrains_status = user_filter
             .as_ref()
             .map(filter_mentions_status)
             .unwrap_or(false);
         let base = combine_user_with_archived_hide(
-            a.filter.clone(),
+            user_filter,
             a.include_archived,
             user_constrains_status,
         );
@@ -529,5 +579,63 @@ mod tests {
         let items = v["items"].as_array().unwrap();
         assert_eq!(items.len(), 2, "both artifacts should be returned");
         assert_eq!(items[0]["id"], "auth-doc");
+    }
+
+    #[tokio::test]
+    async fn augmented_true_returns_only_augmented() {
+        use crate::catalog::augmentation::{self, AugmentationRow};
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("plain", "Plain")).unwrap();
+        artifact::upsert(&cat, &sample_row("aug", "Augmented")).unwrap();
+        augmentation::upsert(
+            &cat,
+            &AugmentationRow {
+                artifact_id: "aug".to_string(),
+                prompt: "p".to_string(),
+                params: "{}".to_string(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            },
+        )
+        .unwrap();
+        let ctx = mk_ctx(cat);
+        let result = ArtifactFind
+            .call(&ctx, json!({"augmented": true, "scope": "all"}))
+            .await
+            .unwrap();
+        let items = result["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["id"], "aug");
+    }
+
+    #[tokio::test]
+    async fn augmented_false_returns_only_non_augmented() {
+        use crate::catalog::augmentation::{self, AugmentationRow};
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("plain", "Plain")).unwrap();
+        artifact::upsert(&cat, &sample_row("aug", "Augmented")).unwrap();
+        augmentation::upsert(
+            &cat,
+            &AugmentationRow {
+                artifact_id: "aug".to_string(),
+                prompt: "p".to_string(),
+                params: "{}".to_string(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            },
+        )
+        .unwrap();
+        let ctx = mk_ctx(cat);
+        let result = ArtifactFind
+            .call(&ctx, json!({"augmented": false, "scope": "all"}))
+            .await
+            .unwrap();
+        let items = result["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["id"], "plain");
     }
 }

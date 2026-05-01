@@ -18,11 +18,18 @@ const REAL_TOOLS: &[&str] = &[
     "artifact_observe",
     "librarian_context",
     "librarian_reindex",
+    "artifact_augment",
+    "artifact_update_params",
+    "artifact_refresh",
+    "artifact_refresh_commit",
+    "tracker_create",
 ];
 
 fn extract_tool_tokens(s: &str) -> Vec<&str> {
     s.split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
-        .filter(|t| t.starts_with("artifact_") || t.starts_with("librarian_"))
+        .filter(|t| {
+            t.starts_with("artifact_") || t.starts_with("librarian_") || t.starts_with("tracker_")
+        })
         .collect()
 }
 

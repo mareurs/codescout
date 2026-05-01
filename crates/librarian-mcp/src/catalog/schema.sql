@@ -115,3 +115,18 @@ CREATE INDEX IF NOT EXISTS idx_event_edges_dst_artifact ON event_edges(dst_artif
 CREATE INDEX IF NOT EXISTS idx_event_edges_dst_event ON event_edges(dst_event_id);
 
 INSERT OR IGNORE INTO schema_version (version) VALUES (2);
+
+-- v3: artifact augmentation (prompt + params for AI-maintained artifacts)
+CREATE TABLE IF NOT EXISTS artifact_augmentation (
+  artifact_id       TEXT    NOT NULL REFERENCES artifact(id) ON DELETE CASCADE,
+  prompt            TEXT    NOT NULL,
+  params            TEXT    NOT NULL DEFAULT '{}',
+  last_refreshed_at TEXT,
+  refresh_count     INTEGER NOT NULL DEFAULT 0,
+  created_at        TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at        TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  PRIMARY KEY (artifact_id)
+);
+CREATE INDEX IF NOT EXISTS idx_augmentation_artifact ON artifact_augmentation(artifact_id);
+
+INSERT OR IGNORE INTO schema_version (version) VALUES (3);

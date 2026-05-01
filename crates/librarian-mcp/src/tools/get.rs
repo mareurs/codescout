@@ -4,7 +4,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{Tool, ToolContext};
-use crate::catalog::{artifact, links, observations};
+use crate::catalog::{artifact, augmentation, links, observations};
 use rusqlite;
 
 use crate::frontmatter;
@@ -167,7 +167,7 @@ impl Tool for ArtifactGet {
         // so holding it across `preview::extract` would deadlock.
         let want_observations = a.include_observations.unwrap_or(false);
         let want_links = a.include_links.unwrap_or(false);
-        let (row, observations_json, links_json, latest_event_row, latest_reviewed_at) = {
+        let (row, observations_json, links_json, latest_event_row, latest_reviewed_at, aug) = {
             let cat = ctx.catalog.lock();
             let row = match artifact::get(&cat, &a.id)? {
                 Some(r) => r,
@@ -216,12 +216,15 @@ impl Tool for ArtifactGet {
                 )
                 .unwrap_or(None);
 
+            let aug = augmentation::get(&cat, &a.id)?;
+
             (
                 row,
                 observations_json,
                 links_json,
                 latest_event_row,
                 latest_reviewed_at,
+                aug,
             )
         };
 
@@ -262,6 +265,18 @@ impl Tool for ArtifactGet {
                 "kind": e.kind,
                 "created_at": e.created_at,
                 "head_commit": e.head_commit,
+            }),
+            None => Value::Null,
+        };
+
+        out["augmentation"] = match aug {
+            Some(a) => json!({
+                "prompt": a.prompt,
+                "params": serde_json::from_str::<Value>(&a.params).unwrap_or_else(|_| json!({})),
+                "last_refreshed_at": a.last_refreshed_at,
+                "refresh_count": a.refresh_count,
+                "created_at": a.created_at,
+                "updated_at": a.updated_at,
             }),
             None => Value::Null,
         };
@@ -888,5 +903,47 @@ mod tests {
         let res = ArtifactGet.call(&ctx, json!({"id": "a"})).await.unwrap();
         assert_eq!(res["freshness"], "fresh");
         assert_eq!(res["latest_event"]["kind"], "reviewed");
+    }
+
+    #[tokio::test]
+    async fn get_includes_augmentation_when_present() {
+        use crate::catalog::augmentation::{self, AugmentationRow};
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("aug-art")).unwrap();
+        augmentation::upsert(
+            &cat,
+            &AugmentationRow {
+                artifact_id: "aug-art".to_string(),
+                prompt: "Keep updated".to_string(),
+                params: r#"{"format":"table"}"#.to_string(),
+                last_refreshed_at: Some("2026-05-01T00:00:00.000Z".to_string()),
+                refresh_count: 5,
+                created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            },
+        )
+        .unwrap();
+        let ctx = mk_ctx(cat);
+        let result = ArtifactGet
+            .call(&ctx, json!({"id": "aug-art"}))
+            .await
+            .unwrap();
+        let aug = &result["augmentation"];
+        assert_eq!(aug["prompt"], "Keep updated");
+        assert_eq!(aug["refresh_count"], 5);
+        assert_eq!(aug["last_refreshed_at"], "2026-05-01T00:00:00.000Z");
+        assert_eq!(aug["params"]["format"], "table");
+    }
+
+    #[tokio::test]
+    async fn get_omits_augmentation_when_absent() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("plain-art")).unwrap();
+        let ctx = mk_ctx(cat);
+        let result = ArtifactGet
+            .call(&ctx, json!({"id": "plain-art"}))
+            .await
+            .unwrap();
+        assert!(result["augmentation"].is_null());
     }
 }

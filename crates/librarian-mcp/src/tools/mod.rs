@@ -7,6 +7,7 @@ use crate::classify::CompiledRule;
 use crate::workspace::WorkspaceConfig;
 
 pub mod find;
+pub mod gather;
 pub mod get;
 pub mod graph;
 pub mod links;
@@ -103,6 +104,12 @@ pub mod reindex;
 
 pub mod context;
 
+pub mod augment;
+pub mod refresh;
+pub mod refresh_commit;
+pub mod tracker_create;
+pub mod update_params;
+
 pub fn all_tools() -> Vec<Arc<dyn Tool>> {
     vec![
         Arc::new(find::ArtifactFind),
@@ -120,5 +127,10 @@ pub fn all_tools() -> Vec<Arc<dyn Tool>> {
         Arc::new(workspace_state_at::WorkspaceStateAt),
         Arc::new(reindex::LibrarianReindex),
         Arc::new(context::LibrarianContext),
+        Arc::new(augment::ArtifactAugment),
+        Arc::new(update_params::ArtifactUpdateParams),
+        Arc::new(refresh::ArtifactRefresh),
+        Arc::new(refresh_commit::ArtifactRefreshCommit),
+        Arc::new(tracker_create::TrackerCreate),
     ]
 }
