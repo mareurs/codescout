@@ -85,9 +85,11 @@ pub fn merge_params(cat: &Catalog, artifact_id: &str, patch: &Value) -> Result<b
     Ok(true)
 }
 
-/// RFC 7396 JSON merge-patch applied in place to `target`. `null` keys in the
-/// patch delete; non-null keys overwrite. Non-object patches are no-ops
-/// (the tool schema enforces object at the boundary).
+/// Shallow RFC 7396 merge-patch applied in place to `target`. `null` keys in the
+/// patch delete; non-null values overwrite the corresponding target key entirely.
+/// Nested objects are overwritten in full (not recursively merged). This is intentional —
+/// artifact params are expected to be flat key-value objects. Non-object patches are
+/// no-ops (the tool schema enforces object at the boundary).
 pub fn apply_merge_patch(target: &mut Value, patch: &Value) {
     if let (Value::Object(t), Value::Object(p)) = (target, patch) {
         for (k, v) in p {
