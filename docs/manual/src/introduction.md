@@ -54,7 +54,7 @@ tree-sitter, git, embedding index) and returns structured, compact results.
 
 Four pillars:
 
-### LSP Navigation (9 tools, 9 languages)
+### LSP Navigation (8 tools, 9 languages)
 
 The Language Server Protocol is how IDEs answer questions like "where is this
 defined?" and "who calls this?". codescout runs LSP servers on your behalf
@@ -67,8 +67,7 @@ and exposes their answers as agent-friendly tools.
 - `replace_symbol` — replace a function body by name, not by line number
 - `remove_symbol` — delete a named symbol entirely
 - `insert_code` — add code relative to a named symbol (`position: "before"` or `position: "after"`)
-- `goto_definition` — jump to the definition of a symbol at a given line
-- `hover` — type info and documentation for a symbol at a given position
+- `symbol_at` — inspect a symbol at a position via LSP: definition location and/or hover (type signature + docs)
 - `rename_symbol` — rename across the entire codebase via LSP
 
 Supported languages: Rust, Python, TypeScript/JavaScript, Go, Java, Kotlin,
@@ -107,7 +106,7 @@ up on the next session without re-discovery.
 ### Library Navigation (1 tool)
 
 Navigate third-party dependency source code without leaving your agent workflow.
-Libraries auto-register when LSP `goto_definition` returns paths outside the
+Libraries auto-register when LSP `symbol_at` returns paths outside the
 project root.
 
 - `list_libraries` — see all registered libraries and their status (use `index_project` with a library path to build a semantic index for it)

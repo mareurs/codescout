@@ -2,12 +2,12 @@
 
 Library navigation lets you explore third-party dependency source code using the
 same symbol tools you use for your own project — `find_symbol`, `list_symbols`,
-`goto_definition`, `semantic_search` — without switching contexts or manually
+`symbol_at`, `semantic_search` — without switching contexts or manually
 locating package directories.
 
 ## Auto-Discovery
 
-Libraries are discovered automatically. When you call `goto_definition` on a
+Libraries are discovered automatically. When you call `symbol_at` on a
 symbol and the LSP resolves it to a path *outside the project root* (typically
 inside a language package cache), codescout registers that path as a library
 and names it by the package name inferred from the manifest it finds there.

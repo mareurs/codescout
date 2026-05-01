@@ -41,7 +41,7 @@ output feeds the next.
 |------|------|---------|
 | 1 | `find_symbol(name, include_body=true)` | Read the current implementation |
 | 2 | `references(name_path, path)` | Find all callers and dependents |
-| 3 | `hover` on key call sites | Reveal concrete types flowing through (especially generics/traits) |
+| 3 | `symbol_at` with `fields: ["hover"]` on key call sites | Reveal concrete types flowing through (especially generics/traits) |
 | 4 | Edit with full knowledge of impact | |
 
 **Why not `search_pattern`?** A regex search for a symbol name returns string
@@ -50,7 +50,7 @@ matches — including imports, type annotations, comments, and tests.
 
 **Tips:**
 - Step 2 may overflow on widely-used symbols. Check the `by_file` distribution to focus on the most important callers.
-- Step 3 is optional but valuable for generic code — `hover` shows the *resolved* concrete type, not the declared generic.
+- Step 3 is optional but valuable for generic code — `symbol_at` (hover) shows the *resolved* concrete type, not the declared generic.
 
 ---
 
@@ -61,17 +61,17 @@ matches — including imports, type annotations, comments, and tests.
 | Step | Tool | Purpose |
 |------|------|---------|
 | 1 | `find_symbol(entry_point)` | Locate the starting function |
-| 2 | `goto_definition` on called functions | Follow the call chain forward |
-| 3 | `hover` on parameters/return values | See resolved types at each stage |
+| 2 | `symbol_at` with `fields: ["def"]` on called functions | Follow the call chain forward |
+| 3 | `symbol_at` with `fields: ["hover"]` on parameters/return values | See resolved types at each stage |
 | 4 | `references` at the destination | Confirm which callers reach this point |
 
-**Why not grep?** `goto_definition` follows the *actual* dispatch — through
+**Why not grep?** `symbol_at` follows the *actual* dispatch — through
 trait impls, re-exports, and type aliases. `search_pattern` finds text matches
 but can't follow indirection.
 
 **Tips:**
-- Use `goto_definition` iteratively — follow the chain function by function.
-- `hover` at each step shows the concrete types, which is critical when tracing through generics or trait objects.
+- Use `symbol_at` iteratively — follow the chain function by function.
+- The `hover` field at each step shows the concrete types, which is critical when tracing through generics or trait objects.
 
 ---
 

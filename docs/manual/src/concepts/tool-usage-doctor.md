@@ -42,7 +42,7 @@ curl -s -X POST http://127.0.0.1:PORT/mcp \
       "p99_ms": 210
     }
   ],
-  "prune_candidates": ["hover", "git_blame"],
+  "prune_candidates": ["symbol_at", "git_blame"],
   "unused_tools": ["register_library"]
 }
 ```

@@ -144,8 +144,8 @@ mod tests {
 
     #[tokio::test]
     async fn tool_guide_includes_dependency_tracing_workflow() {
-        use crate::tools::symbol::GotoDefinition;
-        let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(GotoDefinition)];
+        use crate::tools::symbol::SymbolAt;
+        let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(SymbolAt)];
         let p = ToolGuideProvider::new(tools);
         let bytes = p.read("doc://codescout-tool-guide").await.unwrap();
         match bytes {

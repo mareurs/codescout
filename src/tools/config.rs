@@ -126,7 +126,7 @@ impl Tool for ProjectStatus {
             tracing::info!("PostCompact: flushed all LSP clients; they will restart lazily.");
             return Ok(json!({
                 "flushed": true,
-                "hint": "LSP position caches cleared. Clients restart automatically on the next navigation call (goto_definition, hover, references)."
+                "hint": "LSP position caches cleared. Clients restart automatically on the next navigation call (symbol_at, references)."
             }));
         }
 

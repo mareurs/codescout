@@ -6,9 +6,7 @@
 
 use codescout::agent::Agent;
 use codescout::lsp::{MockLspClient, MockLspProvider, SymbolInfo, SymbolKind};
-use codescout::tools::symbol::{
-    FindSymbol, GotoDefinition, InsertCode, RemoveSymbol, ReplaceSymbol,
-};
+use codescout::tools::symbol::{FindSymbol, InsertCode, RemoveSymbol, ReplaceSymbol, SymbolAt};
 use codescout::tools::{Tool, ToolContext};
 use serde_json::json;
 
@@ -1682,15 +1680,15 @@ async fn find_symbol_name_path_does_not_return_local_variable_children() {
     assert_eq!(symbols[0]["name"], "my_fn");
 }
 
-// ── goto_definition: no-identifier fallback (BUG-012) ─────────────────────────
+// ── symbol_at def: no-identifier fallback (BUG-012) ───────────────────────────
 
-/// When `identifier` is omitted, `goto_definition` must use the first
+/// When `identifier` is omitted, `symbol_at` (def) must use the first
 /// non-whitespace column of the line, not error with "identifier not found".
 ///
 /// Regression for BUG-012: the old code called `str::find(ident)` which returned
 /// `None` for nearly every call, causing a 100% error rate.
 #[tokio::test]
-async fn goto_definition_unknown_identifier_falls_back_to_first_nonwhitespace() {
+async fn symbol_at_def_unknown_identifier_falls_back_to_first_nonwhitespace() {
     // Line 0 (1-indexed: line 1) has 4 spaces of indent before "let".
     // First non-whitespace column = 4.
     let src = "    let foo = 1;\n";
@@ -1724,11 +1722,12 @@ async fn goto_definition_unknown_identifier_falls_back_to_first_nonwhitespace() 
     })
     .await;
 
-    let result = GotoDefinition
+    let result = SymbolAt
         .call(
             json!({
                 "path": "src/lib.rs",
-                "line": 1
+                "line": 1,
+                "fields": ["def"]
                 // no "identifier" — must fall back to first-nonwhitespace column
             }),
             &ctx,
@@ -1736,7 +1735,7 @@ async fn goto_definition_unknown_identifier_falls_back_to_first_nonwhitespace() 
         .await
         .expect("should succeed: omitting identifier must not cause 'identifier not found'");
 
-    let defs = result["definitions"].as_array().unwrap();
+    let defs = result["def"]["definitions"].as_array().unwrap();
     assert_eq!(
         defs.len(),
         1,

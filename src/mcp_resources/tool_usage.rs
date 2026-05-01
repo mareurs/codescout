@@ -298,13 +298,13 @@ mod tests {
                 by_tool: vec![
                     make_stats("find_symbol", 197), // above threshold
                     make_stats("rename_symbol", 2), // below threshold, but > 0 → prune candidate
-                    make_stats("hover", 1),         // below threshold → prune candidate
+                    make_stats("symbol_at", 1),     // below threshold → prune candidate
                 ],
             },
             registered: vec![
                 "find_symbol".into(),
                 "rename_symbol".into(),
-                "hover".into(),
+                "symbol_at".into(),
                 "list_dir".into(), // never called → unused
             ],
         });
@@ -316,7 +316,7 @@ mod tests {
         assert_eq!(parsed["total_calls"], 200);
         assert_eq!(
             parsed["prune_candidates"],
-            serde_json::json!(["rename_symbol", "hover"])
+            serde_json::json!(["rename_symbol", "symbol_at"])
         );
         assert_eq!(parsed["unused_tools"], serde_json::json!(["list_dir"]));
     }

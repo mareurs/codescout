@@ -135,7 +135,7 @@ Onboarding takes 10–30 seconds on first run (LSP server startup). Subsequent s
 
 Re-run with `force: true` to rebuild from scratch: ask your agent `"Run codescout onboarding with force: true"`.
 
-> **Note:** If you skip onboarding, tools like `find_symbol`, `list_symbols`, and `goto_definition` will return errors — they depend on LSP servers that onboarding starts.
+> **Note:** If you skip onboarding, tools like `find_symbol`, `list_symbols`, and `symbol_at` will return errors — they depend on LSP servers that onboarding starts.
 
 ## Feature Flags
 

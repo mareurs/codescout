@@ -3784,7 +3784,7 @@ fn remove_symbol_format_compact_shows_range() {
 }
 
 #[test]
-fn hover_requires_lsp() {
+fn symbol_at_requires_lsp() {
     let off = crate::tools::ToolCapabilities {
         has_lsp: false,
         has_embeddings: false,
@@ -3795,7 +3795,7 @@ fn hover_requires_lsp() {
         has_lsp: true,
         ..off
     };
-    let t = Hover;
+    let t = SymbolAt;
     assert!(!t.availability(&off).is_available(&off));
     assert!(t.availability(&on).is_available(&on));
 }
@@ -4482,9 +4482,9 @@ async fn find_symbol_falls_back_to_document_symbols_on_bad_workspace_range() {
 }
 
 #[tokio::test]
-async fn goto_definition_uses_col_param_over_identifier() {
+async fn symbol_at_def_uses_col_param_over_identifier() {
     use crate::lsp::{mock::MockLspClient, mock::MockLspProvider};
-    use crate::tools::symbol::GotoDefinition;
+    use crate::tools::symbol::SymbolAt;
 
     let dir = tempfile::tempdir().unwrap();
     let src_dir = dir.path().join("src");
@@ -4529,27 +4529,28 @@ async fn goto_definition_uses_col_param_over_identifier() {
         )),
     };
 
-    let result = GotoDefinition
+    let result = SymbolAt
         .call(
             json!({
                 "path": "src/lib.rs",
                 "line": 1,
                 "col": 4,
                 "identifier": "DOES_NOT_EXIST_ON_LINE",
+                "fields": ["def"],
             }),
             &ctx,
         )
         .await
         .expect("col should win over identifier and resolve");
-    let defs = result["definitions"].as_array().unwrap();
+    let defs = result["def"]["definitions"].as_array().unwrap();
     assert_eq!(defs.len(), 1, "exactly one definition expected");
     assert_eq!(defs[0]["line"].as_u64(), Some(6)); // 5 + 1 (1-indexed)
 }
 
 #[tokio::test]
-async fn hover_returns_ok_with_null_content_when_lsp_empty() {
+async fn symbol_at_hover_returns_ok_with_null_content_when_lsp_empty() {
     use crate::lsp::{mock::MockLspClient, mock::MockLspProvider};
-    use crate::tools::symbol::Hover;
+    use crate::tools::symbol::SymbolAt;
 
     let dir = tempfile::tempdir().unwrap();
     let src_dir = dir.path().join("src");
@@ -4574,31 +4575,32 @@ async fn hover_returns_ok_with_null_content_when_lsp_empty() {
         )),
     };
 
-    let result = Hover
+    let result = SymbolAt
         .call(
             json!({
                 "path": "src/lib.rs",
                 "line": 1,
                 "col": 4,
+                "fields": ["hover"],
             }),
             &ctx,
         )
         .await
         .expect("empty hover must be Ok, not Err (no misclassification)");
     assert!(
-        result["content"].is_null(),
+        result["hover"]["content"].is_null(),
         "content should be null on empty"
     );
     assert!(
-        result["hint"].as_str().is_some(),
+        result["hover"]["hint"].as_str().is_some(),
         "hint should be present to guide caller"
     );
 }
 
 #[tokio::test]
-async fn hover_col_zero_rejected() {
+async fn symbol_at_hover_col_zero_rejected() {
     use crate::lsp::{mock::MockLspClient, mock::MockLspProvider};
-    use crate::tools::symbol::Hover;
+    use crate::tools::symbol::SymbolAt;
 
     let dir = tempfile::tempdir().unwrap();
     let src_dir = dir.path().join("src");
@@ -4620,17 +4622,20 @@ async fn hover_col_zero_rejected() {
         )),
     };
 
-    let err = Hover
-        .call(json!({"path": "src/lib.rs", "line": 1, "col": 0}), &ctx)
+    let err = SymbolAt
+        .call(
+            json!({"path": "src/lib.rs", "line": 1, "col": 0, "fields": ["hover"]}),
+            &ctx,
+        )
         .await
         .unwrap_err();
     assert!(err.to_string().contains("'col' must be >= 1"), "got: {err}");
 }
 
 #[tokio::test]
-async fn hover_retries_once_on_mux_disconnect() {
+async fn symbol_at_hover_retries_once_on_mux_disconnect() {
     use crate::lsp::{mock::MockLspClient, mock::MockLspProvider};
-    use crate::tools::symbol::Hover;
+    use crate::tools::symbol::SymbolAt;
 
     let dir = tempfile::tempdir().unwrap();
     let src_dir = dir.path().join("src");
@@ -4659,21 +4664,24 @@ async fn hover_retries_once_on_mux_disconnect() {
         )),
     };
 
-    let result = Hover
-        .call(json!({"path": "src/lib.rs", "line": 1, "col": 4}), &ctx)
+    let result = SymbolAt
+        .call(
+            json!({"path": "src/lib.rs", "line": 1, "col": 4, "fields": ["hover"]}),
+            &ctx,
+        )
         .await
         .expect("transient mux disconnect should be retried, not surfaced");
     assert_eq!(
-        result["content"].as_str(),
+        result["hover"]["content"].as_str(),
         Some("```rust\nfn x()\n```"),
         "second-attempt content should be returned"
     );
 }
 
 #[tokio::test]
-async fn hover_does_not_retry_non_disconnect_errors() {
+async fn symbol_at_hover_does_not_retry_non_disconnect_errors() {
     use crate::lsp::{mock::MockLspClient, mock::MockLspProvider};
-    use crate::tools::symbol::Hover;
+    use crate::tools::symbol::SymbolAt;
 
     let dir = tempfile::tempdir().unwrap();
     let src_dir = dir.path().join("src");
@@ -4698,13 +4706,79 @@ async fn hover_does_not_retry_non_disconnect_errors() {
         )),
     };
 
-    let err = Hover
-        .call(json!({"path": "src/lib.rs", "line": 1, "col": 4}), &ctx)
+    let err = SymbolAt
+        .call(
+            json!({"path": "src/lib.rs", "line": 1, "col": 4, "fields": ["hover"]}),
+            &ctx,
+        )
         .await
         .unwrap_err();
     assert!(
         err.to_string().contains("some unrelated LSP error"),
         "non-disconnect errors must surface immediately, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn symbol_at_returns_both_fields_by_default() {
+    use crate::lsp::{mock::MockLspClient, mock::MockLspProvider};
+    use crate::tools::symbol::SymbolAt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let file = src_dir.join("lib.rs");
+    std::fs::write(&file, "fn helper(x: i32) {}\n").unwrap();
+
+    // Hover returns Some(...), goto_definition returns one location.
+    let target = lsp_types::Location {
+        uri: url::Url::from_file_path(&file)
+            .unwrap()
+            .as_str()
+            .parse()
+            .unwrap(),
+        range: lsp_types::Range {
+            start: lsp_types::Position {
+                line: 0,
+                character: 3,
+            },
+            end: lsp_types::Position {
+                line: 0,
+                character: 9,
+            },
+        },
+    };
+    let mock = MockLspClient::new()
+        .with_definitions(0, 3, vec![target])
+        .with_hover_responses(vec![Ok(Some(
+            "```rust\nfn helper(x: i32)\n```".to_string(),
+        ))]);
+    let lsp = MockLspProvider::with_client(mock);
+
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+    };
+
+    let result = SymbolAt
+        .call(json!({"path": "src/lib.rs", "line": 1, "col": 4}), &ctx)
+        .await
+        .expect("symbol_at with default fields should succeed");
+    assert!(
+        result.get("def").is_some(),
+        "default fields should include def; got: {result:?}"
+    );
+    assert!(
+        result.get("hover").is_some(),
+        "default fields should include hover; got: {result:?}"
     );
 }
 

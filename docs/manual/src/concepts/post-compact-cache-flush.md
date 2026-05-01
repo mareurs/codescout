@@ -16,8 +16,7 @@ all active LSP clients are shut down immediately and the call returns early:
 { "flushed": true, "hint": "LSP position caches cleared. Clients restart automatically on the next navigation call..." }
 ```
 
-LSP clients restart lazily on the next `goto_definition`, `hover`, or
-`references` call — there is no manual restart step and no disruption to
+LSP clients restart lazily on the next `symbol_at` or `references` call — there is no manual restart step and no disruption to
 the session. The normal status fields (`project_root`, `languages`, etc.) are
 not included in the flush response.
 
@@ -41,7 +40,7 @@ The agent sees this as the first message of the new turn and calls
 
 Long coding sessions where the context is compacted mid-task — especially when
 there are open LSP-backed files (Rust, TypeScript, Kotlin) and the agent
-immediately needs accurate `goto_definition` results after compaction.
+immediately needs accurate `symbol_at` results after compaction.
 
 ## Upgrade path
 

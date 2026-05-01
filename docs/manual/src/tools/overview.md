@@ -17,8 +17,7 @@ The navigation tools (`find_symbol`, `list_symbols`, `references`) accept an opt
 |------|-------------|
 | `find_symbol` | Find symbols by name pattern across the project or within a file |
 | `list_symbols` | Symbol tree for a file, directory, or glob — classes, functions, structs |
-| `goto_definition` | Jump to where a symbol is defined via LSP; auto-discovers libraries |
-| `hover` | Get type info and documentation for a symbol at a given position |
+| `symbol_at` | Inspect a symbol at a position via LSP — definition location and/or hover (type + docs); auto-discovers libraries |
 | `references` | All callers and usages of a given symbol |
 | `replace_symbol` | Replace the entire body of a named symbol with new source |
 | `remove_symbol` | Delete a named symbol entirely from the file |
@@ -60,7 +59,7 @@ within a specific library (see [Library Navigation](#library-navigation)).
 ## Library Navigation {#library-navigation}
 
 Navigate third-party dependency source code (read-only). Libraries are
-auto-registered when LSP `goto_definition` returns a path outside the project
+auto-registered when LSP `symbol_at` returns a path outside the project
 root; you can also register them manually.
 
 | Tool | Description |
@@ -115,8 +114,8 @@ for.
 |----------------|----------|
 | See what functions/classes a file contains | `list_symbols` |
 | Find where a function is defined | `find_symbol` |
-| Jump to a symbol's definition | `goto_definition` |
-| Get type info or docs for a symbol | `hover` |
+| Jump to a symbol's definition | `symbol_at` with `fields: ["def"]` |
+| Get type info or docs for a symbol | `symbol_at` with `fields: ["hover"]` |
 | Find all callers of a function | `references` |
 | Rewrite a function body | `replace_symbol` |
 | Add a new function next to an existing one | `insert_code` |

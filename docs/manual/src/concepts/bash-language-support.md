@@ -13,8 +13,7 @@ search but no symbols were extracted and no LSP server was started.
 |---|---|
 | Semantic search indexing | ✅ |
 | `list_symbols` / `find_symbol` | ✅ (function definitions) |
-| `goto_definition` / `references` | ✅ (requires LSP) |
-| `hover` | ✅ (requires LSP) |
+| `symbol_at` / `references` | ✅ (requires LSP) |
 
 ## Setup
 

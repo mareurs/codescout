@@ -28,7 +28,7 @@ Longer usage notes (examples, tradeoffs, gotchas) live in
 Tools are also hidden from `list_tools` when their required capability is
 missing:
 
-- LSP tools (`hover`, `goto_definition`, `references`, `rename_symbol`) —
+- LSP tools (`symbol_at`, `references`, `rename_symbol`) —
   hidden when no LSP provider is wired for the project's language.
 - Embedding tools (`semantic_search`, `index_project`, `index_status`) — hidden
   when embeddings are disabled at build time.

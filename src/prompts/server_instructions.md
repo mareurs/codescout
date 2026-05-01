@@ -99,13 +99,13 @@ covers only cross-tool routing and non-obvious behaviors.
 
 Pass `scope="lib:<name>"` on `find_symbol`, `list_symbols`, `references`,
 `semantic_search`, or `index_project` to target a registered library.
-Libraries are auto-discovered when `goto_definition`/`hover` resolves outside
+Libraries are auto-discovered when `symbol_at` resolves outside
 the project root. All read-only tools work on libraries; write tools are project-only.
 
 **Lifecycle:** `register_library(name, path)` adds a library to the registry
 (one-time, per project). Then `index_project(scope="lib:<name>")` builds the
 symbol+embedding index. `list_libraries()` enumerates registered libraries.
-You rarely need `register_library` manually — goto_definition registers
+You rarely need `register_library` manually — symbol_at registers
 external dependencies on the fly.
 ## Output System
 
@@ -180,7 +180,7 @@ Multi-tool chains for common tasks. Follow the steps in order.
 |------|------|---------|
 | 1 | `find_symbol(name, include_body=true)` | Read current implementation |
 | 2 | `references(symbol, path)` | Find all callers and dependents |
-| 3 | `hover` on key call sites | Reveal concrete types (especially generics/traits) |
+| 3 | `symbol_at` with `fields: ["hover"]` on key call sites | Reveal concrete types (especially generics/traits) |
 | 4 | Edit with full knowledge of blast radius | |
 
 ### Safe Rename

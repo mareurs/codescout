@@ -91,7 +91,7 @@ Embedded semantic search with zero external services.
 Third-party library source code navigation (read-only).
 
 - `registry.rs` — `LibraryRegistry` persists known library paths in `.codescout/libraries.json`. CRUD + serialization.
-- `discovery.rs` — `discover_library_from_path()`: walks parent dirs to find package manifests (Cargo.toml, package.json, pyproject.toml, go.mod). Auto-triggered when LSP goto_definition returns a path outside the project root.
+- `discovery.rs` — `discover_library_from_path()`: walks parent dirs to find package manifests (Cargo.toml, package.json, pyproject.toml, go.mod). Auto-triggered when LSP `symbol_at` returns a path outside the project root.
 - `scope.rs` — `Scope` enum: `Project`, `Library(name)`, `Libraries`, `All`. Parsed from the `scope` string parameter on symbol/semantic tools.
 - `src/library/versions.rs` — reads lockfiles (`Cargo.lock`, `package-lock.json`,
   etc.) to record indexed vs current versions; `semantic_search` includes
@@ -131,7 +131,7 @@ Each tool implements the `Tool` trait (`name`, `description`, `input_schema`, `a
 |----------|------|-------|
 | File | `file.rs` | `read_file`, `list_dir`, `search_pattern`, `find_file`, `create_file`, `edit_file` |
 | Workflow | `workflow.rs` | `onboarding`, `run_command` |
-| Symbol | `symbol.rs` | `find_symbol`, `list_symbols`, `goto_definition`, `hover`, `references`, `replace_symbol`, `remove_symbol`, `insert_code`, `rename_symbol` (all navigation tools support `scope` param) |
+| Symbol | `symbol.rs` | `find_symbol`, `list_symbols`, `symbol_at`, `references`, `replace_symbol`, `remove_symbol`, `insert_code`, `rename_symbol` (all navigation tools support `scope` param) |
 | Semantic | `semantic.rs` | `semantic_search`, `index_project`, `index_status` |
 | Library | `library.rs` | `list_libraries` |
 | Memory | `memory.rs` | `memory` (dispatches `read` / `write` / `list` / `delete` / `remember` / `recall` / `forget` / `refresh_anchors` via `action` param) |

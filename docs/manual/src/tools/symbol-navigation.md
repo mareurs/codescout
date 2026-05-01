@@ -541,23 +541,29 @@ Uses LSP to identify the exact line range covered by the symbol — no manual li
 
 ---
 
-## `goto_definition`
+## `symbol_at`
 
-**Purpose:** Jump to the definition of a symbol at a given line. Resolves types via LSP — handles method calls, trait implementations, and cross-crate navigation. When the definition lives outside the project root, the library is auto-discovered and registered in `list_libraries`.
+**Purpose:** Inspect a symbol at a given position via LSP. Returns the symbol's
+definition location(s) (`def`) and/or type information + doc comments (`hover`).
+Pass the `fields` parameter to choose which queries to run; the default runs
+both. When a definition lives outside the project root, the library is
+auto-discovered and registered in `list_libraries`.
 
 **Parameters:**
 
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
 | `path` | string | yes | — | File path (relative or absolute) |
-| `line` | integer | yes | — | 1-indexed line number to jump from |
-| `identifier` | string | no | — | Optional identifier on the line to target (disambiguates when multiple symbols are on the same line) |
+| `line` | integer | yes | — | 1-indexed line number |
+| `col` | integer | no | — | 1-indexed column. Preferred when known — LSP-native, no identifier-mismatch risk |
+| `identifier` | string | no | — | Optional identifier on the line to target (fallback when `col` not known) |
+| `fields` | array of strings | no | `["def", "hover"]` | Which LSP queries to run. Allowed values: `"def"`, `"hover"` |
 
-**Example — jump to the definition of a symbol on line 42:**
+**Example — get both definition and hover info for a symbol on line 42:**
 
 ```json
 {
-  "tool": "goto_definition",
+  "tool": "symbol_at",
   "arguments": {
     "path": "src/tools/symbol.rs",
     "line": 42
@@ -569,78 +575,54 @@ Uses LSP to identify the exact line range covered by the symbol — no manual li
 
 ```json
 {
-  "definitions": [
-    {
-      "file": "src/lsp/symbols.rs",
-      "start_line": 12,
-      "end_line": 28
-    }
-  ]
-}
-```
-
-When the definition is in a library (outside the project root), the response includes a `library_registered` field:
-
-```json
-{
-  "definitions": [
-    {
-      "file": "/home/user/.cargo/registry/src/serde-1.0.196/src/lib.rs",
-      "start_line": 314,
-      "end_line": 320
-    }
-  ],
-  "library_registered": "serde"
-}
-```
-
-**Tips:**
-
-- Use `goto_definition` to quickly locate where a type, trait, or function is defined without searching by name.
-- When the definition is in an external library and `library_registered` appears, run `index_project` with the library's root path to enable `semantic_search` across it.
-- Supply `identifier` when the line has multiple symbols (e.g. a method call chain) to pin the lookup to the one you care about.
-- The result is the definition site — if you want the symbol's type and documentation without navigating away, use `hover` instead.
-
----
-
-## `hover`
-
-**Purpose:** Get type information and documentation for a symbol at a given position. Returns the type signature, inferred types, and doc comments without navigating away from the current file. Complements `find_symbol` (name lookup) and `goto_definition` (navigation).
-
-**Parameters:**
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `path` | string | yes | — | File path (relative or absolute) |
-| `line` | integer | yes | — | 1-indexed line number |
-| `identifier` | string | no | — | Optional identifier on the line to target (disambiguates when multiple symbols are on the same line) |
-
-**Example — inspect the type of a variable:**
-
-```json
-{
-  "tool": "hover",
-  "arguments": {
-    "path": "src/tools/symbol.rs",
-    "line": 55
+  "def": {
+    "definitions": [
+      {
+        "file": "src/lsp/symbols.rs",
+        "line": 12,
+        "end_line": 28,
+        "context": "pub struct SymbolInfo {"
+      }
+    ],
+    "from": "symbol.rs:42"
+  },
+  "hover": {
+    "content": "pub struct SymbolInfo\n\nMetadata about a symbol returned by the LSP.",
+    "location": "symbol.rs:42"
   }
 }
 ```
 
-**Output:**
+When the definition is in a library (outside the project root), each entry in
+`def.definitions` carries a `source` tag (e.g. `"lib:serde"`) and the library
+is added to `list_libraries`.
+
+**Example — hover only:**
 
 ```json
 {
-  "content": "pub fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value>\n\nExecute the tool with the given JSON input and return a JSON result."
+  "tool": "symbol_at",
+  "arguments": {
+    "path": "src/tools/symbol.rs",
+    "line": 55,
+    "fields": ["hover"]
+  }
 }
 ```
 
-The `content` field contains the formatted hover text — typically a type signature followed by any doc comments the language server found.
-
 **Tips:**
 
-- Use `hover` when you want to understand a type without reading the full definition. It is faster than `goto_definition` + `read_file` for orientation tasks.
-- `hover` is especially useful for complex inferred types (closures, iterator chains) where the type is not written explicitly in the source.
-- If `content` is empty, the language server has no information for that position — try adjusting `line` by ±1 or supplying `identifier` to target a specific token.
-- Supply `identifier` on lines with multiple symbols (a method call, a generic type parameter, a trait bound) to pin the hover to the right one.
-  your expectations.
+- Use `symbol_at` to quickly locate where a type, trait, or function is defined
+  and to see its type signature in one round-trip.
+- Pass `fields: ["def"]` when you only need the location, or
+  `fields: ["hover"]` when you only need the type signature — saves an LSP
+  round-trip.
+- Supply `col` (1-indexed) when known for LSP-native targeting. Fall back to
+  `identifier` to locate by name on the line; prefer `col` to avoid
+  identifier-mismatch errors.
+- When the definition is in an external library, run
+  `index_project(scope="lib:<name>")` to enable `semantic_search` across it.
+- For hover, if `content` is null, the language server has no information at
+  that position — try adjusting `line`/`col` or supplying `identifier`.
+
+---

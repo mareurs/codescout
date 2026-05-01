@@ -175,7 +175,7 @@ full detail, paginated via offset/limit. Enforced via `OutputGuard`
 (`src/tools/output.rs`), a project-wide pattern not per-tool logic.
 
 **Tool Selection by Knowledge Level** — Know the name → LSP/AST tools
-(`find_symbol`, `list_symbols`, `goto_definition`, `hover`). Know the concept →
+(`find_symbol`, `list_symbols`, `symbol_at`). Know the concept →
 semantic search first, then drill down. Know nothing → `list_dir` +
 `list_symbols` at top level, then semantic search.
 
