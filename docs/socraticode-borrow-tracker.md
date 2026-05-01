@@ -13,7 +13,7 @@ Features worth porting from `../socraticode` to codescout. One at a time.
 
 | ID | Status | Feature | Why |
 |----|--------|---------|-----|
-| **L3** | 🟡 | **Tool surface compression (25 → ~19)** — merge find_symbol+list_symbols, goto_definition+hover, list_dir+find_file, activate_project+project_status, list_libraries+register_library, index_project+index_status; introduce `call_graph`; keep `references` for non-call refs | Prereq for A. Reduces prompt-surface noise, removes overlaps revealed when designing call_graph. |
+| **L3** | ✅ | **Tool surface compression (25 → 22)** — merged find_symbol+list_symbols→`symbols`, goto_definition+hover→`symbol_at`, list_dir+find_file→`tree`, activate_project+project_status→`workspace`, list_libraries+register_library→`library`, index_project+index_status→`index`; renamed find_references→`references`; added `call_graph` stub. Released as v0.10.0. | Prereq for A. Reduces prompt-surface noise, removes overlaps revealed when designing call_graph. |
 | A | 🔵 | **Code graph + blast radius** — file-import + symbol call graph; `impact(symbol)` returns transitive callers/callees. LSP-backed (A4), sqlite-cached (B), bidirectional (C), one tool `call_graph(symbol, direction, max_depth)`. Sequenced after L3. | Safety for AI edits — knows what breaks before mutating. Codescout's biggest gap. |
 | B | 🔵 | **Hybrid search (BM25 + dense RRF)** | Better identifier/API recall than dense-only sqlite-vec. |
 | C | 🔵 | **Context artifacts** — index non-code files (DB schema, OpenAPI, infra YAML) into separate semantic store | Bridge code ↔ external specs for AI tasks. |
@@ -26,8 +26,7 @@ Features worth porting from `../socraticode` to codescout. One at a time.
 
 ## Active
 
-**L3 — Tool surface compression.** Brainstorming. (Blocks A.)
-
+**A — Code graph + blast radius.** Queued. L3 ✅ unblocks this. Next: brainstorm design (LSP-backed, sqlite-cached, bidirectional `call_graph`).
 ## L3 cleanup follow-ups
 
 - **Internal helper renames** — `format_find_references`, `run_find_references`, `format_goto_definition`, `format_hover`, and tests like `find_references_format_compact_shows_count` / `find_referencing_symbols_schema_includes_scope` still carry old tool-concept names. Private only; no MCP impact. Cheap end-of-L3 cleanup commit after Task 16.
