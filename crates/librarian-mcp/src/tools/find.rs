@@ -19,6 +19,12 @@ const HIDDEN_STATUSES: &[&str] = &["archived", "superseded"];
 struct Args {
     #[serde(default)]
     filter: Option<FilterNode>,
+    /// Shortcut: equivalent to filter `{kind: {eq: value}}`. Combined with `filter` via AND.
+    #[serde(default)]
+    kind: Option<String>,
+    /// Shortcut: equivalent to filter `{status: {eq: value}}`. Disables archived-hide default.
+    #[serde(default)]
+    status: Option<String>,
     #[serde(default = "default_limit")]
     limit: usize,
     #[serde(default)]
@@ -41,6 +47,33 @@ fn default_limit() -> usize {
     50
 }
 
+fn merge_kind_status(
+    filter: Option<FilterNode>,
+    kind: Option<&str>,
+    status: Option<&str>,
+) -> Option<FilterNode> {
+    let mut parts: Vec<FilterNode> = Vec::new();
+    if let Some(k) = kind {
+        parts.push(FilterNode::Leaf(
+            [("kind".to_string(), json!({"eq": k}))].into_iter().collect(),
+        ));
+    }
+    if let Some(s) = status {
+        parts.push(FilterNode::Leaf(
+            [("status".to_string(), json!({"eq": s}))].into_iter().collect(),
+        ));
+    }
+    if let Some(f) = filter {
+        parts.push(f);
+    }
+    match parts.len() {
+        0 => None,
+        1 => parts.into_iter().next(),
+        _ => Some(FilterNode::And { and: parts }),
+    }
+}
+
+
 #[async_trait]
 impl Tool for ArtifactFind {
     fn name(&self) -> &'static str {
@@ -49,6 +82,8 @@ impl Tool for ArtifactFind {
 
     fn description(&self) -> &'static str {
         "Search artifacts by filter AST (kind/status/tags/updated_at etc). \
+         Shortcut params: `kind` and `status` expand to eq-filters and combine \
+         with `filter` using AND. \
          Composition: and/or/not. Leaf ops: eq/ne/in/nin/gt/lt/gte/lte/contains/prefix. \
          Defaults: scope=project (current sub-project only), archived/superseded hidden \
          when the filter does not constrain status. Pass scope=repo|umbrella|all to widen, \
@@ -60,6 +95,8 @@ impl Tool for ArtifactFind {
             "type": "object",
             "properties": {
                 "filter": {"type": "object"},
+                "kind": {"type": "string", "description": "Shortcut: filter to this kind only."},
+                "status": {"type": "string", "description": "Shortcut: filter to this status. Disables archived-hide default."},
                 "limit": {"type": "integer", "default": 50, "maximum": 500},
                 "offset": {"type": "integer", "default": 0, "maximum": 100000},
                 "semantic": {"type": "string", "description": "Natural-language query for semantic search (requires embedder)"},
@@ -95,6 +132,10 @@ impl Tool for ArtifactFind {
             None
         };
 
+        // Merge kind/status shortcut params into the base filter.
+        let status_shortcut_set = a.status.is_some();
+        let base_filter = merge_kind_status(a.filter, a.kind.as_deref(), a.status.as_deref());
+
         // Build augmented pre-filter if requested, then merge with user filter.
         let user_filter: Option<FilterNode> = if let Some(want_augmented) = a.augmented {
             let ids = {
@@ -111,15 +152,15 @@ impl Tool for ArtifactFind {
                         .into_iter()
                         .collect(),
                 );
-                Some(match a.filter {
+                Some(match base_filter {
                     Some(f) => FilterNode::And {
                         and: vec![f, in_node],
                     },
                     None => in_node,
                 })
             } else if ids.is_empty() {
-                // Nothing is augmented → "non-augmented" = everything; user filter unchanged.
-                a.filter
+                // Nothing is augmented → "non-augmented" = everything; base filter unchanged.
+                base_filter
             } else {
                 let id_values: Vec<Value> = ids.into_iter().map(|id| json!(id)).collect();
                 let nin_node = FilterNode::Leaf(
@@ -127,7 +168,7 @@ impl Tool for ArtifactFind {
                         .into_iter()
                         .collect(),
                 );
-                Some(match a.filter {
+                Some(match base_filter {
                     Some(f) => FilterNode::And {
                         and: vec![f, nin_node],
                     },
@@ -135,13 +176,14 @@ impl Tool for ArtifactFind {
                 })
             }
         } else {
-            a.filter
+            base_filter
         };
 
-        let user_constrains_status = user_filter
-            .as_ref()
-            .map(filter_mentions_status)
-            .unwrap_or(false);
+        let user_constrains_status = status_shortcut_set
+            || user_filter
+                .as_ref()
+                .map(filter_mentions_status)
+                .unwrap_or(false);
         let base = combine_user_with_archived_hide(
             user_filter,
             a.include_archived,
@@ -642,4 +684,76 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["id"], "plain");
     }
+
+    #[tokio::test]
+    async fn kind_shortcut_filters_by_kind() {
+        use crate::catalog::artifact::{upsert, ArtifactRow};
+        let cat = Catalog::open_in_memory().unwrap();
+        fn row(id: &str, kind: &str) -> ArtifactRow {
+            ArtifactRow {
+                id: id.into(), repo: "claude".into(), rel_path: format!("code-explorer/{id}.md"),
+                kind: kind.into(), status: "active".into(), title: Some(id.into()),
+                owners: vec![], tags: vec![], topic: None, time_scope: None,
+                source: None, created_at: 0, updated_at: 0, file_mtime: 0,
+                file_sha256: "".into(), confidence: 1.0,
+            }
+        }
+        upsert(&cat, &row("spec-1", "spec")).unwrap();
+        upsert(&cat, &row("plan-1", "plan")).unwrap();
+        let ctx = mk_ctx(cat);
+        let result = ArtifactFind.call(&ctx, json!({"kind": "spec"})).await.unwrap();
+        let items = result["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["id"], "spec-1");
+    }
+
+    #[tokio::test]
+    async fn kind_and_filter_combine_with_and() {
+        use crate::catalog::artifact::{upsert, ArtifactRow};
+        let cat = Catalog::open_in_memory().unwrap();
+        fn row(id: &str, kind: &str, status: &str) -> ArtifactRow {
+            ArtifactRow {
+                id: id.into(), repo: "claude".into(), rel_path: format!("code-explorer/{id}.md"),
+                kind: kind.into(), status: status.into(), title: Some(id.into()),
+                owners: vec![], tags: vec![], topic: None, time_scope: None,
+                source: None, created_at: 0, updated_at: 0, file_mtime: 0,
+                file_sha256: "".into(), confidence: 1.0,
+            }
+        }
+        upsert(&cat, &row("spec-active", "spec", "active")).unwrap();
+        upsert(&cat, &row("spec-draft", "spec", "draft")).unwrap();
+        upsert(&cat, &row("plan-active", "plan", "active")).unwrap();
+        let ctx = mk_ctx(cat);
+        let result = ArtifactFind.call(&ctx, json!({
+            "kind": "spec",
+            "filter": {"status": {"eq": "active"}},
+            "include_archived": true
+        })).await.unwrap();
+        let items = result["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["id"], "spec-active");
+    }
+
+    #[tokio::test]
+    async fn status_shortcut_filters_by_status() {
+        use crate::catalog::artifact::{upsert, ArtifactRow};
+        let cat = Catalog::open_in_memory().unwrap();
+        fn row(id: &str, status: &str) -> ArtifactRow {
+            ArtifactRow {
+                id: id.into(), repo: "claude".into(), rel_path: format!("code-explorer/{id}.md"),
+                kind: "spec".into(), status: status.into(), title: Some(id.into()),
+                owners: vec![], tags: vec![], topic: None, time_scope: None,
+                source: None, created_at: 0, updated_at: 0, file_mtime: 0,
+                file_sha256: "".into(), confidence: 1.0,
+            }
+        }
+        upsert(&cat, &row("a", "active")).unwrap();
+        upsert(&cat, &row("d", "draft")).unwrap();
+        let ctx = mk_ctx(cat);
+        let result = ArtifactFind.call(&ctx, json!({"status": "active", "include_archived": true})).await.unwrap();
+        let items = result["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["id"], "a");
+    }
+
 }
