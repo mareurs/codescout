@@ -929,6 +929,7 @@ impl Tool for EditMarkdown {
 
         ctx.agent.reload_config_if_project_toml(&resolved).await;
         ctx.lsp.notify_file_changed(&resolved).await;
+        ctx.agent.invalidate_call_edges(&resolved).await;
         ctx.agent.mark_file_dirty(resolved.clone()).await;
 
         // Coverage hint: warn about unread sections.

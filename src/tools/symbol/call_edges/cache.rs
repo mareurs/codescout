@@ -219,4 +219,59 @@ mod tests {
         let got = cache_b.lookup_callers("a").unwrap();
         assert!(got.is_empty());
     }
+
+    /// Three-query sandwich: proves that `invalidate_file` clears stale cache
+    /// entries and that the cache is indeed stale before invalidation fires.
+    ///
+    /// Structure per CLAUDE.md § Testing Patterns:
+    /// 1. Seed the cache with an edge from a.rs.
+    /// 2. Query → assert edge is PRESENT (baseline).
+    /// 3. (Simulate "file changed but cache not yet invalidated") — query again
+    ///    → assert edge is STILL present (stale). This is the regression step.
+    /// 4. Call `invalidate_file("a.rs")`.
+    /// 5. Query → assert edge is GONE (fresh).
+    #[test]
+    fn invalidate_file_clears_stale_entries_three_query_sandwich() {
+        let conn = setup_db();
+        let cache = EdgeCache::new(&conn, "test-project");
+        let edge = Edge {
+            caller_sym: "b".into(),
+            callee_sym: "a".into(),
+            file: PathBuf::from("a.rs"),
+            line: 3,
+            col: 0,
+            source: EdgeSource::Lsp,
+        };
+
+        // Step 1: seed.
+        cache.upsert(&[edge.clone()]).unwrap();
+
+        // Step 2: baseline — edge is present.
+        let before = cache.lookup_callers("a").unwrap();
+        assert!(
+            before.contains(&edge),
+            "baseline: edge must be present after upsert"
+        );
+
+        // Step 3: stale-assertion — WITHOUT calling invalidate_file the edge
+        // must still be present. This proves the invalidation isn't happening
+        // automatically and that a future regression (e.g. eager re-read) will
+        // be caught here.
+        let still_stale = cache.lookup_callers("a").unwrap();
+        assert!(
+            still_stale.contains(&edge),
+            "stale: edge must still be present before invalidation fires"
+        );
+
+        // Step 4: invalidate.
+        let removed = cache.invalidate_file(Path::new("a.rs")).unwrap();
+        assert_eq!(removed, 1, "invalidate_file must report 1 row deleted");
+
+        // Step 5: fresh — edge must be gone.
+        let after = cache.lookup_callers("a").unwrap();
+        assert!(
+            !after.contains(&edge),
+            "fresh: edge must be absent after invalidation"
+        );
+    }
 }

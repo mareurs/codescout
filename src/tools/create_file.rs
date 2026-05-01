@@ -57,6 +57,7 @@ impl Tool for CreateFile {
         }
         crate::util::fs::write_utf8(&resolved, content)?;
         ctx.lsp.notify_file_changed(&resolved).await;
+        ctx.agent.invalidate_call_edges(&resolved).await;
         ctx.agent.mark_file_dirty(resolved).await;
         Ok(json!("ok"))
     }

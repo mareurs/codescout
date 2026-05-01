@@ -505,6 +505,9 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
 
     maybe_migrate_to_vec0(&conn)?;
 
+    // Apply call_edges schema (idempotent CREATE TABLE IF NOT EXISTS).
+    crate::tools::symbol::call_edges::cache::apply_schema(&conn);
+
     Ok(conn)
 }
 

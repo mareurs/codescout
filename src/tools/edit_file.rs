@@ -214,6 +214,7 @@ impl Tool for EditFile {
             crate::util::fs::atomic_write(&resolved, &content)?;
             ctx.agent.reload_config_if_project_toml(&resolved).await;
             ctx.lsp.notify_file_changed(&resolved).await;
+            ctx.agent.invalidate_call_edges(&resolved).await;
             ctx.agent.mark_file_dirty(resolved).await;
             return Ok(json!("ok"));
         }
@@ -244,6 +245,7 @@ impl Tool for EditFile {
             };
             crate::util::fs::atomic_write(&resolved, &new_content)?;
             ctx.lsp.notify_file_changed(&resolved).await;
+            ctx.agent.invalidate_call_edges(&resolved).await;
             ctx.agent.mark_file_dirty(resolved).await;
             return Ok(json!("ok"));
         }
@@ -326,6 +328,7 @@ async fn perform_edit(
     crate::util::fs::atomic_write(&resolved, &new_content)?;
     ctx.agent.reload_config_if_project_toml(&resolved).await;
     ctx.lsp.notify_file_changed(&resolved).await;
+    ctx.agent.invalidate_call_edges(&resolved).await;
     ctx.agent.mark_file_dirty(resolved.clone()).await;
 
     // Syntax check: warn if the edit introduced parse errors (non-fatal).

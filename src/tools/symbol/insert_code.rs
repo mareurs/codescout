@@ -93,6 +93,7 @@ impl Tool for InsertCode {
 
         write_lines(&full_path, &new_lines, content.ends_with('\n'))?;
         ctx.lsp.notify_file_changed(&full_path).await;
+        ctx.agent.invalidate_call_edges(&full_path).await;
         ctx.agent.mark_file_dirty(full_path).await;
         Ok(json!({ "status": "ok", "inserted_at_line": insert_at + 1, "position": position }))
     }

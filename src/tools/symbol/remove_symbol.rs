@@ -85,6 +85,7 @@ impl Tool for RemoveSymbol {
 
         write_lines(&full_path, &new_lines, content.ends_with('\n'))?;
         ctx.lsp.notify_file_changed(&full_path).await;
+        ctx.agent.invalidate_call_edges(&full_path).await;
         ctx.agent.mark_file_dirty(full_path).await;
         let line_count = end - start;
         let removed_range = format!("{}-{}", start + 1, end);

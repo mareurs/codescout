@@ -131,6 +131,7 @@ impl Tool for ReplaceSymbol {
                 // Roll back before notifying LSP so the server never sees the broken state.
                 write_lines(&full_path, &lines, content.ends_with('\n'))?;
                 ctx.lsp.notify_file_changed(&full_path).await;
+                ctx.agent.invalidate_call_edges(&full_path).await;
                 ctx.agent.mark_file_dirty(full_path).await;
                 return Err(RecoverableError::with_hint(
                     format!(
@@ -158,6 +159,7 @@ impl Tool for ReplaceSymbol {
             if !dropped.is_empty() {
                 write_lines(&full_path, &lines, content.ends_with('\n'))?;
                 ctx.lsp.notify_file_changed(&full_path).await;
+                ctx.agent.invalidate_call_edges(&full_path).await;
                 ctx.agent.mark_file_dirty(full_path).await;
                 return Err(RecoverableError::with_hint(
                     format!(
@@ -174,6 +176,7 @@ impl Tool for ReplaceSymbol {
         }
 
         ctx.lsp.notify_file_changed(&full_path).await;
+        ctx.agent.invalidate_call_edges(&full_path).await;
         ctx.agent.mark_file_dirty(full_path).await;
         Ok(json!({ "status": "ok", "replaced_lines": format!("{}-{}", start + 1, end) }))
     }

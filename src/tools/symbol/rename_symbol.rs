@@ -202,6 +202,7 @@ impl Tool for RenameSymbol {
         // file on disk is correct (stale textDocument cache in the LSP server).
         for path in &lsp_files {
             ctx.lsp.notify_file_changed(path).await;
+            ctx.agent.invalidate_call_edges(path).await;
             ctx.agent.mark_file_dirty(path.clone()).await;
         }
 

@@ -750,6 +750,44 @@ impl Agent {
             }
         }
     }
+
+    /// Invalidate call-edge cache entries for `path`.
+    ///
+    /// Called alongside `lsp.notify_file_changed` at every write-tool call site
+    /// so that call-graph queries see fresh results after a file is modified.
+    /// Best-effort: opens the project DB if one exists, then deletes all cached
+    /// edges whose ref-site matches `path`. Silently no-ops when:
+    /// - no project is active,
+    /// - the embed DB does not exist yet (pre-index state),
+    /// - or the DB open / DELETE fails (non-fatal degraded mode).
+    pub async fn invalidate_call_edges(&self, path: &std::path::Path) {
+        let root = {
+            let inner = self.inner.read().await;
+            inner.active_project().map(|p| p.root.clone())
+        };
+        let Some(root) = root else { return };
+
+        let db_path = crate::embed::index::project_db_path(&root);
+        if !db_path.exists() {
+            return;
+        }
+
+        // Spawn blocking so we don't hold the async executor on a sqlite open.
+        let path = path.to_path_buf();
+        let _ = tokio::task::spawn_blocking(move || {
+            let conn = match crate::embed::index::open_db(&root) {
+                Ok(c) => c,
+                Err(_) => return,
+            };
+            // project_id is the project root string (matches the convention used
+            // by the call_graph tool when it upserts edges).
+            let project_id = root.to_string_lossy();
+            let cache =
+                crate::tools::symbol::call_edges::cache::EdgeCache::new(&conn, project_id.as_ref());
+            let _ = cache.invalidate_file(&path);
+        })
+        .await;
+    }
 }
 
 // ---------------------------------------------------------------------------
