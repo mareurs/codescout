@@ -26,6 +26,7 @@ through file frontmatter.
 | Design a tracker (archetypes + teaching prompt)  | `tracker_design`       |
 | Create tracker artifact + augment atomically     | `tracker_create`       |
 | List/find augmented artifacts                    | `artifact_find` with `augmented: true` |
+| Discover stale augmented artifacts               | `artifact_refresh_stale` |
 ## Filter AST
 
 JSON tree. Composition: `and`, `or`, `not`. Leaf ops: `eq`, `ne`, `in`,
@@ -114,6 +115,10 @@ derived index.
 
 Any artifact can carry a persistent **prompt** + AI-editable **params** via
 `artifact_augment`. This enables server-assisted context gathering.
+
+**Discovering what to refresh:** Call `artifact_refresh_stale` to list augmented
+artifacts that haven't been refreshed recently (default: 24h threshold, current
+project scope). Returns items oldest-first; never-refreshed appear first.
 
 **Refresh cycle** (4 steps):
 1. `artifact_refresh(id)` — server gathers context per params, returns package

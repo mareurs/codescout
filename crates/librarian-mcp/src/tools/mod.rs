@@ -107,6 +107,7 @@ pub mod context;
 pub mod augment;
 pub mod refresh;
 pub mod refresh_commit;
+pub mod refresh_stale;
 pub mod render;
 pub mod schema_validate;
 pub mod tracker_create;
@@ -136,5 +137,6 @@ pub fn all_tools() -> Vec<Arc<dyn Tool>> {
         Arc::new(refresh_commit::ArtifactRefreshCommit),
         Arc::new(tracker_create::TrackerCreate),
         Arc::new(tracker_design::TrackerDesign),
+        Arc::new(refresh_stale::ArtifactRefreshStale),
     ]
 }

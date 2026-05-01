@@ -151,6 +151,73 @@ pub fn get_batch(
         .collect())
 }
 
+#[derive(Debug, Clone)]
+pub struct StaleEntry {
+    pub artifact_id: String,
+    pub repo: String,
+    pub rel_path: String,
+    pub kind: String,
+    pub title: Option<String>,
+    pub last_refreshed_at: Option<String>,
+    pub refresh_count: i64,
+}
+
+/// Return augmented artifacts whose `last_refreshed_at` is older than
+/// `threshold_iso` (ISO-8601), or has never been refreshed (NULL).
+/// Results are ordered oldest-first (NULLs first — SQLite sorts NULLs as
+/// less than any value in ASC order).
+pub fn list_stale(
+    cat: &Catalog,
+    threshold_iso: &str,
+    limit: usize,
+    repo: Option<&str>,
+    subdir_prefix: Option<&str>,
+) -> Result<Vec<StaleEntry>> {
+    let mut sql = String::from(
+        "SELECT a.id, a.repo, a.rel_path, a.kind, a.title, \
+         au.last_refreshed_at, au.refresh_count \
+         FROM artifact_augmentation au \
+         JOIN artifact a ON a.id = au.artifact_id \
+         WHERE (au.last_refreshed_at IS NULL OR au.last_refreshed_at < ?1)",
+    );
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(threshold_iso.to_string())];
+    let mut idx = 2usize;
+
+    if let Some(r) = repo {
+        sql.push_str(&format!(" AND a.repo = ?{idx}"));
+        params.push(Box::new(r.to_string()));
+        idx += 1;
+    }
+
+    if let Some(prefix) = subdir_prefix {
+        if !prefix.is_empty() {
+            sql.push_str(&format!(" AND a.rel_path LIKE ?{idx}"));
+            params.push(Box::new(format!("{prefix}/%")));
+            idx += 1;
+        }
+    }
+
+    sql.push_str(&format!(" ORDER BY au.last_refreshed_at ASC LIMIT ?{idx}"));
+    params.push(Box::new(limit as i64));
+
+    let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let mut stmt = cat.conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map(refs.as_slice(), |row| {
+            Ok(StaleEntry {
+                artifact_id: row.get(0)?,
+                repo: row.get(1)?,
+                rel_path: row.get(2)?,
+                kind: row.get(3)?,
+                title: row.get(4)?,
+                last_refreshed_at: row.get(5)?,
+                refresh_count: row.get(6)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
