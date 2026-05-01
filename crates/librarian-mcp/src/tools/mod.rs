@@ -104,6 +104,12 @@ pub mod reindex;
 
 pub mod context;
 
+pub mod augment;
+pub mod refresh;
+pub mod refresh_commit;
+pub mod tracker_create;
+pub mod update_params;
+
 pub fn all_tools() -> Vec<Arc<dyn Tool>> {
     vec![
         Arc::new(find::ArtifactFind),
