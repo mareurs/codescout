@@ -75,7 +75,7 @@ covers only cross-tool routing and non-obvious behaviors.
 - **Know a text pattern** → `grep(pattern)`
 - **Know a filename** → `tree(glob=...)`
 - **All callers of X** → `references(symbol, path)` (not `grep`)
-- **Transitive call graphs** → `call_graph` (reserved — returns "not yet implemented")
+- **Transitive call graphs** → `call_graph(symbol, direction, max_depth)` — `direction="callers"` for blast-radius sizing; `direction="callees"` for flow tracing. `call_graph(depth=1, direction="callers")` also filters refs to call sites only.
 
 ### Gotchas
 
@@ -182,6 +182,7 @@ Multi-tool chains for common tasks. Follow the steps in order.
 |------|------|---------|
 | 1 | `symbols(name=..., include_body=true)` | Read current implementation |
 | 2 | `references(symbol, path)` | Find all callers and dependents |
+| 2b | `call_graph(symbol, direction="callers", max_depth=3)` | Transitive blast radius beyond direct callers |
 | 3 | `symbol_at` with `fields: ["hover"]` on key call sites | Reveal concrete types (especially generics/traits) |
 | 4 | Edit with full knowledge of blast radius | |
 
