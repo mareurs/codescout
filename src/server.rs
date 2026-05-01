@@ -1365,6 +1365,23 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn server_tool_count_is_l3_target() {
+        let (_dir, server) = make_server().await;
+        let core_count = server
+            .tools
+            .iter()
+            .filter(|t| !is_librarian_tool(t.name()))
+            .count();
+        assert_eq!(
+            core_count,
+            22,
+            "L3 target is 22 core tools; got {}: {:?}",
+            core_count,
+            server.tools.iter().map(|t| t.name()).collect::<Vec<_>>()
+        );
+    }
+
     fn is_librarian_tool(name: &str) -> bool {
         name.starts_with("artifact_")
             || name.starts_with("librarian_")
