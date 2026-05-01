@@ -129,7 +129,7 @@ impl Tool for ArtifactRefreshStale {
             "No stale augmented artifacts in scope.".to_string()
         } else {
             "Call artifact_refresh(id) on each item, synthesize updates, \
-             then artifact_update + artifact_refresh_commit."
+             then artifact_update(id, commit_refresh=true)."
                 .to_string()
         };
 

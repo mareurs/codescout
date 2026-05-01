@@ -24,7 +24,7 @@ impl Tool for ArtifactRefresh {
         "Gather context for an augmented artifact and return a refresh package \
          (prompt + current_body + gathered context). Does NOT write anything — \
          synthesize new content from the package then call artifact_update to write back, \
-         then artifact_refresh_commit to record the refresh."
+         then artifact_update(id, commit_refresh=true) to record the refresh."
     }
 
     fn input_schema(&self) -> Value {
