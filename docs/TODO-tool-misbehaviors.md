@@ -14,6 +14,18 @@ Skim the "Mitigated quirks" section below so you know which sharp edges still ex
 
 Use the template at the bottom. Keep it one entry per observation, even if you think it's a duplicate — historians decide that later. Mention commits and tests where possible.
 
+## Known design limitations (not bugs)
+
+### LIMIT-001 — `call_graph direction=callees` requires LSP callHierarchy; no tree-sitter fallback
+
+- **Observed:** 2026-05-01 (during Task 6 implementation)
+- **Component:** `src/tools/symbol/call_edges/resolver.rs` — `resolve_via_ts`
+- **Severity:** Low (expected limitation, clearly communicated to caller)
+- **What happens:** when `prepare_call_hierarchy` returns `None` (language server not running or language not supported) and the caller requests `direction=callees`, `resolve_one_hop` returns a `RecoverableError` instead of edges.
+- **Why:** `LspClientOps::references()` finds all locations that *reference* a symbol — i.e., calls *to* it. To find *callees* (calls made *from* the symbol's body) we would need to parse the symbol's body and enumerate every call expression inside it. That requires knowing the symbol's byte range in the file, which is only available via LSP document symbols or a full AST walk. Without LSP we have no reliable way to bound the symbol body.
+- **Workaround:** activate a language server for the file. `direction=callers` has a full tree-sitter fallback.
+- **Status:** By design. Revisit if a "find callees via AST body walk" helper is added in a future task.
+
 ## Mitigated quirks (live caveats)
 
 These are fixed in the happy path but still have edge cases worth knowing about. Full write-ups in `docs/archive/bug-reports/2026-03-to-2026-04-tool-misbehaviors.md`.

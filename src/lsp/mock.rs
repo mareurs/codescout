@@ -42,6 +42,9 @@ pub struct MockLspClient {
     pub outgoing_calls_results: std::sync::Mutex<
         std::collections::HashMap<String, Vec<lsp_types::CallHierarchyOutgoingCall>>,
     >,
+    /// Canned responses for `references`, keyed by file path.
+    pub references_results:
+        std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, Vec<lsp_types::Location>>>,
 }
 
 impl MockLspClient {
@@ -56,6 +59,7 @@ impl MockLspClient {
             prepare_call_hierarchy_results: std::sync::Mutex::new(std::collections::HashMap::new()),
             incoming_calls_results: std::sync::Mutex::new(std::collections::HashMap::new()),
             outgoing_calls_results: std::sync::Mutex::new(std::collections::HashMap::new()),
+            references_results: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -161,12 +165,16 @@ impl LspClientOps for MockLspClient {
 
     async fn references(
         &self,
-        _path: &Path,
+        path: &Path,
         _line: u32,
         _col: u32,
         _language_id: &str,
     ) -> anyhow::Result<Vec<lsp_types::Location>> {
-        Ok(vec![])
+        let map = self
+            .references_results
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        Ok(map.get(path).cloned().unwrap_or_default())
     }
 
     async fn goto_definition(
