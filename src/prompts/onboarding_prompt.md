@@ -514,7 +514,7 @@ After confirming all 6 memories and the system prompt with the user, deliver thi
   4. `symbols(name="Name", include_body=true)` — read the implementation
 - **Library support:**
   - Libraries are **auto-discovered** when `symbol_at` resolves outside the project root.
-  - `list_libraries` — view all registered libraries and their index/version status.
+  - `library(action="list")` — view all registered libraries and their index/version status.
   - `index_project(scope="lib:<name>")` — index a specific library for semantic search.
   - Once registered, use `scope="lib:<name>"` with `symbols`, `symbols`,
     `grep`, and `semantic_search` to navigate library code.

@@ -24,7 +24,7 @@ use crate::tools::{
     create_file::CreateFile,
     edit_file::EditFile,
     grep::Grep,
-    library::{ListLibraries, RegisterLibrary},
+    library::Library,
     markdown::{EditMarkdown, ReadMarkdown},
     memory::Memory,
     progress,
@@ -38,7 +38,7 @@ use crate::tools::{
 };
 use crate::usage::UsageRecorder;
 
-// Note: `register_library` writes libraries.json but is intentionally excluded —
+// Note: `library` (action='register') writes libraries.json but is intentionally excluded —
 // it is idempotent and write-lock overhead on registration is not warranted.
 // `onboarding` writes memory but is also excluded — it is infrequent and
 // memory writes are small; the `memory` tool's write actions cover the
@@ -121,8 +121,7 @@ impl CodeScoutServer {
             // Config tools
             Arc::new(Workspace),
             // Library tools
-            Arc::new(ListLibraries),
-            Arc::new(RegisterLibrary),
+            Arc::new(Library),
         ];
         #[cfg(feature = "librarian")]
         if librarian_enabled_at_runtime(status.as_ref().map(|s| s.path.as_str())) {
@@ -1341,8 +1340,7 @@ mod tests {
             "index_project",
             "index_status",
             "workspace",
-            "list_libraries",
-            "register_library",
+            "library",
         ];
         let core_count = server
             .tools
@@ -2123,7 +2121,8 @@ mod tests {
         assert!(server.is_write_call("edit_markdown", &json!({})));
         assert!(server.is_write_call("index_project", &json!({})));
         assert!(server.is_write_call("onboarding", &json!({})));
-        assert!(server.is_write_call("register_library", &json!({})));
+        assert!(server.is_write_call("library", &json!({"action": "register"})));
+        assert!(!server.is_write_call("library", &json!({"action": "list"})));
         assert!(!server.is_write_call("read_file", &json!({})));
         assert!(!server.is_write_call("symbols", &json!({})));
     }

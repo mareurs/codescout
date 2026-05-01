@@ -129,7 +129,7 @@ impl Tool for RegisterLibrary {
 
         // Scope guard (phase-5 S2): reject registering the home directory,
         // its parent, or a system path like `/etc` / `/usr`. Without this,
-        // a prompt-injected `register_library(path="/etc")` would let a later
+        // a prompt-injected `library(action="register", path="/etc")` would let a later
         // `index_project(scope="lib:…")` walk and embed the entire directory,
         // leaking secrets back to the LLM via `semantic_search`.
         //
@@ -245,6 +245,85 @@ fn format_list_libraries(result: &Value) -> String {
     out
 }
 
+pub struct Library;
+
+#[async_trait::async_trait]
+impl Tool for Library {
+    fn name(&self) -> &str {
+        "library"
+    }
+
+    fn is_write(&self, input: &Value) -> bool {
+        input.get("action").and_then(Value::as_str) == Some("register")
+    }
+
+    fn description(&self) -> &str {
+        "Library registry. Actions: \
+         `list` (show registered libraries with index/version status), \
+         `register` (add a library directory for cross-project search; \
+         pass `path` and optional `name`/`language`)."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list", "register"],
+                    "description": "Operation to perform."
+                },
+                "path": {
+                    "type": "string",
+                    "description": "For action='register': directory path of the library."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "For action='register': override the auto-detected library name."
+                },
+                "language": {
+                    "type": "string",
+                    "description": "For action='register': override the auto-detected language."
+                }
+            },
+            "required": ["action"]
+        })
+    }
+
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
+        let action = input
+            .get("action")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                super::RecoverableError::with_hint(
+                    "library requires 'action' parameter",
+                    "Pass action='list' or action='register'.",
+                )
+            })?;
+        match action {
+            "list" => ListLibraries.call(input, ctx).await,
+            "register" => RegisterLibrary.call(input, ctx).await,
+            other => Err(super::RecoverableError::with_hint(
+                format!("unknown library action: {}", other),
+                "Valid actions: 'list', 'register'.",
+            )
+            .into()),
+        }
+    }
+
+    fn format_compact(&self, result: &Value) -> Option<String> {
+        if result.get("libraries").is_some() {
+            ListLibraries.format_compact(result)
+        } else {
+            RegisterLibrary.format_compact(result)
+        }
+    }
+
+    fn availability(&self, caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
+        ListLibraries.availability(caps)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,8 +366,10 @@ mod tests {
     #[tokio::test]
     async fn list_libraries_empty() {
         let ctx = project_ctx().await;
-        let tool = ListLibraries;
-        let result = tool.call(json!({}), &ctx).await.unwrap();
+        let result = Library
+            .call(json!({ "action": "list" }), &ctx)
+            .await
+            .unwrap();
         let libs = result["libraries"].as_array().unwrap();
         assert!(libs.is_empty());
     }
@@ -307,8 +388,10 @@ mod tests {
                 true,
             );
         }
-        let tool = ListLibraries;
-        let result = tool.call(json!({}), &ctx).await.unwrap();
+        let result = Library
+            .call(json!({ "action": "list" }), &ctx)
+            .await
+            .unwrap();
         let libs = result["libraries"].as_array().unwrap();
         assert_eq!(libs.len(), 1);
         assert_eq!(libs[0]["name"], "serde");
@@ -328,8 +411,7 @@ mod tests {
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
         };
-        let tool = ListLibraries;
-        let result = tool.call(json!({}), &ctx).await;
+        let result = Library.call(json!({ "action": "list" }), &ctx).await;
         assert!(result.is_err());
     }
 
@@ -386,10 +468,10 @@ mod tests {
 
         let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
         let ctx = project_ctx_with_agent(agent.clone());
-        let tool = RegisterLibrary;
-        let result = tool
+        let result = Library
             .call(
                 json!({
+                    "action": "register",
                     "path": lib_dir.path().display().to_string(),
                 }),
                 &ctx,
@@ -413,10 +495,10 @@ mod tests {
 
         let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
         let ctx = project_ctx_with_agent(agent.clone());
-        let tool = RegisterLibrary;
-        let result = tool
+        let result = Library
             .call(
                 json!({
+                    "action": "register",
                     "path": lib_dir.path().display().to_string(),
                     "name": "custom-name",
                     "language": "python",
@@ -436,10 +518,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
         let ctx = project_ctx_with_agent(agent);
-        let tool = RegisterLibrary;
-        let result = tool
+        let result = Library
             .call(
                 json!({
+                    "action": "register",
                     "path": "/nonexistent/path/to/lib",
                 }),
                 &ctx,
@@ -447,5 +529,35 @@ mod tests {
             .await;
 
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn library_action_unknown_errors() {
+        let ctx = project_ctx().await;
+        let err = Library
+            .call(json!({ "action": "wat" }), &ctx)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("unknown library action"),
+            "expected unknown action error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn library_action_missing_errors() {
+        let ctx = project_ctx().await;
+        let err = Library.call(json!({}), &ctx).await.unwrap_err();
+        assert!(
+            err.to_string().contains("library requires 'action'"),
+            "expected missing action error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn library_is_write_depends_on_action() {
+        assert!(Library.is_write(&json!({ "action": "register" })));
+        assert!(!Library.is_write(&json!({ "action": "list" })));
+        assert!(!Library.is_write(&json!({})));
     }
 }

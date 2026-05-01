@@ -1291,7 +1291,8 @@ pub fn search_multi_db(
                     .map(|e| e.name.as_str())
                     .collect();
                 let hint = if available.is_empty() {
-                    "No libraries are registered. Use register_library to add one.".to_string()
+                    "No libraries are registered. Use library(action='register') to add one."
+                        .to_string()
                 } else {
                     format!(
                         "Available libraries: {}. Use one of these as the scope.",

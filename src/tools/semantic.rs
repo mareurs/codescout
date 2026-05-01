@@ -427,7 +427,7 @@ impl Tool for IndexProject {
                 let entry = project.library_registry.lookup(lib_name).ok_or_else(|| {
                     crate::tools::RecoverableError::with_hint(
                         format!("Library '{}' not found in registry.", lib_name),
-                        "Use list_libraries to see registered libraries.",
+                        "Use library(action='list') to see registered libraries.",
                     )
                 })?;
                 if !entry.source_available {
@@ -437,7 +437,7 @@ impl Tool for IndexProject {
                             lib_name
                         ),
                         "Download sources using the project's build tool, then call \
-                         register_library(name, \"/path/to/source\", language) and retry.",
+                         library(action='register', path=\"/path/to/source\", name, language) and retry.",
                     )
                     .into());
                 }

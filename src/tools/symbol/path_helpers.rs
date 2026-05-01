@@ -114,7 +114,7 @@ pub(super) async fn resolve_library_roots(
                 ),
                 "To browse library source, download it using the project's build tool \
                  (e.g. ./gradlew dependencies, mvn dependency:sources), then call \
-                 register_library(name, \"/path/to/source\", language) and retry.",
+                 library(action='register', path=\"/path/to/source\", name, language) and retry.",
             )
             .into());
         }

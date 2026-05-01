@@ -103,10 +103,10 @@ Pass `scope="lib:<name>"` on `symbols`, `references`,
 Libraries are auto-discovered when `symbol_at` resolves outside
 the project root. All read-only tools work on libraries; write tools are project-only.
 
-**Lifecycle:** `register_library(name, path)` adds a library to the registry
+**Lifecycle:** `library(action="register", path)` adds a library to the registry
 (one-time, per project). Then `index_project(scope="lib:<name>")` builds the
-symbol+embedding index. `list_libraries()` enumerates registered libraries.
-You rarely need `register_library` manually — symbol_at registers
+symbol+embedding index. `library(action="list")` enumerates registered libraries.
+You rarely need `library(action="register")` manually — symbol_at registers
 external dependencies on the fly.
 ## Output System
 

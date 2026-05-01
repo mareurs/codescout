@@ -386,7 +386,7 @@ pub fn check_tool_access(tool_name: &str, config: &PathSecurityConfig) -> Result
             }
         }
         "create_file" | "edit_file" | "replace_symbol" | "insert_code" | "rename_symbol"
-        | "remove_symbol" | "register_library" | "edit_markdown" => {
+        | "remove_symbol" | "library" | "edit_markdown" => {
             if !config.file_write_enabled {
                 bail!(
                     "File writes are disabled for this project. If this project was activated in read-only mode, call workspace(action='activate', read_only: false) to enable writes."
@@ -998,7 +998,7 @@ mod tests {
             "replace_symbol",
             "insert_code",
             "rename_symbol",
-            "register_library",
+            "library",
         ] {
             assert!(
                 check_tool_access(tool, &config).is_err(),
@@ -1009,22 +1009,22 @@ mod tests {
     }
 
     #[test]
-    fn register_library_disabled_when_file_write_false() {
+    fn library_disabled_when_file_write_false() {
         let config = PathSecurityConfig {
             file_write_enabled: false,
             ..PathSecurityConfig::default()
         };
         assert!(
-            check_tool_access("register_library", &config).is_err(),
-            "register_library should be blocked when file_write_enabled = false"
+            check_tool_access("library", &config).is_err(),
+            "library should be blocked when file_write_enabled = false"
         );
         let config = PathSecurityConfig {
             file_write_enabled: true,
             ..PathSecurityConfig::default()
         };
         assert!(
-            check_tool_access("register_library", &config).is_ok(),
-            "register_library should be allowed when file_write_enabled = true"
+            check_tool_access("library", &config).is_ok(),
+            "library should be allowed when file_write_enabled = true"
         );
     }
 
