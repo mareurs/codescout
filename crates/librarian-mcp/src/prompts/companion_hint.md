@@ -21,25 +21,26 @@ ephemeral session state (don't persist).
 
 | Want                                          | Use                     |
 |-----------------------------------------------|-------------------------|
-| List artifacts of one kind                    | `artifact_list_by_kind` |
+| List artifacts of one kind                    | `artifact_find` with `kind` param |
 | Multi-field filter (and/or/not)               | `artifact_find`         |
 | Read one artifact + previews + observations   | `artifact_get`          |
-| Edges out of / into a node                    | `artifact_links`        |
+| Edges from a node (filtered by direction/rel) | `artifact_get` with `include_links=true`, `links_direction`, `links_rel` |
 | BFS around a node (depth 1–3)                 | `artifact_graph`        |
 | Topic → packed markdown bundle                | `librarian_context`     |
 | Write new artifact                             | `artifact_create`       |
+| Write tracker artifact with augmentation      | `artifact_create` with `kind=tracker`, `status=active`, `augment={prompt,params}` |
 | Patch frontmatter or body                     | `artifact_update`       |
+| Patch frontmatter + record refresh in one call | `artifact_update` with `commit_refresh=true` |
 | Add relation edge (supersedes, implements …)  | `artifact_link`         |
-| Append observation note                       | `artifact_observe`      |
+| Append observation note                       | `artifact_event_create` with `kind=note` |
 | Manual re-scan                                | `librarian_reindex`     |
-| Attach/update prompt+params on artifact       | `artifact_augment`      |
-| Tune gather params mid-session                | `artifact_update_params` |
+| Attach/replace prompt+params on artifact      | `artifact_augment`      |
+| Merge-patch params on existing augmentation   | `artifact_augment` with `merge=true` |
 | Gather context for refresh (read-only)        | `artifact_refresh`      |
-| Commit completed refresh cycle                | `artifact_refresh_commit` |
-| Create tracker artifact + augment atomically  | `tracker_create`        |
 | List/find augmented artifacts                 | `artifact_find` with `augmented: true` |
+| Discover stale augmented artifacts            | `artifact_refresh_stale` |
 
-Example: `artifact_list_by_kind {kind: "tracker"}` — live trackers in the
+Example: `artifact_find {kind: "tracker"}` — live trackers in the
 **current sub-project** (default scope). Pass `scope: "all"` to widen.
 ## Filter AST (one-liner)
 
@@ -51,7 +52,7 @@ rel_path, updated_at, created_at, confidence`. Unknown fields rejected.
 
 ## Default scope (project, archived hidden)
 
-Listing tools (`artifact_list_by_kind`, `artifact_find`, `librarian_context`)
+Listing tools (`artifact_find`, `librarian_context`)
 default to **the agent's current sub-project** and **hide archived/superseded**
 rows. The current project = nearest `.git` ancestor of cwd, mapped onto a
 workspace root.

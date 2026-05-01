@@ -8,23 +8,23 @@ through file frontmatter.
 
 | Want                                             | Use                    |
 |--------------------------------------------------|------------------------|
-| List all artifacts of one kind                   | `artifact_list_by_kind`|
+| List artifacts of one kind                       | `artifact_find` with `kind` param |
 | Complex filter (multiple fields, and/or/not)     | `artifact_find`        |
 | Read one artifact + its neighbourhood            | `artifact_get`         |
-| Edges outgoing / incoming from a node            | `artifact_links`       |
+| Edges from a node (filtered by direction/rel)    | `artifact_get` with `include_links=true`, `links_direction`, `links_rel` |
 | BFS explore around a node (depth 1–3)            | `artifact_graph`       |
 | Topic or anchor → packed markdown context        | `librarian_context`    |
 | Write new artifact                               | `artifact_create`      |
+| Write tracker artifact with augmentation         | `artifact_create` with `kind=tracker`, `status=active`, `augment={prompt,params}` |
 | Patch frontmatter or body                        | `artifact_update`      |
+| Patch frontmatter + record refresh in one call   | `artifact_update` with `commit_refresh=true` |
 | Add relation edge (supersedes, implements, …)    | `artifact_link`        |
-| Append observation note                          | `artifact_observe`     |
+| Append observation note                          | `artifact_event_create` with `kind=note` |
 | Manual re-scan (project-scoped by default)       | `librarian_reindex`    |
-| Attach/update prompt+params on artifact          | `artifact_augment`     |
-| Tune gather params mid-session                   | `artifact_update_params` |
+| Attach/replace prompt+params on artifact         | `artifact_augment`     |
+| Merge-patch params on existing augmentation      | `artifact_augment` with `merge=true` |
 | Gather context for refresh (read-only)           | `artifact_refresh`     |
-| Commit completed refresh cycle                   | `artifact_refresh_commit` |
 | Design a tracker (archetypes + teaching prompt)  | `tracker_design`       |
-| Create tracker artifact + augment atomically     | `tracker_create`       |
 | List/find augmented artifacts                    | `artifact_find` with `augmented: true` |
 | Discover stale augmented artifacts               | `artifact_refresh_stale` |
 ## Filter AST
@@ -68,7 +68,7 @@ Times are ms-epoch integers, not ISO-8601.
 
 ## Default scope (project, archived hidden)
 
-Listing tools (`artifact_list_by_kind`, `artifact_find`, `librarian_context`)
+Listing tools (`artifact_find`, `librarian_context`)
 default to **the agent's current sub-project** and **hide archived/superseded**.
 
 - `scope`: `"project"` (default) | `"repo"` | `"umbrella"` | `"all"`.
@@ -120,22 +120,20 @@ Any artifact can carry a persistent **prompt** + AI-editable **params** via
 artifacts that haven't been refreshed recently (default: 24h threshold, current
 project scope). Returns items oldest-first; never-refreshed appear first.
 
-**Refresh cycle** (4 steps):
+**Refresh cycle** (3 steps — commit is now inline):
 1. `artifact_refresh(id)` — server gathers context per params, returns package
    `{ prompt, params, current_body, context, hints }`. Does NOT write.
 2. Synthesize new body from `prompt + context + current_body`.
-3. `artifact_update(id, { body: "<new content>" })` — write back.
-4. `artifact_refresh_commit(id)` — record refresh metadata.
+3. `artifact_update(id, { body: "<new content>" }, commit_refresh=true)` — write back and record refresh metadata.
 
-**Tracker kind:** `tracker_create` creates a `kind: tracker` artifact (body = live state)
-and attaches augmentation atomically. Trackers are ranked first in `librarian_context`.
+**Tracker kind:** `artifact_create` with `kind=tracker`, `status=active`, and `augment={prompt, params}` creates a tracker artifact (body = live state) and attaches augmentation atomically. Trackers are ranked first in `librarian_context`.
 
 **Designing a tracker:** When the user asks to create a tracker, call
 `tracker_design` FIRST. It returns a teaching system_prompt + 6 archetypes
 (`deployment_state`, `failure_table`, `metric_baseline`, `audit_issues`,
 `task_list`, `reflective`) + the existing-tracker landscape. Pick an
 archetype, compose the spec (prompt, params, render_template, params_schema,
-body), then call `tracker_create`. Don't skip `tracker_design` — it prevents
+body), then call `artifact_create` with `kind=tracker`. Don't skip `tracker_design` — it prevents
 collisions, anti-patterns, and ad-hoc shapes.
 
 **`[LIVE]` in context:** Augmented artifacts appear with a `<!-- [LIVE] -->` header
@@ -153,8 +151,8 @@ from narrative (artifact body):
   anything mechanically derivable. Body stays prose-only and is rewritten
   rarely; params are merged often without churning prose.
 - `params_schema` — a JSON Schema (draft-07+) validating `params` on
-  `artifact_augment` (initial seed) and every `artifact_update_params`
-  merge. Violations are returned as recoverable errors before the write
+  `artifact_augment` (initial seed) and every `artifact_augment(merge=true)`
+  call. Violations are returned as recoverable errors before the write
   lands. Use this to lock down tracker shapes (e.g. failure-table rows
   must have `id`, `status`, `last_seen`).
 
