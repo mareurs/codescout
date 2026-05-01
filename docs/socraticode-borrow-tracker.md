@@ -28,6 +28,10 @@ Features worth porting from `../socraticode` to codescout. One at a time.
 
 **L3 — Tool surface compression.** Brainstorming. (Blocks A.)
 
+## L3 cleanup follow-ups
+
+- **Internal helper renames** — `format_find_references`, `run_find_references`, and tests like `find_references_format_compact_shows_count` / `find_referencing_symbols_schema_includes_scope` still carry old tool-concept names. Private only; no MCP impact. Cheap end-of-L3 cleanup commit after Task 16.
+
 ## Deferred decisions
 
 Captured here so they don't get lost during sequencing.
