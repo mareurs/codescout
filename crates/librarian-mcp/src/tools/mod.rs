@@ -108,7 +108,6 @@ pub mod refresh_stale;
 pub mod render;
 pub mod schema_validate;
 pub mod tracker_design;
-pub mod update_params;
 
 pub fn all_tools() -> Vec<Arc<dyn Tool>> {
     vec![
@@ -126,7 +125,6 @@ pub fn all_tools() -> Vec<Arc<dyn Tool>> {
         Arc::new(reindex::LibrarianReindex),
         Arc::new(context::LibrarianContext),
         Arc::new(augment::ArtifactAugment),
-        Arc::new(update_params::ArtifactUpdateParams),
         Arc::new(refresh::ArtifactRefresh),
         Arc::new(refresh_commit::ArtifactRefreshCommit),
         Arc::new(tracker_design::TrackerDesign),

@@ -8,16 +8,19 @@ use serde_json::{json, Value};
 pub struct ArtifactAugment;
 
 #[derive(Deserialize)]
-
 struct Args {
     id: String,
-    prompt: String,
+    /// Required when merge=false (create/replace). Ignored when merge=true.
+    prompt: Option<String>,
     params: Option<Value>,
     /// MiniJinja template projecting `params` into a markdown snippet.
     /// Decouples live state from prose body.
     render_template: Option<String>,
     /// JSON Schema validating future `params` merges.
     params_schema: Option<Value>,
+    /// When true: RFC 7396 merge-patch on params only. Requires existing augmentation.
+    #[serde(default)]
+    merge: bool,
 }
 
 #[async_trait]
@@ -27,19 +30,21 @@ impl Tool for ArtifactAugment {
     }
 
     fn description(&self) -> &'static str {
-        "Attach or replace a persistent prompt + params on any artifact, enabling \
-         server-assisted refresh. Idempotent — safe to call on already-augmented artifacts."
+        "Attach or replace a persistent prompt + params on any artifact (merge=false, default), \
+         or RFC 7396 merge-patch params only without changing the prompt (merge=true). \
+         Idempotent — safe to call on already-augmented artifacts. \
+         Replaces artifact_update_params."
     }
 
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
-            "required": ["id", "prompt"],
+            "required": ["id"],
             "properties": {
                 "id": { "type": "string", "description": "Artifact id" },
                 "prompt": {
                     "type": "string",
-                    "description": "Persistent instruction: what to maintain and how to format it"
+                    "description": "Required when merge=false. Persistent instruction: what to maintain and how to format it."
                 },
                 "params": {
                     "type": "object",
@@ -52,6 +57,10 @@ impl Tool for ArtifactAugment {
                 "params_schema": {
                     "type": "object",
                     "description": "Optional JSON Schema validating params on every merge. Initial params are also validated."
+                },
+                "merge": {
+                    "type": "boolean",
+                    "description": "When true, apply RFC 7396 merge-patch to params only — prompt is not required. Requires an existing augmentation."
                 }
             }
         })
@@ -61,11 +70,39 @@ impl Tool for ArtifactAugment {
         let a: Args = serde_json::from_value(args)?;
         let cat = ctx.catalog.lock();
 
+        if a.merge {
+            // RFC 7396 merge-patch path
+            let patch = a.params.as_ref().cloned().unwrap_or(Value::Object(Default::default()));
+            if let Some(existing) = augmentation::get(&cat, &a.id)? {
+                if let Some(schema_text) = existing.params_schema.as_deref() {
+                    let mut current: Value = serde_json::from_str(&existing.params)
+                        .unwrap_or(Value::Object(Default::default()));
+                    augmentation::apply_merge_patch(&mut current, &patch);
+                    crate::tools::schema_validate::validate_against_stored(schema_text, &current)
+                        .map_err(|e| {
+                            RecoverableError::new(format!(
+                                "merged params violate params_schema: {e}"
+                            ))
+                        })?;
+                }
+            }
+            let found = augmentation::merge_params(&cat, &a.id, &patch)?;
+            if !found {
+                return Err(RecoverableError::new(format!(
+                    "no augmentation for artifact '{}' — call artifact_augment first",
+                    a.id
+                )));
+            }
+            return Ok(json!("ok"));
+        }
+
+        // Create/replace path — prompt is required
+        let prompt = a.prompt.ok_or_else(|| {
+            RecoverableError::new("prompt is required (set merge=true to patch params only)")
+        })?;
+
         if artifact::get(&cat, &a.id)?.is_none() {
-            return Err(RecoverableError::new(format!(
-                "artifact '{}' not found",
-                a.id
-            )));
+            return Err(RecoverableError::new(format!("artifact '{}' not found", a.id)));
         }
 
         let params_str = a
@@ -80,7 +117,6 @@ impl Tool for ArtifactAugment {
             .map(serde_json::to_string)
             .transpose()?;
 
-        // If a schema is supplied, validate the initial params against it.
         if let Some(schema) = &a.params_schema {
             let parsed_params: Value = serde_json::from_str(&params_str)?;
             crate::tools::schema_validate::validate(schema, &parsed_params).map_err(|e| {
@@ -96,7 +132,7 @@ impl Tool for ArtifactAugment {
             &cat,
             &augmentation::AugmentationRow {
                 artifact_id: a.id.clone(),
-                prompt: a.prompt,
+                prompt,
                 params: params_str,
                 last_refreshed_at: None,
                 refresh_count: 0,
@@ -267,4 +303,60 @@ mod tests {
             "got: {err}"
         );
     }
+
+    #[tokio::test]
+    async fn merge_true_patches_params_without_touching_prompt() {
+        let ctx = mk_ctx();
+        seed_artifact(&ctx, "aug-1");
+        // First, augment with a prompt and initial params
+        ArtifactAugment
+            .call(
+                &ctx,
+                json!({"id": "aug-1", "prompt": "do stuff", "params": {"a": 1, "b": 2}}),
+            )
+            .await
+            .unwrap();
+
+        // Now merge-patch: add c, delete b
+        ArtifactAugment
+            .call(
+                &ctx,
+                json!({"id": "aug-1", "merge": true, "params": {"c": 3, "b": null}}),
+            )
+            .await
+            .unwrap();
+
+        let cat = ctx.catalog.lock();
+        let aug = crate::catalog::augmentation::get(&cat, "aug-1").unwrap().unwrap();
+        assert_eq!(aug.prompt, "do stuff", "prompt must be unchanged");
+        let params: serde_json::Value = serde_json::from_str(&aug.params).unwrap();
+        assert_eq!(params["a"], 1, "a must survive merge");
+        assert_eq!(params["c"], 3, "c must be added");
+        assert!(params.get("b").map(|v| v.is_null()).unwrap_or(true), "b must be deleted");
+    }
+
+    #[tokio::test]
+    async fn merge_true_without_existing_augmentation_errors() {
+        let ctx = mk_ctx();
+        seed_artifact(&ctx, "aug-2");
+        let err = ArtifactAugment
+            .call(&ctx, json!({"id": "aug-2", "merge": true, "params": {"x": 1}}))
+            .await;
+        assert!(err.is_err());
+        let msg = err.unwrap_err().to_string();
+        assert!(msg.contains("artifact_augment"), "error must mention artifact_augment");
+    }
+
+    #[tokio::test]
+    async fn non_merge_without_prompt_errors() {
+        let ctx = mk_ctx();
+        seed_artifact(&ctx, "aug-3");
+        let err = ArtifactAugment
+            .call(&ctx, json!({"id": "aug-3", "params": {"x": 1}}))
+            .await;
+        assert!(err.is_err());
+        let msg = err.unwrap_err().to_string();
+        assert!(msg.contains("prompt"), "error must mention prompt");
+    }
+
 }
