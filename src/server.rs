@@ -557,7 +557,7 @@ fn read_self_memory_kb() -> SelfMemoryKb {
 /// Returns true for tools that manage their own timeout internally and must not
 /// be wrapped by the server-level `tool_timeout_secs` guard.
 ///
-/// - `index_project` / `index_library`: embedding loops that run for many minutes.
+/// - `index` / `index_library`: embedding loops that run for many minutes.
 /// - `run_command`: the caller supplies `timeout_secs` in the request params; the
 ///   server-level timeout is unaware of that value and would fire first, making
 ///   the per-request `timeout_secs` parameter effectively ignored.

@@ -386,7 +386,7 @@ impl Tool for IndexProject {
                 if matches!(*state, IndexingState::Running { .. }) {
                     return Ok(json!({
                         "status": "already_running",
-                        "hint": "Use index_status() to check progress.",
+                        "hint": "Use index(action='status') to check progress.",
                     }));
                 }
                 *state = IndexingState::Running {
@@ -589,7 +589,7 @@ impl Tool for IndexProject {
             if matches!(*state, IndexingState::Running { .. }) {
                 return Ok(json!({
                     "status": "already_running",
-                    "hint": "Use index_status() to check progress."
+                    "hint": "Use index(action='status') to check progress."
                 }));
             }
             *state = IndexingState::Running {
@@ -691,7 +691,7 @@ impl Tool for IndexProject {
 
         Ok(json!({
             "status": "started",
-            "hint": "Indexing is running in the background. Use index_status() to check when complete."
+            "hint": "Indexing is running in the background. Use index(action='status') to check when complete."
         }))
     }
 
