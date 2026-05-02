@@ -1131,6 +1131,7 @@ pub fn search_scoped(
         let distance: f64 = row.get(6)?;
         let score = (1.0_f32 - distance as f32).clamp(0.0, 1.0);
         Ok(SearchResult {
+            id: row.get::<_, i64>(8)? as u64,
             file_path: row.get(0)?,
             language: row.get(1)?,
             content: row.get(2)?,
@@ -1145,7 +1146,7 @@ pub fn search_scoped(
     // Common SELECT with sqlite-vec distance. ORDER BY + LIMIT pushed to SQLite.
     let sel = "SELECT c.file_path, c.language, c.content, c.start_line, c.end_line, c.source, \
                COALESCE(vec_distance_cosine(vec_f32(ce.embedding), vec_f32(?1)), 1.0) AS distance, \
-               c.project_id \
+               c.project_id, c.id \
                FROM chunks c JOIN chunk_embeddings ce ON c.id = ce.rowid";
 
     match source_filter {
@@ -1194,6 +1195,7 @@ fn search_scoped_vec0(
         let distance: f64 = row.get(6)?;
         let score = (1.0_f32 - distance as f32).clamp(0.0, 1.0);
         Ok(SearchResult {
+            id: row.get::<_, i64>(8)? as u64,
             file_path: row.get(0)?,
             language: row.get(1)?,
             content: row.get(2)?,
@@ -1234,12 +1236,12 @@ fn search_scoped_vec0(
 
     let sel_exact = format!(
         "SELECT c.file_path, c.language, c.content, c.start_line, c.end_line, c.source, \
-         COALESCE(knn.distance, 1.0) AS distance, c.project_id \
+         COALESCE(knn.distance, 1.0) AS distance, c.project_id, c.id \
          FROM chunks c JOIN ({knn_exact}) knn ON c.id = knn.rowid"
     );
     let sel_over = format!(
         "SELECT c.file_path, c.language, c.content, c.start_line, c.end_line, c.source, \
-         COALESCE(knn.distance, 1.0) AS distance, c.project_id \
+         COALESCE(knn.distance, 1.0) AS distance, c.project_id, c.id \
          FROM chunks c JOIN ({knn_over}) knn ON c.id = knn.rowid"
     );
 

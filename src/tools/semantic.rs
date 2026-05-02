@@ -1169,6 +1169,7 @@ mod tests {
 
     fn sr(file: &str, score: f32) -> crate::embed::schema::SearchResult {
         crate::embed::schema::SearchResult {
+            id: 0,
             file_path: file.to_string(),
             language: "rust".to_string(),
             content: String::new(),

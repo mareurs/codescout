@@ -31,6 +31,8 @@ pub struct CodeChunk {
 /// A ranked result from a semantic search query.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
+    /// Row id of the chunk in the `chunks` table.
+    pub id: u64,
     pub file_path: String,
     pub language: String,
     pub content: String,
