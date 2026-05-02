@@ -1615,7 +1615,7 @@ mod tests {
     #[test]
     fn validate_write_path_outside_root_mentions_approve_write() {
         let dir = tempdir().unwrap();
-        // Use /var — outside both the project root and /tmp, so the deny check
+        // Use /var — outside both the project root and /tmp, so the boundary check
         // fires and the error message must mention approve_write.
         let target = "/var/outside_ce_test_approve_write_hint.rs";
         let result = validate_write_path(

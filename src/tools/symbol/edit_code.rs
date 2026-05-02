@@ -124,9 +124,9 @@ impl EditCode {
             .rename(&full_path, sym.start_line, sym.start_col, new_name, &lang)
             .await?;
 
-        let rename_root = ctx.agent.require_project_root().await?;
-        let rename_security = ctx.agent.security_config().await;
-        let rename_session_roots = ctx.agent.session_write_roots_snapshot().await;
+        let root = ctx.agent.require_project_root().await?;
+        let security = ctx.agent.security_config().await;
+        let session_roots = ctx.agent.session_write_roots_snapshot().await;
         let mut lsp_files: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
 
         struct PlannedWrite {
@@ -148,9 +148,9 @@ impl EditCode {
                 .ok_or_else(|| anyhow::anyhow!("non-UTF8 path from LSP: {:?}", path))?;
             crate::util::path_security::validate_write_path(
                 path_str,
-                &rename_root,
-                &rename_security,
-                &rename_session_roots,
+                &root,
+                &security,
+                &session_roots,
             )?;
             let pre_image = std::fs::read_to_string(&path)?;
             let new_content = apply_text_edits(&pre_image, &plain_edits);
@@ -266,7 +266,7 @@ impl EditCode {
                         continue;
                     };
                     let rel = path
-                        .strip_prefix(&rename_root)
+                        .strip_prefix(&root)
                         .unwrap_or(path)
                         .display()
                         .to_string();
@@ -302,7 +302,7 @@ impl EditCode {
                 )),
             )
         } else {
-            let sweep_root = rename_root.clone();
+            let sweep_root = root.clone();
             let sweep_name = old_name_str.to_string();
             let sweep_files = lsp_files.clone();
             let sweep_result = tokio::task::spawn_blocking(move || {
