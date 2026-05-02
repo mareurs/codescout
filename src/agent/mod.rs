@@ -635,6 +635,19 @@ impl Agent {
             .unwrap_or(0)
     }
 
+    /// Drain all files marked dirty by write tools, returning them for re-indexing.
+    /// Clears the set so subsequent calls return only newly-dirtied files.
+    pub async fn drain_dirty_files(&self) -> Vec<PathBuf> {
+        let inner = self.inner.read().await;
+        inner
+            .active_project()
+            .map(|p| {
+                let mut set = p.dirty_files.lock().unwrap_or_else(|e| e.into_inner());
+                set.drain().collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Clone the dirty-files Arc so index_project can capture it across a spawn boundary
     /// and clear it on successful completion.
     pub async fn dirty_files_arc(
@@ -1752,5 +1765,26 @@ mod tests {
             .await
             .unwrap();
         assert!(sha.is_none(), "head_sha should be None for non-git project");
+    }
+
+    #[tokio::test]
+    async fn drain_dirty_files_clears_set_and_returns_paths() {
+        use std::path::PathBuf;
+
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+
+        let a = PathBuf::from("/proj/src/a.rs");
+        let b = PathBuf::from("/proj/src/b.rs");
+        agent.mark_file_dirty(a.clone()).await;
+        agent.mark_file_dirty(b.clone()).await;
+
+        let mut drained = agent.drain_dirty_files().await;
+        drained.sort();
+        assert_eq!(drained, vec![a, b]);
+
+        // Set must be empty after drain
+        assert!(agent.drain_dirty_files().await.is_empty());
     }
 }
