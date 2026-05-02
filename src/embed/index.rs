@@ -2675,114 +2675,169 @@ pub fn mark_anchors_stale_for_file(conn: &Connection, file_path: &str) -> Result
     )?;
     Ok(count)
 }
-/// Re-embed a specific set of files that were modified by write tools.
-///
-/// Hash-gated: files whose content matches the stored hash are skipped.
-/// Called by `SemanticSearch` before executing a query to drain the dirty set.
+/// Per-file work item built during Phase 1 (blocking I/O), consumed in Phase 2+3.
+struct FileToEmbed {
+    rel: String,
+    hash: String,
+    mtime: i64,
+    lang: &'static str,
+    chunks: Vec<crate::embed::RawChunk>,
+    embed_texts: Vec<String>,
+    project_id: String,
+}
+
 pub async fn reindex_files(
     project_root: &Path,
     abs_paths: &[std::path::PathBuf],
     embedder: &std::sync::Arc<dyn codescout_embed::Embedder>,
 ) -> anyhow::Result<usize> {
-    use crate::config::ProjectConfig;
-    use crate::embed::schema::CodeChunk;
-
     if abs_paths.is_empty() {
         return Ok(0);
     }
 
-    let config = ProjectConfig::load_or_default(project_root)?;
-    let conn = open_db(project_root)?;
-    let discovered = crate::workspace::discover_projects(project_root, 3, &[]);
-    let mut count = 0;
+    // ── Phase 1 (spawn_blocking): hash-gate + file reading ────────────────────
+    // Open DB, check mtimes/hashes, read source, split into chunks.
+    // All blocking I/O and SQLite access is confined here; Connection is
+    // dropped before we return to the async executor.
+    let project_root_buf = project_root.to_path_buf();
+    let abs_paths_vec = abs_paths.to_vec();
 
-    for abs_path in abs_paths {
-        // Strip to relative path; skip if outside project root
-        let rel_path = match abs_path.strip_prefix(project_root) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-        let rel = rel_path.to_string_lossy().replace('\\', "/");
+    let files_to_embed: Vec<FileToEmbed> = tokio::task::spawn_blocking(move || {
+        use crate::config::ProjectConfig;
 
-        // Hash gate: skip if content unchanged since last index
-        match is_file_changed_mtime_hash(&conn, project_root, &rel) {
-            Ok(false) => continue,
-            Ok(true) => {}
-            Err(e) => {
-                tracing::warn!("reindex_files: hash check failed for {}: {e}", rel);
-                continue;
-            }
-        }
+        let config = ProjectConfig::load_or_default(&project_root_buf)?;
+        let conn = open_db(&project_root_buf)?;
+        let discovered = crate::workspace::discover_projects(&project_root_buf, 3, &[]);
+        let mut result: Vec<FileToEmbed> = Vec::new();
 
-        let Some(lang) = crate::ast::detect_language(abs_path) else {
-            continue;
-        };
-        let source = match std::fs::read_to_string(abs_path) {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::warn!("reindex_files: cannot read {}: {e}", rel);
-                continue;
-            }
-        };
-        let hash = match hash_file(abs_path) {
-            Ok(h) => h,
-            Err(e) => {
-                tracing::warn!("reindex_files: cannot hash {}: {e}", rel);
-                continue;
-            }
-        };
-        let mtime = file_mtime(abs_path).unwrap_or(0);
-
-        let chunks = super::ast_chunker::split_file(
-            &source,
-            lang,
-            rel_path,
-            config.embeddings.effective_chunk_size(),
-        );
-        if chunks.is_empty() {
-            continue;
-        }
-
-        // Build embed texts: metadata header + content (mirrors embed_producer)
-        let embed_texts: Vec<String> = chunks
-            .iter()
-            .map(|c| match &c.metadata {
-                Some(m) => format!("{m}\n{}", c.content),
-                None => c.content.clone(),
-            })
-            .collect();
-        let text_refs: Vec<&str> = embed_texts.iter().map(|s| s.as_str()).collect();
-        let vectors = embedder.embed(&text_refs).await?;
-
-        // Resolve project_id for this file
-        let project_id = discovered
-            .iter()
-            .find(|p| abs_path.starts_with(project_root.join(&p.relative_root)))
-            .map(|p| p.id.clone())
-            .unwrap_or_else(|| "project".to_string());
-
-        // Atomic DB write: delete stale chunks, insert fresh, update hash
-        conn.execute_batch("BEGIN")?;
-        delete_file_chunks(&conn, &rel)?;
-        for (chunk, vector) in chunks.iter().zip(vectors.iter()) {
-            let code_chunk = CodeChunk {
-                id: None,
-                file_path: rel.clone(),
-                language: lang.to_string(),
-                content: chunk.content.clone(),
-                start_line: chunk.start_line,
-                end_line: chunk.end_line,
-                file_hash: hash.clone(),
-                source: "project".to_string(),
-                project_id: project_id.clone(),
-                metadata: chunk.metadata.clone(),
+        for abs_path in &abs_paths_vec {
+            let rel_path = match abs_path.strip_prefix(&project_root_buf) {
+                Ok(r) => r,
+                Err(_) => continue,
             };
-            insert_chunk(&conn, &code_chunk, vector)?;
+            let rel = rel_path.to_string_lossy().replace('\\', "/");
+
+            // Hash gate: skip if content unchanged since last index
+            match is_file_changed_mtime_hash(&conn, &project_root_buf, &rel) {
+                Ok(false) => continue,
+                Ok(true) => {}
+                Err(e) => {
+                    tracing::warn!("reindex_files: hash check failed for {}: {e}", rel);
+                    continue;
+                }
+            }
+
+            let Some(lang) = crate::ast::detect_language(abs_path) else {
+                continue;
+            };
+            let source = match std::fs::read_to_string(abs_path) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!("reindex_files: cannot read {}: {e}", rel);
+                    continue;
+                }
+            };
+            let hash = match hash_file(abs_path) {
+                Ok(h) => h,
+                Err(e) => {
+                    tracing::warn!("reindex_files: cannot hash {}: {e}", rel);
+                    continue;
+                }
+            };
+            let mtime = file_mtime(abs_path).unwrap_or(0);
+
+            let chunks = super::ast_chunker::split_file(
+                &source,
+                lang,
+                rel_path,
+                config.embeddings.effective_chunk_size(),
+            );
+            if chunks.is_empty() {
+                continue;
+            }
+
+            // Build embed texts: metadata header + content (mirrors embed_producer)
+            let embed_texts: Vec<String> = chunks
+                .iter()
+                .map(|c| match &c.metadata {
+                    Some(m) => format!("{m}\n{}", c.content),
+                    None => c.content.clone(),
+                })
+                .collect();
+
+            // Resolve project_id for this file
+            let project_id = discovered
+                .iter()
+                .find(|p| abs_path.starts_with(project_root_buf.join(&p.relative_root)))
+                .map(|p| p.id.clone())
+                .unwrap_or_else(|| "project".to_string());
+
+            result.push(FileToEmbed {
+                rel,
+                hash,
+                mtime,
+                lang,
+                chunks,
+                embed_texts,
+                project_id,
+            });
         }
-        upsert_file_hash(&conn, &rel, &hash, Some(mtime))?;
-        conn.execute_batch("COMMIT")?;
-        count += 1;
+
+        // conn is dropped here — no Connection held across await points
+        anyhow::Ok(result)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("reindex_files phase1 panicked: {e}"))??;
+
+    if files_to_embed.is_empty() {
+        return Ok(0);
     }
+
+    // ── Phase 2 (async): embed all chunks ─────────────────────────────────────
+    // Collect all embed texts per file, call the embedder, map vectors back.
+    let mut all_vectors: Vec<Vec<Vec<f32>>> = Vec::with_capacity(files_to_embed.len());
+    for file in &files_to_embed {
+        let text_refs: Vec<&str> = file.embed_texts.iter().map(|s| s.as_str()).collect();
+        let vectors = embedder.embed(&text_refs).await?;
+        all_vectors.push(vectors);
+    }
+
+    // ── Phase 3 (spawn_blocking): write to DB ─────────────────────────────────
+    // Fresh Connection, no await point held — Connection is !Send.
+    let project_root_buf = project_root.to_path_buf();
+    let count = tokio::task::spawn_blocking(move || {
+        use crate::embed::schema::CodeChunk;
+
+        let conn = open_db(&project_root_buf)?;
+        let mut count = 0usize;
+
+        for (file, vectors) in files_to_embed.iter().zip(all_vectors.iter()) {
+            conn.execute_batch("BEGIN")?;
+            delete_file_chunks(&conn, &file.rel)?;
+            for (chunk, vector) in file.chunks.iter().zip(vectors.iter()) {
+                let code_chunk = CodeChunk {
+                    id: None,
+                    file_path: file.rel.clone(),
+                    language: file.lang.to_string(),
+                    content: chunk.content.clone(),
+                    start_line: chunk.start_line,
+                    end_line: chunk.end_line,
+                    file_hash: file.hash.clone(),
+                    source: "project".to_string(),
+                    project_id: file.project_id.clone(),
+                    metadata: chunk.metadata.clone(),
+                };
+                insert_chunk(&conn, &code_chunk, vector)?;
+            }
+            upsert_file_hash(&conn, &file.rel, &file.hash, Some(file.mtime))?;
+            conn.execute_batch("COMMIT")?;
+            count += 1;
+        }
+
+        anyhow::Ok(count)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("reindex_files phase3 panicked: {e}"))??;
 
     Ok(count)
 }
