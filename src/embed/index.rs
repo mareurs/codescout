@@ -2675,6 +2675,108 @@ pub fn mark_anchors_stale_for_file(conn: &Connection, file_path: &str) -> Result
     )?;
     Ok(count)
 }
+/// Re-embed a specific set of files that were modified by write tools.
+///
+/// Hash-gated: files whose content matches the stored hash are skipped.
+/// Called by `SemanticSearch` before executing a query to drain the dirty set.
+pub async fn reindex_files(
+    project_root: &Path,
+    abs_paths: &[std::path::PathBuf],
+    embedder: &std::sync::Arc<dyn codescout_embed::Embedder>,
+) -> anyhow::Result<usize> {
+    use crate::config::ProjectConfig;
+    use crate::embed::schema::CodeChunk;
+
+    if abs_paths.is_empty() {
+        return Ok(0);
+    }
+
+    let config = ProjectConfig::load_or_default(project_root)?;
+    let conn = open_db(project_root)?;
+    let discovered = crate::workspace::discover_projects(project_root, 3, &[]);
+    let mut count = 0;
+
+    for abs_path in abs_paths {
+        // Strip to relative path; skip if outside project root
+        let rel_path = match abs_path.strip_prefix(project_root) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        let rel = rel_path.to_string_lossy().replace('\\', "/");
+
+        // Hash gate: skip if content unchanged since last index
+        match is_file_changed_mtime_hash(&conn, project_root, &rel) {
+            Ok(false) => continue,
+            Ok(true) => {}
+            Err(_) => continue,
+        }
+
+        let Some(lang) = crate::ast::detect_language(abs_path) else {
+            continue;
+        };
+        let source = match std::fs::read_to_string(abs_path) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let hash = match hash_file(abs_path) {
+            Ok(h) => h,
+            Err(_) => continue,
+        };
+        let mtime = file_mtime(abs_path).unwrap_or(0);
+
+        let chunks = super::ast_chunker::split_file(
+            &source,
+            lang,
+            rel_path,
+            config.embeddings.effective_chunk_size(),
+        );
+        if chunks.is_empty() {
+            continue;
+        }
+
+        // Build embed texts: metadata header + content (mirrors embed_producer)
+        let embed_texts: Vec<String> = chunks
+            .iter()
+            .map(|c| match &c.metadata {
+                Some(m) => format!("{m}\n{}", c.content),
+                None => c.content.clone(),
+            })
+            .collect();
+        let text_refs: Vec<&str> = embed_texts.iter().map(|s| s.as_str()).collect();
+        let vectors = embedder.embed(&text_refs).await?;
+
+        // Resolve project_id for this file
+        let project_id = discovered
+            .iter()
+            .find(|p| abs_path.starts_with(project_root.join(&p.relative_root)))
+            .map(|p| p.id.clone())
+            .unwrap_or_else(|| "project".to_string());
+
+        // Atomic DB write: delete stale chunks, insert fresh, update hash
+        conn.execute_batch("BEGIN")?;
+        delete_file_chunks(&conn, &rel)?;
+        for (chunk, vector) in chunks.iter().zip(vectors.iter()) {
+            let code_chunk = CodeChunk {
+                id: None,
+                file_path: rel.clone(),
+                language: lang.to_string(),
+                content: chunk.content.clone(),
+                start_line: chunk.start_line,
+                end_line: chunk.end_line,
+                file_hash: hash.clone(),
+                source: "project".to_string(),
+                project_id: project_id.clone(),
+                metadata: chunk.metadata.clone(),
+            };
+            insert_chunk(&conn, &code_chunk, vector)?;
+        }
+        upsert_file_hash(&conn, &rel, &hash, Some(mtime))?;
+        conn.execute_batch("COMMIT")?;
+        count += 1;
+    }
+
+    Ok(count)
+}
 
 #[cfg(test)]
 mod tests {
@@ -4826,5 +4928,89 @@ mod tests {
             stats.embedding_count, stats.chunk_count,
             "every chunk needs an embedding"
         );
+    }
+    // ── reindex_files tests ───────────────────────────────────────────────────────
+
+    #[test]
+    fn reindex_files_skips_empty_input() {
+        let dir = tempdir().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        struct InstantEmbedder;
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for InstantEmbedder {
+            fn dimensions(&self) -> usize {
+                3
+            }
+            async fn embed(
+                &self,
+                texts: &[&str],
+            ) -> anyhow::Result<Vec<codescout_embed::Embedding>> {
+                Ok(texts.iter().map(|_| vec![1.0_f32, 0.0, 0.0]).collect())
+            }
+        }
+        let embedder: std::sync::Arc<dyn codescout_embed::Embedder> =
+            std::sync::Arc::new(InstantEmbedder);
+        let result = rt.block_on(reindex_files(dir.path(), &[], &embedder));
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[test]
+    fn reindex_files_skips_hash_unchanged() {
+        let dir = tempdir().unwrap();
+        let conn = open_db(dir.path()).unwrap();
+
+        let file = dir.path().join("mod.rs");
+        std::fs::write(&file, "fn a() {}").unwrap();
+        let hash = hash_file(&file).unwrap();
+        let mtime = file_mtime(&file).unwrap();
+        upsert_file_hash(&conn, "mod.rs", &hash, Some(mtime)).unwrap();
+        drop(conn);
+
+        struct InstantEmbedder;
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for InstantEmbedder {
+            fn dimensions(&self) -> usize {
+                3
+            }
+            async fn embed(
+                &self,
+                texts: &[&str],
+            ) -> anyhow::Result<Vec<codescout_embed::Embedding>> {
+                Ok(texts.iter().map(|_| vec![1.0_f32, 0.0, 0.0]).collect())
+            }
+        }
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let embedder: std::sync::Arc<dyn codescout_embed::Embedder> =
+            std::sync::Arc::new(InstantEmbedder);
+        let count = rt
+            .block_on(reindex_files(dir.path(), &[file], &embedder))
+            .unwrap();
+        assert_eq!(count, 0, "hash gate should prevent re-embed");
+    }
+
+    #[test]
+    fn reindex_files_skips_unreadable_path() {
+        let dir = tempdir().unwrap();
+        struct InstantEmbedder;
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for InstantEmbedder {
+            fn dimensions(&self) -> usize {
+                3
+            }
+            async fn embed(
+                &self,
+                texts: &[&str],
+            ) -> anyhow::Result<Vec<codescout_embed::Embedding>> {
+                Ok(texts.iter().map(|_| vec![1.0_f32, 0.0, 0.0]).collect())
+            }
+        }
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let embedder: std::sync::Arc<dyn codescout_embed::Embedder> =
+            std::sync::Arc::new(InstantEmbedder);
+        let ghost = dir.path().join("ghost.rs");
+        let count = rt
+            .block_on(reindex_files(dir.path(), &[ghost], &embedder))
+            .unwrap();
+        assert_eq!(count, 0);
     }
 }
