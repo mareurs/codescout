@@ -151,9 +151,17 @@ e2e-typescript = [] # needs: typescript-language-server
 e2e-kotlin = []     # needs: kotlin-lsp
 e2e-java = []       # needs: jdtls
 
+[profile.dev]
+opt-level = 0
+debug = 1
+
+[profile.dev.build-override]
+opt-level = 3
+
 [profile.release]
 opt-level = 3
 lto = "thin"
+codegen-units = 1
 strip = true
 # Abort on panic rather than unwind — prevents a future panic from leaving the
 # MCP server in a half-alive state where the process runs but no responses are
