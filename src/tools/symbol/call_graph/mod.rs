@@ -183,7 +183,7 @@ impl Tool for CallGraph {
         json!({
             "type": "object",
             "properties": {
-                "symbol":       { "type": "string", "description": "Symbol identifier (e.g. 'MyStruct/my_method')" },
+                "symbol":       { "type": "string", "description": "Symbol identifier. Plain method: 'MyStruct/method'. Trait impl method: 'impl Trait for Struct/method'." },
                 "path":         { "type": "string", "description": "File containing the symbol (required for seed resolution)" },
                 "direction":    { "enum": ["callers", "callees", "both"], "default": "callers" },
                 "max_depth":    { "type": "integer", "default": 3, "description": "Max BFS depth (capped at 10)" },

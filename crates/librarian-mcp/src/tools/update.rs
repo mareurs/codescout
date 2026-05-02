@@ -205,7 +205,19 @@ pub(crate) fn write_field_to_frontmatter(
         .find(|r| r.name == row.repo)
         .ok_or_else(|| anyhow::anyhow!("unknown repo `{}`", row.repo))?;
     let full = root.path.join(&row.rel_path);
-    let original = std::fs::read_to_string(&full)?;
+    let original = std::fs::read_to_string(&full).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            crate::tools::RecoverableError::with_hint(
+                format!("artifact file not found on disk: {}", full.display()),
+                "the file may have been deleted or moved outside of librarian",
+            )
+        } else {
+            crate::tools::RecoverableError::with_hint(
+                format!("failed to read {}: {e}", full.display()),
+                "check file permissions",
+            )
+        }
+    })?;
     let new_content = crate::frontmatter::update_in_place(&original, |fm| match field {
         "status" => {
             if let Some(s) = value.as_str() {

@@ -2,7 +2,6 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
 pub struct Frontmatter {
     #[serde(default)]
     pub id: Option<String>,
@@ -103,9 +102,12 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_fields() {
+    fn ignores_unknown_fields() {
         let doc = "---\nkind: spec\nbogus: nope\n---\nbody\n";
-        assert!(parse(doc).is_err());
+        let result = parse(doc);
+        assert!(result.is_ok());
+        let (fm, _) = result.unwrap();
+        assert_eq!(fm.unwrap().kind.as_deref(), Some("spec"));
     }
 
     #[test]

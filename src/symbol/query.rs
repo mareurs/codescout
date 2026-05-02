@@ -547,7 +547,7 @@ pub fn find_unique_symbol_by_name_path<'a>(
     match matches.len() {
         0 => Err(RecoverableError::with_hint(
             format!("symbol not found: {name_path}"),
-            "Use symbols(path) to see available symbols, or check the name_path spelling.",
+            "Use symbols(path) to list symbols. Trait impl methods use format 'impl Trait for Struct/method'.",
         )
         .into()),
         1 => Ok(matches.into_iter().next().unwrap()),
