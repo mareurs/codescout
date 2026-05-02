@@ -222,6 +222,11 @@ The project's security profile is set in `.codescout/project.toml`:
   dangerous commands execute without speed bump. For system-administration projects
   that need full filesystem access.
 
+
+- `approve_write(path)` — grant write access to a directory outside the project root for
+  this session. Required before `edit_file`/`create_file`/`edit_code`/`edit_markdown` on
+  out-of-project paths. Approval is cleared on server restart or re-activation. The
+  deny-list (`~/.ssh`, etc.) is always enforced regardless of approval.
 ## Workflows
 
 Multi-tool chains for common tasks. Follow the steps in order.
