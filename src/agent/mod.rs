@@ -142,6 +142,9 @@ pub struct ActiveProject {
     /// single File handle shared by every tool call in this process (via Arc)
     /// is sufficient — in-process ordering is handled by `write_lock` above.
     pub(crate) file_lock: Arc<std::fs::File>,
+    /// Session-scoped directories approved for writing outside the project root.
+    /// Managed by the `approve_write` tool; cleared on re-activation.
+    pub(crate) session_write_roots: Arc<std::sync::Mutex<Vec<PathBuf>>>,
 }
 
 /// Read `workspace.toml` (if present) and return the discovery depth and exclude list.
@@ -209,6 +212,7 @@ impl Agent {
                 write_lock: Arc::new(tokio::sync::Mutex::new(())),
                 file_lock: open_lock_file(&root)
                     .with_context(|| format!("failed to open write.lock for {}", root.display()))?,
+                session_write_roots: Arc::new(std::sync::Mutex::new(Vec::new())),
             };
 
             // Discover sub-projects; root project is always included.
@@ -368,6 +372,7 @@ impl Agent {
                 has_git_remote: probe_has_git_remote(&root),
                 write_lock,
                 file_lock,
+                session_write_roots: Arc::new(std::sync::Mutex::new(Vec::new())),
             };
 
             let mut projects: Vec<Project> = Vec::new();
@@ -561,6 +566,7 @@ impl Agent {
             has_git_remote: probe_has_git_remote(&abs_root),
             write_lock: Arc::new(tokio::sync::Mutex::new(())),
             file_lock,
+            session_write_roots: Arc::new(std::sync::Mutex::new(Vec::new())),
         };
 
         // Promote in-place
