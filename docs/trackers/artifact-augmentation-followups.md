@@ -1,13 +1,12 @@
 ---
-title: Artifact augmentation — followups & enhancement roadmap
-status: in-progress
-last_updated: 2026-05-01
-owner: @mareurs
+id: null
 kind: tracker
-related:
-  - docs/superpowers/plans/2026-05-01-artifact-augmentation.md
-  - docs/superpowers/specs/2026-05-01-artifact-augmentation.md
-  - .worktrees/artifact-augmentation (branch feat/artifact-augmentation)
+status: in-progress
+title: Artifact augmentation - followups and enhancement roadmap
+owners: []
+tags: []
+topic: null
+time_scope: null
 ---
 
 # Artifact augmentation — followups
