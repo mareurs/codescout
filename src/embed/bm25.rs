@@ -35,9 +35,11 @@ impl TokenStream for CodeTokenStream {
         }
     }
     fn token(&self) -> &Token {
+        debug_assert!(self.index > 0, "token() called before advance()");
         &self.tokens[self.index - 1]
     }
     fn token_mut(&mut self) -> &mut Token {
+        debug_assert!(self.index > 0, "token_mut() called before advance()");
         &mut self.tokens[self.index - 1]
     }
 }
@@ -235,7 +237,7 @@ impl BM25Index {
                 let chunk_id = doc
                     .get_first(self.chunk_id)
                     .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
+                    .ok_or_else(|| anyhow::anyhow!("missing chunk_id in BM25 doc — index may be corrupt"))?;
                 Ok(BM25Result {
                     chunk_id,
                     score: *score,
