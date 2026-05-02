@@ -477,7 +477,7 @@ pub fn is_dangerous_command(command: &str, config: &PathSecurityConfig) -> Optio
 const SOURCE_EXTENSIONS: &str = r"\.(rs|py|ts|tsx|js|cjs|mjs|jsx|go|java|kt|kts|c|cpp|cc|cxx|cs|rb|php|swift|scala|ex|exs|hs|lua|sh|bash)\b";
 
 /// Shell commands whose primary job is reading file content.
-const SOURCE_ACCESS_COMMANDS: &str = r"\b(cat|head|tail|sed|awk|less|more|wc)\b";
+const SOURCE_ACCESS_COMMANDS: &str = r"\b(cat|head|tail|sed|awk|less|more|wc|grep)\b";
 
 /// Split `s` on any separator in `seps` that appears *outside* single- or
 /// double-quoted strings. Separators are checked in order — put longer
@@ -545,6 +545,16 @@ fn split_outside_quotes(s: &str, seps: &[&str]) -> Vec<String> {
     segments
 }
 
+/// Extracts the pattern argument from a grep shell segment.
+/// Skips the command name and any flag tokens (starting with `-`).
+fn extract_grep_pattern(segment: &str) -> Option<&str> {
+    segment
+        .split_whitespace()
+        .skip(1)
+        .find(|t| !t.starts_with('-'))
+        .map(|t| t.trim_matches('"').trim_matches('\''))
+}
+
 /// Returns a hint string if `command` is a file-reading tool targeting a source file,
 /// `None` if the command is safe to execute.
 ///
@@ -579,7 +589,7 @@ pub fn check_source_file_access(command: &str) -> Option<String> {
         }
         // Only the *first token* of a segment is the actual command being executed.
         // Matching against the first token (not the full segment string) prevents
-        // false positives from quoted arguments containing command names, e.g.:
+        // false positives from quoted arguments containing command names, e.g.:\
         //   git commit -m "feat: tail-50 of log, output_buffer.rs"
         let first_token = seg.split_whitespace().next().unwrap_or("");
         if !cmd_re.is_match(first_token) {
@@ -592,20 +602,34 @@ pub fn check_source_file_access(command: &str) -> Option<String> {
 
     // Derive the hint from the specific command that triggered the block.
     let first_cmd = blocked.split_whitespace().next().unwrap_or("");
-    let hint = match first_cmd {
-        "sed" | "awk" => {
-            "use read_file(path, start_line, end_line), symbols(path), \
+    let hint: String = match first_cmd {
+        "grep" => {
+            let pat = extract_grep_pattern(blocked.as_str()).unwrap_or("");
+            if is_identifier_pattern(pat) {
+                let name = pat.split('|').next().unwrap_or(pat);
+                format!(
+                    "use symbols(name='{name}') for declarations, \
+                     references(symbol='{name}') for direct callers, \
+                     call_graph(symbol='{name}', direction='callers') for transitive blast radius. \
+                     Re-run with acknowledge_risk: true if you need raw shell grep."
+                )
+            } else {
+                "use grep(pattern, path) codescout tool instead. \
+                 Re-run with acknowledge_risk: true if you need raw shell access."
+                    .to_string()
+            }
+        }
+        "sed" | "awk" => "use read_file(path, start_line, end_line), symbols(path), \
              symbols(name=..., include_body=true), or grep(regex) instead. \
              Re-run with acknowledge_risk: true if you need raw shell access."
-        }
-        _ => {
-            "use read_file(path, start_line, end_line) or symbols(path) + \
+            .to_string(),
+        _ => "use read_file(path, start_line, end_line) or symbols(path) + \
              symbols(name=..., include_body=true) instead. \
              Re-run with acknowledge_risk: true if you need raw shell access."
-        }
+            .to_string(),
     };
 
-    Some(hint.to_string())
+    Some(hint)
 }
 
 /// Returns true if the path refers to a source code file (by extension).
@@ -1268,6 +1292,35 @@ mod tests {
             hint.contains("symbols"),
             "hint should mention symbols, got: {hint}"
         );
+    }
+
+    #[test]
+    fn grep_on_source_with_identifier_gives_symbol_ladder() {
+        let hint = check_source_file_access("grep WriteMemory src/tools/memory.rs").unwrap();
+        assert!(hint.contains("symbols(name='WriteMemory')"), "got: {hint}");
+        assert!(
+            hint.contains("references(symbol='WriteMemory')"),
+            "got: {hint}"
+        );
+        assert!(
+            hint.contains("call_graph(symbol='WriteMemory'"),
+            "got: {hint}"
+        );
+    }
+
+    #[test]
+    fn grep_on_source_with_regex_gives_generic_hint() {
+        let hint = check_source_file_access("grep 'foo.*bar' src/main.rs").unwrap();
+        assert!(hint.contains("grep(pattern"), "got: {hint}");
+        // must NOT show symbol ladder for regex patterns
+        assert!(!hint.contains("call_graph"), "got: {hint}");
+    }
+
+    #[test]
+    fn grep_pipe_alternation_uses_first_part_in_hint() {
+        let hint =
+            check_source_file_access("grep 'WriteMemory|ReadMemory' src/tools/memory.rs").unwrap();
+        assert!(hint.contains("symbols(name='WriteMemory')"), "got: {hint}");
     }
 
     #[test]
