@@ -6,6 +6,7 @@
 mod core;
 pub use core::*;
 
+pub mod approve_write;
 pub mod ast;
 pub mod command_summary;
 pub mod config;

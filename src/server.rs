@@ -20,6 +20,7 @@ use serde_json::Value;
 
 use crate::agent::Agent;
 use crate::tools::{
+    approve_write::ApproveWrite,
     config::Workspace,
     create_file::CreateFile,
     edit_file::EditFile,
@@ -102,6 +103,7 @@ impl CodeScoutServer {
             // Workflow tools
             Arc::new(RunCommand),
             Arc::new(Onboarding),
+            Arc::new(ApproveWrite),
             // Symbol tools (stub — require LSP)
             Arc::new(Symbols),
             Arc::new(References),
@@ -1323,6 +1325,7 @@ mod tests {
             "read_markdown",
             "run_command",
             "onboarding",
+            "approve_write",
             "symbols",
             "references",
             "call_graph",
@@ -1366,8 +1369,8 @@ mod tests {
             .count();
         assert_eq!(
             core_count,
-            19,
-            "L3 target is 19 core tools; got {}: {:?}",
+            20,
+            "L3 target is 20 core tools; got {}: {:?}",
             core_count,
             server.tools.iter().map(|t| t.name()).collect::<Vec<_>>()
         );
