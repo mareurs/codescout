@@ -2751,18 +2751,19 @@ async fn edit_file_blocked_on_source_file_when_debug_enforce_symbol_tools() {
 
     let src_file = dir.path().join("src/lib.rs");
     std::fs::create_dir_all(src_file.parent().unwrap()).unwrap();
-    std::fs::write(&src_file, "fn hello() {}\n").unwrap();
+    std::fs::write(&src_file, "fn hello() {\n    println!(\"hi\");\n}\n").unwrap();
 
+    // Structural (multi-line + definition keyword) → must be blocked.
     let result = EditFile
-            .call(
-                json!({"path": "src/lib.rs", "old_string": "fn hello()", "new_string": "fn hello_world()"}),
-                &ctx,
-            )
-            .await;
+        .call(
+            json!({"path": "src/lib.rs", "old_string": "fn hello() {\n    println!(\"hi\");\n}", "new_string": "fn hello_world() {\n    println!(\"hi\");\n}"}),
+            &ctx,
+        )
+        .await;
 
     assert!(
         result.is_err(),
-        "should block source edits when debug_enforce_symbol_tools=true"
+        "should block structural edits when debug_enforce_symbol_tools=true"
     );
     let err = result.unwrap_err();
     let recoverable = err
@@ -2777,6 +2778,49 @@ async fn edit_file_blocked_on_source_file_when_debug_enforce_symbol_tools() {
         "hint should point to edit_code, got: {:?}",
         recoverable.hint()
     );
+}
+
+#[tokio::test]
+async fn edit_file_allows_literal_substitution_when_debug_enforce_symbol_tools() {
+    let dir = tempdir().unwrap();
+    let codescout_dir = dir.path().join(".codescout");
+    std::fs::create_dir_all(&codescout_dir).unwrap();
+    std::fs::write(
+        codescout_dir.join("project.toml"),
+        "[project]\nname = \"test\"\n\n[security]\ndebug_enforce_symbol_tools = true\n",
+    )
+    .unwrap();
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: LspManager::new_arc(),
+        output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+    };
+
+    let src_file = dir.path().join("src/lib.rs");
+    std::fs::create_dir_all(src_file.parent().unwrap()).unwrap();
+    std::fs::write(&src_file, "fn hello() { let x = \"old_value\"; }\n").unwrap();
+
+    // Non-structural literal substitution — must be allowed through.
+    let result = EditFile
+        .call(
+            json!({"path": "src/lib.rs", "old_string": "\"old_value\"", "new_string": "\"new_value\""}),
+            &ctx,
+        )
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "literal string substitution should be allowed through debug_enforce_symbol_tools, got: {:?}",
+        result.err()
+    );
+    let content = std::fs::read_to_string(&src_file).unwrap();
+    assert!(content.contains("\"new_value\""), "file should be updated");
 }
 
 #[tokio::test]
