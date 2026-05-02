@@ -600,6 +600,43 @@ TC-09 expected corrected to `workflow.rs` (command.rs no longer exists).
 **Observations:** Pure-vector baseline (hybrid not active). Score 27/60 — matches the run 2 baseline of 27/60. The vocabulary-mismatch targets (TC-10, TC-19, TC-20) scored 0/0/1 — TC-10 improved to 1 vs run 2's 1 (same), TC-19 still 1, TC-20 still 0. TC-11 regressed to 0 vs run 2's 1 — the `symbol.rs` file has since been reorganized into a `symbol/` module so `symbol.rs` is no longer the expected match path. The stable 27/60 confirms the index state is consistent with prior baselines; true hybrid evaluation requires server restart after reindex.
 
 ---
+### Model: CodeRankEmbed — hybrid BM25+vector, post-restart reindex (2026-05-02)
+
+| Field | Value |
+|-------|-------|
+| Model string | `CodeRankEmbed` + `url = "http://localhost:43300/v1"` |
+| Pipeline | **Hybrid BM25+vector with RRF fusion** (k=60) — BM25 active after `/mcp` restart + `index(action="build")` |
+| Index state | Up to date (634 files, 24285 chunks, commit 91500dbe) |
+| **Total score** | **31/60** |
+
+| TC | Score | Notes |
+|----|-------|-------|
+| TC-01 | 2 | mod.rs ✓ (#1,#2,#5); server.rs ✗, FEATURES.md ✗ |
+| TC-02 | 1 | embedding-backends.md ✓ (#1,#3); embed/mod.rs ✗, embeddings.md ✗ |
+| TC-03 | 2 | client.rs ✓ (#1,#2); ops.rs ✗, manager.rs ✗ |
+| TC-04 | 2 | run_command.rs ✓ (#1,#2,#3) [file currently named run_command.rs]; docs ✗ |
+| TC-05 | 3 | output.rs ✓ (#4), PROGRESSIVE_DISCOVERABILITY.md ✓ (#5) — both in top 5 |
+| TC-06 | 0 | mcp_resources/tool_usage.rs surfaced instead of usage/db.rs, usage/mod.rs |
+| TC-07 | 2 | markdown.rs ✓ (#1,#4,#5); file_summary.rs ✗ |
+| TC-08 | 2 | index.rs ✓ (#1,#2); schema.rs ✗ |
+| TC-09 | 2 | path_security.rs ✓ (#1); run_command.rs ✓ (#3,#4) [current equiv of workflow.rs] |
+| TC-10 | 1 | progressive-disclosure.md manual page ✓ (#2) — overflow hint content present; output.rs ✗, server_instructions.md ✗ |
+| TC-11 | 1 | server_instructions.md "Safe Rename" section ✓ (#2); symbol/rename impl ✗, lsp/ops.rs ✗ |
+| TC-12 | 1 | embedding-backends.md ✓ (#3); embed/mod.rs ✗ |
+| TC-13 | 2 | manager.rs ✓ (#1,#2), client.rs ✓ (#3); troubleshooting.md ✗ |
+| TC-14 | 0 | research-progressive-disclosure.md surfaced instead of tools/mod.rs, server.rs |
+| TC-15 | 2 | index.rs ✓ (#1), vec0-migration plans ✓ (#2,#3,#4); embed/mod.rs ✗ |
+| TC-16 | 1 | semantic.rs ✓ (#5); embed/index.rs ✗, embed/mod.rs ✗ |
+| TC-17 | 3 | companion-plugin.md ✓ (#2), routing-plugin.md ✓ (#3) — both in top 5 |
+| TC-18 | 3 | markdown.rs ✓ (#2), file_summary.rs ✓ (#3,#4), archived misbehaviors ✓ (#1) |
+| TC-19 | 1 | server.rs ✓ (#5); agent/mod.rs ✗, lsp/manager.rs ✗ — **improved from 0** |
+| TC-20 | 0 | CLAUDE.md + server.rs test surfaced; server_instructions.md ✗, onboarding_prompt.md ✗ |
+
+**Tier scores:** T1=10/15 · T2=9/21 · T3=8/15 · T4=4/9
+
+**vs pure-vector baseline (27/60):** +4 points. Vocabulary-mismatch targets: TC-10 0→1 ✓, TC-19 0→1 ✓, TC-20 still 0. Both TC-10 and TC-19 met the ≥1/3 improvement target. TC-05 improved 1→3 (output.rs + PROGRESSIVE_DISCOVERABILITY.md both surfaced). TC-20 remains at 0 — "prompt surface consistency" query still routed to CLAUDE.md and server.rs test instead of the actual prompt files.
+
+---
 ### Model: *(template for additional models)*
 
 | Field | Value |
