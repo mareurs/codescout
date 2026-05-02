@@ -62,8 +62,35 @@ impl Tokenizer for CodeTokenizer {
     }
 }
 
-pub fn tokenize_code_text(_text: &str) -> Vec<String> {
-    todo!("Task 2")
+fn split_camel_case(s: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let chars: Vec<char> = s.chars().collect();
+    for (i, &c) in chars.iter().enumerate() {
+        if i > 0 && c.is_uppercase() && chars[i - 1].is_lowercase() {
+            if !current.is_empty() {
+                parts.push(std::mem::take(&mut current));
+            }
+        }
+        current.push(c);
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+    parts.into_iter().map(|s| s.to_lowercase()).collect()
+}
+
+pub fn tokenize_code_text(text: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    for word in text.split(|c: char| !c.is_alphanumeric() && c != '_') {
+        if word.is_empty() {
+            continue;
+        }
+        for part in word.split('_').filter(|s| !s.is_empty()) {
+            tokens.extend(split_camel_case(part));
+        }
+    }
+    tokens
 }
 
 // ── Schema ───────────────────────────────────────────────────────────────────
@@ -103,4 +130,39 @@ impl BM25Index {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tokenizer_splits_camel_case() {
+        assert_eq!(
+            tokenize_code_text("parseJsonObject"),
+            vec!["parse", "json", "object"]
+        );
+    }
+
+    #[test]
+    fn tokenizer_splits_snake_case() {
+        assert_eq!(tokenize_code_text("open_db"), vec!["open", "db"]);
+    }
+
+    #[test]
+    fn tokenizer_splits_file_path() {
+        assert_eq!(
+            tokenize_code_text("src/embed/index.rs"),
+            vec!["src", "embed", "index", "rs"]
+        );
+    }
+
+    #[test]
+    fn tokenizer_handles_mixed_ident() {
+        assert_eq!(
+            tokenize_code_text("impl Tool for SemanticSearch"),
+            vec!["impl", "tool", "for", "semantic", "search"]
+        );
+    }
+
+    #[test]
+    fn tokenizer_strips_empty_tokens() {
+        let tokens = tokenize_code_text("  spaces  and__double  ");
+        assert!(!tokens.iter().any(|t| t.is_empty()), "no empty tokens");
+    }
 }
