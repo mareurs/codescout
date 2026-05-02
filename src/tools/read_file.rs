@@ -551,6 +551,14 @@ fn read_full_file(
     if source_tag != "project" {
         result["source"] = json!(source_tag);
     }
+    if crate::tools::file_summary::detect_file_type(&resolved.to_string_lossy())
+        == crate::tools::file_summary::FileSummaryType::Source
+    {
+        result["hint"] = json!(
+            "Source file — prefer symbols(path) for overview, \
+             symbols(name='...', include_body=true) for specific functions."
+        );
+    }
     if let Some(c) = md_cov {
         result["coverage"] = c;
     }

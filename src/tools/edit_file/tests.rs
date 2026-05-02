@@ -1581,6 +1581,41 @@ async fn read_file_small_file_returns_content_directly() {
 }
 
 #[tokio::test]
+async fn read_file_small_source_file_has_hint() {
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("small.rs");
+    std::fs::write(&path, "fn main() {}\n").unwrap();
+
+    let result = ReadFile
+        .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+        .await
+        .unwrap();
+
+    let hint = result["hint"]
+        .as_str()
+        .expect("hint field missing for source file");
+    assert!(hint.contains("symbols(path)"), "got: {hint}");
+    assert!(hint.contains("include_body=true"), "got: {hint}");
+}
+
+#[tokio::test]
+async fn read_file_small_non_source_file_no_hint() {
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("config.json");
+    std::fs::write(&path, "{\"key\": \"value\"}\n").unwrap();
+
+    let result = ReadFile
+        .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+        .await
+        .unwrap();
+
+    assert!(
+        result.get("hint").is_none(),
+        "non-source file should not have hint"
+    );
+}
+
+#[tokio::test]
 async fn read_file_large_file_returns_buffer_ref() {
     let (dir, ctx) = project_ctx().await;
     let path = dir.path().join("big.txt");
