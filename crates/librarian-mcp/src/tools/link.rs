@@ -1,12 +1,9 @@
 use anyhow::Result;
-use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{Tool, ToolContext};
+use super::ToolContext;
 use crate::catalog::{artifact, links};
-
-pub struct ArtifactLink;
 
 #[derive(Deserialize)]
 struct Args {
@@ -14,75 +11,49 @@ struct Args {
     dst_id: String,
     rel: String,
 }
+pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    let a: Args = serde_json::from_value(args)?;
+    let now = chrono::Utc::now().timestamp_millis();
+    let cat = ctx.catalog.lock();
 
-#[async_trait]
-impl Tool for ArtifactLink {
-    fn name(&self) -> &'static str {
-        "artifact_link"
+    if artifact::get(&cat, &a.src_id)?.is_none() {
+        anyhow::bail!("src artifact `{}` not found", a.src_id);
     }
+    let dst = artifact::get(&cat, &a.dst_id)?
+        .ok_or_else(|| anyhow::anyhow!("dst artifact `{}` not found", a.dst_id))?;
 
-    fn description(&self) -> &'static str {
-        "Create a directional link between two artifacts. rel=\"supersedes\" also marks the destination as superseded."
-    }
+    links::insert(
+        &cat,
+        &links::LinkRow {
+            src_id: a.src_id.clone(),
+            dst_id: a.dst_id.clone(),
+            rel: a.rel.clone(),
+            created_at: now,
+        },
+    )?;
 
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "required": ["src_id", "dst_id", "rel"],
-            "properties": {
-                "src_id": {"type": "string"},
-                "dst_id": {"type": "string"},
-                "rel": {"type": "string"}
-            }
-        })
-    }
+    if a.rel == "supersedes" {
+        let mut dst = dst;
+        dst.status = "superseded".into();
+        dst.updated_at = now;
+        artifact::upsert(&cat, &dst)?;
 
-    async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
-        let a: Args = serde_json::from_value(args)?;
-        let now = chrono::Utc::now().timestamp_millis();
-        let cat = ctx.catalog.lock();
-
-        if artifact::get(&cat, &a.src_id)?.is_none() {
-            anyhow::bail!("src artifact `{}` not found", a.src_id);
-        }
-        let dst = artifact::get(&cat, &a.dst_id)?
-            .ok_or_else(|| anyhow::anyhow!("dst artifact `{}` not found", a.dst_id))?;
-
-        links::insert(
+        let _ = crate::catalog::events::insert(
             &cat,
-            &links::LinkRow {
-                src_id: a.src_id.clone(),
-                dst_id: a.dst_id.clone(),
-                rel: a.rel.clone(),
+            &crate::catalog::events::EventRow {
+                id: ulid::Ulid::new().to_string(),
+                artifact_id: a.src_id.clone(),
+                kind: "superseded_by".into(),
+                payload: serde_json::json!({"target_artifact_id": a.dst_id}).to_string(),
+                anchor_commit: None,
+                head_commit: None,
+                author: None,
                 created_at: now,
             },
-        )?;
-
-        if a.rel == "supersedes" {
-            let mut dst = dst;
-            dst.status = "superseded".into();
-            dst.updated_at = now;
-            artifact::upsert(&cat, &dst)?;
-
-            // Dual-write: emit a superseded_by event on the source artifact so the
-            // timeline surface sees the supersession.
-            let _ = crate::catalog::events::insert(
-                &cat,
-                &crate::catalog::events::EventRow {
-                    id: ulid::Ulid::new().to_string(),
-                    artifact_id: a.src_id.clone(),
-                    kind: "superseded_by".into(),
-                    payload: serde_json::json!({"target_artifact_id": a.dst_id}).to_string(),
-                    anchor_commit: None,
-                    head_commit: None,
-                    author: None,
-                    created_at: now,
-                },
-            );
-        }
-
-        Ok(json!("ok"))
+        );
     }
+
+    Ok(json!("ok"))
 }
 
 #[cfg(test)]
@@ -137,13 +108,12 @@ mod tests {
         artifact::upsert(&cat, &mk_row("b")).unwrap();
         let ctx = mk_ctx(cat);
 
-        let v = ArtifactLink
-            .call(
-                &ctx,
-                json!({"src_id": "a", "dst_id": "b", "rel": "implements"}),
-            )
-            .await
-            .unwrap();
+        let v = call(
+            &ctx,
+            json!({"src_id": "a", "dst_id": "b", "rel": "implements"}),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(v, json!("ok"));
         let out = links::outgoing(&ctx.catalog.lock(), "a").unwrap();
@@ -158,13 +128,12 @@ mod tests {
         artifact::upsert(&cat, &mk_row("b")).unwrap();
         let ctx = mk_ctx(cat);
 
-        let v = ArtifactLink
-            .call(
-                &ctx,
-                json!({"src_id": "a", "dst_id": "b", "rel": "supersedes"}),
-            )
-            .await
-            .unwrap();
+        let v = call(
+            &ctx,
+            json!({"src_id": "a", "dst_id": "b", "rel": "supersedes"}),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(v, json!("ok"));
         let dst = artifact::get(&ctx.catalog.lock(), "b").unwrap().unwrap();
@@ -178,13 +147,12 @@ mod tests {
         artifact::upsert(&cat, &mk_row("b")).unwrap();
         let ctx = mk_ctx(cat);
 
-        ArtifactLink
-            .call(
-                &ctx,
-                json!({"src_id": "a", "dst_id": "b", "rel": "supersedes"}),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            json!({"src_id": "a", "dst_id": "b", "rel": "supersedes"}),
+        )
+        .await
+        .unwrap();
 
         // Expect a superseded_by event on artifact "a".
         let count: i64 = ctx
@@ -206,13 +174,12 @@ mod tests {
         artifact::upsert(&cat, &mk_row("a")).unwrap();
         let ctx = mk_ctx(cat);
 
-        let err = ArtifactLink
-            .call(
-                &ctx,
-                json!({"src_id": "a", "dst_id": "nonexistent", "rel": "ref"}),
-            )
-            .await
-            .unwrap_err();
+        let err = call(
+            &ctx,
+            json!({"src_id": "a", "dst_id": "nonexistent", "rel": "ref"}),
+        )
+        .await
+        .unwrap_err();
 
         assert!(
             err.to_string().contains("not found"),
@@ -228,22 +195,20 @@ mod tests {
         let ctx = mk_ctx(cat);
 
         // First link — ok.
-        ArtifactLink
-            .call(
-                &ctx,
-                json!({"src_id": "a", "dst_id": "b", "rel": "implements"}),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            json!({"src_id": "a", "dst_id": "b", "rel": "implements"}),
+        )
+        .await
+        .unwrap();
 
         // Same link again — must not error.
-        let v = ArtifactLink
-            .call(
-                &ctx,
-                json!({"src_id": "a", "dst_id": "b", "rel": "implements"}),
-            )
-            .await
-            .unwrap();
+        let v = call(
+            &ctx,
+            json!({"src_id": "a", "dst_id": "b", "rel": "implements"}),
+        )
+        .await
+        .unwrap();
         assert_eq!(v, json!("ok"));
 
         // Only one edge row should exist.
@@ -265,13 +230,12 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         let ctx = mk_ctx(cat);
 
-        let err = ArtifactLink
-            .call(
-                &ctx,
-                json!({"src_id": "ghost", "dst_id": "also_ghost", "rel": "implements"}),
-            )
-            .await
-            .unwrap_err();
+        let err = call(
+            &ctx,
+            json!({"src_id": "ghost", "dst_id": "also_ghost", "rel": "implements"}),
+        )
+        .await
+        .unwrap_err();
         assert!(
             err.to_string().contains("not found"),
             "expected 'not found' error, got: {err}"

@@ -4,9 +4,7 @@ use serde_json::{json, Value};
 
 use crate::indexer;
 
-use super::{Tool, ToolContext};
-
-pub struct LibrarianReindex;
+use super::ToolContext;
 
 #[derive(Deserialize)]
 struct Args {
@@ -15,265 +13,6 @@ struct Args {
     /// Scope of the reindex. Defaults to `project` when a current project is
     /// resolved, else `all`. Mirrors the read-tool scope semantics.
     scope: Option<super::scope::Scope>,
-}
-
-#[async_trait::async_trait]
-impl Tool for LibrarianReindex {
-    fn name(&self) -> &'static str {
-        "librarian_reindex"
-    }
-
-    fn description(&self) -> &'static str {
-        "Re-scan and classify markdown artifacts. Default scope=project (current sub-project only); pass scope=repo|umbrella|all to widen. force=true wipes target rows first. Reports `targets` (repos+subdirs walked) and `scope` for confirmation."
-    }
-
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "repo": {
-                    "type": "string",
-                    "description": "Restrict to a specific workspace root (only meaningful with scope=all|repo)."
-                },
-                "force": {
-                    "type": "boolean",
-                    "description": "Wipe rows for the targeted scope before re-walking."
-                },
-                "scope": {
-                    "type": "string",
-                    "enum": ["project", "repo", "umbrella", "all"],
-                    "description": "project = current sub-project (default); repo = whole current root; umbrella = umbrella members; all = workspace-wide."
-                }
-            }
-        })
-    }
-
-    async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
-        use super::scope::Scope;
-
-        let a: Args = serde_json::from_value(args)?;
-
-        // Build target list as (root, subdir) tuples honoring scope.
-        // Scope semantics:
-        //   - Project (default when current_project resolved): walk only the
-        //     current sub-project's directory, leaving sibling project rows
-        //     under the same workspace root untouched.
-        //   - Repo: walk the full workspace root.
-        //   - Umbrella: walk every member of the current project's umbrella.
-        //   - All: walk every workspace root (legacy behavior).
-        // `repo` arg is honored only with scope=All|Repo (back-compat path).
-        let effective_scope = a.scope.unwrap_or_else(|| {
-            if ctx.current_project.is_some() {
-                Scope::Project
-            } else {
-                Scope::All
-            }
-        });
-
-        let targets: Vec<(crate::workspace::Root, Option<String>)> = match effective_scope {
-            Scope::All => {
-                let roots: Vec<_> = if let Some(ref repo_name) = a.repo {
-                    let root = ctx
-                        .workspace
-                        .roots
-                        .iter()
-                        .find(|r| &r.name == repo_name)
-                        .ok_or_else(|| anyhow::anyhow!("unknown repo `{}`", repo_name))?;
-                    vec![root.clone()]
-                } else {
-                    ctx.workspace.roots.clone()
-                };
-                roots.into_iter().map(|r| (r, None)).collect()
-            }
-            Scope::Repo => {
-                let cp = ctx.current_project.as_deref().ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "scope=repo requires a resolved current project; cwd is outside all \
-                         workspace roots. Pass scope=\"all\" to reindex everything."
-                    )
-                })?;
-                let root = ctx
-                    .workspace
-                    .roots
-                    .iter()
-                    .find(|r| r.name == cp.root)
-                    .ok_or_else(|| anyhow::anyhow!("workspace root `{}` not found", cp.root))?;
-                vec![(root.clone(), None)]
-            }
-            Scope::Project => {
-                let cp = ctx.current_project.as_deref().ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "scope=project requires a resolved current project; cwd is outside all \
-                         workspace roots. Pass scope=\"all\" to reindex everything."
-                    )
-                })?;
-                let root = ctx
-                    .workspace
-                    .roots
-                    .iter()
-                    .find(|r| r.name == cp.root)
-                    .ok_or_else(|| anyhow::anyhow!("workspace root `{}` not found", cp.root))?;
-                let subdir = if cp.subdir.is_empty() {
-                    None
-                } else {
-                    Some(cp.subdir.clone())
-                };
-                vec![(root.clone(), subdir)]
-            }
-            Scope::Umbrella => {
-                let cp = ctx.current_project.as_deref().ok_or_else(|| {
-                    anyhow::anyhow!("scope=umbrella requires a resolved current project")
-                })?;
-                let umbrella_name = cp.umbrella.as_deref().ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "scope=umbrella but no umbrella declared for {}/{}",
-                        cp.root,
-                        cp.subdir
-                    )
-                })?;
-                let umbrella = ctx
-                    .workspace
-                    .umbrellas
-                    .iter()
-                    .find(|u| u.name == umbrella_name)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("umbrella `{umbrella_name}` not found in workspace config")
-                    })?;
-                let mut out = Vec::with_capacity(umbrella.members.len());
-                for m in &umbrella.members {
-                    let (root_name, sub) = match m.split_once('/') {
-                        Some((r, s)) => (r, Some(s.to_string())),
-                        None => (m.as_str(), None),
-                    };
-                    let root = ctx
-                        .workspace
-                        .roots
-                        .iter()
-                        .find(|r| r.name == root_name)
-                        .ok_or_else(|| {
-                            anyhow::anyhow!("umbrella member root `{root_name}` not in workspace")
-                        })?;
-                    out.push((root.clone(), sub));
-                }
-                out
-            }
-        };
-
-        // Force-wipe: scoped DELETE per target. NEVER cross sub-project lines.
-        if a.force == Some(true) {
-            let cat = ctx.catalog.lock();
-            for (root, subdir) in &targets {
-                match subdir {
-                    Some(s) if !s.is_empty() => {
-                        cat.conn.execute(
-                            "DELETE FROM artifact WHERE repo = ?1 AND rel_path LIKE ?2",
-                            rusqlite::params![root.name, format!("{s}/%")],
-                        )?;
-                    }
-                    _ => {
-                        cat.conn.execute(
-                            "DELETE FROM artifact WHERE repo = ?1",
-                            rusqlite::params![root.name],
-                        )?;
-                    }
-                }
-            }
-        }
-
-        // Whole-workspace reindex: drop rows for repos no longer in workspace.toml.
-        // Only meaningful when scope=All AND no specific repo requested.
-        let mut orphan_removed = 0usize;
-        if effective_scope == Scope::All && a.repo.is_none() {
-            let cat = ctx.catalog.lock();
-            let active: Vec<&str> = ctx
-                .workspace
-                .roots
-                .iter()
-                .map(|r| r.name.as_str())
-                .collect();
-            orphan_removed = crate::catalog::artifact::delete_orphan_repos(&cat, &active)?;
-        }
-
-        let ignore = crate::workspace::compile_ignore(&ctx.workspace.ignore)?;
-
-        let mut total_added = 0usize;
-        let mut total_updated = 0usize;
-        let mut total_removed = 0usize;
-        let mut total_unchanged = 0usize;
-        let mut all_unknown_ids: Vec<String> = Vec::new();
-
-        let want_embeddings = ctx.embedding.is_some();
-
-        for (root, subdir) in &targets {
-            let subdir_ref = subdir.as_deref();
-            // Phase 1: sync walk (lock held, no await)
-            let (report, embed_queue) = {
-                let cat = ctx.catalog.lock();
-                indexer::index_repo_sync(
-                    &cat,
-                    &ctx.rules,
-                    &root.name,
-                    &root.path,
-                    subdir_ref,
-                    &ignore,
-                    want_embeddings,
-                )?
-            };
-
-            total_added += report.added;
-            total_updated += report.updated;
-            total_removed += report.removed;
-            total_unchanged += report.unchanged;
-            all_unknown_ids.extend(report.unknown_ids);
-
-            if let Some(ref svc) = ctx.embedding {
-                let mut computed: Vec<(String, Vec<f32>)> = Vec::with_capacity(embed_queue.len());
-                for (id, title, chunk_text) in &embed_queue {
-                    let vec = svc.embed_artifact(title.as_deref(), chunk_text).await?;
-                    computed.push((id.clone(), vec));
-                }
-                let cat = ctx.catalog.lock();
-                indexer::write_embeddings(&cat, &computed)?;
-            }
-
-            // Backfill commit history at the workspace root level (commits are
-            // repo-wide regardless of subdir scoping).
-            {
-                let cat = ctx.catalog.lock();
-                if let Err(e) = backfill_commits(&cat, &root.path, &root.name) {
-                    tracing::debug!("backfill_commits skipped for {}: {}", root.name, e);
-                }
-            }
-        }
-
-        let unknown_count = all_unknown_ids.len();
-        const UNKNOWN_SAMPLE: usize = 20;
-        let sample: Vec<&String> = all_unknown_ids.iter().take(UNKNOWN_SAMPLE).collect();
-        Ok(json!({
-            "added": total_added,
-            "updated": total_updated,
-            "removed": total_removed,
-            "unchanged": total_unchanged,
-            "orphans_removed": orphan_removed,
-            "unknown_count": unknown_count,
-            "unknown_sample": sample,
-            "unknown_sample_note": if unknown_count > UNKNOWN_SAMPLE {
-                format!("showing first {UNKNOWN_SAMPLE} of {unknown_count}; run CLI reindex for full list")
-            } else {
-                "complete".to_string()
-            },
-            "scope": match effective_scope {
-                Scope::Project => "project",
-                Scope::Repo => "repo",
-                Scope::Umbrella => "umbrella",
-                Scope::All => "all",
-            },
-            "targets": targets.iter().map(|(r, s)| json!({
-                "repo": r.name,
-                "subdir": s,
-            })).collect::<Vec<_>>(),
-        }))
-    }
 }
 
 fn backfill_commits(
@@ -320,6 +59,217 @@ fn backfill_commits(
         .collect();
     crate::catalog::commits::upsert_many(catalog, &rows?)?;
     Ok(())
+}
+pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    use super::scope::Scope;
+
+    let a: Args = serde_json::from_value(args)?;
+
+    let effective_scope = a.scope.unwrap_or_else(|| {
+        if ctx.current_project.is_some() {
+            Scope::Project
+        } else {
+            Scope::All
+        }
+    });
+
+    let targets: Vec<(crate::workspace::Root, Option<String>)> = match effective_scope {
+        Scope::All => {
+            let roots: Vec<_> = if let Some(ref repo_name) = a.repo {
+                let root = ctx
+                    .workspace
+                    .roots
+                    .iter()
+                    .find(|r| &r.name == repo_name)
+                    .ok_or_else(|| anyhow::anyhow!("unknown repo `{}`", repo_name))?;
+                vec![root.clone()]
+            } else {
+                ctx.workspace.roots.clone()
+            };
+            roots.into_iter().map(|r| (r, None)).collect()
+        }
+        Scope::Repo => {
+            let cp = ctx.current_project.as_deref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "scope=repo requires a resolved current project; cwd is outside all \
+                     workspace roots. Pass scope=\"all\" to reindex everything."
+                )
+            })?;
+            let root = ctx
+                .workspace
+                .roots
+                .iter()
+                .find(|r| r.name == cp.root)
+                .ok_or_else(|| anyhow::anyhow!("workspace root `{}` not found", cp.root))?;
+            vec![(root.clone(), None)]
+        }
+        Scope::Project => {
+            let cp = ctx.current_project.as_deref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "scope=project requires a resolved current project; cwd is outside all \
+                     workspace roots. Pass scope=\"all\" to reindex everything."
+                )
+            })?;
+            let root = ctx
+                .workspace
+                .roots
+                .iter()
+                .find(|r| r.name == cp.root)
+                .ok_or_else(|| anyhow::anyhow!("workspace root `{}` not found", cp.root))?;
+            let subdir = if cp.subdir.is_empty() {
+                None
+            } else {
+                Some(cp.subdir.clone())
+            };
+            vec![(root.clone(), subdir)]
+        }
+        Scope::Umbrella => {
+            let cp = ctx.current_project.as_deref().ok_or_else(|| {
+                anyhow::anyhow!("scope=umbrella requires a resolved current project")
+            })?;
+            let umbrella_name = cp.umbrella.as_deref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "scope=umbrella but no umbrella declared for {}/{}",
+                    cp.root,
+                    cp.subdir
+                )
+            })?;
+            let umbrella = ctx
+                .workspace
+                .umbrellas
+                .iter()
+                .find(|u| u.name == umbrella_name)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("umbrella `{umbrella_name}` not found in workspace config")
+                })?;
+            let mut out = Vec::with_capacity(umbrella.members.len());
+            for m in &umbrella.members {
+                let (root_name, sub) = match m.split_once('/') {
+                    Some((r, s)) => (r, Some(s.to_string())),
+                    None => (m.as_str(), None),
+                };
+                let root = ctx
+                    .workspace
+                    .roots
+                    .iter()
+                    .find(|r| r.name == root_name)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("umbrella member root `{root_name}` not in workspace")
+                    })?;
+                out.push((root.clone(), sub));
+            }
+            out
+        }
+    };
+
+    if a.force == Some(true) {
+        let cat = ctx.catalog.lock();
+        for (root, subdir) in &targets {
+            match subdir {
+                Some(s) if !s.is_empty() => {
+                    cat.conn.execute(
+                        "DELETE FROM artifact WHERE repo = ?1 AND rel_path LIKE ?2",
+                        rusqlite::params![root.name, format!("{s}/%")],
+                    )?;
+                }
+                _ => {
+                    cat.conn.execute(
+                        "DELETE FROM artifact WHERE repo = ?1",
+                        rusqlite::params![root.name],
+                    )?;
+                }
+            }
+        }
+    }
+
+    let mut orphan_removed = 0usize;
+    if effective_scope == Scope::All && a.repo.is_none() {
+        let cat = ctx.catalog.lock();
+        let active: Vec<&str> = ctx
+            .workspace
+            .roots
+            .iter()
+            .map(|r| r.name.as_str())
+            .collect();
+        orphan_removed = crate::catalog::artifact::delete_orphan_repos(&cat, &active)?;
+    }
+
+    let ignore = crate::workspace::compile_ignore(&ctx.workspace.ignore)?;
+
+    let mut total_added = 0usize;
+    let mut total_updated = 0usize;
+    let mut total_removed = 0usize;
+    let mut total_unchanged = 0usize;
+    let mut all_unknown_ids: Vec<String> = Vec::new();
+
+    let want_embeddings = ctx.embedding.is_some();
+
+    for (root, subdir) in &targets {
+        let subdir_ref = subdir.as_deref();
+        let (report, embed_queue) = {
+            let cat = ctx.catalog.lock();
+            indexer::index_repo_sync(
+                &cat,
+                &ctx.rules,
+                &root.name,
+                &root.path,
+                subdir_ref,
+                &ignore,
+                want_embeddings,
+            )?
+        };
+
+        total_added += report.added;
+        total_updated += report.updated;
+        total_removed += report.removed;
+        total_unchanged += report.unchanged;
+        all_unknown_ids.extend(report.unknown_ids);
+
+        if let Some(ref svc) = ctx.embedding {
+            let mut computed: Vec<(String, Vec<f32>)> = Vec::with_capacity(embed_queue.len());
+            for (id, title, chunk_text) in &embed_queue {
+                let vec = svc.embed_artifact(title.as_deref(), chunk_text).await?;
+                computed.push((id.clone(), vec));
+            }
+            let cat = ctx.catalog.lock();
+            indexer::write_embeddings(&cat, &computed)?;
+        }
+
+        {
+            let cat = ctx.catalog.lock();
+            if let Err(e) = backfill_commits(&cat, &root.path, &root.name) {
+                tracing::debug!("backfill_commits skipped for {}: {}", root.name, e);
+            }
+        }
+    }
+
+    let unknown_count = all_unknown_ids.len();
+    const UNKNOWN_SAMPLE: usize = 20;
+    let sample: Vec<&String> = all_unknown_ids.iter().take(UNKNOWN_SAMPLE).collect();
+    Ok(json!({
+        "added": total_added,
+        "updated": total_updated,
+        "removed": total_removed,
+        "unchanged": total_unchanged,
+        "orphans_removed": orphan_removed,
+        "unknown_count": unknown_count,
+        "unknown_sample": sample,
+        "unknown_sample_note": if unknown_count > UNKNOWN_SAMPLE {
+            format!("showing first {UNKNOWN_SAMPLE} of {unknown_count}; run CLI reindex for full list")
+        } else {
+            "complete".to_string()
+        },
+        "scope": match effective_scope {
+            Scope::Project => "project",
+            Scope::Repo => "repo",
+            Scope::Umbrella => "umbrella",
+            Scope::All => "all",
+        },
+        "targets": targets.iter().map(|(r, s)| json!({
+            "repo": r.name,
+            "subdir": s,
+        })).collect::<Vec<_>>(),
+    }))
 }
 
 #[cfg(test)]
@@ -368,7 +318,7 @@ mod tests {
         let rules_toml = "[[rule]]\nglob = \"**/docs/specs/*.md\"\nkind = \"spec\"\n";
         let ctx = mk_ctx(root.to_path_buf(), rules_toml);
 
-        let v = LibrarianReindex.call(&ctx, json!({})).await.unwrap();
+        let v = call(&ctx, json!({})).await.unwrap();
 
         assert_eq!(
             v["added"].as_u64().unwrap(),
@@ -392,18 +342,15 @@ mod tests {
         let ctx = mk_ctx(root.to_path_buf(), "");
 
         // First index
-        LibrarianReindex.call(&ctx, json!({})).await.unwrap();
+        call(&ctx, json!({})).await.unwrap();
 
         // Second index without force → unchanged
-        let v2 = LibrarianReindex.call(&ctx, json!({})).await.unwrap();
+        let v2 = call(&ctx, json!({})).await.unwrap();
         assert_eq!(v2["unchanged"].as_u64().unwrap(), 1);
         assert_eq!(v2["added"].as_u64().unwrap(), 0);
 
         // Third index with force=true → wipes and re-adds
-        let v3 = LibrarianReindex
-            .call(&ctx, json!({"force": true}))
-            .await
-            .unwrap();
+        let v3 = call(&ctx, json!({"force": true})).await.unwrap();
         assert_eq!(v3["added"].as_u64().unwrap(), 1);
         assert_eq!(v3["unchanged"].as_u64().unwrap(), 0);
     }
@@ -442,7 +389,7 @@ mod tests {
 
         let ctx = mk_ctx_with_project(root.to_path_buf(), "p1");
 
-        let v = LibrarianReindex.call(&ctx, json!({})).await.unwrap();
+        let v = call(&ctx, json!({})).await.unwrap();
 
         assert_eq!(v["added"].as_u64().unwrap(), 1, "only p1/docs/a.md indexed");
         assert_eq!(v["scope"].as_str().unwrap(), "project");
@@ -462,10 +409,7 @@ mod tests {
 
         // First, index everything (scope=all)
         let ctx_all = mk_ctx(root.to_path_buf(), "");
-        LibrarianReindex
-            .call(&ctx_all, json!({"scope": "all"}))
-            .await
-            .unwrap();
+        call(&ctx_all, json!({"scope": "all"})).await.unwrap();
         let total_before: i64 = ctx_all
             .catalog
             .lock()
@@ -487,10 +431,7 @@ mod tests {
                 umbrella: None,
             })),
         };
-        LibrarianReindex
-            .call(&ctx_p1, json!({"force": true}))
-            .await
-            .unwrap();
+        call(&ctx_p1, json!({"force": true})).await.unwrap();
 
         let total_after: i64 = ctx_p1
             .catalog
@@ -520,10 +461,7 @@ mod tests {
     async fn project_scope_errors_without_current_project() {
         let tmp = TempDir::new().unwrap();
         let ctx = mk_ctx(tmp.path().to_path_buf(), "");
-        let err = LibrarianReindex
-            .call(&ctx, json!({"scope": "project"}))
-            .await
-            .unwrap_err();
+        let err = call(&ctx, json!({"scope": "project"})).await.unwrap_err();
         assert!(err.to_string().contains("scope=project"));
     }
 
@@ -533,7 +471,7 @@ mod tests {
         let root = tmp.path();
         std::fs::write(root.join("a.md"), "# A\n").unwrap();
         let ctx = mk_ctx(root.to_path_buf(), "");
-        let v = LibrarianReindex.call(&ctx, json!({})).await.unwrap();
+        let v = call(&ctx, json!({})).await.unwrap();
         assert_eq!(v["scope"].as_str().unwrap(), "all");
         assert_eq!(v["added"].as_u64().unwrap(), 1);
     }
@@ -585,7 +523,7 @@ mod tests {
         };
 
         // Run reindex — this should backfill the commits table
-        LibrarianReindex.call(&ctx, json!({})).await.unwrap();
+        call(&ctx, json!({})).await.unwrap();
 
         // Assert 3 rows in commits table for "r1"
         let n: i64 = {

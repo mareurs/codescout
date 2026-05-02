@@ -1,4 +1,5 @@
 //! librarian-mcp — workspace artifact registry, stdio MCP server.
+#![recursion_limit = "256"]
 
 pub mod classify;
 pub mod filter;

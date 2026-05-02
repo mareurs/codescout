@@ -8,25 +8,27 @@ through file frontmatter.
 
 | Want                                             | Use                    |
 |--------------------------------------------------|------------------------|
-| List artifacts of one kind                       | `artifact_find` with `kind` param |
-| Complex filter (multiple fields, and/or/not)     | `artifact_find`        |
-| Read one artifact + its neighbourhood            | `artifact_get`         |
-| Edges from a node (filtered by direction/rel)    | `artifact_get` with `include_links=true`, `links_direction`, `links_rel` |
-| BFS explore around a node (depth 1–3)            | `artifact_graph`       |
-| Topic or anchor → packed markdown context        | `librarian_context`    |
-| Write new artifact                               | `artifact_create`      |
-| Write tracker artifact with augmentation         | `artifact_create` with `kind=tracker`, `status=active`, `augment={prompt,params}` |
-| Patch frontmatter or body                        | `artifact_update`      |
-| Patch frontmatter + record refresh in one call   | `artifact_update` with `commit_refresh=true` |
-| Add relation edge (supersedes, implements, …)    | `artifact_link`        |
-| Append observation note                          | `artifact_event_create` with `kind=note` |
-| Manual re-scan (project-scoped by default)       | `librarian_reindex`    |
+| List artifacts of one kind                       | `artifact` with `action=find`, `kind` param |
+| Complex filter (multiple fields, and/or/not)     | `artifact` with `action=find`  |
+| Read one artifact + its neighbourhood            | `artifact` with `action=get`   |
+| Edges from a node (filtered by direction/rel)    | `artifact` with `action=get`, `include_links=true`, `links_direction`, `links_rel` |
+| BFS explore around a node (depth 1–3)            | `artifact` with `action=graph` |
+| Topic or anchor → packed markdown context        | `librarian` with `action=context` |
+| Write new artifact                               | `artifact` with `action=create` |
+| Write tracker artifact with augmentation         | `artifact` with `action=create`, `kind=tracker`, `status=active`, `augment={prompt,params}` |
+| Patch frontmatter or body                        | `artifact` with `action=update` |
+| Patch frontmatter + record refresh in one call   | `artifact` with `action=update`, `commit_refresh=true` |
+| Add relation edge (supersedes, implements, …)    | `artifact` with `action=link`  |
+| Append observation note                          | `artifact_event` with `action=create`, `kind=note` |
+| Manual re-scan (project-scoped by default)       | `librarian` with `action=reindex` |
 | Attach/replace prompt+params on artifact         | `artifact_augment`     |
 | Merge-patch params on existing augmentation      | `artifact_augment` with `merge=true` |
-| Gather context for refresh (read-only)           | `artifact_refresh`     |
-| Design a tracker (archetypes + teaching prompt)  | `tracker_design`       |
-| List/find augmented artifacts                    | `artifact_find` with `augmented: true` |
-| Discover stale augmented artifacts               | `artifact_refresh_stale` |
+| Gather context for refresh (read-only)           | `artifact_refresh` with `action=gather` |
+| Design a tracker (archetypes + teaching prompt)  | `librarian` with `action=tracker_design` |
+| List/find augmented artifacts                    | `artifact` with `action=find`, `augmented: true` |
+| Discover stale augmented artifacts               | `artifact_refresh` with `action=list_stale` |
+| Time-travel: single artifact at commit           | `artifact` with `action=state_at` |
+| Time-travel: all artifacts at commit             | `librarian` with `action=workspace_state_at` |
 ## Filter AST
 
 JSON tree. Composition: `and`, `or`, `not`. Leaf ops: `eq`, `ne`, `in`,
@@ -68,7 +70,7 @@ Times are ms-epoch integers, not ISO-8601.
 
 ## Default scope (project, archived hidden)
 
-Listing tools (`artifact_find`, `librarian_context`)
+Listing tools (`artifact` with `action=find`, `librarian` with `action=context`)
 default to **the agent's current sub-project** and **hide archived/superseded**.
 
 - `scope`: `"project"` (default) | `"repo"` | `"umbrella"` | `"all"`.
@@ -88,25 +90,17 @@ default to **the agent's current sub-project** and **hide archived/superseded**.
   the response surfaces `scope_fallback` in hints.
 
 **Umbrellas are user-declared** in `workspace.toml`:
-
-    [[umbrella]]
-    name = "my-platform"
-    members = ["infra/svc-a", "infra/svc-b"]
-
-Leaf ops gain `prefix` (LIKE `val%` with `_`/`%` escaped) for safe
-`rel_path` matching used by scope clauses.
-
 ## Limits
 
 - `limit` capped at 500, `offset` capped at 100_000 per query.
 - Default `limit` is 50 for list/find, 20 for links.
-- `artifact_graph` depth is 1–3.
+- `artifact` with `action=graph` depth is 1–3.
 - Semantic search requires `LIBRARIAN_EMBED_MODEL` env at server start —
   falls back to LIKE-match on title/topic if unavailable.
 
 ## Writes round-trip
 
-`artifact_create` / `_update` modify the on-disk markdown file first, then
+`artifact` with `action=create` / `action=update` modify the on-disk markdown file first, then
 re-index. The file + frontmatter is the source of truth; the catalog is a
 derived index.
 
@@ -116,24 +110,24 @@ derived index.
 Any artifact can carry a persistent **prompt** + AI-editable **params** via
 `artifact_augment`. This enables server-assisted context gathering.
 
-**Discovering what to refresh:** Call `artifact_refresh_stale` to list augmented
+**Discovering what to refresh:** Call `artifact_refresh` with `action=list_stale` to list augmented
 artifacts that haven't been refreshed recently (default: 24h threshold, current
 project scope). Returns items oldest-first; never-refreshed appear first.
 
 **Refresh cycle** (3 steps — commit is now inline):
-1. `artifact_refresh(id)` — server gathers context per params, returns package
+1. `artifact_refresh` with `action=gather` and `id` — server gathers context per params, returns package
    `{ prompt, params, current_body, context, hints }`. Does NOT write.
 2. Synthesize new body from `prompt + context + current_body`.
-3. `artifact_update(id, { body: "<new content>" }, commit_refresh=true)` — write back and record refresh metadata.
+3. `artifact` with `action=update`, `id`, `body: "<new content>"`, `commit_refresh=true` — write back and record refresh metadata.
 
-**Tracker kind:** `artifact_create` with `kind=tracker`, `status=active`, and `augment={prompt, params}` creates a tracker artifact (body = live state) and attaches augmentation atomically. Trackers are ranked first in `librarian_context`.
+**Tracker kind:** `artifact` with `action=create`, `kind=tracker`, `status=active`, and `augment={prompt, params}` creates a tracker artifact (body = live state) and attaches augmentation atomically. Trackers are ranked first in `librarian` with `action=context`.
 
 **Designing a tracker:** When the user asks to create a tracker, call
-`tracker_design` FIRST. It returns a teaching system_prompt + 6 archetypes
+`librarian` with `action=tracker_design` FIRST. It returns a teaching system_prompt + 6 archetypes
 (`deployment_state`, `failure_table`, `metric_baseline`, `audit_issues`,
 `task_list`, `reflective`) + the existing-tracker landscape. Pick an
 archetype, compose the spec (prompt, params, render_template, params_schema,
-body), then call `artifact_create` with `kind=tracker`. Don't skip `tracker_design` — it prevents
+body), then call `artifact` with `action=create` and `kind=tracker`. Don't skip `tracker_design` — it prevents
 collisions, anti-patterns, and ad-hoc shapes.
 
 **`[LIVE]` in context:** Augmented artifacts appear with a `<!-- [LIVE] -->` header
@@ -146,7 +140,7 @@ Unknown sources are skipped with a warning (forward compat).
 Augmentation supports two optional fields that decouple live state (params)
 from narrative (artifact body):
 - `render_template` — a MiniJinja template projecting `params` into a
-  markdown snippet that `librarian_context` injects under the `[LIVE]`
+  markdown snippet that `librarian` with `action=context` injects under the `[LIVE]`
   header. Use it for status tables, deployment flags, F-N failure rows —
   anything mechanically derivable. Body stays prose-only and is rewritten
   rarely; params are merged often without churning prose.
@@ -158,7 +152,7 @@ from narrative (artifact body):
 
 Both fields are optional; legacy augmentations work unchanged.## When indexing is stale
 
-`librarian_reindex {scope?, repo?, force?}` to manually trigger. Defaults
+`librarian` with `action=reindex` and `{scope?, repo?, force?}` to manually trigger. Defaults
 to `scope="project"` (current sub-project only) — sibling-project rows under
 the same workspace root are NOT touched. Pass `scope="repo"|"umbrella"|"all"`
 to widen, mirroring read-tool semantics. `force=true` wipes only the

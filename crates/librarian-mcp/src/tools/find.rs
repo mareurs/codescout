@@ -1,15 +1,12 @@
 use anyhow::Result;
-use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::scope::{apply_scope, Scope, ScopeApplied};
-use super::{Tool, ToolContext};
+use super::ToolContext;
 use crate::catalog::augmentation;
 use crate::catalog::find::{count_matching, find, FindOpts};
 use crate::filter::FilterNode;
-
-pub struct ArtifactFind;
 
 const MAX_LIMIT: usize = 500;
 const MAX_OFFSET: usize = 100_000;
@@ -74,184 +71,6 @@ fn merge_kind_status(
         0 => None,
         1 => parts.into_iter().next(),
         _ => Some(FilterNode::And { and: parts }),
-    }
-}
-
-#[async_trait]
-impl Tool for ArtifactFind {
-    fn name(&self) -> &'static str {
-        "artifact_find"
-    }
-
-    fn description(&self) -> &'static str {
-        "Search artifacts by filter AST (kind/status/tags/updated_at etc). \
-         Shortcut params: `kind` and `status` expand to eq-filters and combine \
-         with `filter` using AND. \
-         Composition: and/or/not. Leaf ops: eq/ne/in/nin/gt/lt/gte/lte/contains/prefix. \
-         Defaults: scope=project (current sub-project only), archived/superseded hidden \
-         when the filter does not constrain status. Pass scope=repo|umbrella|all to widen, \
-         include_archived=true to surface archived rows."
-    }
-
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "filter": {"type": "object"},
-                "kind": {"type": "string", "description": "Shortcut: filter to this kind only."},
-                "status": {"type": "string", "description": "Shortcut: filter to this status. Disables archived-hide default."},
-                "limit": {"type": "integer", "default": 50, "maximum": 500},
-                "offset": {"type": "integer", "default": 0, "maximum": 100000},
-                "semantic": {"type": "string", "description": "Natural-language query for semantic search (requires embedder)"},
-                "scope": {
-                    "type": "string",
-                    "enum": ["project", "repo", "umbrella", "all"],
-                    "default": "project"
-                },
-                "include_archived": {
-                    "type": "boolean",
-                    "default": false
-                },
-                "augmented": {
-                    "type": "boolean",
-                    "description": "Filter to augmented (true) or non-augmented (false) artifacts. Omit to return all."
-                }
-            }
-        })
-    }
-
-    async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
-        let a: Args = serde_json::from_value(args)?;
-        let limit = a.limit.min(MAX_LIMIT);
-        let offset = a.offset.min(MAX_OFFSET);
-
-        // Resolve semantic query → embedding vector (if requested and available).
-        let semantic_vec: Option<Vec<f32>> = if let Some(ref query) = a.semantic {
-            match ctx.embedding.as_ref() {
-                Some(svc) => Some(svc.embedder.embed_query(query).await?),
-                None => anyhow::bail!("semantic search requires an embedding service"),
-            }
-        } else {
-            None
-        };
-
-        // Merge kind/status shortcut params into the base filter.
-        let status_shortcut_set = a.status.is_some();
-        let base_filter = merge_kind_status(a.filter, a.kind.as_deref(), a.status.as_deref());
-
-        // Build augmented pre-filter if requested, then merge with user filter.
-        let user_filter: Option<FilterNode> = if let Some(want_augmented) = a.augmented {
-            let ids = {
-                let cat = ctx.catalog.lock();
-                augmentation::list_all_ids(&cat)?
-            };
-            if want_augmented {
-                if ids.is_empty() {
-                    return Ok(json!({"count": 0, "items": [], "scope": Value::Null, "hints": {}}));
-                }
-                let id_values: Vec<Value> = ids.into_iter().map(|id| json!(id)).collect();
-                let in_node = FilterNode::Leaf(
-                    [("id".to_string(), json!({"in": id_values}))]
-                        .into_iter()
-                        .collect(),
-                );
-                Some(match base_filter {
-                    Some(f) => FilterNode::And {
-                        and: vec![f, in_node],
-                    },
-                    None => in_node,
-                })
-            } else if ids.is_empty() {
-                // Nothing is augmented → "non-augmented" = everything; base filter unchanged.
-                base_filter
-            } else {
-                let id_values: Vec<Value> = ids.into_iter().map(|id| json!(id)).collect();
-                let nin_node = FilterNode::Leaf(
-                    [("id".to_string(), json!({"nin": id_values}))]
-                        .into_iter()
-                        .collect(),
-                );
-                Some(match base_filter {
-                    Some(f) => FilterNode::And {
-                        and: vec![f, nin_node],
-                    },
-                    None => nin_node,
-                })
-            }
-        } else {
-            base_filter
-        };
-
-        let user_constrains_status = status_shortcut_set
-            || user_filter
-                .as_ref()
-                .map(filter_mentions_status)
-                .unwrap_or(false);
-        let base = combine_user_with_archived_hide(
-            user_filter,
-            a.include_archived,
-            user_constrains_status,
-        );
-
-        let requested_scope = a.scope.unwrap_or_default();
-        let (effective_scope, scope_fallback) =
-            match (requested_scope, ctx.current_project.is_some()) {
-                (Scope::Project | Scope::Repo, false) => (Scope::All, true),
-                (s, _) => (s, false),
-            };
-
-        let current = ctx.current_project.as_deref();
-        let (scoped_filter, applied) =
-            apply_scope(base.clone(), effective_scope, &ctx.workspace, current)?;
-
-        let cat = ctx.catalog.lock();
-        let rows = find(
-            &cat,
-            &FindOpts {
-                filter: scoped_filter,
-                limit,
-                offset,
-                semantic: semantic_vec,
-            },
-        )?;
-        let items: Vec<Value> = rows
-            .into_iter()
-            .map(|r| {
-                json!({
-                    "id": r.id,
-                    "kind": r.kind,
-                    "status": r.status,
-                    "title": r.title,
-                    "repo": r.repo,
-                    "rel_path": r.rel_path,
-                    "updated_at": r.updated_at,
-                })
-            })
-            .collect();
-
-        // Hints only meaningful for non-semantic queries — semantic results are
-        // KNN-bounded and a count comparison would be misleading.
-        let hints = if a.semantic.is_some() {
-            json!({})
-        } else {
-            build_hints(
-                &cat,
-                base.as_ref(),
-                &applied,
-                &ctx.workspace,
-                current,
-                scope_fallback,
-                user_constrains_status,
-                a.include_archived,
-            )?
-        };
-
-        Ok(json!({
-            "count": items.len(),
-            "items": items,
-            "scope": applied.to_json(),
-            "hints": hints,
-        }))
     }
 }
 
@@ -401,6 +220,135 @@ fn is_status_nin_clause(n: &FilterNode) -> bool {
     }
     false
 }
+pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    let a: Args = serde_json::from_value(args)?;
+    let limit = a.limit.min(MAX_LIMIT);
+    let offset = a.offset.min(MAX_OFFSET);
+
+    // Resolve semantic query → embedding vector (if requested and available).
+    let semantic_vec: Option<Vec<f32>> = if let Some(ref query) = a.semantic {
+        match ctx.embedding.as_ref() {
+            Some(svc) => Some(svc.embedder.embed_query(query).await?),
+            None => anyhow::bail!("semantic search requires an embedding service"),
+        }
+    } else {
+        None
+    };
+
+    // Merge kind/status shortcut params into the base filter.
+    let status_shortcut_set = a.status.is_some();
+    let base_filter = merge_kind_status(a.filter, a.kind.as_deref(), a.status.as_deref());
+
+    // Build augmented pre-filter if requested, then merge with user filter.
+    let user_filter: Option<FilterNode> = if let Some(want_augmented) = a.augmented {
+        let ids = {
+            let cat = ctx.catalog.lock();
+            augmentation::list_all_ids(&cat)?
+        };
+        if want_augmented {
+            if ids.is_empty() {
+                return Ok(json!({"count": 0, "items": [], "scope": Value::Null, "hints": {}}));
+            }
+            let id_values: Vec<Value> = ids.into_iter().map(|id| json!(id)).collect();
+            let in_node = FilterNode::Leaf(
+                [("id".to_string(), json!({"in": id_values}))]
+                    .into_iter()
+                    .collect(),
+            );
+            Some(match base_filter {
+                Some(f) => FilterNode::And {
+                    and: vec![f, in_node],
+                },
+                None => in_node,
+            })
+        } else if ids.is_empty() {
+            // Nothing is augmented → "non-augmented" = everything; base filter unchanged.
+            base_filter
+        } else {
+            let id_values: Vec<Value> = ids.into_iter().map(|id| json!(id)).collect();
+            let nin_node = FilterNode::Leaf(
+                [("id".to_string(), json!({"nin": id_values}))]
+                    .into_iter()
+                    .collect(),
+            );
+            Some(match base_filter {
+                Some(f) => FilterNode::And {
+                    and: vec![f, nin_node],
+                },
+                None => nin_node,
+            })
+        }
+    } else {
+        base_filter
+    };
+
+    let user_constrains_status = status_shortcut_set
+        || user_filter
+            .as_ref()
+            .map(filter_mentions_status)
+            .unwrap_or(false);
+    let base =
+        combine_user_with_archived_hide(user_filter, a.include_archived, user_constrains_status);
+
+    let requested_scope = a.scope.unwrap_or_default();
+    let (effective_scope, scope_fallback) = match (requested_scope, ctx.current_project.is_some()) {
+        (Scope::Project | Scope::Repo, false) => (Scope::All, true),
+        (s, _) => (s, false),
+    };
+
+    let current = ctx.current_project.as_deref();
+    let (scoped_filter, applied) =
+        apply_scope(base.clone(), effective_scope, &ctx.workspace, current)?;
+
+    let cat = ctx.catalog.lock();
+    let rows = find(
+        &cat,
+        &FindOpts {
+            filter: scoped_filter,
+            limit,
+            offset,
+            semantic: semantic_vec,
+        },
+    )?;
+    let items: Vec<Value> = rows
+        .into_iter()
+        .map(|r| {
+            json!({
+                "id": r.id,
+                "kind": r.kind,
+                "status": r.status,
+                "title": r.title,
+                "repo": r.repo,
+                "rel_path": r.rel_path,
+                "updated_at": r.updated_at,
+            })
+        })
+        .collect();
+
+    // Hints only meaningful for non-semantic queries — semantic results are
+    // KNN-bounded and a count comparison would be misleading.
+    let hints = if a.semantic.is_some() {
+        json!({})
+    } else {
+        build_hints(
+            &cat,
+            base.as_ref(),
+            &applied,
+            &ctx.workspace,
+            current,
+            scope_fallback,
+            user_constrains_status,
+            a.include_archived,
+        )?
+    };
+
+    Ok(json!({
+        "count": items.len(),
+        "items": items,
+        "scope": applied.to_json(),
+        "hints": hints,
+    }))
+}
 
 #[cfg(test)]
 mod tests {
@@ -478,8 +426,7 @@ mod tests {
         artifact::upsert(&cat, &sample_row("b", "beta")).unwrap();
 
         let ctx = mk_ctx(cat);
-        let v = ArtifactFind
-            .call(&ctx, json!({"filter": {"kind": {"eq": "spec"}}}))
+        let v = call(&ctx, json!({"filter": {"kind": {"eq": "spec"}}}))
             .await
             .unwrap();
         assert_eq!(v["count"].as_u64(), Some(2));
@@ -496,8 +443,7 @@ mod tests {
         artifact::upsert(&cat, &archived).unwrap();
 
         let ctx = mk_ctx(cat);
-        let v = ArtifactFind
-            .call(&ctx, json!({"filter": {"kind": {"eq": "spec"}}}))
+        let v = call(&ctx, json!({"filter": {"kind": {"eq": "spec"}}}))
             .await
             .unwrap();
         assert_eq!(v["count"].as_u64(), Some(1));
@@ -512,8 +458,7 @@ mod tests {
         artifact::upsert(&cat, &archived).unwrap();
 
         let ctx = mk_ctx(cat);
-        let v = ArtifactFind
-            .call(&ctx, json!({"filter": {"status": {"eq": "archived"}}}))
+        let v = call(&ctx, json!({"filter": {"status": {"eq": "archived"}}}))
             .await
             .unwrap();
         assert_eq!(v["count"].as_u64(), Some(1));
@@ -529,20 +474,18 @@ mod tests {
         artifact::upsert(&cat, &elsewhere).unwrap();
 
         let ctx = mk_ctx(cat);
-        let v_default = ArtifactFind
-            .call(&ctx, json!({"filter": {"kind": {"eq": "spec"}}}))
+        let v_default = call(&ctx, json!({"filter": {"kind": {"eq": "spec"}}}))
             .await
             .unwrap();
         assert_eq!(v_default["count"].as_u64(), Some(1));
         assert_eq!(v_default["hints"]["more_in_workspace"].as_u64(), Some(1));
 
-        let v_all = ArtifactFind
-            .call(
-                &ctx,
-                json!({"filter": {"kind": {"eq": "spec"}}, "scope": "all"}),
-            )
-            .await
-            .unwrap();
+        let v_all = call(
+            &ctx,
+            json!({"filter": {"kind": {"eq": "spec"}}, "scope": "all"}),
+        )
+        .await
+        .unwrap();
         assert_eq!(v_all["count"].as_u64(), Some(2));
     }
 
@@ -551,10 +494,7 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &sample_row("a", "alpha")).unwrap();
         let ctx = mk_ctx(cat);
-        let v = ArtifactFind
-            .call(&ctx, json!({"limit": 10_000_000}))
-            .await
-            .unwrap();
+        let v = call(&ctx, json!({"limit": 10_000_000})).await.unwrap();
         assert!(v["count"].as_u64().unwrap() <= 500);
     }
 
@@ -613,13 +553,12 @@ mod tests {
         let svc = Arc::new(EmbeddingService::new(Arc::new(MockEmbedder)));
         let ctx = mk_ctx_with_embedder(cat, svc);
 
-        let v = ArtifactFind
-            .call(
-                &ctx,
-                json!({"semantic": "auth login flow", "limit": 10, "scope": "all"}),
-            )
-            .await
-            .unwrap();
+        let v = call(
+            &ctx,
+            json!({"semantic": "auth login flow", "limit": 10, "scope": "all"}),
+        )
+        .await
+        .unwrap();
 
         let items = v["items"].as_array().unwrap();
         assert_eq!(items.len(), 2, "both artifacts should be returned");
@@ -650,8 +589,7 @@ mod tests {
         )
         .unwrap();
         let ctx = mk_ctx(cat);
-        let result = ArtifactFind
-            .call(&ctx, json!({"augmented": true, "scope": "all"}))
+        let result = call(&ctx, json!({"augmented": true, "scope": "all"}))
             .await
             .unwrap();
         let items = result["items"].as_array().unwrap();
@@ -683,8 +621,7 @@ mod tests {
         )
         .unwrap();
         let ctx = mk_ctx(cat);
-        let result = ArtifactFind
-            .call(&ctx, json!({"augmented": false, "scope": "all"}))
+        let result = call(&ctx, json!({"augmented": false, "scope": "all"}))
             .await
             .unwrap();
         let items = result["items"].as_array().unwrap();
@@ -719,10 +656,7 @@ mod tests {
         upsert(&cat, &row("spec-1", "spec")).unwrap();
         upsert(&cat, &row("plan-1", "plan")).unwrap();
         let ctx = mk_ctx(cat);
-        let result = ArtifactFind
-            .call(&ctx, json!({"kind": "spec"}))
-            .await
-            .unwrap();
+        let result = call(&ctx, json!({"kind": "spec"})).await.unwrap();
         let items = result["items"].as_array().unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["id"], "spec-1");
@@ -756,17 +690,16 @@ mod tests {
         upsert(&cat, &row("spec-draft", "spec", "draft")).unwrap();
         upsert(&cat, &row("plan-active", "plan", "active")).unwrap();
         let ctx = mk_ctx(cat);
-        let result = ArtifactFind
-            .call(
-                &ctx,
-                json!({
-                    "kind": "spec",
-                    "filter": {"status": {"eq": "active"}},
-                    "include_archived": true
-                }),
-            )
-            .await
-            .unwrap();
+        let result = call(
+            &ctx,
+            json!({
+                "kind": "spec",
+                "filter": {"status": {"eq": "active"}},
+                "include_archived": true
+            }),
+        )
+        .await
+        .unwrap();
         let items = result["items"].as_array().unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["id"], "spec-active");
@@ -799,8 +732,7 @@ mod tests {
         upsert(&cat, &row("a", "active")).unwrap();
         upsert(&cat, &row("d", "draft")).unwrap();
         let ctx = mk_ctx(cat);
-        let result = ArtifactFind
-            .call(&ctx, json!({"status": "active", "include_archived": true}))
+        let result = call(&ctx, json!({"status": "active", "include_archived": true}))
             .await
             .unwrap();
         let items = result["items"].as_array().unwrap();

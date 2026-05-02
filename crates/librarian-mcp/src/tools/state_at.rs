@@ -1,13 +1,10 @@
 use anyhow::{anyhow, Result};
-use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
-use super::{Tool, ToolContext};
+use super::ToolContext;
 use crate::catalog::{artifact, events};
-
-pub struct ArtifactStateAt;
 
 /// Intermediate result of replaying events for a single artifact up to a cutoff.
 /// Returned by [`replay_state_at`] and consumed by both `artifact_state_at`
@@ -136,93 +133,66 @@ pub struct Args {
     #[serde(default)]
     pub timestamp: Option<i64>,
 }
+pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    let a: Args = serde_json::from_value(args)?;
 
-#[async_trait]
-impl Tool for ArtifactStateAt {
-    fn name(&self) -> &'static str {
-        "artifact_state_at"
-    }
-
-    fn description(&self) -> &'static str {
-        "Reconstruct an artifact's status + frontmatter + freshness as it stood at a given \
-         commit or timestamp. Replays status_change / field_patch events in chronological order \
-         up to the cutoff; un-patched fields fall back to the current artifact-row value. \
-         Response shape mirrors `librarian_workspace_state_at`: \
-         `status_at_as_of`, `frontmatter`, `freshness_at_as_of` (replay value), \
-         `freshness_now` (current value ignoring cutoff), `freshness_changed`, \
-         `latest_event_at_as_of`, `supersession_chain`."
-    }
-
-    fn input_schema(&self) -> Value {
-        serde_json::to_value(schemars::schema_for!(Args)).unwrap()
-    }
-
-    async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
-        let a: Args = serde_json::from_value(args)?;
-
-        // Exactly one of commit / timestamp must be supplied.
-        match (&a.commit, &a.timestamp) {
-            (Some(_), Some(_)) | (None, None) => {
-                return Err(anyhow!("supply exactly one of `commit` or `timestamp`"));
-            }
-            _ => {}
+    match (&a.commit, &a.timestamp) {
+        (Some(_), Some(_)) | (None, None) => {
+            return Err(anyhow!("supply exactly one of `commit` or `timestamp`"));
         }
-
-        let cutoff_ts = resolve_cutoff_ts(ctx, a.commit.as_deref(), a.timestamp)?;
-
-        // Load artifact row + replay events up to the cutoff, and compute
-        // freshness_now (current state, ignoring cutoff) — single lock scope.
-        let (state, freshness_now) = {
-            use rusqlite::{params, OptionalExtension};
-            let cat = ctx.catalog.lock();
-            let art = artifact::get(&cat, &a.artifact_id)?
-                .ok_or_else(|| anyhow!("artifact not found: {}", a.artifact_id))?;
-            let state = replay_state_at(&cat, &art, cutoff_ts)?;
-
-            // freshness_now mirrors workspace_state_at: latest event of any kind +
-            // latest reviewed event, both without the cutoff.
-            let latest_any: Option<String> = cat
-                .conn
-                .query_row(
-                    "SELECT kind FROM events WHERE artifact_id=?1 \
-                     ORDER BY created_at DESC, id DESC LIMIT 1",
-                    params![art.id],
-                    |r| r.get::<_, String>(0),
-                )
-                .optional()?;
-            let latest_reviewed_now: Option<i64> = cat
-                .conn
-                .query_row(
-                    "SELECT MAX(created_at) FROM events \
-                     WHERE artifact_id=?1 AND kind='reviewed'",
-                    params![art.id],
-                    |r| r.get::<_, Option<i64>>(0),
-                )
-                .optional()?
-                .flatten();
-
-            let fn_now = crate::freshness::compute(crate::freshness::FreshnessInputs {
-                latest_event_kind: latest_any.as_deref(),
-                latest_reviewed_at: latest_reviewed_now,
-                file_updated_at: art.file_mtime,
-                topo_distance_from_head: None,
-                freshness_horizon: crate::freshness::FRESHNESS_HORIZON_DEFAULT,
-            });
-
-            (state, fn_now)
-        };
-
-        Ok(json!({
-            "as_of": cutoff_ts,
-            "status_at_as_of": state.status,
-            "frontmatter": Value::Object(state.frontmatter),
-            "freshness_at_as_of": state.freshness_at_as_of,
-            "freshness_now": freshness_now,
-            "freshness_changed": state.freshness_at_as_of != freshness_now,
-            "latest_event_at_as_of": state.latest_event_summary,
-            "supersession_chain": state.supersession_chain,
-        }))
+        _ => {}
     }
+
+    let cutoff_ts = resolve_cutoff_ts(ctx, a.commit.as_deref(), a.timestamp)?;
+
+    let (state, freshness_now) = {
+        use rusqlite::{params, OptionalExtension};
+        let cat = ctx.catalog.lock();
+        let art = artifact::get(&cat, &a.artifact_id)?
+            .ok_or_else(|| anyhow!("artifact not found: {}", a.artifact_id))?;
+        let state = replay_state_at(&cat, &art, cutoff_ts)?;
+
+        let latest_any: Option<String> = cat
+            .conn
+            .query_row(
+                "SELECT kind FROM events WHERE artifact_id=?1 \
+                 ORDER BY created_at DESC, id DESC LIMIT 1",
+                params![art.id],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?;
+        let latest_reviewed_now: Option<i64> = cat
+            .conn
+            .query_row(
+                "SELECT MAX(created_at) FROM events \
+                 WHERE artifact_id=?1 AND kind='reviewed'",
+                params![art.id],
+                |r| r.get::<_, Option<i64>>(0),
+            )
+            .optional()?
+            .flatten();
+
+        let fn_now = crate::freshness::compute(crate::freshness::FreshnessInputs {
+            latest_event_kind: latest_any.as_deref(),
+            latest_reviewed_at: latest_reviewed_now,
+            file_updated_at: art.file_mtime,
+            topo_distance_from_head: None,
+            freshness_horizon: crate::freshness::FRESHNESS_HORIZON_DEFAULT,
+        });
+
+        (state, fn_now)
+    };
+
+    Ok(json!({
+        "as_of": cutoff_ts,
+        "status_at_as_of": state.status,
+        "frontmatter": Value::Object(state.frontmatter),
+        "freshness_at_as_of": state.freshness_at_as_of,
+        "freshness_now": freshness_now,
+        "freshness_changed": state.freshness_at_as_of != freshness_now,
+        "latest_event_at_as_of": state.latest_event_summary,
+        "supersession_chain": state.supersession_chain,
+    }))
 }
 
 #[cfg(test)]
@@ -295,8 +265,7 @@ mod tests {
         }
 
         // Query at ts=20 — event is visible → status should be "done"
-        let result = ArtifactStateAt
-            .call(&ctx, json!({"artifact_id": "a1", "timestamp": 20}))
+        let result = call(&ctx, json!({"artifact_id": "a1", "timestamp": 20}))
             .await
             .unwrap();
         assert_eq!(
@@ -305,8 +274,7 @@ mod tests {
         );
 
         // Query at ts=5 — event not yet seen → status should be "active" (seeded)
-        let result = ArtifactStateAt
-            .call(&ctx, json!({"artifact_id": "a1", "timestamp": 5}))
+        let result = call(&ctx, json!({"artifact_id": "a1", "timestamp": 5}))
             .await
             .unwrap();
         assert_eq!(
@@ -335,8 +303,7 @@ mod tests {
             .unwrap();
         }
 
-        let result = ArtifactStateAt
-            .call(&ctx, json!({"artifact_id": "b1", "timestamp": 10}))
+        let result = call(&ctx, json!({"artifact_id": "b1", "timestamp": 10}))
             .await
             .unwrap();
         let chain = result["supersession_chain"].as_array().unwrap();
@@ -351,18 +318,15 @@ mod tests {
         seed(&ctx, "c1");
 
         // Both supplied → error
-        let err = ArtifactStateAt
-            .call(
-                &ctx,
-                json!({"artifact_id": "c1", "commit": "abc", "timestamp": 5}),
-            )
-            .await;
+        let err = call(
+            &ctx,
+            json!({"artifact_id": "c1", "commit": "abc", "timestamp": 5}),
+        )
+        .await;
         assert!(err.is_err(), "both commit+timestamp should error");
 
         // Neither supplied → error
-        let err = ArtifactStateAt
-            .call(&ctx, json!({"artifact_id": "c1"}))
-            .await;
+        let err = call(&ctx, json!({"artifact_id": "c1"})).await;
         assert!(err.is_err(), "neither commit nor timestamp should error");
     }
 
@@ -413,8 +377,7 @@ mod tests {
         }
 
         // Query at commit "abc" → authored_at=15 → only first event visible
-        let result = ArtifactStateAt
-            .call(&ctx, json!({"artifact_id": "d1", "commit": "abc"}))
+        let result = call(&ctx, json!({"artifact_id": "d1", "commit": "abc"}))
             .await
             .unwrap();
         assert_eq!(

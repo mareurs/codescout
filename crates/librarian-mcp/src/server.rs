@@ -133,15 +133,17 @@ mod tests {
 
     #[tokio::test]
     async fn serde_error_gets_helpful_hint() {
-        use crate::tools::get::ArtifactGet;
+        use crate::tools::artifact::Artifact;
+        use crate::tools::Tool;
         let ctx = mk_ctx();
         // Pass a string where a bool is expected — serde will reject it.
-        let err = ArtifactGet
+        let err = Artifact
             .call(
                 &ctx,
                 serde_json::json!({
+                    "action": "get",
                     "id": "x",
-                    "include_links": "true"
+                    "include_links": "true"   // should be bool
                 }),
             )
             .await

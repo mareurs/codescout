@@ -1,17 +1,13 @@
 use anyhow::{anyhow, Result};
-use async_trait::async_trait;
 use rusqlite::{params, OptionalExtension};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::scope::{apply_scope, Scope};
 use super::state_at::{replay_state_at, resolve_cutoff_ts};
-use super::{Tool, ToolContext};
-use crate::catalog::find::{count_matching, find, FindOpts};
+use super::ToolContext;
 use crate::filter::FilterNode;
-use crate::freshness::{compute, Freshness, FreshnessInputs};
-
-pub struct WorkspaceStateAt;
+use crate::freshness::Freshness;
 
 /// Maximum artifacts returned per call (exploring-mode cap, matches codescout convention).
 const MAX_ROWS: usize = 200;
@@ -41,182 +37,6 @@ pub struct Args {
     /// Omit for all freshness values.
     #[serde(default)]
     pub freshness_filter: Option<Vec<String>>,
-}
-
-#[async_trait]
-impl Tool for WorkspaceStateAt {
-    fn name(&self) -> &'static str {
-        "workspace_state_at"
-    }
-
-    fn description(&self) -> &'static str {
-        "Time-travel snapshot: return all artifacts in scope as they stood at the given \
-         commit/timestamp, with freshness_at_as_of (replay up to cutoff) vs freshness_now \
-         (current state). Useful for answering 'what was stale at release X?' questions. \
-         Capped at 200 artifacts; hints.more_in_scope reports remainder. Note: the \
-         single-artifact sibling `librarian_artifact_state_at` returns just `freshness` \
-         (the at-as-of value) rather than the at-as-of + now pair this tool surfaces."
-    }
-
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "commit": {
-                    "type": "string",
-                    "description": "Commit hash as time-travel cutoff. Exactly one of commit or timestamp required."
-                },
-                "timestamp": {
-                    "type": "integer",
-                    "description": "Unix epoch timestamp (ms) as cutoff. Exactly one of commit or timestamp required."
-                },
-                "scope": {
-                    "type": "string",
-                    "enum": ["project", "repo", "umbrella", "all"],
-                    "default": "project",
-                    "description": "project = current sub-project (default); repo = whole current root; umbrella = declared umbrella members; all = workspace-wide."
-                },
-                "kinds": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Filter by artifact kinds (e.g. [\"spec\", \"adr\"]). Omit for all kinds."
-                },
-                "include_archived": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "Include archived/superseded artifacts."
-                },
-                "freshness_filter": {
-                    "type": "array",
-                    "items": {"type": "string", "enum": ["fresh", "stale", "unknown", "superseded"]},
-                    "description": "Only return artifacts whose freshness_at_as_of matches one of these values."
-                }
-            }
-        })
-    }
-
-    async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
-        let a: Args = serde_json::from_value(args)?;
-
-        // Exactly one of commit / timestamp must be supplied.
-        if a.commit.is_some() == a.timestamp.is_some() {
-            return Err(anyhow!("supply exactly one of `commit` or `timestamp`"));
-        }
-
-        let cutoff_ts = resolve_cutoff_ts(ctx, a.commit.as_deref(), a.timestamp)?;
-
-        // Build scope + kind/archived filter, then enumerate artifacts.
-        let requested_scope = a.scope.unwrap_or_default();
-        let (effective_scope, scope_fallback) =
-            match (requested_scope, ctx.current_project.is_some()) {
-                (Scope::Project | Scope::Repo, false) => (Scope::All, true),
-                (s, _) => (s, false),
-            };
-
-        let base_filter = build_base_filter(a.kinds.as_deref(), a.include_archived);
-        let current = ctx.current_project.as_deref();
-        let (scoped_filter, applied) =
-            apply_scope(base_filter, effective_scope, &ctx.workspace, current)?;
-
-        // Count total matching artifacts, then fetch up to MAX_ROWS.
-        let (total_in_scope, all_rows) = {
-            let cat = ctx.catalog.lock();
-            let total = count_matching(&cat, scoped_filter.as_ref())?;
-            let rows = find(
-                &cat,
-                &FindOpts {
-                    filter: scoped_filter,
-                    limit: MAX_ROWS,
-                    offset: 0,
-                    semantic: None,
-                },
-            )?;
-            (total, rows)
-        };
-
-        let more_in_scope = total_in_scope.saturating_sub(MAX_ROWS);
-        let rows_to_process = &all_rows[..];
-
-        // For each artifact: replay at-as-of state + compute freshness_now.
-        let mut artifacts: Vec<Value> = Vec::with_capacity(rows_to_process.len());
-        for art in rows_to_process {
-            let (state, freshness_now) = {
-                let cat = ctx.catalog.lock();
-
-                // Replay up to cutoff → freshness_at_as_of
-                let state = replay_state_at(&cat, art, cutoff_ts)?;
-
-                // freshness_now: latest event (any kind) + latest reviewed event (no cutoff)
-                let latest_any: Option<String> = cat
-                    .conn
-                    .query_row(
-                        "SELECT kind FROM events WHERE artifact_id=?1 \
-                         ORDER BY created_at DESC, id DESC LIMIT 1",
-                        params![art.id],
-                        |r| r.get::<_, String>(0),
-                    )
-                    .optional()?;
-                let latest_reviewed_now: Option<i64> = cat
-                    .conn
-                    .query_row(
-                        "SELECT MAX(created_at) FROM events \
-                         WHERE artifact_id=?1 AND kind='reviewed'",
-                        params![art.id],
-                        |r| r.get::<_, Option<i64>>(0),
-                    )
-                    .optional()?
-                    .flatten();
-
-                let fn_now = compute(FreshnessInputs {
-                    latest_event_kind: latest_any.as_deref(),
-                    latest_reviewed_at: latest_reviewed_now,
-                    file_updated_at: art.file_mtime,
-                    topo_distance_from_head: None,
-                    freshness_horizon: FRESHNESS_HORIZON,
-                });
-
-                (state, fn_now)
-            };
-
-            // Apply optional freshness filter
-            if let Some(ref ff) = a.freshness_filter {
-                let fa_str = freshness_to_str(state.freshness_at_as_of);
-                if !ff.iter().any(|f| f == fa_str) {
-                    continue;
-                }
-            }
-
-            artifacts.push(json!({
-                "id": art.id,
-                "kind": art.kind,
-                "status_at_as_of": state.status,
-                "freshness_at_as_of": state.freshness_at_as_of,
-                "freshness_now": freshness_now,
-                "freshness_changed": state.freshness_at_as_of != freshness_now,
-                "latest_event_at_as_of": state.latest_event_summary,
-                "supersession_chain": state.supersession_chain,
-                "rel_path": art.rel_path,
-                "repo": art.repo,
-            }));
-        }
-
-        let mut hints = json!({
-            "scope_fallback": scope_fallback,
-        });
-        if more_in_scope > 0 {
-            hints["more_in_scope"] = json!(more_in_scope);
-            hints["hint"] = json!(
-                "Result capped at 200. Narrow with `kinds`, `freshness_filter`, or a tighter scope."
-            );
-        }
-
-        Ok(json!({
-            "as_of": cutoff_ts,
-            "scope": applied.to_json(),
-            "artifacts": artifacts,
-            "hints": hints,
-        }))
-    }
 }
 
 fn freshness_to_str(f: Freshness) -> &'static str {
@@ -264,6 +84,120 @@ fn build_base_filter(kinds: Option<&[String]>, include_archived: bool) -> Option
         (None, Some(a)) => Some(a),
         (Some(k), Some(a)) => Some(FilterNode::And { and: vec![k, a] }),
     }
+}
+pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    let a: Args = serde_json::from_value(args)?;
+
+    if a.commit.is_some() == a.timestamp.is_some() {
+        return Err(anyhow!("supply exactly one of `commit` or `timestamp`"));
+    }
+
+    let cutoff_ts = resolve_cutoff_ts(ctx, a.commit.as_deref(), a.timestamp)?;
+
+    let requested_scope = a.scope.unwrap_or_default();
+    let (effective_scope, scope_fallback) = match (requested_scope, ctx.current_project.is_some()) {
+        (Scope::Project | Scope::Repo, false) => (Scope::All, true),
+        (s, _) => (s, false),
+    };
+
+    let base_filter = build_base_filter(a.kinds.as_deref(), a.include_archived);
+    let current = ctx.current_project.as_deref();
+    let (scoped_filter, applied) =
+        apply_scope(base_filter, effective_scope, &ctx.workspace, current)?;
+
+    let (total_in_scope, all_rows) = {
+        let cat = ctx.catalog.lock();
+        let total = crate::catalog::find::count_matching(&cat, scoped_filter.as_ref())?;
+        let rows = crate::catalog::find::find(
+            &cat,
+            &crate::catalog::find::FindOpts {
+                filter: scoped_filter,
+                limit: MAX_ROWS,
+                offset: 0,
+                semantic: None,
+            },
+        )?;
+        (total, rows)
+    };
+
+    let more_in_scope = total_in_scope.saturating_sub(MAX_ROWS);
+    let rows_to_process = &all_rows[..];
+
+    let mut artifacts: Vec<Value> = Vec::with_capacity(rows_to_process.len());
+    for art in rows_to_process {
+        let (state, freshness_now) = {
+            let cat = ctx.catalog.lock();
+
+            let state = replay_state_at(&cat, art, cutoff_ts)?;
+
+            let latest_any: Option<String> = cat
+                .conn
+                .query_row(
+                    "SELECT kind FROM events WHERE artifact_id=?1 \
+                     ORDER BY created_at DESC, id DESC LIMIT 1",
+                    params![art.id],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()?;
+            let latest_reviewed_now: Option<i64> = cat
+                .conn
+                .query_row(
+                    "SELECT MAX(created_at) FROM events \
+                     WHERE artifact_id=?1 AND kind='reviewed'",
+                    params![art.id],
+                    |r| r.get::<_, Option<i64>>(0),
+                )
+                .optional()?
+                .flatten();
+
+            let fn_now = crate::freshness::compute(crate::freshness::FreshnessInputs {
+                latest_event_kind: latest_any.as_deref(),
+                latest_reviewed_at: latest_reviewed_now,
+                file_updated_at: art.file_mtime,
+                topo_distance_from_head: None,
+                freshness_horizon: FRESHNESS_HORIZON,
+            });
+
+            (state, fn_now)
+        };
+
+        if let Some(ref ff) = a.freshness_filter {
+            let fa_str = freshness_to_str(state.freshness_at_as_of);
+            if !ff.iter().any(|f| f == fa_str) {
+                continue;
+            }
+        }
+
+        artifacts.push(json!({
+            "id": art.id,
+            "kind": art.kind,
+            "status_at_as_of": state.status,
+            "freshness_at_as_of": state.freshness_at_as_of,
+            "freshness_now": freshness_now,
+            "freshness_changed": state.freshness_at_as_of != freshness_now,
+            "latest_event_at_as_of": state.latest_event_summary,
+            "supersession_chain": state.supersession_chain,
+            "rel_path": art.rel_path,
+            "repo": art.repo,
+        }));
+    }
+
+    let mut hints = json!({
+        "scope_fallback": scope_fallback,
+    });
+    if more_in_scope > 0 {
+        hints["more_in_scope"] = json!(more_in_scope);
+        hints["hint"] = json!(
+            "Result capped at 200. Narrow with `kinds`, `freshness_filter`, or a tighter scope."
+        );
+    }
+
+    Ok(json!({
+        "as_of": cutoff_ts,
+        "scope": applied.to_json(),
+        "artifacts": artifacts,
+        "hints": hints,
+    }))
 }
 
 #[cfg(test)]
@@ -346,8 +280,7 @@ mod tests {
         }
 
         // Query at cutoff=80 (before the review at 100)
-        let result = WorkspaceStateAt
-            .call(&ctx, json!({"timestamp": 80, "scope": "all"}))
+        let result = call(&ctx, json!({"timestamp": 80, "scope": "all"}))
             .await
             .unwrap();
 
@@ -391,8 +324,7 @@ mod tests {
             art_insert(&cat, &art(&format!("art-{i:04}"), 0)).unwrap();
         }
 
-        let result = WorkspaceStateAt
-            .call(&ctx, json!({"timestamp": 999999, "scope": "all"}))
+        let result = call(&ctx, json!({"timestamp": 999999, "scope": "all"}))
             .await
             .unwrap();
 
@@ -428,8 +360,7 @@ mod tests {
         }
 
         // Step 1: query at ts=25 → reviewed_at=20, file_mtime=10 → fresh
-        let r1 = WorkspaceStateAt
-            .call(&ctx, json!({"timestamp": 25, "scope": "all"}))
+        let r1 = call(&ctx, json!({"timestamp": 25, "scope": "all"}))
             .await
             .unwrap();
         let entry1 = r1["artifacts"]
@@ -453,8 +384,7 @@ mod tests {
 
         // Step 3 (stale-assertion sandwich): query at ts=25 again → must still be fresh
         // The new event at ts=100 is OUTSIDE the as-of window (25), so it must not affect result.
-        let r2 = WorkspaceStateAt
-            .call(&ctx, json!({"timestamp": 25, "scope": "all"}))
+        let r2 = call(&ctx, json!({"timestamp": 25, "scope": "all"}))
             .await
             .unwrap();
         let entry2 = r2["artifacts"]
@@ -475,8 +405,7 @@ mod tests {
         );
 
         // Step 4: query at ts=200 → event@100 is now inside the window → latest_event id differs.
-        let r3 = WorkspaceStateAt
-            .call(&ctx, json!({"timestamp": 200, "scope": "all"}))
+        let r3 = call(&ctx, json!({"timestamp": 200, "scope": "all"}))
             .await
             .unwrap();
         let entry3 = r3["artifacts"]

@@ -1,9 +1,8 @@
 use anyhow::Result;
-use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{RecoverableError, Tool, ToolContext};
+use super::{RecoverableError, ToolContext};
 use crate::catalog::{artifact, augmentation, links, observations};
 use rusqlite;
 
@@ -71,8 +70,6 @@ fn apply_soft_cap(body: &str) -> (String, Option<(usize, usize, Vec<String>)>) {
     (shown, Some((SOFT_CAP_LINES, total, top_headings)))
 }
 
-pub struct ArtifactGet;
-
 #[derive(Deserialize)]
 struct Args {
     id: String,
@@ -97,337 +94,273 @@ struct Args {
     #[serde(default)]
     end_line: Option<usize>,
 }
-
-#[async_trait]
-impl Tool for ArtifactGet {
-    fn name(&self) -> &'static str {
-        "artifact_get"
+pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    if args.get("include_body").is_some() {
+        anyhow::bail!(
+            "parameter `include_body` was removed; use `full: true` for the full body, or `heading=\"<section>\"` for a targeted section"
+        );
+    }
+    let a: Args = serde_json::from_value(args)?;
+    let body_selectors = [
+        a.full.unwrap_or(false),
+        a.heading.is_some(),
+        a.headings.as_ref().is_some_and(|v| !v.is_empty()),
+        a.start_line.is_some() || a.end_line.is_some(),
+    ];
+    if body_selectors.iter().filter(|b| **b).count() > 1 {
+        anyhow::bail!(
+            "at most one of `full`, `heading`, `headings`, `start_line`+`end_line` may be set"
+        );
+    }
+    if let (Some(s), Some(e)) = (a.start_line, a.end_line) {
+        if s > e {
+            anyhow::bail!("start_line ({s}) must be <= end_line ({e})");
+        }
     }
 
-    fn description(&self) -> &'static str {
-        "Fetch a single artifact by id. Optionally include observations and links."
-    }
+    let want_observations = a.include_observations.unwrap_or(false);
+    let want_links = a.include_links.unwrap_or(false);
+    let (row, observations_json, links_json, latest_event_row, latest_reviewed_at, aug) = {
+        let cat = ctx.catalog.lock();
+        let row = match artifact::get(&cat, &a.id)? {
+            Some(r) => r,
+            None => return Ok(Value::Null),
+        };
 
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "required": ["id"],
-            "properties": {
-                "id": {"type": "string"},
-                "include_observations": {"type": "boolean", "default": false},
-                "include_links": {"type": "boolean", "default": false},
-                "links_direction": {
-                    "type": "string",
-                    "enum": ["out", "in", "both"],
-                    "description": "Filter links by direction. Default: both. Only applies when include_links=true."
-                },
-                "links_rel": {
-                    "type": "string",
-                    "description": "Filter links to only this rel type. Only applies when include_links=true."
-                },
-                "full": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "Include full body (subject to soft cap)."
-                },
-                "heading": {
-                    "type": "string",
-                    "description": "Fetch one section by heading match (case-insensitive, trimmed)."
-                },
-                "headings": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Fetch multiple sections by heading match."
-                },
-                "start_line": {
-                    "type": "integer",
-                    "description": "1-indexed start of line slice. Pair with end_line."
-                },
-                "end_line": {
-                    "type": "integer",
-                    "description": "1-indexed inclusive end of line slice."
-                }
-            }
-        })
-    }
-
-    async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
-        if args.get("include_body").is_some() {
-            anyhow::bail!(
-                "parameter `include_body` was removed; use `full: true` for the full body, or `heading=\"<section>\"` for a targeted section"
-            );
-        }
-        let a: Args = serde_json::from_value(args)?;
-        let body_selectors = [
-            a.full.unwrap_or(false),
-            a.heading.is_some(),
-            a.headings.as_ref().is_some_and(|v| !v.is_empty()),
-            a.start_line.is_some() || a.end_line.is_some(),
-        ];
-        if body_selectors.iter().filter(|b| **b).count() > 1 {
-            anyhow::bail!(
-                "at most one of `full`, `heading`, `headings`, `start_line`+`end_line` may be set"
-            );
-        }
-        if let (Some(s), Some(e)) = (a.start_line, a.end_line) {
-            if s > e {
-                anyhow::bail!("start_line ({s}) must be <= end_line ({e})");
-            }
-        }
-
-        // Scope the catalog lock narrowly: fetch the row plus any optional
-        // observations/links inside this block, then drop the guard before
-        // calling `preview::extract` (which may re-acquire the lock for
-        // certain kinds, e.g. memory). `parking_lot::Mutex` is not reentrant,
-        // so holding it across `preview::extract` would deadlock.
-        let want_observations = a.include_observations.unwrap_or(false);
-        let want_links = a.include_links.unwrap_or(false);
-        let (row, observations_json, links_json, latest_event_row, latest_reviewed_at, aug) = {
-            let cat = ctx.catalog.lock();
-            let row = match artifact::get(&cat, &a.id)? {
-                Some(r) => r,
-                None => return Ok(Value::Null),
-            };
-
-            let observations_json = if want_observations {
-                let obs = observations::list_for_artifact(&cat, &a.id)?;
-                Some(json!(obs
-                    .into_iter()
-                    .map(|o| json!({
-                        "id": o.id,
-                        "text": o.text,
-                        "source": o.source,
-                        "created_at": o.created_at,
-                    }))
-                    .collect::<Vec<_>>()))
-            } else {
-                None
-            };
-
-            let links_json = if want_links {
-                let direction = a.links_direction.as_deref().unwrap_or("both");
-                if !matches!(direction, "out" | "in" | "both") {
-                    return Err(RecoverableError::new(format!(
-                        "invalid links_direction '{}' — must be \"out\", \"in\", or \"both\"",
-                        direction
-                    )));
-                }
-                let rel_filter = a.links_rel.as_deref();
-
-                let outgoing_items: Vec<Value> = if direction == "out" || direction == "both" {
-                    links::outgoing(&cat, &a.id)?
-                        .into_iter()
-                        .filter(|l| rel_filter.is_none_or(|r| l.rel == r))
-                        .map(|l| json!({"dst_id": l.dst_id, "rel": l.rel}))
-                        .collect()
-                } else {
-                    vec![]
-                };
-
-                let incoming_items: Vec<Value> = if direction == "in" || direction == "both" {
-                    links::incoming(&cat, &a.id)?
-                        .into_iter()
-                        .filter(|l| rel_filter.is_none_or(|r| l.rel == r))
-                        .map(|l| json!({"src_id": l.src_id, "rel": l.rel}))
-                        .collect()
-                } else {
-                    vec![]
-                };
-
-                Some(json!({
-                    "outgoing": outgoing_items,
-                    "incoming": incoming_items,
+        let observations_json = if want_observations {
+            let obs = observations::list_for_artifact(&cat, &a.id)?;
+            Some(json!(obs
+                .into_iter()
+                .map(|o| json!({
+                    "id": o.id,
+                    "text": o.text,
+                    "source": o.source,
+                    "created_at": o.created_at,
                 }))
+                .collect::<Vec<_>>()))
+        } else {
+            None
+        };
+
+        let links_json = if want_links {
+            let direction = a.links_direction.as_deref().unwrap_or("both");
+            if !matches!(direction, "out" | "in" | "both") {
+                return Err(RecoverableError::new(format!(
+                    "invalid links_direction '{}' — must be \"out\", \"in\", or \"both\"",
+                    direction
+                )));
+            }
+            let rel_filter = a.links_rel.as_deref();
+
+            let outgoing_items: Vec<Value> = if direction == "out" || direction == "both" {
+                links::outgoing(&cat, &a.id)?
+                    .into_iter()
+                    .filter(|l| rel_filter.is_none_or(|r| l.rel == r))
+                    .map(|l| json!({"dst_id": l.dst_id, "rel": l.rel}))
+                    .collect()
             } else {
-                None
+                vec![]
             };
 
-            let latest_event_row = crate::catalog::events::latest_for_artifact(&cat, &a.id)?;
-            let latest_reviewed_at: Option<i64> = cat
-                .conn
-                .query_row(
-                    "SELECT MAX(created_at) FROM events WHERE artifact_id=?1 AND kind='reviewed'",
-                    rusqlite::params![&a.id],
-                    |r| r.get::<_, Option<i64>>(0),
-                )
-                .unwrap_or(None);
+            let incoming_items: Vec<Value> = if direction == "in" || direction == "both" {
+                links::incoming(&cat, &a.id)?
+                    .into_iter()
+                    .filter(|l| rel_filter.is_none_or(|r| l.rel == r))
+                    .map(|l| json!({"src_id": l.src_id, "rel": l.rel}))
+                    .collect()
+            } else {
+                vec![]
+            };
 
-            let aug = augmentation::get(&cat, &a.id)?;
+            Some(json!({
+                "outgoing": outgoing_items,
+                "incoming": incoming_items,
+            }))
+        } else {
+            None
+        };
 
-            (
-                row,
-                observations_json,
-                links_json,
-                latest_event_row,
-                latest_reviewed_at,
-                aug,
+        let latest_event_row = crate::catalog::events::latest_for_artifact(&cat, &a.id)?;
+        let latest_reviewed_at: Option<i64> = cat
+            .conn
+            .query_row(
+                "SELECT MAX(created_at) FROM events WHERE artifact_id=?1 AND kind='reviewed'",
+                rusqlite::params![&a.id],
+                |r| r.get::<_, Option<i64>>(0),
             )
-        };
+            .unwrap_or(None);
 
-        let mut out = json!({
-            "id": row.id,
-            "repo": row.repo,
-            "rel_path": row.rel_path,
-            "kind": row.kind,
-            "status": row.status,
-            "title": row.title,
-            "owners": row.owners,
-            "tags": row.tags,
-            "topic": row.topic,
-            "time_scope": row.time_scope,
-            "created_at": row.created_at,
-            "updated_at": row.updated_at,
-        });
+        let aug = augmentation::get(&cat, &a.id)?;
 
-        if let Some(v) = observations_json {
-            out["observations"] = v;
-        }
-        if let Some(v) = links_json {
-            out["links"] = v;
-        }
-
-        // TimeMachine freshness + latest_event annotations.
-        let freshness = crate::freshness::compute(crate::freshness::FreshnessInputs {
-            latest_event_kind: latest_event_row.as_ref().map(|e| e.kind.as_str()),
+        (
+            row,
+            observations_json,
+            links_json,
+            latest_event_row,
             latest_reviewed_at,
-            file_updated_at: row.file_mtime,
-            topo_distance_from_head: None,
-            freshness_horizon: crate::freshness::FRESHNESS_HORIZON_DEFAULT,
-        });
-        out["freshness"] = serde_json::to_value(freshness)?;
-        out["latest_event"] = match latest_event_row {
-            Some(ref e) => json!({
-                "id": e.id,
-                "kind": e.kind,
-                "created_at": e.created_at,
-                "head_commit": e.head_commit,
-            }),
-            None => Value::Null,
-        };
+            aug,
+        )
+    };
 
-        out["augmentation"] = match aug {
-            Some(a) => json!({
-                "prompt": a.prompt,
-                "params": serde_json::from_str::<Value>(&a.params).unwrap_or_else(|_| json!({})),
-                "last_refreshed_at": a.last_refreshed_at,
-                "refresh_count": a.refresh_count,
-                "created_at": a.created_at,
-                "updated_at": a.updated_at,
-            }),
-            None => Value::Null,
-        };
+    let mut out = json!({
+        "id": row.id,
+        "repo": row.repo,
+        "rel_path": row.rel_path,
+        "kind": row.kind,
+        "status": row.status,
+        "title": row.title,
+        "owners": row.owners,
+        "tags": row.tags,
+        "topic": row.topic,
+        "time_scope": row.time_scope,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    });
 
-        let file_path = resolve_file_path(ctx, &row);
-        let body_selected = a.full.unwrap_or(false)
-            || a.heading.is_some()
-            || a.headings.as_ref().is_some_and(|v| !v.is_empty())
-            || a.start_line.is_some()
-            || a.end_line.is_some();
+    if let Some(v) = observations_json {
+        out["observations"] = v;
+    }
+    if let Some(v) = links_json {
+        out["links"] = v;
+    }
 
-        let file_content = match &file_path {
-            Some(p) => match std::fs::read_to_string(p) {
-                Ok(c) => Some(c),
-                Err(e) => {
-                    out["preview"] = Value::Null;
-                    out["body_error"] = json!(e.to_string());
-                    None
-                }
-            },
-            None => {
+    let freshness = crate::freshness::compute(crate::freshness::FreshnessInputs {
+        latest_event_kind: latest_event_row.as_ref().map(|e| e.kind.as_str()),
+        latest_reviewed_at,
+        file_updated_at: row.file_mtime,
+        topo_distance_from_head: None,
+        freshness_horizon: crate::freshness::FRESHNESS_HORIZON_DEFAULT,
+    });
+    out["freshness"] = serde_json::to_value(freshness)?;
+    out["latest_event"] = match latest_event_row {
+        Some(ref e) => json!({
+            "id": e.id,
+            "kind": e.kind,
+            "created_at": e.created_at,
+            "head_commit": e.head_commit,
+        }),
+        None => Value::Null,
+    };
+
+    out["augmentation"] = match aug {
+        Some(a) => json!({
+            "prompt": a.prompt,
+            "params": serde_json::from_str::<Value>(&a.params).unwrap_or_else(|_| json!({})),
+            "last_refreshed_at": a.last_refreshed_at,
+            "refresh_count": a.refresh_count,
+            "created_at": a.created_at,
+            "updated_at": a.updated_at,
+        }),
+        None => Value::Null,
+    };
+
+    let file_path = resolve_file_path(ctx, &row);
+    let body_selected = a.full.unwrap_or(false)
+        || a.heading.is_some()
+        || a.headings.as_ref().is_some_and(|v| !v.is_empty())
+        || a.start_line.is_some()
+        || a.end_line.is_some();
+
+    let file_content = match &file_path {
+        Some(p) => match std::fs::read_to_string(p) {
+            Ok(c) => Some(c),
+            Err(e) => {
                 out["preview"] = Value::Null;
-                out["body_error"] = json!(format!("repo {:?} not in workspace.roots", row.repo));
+                out["body_error"] = json!(e.to_string());
                 None
             }
-        };
+        },
+        None => {
+            out["preview"] = Value::Null;
+            out["body_error"] = json!(format!("repo {:?} not in workspace.roots", row.repo));
+            None
+        }
+    };
 
-        let parsed_body: Option<String> =
-            file_content
-                .as_ref()
-                .map(|content| match frontmatter::parse(content) {
-                    Ok((_, b)) => b.to_string(),
-                    Err(_) => content.clone(),
-                });
+    let parsed_body: Option<String> =
+        file_content
+            .as_ref()
+            .map(|content| match frontmatter::parse(content) {
+                Ok((_, b)) => b.to_string(),
+                Err(_) => content.clone(),
+            });
 
-        if let Some(body) = parsed_body.as_deref() {
-            out["preview"] = crate::preview::extract(&row.kind, &row, body, ctx);
+    if let Some(body) = parsed_body.as_deref() {
+        out["preview"] = crate::preview::extract(&row.kind, &row, body, ctx);
 
-            if body_selected {
-                // Parse headings once; reused by heading/headings selectors
-                // and by the overflow hint on `full`.
-                let parsed_headings = headings::parse(body);
-                let (final_body, overflow_meta, body_meta_extra) = if let Some(ref name) = a.heading
-                {
-                    match find_heading_section(&parsed_headings, body, name) {
-                        Some(section) => (section, None, json!({ "heading": name })),
-                        None => (
-                            String::new(),
-                            None,
-                            json!({ "heading": name, "heading_missing": true }),
-                        ),
-                    }
-                } else if let Some(ref list) = a.headings {
-                    let mut parts = Vec::new();
-                    let mut missing = Vec::new();
-                    for name in list {
-                        match find_heading_section(&parsed_headings, body, name) {
-                            Some(s) => parts.push(s),
-                            None => missing.push(name.clone()),
-                        }
-                    }
-                    let joined = parts.join("\n\n");
-                    let extra = if missing.is_empty() {
-                        json!({ "headings": list })
-                    } else {
-                        json!({ "headings": list, "headings_missing": missing })
-                    };
-                    (joined, None, extra)
-                } else if let (Some(s), Some(e)) = (a.start_line, a.end_line) {
-                    (
-                        slice_lines(body, s, e),
+        if body_selected {
+            let parsed_headings = headings::parse(body);
+            let (final_body, overflow_meta, body_meta_extra) = if let Some(ref name) = a.heading {
+                match find_heading_section(&parsed_headings, body, name) {
+                    Some(section) => (section, None, json!({ "heading": name })),
+                    None => (
+                        String::new(),
                         None,
-                        json!({ "start_line": s, "end_line": e }),
-                    )
-                } else {
-                    // full = true
-                    let (shown, overflow) = apply_soft_cap(body);
-                    (shown, overflow, json!({}))
-                };
-
-                let source_line_count = body.lines().count();
-                let returned_line_count = if final_body.is_empty() {
-                    0
-                } else {
-                    final_body.lines().count()
-                };
-                let bytes = final_body.len();
-                out["body"] = json!(final_body);
-                let mut meta = json!({
-                    "line_count": returned_line_count,
-                    "source_line_count": source_line_count,
-                    "bytes": bytes,
-                });
-                if let Some(extra) = body_meta_extra.as_object() {
-                    for (k, v) in extra {
-                        meta[k] = v.clone();
+                        json!({ "heading": name, "heading_missing": true }),
+                    ),
+                }
+            } else if let Some(ref list) = a.headings {
+                let mut parts = Vec::new();
+                let mut missing = Vec::new();
+                for name in list {
+                    match find_heading_section(&parsed_headings, body, name) {
+                        Some(s) => parts.push(s),
+                        None => missing.push(name.clone()),
                     }
                 }
-                out["body_meta"] = meta;
+                let joined = parts.join("\n\n");
+                let extra = if missing.is_empty() {
+                    json!({ "headings": list })
+                } else {
+                    json!({ "headings": list, "headings_missing": missing })
+                };
+                (joined, None, extra)
+            } else if let (Some(s), Some(e)) = (a.start_line, a.end_line) {
+                (
+                    slice_lines(body, s, e),
+                    None,
+                    json!({ "start_line": s, "end_line": e }),
+                )
+            } else {
+                // full = true
+                let (shown, overflow) = apply_soft_cap(body);
+                (shown, overflow, json!({}))
+            };
 
-                if let Some((shown, total, headings)) = overflow_meta {
-                    let hint = format!(
-                        "Body exceeds soft cap ({SOFT_CAP_LINES} lines). Narrow with heading=\"<section>\" or start_line=N, end_line=M. Top-level headings: {headings:?}"
-                    );
-                    out["overflow"] = json!({
-                        "shown_lines": shown,
-                        "total_lines": total,
-                        "hint": hint,
-                    });
+            let source_line_count = body.lines().count();
+            let returned_line_count = if final_body.is_empty() {
+                0
+            } else {
+                final_body.lines().count()
+            };
+            let bytes = final_body.len();
+            out["body"] = json!(final_body);
+            let mut meta = json!({
+                "line_count": returned_line_count,
+                "source_line_count": source_line_count,
+                "bytes": bytes,
+            });
+            if let Some(extra) = body_meta_extra.as_object() {
+                for (k, v) in extra {
+                    meta[k] = v.clone();
                 }
             }
-        }
+            out["body_meta"] = meta;
 
-        Ok(out)
+            if let Some((shown, total, headings)) = overflow_meta {
+                let hint = format!(
+                    "Body exceeds soft cap ({SOFT_CAP_LINES} lines). Narrow with heading=\"<section>\" or start_line=N, end_line=M. Top-level headings: {headings:?}"
+                );
+                out["overflow"] = json!({
+                    "shown_lines": shown,
+                    "total_lines": total,
+                    "hint": hint,
+                });
+            }
+        }
     }
+
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -504,13 +437,12 @@ mod tests {
         .unwrap();
 
         let ctx = mk_ctx(cat);
-        let v = ArtifactGet
-            .call(
-                &ctx,
-                json!({"id": "a", "include_links": true, "include_observations": true}),
-            )
-            .await
-            .unwrap();
+        let v = call(
+            &ctx,
+            json!({"id": "a", "include_links": true, "include_observations": true}),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(v["id"], "a");
         assert_eq!(
@@ -531,10 +463,7 @@ mod tests {
     async fn get_missing_returns_null() {
         let cat = Catalog::open_in_memory().unwrap();
         let ctx = mk_ctx(cat);
-        let v = ArtifactGet
-            .call(&ctx, json!({"id": "nonexistent"}))
-            .await
-            .unwrap();
+        let v = call(&ctx, json!({"id": "nonexistent"})).await.unwrap();
         assert!(v.is_null());
     }
 
@@ -543,9 +472,7 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &mk_row("a")).unwrap();
         let ctx = mk_ctx(cat);
-        let res = ArtifactGet
-            .call(&ctx, json!({"id": "a", "include_body": true}))
-            .await;
+        let res = call(&ctx, json!({"id": "a", "include_body": true})).await;
         let err = res.expect_err("include_body must error");
         let msg = format!("{err}");
         assert!(
@@ -559,9 +486,7 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &mk_row("a")).unwrap();
         let ctx = mk_ctx(cat);
-        let res = ArtifactGet
-            .call(&ctx, json!({"id": "a", "full": true, "heading": "X"}))
-            .await;
+        let res = call(&ctx, json!({"id": "a", "full": true, "heading": "X"})).await;
         assert!(res.is_err(), "conflicting selectors must error");
     }
 
@@ -570,9 +495,7 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &mk_row("a")).unwrap();
         let ctx = mk_ctx(cat);
-        let res = ArtifactGet
-            .call(&ctx, json!({"id": "a", "start_line": 10, "end_line": 5}))
-            .await;
+        let res = call(&ctx, json!({"id": "a", "start_line": 10, "end_line": 5})).await;
         assert!(res.is_err(), "inverted line range must error");
     }
 
@@ -612,10 +535,7 @@ mod tests {
         )
         .unwrap();
 
-        let v = ArtifactGet
-            .call(&ctx, json!({"id": "a", "full": true}))
-            .await
-            .unwrap();
+        let v = call(&ctx, json!({"id": "a", "full": true})).await.unwrap();
         assert!(v["body"].as_str().unwrap().contains("Short body."));
         assert!(v.get("overflow").is_none(), "short body must not overflow");
     }
@@ -634,10 +554,7 @@ mod tests {
         body.push_str("## Section Two\n");
         fs::write(dir.path().join("a.md"), body).unwrap();
 
-        let v = ArtifactGet
-            .call(&ctx, json!({"id": "a", "full": true}))
-            .await
-            .unwrap();
+        let v = call(&ctx, json!({"id": "a", "full": true})).await.unwrap();
         let overflow = v["overflow"].as_object().expect("overflow present");
         assert!(overflow["total_lines"].as_u64().unwrap() > 500);
         assert_eq!(overflow["shown_lines"], 500);
@@ -660,8 +577,7 @@ mod tests {
         )
         .unwrap();
 
-        let v = ArtifactGet
-            .call(&ctx, json!({"id": "a", "heading": "Alpha"}))
+        let v = call(&ctx, json!({"id": "a", "heading": "Alpha"}))
             .await
             .unwrap();
         let body = v["body"].as_str().unwrap();
@@ -680,8 +596,7 @@ mod tests {
         )
         .unwrap();
 
-        let v = ArtifactGet
-            .call(&ctx, json!({"id": "a", "heading": "Nonexistent"}))
+        let v = call(&ctx, json!({"id": "a", "heading": "Nonexistent"}))
             .await
             .unwrap();
         assert_eq!(v["body"], "");
@@ -701,8 +616,7 @@ mod tests {
         )
         .unwrap();
 
-        let v = ArtifactGet
-            .call(&ctx, json!({"id": "a", "start_line": 2, "end_line": 4}))
+        let v = call(&ctx, json!({"id": "a", "start_line": 2, "end_line": 4}))
             .await
             .unwrap();
         let body = v["body"].as_str().unwrap();
@@ -726,7 +640,7 @@ mod tests {
         )
         .unwrap();
 
-        let v = ArtifactGet.call(&ctx, json!({"id": "a"})).await.unwrap();
+        let v = call(&ctx, json!({"id": "a"})).await.unwrap();
         assert_eq!(v["preview"]["shape"], "spec");
         assert!(v.get("body").is_none(), "body absent when not selected");
     }
@@ -738,7 +652,7 @@ mod tests {
         let (ctx, _dir) = mk_ctx_with_root(cat);
         // Note: file was never written.
 
-        let v = ArtifactGet.call(&ctx, json!({"id": "a"})).await.unwrap();
+        let v = call(&ctx, json!({"id": "a"})).await.unwrap();
         assert!(v["preview"].is_null());
         assert!(v["body_error"].as_str().is_some());
     }
@@ -749,7 +663,7 @@ mod tests {
         artifact::upsert(&cat, &mk_row("a")).unwrap();
         let ctx = mk_ctx(cat); // mk_ctx has roots: vec![]
 
-        let v = ArtifactGet.call(&ctx, json!({"id": "a"})).await.unwrap();
+        let v = call(&ctx, json!({"id": "a"})).await.unwrap();
         assert!(v["preview"].is_null());
         assert!(v["body_error"]
             .as_str()
@@ -778,7 +692,7 @@ mod tests {
         .unwrap();
 
         // Mode 1: preview default
-        let v = ArtifactGet.call(&ctx, json!({"id": "pl"})).await.unwrap();
+        let v = call(&ctx, json!({"id": "pl"})).await.unwrap();
         assert_eq!(v["preview"]["shape"], "plan");
         assert_eq!(v["preview"]["tasks"]["total"], 4);
         assert_eq!(v["preview"]["tasks"]["done"], 1);
@@ -787,17 +701,13 @@ mod tests {
         assert!(v.get("body").is_none());
 
         // Mode 2: full body
-        let v = ArtifactGet
-            .call(&ctx, json!({"id": "pl", "full": true}))
-            .await
-            .unwrap();
+        let v = call(&ctx, json!({"id": "pl", "full": true})).await.unwrap();
         assert!(v["body"].as_str().unwrap().contains("Alpha task"));
         assert!(v["body"].as_str().unwrap().contains("Phase 2"));
         assert!(v.get("overflow").is_none());
 
         // Mode 3: heading-targeted read
-        let v = ArtifactGet
-            .call(&ctx, json!({"id": "pl", "heading": "Phase 1"}))
+        let v = call(&ctx, json!({"id": "pl", "heading": "Phase 1"}))
             .await
             .unwrap();
         let body = v["body"].as_str().unwrap();
@@ -837,7 +747,7 @@ mod tests {
         // `preview::extract` on a memory-kind artifact.
         let v = tokio::time::timeout(
             std::time::Duration::from_secs(3),
-            ArtifactGet.call(&ctx, json!({"id": "m"})),
+            call(&ctx, json!({"id": "m"})),
         )
         .await
         .expect("artifact_get should not deadlock on memory kind")
@@ -858,8 +768,7 @@ mod tests {
         )
         .unwrap();
 
-        let v = ArtifactGet
-            .call(&ctx, json!({"id": "a", "heading": "Alpha"}))
+        let v = call(&ctx, json!({"id": "a", "heading": "Alpha"}))
             .await
             .unwrap();
         let returned = v["body"].as_str().unwrap();
@@ -887,13 +796,12 @@ mod tests {
         )
         .unwrap();
 
-        let v = ArtifactGet
-            .call(
-                &ctx,
-                json!({"id": "a", "headings": ["Alpha", "Gamma", "Missing"]}),
-            )
-            .await
-            .unwrap();
+        let v = call(
+            &ctx,
+            json!({"id": "a", "headings": ["Alpha", "Gamma", "Missing"]}),
+        )
+        .await
+        .unwrap();
         let body = v["body"].as_str().unwrap();
         assert!(body.contains("alpha body"));
         assert!(body.contains("gamma body"));
@@ -909,7 +817,7 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &mk_row("a")).unwrap();
         let ctx = mk_ctx(cat);
-        let res = ArtifactGet.call(&ctx, json!({"id": "a"})).await.unwrap();
+        let res = call(&ctx, json!({"id": "a"})).await.unwrap();
         assert_eq!(res["freshness"], "unknown");
         assert!(res["latest_event"].is_null());
         let _ = events::latest_for_artifact; // keep import used
@@ -936,7 +844,7 @@ mod tests {
         )
         .unwrap();
         let ctx = mk_ctx(cat);
-        let res = ArtifactGet.call(&ctx, json!({"id": "a"})).await.unwrap();
+        let res = call(&ctx, json!({"id": "a"})).await.unwrap();
         assert_eq!(res["freshness"], "fresh");
         assert_eq!(res["latest_event"]["kind"], "reviewed");
     }
@@ -964,10 +872,7 @@ mod tests {
         )
         .unwrap();
         let ctx = mk_ctx(cat);
-        let result = ArtifactGet
-            .call(&ctx, json!({"id": "aug-art"}))
-            .await
-            .unwrap();
+        let result = call(&ctx, json!({"id": "aug-art"})).await.unwrap();
         let aug = &result["augmentation"];
         assert_eq!(aug["prompt"], "Keep updated");
         assert_eq!(aug["refresh_count"], 5);
@@ -980,10 +885,7 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &mk_row("plain-art")).unwrap();
         let ctx = mk_ctx(cat);
-        let result = ArtifactGet
-            .call(&ctx, json!({"id": "plain-art"}))
-            .await
-            .unwrap();
+        let result = call(&ctx, json!({"id": "plain-art"})).await.unwrap();
         assert!(result["augmentation"].is_null());
     }
 
@@ -1016,13 +918,12 @@ mod tests {
         )
         .unwrap();
         let ctx = mk_ctx(cat);
-        let result = ArtifactGet
-            .call(
-                &ctx,
-                json!({"id": "center", "include_links": true, "links_direction": "out"}),
-            )
-            .await
-            .unwrap();
+        let result = call(
+            &ctx,
+            json!({"id": "center", "include_links": true, "links_direction": "out"}),
+        )
+        .await
+        .unwrap();
         let outgoing = result["links"]["outgoing"].as_array().unwrap();
         let incoming = result["links"]["incoming"].as_array().unwrap();
         assert_eq!(outgoing.len(), 1);
@@ -1057,13 +958,12 @@ mod tests {
         )
         .unwrap();
         let ctx = mk_ctx(cat);
-        let result = ArtifactGet
-            .call(
-                &ctx,
-                json!({"id": "a", "include_links": true, "links_rel": "implements"}),
-            )
-            .await
-            .unwrap();
+        let result = call(
+            &ctx,
+            json!({"id": "a", "include_links": true, "links_rel": "implements"}),
+        )
+        .await
+        .unwrap();
         let outgoing = result["links"]["outgoing"].as_array().unwrap();
         assert_eq!(outgoing.len(), 1);
         assert_eq!(outgoing[0]["rel"], "implements");
@@ -1075,12 +975,11 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &mk_row("x")).unwrap();
         let ctx = mk_ctx(cat);
-        let err = ArtifactGet
-            .call(
-                &ctx,
-                json!({"id": "x", "include_links": true, "links_direction": "sideways"}),
-            )
-            .await;
+        let err = call(
+            &ctx,
+            json!({"id": "x", "include_links": true, "links_direction": "sideways"}),
+        )
+        .await;
         assert!(err.is_err());
     }
 }

@@ -7,13 +7,10 @@
 //! deferred until archetype selection proves frustrating in practice.
 
 use crate::catalog::{artifact, augmentation};
-use crate::tools::{Tool, ToolContext};
+use crate::tools::ToolContext;
 use anyhow::Result;
-use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
-
-pub struct TrackerDesign;
 
 #[derive(Deserialize, Default)]
 struct Args {
@@ -28,81 +25,6 @@ const DESIGN_VERSION: &str = "1";
 /// Cap for inline existing-trackers list. Above this, agent should call
 /// `artifact_find {kind:"tracker"}` directly.
 const EXISTING_TRACKERS_CAP: usize = 30;
-
-#[async_trait]
-impl Tool for TrackerDesign {
-    fn name(&self) -> &'static str {
-        "tracker_design"
-    }
-
-    fn description(&self) -> &'static str {
-        "Returns a teaching system_prompt + archetype library + existing-tracker \
-         landscape to guide the agent through composing a tracker. Call this \
-         BEFORE artifact_create when the user asks to create a tracker — pick \
-         an archetype, fill in the spec, then call artifact_create."
-    }
-
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "intent": {
-                    "type": "string",
-                    "description": "Free-form intent (optional, reserved for future tailoring)"
-                }
-            }
-        })
-    }
-
-    async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
-        let a: Args = serde_json::from_value(args).unwrap_or_default();
-        let cat = ctx.catalog.lock();
-
-        // Existing-trackers landscape. Limit + overflow hint.
-        let tracker_ids = augmentation::list_all_ids(&cat)?;
-        let mut existing: Vec<Value> = Vec::new();
-        let mut total_trackers = 0usize;
-        for id in tracker_ids.iter() {
-            let Some(art) = artifact::get(&cat, id)? else {
-                continue;
-            };
-            if art.kind != "tracker" {
-                continue;
-            }
-            total_trackers += 1;
-            if existing.len() >= EXISTING_TRACKERS_CAP {
-                continue;
-            }
-            let aug = augmentation::get(&cat, id)?;
-            existing.push(json!({
-                "id": id,
-                "title": art.title,
-                "kind": art.kind,
-                "rel_path": art.rel_path,
-                "last_refreshed_at": aug.as_ref().and_then(|a| a.last_refreshed_at.clone()),
-                "refresh_count": aug.as_ref().map(|a| a.refresh_count).unwrap_or(0),
-            }));
-        }
-
-        let mut response = json!({
-            "design_version": DESIGN_VERSION,
-            "system_prompt": SYSTEM_PROMPT,
-            "archetypes": archetypes(),
-            "existing_trackers": existing,
-            "existing_trackers_total": total_trackers,
-            "intent": a.intent,
-            "next_step": "Pick archetype. Compose spec (prompt, params, render_template, params_schema, body). Call artifact_create with kind=tracker, status=active, and augment={prompt,params}.",
-        });
-
-        if total_trackers > EXISTING_TRACKERS_CAP {
-            response["existing_trackers_overflow_hint"] = json!(format!(
-                "Showing {EXISTING_TRACKERS_CAP} of {total_trackers}. For full list use artifact_find {{\"kind\":\"tracker\"}}."
-            ));
-        }
-
-        Ok(response)
-    }
-}
 
 fn archetypes() -> Value {
     json!([
@@ -431,6 +353,53 @@ Call `artifact_create` with `kind=tracker`, `status=active`, and `augment={promp
 
 The artifact + augmentation are created atomically.
 "#;
+pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    let a: Args = serde_json::from_value(args).unwrap_or_default();
+    let cat = ctx.catalog.lock();
+
+    let tracker_ids = augmentation::list_all_ids(&cat)?;
+    let mut existing: Vec<Value> = Vec::new();
+    let mut total_trackers = 0usize;
+    for id in tracker_ids.iter() {
+        let Some(art) = artifact::get(&cat, id)? else {
+            continue;
+        };
+        if art.kind != "tracker" {
+            continue;
+        }
+        total_trackers += 1;
+        if existing.len() >= EXISTING_TRACKERS_CAP {
+            continue;
+        }
+        let aug = augmentation::get(&cat, id)?;
+        existing.push(json!({
+            "id": id,
+            "title": art.title,
+            "kind": art.kind,
+            "rel_path": art.rel_path,
+            "last_refreshed_at": aug.as_ref().and_then(|a| a.last_refreshed_at.clone()),
+            "refresh_count": aug.as_ref().map(|a| a.refresh_count).unwrap_or(0),
+        }));
+    }
+
+    let mut response = json!({
+        "design_version": DESIGN_VERSION,
+        "system_prompt": SYSTEM_PROMPT,
+        "archetypes": archetypes(),
+        "existing_trackers": existing,
+        "existing_trackers_total": total_trackers,
+        "intent": a.intent,
+        "next_step": "Pick archetype. Compose spec (prompt, params, render_template, params_schema, body). Call artifact_create with kind=tracker, status=active, and augment={prompt,params}.",
+    });
+
+    if total_trackers > EXISTING_TRACKERS_CAP {
+        response["existing_trackers_overflow_hint"] = json!(format!(
+            "Showing {EXISTING_TRACKERS_CAP} of {total_trackers}. For full list use artifact_find {{\"kind\":\"tracker\"}}."
+        ));
+    }
+
+    Ok(response)
+}
 
 #[cfg(test)]
 mod tests {
@@ -465,7 +434,7 @@ mod tests {
     #[tokio::test]
     async fn returns_design_envelope() {
         let ctx = mk_ctx();
-        let v = TrackerDesign.call(&ctx, json!({})).await.unwrap();
+        let v = call(&ctx, json!({})).await.unwrap();
         assert_eq!(v["design_version"], "1");
         assert!(v["system_prompt"].as_str().unwrap().len() > 1000);
         assert_eq!(v["archetypes"].as_array().unwrap().len(), 6);
@@ -521,7 +490,7 @@ mod tests {
             }
         }
 
-        let v = TrackerDesign.call(&ctx, json!({})).await.unwrap();
+        let v = call(&ctx, json!({})).await.unwrap();
         let listed = v["existing_trackers"].as_array().unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0]["id"], "t1");
@@ -578,7 +547,7 @@ mod tests {
             }
         }
 
-        let v = TrackerDesign.call(&ctx, json!({})).await.unwrap();
+        let v = call(&ctx, json!({})).await.unwrap();
         let listed = v["existing_trackers"].as_array().unwrap();
         assert_eq!(listed.len(), EXISTING_TRACKERS_CAP);
         assert_eq!(

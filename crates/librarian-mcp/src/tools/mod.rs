@@ -107,23 +107,17 @@ pub mod render;
 pub mod schema_validate;
 pub mod tracker_design;
 
+pub mod artifact;
+pub mod artifact_event;
+pub mod artifact_refresh;
+pub mod librarian;
+
 pub fn all_tools() -> Vec<Arc<dyn Tool>> {
     vec![
-        Arc::new(find::ArtifactFind),
-        Arc::new(get::ArtifactGet),
-        Arc::new(graph::ArtifactGraph),
-        Arc::new(create::ArtifactCreate),
-        Arc::new(update::ArtifactUpdate),
-        Arc::new(link::ArtifactLink),
-        Arc::new(event_create::ArtifactEventCreate),
-        Arc::new(timeline::ArtifactTimeline),
-        Arc::new(state_at::ArtifactStateAt),
-        Arc::new(workspace_state_at::WorkspaceStateAt),
-        Arc::new(reindex::LibrarianReindex),
-        Arc::new(context::LibrarianContext),
+        Arc::new(artifact::Artifact),
+        Arc::new(artifact_event::ArtifactEvent),
         Arc::new(augment::ArtifactAugment),
-        Arc::new(refresh::ArtifactRefresh),
-        Arc::new(tracker_design::TrackerDesign),
-        Arc::new(refresh_stale::ArtifactRefreshStale),
+        Arc::new(artifact_refresh::ArtifactRefreshTool),
+        Arc::new(librarian::Librarian),
     ]
 }

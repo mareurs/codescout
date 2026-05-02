@@ -1,12 +1,9 @@
 use anyhow::Result;
-use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{Tool, ToolContext};
+use super::ToolContext;
 use crate::catalog::artifact;
-
-pub struct ArtifactUpdate;
 
 #[derive(Deserialize, Default)]
 struct UpdatePatch {
@@ -32,64 +29,55 @@ struct Args {
     #[serde(default)]
     commit_refresh: bool,
 }
+pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    let a: Args = serde_json::from_value(args)?;
+    let cat = ctx.catalog.lock();
+    let row =
+        artifact::get(&cat, &a.id)?.ok_or_else(|| anyhow::anyhow!("unknown id `{}`", a.id))?;
 
-#[async_trait]
-impl Tool for ArtifactUpdate {
-    fn name(&self) -> &'static str {
-        "artifact_update"
-    }
+    let root = ctx
+        .workspace
+        .roots
+        .iter()
+        .find(|r| r.name == row.repo)
+        .ok_or_else(|| anyhow::anyhow!("unknown repo `{}`", row.repo))?;
+    let full = root.path.join(&row.rel_path);
 
-    fn description(&self) -> &'static str {
-        "Update an existing artifact's frontmatter fields and/or body. Only provided fields are changed. Set commit_refresh=true to atomically record a completed refresh cycle (replaces artifact_refresh_commit)."
-    }
+    let original = std::fs::read_to_string(&full)?;
+    let patch = &a.patch;
 
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "required": ["id", "patch"],
-            "properties": {
-                "id": {"type": "string"},
-                "patch": {
-                    "type": "object",
-                    "properties": {
-                        "status": {"type": "string"},
-                        "title": {"type": "string"},
-                        "owners": {"type": "array", "items": {"type": "string"}},
-                        "tags": {"type": "array", "items": {"type": "string"}},
-                        "topic": {"type": "string"},
-                        "body": {"type": "string"}
-                    }
-                },
-                "commit_refresh": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "When true, also record a completed refresh cycle (increments refresh_count, sets last_refreshed_at). Replaces a separate artifact_refresh_commit call."
+    let new_content = if let Some(new_body) = &patch.body {
+        let (fm_opt, old_body) = crate::frontmatter::parse(&original)?;
+        let mut fm = fm_opt.unwrap_or_default();
+        if let Some(v) = &patch.status {
+            fm.status = Some(v.clone());
+        }
+        if let Some(v) = &patch.title {
+            fm.title = Some(v.clone());
+        }
+        if let Some(v) = &patch.owners {
+            fm.owners = v.clone();
+        }
+        if let Some(v) = &patch.tags {
+            fm.tags = v.clone();
+        }
+        if let Some(v) = &patch.topic {
+            fm.topic = Some(v.clone());
+        }
+        let actual_body = match crate::catalog::augmentation::get(&cat, &a.id)? {
+            Some(aug) if aug.append_mode => {
+                let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+                let mut appended = format!("## {date}\n\n{new_body}\n\n{}", old_body.trim_start());
+                if let Some(cap) = aug.history_cap {
+                    appended = trim_history(&appended, cap as usize);
                 }
+                appended
             }
-        })
-    }
-
-    async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
-        let a: Args = serde_json::from_value(args)?;
-        let cat = ctx.catalog.lock();
-        let row =
-            artifact::get(&cat, &a.id)?.ok_or_else(|| anyhow::anyhow!("unknown id `{}`", a.id))?;
-
-        let root = ctx
-            .workspace
-            .roots
-            .iter()
-            .find(|r| r.name == row.repo)
-            .ok_or_else(|| anyhow::anyhow!("unknown repo `{}`", row.repo))?;
-        let full = root.path.join(&row.rel_path);
-
-        let original = std::fs::read_to_string(&full)?;
-        let patch = &a.patch;
-
-        let new_content = if let Some(new_body) = &patch.body {
-            // Re-parse frontmatter and rebuild with new body
-            let (fm_opt, old_body) = crate::frontmatter::parse(&original)?;
-            let mut fm = fm_opt.unwrap_or_default();
+            _ => new_body.clone(),
+        };
+        crate::frontmatter::write(&fm, &format!("\n{actual_body}\n"))
+    } else {
+        crate::frontmatter::update_in_place(&original, |fm| {
             if let Some(v) = &patch.status {
                 fm.status = Some(v.clone());
             }
@@ -105,86 +93,54 @@ impl Tool for ArtifactUpdate {
             if let Some(v) = &patch.topic {
                 fm.topic = Some(v.clone());
             }
-            let actual_body = match crate::catalog::augmentation::get(&cat, &a.id)? {
-                Some(aug) if aug.append_mode => {
-                    let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
-                    let mut appended =
-                        format!("## {date}\n\n{new_body}\n\n{}", old_body.trim_start());
-                    if let Some(cap) = aug.history_cap {
-                        appended = trim_history(&appended, cap as usize);
-                    }
-                    appended
-                }
-                _ => new_body.clone(),
-            };
-            crate::frontmatter::write(&fm, &format!("\n{actual_body}\n"))
-        } else {
-            crate::frontmatter::update_in_place(&original, |fm| {
-                if let Some(v) = &patch.status {
-                    fm.status = Some(v.clone());
-                }
-                if let Some(v) = &patch.title {
-                    fm.title = Some(v.clone());
-                }
-                if let Some(v) = &patch.owners {
-                    fm.owners = v.clone();
-                }
-                if let Some(v) = &patch.tags {
-                    fm.tags = v.clone();
-                }
-                if let Some(v) = &patch.topic {
-                    fm.topic = Some(v.clone());
-                }
-            })?
-        };
+        })?
+    };
 
-        std::fs::write(&full, &new_content)?;
+    std::fs::write(&full, &new_content)?;
 
-        let now = chrono::Utc::now().timestamp_millis();
-        let file_mtime = std::fs::metadata(&full)
-            .ok()
-            .and_then(|m| {
-                m.modified().ok().and_then(|t| {
-                    t.duration_since(std::time::UNIX_EPOCH)
-                        .ok()
-                        .map(|d| d.as_millis() as i64)
-                })
+    let now = chrono::Utc::now().timestamp_millis();
+    let file_mtime = std::fs::metadata(&full)
+        .ok()
+        .and_then(|m| {
+            m.modified().ok().and_then(|t| {
+                t.duration_since(std::time::UNIX_EPOCH)
+                    .ok()
+                    .map(|d| d.as_millis() as i64)
             })
-            .unwrap_or(now);
+        })
+        .unwrap_or(now);
 
-        // Build updated row from original, applying patch
-        let updated_row = crate::catalog::artifact::ArtifactRow {
-            id: row.id.clone(),
-            repo: row.repo.clone(),
-            rel_path: row.rel_path.clone(),
-            kind: row.kind.clone(),
-            status: patch.status.clone().unwrap_or(row.status),
-            title: patch.title.clone().or(row.title),
-            owners: patch.owners.clone().unwrap_or(row.owners),
-            tags: patch.tags.clone().unwrap_or(row.tags),
-            topic: patch.topic.clone().or(row.topic),
-            time_scope: row.time_scope,
-            source: row.source,
-            created_at: row.created_at,
-            updated_at: now,
-            file_mtime,
-            file_sha256: crate::util::sha_of_bytes(new_content.as_bytes()),
-            confidence: row.confidence,
-        };
-        artifact::upsert(&cat, &updated_row)?;
+    let updated_row = crate::catalog::artifact::ArtifactRow {
+        id: row.id.clone(),
+        repo: row.repo.clone(),
+        rel_path: row.rel_path.clone(),
+        kind: row.kind.clone(),
+        status: patch.status.clone().unwrap_or(row.status),
+        title: patch.title.clone().or(row.title),
+        owners: patch.owners.clone().unwrap_or(row.owners),
+        tags: patch.tags.clone().unwrap_or(row.tags),
+        topic: patch.topic.clone().or(row.topic),
+        time_scope: row.time_scope,
+        source: row.source,
+        created_at: row.created_at,
+        updated_at: now,
+        file_mtime,
+        file_sha256: crate::util::sha_of_bytes(new_content.as_bytes()),
+        confidence: row.confidence,
+    };
+    artifact::upsert(&cat, &updated_row)?;
 
-        let committed = if a.commit_refresh {
-            Some(crate::catalog::augmentation::commit_refresh(&cat, &a.id)?)
-        } else {
-            None
-        };
+    let committed = if a.commit_refresh {
+        Some(crate::catalog::augmentation::commit_refresh(&cat, &a.id)?)
+    } else {
+        None
+    };
 
-        let mut out = json!({"id": a.id, "updated": true});
-        if let Some(c) = committed {
-            out["committed"] = json!(c);
-        }
-        Ok(out)
+    let mut out = json!({"id": a.id, "updated": true});
+    if let Some(c) = committed {
+        out["committed"] = json!(c);
     }
+    Ok(out)
 }
 
 /// Write a single named frontmatter field to the artifact's file on disk.
@@ -274,7 +230,6 @@ mod tests {
     use crate::catalog::artifact;
     use crate::catalog::augmentation;
     use crate::catalog::Catalog;
-    use crate::tools::create::ArtifactCreate;
     use crate::workspace::{Root, WorkspaceConfig};
     use std::sync::Arc;
     use tempfile::TempDir;
@@ -301,25 +256,23 @@ mod tests {
     async fn update_title_roundtrips() {
         let tmp = TempDir::new().unwrap();
         let ctx = mk_ctx(tmp.path().to_path_buf());
-        let v = ArtifactCreate
-            .call(
-                &ctx,
-                serde_json::json!({
-                    "repo": "r", "rel_path": "doc.md",
-                    "kind": "spec", "title": "Old", "body": "content"
-                }),
-            )
-            .await
-            .unwrap();
+        let v = crate::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "doc.md",
+                "kind": "spec", "title": "Old", "body": "content"
+            }),
+        )
+        .await
+        .unwrap();
         let id = v["id"].as_str().unwrap().to_string();
 
-        ArtifactUpdate
-            .call(
-                &ctx,
-                serde_json::json!({"id": id, "patch": {"title": "New"}}),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"title": "New"}}),
+        )
+        .await
+        .unwrap();
 
         let content = std::fs::read_to_string(tmp.path().join("doc.md")).unwrap();
         assert!(content.contains("title: New"), "file should have new title");
@@ -331,25 +284,23 @@ mod tests {
     async fn update_status_archived_persisted() {
         let tmp = TempDir::new().unwrap();
         let ctx = mk_ctx(tmp.path().to_path_buf());
-        let v = ArtifactCreate
-            .call(
-                &ctx,
-                serde_json::json!({
-                    "repo": "r", "rel_path": "doc2.md",
-                    "kind": "spec", "title": "T", "body": "b"
-                }),
-            )
-            .await
-            .unwrap();
+        let v = crate::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "doc2.md",
+                "kind": "spec", "title": "T", "body": "b"
+            }),
+        )
+        .await
+        .unwrap();
         let id = v["id"].as_str().unwrap().to_string();
 
-        ArtifactUpdate
-            .call(
-                &ctx,
-                serde_json::json!({"id": id, "patch": {"status": "archived"}}),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"status": "archived"}}),
+        )
+        .await
+        .unwrap();
 
         let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
         assert_eq!(row.status, "archived");
@@ -359,13 +310,12 @@ mod tests {
     async fn missing_id_errors() {
         let tmp = TempDir::new().unwrap();
         let ctx = mk_ctx(tmp.path().to_path_buf());
-        let err = ArtifactUpdate
-            .call(
-                &ctx,
-                serde_json::json!({"id": "nonexistent", "patch": {"title": "X"}}),
-            )
-            .await
-            .unwrap_err();
+        let err = call(
+            &ctx,
+            serde_json::json!({"id": "nonexistent", "patch": {"title": "X"}}),
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("unknown id"));
     }
 
@@ -373,25 +323,23 @@ mod tests {
     async fn body_patch_preserves_frontmatter() {
         let tmp = TempDir::new().unwrap();
         let ctx = mk_ctx(tmp.path().to_path_buf());
-        let v = ArtifactCreate
-            .call(
-                &ctx,
-                serde_json::json!({
-                    "repo": "r", "rel_path": "doc3.md",
-                    "kind": "spec", "title": "Keep", "body": "old body"
-                }),
-            )
-            .await
-            .unwrap();
+        let v = crate::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "doc3.md",
+                "kind": "spec", "title": "Keep", "body": "old body"
+            }),
+        )
+        .await
+        .unwrap();
         let id = v["id"].as_str().unwrap().to_string();
 
-        ArtifactUpdate
-            .call(
-                &ctx,
-                serde_json::json!({"id": id, "patch": {"body": "brand new"}}),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"body": "brand new"}}),
+        )
+        .await
+        .unwrap();
 
         let content = std::fs::read_to_string(tmp.path().join("doc3.md")).unwrap();
         assert!(content.starts_with("---\n"), "frontmatter must be present");
@@ -410,16 +358,15 @@ mod tests {
         let ctx = mk_ctx(tmp.path().to_path_buf());
 
         // Create artifact via ArtifactCreate so the file exists on disk
-        let v = ArtifactCreate
-            .call(
-                &ctx,
-                serde_json::json!({
-                    "repo": "r", "rel_path": "tracker.md",
-                    "kind": "tracker", "title": "T", "body": "body"
-                }),
-            )
-            .await
-            .unwrap();
+        let v = crate::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "tracker.md",
+                "kind": "tracker", "title": "T", "body": "body"
+            }),
+        )
+        .await
+        .unwrap();
         let id = v["id"].as_str().unwrap().to_string();
 
         // Seed augmentation row
@@ -446,17 +393,16 @@ mod tests {
         }
 
         // Update body + commit refresh in one call
-        let result = ArtifactUpdate
-            .call(
-                &ctx,
-                serde_json::json!({
-                    "id": id,
-                    "patch": {"body": "new body"},
-                    "commit_refresh": true
-                }),
-            )
-            .await
-            .unwrap();
+        let result = call(
+            &ctx,
+            serde_json::json!({
+                "id": id,
+                "patch": {"body": "new body"},
+                "commit_refresh": true
+            }),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(result["id"].as_str().unwrap(), id);
         assert_eq!(result["updated"], true);
@@ -505,19 +451,18 @@ mod tests {
         append_mode: bool,
         history_cap: Option<i64>,
     ) -> String {
-        let v = ArtifactCreate
-            .call(
-                ctx,
-                serde_json::json!({
-                    "repo": "r",
-                    "rel_path": rel_path,
-                    "kind": "spec",
-                    "title": "test",
-                    "body": "original body",
-                }),
-            )
-            .await
-            .unwrap();
+        let v = crate::tools::create::call(
+            ctx,
+            serde_json::json!({
+                "repo": "r",
+                "rel_path": rel_path,
+                "kind": "spec",
+                "title": "test",
+                "body": "original body",
+            }),
+        )
+        .await
+        .unwrap();
         let id = v["id"].as_str().unwrap().to_string();
         let cat = ctx.catalog.lock();
         augmentation::upsert(
@@ -546,13 +491,12 @@ mod tests {
         let ctx = mk_ctx(tmp.path().to_path_buf());
         let id = seed_with_augment(&ctx, "b1.md", true, None).await;
 
-        ArtifactUpdate
-            .call(
-                &ctx,
-                serde_json::json!({"id": id, "patch": {"body": "delta content"}}),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"body": "delta content"}}),
+        )
+        .await
+        .unwrap();
 
         let content = std::fs::read_to_string(tmp.path().join("b1.md")).unwrap();
         assert!(
@@ -569,20 +513,18 @@ mod tests {
         let ctx = mk_ctx(tmp.path().to_path_buf());
         let id = seed_with_augment(&ctx, "b2.md", true, None).await;
 
-        ArtifactUpdate
-            .call(
-                &ctx,
-                serde_json::json!({"id": id, "patch": {"body": "first delta"}}),
-            )
-            .await
-            .unwrap();
-        ArtifactUpdate
-            .call(
-                &ctx,
-                serde_json::json!({"id": id, "patch": {"body": "second delta"}}),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"body": "first delta"}}),
+        )
+        .await
+        .unwrap();
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"body": "second delta"}}),
+        )
+        .await
+        .unwrap();
 
         let content = std::fs::read_to_string(tmp.path().join("b2.md")).unwrap();
         let pos_second = content.find("second delta").unwrap();
@@ -600,13 +542,12 @@ mod tests {
         let id = seed_with_augment(&ctx, "b3.md", true, Some(2)).await;
 
         for entry in &["entry 1", "entry 2", "entry 3"] {
-            ArtifactUpdate
-                .call(
-                    &ctx,
-                    serde_json::json!({"id": id, "patch": {"body": entry}}),
-                )
-                .await
-                .unwrap();
+            crate::tools::update::call(
+                &ctx,
+                serde_json::json!({"id": id, "patch": {"body": entry}}),
+            )
+            .await
+            .unwrap();
         }
 
         let content = std::fs::read_to_string(tmp.path().join("b3.md")).unwrap();
@@ -621,13 +562,12 @@ mod tests {
         let ctx = mk_ctx(tmp.path().to_path_buf());
         let id = seed_with_augment(&ctx, "b4.md", false, None).await;
 
-        ArtifactUpdate
-            .call(
-                &ctx,
-                serde_json::json!({"id": id, "patch": {"body": "replacement body"}}),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"body": "replacement body"}}),
+        )
+        .await
+        .unwrap();
 
         let content = std::fs::read_to_string(tmp.path().join("b4.md")).unwrap();
         assert!(content.contains("replacement body"), "body missing");

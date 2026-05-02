@@ -7,29 +7,16 @@
 const COMPANION_HINT: &str = include_str!("../src/prompts/companion_hint.md");
 
 const REAL_TOOLS: &[&str] = &[
-    "artifact_list_by_kind",
-    "artifact_find",
-    "artifact_get",
-    "artifact_links",
-    "artifact_graph",
-    "artifact_create",
-    "artifact_update",
-    "artifact_link",
-    "artifact_observe",
-    "librarian_context",
-    "librarian_reindex",
+    "artifact",
+    "artifact_event",
     "artifact_augment",
-    "artifact_update_params",
     "artifact_refresh",
-    "artifact_refresh_commit",
-    "tracker_create",
+    "librarian",
 ];
 
 fn extract_tool_tokens(s: &str) -> Vec<&str> {
     s.split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
-        .filter(|t| {
-            t.starts_with("artifact_") || t.starts_with("librarian_") || t.starts_with("tracker_")
-        })
+        .filter(|t| REAL_TOOLS.contains(t))
         .collect()
 }
 

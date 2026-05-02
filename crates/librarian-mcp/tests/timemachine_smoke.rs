@@ -12,9 +12,7 @@ use std::sync::Arc;
 use librarian_mcp::{
     catalog::Catalog,
     tools::{
-        create::ArtifactCreate, event_create::ArtifactEventCreate, get::ArtifactGet,
-        graph::ArtifactGraph, link::ArtifactLink, state_at::ArtifactStateAt,
-        timeline::ArtifactTimeline, workspace_state_at::WorkspaceStateAt, Tool, ToolContext,
+        create, event_create, get, graph, link, state_at, timeline, workspace_state_at, ToolContext,
     },
     workspace::{Root, WorkspaceConfig},
 };
@@ -41,19 +39,18 @@ fn mk_ctx(tmp_root: std::path::PathBuf) -> ToolContext {
 
 /// Helper: create an artifact and return its id string.
 async fn create_artifact(ctx: &ToolContext, rel_path: &str, kind: &str, title: &str) -> String {
-    let v = ArtifactCreate
-        .call(
-            ctx,
-            json!({
-                "repo": "r",
-                "rel_path": rel_path,
-                "kind": kind,
-                "title": title,
-                "body": "smoke test body"
-            }),
-        )
-        .await
-        .expect("artifact_create should succeed");
+    let v = create::call(
+        ctx,
+        json!({
+            "repo": "r",
+            "rel_path": rel_path,
+            "kind": kind,
+            "title": title,
+            "body": "smoke test body"
+        }),
+    )
+    .await
+    .expect("artifact_create should succeed");
     v["id"]
         .as_str()
         .expect("artifact_create must return an id")
@@ -74,17 +71,16 @@ async fn timemachine_full_chain() {
     // -----------------------------------------------------------------------
     // 1. note event on tracker → assert event_id returned
     // -----------------------------------------------------------------------
-    let note_resp = ArtifactEventCreate
-        .call(
-            &ctx,
-            json!({
-                "artifact_id": tracker_id,
-                "kind": "note",
-                "payload": {"text": "initial note"}
-            }),
-        )
-        .await
-        .expect("note event should succeed");
+    let note_resp = event_create::call(
+        &ctx,
+        json!({
+            "artifact_id": tracker_id,
+            "kind": "note",
+            "payload": {"text": "initial note"}
+        }),
+    )
+    .await
+    .expect("note event should succeed");
     let note_id = note_resp["event_id"]
         .as_str()
         .expect("event_create must return event_id")
@@ -94,34 +90,32 @@ async fn timemachine_full_chain() {
     // -----------------------------------------------------------------------
     // 2. reviewed event on tracker (makes freshness=fresh)
     // -----------------------------------------------------------------------
-    let _reviewed_resp = ArtifactEventCreate
-        .call(
-            &ctx,
-            json!({
-                "artifact_id": tracker_id,
-                "kind": "reviewed",
-                "payload": {}
-            }),
-        )
-        .await
-        .expect("reviewed event should succeed");
+    let _reviewed_resp = event_create::call(
+        &ctx,
+        json!({
+            "artifact_id": tracker_id,
+            "kind": "reviewed",
+            "payload": {}
+        }),
+    )
+    .await
+    .expect("reviewed event should succeed");
 
     // -----------------------------------------------------------------------
     // 3. intent event on tracker with inputs referencing spec + anchor_commit
     // -----------------------------------------------------------------------
-    let intent_resp = ArtifactEventCreate
-        .call(
-            &ctx,
-            json!({
-                "artifact_id": tracker_id,
-                "kind": "intent",
-                "payload": {"hypothesis": "tracker drives spec"},
-                "anchor_commit": "abc123",
-                "also_mutates": [spec_id]
-            }),
-        )
-        .await
-        .expect("intent event should succeed");
+    let intent_resp = event_create::call(
+        &ctx,
+        json!({
+            "artifact_id": tracker_id,
+            "kind": "intent",
+            "payload": {"hypothesis": "tracker drives spec"},
+            "anchor_commit": "abc123",
+            "also_mutates": [spec_id]
+        }),
+    )
+    .await
+    .expect("intent event should succeed");
     let intent_id = intent_resp["event_id"]
         .as_str()
         .expect("intent event must return event_id")
@@ -130,18 +124,17 @@ async fn timemachine_full_chain() {
     // -----------------------------------------------------------------------
     // 4. verdict event resolving the intent
     // -----------------------------------------------------------------------
-    let verdict_resp = ArtifactEventCreate
-        .call(
-            &ctx,
-            json!({
-                "artifact_id": tracker_id,
-                "kind": "verdict",
-                "payload": {"outcome": "confirmed"},
-                "resolves_intent_event_id": intent_id
-            }),
-        )
-        .await
-        .expect("verdict event should succeed");
+    let verdict_resp = event_create::call(
+        &ctx,
+        json!({
+            "artifact_id": tracker_id,
+            "kind": "verdict",
+            "payload": {"outcome": "confirmed"},
+            "resolves_intent_event_id": intent_id
+        }),
+    )
+    .await
+    .expect("verdict event should succeed");
     let verdict_id = verdict_resp["event_id"]
         .as_str()
         .expect("verdict event must return event_id")
@@ -150,17 +143,16 @@ async fn timemachine_full_chain() {
     // -----------------------------------------------------------------------
     // 5. failure: resolve same intent twice → error contains "already resolved"
     // -----------------------------------------------------------------------
-    let double_resolve = ArtifactEventCreate
-        .call(
-            &ctx,
-            json!({
-                "artifact_id": tracker_id,
-                "kind": "verdict",
-                "payload": {"outcome": "refuted"},
-                "resolves_intent_event_id": intent_id
-            }),
-        )
-        .await;
+    let double_resolve = event_create::call(
+        &ctx,
+        json!({
+            "artifact_id": tracker_id,
+            "kind": "verdict",
+            "payload": {"outcome": "refuted"},
+            "resolves_intent_event_id": intent_id
+        }),
+    )
+    .await;
     assert!(
         double_resolve.is_err(),
         "resolving the same intent twice must fail"
@@ -174,16 +166,15 @@ async fn timemachine_full_chain() {
     // -----------------------------------------------------------------------
     // 6. failure: kind=note with empty payload → error contains "note.text required"
     // -----------------------------------------------------------------------
-    let bad_note = ArtifactEventCreate
-        .call(
-            &ctx,
-            json!({
-                "artifact_id": tracker_id,
-                "kind": "note",
-                "payload": {}
-            }),
-        )
-        .await;
+    let bad_note = event_create::call(
+        &ctx,
+        json!({
+            "artifact_id": tracker_id,
+            "kind": "note",
+            "payload": {}
+        }),
+    )
+    .await;
     assert!(bad_note.is_err(), "note without text must fail");
     let err_msg = bad_note.unwrap_err().to_string();
     assert!(
@@ -194,16 +185,15 @@ async fn timemachine_full_chain() {
     // -----------------------------------------------------------------------
     // 7. failure: unknown kind → error contains "unknown event kind"
     // -----------------------------------------------------------------------
-    let unknown_kind = ArtifactEventCreate
-        .call(
-            &ctx,
-            json!({
-                "artifact_id": tracker_id,
-                "kind": "bogus_kind",
-                "payload": {}
-            }),
-        )
-        .await;
+    let unknown_kind = event_create::call(
+        &ctx,
+        json!({
+            "artifact_id": tracker_id,
+            "kind": "bogus_kind",
+            "payload": {}
+        }),
+    )
+    .await;
     assert!(unknown_kind.is_err(), "unknown kind must fail");
     let err_msg = unknown_kind.unwrap_err().to_string();
     assert!(
@@ -216,16 +206,15 @@ async fn timemachine_full_chain() {
     //    events[0] (verdict) has resolves_intent_id == intent_id;
     //    find the intent event and assert resolved_by_verdict_id == verdict_id
     // -----------------------------------------------------------------------
-    let timeline_resp = ArtifactTimeline
-        .call(
-            &ctx,
-            json!({
-                "artifact_id": tracker_id,
-                "limit": 100
-            }),
-        )
-        .await
-        .expect("timeline should succeed");
+    let timeline_resp = timeline::call(
+        &ctx,
+        json!({
+            "artifact_id": tracker_id,
+            "limit": 100
+        }),
+    )
+    .await
+    .expect("timeline should succeed");
     let events = timeline_resp
         .as_array()
         .expect("timeline must return array");
@@ -262,17 +251,16 @@ async fn timemachine_full_chain() {
     // -----------------------------------------------------------------------
     // 9. timeline kinds=["intent"] limit=10 → exactly 1 event
     // -----------------------------------------------------------------------
-    let intent_only = ArtifactTimeline
-        .call(
-            &ctx,
-            json!({
-                "artifact_id": tracker_id,
-                "kinds": ["intent"],
-                "limit": 10
-            }),
-        )
-        .await
-        .expect("timeline intent filter should succeed");
+    let intent_only = timeline::call(
+        &ctx,
+        json!({
+            "artifact_id": tracker_id,
+            "kinds": ["intent"],
+            "limit": 10
+        }),
+    )
+    .await
+    .expect("timeline intent filter should succeed");
     let intent_events = intent_only.as_array().expect("must be array");
     assert_eq!(
         intent_events.len(),
@@ -289,17 +277,16 @@ async fn timemachine_full_chain() {
     // 10. timeline until=<very old timestamp> → 0 events
     //     (regression guard for timeline until-filter fix)
     // -----------------------------------------------------------------------
-    let old_until = ArtifactTimeline
-        .call(
-            &ctx,
-            json!({
-                "artifact_id": tracker_id,
-                "until": 1_000_000_i64,   // epoch ms far in the past (1970-01-01 +16 min)
-                "limit": 100
-            }),
-        )
-        .await
-        .expect("timeline with old until should succeed");
+    let old_until = timeline::call(
+        &ctx,
+        json!({
+            "artifact_id": tracker_id,
+            "until": 1_000_000_i64,   // epoch ms far in the past (1970-01-01 +16 min)
+            "limit": 100
+        }),
+    )
+    .await
+    .expect("timeline with old until should succeed");
     let old_events = old_until.as_array().expect("must be array");
     assert_eq!(
         old_events.len(),
@@ -312,16 +299,15 @@ async fn timemachine_full_chain() {
     //     (reviewed event is in window)
     // -----------------------------------------------------------------------
     let future_ts = chrono::Utc::now().timestamp_millis() + 1_000;
-    let state_resp = ArtifactStateAt
-        .call(
-            &ctx,
-            json!({
-                "artifact_id": tracker_id,
-                "timestamp": future_ts
-            }),
-        )
-        .await
-        .expect("state_at should succeed");
+    let state_resp = state_at::call(
+        &ctx,
+        json!({
+            "artifact_id": tracker_id,
+            "timestamp": future_ts
+        }),
+    )
+    .await
+    .expect("state_at should succeed");
     assert_eq!(
         state_resp["freshness_at_as_of"].as_str().unwrap_or(""),
         "fresh",
@@ -345,15 +331,14 @@ async fn timemachine_full_chain() {
     //     freshness_at_as_of and freshness_now fields present.
     //     Tolerant of exact field name drift — just check presence.
     // -----------------------------------------------------------------------
-    let ws_resp = WorkspaceStateAt
-        .call(
-            &ctx,
-            json!({
-                "timestamp": future_ts
-            }),
-        )
-        .await
-        .expect("workspace_state_at should succeed");
+    let ws_resp = workspace_state_at::call(
+        &ctx,
+        json!({
+            "timestamp": future_ts
+        }),
+    )
+    .await
+    .expect("workspace_state_at should succeed");
     let ws_artifacts = ws_resp["artifacts"]
         .as_array()
         .expect("workspace_state_at must return artifacts array");
@@ -378,8 +363,7 @@ async fn timemachine_full_chain() {
     // -----------------------------------------------------------------------
     // 13. artifact_get(id=tracker) → freshness="fresh", latest_event is object
     // -----------------------------------------------------------------------
-    let get_resp = ArtifactGet
-        .call(&ctx, json!({"id": tracker_id}))
+    let get_resp = get::call(&ctx, json!({"id": tracker_id}))
         .await
         .expect("artifact_get should succeed");
     assert_eq!(
@@ -398,17 +382,16 @@ async fn timemachine_full_chain() {
     //     nodes contains intent_id AND verdict_id;
     //     edges contains rel="resolves"
     // -----------------------------------------------------------------------
-    let graph_resp = ArtifactGraph
-        .call(
-            &ctx,
-            json!({
-                "id": tracker_id,
-                "depth": 2,
-                "include_events": true
-            }),
-        )
-        .await
-        .expect("artifact_graph should succeed");
+    let graph_resp = graph::call(
+        &ctx,
+        json!({
+            "id": tracker_id,
+            "depth": 2,
+            "include_events": true
+        }),
+    )
+    .await
+    .expect("artifact_graph should succeed");
     let nodes = graph_resp["nodes"]
         .as_array()
         .expect("graph must have nodes");
@@ -437,17 +420,16 @@ async fn timemachine_full_chain() {
     // -----------------------------------------------------------------------
     // 15. artifact_graph WITHOUT include_events → no node has node_type="event"
     // -----------------------------------------------------------------------
-    let graph_no_events = ArtifactGraph
-        .call(
-            &ctx,
-            json!({
-                "id": tracker_id,
-                "depth": 2,
-                "include_events": false
-            }),
-        )
-        .await
-        .expect("artifact_graph without events should succeed");
+    let graph_no_events = graph::call(
+        &ctx,
+        json!({
+            "id": tracker_id,
+            "depth": 2,
+            "include_events": false
+        }),
+    )
+    .await
+    .expect("artifact_graph without events should succeed");
     let nodes_no_ev = graph_no_events["nodes"]
         .as_array()
         .expect("nodes must be array");
@@ -463,29 +445,27 @@ async fn timemachine_full_chain() {
     // 16. artifact_event_create(artifact_id=tracker, kind="note", payload={text:"dual-write"}) →
     //     timeline kinds=["note"] now contains an event with text="dual-write"
     // -----------------------------------------------------------------------
-    ArtifactEventCreate
-        .call(
-            &ctx,
-            json!({
-                "artifact_id": tracker_id,
-                "kind": "note",
-                "payload": {"text": "dual-write"}
-            }),
-        )
-        .await
-        .expect("artifact_event_create note should succeed");
+    event_create::call(
+        &ctx,
+        json!({
+            "artifact_id": tracker_id,
+            "kind": "note",
+            "payload": {"text": "dual-write"}
+        }),
+    )
+    .await
+    .expect("artifact_event_create note should succeed");
 
-    let note_timeline = ArtifactTimeline
-        .call(
-            &ctx,
-            json!({
-                "artifact_id": tracker_id,
-                "kinds": ["note"],
-                "limit": 50
-            }),
-        )
-        .await
-        .expect("note timeline should succeed");
+    let note_timeline = timeline::call(
+        &ctx,
+        json!({
+            "artifact_id": tracker_id,
+            "kinds": ["note"],
+            "limit": 50
+        }),
+    )
+    .await
+    .expect("note timeline should succeed");
     let note_events = note_timeline.as_array().expect("must be array");
     let has_dual_write_note = note_events
         .iter()
@@ -500,29 +480,27 @@ async fn timemachine_full_chain() {
     //     also writes a superseded_by event;
     //     timeline kinds=["superseded_by"] non-empty
     // -----------------------------------------------------------------------
-    ArtifactLink
-        .call(
-            &ctx,
-            json!({
-                "src_id": tracker_id,
-                "dst_id": spec_id,
-                "rel": "supersedes"
-            }),
-        )
-        .await
-        .expect("artifact_link supersedes should succeed");
+    link::call(
+        &ctx,
+        json!({
+            "src_id": tracker_id,
+            "dst_id": spec_id,
+            "rel": "supersedes"
+        }),
+    )
+    .await
+    .expect("artifact_link supersedes should succeed");
 
-    let superseded_timeline = ArtifactTimeline
-        .call(
-            &ctx,
-            json!({
-                "artifact_id": tracker_id,
-                "kinds": ["superseded_by"],
-                "limit": 10
-            }),
-        )
-        .await
-        .expect("superseded_by timeline should succeed");
+    let superseded_timeline = timeline::call(
+        &ctx,
+        json!({
+            "artifact_id": tracker_id,
+            "kinds": ["superseded_by"],
+            "limit": 10
+        }),
+    )
+    .await
+    .expect("superseded_by timeline should succeed");
     let sup_events = superseded_timeline.as_array().expect("must be array");
     assert!(
         !sup_events.is_empty(),
@@ -536,32 +514,30 @@ async fn timemachine_full_chain() {
     // -----------------------------------------------------------------------
     let foo_id = create_artifact(&ctx, "foo.md", "tracker", "Foo Tracker").await;
 
-    ArtifactEventCreate
-        .call(
-            &ctx,
-            json!({
-                "artifact_id": foo_id,
-                "kind": "superseded_by",
-                "payload": {"target_artifact_id": spec_id}
-            }),
-        )
-        .await
-        .expect("superseded_by event_create should succeed");
+    event_create::call(
+        &ctx,
+        json!({
+            "artifact_id": foo_id,
+            "kind": "superseded_by",
+            "payload": {"target_artifact_id": spec_id}
+        }),
+    )
+    .await
+    .expect("superseded_by event_create should succeed");
 
     // Check that the dual-write created a supersedes link from foo → spec.
     // (artifact_links was consolidated into artifact_get with include_links=true)
-    let links_resp = ArtifactGet
-        .call(
-            &ctx,
-            json!({
-                "id": foo_id,
-                "include_links": true,
-                "links_direction": "out",
-                "links_rel": "supersedes"
-            }),
-        )
-        .await
-        .expect("artifact_get with include_links should succeed");
+    let links_resp = get::call(
+        &ctx,
+        json!({
+            "id": foo_id,
+            "include_links": true,
+            "links_direction": "out",
+            "links_rel": "supersedes"
+        }),
+    )
+    .await
+    .expect("artifact_get with include_links should succeed");
     let outgoing = links_resp["links"]["outgoing"]
         .as_array()
         .expect("must be array");

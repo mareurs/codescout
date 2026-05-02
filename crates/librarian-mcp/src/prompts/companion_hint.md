@@ -21,26 +21,26 @@ ephemeral session state (don't persist).
 
 | Want                                          | Use                     |
 |-----------------------------------------------|-------------------------|
-| List artifacts of one kind                    | `artifact_find` with `kind` param |
-| Multi-field filter (and/or/not)               | `artifact_find`         |
-| Read one artifact + previews + observations   | `artifact_get`          |
-| Edges from a node (filtered by direction/rel) | `artifact_get` with `include_links=true`, `links_direction`, `links_rel` |
-| BFS around a node (depth 1–3)                 | `artifact_graph`        |
-| Topic → packed markdown bundle                | `librarian_context`     |
-| Write new artifact                             | `artifact_create`       |
-| Write tracker artifact with augmentation      | `artifact_create` with `kind=tracker`, `status=active`, `augment={prompt,params}` |
-| Patch frontmatter or body                     | `artifact_update`       |
-| Patch frontmatter + record refresh in one call | `artifact_update` with `commit_refresh=true` |
-| Add relation edge (supersedes, implements …)  | `artifact_link`         |
-| Append observation note                       | `artifact_event_create` with `kind=note` |
-| Manual re-scan                                | `librarian_reindex`     |
+| List artifacts of one kind                    | `artifact` with `action=find`, `kind` param |
+| Multi-field filter (and/or/not)               | `artifact` with `action=find`  |
+| Read one artifact + previews + observations   | `artifact` with `action=get`   |
+| Edges from a node (filtered by direction/rel) | `artifact` with `action=get`, `include_links=true`, `links_direction`, `links_rel` |
+| BFS around a node (depth 1–3)                 | `artifact` with `action=graph` |
+| Topic → packed markdown bundle                | `librarian` with `action=context` |
+| Write new artifact                            | `artifact` with `action=create` |
+| Write tracker artifact with augmentation      | `artifact` with `action=create`, `kind=tracker`, `status=active`, `augment={prompt,params}` |
+| Patch frontmatter or body                     | `artifact` with `action=update` |
+| Patch frontmatter + record refresh in one call | `artifact` with `action=update`, `commit_refresh=true` |
+| Add relation edge (supersedes, implements …)  | `artifact` with `action=link`  |
+| Append observation note                       | `artifact_event` with `action=create`, `kind=note` |
+| Manual re-scan                                | `librarian` with `action=reindex` |
 | Attach/replace prompt+params on artifact      | `artifact_augment`      |
 | Merge-patch params on existing augmentation   | `artifact_augment` with `merge=true` |
-| Gather context for refresh (read-only)        | `artifact_refresh`      |
-| List/find augmented artifacts                 | `artifact_find` with `augmented: true` |
-| Discover stale augmented artifacts            | `artifact_refresh_stale` |
+| Gather context for refresh (read-only)        | `artifact_refresh` with `action=gather` |
+| List/find augmented artifacts                 | `artifact` with `action=find`, `augmented: true` |
+| Discover stale augmented artifacts            | `artifact_refresh` with `action=list_stale` |
 
-Example: `artifact_find {kind: "tracker"}` — live trackers in the
+Example: `artifact {action: "find", kind: "tracker"}` — live trackers in the
 **current sub-project** (default scope). Pass `scope: "all"` to widen.
 ## Filter AST (one-liner)
 
@@ -52,7 +52,7 @@ rel_path, updated_at, created_at, confidence`. Unknown fields rejected.
 
 ## Default scope (project, archived hidden)
 
-Listing tools (`artifact_find`, `librarian_context`)
+Listing tools (`artifact` with `action=find`, `librarian` with `action=context`)
 default to **the agent's current sub-project** and **hide archived/superseded**
 rows. The current project = nearest `.git` ancestor of cwd, mapped onto a
 workspace root.
@@ -85,10 +85,10 @@ With no umbrellas declared, `scope: "umbrella"` errors — use `repo` or `all`.
 
 ## Gotchas
 
-- **No file watcher.** Files added/moved outside `artifact_create`/`_update` are
-  invisible until `librarian_reindex`. On busy workspaces, reindex once at the
+- **No file watcher.** Files added/moved outside `artifact` `action=create`/`action=update` are
+  invisible until `librarian` with `action=reindex`. On busy workspaces, reindex once at the
   start of a session.
-- **`librarian_reindex` is project-scoped by default** (matching read tools).
+- **`librarian` with `action=reindex` is project-scoped by default** (matching read tools).
   Pass `scope: "repo"|"umbrella"|"all"` to widen. `force=true` only wipes the
   targeted scope's rows — sibling-project rows under the same workspace root
   are preserved.

@@ -1,13 +1,10 @@
 use anyhow::Result;
-use async_trait::async_trait;
 use serde_json::{json, Value};
 
 use crate::catalog::augmentation;
-use crate::tools::{RecoverableError, Tool, ToolContext};
+use crate::tools::{RecoverableError, ToolContext};
 
 use super::scope::Scope;
-
-pub struct ArtifactRefreshStale;
 
 #[derive(serde::Deserialize)]
 struct Args {
@@ -19,127 +16,89 @@ struct Args {
 const MAX_LIMIT: usize = 50;
 const DEFAULT_THRESHOLD_HOURS: u32 = 24;
 const DEFAULT_LIMIT: usize = 10;
+pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    let a: Args = serde_json::from_value(args)?;
+    let threshold_hours = a.threshold_hours.unwrap_or(DEFAULT_THRESHOLD_HOURS);
+    let limit = a.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT);
+    let scope = a.scope.unwrap_or(Scope::Project);
 
-#[async_trait]
-impl Tool for ArtifactRefreshStale {
-    fn name(&self) -> &'static str {
-        "artifact_refresh_stale"
-    }
+    let current = ctx.current_project.as_deref();
 
-    fn description(&self) -> &'static str {
-        "List augmented artifacts whose last refresh is older than threshold_hours (default 24h). \
-         Returns them oldest-first (never-refreshed first) so you know what needs attention. \
-         Scope defaults to project. Call artifact_refresh(id) on each result to refresh."
-    }
+    let (repo, subdir_prefix): (Option<&str>, Option<&str>) = match scope {
+        Scope::All => (None, None),
+        Scope::Repo => {
+            let cp = current.ok_or_else(|| {
+                RecoverableError::new(
+                    "scope=repo requires a resolved current project. Pass scope=\"all\".",
+                )
+            })?;
+            (Some(cp.root.as_str()), None)
+        }
+        Scope::Project => {
+            let cp = current.ok_or_else(|| {
+                RecoverableError::new(
+                    "scope=project requires a resolved current project. Pass scope=\"all\".",
+                )
+            })?;
+            let subdir = if cp.subdir.is_empty() {
+                None
+            } else {
+                Some(cp.subdir.as_str())
+            };
+            (Some(cp.root.as_str()), subdir)
+        }
+        Scope::Umbrella => {
+            return Err(RecoverableError::new(
+                "scope=umbrella is not supported. Use scope=project|repo|all.",
+            ));
+        }
+    };
 
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "threshold_hours": {
-                    "type": "integer",
-                    "description": "Hours since last refresh to consider stale (default 24).",
-                    "default": 24
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max results returned (default 10, max 50).",
-                    "default": 10
-                },
-                "scope": {
-                    "type": "string",
-                    "enum": ["project", "repo", "all"],
-                    "description": "Scope: project = current sub-project (default), repo = whole root, all = workspace-wide.",
-                    "default": "project"
-                }
-            }
-        })
-    }
+    let threshold_iso = {
+        let cutoff = chrono::Utc::now() - chrono::Duration::hours(i64::from(threshold_hours));
+        cutoff.to_rfc3339()
+    };
 
-    async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
-        let a: Args = serde_json::from_value(args)?;
-        let threshold_hours = a.threshold_hours.unwrap_or(DEFAULT_THRESHOLD_HOURS);
-        let limit = a.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT);
-        let scope = a.scope.unwrap_or(Scope::Project);
+    let entries = {
+        let cat = ctx.catalog.lock();
+        augmentation::list_stale(&cat, &threshold_iso, limit, repo, subdir_prefix)?
+    };
 
-        let current = ctx.current_project.as_deref();
-
-        let (repo, subdir_prefix): (Option<&str>, Option<&str>) = match scope {
-            Scope::All => (None, None),
-            Scope::Repo => {
-                let cp = current.ok_or_else(|| {
-                    RecoverableError::new(
-                        "scope=repo requires a resolved current project. Pass scope=\"all\".",
-                    )
-                })?;
-                (Some(cp.root.as_str()), None)
-            }
-            Scope::Project => {
-                let cp = current.ok_or_else(|| {
-                    RecoverableError::new(
-                        "scope=project requires a resolved current project. Pass scope=\"all\".",
-                    )
-                })?;
-                let subdir = if cp.subdir.is_empty() {
-                    None
-                } else {
-                    Some(cp.subdir.as_str())
-                };
-                (Some(cp.root.as_str()), subdir)
-            }
-            Scope::Umbrella => {
-                return Err(RecoverableError::new(
-                    "scope=umbrella is not supported. Use scope=project|repo|all.",
-                ));
-            }
-        };
-
-        let threshold_iso = {
-            let cutoff = chrono::Utc::now() - chrono::Duration::hours(i64::from(threshold_hours));
-            cutoff.to_rfc3339()
-        };
-
-        let entries = {
-            let cat = ctx.catalog.lock();
-            augmentation::list_stale(&cat, &threshold_iso, limit, repo, subdir_prefix)?
-        };
-
-        let now = chrono::Utc::now();
-        let items: Vec<Value> = entries
-            .iter()
-            .map(|e| {
-                let age_hours = e.last_refreshed_at.as_deref().and_then(|t| {
-                    chrono::DateTime::parse_from_rfc3339(t)
-                        .ok()
-                        .map(|dt| (now - dt.with_timezone(&chrono::Utc)).num_hours())
-                });
-                json!({
-                    "id": e.artifact_id,
-                    "kind": e.kind,
-                    "title": e.title,
-                    "rel_path": e.rel_path,
-                    "last_refreshed_at": e.last_refreshed_at,
-                    "refresh_count": e.refresh_count,
-                    "age_hours": age_hours,
-                })
+    let now = chrono::Utc::now();
+    let items: Vec<Value> = entries
+        .iter()
+        .map(|e| {
+            let age_hours = e.last_refreshed_at.as_deref().and_then(|t| {
+                chrono::DateTime::parse_from_rfc3339(t)
+                    .ok()
+                    .map(|dt| (now - dt.with_timezone(&chrono::Utc)).num_hours())
+            });
+            json!({
+                "id": e.artifact_id,
+                "kind": e.kind,
+                "title": e.title,
+                "rel_path": e.rel_path,
+                "last_refreshed_at": e.last_refreshed_at,
+                "refresh_count": e.refresh_count,
+                "age_hours": age_hours,
             })
-            .collect();
+        })
+        .collect();
 
-        let next_step = if items.is_empty() {
-            "No stale augmented artifacts in scope.".to_string()
-        } else {
-            "Call artifact_refresh(id) on each item, synthesize updates, \
-             then artifact_update(id, commit_refresh=true)."
-                .to_string()
-        };
+    let next_step = if items.is_empty() {
+        "No stale augmented artifacts in scope.".to_string()
+    } else {
+        "Call artifact_refresh(id) on each item, synthesize updates, \
+         then artifact_update(id, commit_refresh=true)."
+            .to_string()
+    };
 
-        Ok(json!({
-            "count": items.len(),
-            "threshold_hours": threshold_hours,
-            "items": items,
-            "next_step": next_step,
-        }))
-    }
+    Ok(json!({
+        "count": items.len(),
+        "threshold_hours": threshold_hours,
+        "items": items,
+        "next_step": next_step,
+    }))
 }
 
 #[cfg(test)]

@@ -1,13 +1,10 @@
 use anyhow::Result;
-use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{RecoverableError, Tool, ToolContext};
+use super::{RecoverableError, ToolContext};
 use crate::catalog::{event_edges, events, sources};
-
-pub struct ArtifactEventCreate;
 
 fn any_value_schema(_g: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({})
@@ -103,221 +100,6 @@ fn write_locks() -> &'static WriteLockRegistry {
     WRITE_LOCKS.get_or_init(WriteLockRegistry::default)
 }
 
-#[async_trait]
-impl Tool for ArtifactEventCreate {
-    fn name(&self) -> &'static str {
-        "artifact_event_create"
-    }
-
-    fn description(&self) -> &'static str {
-        "Append an event (note, reviewed, status_change, field_patch, superseded_by, \
-         external_signal, intent, verdict) to an artifact's timeline. Anchored to git commits."
-    }
-
-    fn input_schema(&self) -> Value {
-        serde_json::to_value(schemars::schema_for!(Args)).unwrap()
-    }
-
-    async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
-        let a: Args = serde_json::from_value(args)?;
-
-        if !ALLOWED_KINDS.contains(&a.kind.as_str()) {
-            return Err(RecoverableError::with_hint(
-                format!("unknown event kind: {}", a.kind),
-                format!("allowed: {}", ALLOWED_KINDS.join(", ")),
-            ));
-        }
-        validate_payload(&a.kind, &a.payload)?;
-
-        // Per-artifact write lock — serialises frontmatter mutation,
-        // parent-event lookup, and the row/edges transaction so that two
-        // concurrent calls on the same artifact form a chain not a fan.
-        let _write_guard = write_locks().lock_for(&a.artifact_id).lock_owned().await;
-
-        // verdict ↔ intent invariants — checked before any writes
-        if let Some(ref target) = a.resolves_intent_event_id {
-            if a.kind != "verdict" {
-                return Err(RecoverableError::new(
-                    "resolves_intent_event_id only valid on verdict events",
-                ));
-            }
-            let cat = ctx.catalog.lock();
-            let target_kind: Option<String> = cat
-                .conn
-                .query_row(
-                    "SELECT kind FROM events WHERE id=?1",
-                    rusqlite::params![target],
-                    |r| r.get(0),
-                )
-                .ok();
-            match target_kind.as_deref() {
-                Some("intent") => {}
-                Some(k) => {
-                    return Err(RecoverableError::new(format!(
-                        "target event {target} is kind={k}, not intent"
-                    )))
-                }
-                None => {
-                    return Err(RecoverableError::new(format!(
-                        "target event {target} not found"
-                    )))
-                }
-            }
-            if !event_edges::incoming_by_rel(&cat, target, "resolves")?.is_empty() {
-                return Err(RecoverableError::new(format!(
-                    "intent {target} already resolved"
-                )));
-            }
-        }
-
-        let now = chrono::Utc::now().timestamp_millis();
-        let id = ulid::Ulid::new().to_string();
-
-        let parent_id = match &a.parent_event_id {
-            Some(p) => Some(p.clone()),
-            None => {
-                let cat = ctx.catalog.lock();
-                events::latest_for_artifact(&cat, &a.artifact_id)?.map(|e| e.id)
-            }
-        };
-
-        // status_change / field_patch: round-trip change to frontmatter on disk
-        // before the DB transaction (filesystem effect can't roll back).
-        if a.kind == "status_change" || a.kind == "field_patch" {
-            apply_payload_to_frontmatter(ctx, &a.artifact_id, &a.kind, &a.payload)?;
-        }
-
-        // Build all rows + edges first, then commit them in one transaction.
-        let payload_str = serde_json::to_string(&a.payload)?;
-        let event_row = events::EventRow {
-            id: id.clone(),
-            artifact_id: a.artifact_id.clone(),
-            kind: a.kind.clone(),
-            payload: payload_str,
-            anchor_commit: a.anchor_commit.clone(),
-            head_commit: a.head_commit.clone(),
-            author: a.author.clone(),
-            created_at: now,
-        };
-
-        let supersedes_link = if a.kind == "superseded_by" {
-            let target_id = a
-                .payload
-                .get("target_artifact_id")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| {
-                    RecoverableError::new("superseded_by.target_artifact_id required")
-                })?;
-            Some(crate::catalog::links::LinkRow {
-                src_id: a.artifact_id.clone(),
-                dst_id: target_id.into(),
-                rel: "supersedes".into(),
-                created_at: now,
-            })
-        } else {
-            None
-        };
-
-        let mut edges: Vec<event_edges::EdgeRow> = Vec::new();
-
-        if let Some(p) = parent_id.clone() {
-            edges.push(event_edges::EdgeRow {
-                src_event_id: id.clone(),
-                dst_event_id: Some(p),
-                dst_artifact_id: None,
-                dst_source_id: None,
-                rel: "parent".into(),
-            });
-        }
-
-        let source_row = a.source.as_ref().map(|s| {
-            let src_id = format!("{}:{}", s.kind, s.uri);
-            edges.push(event_edges::EdgeRow {
-                src_event_id: id.clone(),
-                dst_event_id: None,
-                dst_artifact_id: None,
-                dst_source_id: Some(src_id.clone()),
-                rel: "triggered_by".into(),
-            });
-            sources::SourceRow {
-                id: src_id,
-                uri: s.uri.clone(),
-                kind: s.kind.clone(),
-                payload: s.payload.as_ref().map(|p| p.to_string()),
-                ingested_at: now,
-            }
-        });
-
-        for art in a.also_mutates.unwrap_or_default() {
-            edges.push(event_edges::EdgeRow {
-                src_event_id: id.clone(),
-                dst_event_id: None,
-                dst_artifact_id: Some(art),
-                dst_source_id: None,
-                rel: "mutates".into(),
-            });
-        }
-
-        if let Some(target) = a.resolves_intent_event_id {
-            edges.push(event_edges::EdgeRow {
-                src_event_id: id.clone(),
-                dst_event_id: Some(target),
-                dst_artifact_id: None,
-                dst_source_id: None,
-                rel: "resolves".into(),
-            });
-        }
-
-        // Single transaction for source + supersedes link + event row + edges.
-        // Frontmatter mutation already happened on disk above; if this tx
-        // fails the on-disk file may be ahead of the DB until the next event
-        // re-syncs it. That's acceptable — file is the source of truth.
-        {
-            let cat = ctx.catalog.lock();
-            let tx = cat.conn.unchecked_transaction()?;
-            if let Some(s) = &source_row {
-                sources::upsert_with(&tx, s)?;
-            }
-            if let Some(l) = &supersedes_link {
-                crate::catalog::links::insert_with(&tx, l)?;
-            }
-            events::insert_with(&tx, &event_row)?;
-            #[cfg(test)]
-            if tests::INJECT_FAIL_AFTER_EVENT_INSERT.with(|c| {
-                let v = c.get();
-                c.set(false);
-                v
-            }) {
-                anyhow::bail!("test injection: forced failure after event insert");
-            }
-            event_edges::insert_many_in_tx(&tx, &edges)?;
-            tx.commit()?;
-
-            // Dual-write: note events also record an ObservationRow for
-            // backwards compat with artifact_get(include_observations=true).
-            if a.kind == "note" {
-                if let Some(text) = a.payload.get("text").and_then(|v| v.as_str()) {
-                    let obs = crate::catalog::observations::ObservationRow {
-                        id: None,
-                        artifact_id: a.artifact_id.clone(),
-                        text: text.to_string(),
-                        source: a.author.clone(),
-                        created_at: now,
-                    };
-                    let _ = crate::catalog::observations::insert(&cat, &obs);
-                }
-            }
-        }
-
-        Ok(json!({
-            "event_id": id,
-            "parent_event_id": parent_id,
-            "anchor_commit": a.anchor_commit,
-            "head_commit": a.head_commit,
-        }))
-    }
-}
-
 fn validate_payload(kind: &str, p: &Value) -> Result<()> {
     let obj = p
         .as_object()
@@ -402,6 +184,189 @@ fn apply_payload_to_frontmatter(
     }
     Ok(())
 }
+pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    let a: Args = serde_json::from_value(args)?;
+
+    if !ALLOWED_KINDS.contains(&a.kind.as_str()) {
+        return Err(RecoverableError::with_hint(
+            format!("unknown event kind: {}", a.kind),
+            format!("allowed: {}", ALLOWED_KINDS.join(", ")),
+        ));
+    }
+    validate_payload(&a.kind, &a.payload)?;
+
+    let _write_guard = write_locks().lock_for(&a.artifact_id).lock_owned().await;
+
+    if let Some(ref target) = a.resolves_intent_event_id {
+        if a.kind != "verdict" {
+            return Err(RecoverableError::new(
+                "resolves_intent_event_id only valid on verdict events",
+            ));
+        }
+        let cat = ctx.catalog.lock();
+        let target_kind: Option<String> = cat
+            .conn
+            .query_row(
+                "SELECT kind FROM events WHERE id=?1",
+                rusqlite::params![target],
+                |r| r.get(0),
+            )
+            .ok();
+        match target_kind.as_deref() {
+            Some("intent") => {}
+            Some(k) => {
+                return Err(RecoverableError::new(format!(
+                    "target event {target} is kind={k}, not intent"
+                )))
+            }
+            None => {
+                return Err(RecoverableError::new(format!(
+                    "target event {target} not found"
+                )))
+            }
+        }
+        if !event_edges::incoming_by_rel(&cat, target, "resolves")?.is_empty() {
+            return Err(RecoverableError::new(format!(
+                "intent {target} already resolved"
+            )));
+        }
+    }
+
+    let now = chrono::Utc::now().timestamp_millis();
+    let id = ulid::Ulid::new().to_string();
+
+    let parent_id = match &a.parent_event_id {
+        Some(p) => Some(p.clone()),
+        None => {
+            let cat = ctx.catalog.lock();
+            events::latest_for_artifact(&cat, &a.artifact_id)?.map(|e| e.id)
+        }
+    };
+
+    if a.kind == "status_change" || a.kind == "field_patch" {
+        apply_payload_to_frontmatter(ctx, &a.artifact_id, &a.kind, &a.payload)?;
+    }
+
+    let payload_str = serde_json::to_string(&a.payload)?;
+    let event_row = events::EventRow {
+        id: id.clone(),
+        artifact_id: a.artifact_id.clone(),
+        kind: a.kind.clone(),
+        payload: payload_str,
+        anchor_commit: a.anchor_commit.clone(),
+        head_commit: a.head_commit.clone(),
+        author: a.author.clone(),
+        created_at: now,
+    };
+
+    let supersedes_link = if a.kind == "superseded_by" {
+        let target_id = a
+            .payload
+            .get("target_artifact_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| RecoverableError::new("superseded_by.target_artifact_id required"))?;
+        Some(crate::catalog::links::LinkRow {
+            src_id: a.artifact_id.clone(),
+            dst_id: target_id.into(),
+            rel: "supersedes".into(),
+            created_at: now,
+        })
+    } else {
+        None
+    };
+
+    let mut edges: Vec<event_edges::EdgeRow> = Vec::new();
+
+    if let Some(p) = parent_id.clone() {
+        edges.push(event_edges::EdgeRow {
+            src_event_id: id.clone(),
+            dst_event_id: Some(p),
+            dst_artifact_id: None,
+            dst_source_id: None,
+            rel: "parent".into(),
+        });
+    }
+
+    let source_row = a.source.as_ref().map(|s| {
+        let src_id = format!("{}:{}", s.kind, s.uri);
+        edges.push(event_edges::EdgeRow {
+            src_event_id: id.clone(),
+            dst_event_id: None,
+            dst_artifact_id: None,
+            dst_source_id: Some(src_id.clone()),
+            rel: "triggered_by".into(),
+        });
+        sources::SourceRow {
+            id: src_id,
+            uri: s.uri.clone(),
+            kind: s.kind.clone(),
+            payload: s.payload.as_ref().map(|p| p.to_string()),
+            ingested_at: now,
+        }
+    });
+
+    for art in a.also_mutates.unwrap_or_default() {
+        edges.push(event_edges::EdgeRow {
+            src_event_id: id.clone(),
+            dst_event_id: None,
+            dst_artifact_id: Some(art),
+            dst_source_id: None,
+            rel: "mutates".into(),
+        });
+    }
+
+    if let Some(target) = a.resolves_intent_event_id {
+        edges.push(event_edges::EdgeRow {
+            src_event_id: id.clone(),
+            dst_event_id: Some(target),
+            dst_artifact_id: None,
+            dst_source_id: None,
+            rel: "resolves".into(),
+        });
+    }
+
+    {
+        let cat = ctx.catalog.lock();
+        let tx = cat.conn.unchecked_transaction()?;
+        if let Some(s) = &source_row {
+            sources::upsert_with(&tx, s)?;
+        }
+        if let Some(l) = &supersedes_link {
+            crate::catalog::links::insert_with(&tx, l)?;
+        }
+        events::insert_with(&tx, &event_row)?;
+        #[cfg(test)]
+        if tests::INJECT_FAIL_AFTER_EVENT_INSERT.with(|c| {
+            let v = c.get();
+            c.set(false);
+            v
+        }) {
+            anyhow::bail!("test injection: forced failure after event insert");
+        }
+        event_edges::insert_many_in_tx(&tx, &edges)?;
+        tx.commit()?;
+
+        if a.kind == "note" {
+            if let Some(text) = a.payload.get("text").and_then(|v| v.as_str()) {
+                let obs = crate::catalog::observations::ObservationRow {
+                    id: None,
+                    artifact_id: a.artifact_id.clone(),
+                    text: text.to_string(),
+                    source: a.author.clone(),
+                    created_at: now,
+                };
+                let _ = crate::catalog::observations::insert(&cat, &obs);
+            }
+        }
+    }
+
+    Ok(json!({
+        "event_id": id,
+        "parent_event_id": parent_id,
+        "anchor_commit": a.anchor_commit,
+        "head_commit": a.head_commit,
+    }))
+}
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -471,17 +436,16 @@ pub(crate) mod tests {
             let cat = ctx.catalog.lock();
             art_insert(&cat, &art("a1")).unwrap();
         }
-        let result = ArtifactEventCreate
-            .call(
-                &ctx,
-                json!({
-                    "artifact_id": "a1",
-                    "kind": "note",
-                    "payload": {"text": "hi"}
-                }),
-            )
-            .await
-            .unwrap();
+        let result = call(
+            &ctx,
+            json!({
+                "artifact_id": "a1",
+                "kind": "note",
+                "payload": {"text": "hi"}
+            }),
+        )
+        .await
+        .unwrap();
         let event_id = result["event_id"].as_str().unwrap();
         assert!(!event_id.is_empty());
     }
@@ -496,17 +460,16 @@ pub(crate) mod tests {
             art_insert(&cat, &art("obs-art")).unwrap();
         }
 
-        ArtifactEventCreate
-            .call(
-                &ctx,
-                json!({
-                    "artifact_id": "obs-art",
-                    "kind": "note",
-                    "payload": {"text": "hello observation"}
-                }),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            json!({
+                "artifact_id": "obs-art",
+                "kind": "note",
+                "payload": {"text": "hello observation"}
+            }),
+        )
+        .await
+        .unwrap();
 
         let cat = ctx.catalog.lock();
         let obs = observations::list_for_artifact(&cat, "obs-art").unwrap();
@@ -518,17 +481,16 @@ pub(crate) mod tests {
     async fn rejects_unknown_kind() {
         let tmp = TempDir::new().unwrap();
         let ctx = mk_ctx(tmp.path().to_path_buf());
-        let err = ArtifactEventCreate
-            .call(
-                &ctx,
-                json!({
-                    "artifact_id": "a1",
-                    "kind": "bogus",
-                    "payload": {}
-                }),
-            )
-            .await
-            .unwrap_err();
+        let err = call(
+            &ctx,
+            json!({
+                "artifact_id": "a1",
+                "kind": "bogus",
+                "payload": {}
+            }),
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("unknown event kind"));
     }
 
@@ -542,32 +504,30 @@ pub(crate) mod tests {
         }
 
         // Write intent event
-        let intent_result = ArtifactEventCreate
-            .call(
-                &ctx,
-                json!({
-                    "artifact_id": "a2",
-                    "kind": "intent",
-                    "payload": {"hypothesis": "X causes Y"}
-                }),
-            )
-            .await
-            .unwrap();
+        let intent_result = call(
+            &ctx,
+            json!({
+                "artifact_id": "a2",
+                "kind": "intent",
+                "payload": {"hypothesis": "X causes Y"}
+            }),
+        )
+        .await
+        .unwrap();
         let intent_id = intent_result["event_id"].as_str().unwrap().to_string();
 
         // Write verdict resolving the intent
-        let verdict_result = ArtifactEventCreate
-            .call(
-                &ctx,
-                json!({
-                    "artifact_id": "a2",
-                    "kind": "verdict",
-                    "payload": {"outcome": "confirmed"},
-                    "resolves_intent_event_id": intent_id
-                }),
-            )
-            .await
-            .unwrap();
+        let verdict_result = call(
+            &ctx,
+            json!({
+                "artifact_id": "a2",
+                "kind": "verdict",
+                "payload": {"outcome": "confirmed"},
+                "resolves_intent_event_id": intent_id
+            }),
+        )
+        .await
+        .unwrap();
         let verdict_id = verdict_result["event_id"].as_str().unwrap().to_string();
 
         let cat = ctx.catalog.lock();
@@ -590,46 +550,43 @@ pub(crate) mod tests {
         }
 
         // Write intent event
-        let intent_result = ArtifactEventCreate
-            .call(
-                &ctx,
-                json!({
-                    "artifact_id": "a3",
-                    "kind": "intent",
-                    "payload": {"hypothesis": "P implies Q"}
-                }),
-            )
-            .await
-            .unwrap();
+        let intent_result = call(
+            &ctx,
+            json!({
+                "artifact_id": "a3",
+                "kind": "intent",
+                "payload": {"hypothesis": "P implies Q"}
+            }),
+        )
+        .await
+        .unwrap();
         let intent_id = intent_result["event_id"].as_str().unwrap().to_string();
 
         // First verdict — should succeed
-        ArtifactEventCreate
-            .call(
-                &ctx,
-                json!({
-                    "artifact_id": "a3",
-                    "kind": "verdict",
-                    "payload": {"outcome": "refuted"},
-                    "resolves_intent_event_id": intent_id
-                }),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            json!({
+                "artifact_id": "a3",
+                "kind": "verdict",
+                "payload": {"outcome": "refuted"},
+                "resolves_intent_event_id": intent_id
+            }),
+        )
+        .await
+        .unwrap();
 
         // Second verdict against the same intent — should fail
-        let err = ArtifactEventCreate
-            .call(
-                &ctx,
-                json!({
-                    "artifact_id": "a3",
-                    "kind": "verdict",
-                    "payload": {"outcome": "confirmed"},
-                    "resolves_intent_event_id": intent_id
-                }),
-            )
-            .await
-            .unwrap_err();
+        let err = call(
+            &ctx,
+            json!({
+                "artifact_id": "a3",
+                "kind": "verdict",
+                "payload": {"outcome": "confirmed"},
+                "resolves_intent_event_id": intent_id
+            }),
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("already resolved"));
     }
 
@@ -643,17 +600,16 @@ pub(crate) mod tests {
             art_insert(&cat, &art("dst-art")).unwrap();
         }
 
-        ArtifactEventCreate
-            .call(
-                &ctx,
-                serde_json::json!({
-                    "artifact_id": "src-art",
-                    "kind": "superseded_by",
-                    "payload": {"target_artifact_id": "dst-art"}
-                }),
-            )
-            .await
-            .unwrap();
+        call(
+            &ctx,
+            serde_json::json!({
+                "artifact_id": "src-art",
+                "kind": "superseded_by",
+                "payload": {"target_artifact_id": "dst-art"}
+            }),
+        )
+        .await
+        .unwrap();
 
         // Expect an artifact_link with rel=supersedes from src-art → dst-art.
         let count: i64 = ctx
@@ -676,17 +632,16 @@ pub(crate) mod tests {
     async fn unknown_kind_is_recoverable_error() {
         let tmp = TempDir::new().unwrap();
         let ctx = mk_ctx(tmp.path().to_path_buf());
-        let err = ArtifactEventCreate
-            .call(
-                &ctx,
-                json!({
-                    "artifact_id": "a1",
-                    "kind": "bogus",
-                    "payload": {}
-                }),
-            )
-            .await
-            .unwrap_err();
+        let err = call(
+            &ctx,
+            json!({
+                "artifact_id": "a1",
+                "kind": "bogus",
+                "payload": {}
+            }),
+        )
+        .await
+        .unwrap_err();
         assert!(
             err.downcast_ref::<RecoverableError>().is_some(),
             "expected RecoverableError, got: {err:#}"
@@ -702,17 +657,16 @@ pub(crate) mod tests {
             art_insert(&cat, &art("a-tx")).unwrap();
         }
         INJECT_FAIL_AFTER_EVENT_INSERT.with(|c| c.set(true));
-        let err = ArtifactEventCreate
-            .call(
-                &ctx,
-                json!({
-                    "artifact_id": "a-tx",
-                    "kind": "note",
-                    "payload": {"text": "should roll back"}
-                }),
-            )
-            .await
-            .unwrap_err();
+        let err = call(
+            &ctx,
+            json!({
+                "artifact_id": "a-tx",
+                "kind": "note",
+                "payload": {"text": "should roll back"}
+            }),
+        )
+        .await
+        .unwrap_err();
         assert!(
             err.to_string().contains("test injection"),
             "expected injected failure, got: {err:#}"
@@ -751,17 +705,16 @@ pub(crate) mod tests {
             {"kind": "doc", "ref": "spec/foo.md"},
             {"kind": "issue", "ref": "linear://abc-123"}
         ]);
-        let result = ArtifactEventCreate
-            .call(
-                &ctx,
-                json!({
-                    "artifact_id": "a-inp",
-                    "kind": "intent",
-                    "payload": {"hypothesis": "X works", "inputs": inputs.clone()}
-                }),
-            )
-            .await
-            .unwrap();
+        let result = call(
+            &ctx,
+            json!({
+                "artifact_id": "a-inp",
+                "kind": "intent",
+                "payload": {"hypothesis": "X works", "inputs": inputs.clone()}
+            }),
+        )
+        .await
+        .unwrap();
         let event_id = result["event_id"].as_str().unwrap().to_string();
 
         let cat = ctx.catalog.lock();
@@ -791,30 +744,28 @@ pub(crate) mod tests {
         let c1 = ctx.clone();
         let c2 = ctx.clone();
         let h1 = tokio::spawn(async move {
-            ArtifactEventCreate
-                .call(
-                    &c1,
-                    json!({
-                        "artifact_id": "conc",
-                        "kind": "note",
-                        "payload": {"text": "first"}
-                    }),
-                )
-                .await
-                .unwrap()
+            call(
+                &c1,
+                json!({
+                    "artifact_id": "conc",
+                    "kind": "note",
+                    "payload": {"text": "first"}
+                }),
+            )
+            .await
+            .unwrap()
         });
         let h2 = tokio::spawn(async move {
-            ArtifactEventCreate
-                .call(
-                    &c2,
-                    json!({
-                        "artifact_id": "conc",
-                        "kind": "note",
-                        "payload": {"text": "second"}
-                    }),
-                )
-                .await
-                .unwrap()
+            call(
+                &c2,
+                json!({
+                    "artifact_id": "conc",
+                    "kind": "note",
+                    "payload": {"text": "second"}
+                }),
+            )
+            .await
+            .unwrap()
         });
         let r1 = h1.await.unwrap();
         let r2 = h2.await.unwrap();
@@ -869,17 +820,16 @@ pub(crate) mod tests {
             )
             .unwrap();
         }
-        let err = ArtifactEventCreate
-            .call(
-                &ctx,
-                json!({
-                    "artifact_id": "a-fp",
-                    "kind": "field_patch",
-                    "payload": {"field": "owners", "to": ["alice"]}
-                }),
-            )
-            .await
-            .unwrap_err();
+        let err = call(
+            &ctx,
+            json!({
+                "artifact_id": "a-fp",
+                "kind": "field_patch",
+                "payload": {"field": "owners", "to": ["alice"]}
+            }),
+        )
+        .await
+        .unwrap_err();
         assert!(
             err.downcast_ref::<RecoverableError>().is_some(),
             "expected RecoverableError, got: {err:#}"
