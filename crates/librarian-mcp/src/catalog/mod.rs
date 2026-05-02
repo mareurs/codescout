@@ -65,6 +65,23 @@ fn run_migrations(conn: &Connection) -> Result<()> {
         "INSERT OR IGNORE INTO schema_version (version) VALUES (4)",
         [],
     )?;
+    // v5: append_mode + history_cap columns on artifact_augmentation
+    if !column_exists(conn, "artifact_augmentation", "append_mode")? {
+        conn.execute(
+            "ALTER TABLE artifact_augmentation ADD COLUMN append_mode INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "artifact_augmentation", "history_cap")? {
+        conn.execute(
+            "ALTER TABLE artifact_augmentation ADD COLUMN history_cap INTEGER",
+            [],
+        )?;
+    }
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version) VALUES (5)",
+        [],
+    )?;
     Ok(())
 }
 
@@ -153,7 +170,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 4);
+        assert_eq!(v, 5);
     }
 
     #[test]
@@ -161,6 +178,13 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         assert!(column_exists(&cat.conn, "artifact_augmentation", "render_template").unwrap());
         assert!(column_exists(&cat.conn, "artifact_augmentation", "params_schema").unwrap());
+    }
+
+    #[test]
+    fn migration_v5_adds_append_mode_and_history_cap_columns() {
+        let cat = Catalog::open_in_memory().unwrap();
+        assert!(column_exists(&cat.conn, "artifact_augmentation", "append_mode").unwrap());
+        assert!(column_exists(&cat.conn, "artifact_augmentation", "history_cap").unwrap());
     }
 
     #[test]
@@ -175,7 +199,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 4);
+        assert_eq!(v, 5);
     }
 
     #[test]

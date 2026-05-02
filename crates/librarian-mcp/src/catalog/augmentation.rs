@@ -17,19 +17,26 @@ pub struct AugmentationRow {
     pub render_template: Option<String>,
     /// Optional JSON Schema (draft-07+) validating `params` on every merge.
     pub params_schema: Option<String>,
+    /// When true, artifact_update prepends a new dated section instead of replacing the body.
+    pub append_mode: bool,
+    /// Max number of dated `## YYYY-MM-DD` sections to retain. Oldest are dropped beyond cap.
+    pub history_cap: Option<i64>,
 }
 
 pub fn upsert(cat: &Catalog, row: &AugmentationRow) -> Result<()> {
     cat.conn.execute(
         "INSERT INTO artifact_augmentation
            (artifact_id, prompt, params, last_refreshed_at, refresh_count,
-            created_at, updated_at, render_template, params_schema)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            created_at, updated_at, render_template, params_schema,
+            append_mode, history_cap)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
          ON CONFLICT(artifact_id) DO UPDATE SET
            prompt = excluded.prompt,
            params = excluded.params,
            render_template = excluded.render_template,
            params_schema = excluded.params_schema,
+           append_mode = excluded.append_mode,
+           history_cap = excluded.history_cap,
            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
         rusqlite::params![
             row.artifact_id,
@@ -41,6 +48,8 @@ pub fn upsert(cat: &Catalog, row: &AugmentationRow) -> Result<()> {
             row.updated_at,
             row.render_template,
             row.params_schema,
+            row.append_mode as i64,
+            row.history_cap,
         ],
     )?;
     Ok(())
@@ -49,7 +58,8 @@ pub fn upsert(cat: &Catalog, row: &AugmentationRow) -> Result<()> {
 pub fn get(cat: &Catalog, artifact_id: &str) -> Result<Option<AugmentationRow>> {
     let mut stmt = cat.conn.prepare(
         "SELECT artifact_id, prompt, params, last_refreshed_at, refresh_count,
-                created_at, updated_at, render_template, params_schema
+                created_at, updated_at, render_template, params_schema,
+                append_mode, history_cap
          FROM artifact_augmentation WHERE artifact_id = ?1",
     )?;
     let mut rows = stmt.query_map([artifact_id], row_from_sql)?;
@@ -67,6 +77,8 @@ fn row_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<AugmentationRow> {
         updated_at: row.get(6)?,
         render_template: row.get(7)?,
         params_schema: row.get(8)?,
+        append_mode: row.get::<_, i64>(9).map(|v| v != 0)?,
+        history_cap: row.get(10)?,
     })
 }
 
@@ -145,7 +157,8 @@ pub fn get_batch(
         .join(", ");
     let sql = format!(
         "SELECT artifact_id, prompt, params, last_refreshed_at, refresh_count,
-                created_at, updated_at, render_template, params_schema
+                created_at, updated_at, render_template, params_schema,
+                append_mode, history_cap
          FROM artifact_augmentation WHERE artifact_id IN ({placeholders})"
     );
     let mut stmt = cat.conn.prepare(&sql)?;
@@ -257,7 +270,7 @@ mod tests {
     fn aug(artifact_id: &str) -> AugmentationRow {
         AugmentationRow {
             artifact_id: artifact_id.to_string(),
-            prompt: "Keep it updated".to_string(),
+            prompt: "test prompt".to_string(),
             params: "{}".to_string(),
             last_refreshed_at: None,
             refresh_count: 0,
@@ -265,6 +278,8 @@ mod tests {
             updated_at: "2026-01-01T00:00:00.000Z".to_string(),
             render_template: None,
             params_schema: None,
+            append_mode: false,
+            history_cap: None,
         }
     }
 
@@ -275,7 +290,7 @@ mod tests {
         upsert(&cat, &aug("art1")).unwrap();
         let row = get(&cat, "art1").unwrap().expect("row should exist");
         assert_eq!(row.artifact_id, "art1");
-        assert_eq!(row.prompt, "Keep it updated");
+        assert_eq!(row.prompt, "test prompt");
         assert_eq!(row.refresh_count, 0);
     }
 
@@ -437,5 +452,32 @@ mod tests {
         let map = get_batch(&cat, &["art1".to_string(), "art2".to_string()]).unwrap();
         assert!(map.contains_key("art1"));
         assert!(!map.contains_key("art2"));
+    }
+
+    #[test]
+    fn append_mode_and_history_cap_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let cat = Catalog::open(dir.path().join("cat.db").as_path()).unwrap();
+        let art = sample_art("a1");
+        crate::catalog::artifact::upsert(&cat, &art).unwrap();
+        let mut row = aug("a1");
+        row.append_mode = true;
+        row.history_cap = Some(5);
+        upsert(&cat, &row).unwrap();
+        let got = get(&cat, "a1").unwrap().unwrap();
+        assert!(got.append_mode);
+        assert_eq!(got.history_cap, Some(5));
+    }
+
+    #[test]
+    fn append_mode_defaults_to_false() {
+        let dir = tempfile::tempdir().unwrap();
+        let cat = Catalog::open(dir.path().join("cat.db").as_path()).unwrap();
+        let art = sample_art("a2");
+        crate::catalog::artifact::upsert(&cat, &art).unwrap();
+        upsert(&cat, &aug("a2")).unwrap();
+        let got = get(&cat, "a2").unwrap().unwrap();
+        assert!(!got.append_mode);
+        assert_eq!(got.history_cap, None);
     }
 }

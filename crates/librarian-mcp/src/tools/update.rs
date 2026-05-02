@@ -88,7 +88,7 @@ impl Tool for ArtifactUpdate {
 
         let new_content = if let Some(new_body) = &patch.body {
             // Re-parse frontmatter and rebuild with new body
-            let (fm_opt, _old_body) = crate::frontmatter::parse(&original)?;
+            let (fm_opt, old_body) = crate::frontmatter::parse(&original)?;
             let mut fm = fm_opt.unwrap_or_default();
             if let Some(v) = &patch.status {
                 fm.status = Some(v.clone());
@@ -105,7 +105,19 @@ impl Tool for ArtifactUpdate {
             if let Some(v) = &patch.topic {
                 fm.topic = Some(v.clone());
             }
-            crate::frontmatter::write(&fm, &format!("\n{}\n", new_body))
+            let actual_body = match crate::catalog::augmentation::get(&cat, &a.id)? {
+                Some(aug) if aug.append_mode => {
+                    let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+                    let mut appended =
+                        format!("## {date}\n\n{new_body}\n\n{}", old_body.trim_start());
+                    if let Some(cap) = aug.history_cap {
+                        appended = trim_history(&appended, cap as usize);
+                    }
+                    appended
+                }
+                _ => new_body.clone(),
+            };
+            crate::frontmatter::write(&fm, &format!("\n{actual_body}\n"))
         } else {
             crate::frontmatter::update_in_place(&original, |fm| {
                 if let Some(v) = &patch.status {
@@ -244,11 +256,23 @@ pub(crate) fn write_field_to_frontmatter(
     std::fs::write(&full, &new_content)?;
     Ok(())
 }
+fn trim_history(body: &str, cap: usize) -> String {
+    use std::sync::LazyLock;
+    static RE: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"(?m)^## \d{4}-\d{2}-\d{2}").unwrap());
+    let positions: Vec<usize> = RE.find_iter(body).map(|m| m.start()).collect();
+    if positions.len() <= cap {
+        return body.to_string();
+    }
+    let cutoff = positions[cap];
+    body[..cutoff].trim_end().to_string() + "\n"
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::catalog::artifact;
+    use crate::catalog::augmentation;
     use crate::catalog::Catalog;
     use crate::tools::create::ArtifactCreate;
     use crate::workspace::{Root, WorkspaceConfig};
@@ -414,6 +438,8 @@ mod tests {
                     updated_at: ts,
                     render_template: None,
                     params_schema: None,
+                    append_mode: false,
+                    history_cap: None,
                 },
             )
             .unwrap();
@@ -440,5 +466,174 @@ mod tests {
         let aug = augmentation::get(&cat, &id).unwrap().unwrap();
         assert_eq!(aug.refresh_count, 1);
         assert!(aug.last_refreshed_at.is_some());
+    }
+
+    #[test]
+    fn trim_history_keeps_all_when_under_cap() {
+        let body = "## 2026-01-03\n\nnewest\n\n## 2026-01-02\n\nmiddle\n";
+        assert_eq!(trim_history(body, 5), body);
+    }
+
+    #[test]
+    fn trim_history_drops_oldest_entries() {
+        let body =
+            "## 2026-01-03\n\nnewest\n\n## 2026-01-02\n\nmiddle\n\n## 2026-01-01\n\noldest\n";
+        let result = trim_history(body, 2);
+        assert!(result.contains("newest"), "newest missing");
+        assert!(result.contains("middle"), "middle missing");
+        assert!(!result.contains("oldest"), "oldest should be dropped");
+    }
+
+    #[test]
+    fn trim_history_preserves_intro_prose() {
+        let body = "Intro paragraph.\n\n## 2026-01-02\n\nnew\n\n## 2026-01-01\n\nold\n";
+        let result = trim_history(body, 1);
+        assert!(result.contains("Intro paragraph"), "intro prose missing");
+        assert!(result.contains("new"), "new section missing");
+        assert!(!result.contains("old"), "old section should be dropped");
+    }
+
+    #[test]
+    fn trim_history_no_dated_sections_unchanged() {
+        let body = "Just prose, no dated headers.\n";
+        assert_eq!(trim_history(body, 2), body);
+    }
+
+    async fn seed_with_augment(
+        ctx: &ToolContext,
+        rel_path: &str,
+        append_mode: bool,
+        history_cap: Option<i64>,
+    ) -> String {
+        let v = ArtifactCreate
+            .call(
+                ctx,
+                serde_json::json!({
+                    "repo": "r",
+                    "rel_path": rel_path,
+                    "kind": "spec",
+                    "title": "test",
+                    "body": "original body",
+                }),
+            )
+            .await
+            .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+        let cat = ctx.catalog.lock();
+        augmentation::upsert(
+            &cat,
+            &augmentation::AugmentationRow {
+                artifact_id: id.clone(),
+                prompt: "test".to_string(),
+                params: "{}".to_string(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+                render_template: None,
+                params_schema: None,
+                append_mode,
+                history_cap,
+            },
+        )
+        .unwrap();
+        id
+    }
+
+    #[tokio::test]
+    async fn append_mode_prepends_dated_section() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = seed_with_augment(&ctx, "b1.md", true, None).await;
+
+        ArtifactUpdate
+            .call(
+                &ctx,
+                serde_json::json!({"id": id, "patch": {"body": "delta content"}}),
+            )
+            .await
+            .unwrap();
+
+        let content = std::fs::read_to_string(tmp.path().join("b1.md")).unwrap();
+        assert!(
+            content.contains("\n## 20"),
+            "dated header missing: {content}"
+        );
+        assert!(content.contains("delta content"), "delta missing");
+        assert!(content.contains("original body"), "original body missing");
+    }
+
+    #[tokio::test]
+    async fn second_append_newest_first() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = seed_with_augment(&ctx, "b2.md", true, None).await;
+
+        ArtifactUpdate
+            .call(
+                &ctx,
+                serde_json::json!({"id": id, "patch": {"body": "first delta"}}),
+            )
+            .await
+            .unwrap();
+        ArtifactUpdate
+            .call(
+                &ctx,
+                serde_json::json!({"id": id, "patch": {"body": "second delta"}}),
+            )
+            .await
+            .unwrap();
+
+        let content = std::fs::read_to_string(tmp.path().join("b2.md")).unwrap();
+        let pos_second = content.find("second delta").unwrap();
+        let pos_first = content.find("first delta").unwrap();
+        assert!(
+            pos_second < pos_first,
+            "second delta should appear before first delta"
+        );
+    }
+
+    #[tokio::test]
+    async fn history_cap_drops_oldest_section() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = seed_with_augment(&ctx, "b3.md", true, Some(2)).await;
+
+        for entry in &["entry 1", "entry 2", "entry 3"] {
+            ArtifactUpdate
+                .call(
+                    &ctx,
+                    serde_json::json!({"id": id, "patch": {"body": entry}}),
+                )
+                .await
+                .unwrap();
+        }
+
+        let content = std::fs::read_to_string(tmp.path().join("b3.md")).unwrap();
+        assert!(content.contains("entry 3"), "newest missing");
+        assert!(content.contains("entry 2"), "second missing");
+        assert!(!content.contains("entry 1"), "oldest should be dropped");
+    }
+
+    #[tokio::test]
+    async fn no_append_mode_replace_unchanged() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = seed_with_augment(&ctx, "b4.md", false, None).await;
+
+        ArtifactUpdate
+            .call(
+                &ctx,
+                serde_json::json!({"id": id, "patch": {"body": "replacement body"}}),
+            )
+            .await
+            .unwrap();
+
+        let content = std::fs::read_to_string(tmp.path().join("b4.md")).unwrap();
+        assert!(content.contains("replacement body"), "body missing");
+        assert!(
+            !content.contains("## 20"),
+            "dated header should not appear in replace mode"
+        );
     }
 }

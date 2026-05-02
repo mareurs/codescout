@@ -184,6 +184,8 @@ mod tests {
             updated_at: "2026-01-01T00:00:00Z".into(),
             render_template: None,
             params_schema: None,
+            append_mode: false,
+            history_cap: None,
         }
     }
 

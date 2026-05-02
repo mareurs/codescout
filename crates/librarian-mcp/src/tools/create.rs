@@ -164,6 +164,8 @@ impl Tool for ArtifactCreate {
                     updated_at: now_ts,
                     render_template: None,
                     params_schema: None,
+                    append_mode: false,
+                    history_cap: None,
                 },
             )?;
         }

@@ -49,7 +49,7 @@ Skipped for now (in brainstorm but deferred):
 | T-8 | Docs: `docs/manual/src/experimental/artifact-augmentation.md` extends to v2 surface | done | 1 | Shipped as `augmentation-render-template.md`. |
 | T-9 | `artifact_refresh_stale` tool — shipped + verified | done | 2 | `crates/librarian-mcp/src/tools/refresh_stale.rs`, 6 tests. |
 | T-10 | `GatherSource::ConfigValue` design (which formats? key path syntax?) | done | 3 | Detailed spec written 2026-05-02 — see Phase 3 section. |
-| T-19 | `GatherSource::ConfigValue` implementation | open | 3 | See Phase 3 steps. |
+| T-19 | `GatherSource::ConfigValue` implementation | done | 3 | Implemented 2026-05-02 — commit `00e57f7` on `experiments`. 7 tests, TOML/YAML/JSON + git blame annotation. |
 | T-11 | `append_mode` design — where does the date come from? cap policy? | done | 4 | Detailed spec written 2026-05-02 — see Phase 4 section. |
 | T-20 | `append_mode` + history cap implementation | open | 4 | See Phase 4 steps. |
 | T-12 | `kind: experiment` schema + auto-discovery from filesystem | open | 5 |  |

@@ -10,17 +10,20 @@ pub struct ArtifactAugment;
 #[derive(Deserialize)]
 struct Args {
     id: String,
-    /// Required when merge=false (create/replace). Ignored when merge=true.
+    #[serde(default)]
     prompt: Option<String>,
+    #[serde(default)]
     params: Option<Value>,
-    /// MiniJinja template projecting `params` into a markdown snippet.
-    /// Decouples live state from prose body.
+    #[serde(default)]
     render_template: Option<String>,
-    /// JSON Schema validating future `params` merges.
+    #[serde(default)]
     params_schema: Option<Value>,
-    /// When true: RFC 7396 merge-patch on params only. Requires existing augmentation.
     #[serde(default)]
     merge: bool,
+    #[serde(default)]
+    append_mode: Option<bool>,
+    #[serde(default)]
+    history_cap: Option<usize>,
 }
 
 #[async_trait]
@@ -61,6 +64,16 @@ impl Tool for ArtifactAugment {
                 "merge": {
                     "type": "boolean",
                     "description": "When true, apply RFC 7396 merge-patch to params only — prompt is not required. Requires an existing augmentation."
+                },
+                "append_mode": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "When true, artifact_update prepends a new dated section instead of replacing the body. Prompt should instruct the LLM to write only the new delta block."
+                },
+                "history_cap": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Max number of dated ## YYYY-MM-DD sections to retain. Oldest sections beyond cap are dropped on each append."
                 }
             }
         })
@@ -145,6 +158,8 @@ impl Tool for ArtifactAugment {
                 updated_at: now,
                 render_template: a.render_template,
                 params_schema: params_schema_str,
+                append_mode: a.append_mode.unwrap_or(false),
+                history_cap: a.history_cap.map(|v| v as i64),
             },
         )?;
 
@@ -373,5 +388,44 @@ mod tests {
         assert!(err.is_err());
         let msg = err.unwrap_err().to_string();
         assert!(msg.contains("prompt"), "error must mention prompt");
+    }
+
+    #[tokio::test]
+    async fn persists_append_mode_and_history_cap() {
+        let ctx = mk_ctx();
+        seed_artifact(&ctx, "a99");
+        ArtifactAugment
+            .call(
+                &ctx,
+                serde_json::json!({
+                    "id": "a99",
+                    "prompt": "track me",
+                    "append_mode": true,
+                    "history_cap": 10,
+                }),
+            )
+            .await
+            .unwrap();
+        let cat = ctx.catalog.lock();
+        let row = augmentation::get(&cat, "a99").unwrap().unwrap();
+        assert!(row.append_mode);
+        assert_eq!(row.history_cap, Some(10));
+    }
+
+    #[tokio::test]
+    async fn append_mode_defaults_to_false_when_absent() {
+        let ctx = mk_ctx();
+        seed_artifact(&ctx, "a100");
+        ArtifactAugment
+            .call(
+                &ctx,
+                serde_json::json!({"id": "a100", "prompt": "no append"}),
+            )
+            .await
+            .unwrap();
+        let cat = ctx.catalog.lock();
+        let row = augmentation::get(&cat, "a100").unwrap().unwrap();
+        assert!(!row.append_mode);
+        assert_eq!(row.history_cap, None);
     }
 }

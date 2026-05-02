@@ -88,7 +88,7 @@ impl Tool for ArtifactRefresh {
             }
         }
 
-        Ok(json!({
+        let mut out = json!({
             "artifact_id": a.id,
             "prompt": aug.prompt,
             "params": params,
@@ -96,7 +96,11 @@ impl Tool for ArtifactRefresh {
             "context": context,
             "last_refreshed_at": aug.last_refreshed_at,
             "hints": hints,
-        }))
+        });
+        if aug.append_mode {
+            out["append_mode"] = json!(true);
+        }
+        Ok(out)
     }
 }
 
@@ -119,5 +123,73 @@ fn read_body(ctx: &ToolContext, artifact_id: &str) -> Result<Option<String>> {
     match std::fs::read_to_string(&full_path) {
         Ok(s) => Ok(Some(s)),
         Err(_) => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::catalog::Catalog;
+    use crate::tools::augment::ArtifactAugment;
+    use crate::tools::create::ArtifactCreate;
+    use crate::workspace::{Root, WorkspaceConfig};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    fn mk_ctx(tmp_root: std::path::PathBuf) -> ToolContext {
+        ToolContext {
+            catalog: Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap())),
+            workspace: Arc::new(WorkspaceConfig {
+                roots: vec![Root {
+                    name: "r".into(),
+                    path: tmp_root,
+                }],
+                ignore: vec![],
+                rules: vec![],
+                umbrellas: vec![],
+            }),
+            rules: Arc::new(vec![]),
+            embedding: None,
+            current_project: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn refresh_includes_append_mode_hint_when_set() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        let v = ArtifactCreate
+            .call(
+                &ctx,
+                serde_json::json!({
+                    "repo": "r",
+                    "rel_path": "hint_test.md",
+                    "kind": "spec",
+                    "title": "hint test",
+                    "body": "body",
+                }),
+            )
+            .await
+            .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        ArtifactAugment
+            .call(
+                &ctx,
+                serde_json::json!({
+                    "id": id,
+                    "prompt": "track",
+                    "append_mode": true,
+                }),
+            )
+            .await
+            .unwrap();
+
+        let result = ArtifactRefresh
+            .call(&ctx, serde_json::json!({"id": id}))
+            .await
+            .unwrap();
+        assert_eq!(result["append_mode"], serde_json::json!(true));
     }
 }
