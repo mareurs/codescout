@@ -1,3 +1,5 @@
+use crate::tools::Tool;
+
 #[tokio::test]
 async fn read_markdown_empty_file_returns_small_tier() {
     let ctx = test_ctx().await;
@@ -45,8 +47,6 @@ async fn read_markdown_large_no_headings_must_follow_pivots_to_line_ranges() {
 }
 
 use super::edit_markdown::{find_consumed_subsections, perform_scoped_edit, perform_section_edit};
-use super::*;
-use crate::tools::{Tool, ToolContext};
 
 // ── perform_section_edit tests (moved from section_edit.rs) ──────────
 

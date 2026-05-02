@@ -201,7 +201,12 @@ impl Tool for EditFile {
             let root = ctx.agent.require_project_root().await?;
             let security = ctx.agent.security_config().await;
             let session_roots = ctx.agent.session_write_roots_snapshot().await;
-            let resolved = crate::util::path_security::validate_write_path(path, &root, &security, &session_roots)?;
+            let resolved = crate::util::path_security::validate_write_path(
+                path,
+                &root,
+                &security,
+                &session_roots,
+            )?;
             let mut content = std::fs::read_to_string(&resolved)?;
 
             for (i, edit) in edits_arr.iter().enumerate() {
@@ -267,7 +272,12 @@ impl Tool for EditFile {
             let root = ctx.agent.require_project_root().await?;
             let security = ctx.agent.security_config().await;
             let session_roots = ctx.agent.session_write_roots_snapshot().await;
-            let resolved = crate::util::path_security::validate_write_path(path, &root, &security, &session_roots)?;
+            let resolved = crate::util::path_security::validate_write_path(
+                path,
+                &root,
+                &security,
+                &session_roots,
+            )?;
             let content = std::fs::read_to_string(&resolved)?;
             let new_content = match insert {
                 "prepend" => format!("{}{}", new_string, content),
@@ -329,7 +339,8 @@ async fn perform_edit(
     let root = ctx.agent.require_project_root().await?;
     let security = ctx.agent.security_config().await;
     let session_roots = ctx.agent.session_write_roots_snapshot().await;
-    let resolved = crate::util::path_security::validate_write_path(path, &root, &security, &session_roots)?;
+    let resolved =
+        crate::util::path_security::validate_write_path(path, &root, &security, &session_roots)?;
 
     let content = std::fs::read_to_string(&resolved)?;
 
