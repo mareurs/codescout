@@ -61,6 +61,14 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
         )?;
     }
 
+    // Migration: add CC session link (v0.10)
+    let has_cc_session_id: bool = conn
+        .prepare("SELECT cc_session_id FROM tool_calls LIMIT 0")
+        .is_ok();
+    if !has_cc_session_id {
+        conn.execute_batch("ALTER TABLE tool_calls ADD COLUMN cc_session_id TEXT;")?;
+    }
+
     Ok(conn)
 }
 
@@ -77,10 +85,11 @@ pub fn write_record(
     session_id: &str,
     input_json: Option<&str>,
     output_json: Option<&str>,
+    cc_session_id: Option<&str>,
 ) -> Result<()> {
     conn.execute(
-        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, project_sha, session_id, input_json, output_json)
-         VALUES (?1, datetime('now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, project_sha, session_id, input_json, output_json, cc_session_id)
+         VALUES (?1, datetime('now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             tool_name,
             latency_ms,
@@ -92,6 +101,7 @@ pub fn write_record(
             session_id,
             input_json,
             output_json,
+            cc_session_id,
         ],
     )?;
     conn.execute(
@@ -462,6 +472,7 @@ mod tests {
             "test-session",
             None,
             None,
+            None,
         )
         .unwrap();
         let count: i64 = conn
@@ -483,6 +494,7 @@ mod tests {
             "unknown",
             None,
             "test-session",
+            None,
             None,
             None,
         )
@@ -514,6 +526,7 @@ mod tests {
             "unknown",
             None,
             "test-session",
+            None,
             None,
             None,
         )
@@ -550,6 +563,7 @@ mod tests {
             "unknown",
             None,
             "test-session",
+            None,
             None,
             None,
         )
@@ -653,6 +667,7 @@ mod tests {
             "test-session",
             None,
             None,
+            None,
         )
         .unwrap();
         write_record(
@@ -667,6 +682,7 @@ mod tests {
             "test-session",
             None,
             None,
+            None,
         )
         .unwrap();
         write_record(
@@ -679,6 +695,7 @@ mod tests {
             "unknown",
             None,
             "test-session",
+            None,
             None,
             None,
         )
@@ -705,6 +722,7 @@ mod tests {
                 "unknown",
                 None,
                 "test-session",
+                None,
                 None,
                 None,
             )
@@ -856,6 +874,7 @@ mod tests {
             "sess-1",
             Some("{\"query\":\"foo\"}"),
             Some("{\"error\":\"not found\"}"),
+            None,
         )
         .unwrap();
         let (cs, ps, sid, inp, out): (String, String, String, String, String) = conn
@@ -877,6 +896,7 @@ mod tests {
         let (_dir, conn) = tmp();
         write_record(
             &conn, "symbols", 42, "success", false, None, "abc1234", None, "sess-1", None, None,
+            None,
         )
         .unwrap();
         let (ps, inp, out): (Option<String>, Option<String>, Option<String>) = conn

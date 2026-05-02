@@ -1,3 +1,13 @@
+---
+id: null
+kind: null
+status: done
+title: null
+owners: []
+tags: []
+topic: null
+time_scope: null
+---
 # MCP Disconnect on User-Cancel of Long Tool Calls
 
 **Status:** FIXED (2026-04-16) — no response sent for cancelled requests; MCP connection stays alive.

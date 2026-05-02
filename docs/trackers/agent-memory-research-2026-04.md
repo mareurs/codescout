@@ -1,7 +1,7 @@
 ---
 id: '437c392eefa936fc'
 kind: tracker
-status: draft
+status: done
 title: Agent Memory & Timeline Research — April 2026
 owners: []
 tags:

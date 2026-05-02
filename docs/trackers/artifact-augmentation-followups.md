@@ -47,8 +47,8 @@ Skipped for now (in brainstorm but deferred):
 | T-5 | `librarian_context` uses rendered output for trackers w/ template | done | 1 | `render_template_projects_params_into_context` + error-surface test. |
 | T-6 | Spike: pick template engine (`minijinja` vs `handlebars-rust`) | done | 1 | Picked `minijinja` per user. |
 | T-7 | Tests: schema-validate-on-update, template-render, fall-through when absent | done | 1 | 287 lib tests (was 267); 20 new across `schema_validate`, `render`, `update_params`, `augment`, `context`, `catalog`. |
-| T-8 | Docs: `docs/manual/src/experimental/artifact-augmentation.md` extends to v2 surface | open | 1 | Pending; covered in `server_instructions.md` for now. |
-| T-9 | `artifact_refresh_stale` tool design | open | 2 |  |
+| T-8 | Docs: `docs/manual/src/experimental/artifact-augmentation.md` extends to v2 surface | done | 1 | Shipped as `augmentation-render-template.md`. |
+| T-9 | `artifact_refresh_stale` tool design | done | 2 | Shipped as `crates/librarian-mcp/src/tools/refresh_stale.rs`. |
 | T-10 | `GatherSource::ConfigValue` design (which formats? key path syntax?) | open | 3 |  |
 | T-11 | `append_mode` design — where does the date come from? cap policy? | open | 4 |  |
 | T-12 | `kind: experiment` schema + auto-discovery from filesystem | open | 5 |  |

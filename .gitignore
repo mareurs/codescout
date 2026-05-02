@@ -13,7 +13,7 @@
 /.codescout/debug.log*
 /.codescout/diagnostic-*.log
 /.codescout/libraries.json
-/.codescout/embeddings/
+.codescout/embeddings/
 /com/
 tests/fixtures/*/.codescout/
 /.codescout/workspace.toml
@@ -30,3 +30,6 @@ tests/fixtures/*/.codescout/
 /.buddy/
 # Cross-process write lock file (per-project; recreated on activate)
 .codescout/write.lock
+# Runtime / session files
+.codescout/cc_session_id
+.codescout/tantivy/

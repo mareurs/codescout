@@ -495,6 +495,10 @@ pub fn find_matching_symbol(
 /// Exact match takes priority. Falls back to a prefix check for generic types
 /// so that e.g. `IRepository<T, ID>` matches query `IRepository`, and
 /// `impl Tool for MyStruct<T>` matches query `MyStruct<T>` or `MyStruct`.
+///
+/// Also supports suffix matching at word boundaries (space, `/`, `:`), so
+/// e.g. `SemanticSearch/call` matches `impl Tool for SemanticSearch/call`
+/// and `Book/method` matches `impl Trait for crate::path::Book/method`.
 pub fn symbol_name_matches(sym: &SymbolInfo, query: &str) -> bool {
     if sym.name_path == query || sym.name == query {
         return true;
@@ -506,6 +510,18 @@ pub fn symbol_name_matches(sym: &SymbolInfo, query: &str) -> bool {
                 if matches!(next, b'<' | b'(' | b' ') {
                     return true;
                 }
+            }
+        }
+    }
+    // Suffix match at word boundary: handles queries like "SemanticSearch/call"
+    // matching "impl Tool for SemanticSearch/call" (boundary = space),
+    // "Book/method" matching "impl Trait for crate::Book/method" (boundary = ':'),
+    // or "Inner/method" matching "Outer/Inner/method" (boundary = '/').
+    for candidate in [sym.name.as_str(), sym.name_path.as_str()] {
+        if candidate.len() > query.len() && candidate.ends_with(query) {
+            let boundary = candidate.as_bytes()[candidate.len() - query.len() - 1];
+            if matches!(boundary, b' ' | b'/' | b':') {
+                return true;
             }
         }
     }
@@ -545,11 +561,36 @@ pub fn find_unique_symbol_by_name_path<'a>(
 ) -> anyhow::Result<&'a SymbolInfo> {
     let matches = collect_matching_symbols(symbols, name_path);
     match matches.len() {
-        0 => Err(RecoverableError::with_hint(
-            format!("symbol not found: {name_path}"),
-            "Use symbols(path) to list symbols. Trait impl methods use format 'impl Trait for Struct/method'.",
-        )
-        .into()),
+        0 => {
+            // Progressive disclosure: when the query contains '/', search by
+            // the leaf segment alone to surface candidates whose parent has
+            // generics or a long impl prefix the caller elided.
+            // e.g. "Catalog/add" → leaf "add" → finds "impl Catalog<T>/add".
+            // Suggestions go in the message (Display only emits message, not hint).
+            let leaf = name_path.rsplit('/').next().unwrap_or(name_path);
+            let message = if leaf != name_path {
+                let suggestions: Vec<String> = collect_matching_symbols(symbols, leaf)
+                    .into_iter()
+                    .take(3)
+                    .map(|s| format!("'{}'", s.name_path))
+                    .collect();
+                if suggestions.is_empty() {
+                    format!("symbol not found: {name_path}")
+                } else {
+                    format!(
+                        "symbol not found: {name_path} — did you mean {}?",
+                        suggestions.join(", ")
+                    )
+                }
+            } else {
+                format!("symbol not found: {name_path}")
+            };
+            Err(RecoverableError::with_hint(
+                message,
+                "Use symbols(path) to list symbols. Trait impl methods use format 'impl Trait for Struct/method'.",
+            )
+            .into())
+        }
         1 => Ok(matches.into_iter().next().unwrap()),
         _ => {
             // Prefer exact name_path match over bare-name match (e.g. class "Book"

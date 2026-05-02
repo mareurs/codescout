@@ -67,6 +67,60 @@ These are fixed in the happy path but still have edge cases worth knowing about.
 - **Workaround:** for any new-function injection, use a multi-line `old_string` with explicit anchor lines on both sides, or use `insert_code`/`replace_symbol` instead of `edit_file`.
 - **Fix:** open
 - **Status:** Open
+### BUG-051 — `edit_code insert after`: code injected mid-function body when symbol body is truncated in display
+
+- **Observed:** 2026-05-02
+- **Tool:** `mcp__codescout__edit_code` (`action="insert"`, `position="after"`)
+- **Severity:** High (silent source corruption — compiles to wrong code or doesn't compile)
+- **Exact call:**
+  ```json
+  {
+    "symbol": "find_unique_symbol_by_name_path_errors_on_ambiguous_name",
+    "path": "src/tools/symbol/tests.rs",
+    "action": "insert",
+    "position": "after",
+    "body": "\n#[test]\nfn find_unique_symbol_by_name_path_suggests_leaf_matches() { ... }"
+  }
+  ```
+- **Reproducing commit:** `629b7eae` (experiments branch) — file `src/tools/symbol/tests.rs`, function `find_unique_symbol_by_name_path_errors_on_ambiguous_name` was ~82 lines long (lines 1081–1162+ in that snapshot).
+- **Preceding `symbols` call that revealed the truncation:**
+  ```json
+  {
+    "name": "find_unique_symbol_by_name_path_errors_on_ambiguous_name",
+    "path": "src/tools/symbol/tests.rs",
+    "include_body": true
+  }
+  ```
+  Returned `end_line: 1162` and a body that was cut off mid-`assert!()` at that same line — the function's closing `);` and `}` were NOT shown.
+- **Expected:** new test function inserted after the closing `}` of the target function.
+- **What happened:** code inserted at line 1162 — mid-body, splitting an open `assert!(err_str.contains("nonexistent"),` — corrupting both the old function and making the file fail to compile.
+- **Probable cause:** two possibilities (root cause unconfirmed):
+  1. `edit_code` uses the body's last *displayed* line as the insertion anchor rather than the LSP-authoritative `end_line`. Body display is capped at a max-length (same truncation visible in the `symbols` output), so insertion lands at the display cutoff, not the real end.
+  2. LSP itself reported a wrong `end_line` that coincides with the display truncation point — both the display and the insertion used the same wrong value.
+- **Workaround:** before any `insert after`, verify the symbol's `end_line` equals its real closing `}` by reading surrounding lines with `read_file(path, start_line=end_line-2, end_line=end_line+2)`. If the body display is truncated (ends mid-expression), do NOT use `insert after` — use `run_command` with a Python script for safe text replacement instead.
+- **Fix:** investigate whether `edit_code` anchor comes from display length or LSP; add a guard that refuses `insert after` when the symbol's body appears truncated.
+- **Root cause (confirmed 2026-05-02):** `editing_end_line` in `src/symbol/edit.rs` had an early return when `has_syntax_errors` was true, falling back to LSP's `end_line`. During mid-session editing (prior edits leave broken syntax), LSP frequently reports the last *statement* line rather than the closing `}`. Insertion used this short value as anchor, landing inside the function.
+- **Fix applied (2026-05-02):** Removed the syntax-error early return. AST is run unconditionally and trusted when it finds the symbol (same as on a clean file). `max(ast, lsp)` was considered but rejected — it regresses BUG-029 when syntax errors coexist with LSP over-extension. Two regression tests added in `src/tools/symbol/tests.rs`: `editing_end_line_with_syntax_errors_uses_ast_not_lsp_fallback` and `editing_end_line_syntax_errors_do_not_regress_lsp_overextend`.
+- **Residual (documented, not fixed):** When the file has syntax errors AND tree-sitter's error recovery fails to find the function boundary (`find_ast_end_line_in` returns `None`), the function still falls back to `sym.end_line` — the original failure path. In this worst-case scenario (badly broken parse tree), the bug can still manifest.
+- **Status:** Partially fixed
+
+### BUG-052 — `RecoverableError` guidance/hint not included in `Display` / `to_string()`
+
+- **Observed:** 2026-05-02
+- **Component:** `src/tools/mod.rs` — `impl std::fmt::Display for RecoverableError`
+- **Severity:** Low (test footgun; no runtime data loss — MCP JSON output is correct)
+- **What I did:** wrote a test asserting `result.unwrap_err().to_string().contains("did you mean ...")` where `"did you mean ..."` was set as the `hint` in `RecoverableError::with_hint(message, hint)`.
+- **Expected:** `to_string()` to include both the message and the hint text, as the LLM sees both.
+- **What happened:** test failed — `to_string()` emits only `self.message`; the `guidance` field (Hint/Warning/MustFollow) is serialized only in the MCP JSON response body, invisible to `Display`.
+- **Reproducing call:**
+  ```rust
+  let e = RecoverableError::with_hint("symbol not found: Foo/bar", "Did you mean 'Baz/bar'?");
+  assert!(e.to_string().contains("Did you mean")); // FAILS
+  ```
+- **Fix applied (same session):** moved suggestions into the `message` string itself (`"symbol not found: X — did you mean 'Y'?"`), kept the `hint` for static usage guidance. Tests now check `err_str.contains("did you mean")` against the message.
+- **Broader implication:** any code that checks `RecoverableError` content via `anyhow::Error::to_string()` or `Display` only sees the message. Tests for hint/warning/must_follow content must either downcast (`err.downcast_ref::<RecoverableError>()` + `.hint()`) or put the asserted text in the message instead.
+- **Status:** Fixed by convention (2026-05-02) — no `Display` change made; document pattern for future test authors.
+
 ## Archive
 
 Fixed / superseded entries: `docs/archive/bug-reports/`.

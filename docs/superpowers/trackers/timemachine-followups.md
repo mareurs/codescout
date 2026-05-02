@@ -1,9 +1,15 @@
 ---
-title: TimeMachine v1 — should-fix-soon backlog
-status: active
-date: 2026-04-29
+id: null
 kind: tracker
-tags: [librarian-mcp, timemachine, backlog]
+status: done
+title: TimeMachine v1 — should-fix-soon backlog
+owners: []
+tags:
+- librarian-mcp
+- timemachine
+- backlog
+topic: null
+time_scope: null
 ---
 
 # TimeMachine v1 — should-fix-soon backlog

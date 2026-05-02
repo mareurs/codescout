@@ -102,7 +102,7 @@ pub async fn run(
     ));
     let mut server_reader = BufReader::new(server_stdout);
 
-    // Spawn stderr logger
+    // Spawn stderr logger — info level so JVM GC/OOM warnings reach the diagnostic log
     if let Some(stderr) = child.stderr.take() {
         tokio::spawn(async move {
             let mut reader = BufReader::new(stderr);
@@ -111,10 +111,15 @@ pub async fn run(
                 line.clear();
                 match reader.read_line(&mut line).await {
                     Ok(0) | Err(_) => break,
-                    Ok(_) => debug!(target: "mux::server_stderr", "{}", line.trim_end()),
+                    Ok(_) => info!(target: "mux::server_stderr", "{}", line.trim_end()),
                 }
             }
         });
+    }
+
+    // Spawn memory watcher — warns when RSS+swap exceeds expected bounds
+    if let Some(pid) = child.id() {
+        tokio::spawn(watch_memory(pid));
     }
 
     // 3. LSP initialize handshake
@@ -650,4 +655,69 @@ fn extract_text_document_uri(msg: &Value) -> Option<String> {
         .get("uri")?
         .as_str()
         .map(String::from)
+}
+
+/// Periodically logs RSS+swap for the LSP server process.
+/// Emits warn at 4 GiB and error at 8 GiB — both well above the 2 GiB JVM heap cap,
+/// so any trigger indicates native memory growth (RocksDB JNI, direct buffers, etc.).
+/// Exits silently when the process dies.
+async fn watch_memory(pid: u32) {
+    const WARN_KB: u64 = 4 * 1024 * 1024; // 4 GiB
+    const ERROR_KB: u64 = 8 * 1024 * 1024; // 8 GiB
+
+    let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        ticker.tick().await;
+        let Some((rss_kb, swap_kb)) = read_proc_memory(pid) else {
+            break;
+        };
+        let total_kb = rss_kb + swap_kb;
+        let rss_gib = rss_kb as f64 / (1024.0 * 1024.0);
+        let swap_gib = swap_kb as f64 / (1024.0 * 1024.0);
+        let total_gib = total_kb as f64 / (1024.0 * 1024.0);
+        if total_kb >= ERROR_KB {
+            error!(
+                target: "mux::memory",
+                "LSP server memory CRITICAL (pid={}): {:.1} GiB total (rss={:.1} GiB swap={:.1} GiB)",
+                pid, total_gib, rss_gib, swap_gib
+            );
+        } else if total_kb >= WARN_KB {
+            warn!(
+                target: "mux::memory",
+                "LSP server memory high (pid={}): {:.1} GiB total (rss={:.1} GiB swap={:.1} GiB)",
+                pid, total_gib, rss_gib, swap_gib
+            );
+        } else {
+            debug!(
+                target: "mux::memory",
+                "LSP server memory (pid={}): rss={:.1} GiB swap={:.1} GiB",
+                pid, rss_gib, swap_gib
+            );
+        }
+    }
+}
+
+/// Reads VmRSS and VmSwap from `/proc/{pid}/status`. Returns `None` if the process is gone.
+#[cfg(target_os = "linux")]
+fn read_proc_memory(pid: u32) -> Option<(u64, u64)> {
+    let content = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    let mut rss_kb = None;
+    let mut swap_kb = None;
+    for line in content.lines() {
+        if let Some(rest) = line.strip_prefix("VmRSS:") {
+            rss_kb = rest.split_whitespace().next().and_then(|v| v.parse().ok());
+        } else if let Some(rest) = line.strip_prefix("VmSwap:") {
+            swap_kb = rest.split_whitespace().next().and_then(|v| v.parse().ok());
+        }
+        if rss_kb.is_some() && swap_kb.is_some() {
+            break;
+        }
+    }
+    Some((rss_kb?, swap_kb.unwrap_or(0)))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn read_proc_memory(_pid: u32) -> Option<(u64, u64)> {
+    None
 }

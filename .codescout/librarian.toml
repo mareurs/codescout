@@ -4,46 +4,46 @@
 
 # Phase reviews / postmortems — dated review snapshots.
 [[rule]]
-glob = "code-explorer/docs/reviews/**/*.md"
+glob = "docs/reviews/**/*.md"
 kind = "memory"
 time_scope = "dated_snapshot"
 
 # Per-agent compatibility/usage notes.
 [[rule]]
-glob = "code-explorer/docs/agents/*.md"
+glob = "docs/agents/*.md"
 kind = "doc"
 
 # Long-running cross-cutting trackers shipped under superpowers/.
 [[rule]]
-glob = "code-explorer/docs/superpowers/trackers/*.md"
+glob = "docs/superpowers/trackers/*.md"
 kind = "tracker"
 status = "active"
 
 # Archived bug/issue logs preserved for posterity.
 [[rule]]
-glob = "code-explorer/docs/archive/**/*.md"
+glob = "docs/archive/**/*.md"
 kind = "memory"
 
 # Top-level project docs we ship for users (uppercase convention).
 [[rule]]
-glob = "code-explorer/docs/FEATURES.md"
+glob = "docs/FEATURES.md"
 kind = "doc"
 
 [[rule]]
-glob = "code-explorer/docs/PROGRESSIVE_DISCOVERABILITY.md"
+glob = "docs/PROGRESSIVE_DISCOVERABILITY.md"
 kind = "doc"
 
 [[rule]]
-glob = "code-explorer/docs/RELEASE-TODO.md"
+glob = "docs/RELEASE-TODO.md"
 kind = "tracker"
 status = "active"
 
 # Research/validation memos — long-lived reference notes.
 [[rule]]
-glob = "code-explorer/docs/research-*.md"
+glob = "docs/research-*.md"
 kind = "memory"
 
 # Crate-level credits files.
 [[rule]]
-glob = "code-explorer/crates/*/CREDITS.md"
+glob = "crates/*/CREDITS.md"
 kind = "doc"

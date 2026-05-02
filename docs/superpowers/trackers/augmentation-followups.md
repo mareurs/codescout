@@ -1,8 +1,15 @@
 ---
-title: Artifact Augmentation — Implementation Followups
-status: active
+id: null
 kind: tracker
-tags: [librarian-mcp, augmentation, tracker]
+status: done
+title: Artifact Augmentation — Implementation Followups
+owners: []
+tags:
+- librarian-mcp
+- augmentation
+- tracker
+topic: null
+time_scope: null
 ---
 
 # Artifact Augmentation — Implementation Followups

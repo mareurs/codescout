@@ -106,17 +106,26 @@ pub fn editing_start_line(sym: &crate::lsp::SymbolInfo, lines: &[&str]) -> usize
 /// Resolve the authoritative end line for a symbol we are about to edit.
 ///
 /// Uses AST as the authoritative source for the symbol's end line when available.
-/// Tree-sitter always terminates at the real closing brace/delimiter, while LSP
-/// servers may over-extend (rust-analyzer including the next symbol's opening line)
-/// or under-extend (reporting the last statement line instead of `}`).
+/// Tree-sitter usually terminates at the real closing brace/delimiter even under
+/// error recovery, while LSP servers may over-extend (rust-analyzer including the
+/// next symbol's opening line) or under-extend (reporting the last statement line
+/// instead of `}`).
 ///
 /// We fall back to the LSP end line when:
 /// - AST extraction itself fails (e.g. `detect_language` returned a name like
 ///   `"c"`/`"cpp"` with no tree-sitter grammar).
-/// - Tree-sitter reports syntax errors: a broken parse tree can under-report
-///   the end, silently truncating the edit range.
 /// - The AST produces multiple same-name candidates near `lsp_start` with no
 ///   name_path tiebreaker (ambiguous — refuse to guess; see `find_ast_end_line_in`).
+/// - The file has syntax errors AND tree-sitter's error recovery fails to identify
+///   the function boundary (`find_ast_end_line_in` returns `None`): in this case
+///   `sym.end_line` is returned, which may still be a short LSP value. This is a
+///   known residual of BUG-051 — partial mitigation only.
+///
+/// Syntax errors do NOT cause an early return: we run AST regardless, because the
+/// alternative (falling back to LSP blindly) is worse — LSP regularly reports the
+/// last statement line rather than `}`, causing insertion mid-function (BUG-051).
+/// Tree-sitter's error recovery is reliable enough for function-boundary detection
+/// and is trusted unconditionally when it finds a match, same as on a clean file.
 ///
 /// When AST and LSP disagree by more than a small threshold, we log a warning
 /// so large mismatches are visible under `RUST_LOG=warn`.
@@ -133,16 +142,6 @@ pub fn editing_end_line(sym: &crate::lsp::SymbolInfo) -> u32 {
         }
     };
     let lang = crate::ast::detect_language(&sym.file);
-    if let Some(lang) = lang {
-        if crate::ast::has_syntax_errors(&source, lang) {
-            tracing::trace!(
-                target: "codescout::editing_end_line",
-                "syntax errors in {:?}; refusing to trust AST, using LSP end_line={}",
-                sym.file, sym.end_line,
-            );
-            return sym.end_line;
-        }
-    }
     let ast_syms = match crate::ast::parser::extract_symbols_from_source(&source, lang, &sym.file) {
         Ok(syms) => syms,
         Err(err) => {
@@ -168,7 +167,7 @@ pub fn editing_end_line(sym: &crate::lsp::SymbolInfo) -> u32 {
                 DISAGREE_THRESHOLD, sym.name, sym.file, ast_end + 1, sym.end_line + 1,
             );
         }
-        return ast_end; // AST is authoritative when available
+        return ast_end; // AST is authoritative when available, even with syntax errors
     }
     sym.end_line
 }

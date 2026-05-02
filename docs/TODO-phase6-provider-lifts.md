@@ -20,7 +20,7 @@ Commit `f7ca520`:
 
 **Plan target:** `resolve_read_path`, `resolve_write_path`, `resolve_glob`, `resolve_library_roots`, `guard_not_markdown`, `get_lsp_client`, `LspTimer`, `get_path_param`, `require_path_param`, plus the pure helpers below.
 
-**Blocker:** most of these take `&ToolContext`. Lifting to `src/fs/` would cross the tool-layer boundary. Needs an API redesign — take `&Agent` (+ `&dyn LspProvider` where LSP is involved) instead of `&ToolContext`. That's a refactor of its own, not a mechanical move.
+**Status:** ✅ DONE — `src/fs/mod.rs` exists.
 
 **Easy wins (context-free, can be lifted any time):**
 

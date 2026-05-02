@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::agent::Agent;
 use crate::prompts::builders::{
@@ -38,7 +37,7 @@ fn system_prompt_draft_includes_per_project_memory_refs() {
         &Vec::new(),
     );
     assert!(
-        draft.contains("memory(project:"),
+        draft.contains("memory(project_id="),
         "should reference per-project memories"
     );
     assert!(draft.contains("api"), "should mention api project");
@@ -2247,15 +2246,15 @@ fn system_prompt_draft_multi_project_nav_strategy_has_subsections() {
         "should have frontend subsection"
     );
     assert!(
-        draft.contains("scope=\"project:backend\""),
+        draft.contains("project_id=\"backend\""),
         "should have scoped semantic_search for backend"
     );
     assert!(
-        draft.contains("scope=\"project:frontend\""),
+        draft.contains("project_id=\"frontend\""),
         "should have scoped semantic_search for frontend"
     );
     assert!(
-        draft.contains("memory(project: \"backend\""),
+        draft.contains("memory(project_id=\"backend\""),
         "should have per-project memory hint for backend"
     );
     assert!(
@@ -2311,11 +2310,11 @@ fn system_prompt_draft_multi_project_search_tips_has_scope_warning() {
         "should warn about workspace scoping in Search Tips"
     );
     assert!(
-        draft.contains("project: \"backend\""),
+        draft.contains("project_id=\"backend\""),
         "should include per-project example for backend"
     );
     assert!(
-        draft.contains("project: \"frontend\""),
+        draft.contains("project_id=\"frontend\""),
         "should include per-project example for frontend"
     );
 }
@@ -3468,7 +3467,7 @@ async fn workspace_onboarding_full_flow() {
     assert!(prompt.contains("## System Prompt Draft"));
     assert!(prompt.contains("api"));
     assert!(prompt.contains("web"));
-    assert!(prompt.contains("memory(project:"));
+    assert!(prompt.contains("memory(project_id="));
 
     // call_content delivers 1 structured JSON block with prompt_path
     let content = Onboarding

@@ -70,6 +70,12 @@ impl UsageRecorder {
             None
         };
 
+        let cc_session_id =
+            std::fs::read_to_string(project_root.join(".codescout").join("cc_session_id"))
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+
         db::write_record(
             &conn,
             tool_name,
@@ -82,6 +88,7 @@ impl UsageRecorder {
             &self.session_id,
             input_json.as_deref(),
             output_json.as_deref(),
+            cc_session_id.as_deref(),
         )?;
         Ok(())
     }

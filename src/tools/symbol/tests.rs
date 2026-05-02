@@ -974,6 +974,56 @@ fn symbol_name_matches_generic_types() {
 }
 
 #[test]
+fn symbol_name_matches_suffix_at_word_boundary() {
+    let make_sym = |name: &str, name_path: &str| SymbolInfo {
+        name: name.to_string(),
+        name_path: name_path.to_string(),
+        kind: crate::lsp::SymbolKind::Function,
+        file: std::env::temp_dir().join("test.rs"),
+        start_line: 0,
+        end_line: 10,
+        start_col: 0,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+
+    // Rust trait impl: space boundary
+    let s = make_sym("call", "impl Tool for SemanticSearch/call");
+    assert!(symbol_name_matches(&s, "SemanticSearch/call"));
+    assert!(symbol_name_matches(&s, "call")); // exact name match still works
+
+    // Rust trait impl with qualified path: colon boundary (from ::)
+    let s = make_sym(
+        "search_text",
+        "impl Searchable for crate::models::book::Book/search_text",
+    );
+    assert!(symbol_name_matches(&s, "Book/search_text"));
+
+    // Nested name_path: slash boundary
+    let s = make_sym("method", "OuterClass/InnerClass/method");
+    assert!(symbol_name_matches(&s, "InnerClass/method"));
+
+    // Non-boundary: partial suffix must NOT match (letter before suffix)
+    let s = make_sym("call", "FooSemanticSearch/call");
+    assert!(!symbol_name_matches(&s, "SemanticSearch/call")); // 'o' is not a boundary
+
+    // Partial suffix not at boundary: "ch/call" must NOT match
+    let s = make_sym("call", "impl Tool for SemanticSearch/call");
+    assert!(!symbol_name_matches(&s, "ch/call")); // 'r' is not a boundary
+
+    // Rust inherent generic impl: generics break suffix — must NOT match
+    let s = make_sym("add", "impl Catalog<T>/add");
+    assert!(!symbol_name_matches(&s, "Catalog/add")); // <T> in between, no clean suffix
+    assert!(symbol_name_matches(&s, "add")); // bare name still works
+
+    // Java generic class: same — must NOT match partial
+    let s = make_sym("add", "Catalog<T extends Searchable>/add");
+    assert!(!symbol_name_matches(&s, "Catalog/add"));
+    assert!(symbol_name_matches(&s, "add")); // bare name works
+}
+
+#[test]
 fn find_symbol_by_name_path_generic_types() {
     let test_file = std::env::temp_dir().join("test.ts");
     let symbols = vec![
@@ -1111,6 +1161,62 @@ fn find_unique_symbol_by_name_path_errors_on_ambiguous_name() {
     assert!(
         err_str.contains("nonexistent"),
         "expected symbol name in error, got: {err_str}"
+    );
+}
+
+#[test]
+fn find_unique_symbol_by_name_path_suggests_leaf_matches() {
+    let test_file = std::env::temp_dir().join("test.rs");
+    let make_child = |parent: &str, name: &str| SymbolInfo {
+        name: name.to_string(),
+        name_path: format!("{}/{}", parent, name),
+        kind: crate::lsp::SymbolKind::Function,
+        file: test_file.clone(),
+        start_line: 1,
+        end_line: 5,
+        start_col: 0,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    let symbols = vec![SymbolInfo {
+        name: "impl Catalog<T>".to_string(),
+        name_path: "impl Catalog<T>".to_string(),
+        kind: crate::lsp::SymbolKind::Object,
+        file: test_file.clone(),
+        start_line: 0,
+        end_line: 20,
+        start_col: 0,
+        children: vec![make_child("impl Catalog<T>", "add")],
+        range_start_line: None,
+        detail: None,
+    }];
+
+    // "Catalog/add" doesn't suffix-match "impl Catalog<T>/add" (generics break it)
+    // but the leaf "add" does match, so the error hint should suggest the real name_path.
+    let result = find_unique_symbol_by_name_path(&symbols, "Catalog/add");
+    assert!(result.is_err());
+    let err_str = result.unwrap_err().to_string();
+    assert!(
+        err_str.contains("impl Catalog<T>/add"),
+        "hint should suggest the real name_path, got: {err_str}"
+    );
+    assert!(
+        err_str.contains("did you mean"),
+        "message should use 'did you mean' phrasing, got: {err_str}"
+    );
+
+    // Bare name with no '/' → no leaf search (would be identical), no suggestion
+    let result = find_unique_symbol_by_name_path(&symbols, "nonexistent");
+    assert!(result.is_err());
+    let err_str = result.unwrap_err().to_string();
+    assert!(
+        err_str.contains("nonexistent"),
+        "bare-name miss should name the query, got: {err_str}"
+    );
+    assert!(
+        !err_str.contains("did you mean"),
+        "bare-name miss should not suggest, got: {err_str}"
     );
 }
 
@@ -2862,6 +2968,92 @@ println!(\"{}\", x + y);
     assert_eq!(
         end, 4,
         "editing_end_line should correct short LSP end to AST end (4), got {end}"
+    );
+}
+
+/// BUG-051 regression: when the file has syntax errors (common mid-session),
+/// `editing_end_line` must still use AST rather than falling back to LSP's
+/// `end_line` — which often points to the last *statement*, not the closing `}`.
+/// Insertion anchored on LSP's short end_line splits multi-line expressions.
+#[test]
+fn editing_end_line_with_syntax_errors_uses_ast_not_lsp_fallback() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("test.rs");
+    // File has a syntax error (incomplete macro in `broken`) but `target` is valid.
+    // LSP reports target's end_line=3 (last statement), real `}` is at line 5 (0-indexed).
+    let source = "\
+fn target() {\n\
+let x = 1;\n\
+let y = 2;\n\
+println!(\"{}\", x + y);\n\
+let z = x + y;\n\
+}\n\
+\n\
+fn broken() {\n\
+    vec![1, 2,\n\
+";
+    std::fs::write(&file, source).unwrap();
+
+    let sym = crate::lsp::SymbolInfo {
+        name: "target".to_string(),
+        name_path: "target".to_string(),
+        kind: crate::lsp::SymbolKind::Function,
+        file: file.clone(),
+        start_line: 0,
+        end_line: 3, // LSP short-reports: last statement, not `}`
+        start_col: 0,
+        children: vec![],
+        range_start_line: Some(0),
+        detail: None,
+    };
+
+    let end = editing_end_line(&sym);
+    // AST (tree-sitter) correctly identifies `}` at line 5 (0-indexed) even
+    // though `broken` has a syntax error. Must NOT return lsp end_line=3.
+    assert_eq!(
+        end, 5,
+        "editing_end_line must return AST's closing brace line (5), not LSP short-report (3), got {end}"
+    );
+}
+
+/// BUG-029 + syntax errors: when the file has syntax errors AND LSP over-extends
+/// by one line (e.g. rust-analyzer reporting the first line of the next function),
+/// `editing_end_line` must still trust AST — not `max(ast, lsp)`, which would
+/// return the inflated LSP value and insert after the next symbol's opening line.
+#[test]
+fn editing_end_line_syntax_errors_do_not_regress_lsp_overextend() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("test.rs");
+    // `target` closes at line 3 (`}`). `broken` has a syntax error.
+    // LSP over-reports target's end_line=4 (the `fn broken` line).
+    let source = "\
+fn target() {\n\
+let x = 1;\n\
+}\n\
+fn broken() {\n\
+    vec![1, 2,\n\
+";
+    std::fs::write(&file, source).unwrap();
+
+    let sym = crate::lsp::SymbolInfo {
+        name: "target".to_string(),
+        name_path: "target".to_string(),
+        kind: crate::lsp::SymbolKind::Function,
+        file: file.clone(),
+        start_line: 0,
+        end_line: 4, // LSP over-reports: includes `fn broken()` line
+        start_col: 0,
+        children: vec![],
+        range_start_line: Some(0),
+        detail: None,
+    };
+
+    let end = editing_end_line(&sym);
+    // AST should return 2 (`}` of target, 0-indexed). We must NOT take
+    // max(2, 4)=4, which would anchor insertion inside `broken`.
+    assert_eq!(
+        end, 2,
+        "editing_end_line must trust AST (2) not max with over-extended LSP (4), got {end}"
     );
 }
 

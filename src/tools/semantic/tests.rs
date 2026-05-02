@@ -1,4 +1,3 @@
-
 use super::index::format_index_status;
 use super::semantic_search::{
     apply_file_diversity_cap, format_search_result_item, format_semantic_search,

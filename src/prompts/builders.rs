@@ -236,7 +236,7 @@ pub(crate) fn build_system_prompt_draft(
     draft.push_str("- For call relationships and impact analysis: `call_graph(symbol, path)` — traces callers/callees\n");
     if projects_slice.len() > 1 {
         draft.push_str(
-            "- **Workspace mode:** always scope `semantic_search` with `project: \"<id>\"` — \
+            "- **Workspace mode:** always scope `semantic_search` with `project_id=\"<id>\"` — \
              broad terms match all projects and return mixed results\n",
         );
         for p in projects_slice {
@@ -254,7 +254,7 @@ pub(crate) fn build_system_prompt_draft(
                 "concept specific to this project"
             };
             draft.push_str(&format!(
-                "  - `{}`: `semantic_search(\"<{}>\", project: \"{}\")` \
+                "  - `{}`: `semantic_search(\"<{}>\", project_id=\"{}\")` \
                  — [fill in good query examples during onboarding]\n",
                 p.id, example_term, p.id
             ));
@@ -313,17 +313,17 @@ pub(crate) fn build_system_prompt_draft(
                 p.relative_root.display()
             ));
             draft.push_str(&format!(
-                "2. `semantic_search(\"your concept\", scope=\"project:{}\")` — search within this project\n",
+                "2. `semantic_search(\"your concept\", project_id=\"{}\")` — search within this project\n",
                 p.id
             ));
             draft.push_str(&format!(
-                "3. `memory(project: \"{}\", action=\"read\", topic=\"architecture\")` — project-specific knowledge\n\n",
+                "3. `memory(project_id=\"{}\", action=\"read\", topic=\"architecture\")` — project-specific knowledge\n\n",
                 p.id
             ));
         }
 
         draft.push_str("**Cross-project navigation:**\n");
-        draft.push_str("- **Quick lookups** (1–3 calls): pass `project: \"<id>\"` to scope the call — no state change.\n");
+        draft.push_str("- **Quick lookups** (1–3 calls): pass `project_id=\"<id>\"` to scope the call — no state change.\n");
         draft.push_str("- **Sustained exploration** (reading memories, semantic search, many tool calls): \
                          use `workspace(action=\"activate\", path=\"<id>\")`, but **always `workspace(action=\"activate\")` back to your original \
                          project when done.** Forgetting to return leaves all subsequent tool calls operating \
@@ -422,12 +422,12 @@ pub(crate) fn build_system_prompt_draft(
         }
 
         draft.push_str(
-            "Use `project: \"name\"` parameter to scope search/navigation to a specific project.\n\n",
+            "Use `project_id=\"name\"` parameter to scope search/navigation to a specific project.\n\n",
         );
 
         draft.push_str(
-            "**Per-project details:** Use `memory(project: \"<id>\", topic: \"architecture\")` \
-             or `memory(project: \"<id>\", topic: \"conventions\")` for project-specific knowledge.\n\n",
+            "**Per-project details:** Use `memory(project_id=\"<id>\", topic=\"architecture\")` \
+             or `memory(project_id=\"<id>\", topic=\"conventions\")` for project-specific knowledge.\n\n",
         );
     }
 
