@@ -10,13 +10,13 @@ use super::list_overview::{
     ast_class_names_for_dir, count_files_by_subdir, find_split_point, flat_symbol_count,
     LIST_SYMBOLS_SINGLE_FILE_FLAT_CAP,
 };
-use super::path_helpers::{
-    classify_reference_path, format_library_path, resolve_library_roots, tag_external_path,
-    uri_to_path,
-};
 use super::symbols::{build_by_file, make_search_symbols_hint};
 use super::*;
 use crate::agent::Agent;
+use crate::fs::{
+    classify_reference_path, format_library_path, resolve_library_roots, tag_external_path,
+    uri_to_path,
+};
 use crate::lsp::SymbolInfo;
 use crate::symbol::edit::{
     apply_text_edits, clamp_range_to_parent, editing_end_line, editing_start_line,

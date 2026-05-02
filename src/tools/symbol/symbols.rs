@@ -17,7 +17,7 @@ use crate::tools::{
 
 use super::display::{format_overview_symbols, format_search_symbols};
 use super::list_overview::list_overview;
-use super::path_helpers::{
+use crate::fs::{
     format_library_path, get_path_param, is_glob, resolve_glob, resolve_library_roots, LspTimer,
 };
 use crate::symbol::query::{
@@ -228,7 +228,7 @@ impl Tool for Symbols {
         if let Some(rel) = get_path_param(&input, false)? {
             // Restricted search: per-file textDocument/documentSymbol
             let files: Vec<PathBuf> = if is_glob(rel) {
-                resolve_glob(ctx, rel).await?
+                resolve_glob(&ctx.agent, rel).await?
             } else {
                 let full = root.join(rel);
                 if full.is_dir() {
@@ -260,7 +260,7 @@ impl Tool for Symbols {
                 let Ok(symbols) = client.document_symbols(file_path, language_id).await else {
                     continue;
                 };
-                timer.record(ctx, lang, &root).await;
+                timer.record(&*ctx.lsp, lang, &root).await;
                 let source = if include_body {
                     std::fs::read_to_string(file_path).ok()
                 } else {

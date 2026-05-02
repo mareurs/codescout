@@ -6,7 +6,6 @@ mod call_graph;
 mod display;
 mod edit_code;
 mod list_overview;
-mod path_helpers;
 mod references;
 mod symbol_at;
 mod symbols;

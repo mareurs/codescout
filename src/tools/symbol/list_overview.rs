@@ -11,7 +11,7 @@ use crate::ast;
 use crate::tools::output::{OutputGuard, OverflowInfo};
 use crate::tools::{optional_u64_param, parse_bool_param, RecoverableError, ToolContext};
 
-use super::path_helpers::{
+use crate::fs::{
     format_library_path, get_lsp_client, get_path_param, is_glob, resolve_glob,
     resolve_library_roots, resolve_read_path, LspTimer,
 };
@@ -219,7 +219,7 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
 
     // If the path contains glob metacharacters, expand and aggregate
     if is_glob(rel_path) {
-        let files = resolve_glob(ctx, rel_path).await?;
+        let files = resolve_glob(&ctx.agent, rel_path).await?;
         let mut guard = guard;
         guard.max_files = guard.max_files.min(LIST_SYMBOLS_MAX_FILES);
         let (files, file_overflow) =
@@ -236,7 +236,7 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
             if let Ok(client) = ctx.lsp.get_or_start(lang, &root, mux_override).await {
                 let timer = LspTimer::start();
                 if let Ok(symbols) = client.document_symbols(file_path, language_id).await {
-                    timer.record(ctx, lang, &root).await;
+                    timer.record(&*ctx.lsp, lang, &root).await;
                     let rel = file_path.strip_prefix(&root).unwrap_or(file_path);
                     let source = if include_body {
                         std::fs::read_to_string(file_path).ok()
@@ -270,16 +270,16 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
         return Ok(result_json);
     }
 
-    let full_path = resolve_read_path(ctx, rel_path).await?;
+    let full_path = resolve_read_path(&ctx.agent, rel_path).await?;
 
     if full_path.is_file() {
         let raw_lang = ast::detect_language(&full_path)
             .ok_or_else(|| anyhow::anyhow!("unsupported language"))?;
         let root = ctx.agent.require_project_root().await?;
-        let (client, lang) = get_lsp_client(ctx, &full_path).await?;
+        let (client, lang) = get_lsp_client(&ctx.agent, &*ctx.lsp, &full_path).await?;
         let timer = LspTimer::start();
         let symbols = client.document_symbols(&full_path, &lang).await?;
-        timer.record(ctx, raw_lang, &root).await;
+        timer.record(&*ctx.lsp, raw_lang, &root).await;
         let include_body = guard.should_include_body();
         let source = if include_body {
             std::fs::read_to_string(&full_path).ok()
@@ -427,7 +427,7 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
                             .await
                             .unwrap_or_default();
                         if !syms.is_empty() {
-                            timer.record(ctx, lang, &root).await;
+                            timer.record(&*ctx.lsp, lang, &root).await;
                         }
                         syms
                     } else {

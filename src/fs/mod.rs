@@ -1,56 +1,55 @@
-//! Path, LSP-client, and library-resolution helpers shared by symbol tools.
+//! Path resolution, glob expansion, and LSP-client acquisition.
 //!
-//! Extracted from `mod.rs` during refactor Phase 1b.1 — no behavior changes.
+//! Moved from `src/tools/symbol/path_helpers.rs` (Phase 6.2). All helpers
+//! take `&Agent` or `(&Agent, &dyn LspProvider)` instead of `&ToolContext`.
 
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+use crate::agent::Agent;
 use crate::ast;
+use crate::lsp::LspProvider;
 use crate::tools::RecoverableError;
-
-use crate::tools::ToolContext;
 
 /// Lightweight timer for recording LSP first-response latency.
 /// Start before the LSP call, then call `.record()` on success.
 /// If the LSP call fails and the function returns early, the timer
 /// is simply dropped — no timing is recorded.
-pub(super) struct LspTimer {
+pub(crate) struct LspTimer {
     start: std::time::Instant,
 }
 
 impl LspTimer {
-    pub(super) fn start() -> Self {
+    pub(crate) fn start() -> Self {
         Self {
             start: std::time::Instant::now(),
         }
     }
 
-    pub(super) async fn record(self, ctx: &ToolContext, lang: &str, root: &Path) {
-        ctx.lsp
-            .record_first_response(lang, root, self.start.elapsed().as_millis() as i64)
+    pub(crate) async fn record(self, lsp: &dyn LspProvider, lang: &str, root: &Path) {
+        lsp.record_first_response(lang, root, self.start.elapsed().as_millis() as i64)
             .await;
     }
 }
 
-/// Returns true if the path string contains glob metacharacters.
-pub(super) fn is_glob(path: &str) -> bool {
-    path.contains('*') || path.contains('?') || path.contains('[')
+pub(crate) fn is_glob(path: &str) -> bool {
+    path.contains(['*', '?', '['])
 }
 
 /// Resolve a path for reading, with security validation.
 ///
 /// `"."` and `""` resolve to the project root directly (not `root.join(".")`)
 /// to avoid spurious `./` prefixes when stripping the root later.
-pub(super) async fn resolve_read_path(
-    ctx: &ToolContext,
+pub(crate) async fn resolve_read_path(
+    agent: &Agent,
     relative_path: &str,
 ) -> anyhow::Result<PathBuf> {
     if relative_path == "." || relative_path.is_empty() {
-        return ctx.agent.require_project_root().await;
+        return agent.require_project_root().await;
     }
-    let project_root = ctx.agent.project_root().await;
-    let security = ctx.agent.security_config().await;
+    let project_root = agent.project_root().await;
+    let security = agent.security_config().await;
     let full = crate::util::path_security::validate_read_path(
         relative_path,
         project_root.as_deref(),
@@ -68,12 +67,12 @@ pub(super) async fn resolve_read_path(
 }
 
 /// Resolve a path for writing, with security validation.
-pub(super) async fn resolve_write_path(
-    ctx: &ToolContext,
+pub(crate) async fn resolve_write_path(
+    agent: &Agent,
     relative_path: &str,
 ) -> anyhow::Result<PathBuf> {
-    let root = ctx.agent.require_project_root().await?;
-    let security = ctx.agent.security_config().await;
+    let root = agent.require_project_root().await?;
+    let security = agent.security_config().await;
     crate::util::path_security::validate_write_path(relative_path, &root, &security)
 }
 
@@ -81,7 +80,7 @@ pub(super) async fn resolve_write_path(
 /// Returns `(library_name, absolute_root_path)` pairs.
 /// For `Scope::Library(name)`, returns a `RecoverableError` if the library
 /// lacks local source code. Other scopes silently skip source-unavailable entries.
-pub(super) async fn resolve_library_roots(
+pub(crate) async fn resolve_library_roots(
     scope: &crate::library::scope::Scope,
     agent: &crate::agent::Agent,
 ) -> anyhow::Result<Vec<(String, PathBuf)>> {
@@ -130,7 +129,7 @@ pub(super) async fn resolve_library_roots(
 
 /// Format a file path relative to a library root for display.
 /// Returns `lib:<name>/<relative_path>` or the absolute path as fallback.
-pub(super) fn format_library_path(lib_name: &str, lib_root: &Path, file_path: &Path) -> String {
+pub(crate) fn format_library_path(lib_name: &str, lib_root: &Path, file_path: &Path) -> String {
     file_path
         .strip_prefix(lib_root)
         .map(|rel| format!("lib:{}/{}", lib_name, rel.display()))
@@ -139,7 +138,7 @@ pub(super) fn format_library_path(lib_name: &str, lib_root: &Path, file_path: &P
 
 /// Classify a reference path as project, library, or external.
 /// Returns (classification_tag, display_path).
-pub(super) fn classify_reference_path(
+pub(crate) fn classify_reference_path(
     path: &Path,
     project_root: &Path,
     library_roots: &[(String, PathBuf)],
@@ -160,14 +159,14 @@ pub(super) fn classify_reference_path(
 /// Resolve a path that may be a glob pattern, returning all matching files.
 /// If the path is a literal file/directory, returns it as a single-element vec.
 /// If it contains glob metacharacters (* ? [), expands against the project root.
-pub(super) async fn resolve_glob(
-    ctx: &ToolContext,
+pub(crate) async fn resolve_glob(
+    agent: &Agent,
     path_or_glob: &str,
 ) -> anyhow::Result<Vec<PathBuf>> {
-    let root = ctx.agent.require_project_root().await?;
+    let root = agent.require_project_root().await?;
 
     if !is_glob(path_or_glob) {
-        let full = resolve_read_path(ctx, path_or_glob).await?;
+        let full = resolve_read_path(agent, path_or_glob).await?;
         return Ok(vec![full]);
     }
 
@@ -211,7 +210,7 @@ pub(super) async fn resolve_glob(
 }
 
 /// Extract an optional file path parameter from input, accepting "path", "relative_path", or "file".
-pub(super) fn get_path_param(input: &Value, required: bool) -> anyhow::Result<Option<&str>> {
+pub(crate) fn get_path_param(input: &Value, required: bool) -> anyhow::Result<Option<&str>> {
     match input["path"]
         .as_str()
         .or_else(|| input["relative_path"].as_str())
@@ -229,7 +228,7 @@ pub(super) fn get_path_param(input: &Value, required: bool) -> anyhow::Result<Op
 
 /// Extract a required file path parameter from input. Returns `&str` directly.
 /// Accepts "path", "relative_path", or "file" — same aliases as `get_path_param`.
-pub(super) fn require_path_param(input: &Value) -> anyhow::Result<&str> {
+pub(crate) fn require_path_param(input: &Value) -> anyhow::Result<&str> {
     input["path"]
         .as_str()
         .or_else(|| input["relative_path"].as_str())
@@ -245,7 +244,7 @@ pub(super) fn require_path_param(input: &Value) -> anyhow::Result<&str> {
 
 /// Return a `RecoverableError` if the path looks like a markdown file,
 /// directing the caller to `edit_markdown` / `read_markdown` instead.
-pub(super) fn guard_not_markdown(path: &Path) -> anyhow::Result<()> {
+pub(crate) fn guard_not_markdown(path: &Path) -> anyhow::Result<()> {
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         if ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown") {
             return Err(RecoverableError::with_hint(
@@ -263,8 +262,9 @@ pub(super) fn guard_not_markdown(path: &Path) -> anyhow::Result<()> {
 ///
 /// Returns `(client, lsp_language_id)` where `lsp_language_id` is the identifier
 /// expected by `textDocument/didOpen` (e.g. `"typescriptreact"` for `.tsx` files).
-pub(super) async fn get_lsp_client(
-    ctx: &ToolContext,
+pub(crate) async fn get_lsp_client(
+    agent: &Agent,
+    lsp: &dyn LspProvider,
     path: &Path,
 ) -> anyhow::Result<(std::sync::Arc<dyn crate::lsp::LspClientOps>, String)> {
     let lang = ast::detect_language(path).ok_or_else(|| {
@@ -275,9 +275,9 @@ pub(super) async fn get_lsp_client(
              Use list_functions for a tree-sitter fallback on other file types.",
         )
     })?;
-    let root = ctx.agent.require_project_root().await?;
-    let mux_override = ctx.agent.lsp_mux_override(lang).await;
-    let client = ctx.lsp.get_or_start(lang, &root, mux_override).await?;
+    let root = agent.require_project_root().await?;
+    let mux_override = agent.lsp_mux_override(lang).await;
+    let client = lsp.get_or_start(lang, &root, mux_override).await?;
     let language_id = crate::lsp::servers::lsp_language_id(lang);
     Ok((client, language_id.to_string()))
 }
@@ -295,8 +295,9 @@ fn is_mux_disconnect(e: &anyhow::Error) -> bool {
 ///
 /// Designed for read-only LSP requests (hover, goto_definition, references).
 /// The closure may be called twice — keep it idempotent.
-pub(super) async fn retry_on_mux_disconnect<F, Fut, T>(
-    ctx: &ToolContext,
+pub(crate) async fn retry_on_mux_disconnect<F, Fut, T>(
+    agent: &Agent,
+    lsp: &dyn LspProvider,
     path: &Path,
     initial_client: std::sync::Arc<dyn crate::lsp::LspClientOps>,
     initial_lang: String,
@@ -309,7 +310,7 @@ where
     match op(initial_client, initial_lang).await {
         Err(e) if is_mux_disconnect(&e) => {
             tracing::warn!("LSP mux disconnect, retrying once: {}", e);
-            let (client, lang) = get_lsp_client(ctx, path).await?;
+            let (client, lang) = get_lsp_client(agent, lsp, path).await?;
             op(client, lang).await
         }
         other => other,
@@ -320,7 +321,7 @@ where
 ///
 /// Uses `url::Url` for correct handling of Windows drive letters,
 /// UNC paths, and percent-encoding.
-pub(super) fn uri_to_path(uri: &str) -> Option<PathBuf> {
+pub(crate) fn uri_to_path(uri: &str) -> Option<PathBuf> {
     url::Url::parse(uri)
         .ok()
         .and_then(|u| u.to_file_path().ok())
@@ -328,7 +329,7 @@ pub(super) fn uri_to_path(uri: &str) -> Option<PathBuf> {
 
 /// Returns `true` if any component of `path` is a well-known build-artifact directory.
 /// Used by `references` to suppress noise from generated/vendored code.
-pub(super) fn path_in_excluded_dir(path: &std::path::Path) -> bool {
+pub(crate) fn path_in_excluded_dir(path: &std::path::Path) -> bool {
     const EXCLUDED: &[&str] = &[
         "target",
         "node_modules",
@@ -355,7 +356,7 @@ pub(super) fn path_in_excluded_dir(path: &std::path::Path) -> bool {
 
 /// Check if a path is outside the project root. If so, attempt to discover
 /// and register the library. Returns the source tag.
-pub(super) async fn tag_external_path(
+pub(crate) async fn tag_external_path(
     path: &std::path::Path,
     project_root: &std::path::Path,
     agent: &crate::agent::Agent,

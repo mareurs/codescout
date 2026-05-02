@@ -7,7 +7,7 @@ use crate::tools::output::OutputGuard;
 use crate::tools::{require_str_param, Tool, ToolContext};
 
 use super::display::format_find_references;
-use super::path_helpers::{
+use crate::fs::{
     classify_reference_path, get_lsp_client, path_in_excluded_dir, require_path_param,
     resolve_library_roots, resolve_read_path, uri_to_path, LspTimer,
 };
@@ -42,16 +42,16 @@ impl Tool for References {
         let rel_path = require_path_param(&input)?;
         let scope = crate::library::scope::Scope::parse(input["scope"].as_str());
 
-        let full_path = resolve_read_path(ctx, rel_path).await?;
+        let full_path = resolve_read_path(&ctx.agent, rel_path).await?;
         let raw_lang = ast::detect_language(&full_path)
             .ok_or_else(|| anyhow::anyhow!("unsupported language"))?;
         let root = ctx.agent.require_project_root().await?;
-        let (client, lang) = get_lsp_client(ctx, &full_path).await?;
+        let (client, lang) = get_lsp_client(&ctx.agent, &*ctx.lsp, &full_path).await?;
 
         // Find the symbol's position by walking document symbols
         let timer = LspTimer::start();
         let symbols = client.document_symbols(&full_path, &lang).await?;
-        timer.record(ctx, raw_lang, &root).await;
+        timer.record(&*ctx.lsp, raw_lang, &root).await;
         let sym = find_unique_symbol_by_name_path(&symbols, name_path)?;
 
         // Get references at the symbol's position

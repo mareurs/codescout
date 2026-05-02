@@ -9,7 +9,7 @@ use crate::tools::{guard_worktree_write, require_str_param, RecoverableError, To
 use super::display::{
     format_insert_code, format_remove_symbol, format_rename_symbol, format_replace_symbol,
 };
-use super::path_helpers::{
+use crate::fs::{
     get_lsp_client, guard_not_markdown, require_path_param, resolve_write_path, uri_to_path,
 };
 use crate::symbol::edit::{
@@ -113,9 +113,9 @@ impl EditCode {
         rel_path: &str,
         new_name: &str,
     ) -> anyhow::Result<Value> {
-        let full_path = resolve_write_path(ctx, rel_path).await?;
+        let full_path = resolve_write_path(&ctx.agent, rel_path).await?;
         guard_not_markdown(&full_path)?;
-        let (client, lang) = get_lsp_client(ctx, &full_path).await?;
+        let (client, lang) = get_lsp_client(&ctx.agent, &*ctx.lsp, &full_path).await?;
 
         let symbols = client.document_symbols(&full_path, &lang).await?;
         let sym = find_unique_symbol_by_name_path(&symbols, name_path)?;
@@ -371,9 +371,9 @@ impl EditCode {
         name_path: &str,
         rel_path: &str,
     ) -> anyhow::Result<Value> {
-        let full_path = resolve_write_path(ctx, rel_path).await?;
+        let full_path = resolve_write_path(&ctx.agent, rel_path).await?;
         guard_not_markdown(&full_path)?;
-        let (client, lang) = get_lsp_client(ctx, &full_path).await?;
+        let (client, lang) = get_lsp_client(&ctx.agent, &*ctx.lsp, &full_path).await?;
 
         let (sym, symbols) = fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
 
@@ -427,9 +427,9 @@ impl EditCode {
         rel_path: &str,
         new_body: &str,
     ) -> anyhow::Result<Value> {
-        let full_path = resolve_write_path(ctx, rel_path).await?;
+        let full_path = resolve_write_path(&ctx.agent, rel_path).await?;
         guard_not_markdown(&full_path)?;
-        let (client, lang) = get_lsp_client(ctx, &full_path).await?;
+        let (client, lang) = get_lsp_client(&ctx.agent, &*ctx.lsp, &full_path).await?;
 
         let (sym, symbols) = fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
 
@@ -540,9 +540,9 @@ impl EditCode {
         code: &str,
         position: &str,
     ) -> anyhow::Result<Value> {
-        let full_path = resolve_write_path(ctx, rel_path).await?;
+        let full_path = resolve_write_path(&ctx.agent, rel_path).await?;
         guard_not_markdown(&full_path)?;
-        let (client, lang) = get_lsp_client(ctx, &full_path).await?;
+        let (client, lang) = get_lsp_client(&ctx.agent, &*ctx.lsp, &full_path).await?;
 
         let (sym, symbols) = fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
 

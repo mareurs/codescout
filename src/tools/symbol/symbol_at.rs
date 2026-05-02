@@ -8,7 +8,7 @@ use crate::ast;
 use crate::tools::{require_u64_param, RecoverableError, Tool, ToolContext};
 
 use super::display::{format_goto_definition, format_hover};
-use super::path_helpers::{
+use crate::fs::{
     get_lsp_client, require_path_param, resolve_read_path, retry_on_mux_disconnect,
     tag_external_path, uri_to_path, LspTimer,
 };
@@ -71,11 +71,11 @@ fn read_position_inputs(input: &Value) -> anyhow::Result<PositionInputs> {
 pub(crate) async fn fetch_definition(ctx: &ToolContext, input: &Value) -> anyhow::Result<Value> {
     let (rel_path, line_1, line_0, col_param, identifier) = read_position_inputs(input)?;
 
-    let full_path = resolve_read_path(ctx, &rel_path).await?;
+    let full_path = resolve_read_path(&ctx.agent, &rel_path).await?;
     let raw_lang =
         ast::detect_language(&full_path).ok_or_else(|| anyhow::anyhow!("unsupported language"))?;
     let root = ctx.agent.require_project_root().await?;
-    let (client, lang) = get_lsp_client(ctx, &full_path).await?;
+    let (client, lang) = get_lsp_client(&ctx.agent, &*ctx.lsp, &full_path).await?;
 
     // Resolution: col > identifier > first-non-whitespace.
     let source = std::fs::read_to_string(&full_path)?;
@@ -115,12 +115,13 @@ pub(crate) async fn fetch_definition(ctx: &ToolContext, input: &Value) -> anyhow
     };
 
     let timer = LspTimer::start();
-    let definitions = retry_on_mux_disconnect(ctx, &full_path, client, lang, |c, l| {
-        let p = full_path.clone();
-        async move { c.goto_definition(&p, line_0, col, &l).await }
-    })
-    .await?;
-    timer.record(ctx, raw_lang, &root).await;
+    let definitions =
+        retry_on_mux_disconnect(&ctx.agent, &*ctx.lsp, &full_path, client, lang, |c, l| {
+            let p = full_path.clone();
+            async move { c.goto_definition(&p, line_0, col, &l).await }
+        })
+        .await?;
+    timer.record(&*ctx.lsp, raw_lang, &root).await;
 
     let from = format!(
         "{}:{}",
@@ -195,10 +196,10 @@ pub(crate) async fn fetch_definition(ctx: &ToolContext, input: &Value) -> anyhow
 pub(crate) async fn fetch_hover(ctx: &ToolContext, input: &Value) -> anyhow::Result<Value> {
     let (rel_path, line_1, line_0, col_param, identifier) = read_position_inputs(input)?;
 
-    let full_path = resolve_read_path(ctx, &rel_path).await?;
+    let full_path = resolve_read_path(&ctx.agent, &rel_path).await?;
     let raw_lang =
         ast::detect_language(&full_path).ok_or_else(|| anyhow::anyhow!("unsupported language"))?;
-    let (client, lang) = get_lsp_client(ctx, &full_path).await?;
+    let (client, lang) = get_lsp_client(&ctx.agent, &*ctx.lsp, &full_path).await?;
 
     // Resolution: col > identifier > first-symbol heuristic.
     // `col` is LSP-native; `identifier` is a substring-match fallback;
@@ -237,13 +238,14 @@ pub(crate) async fn fetch_hover(ctx: &ToolContext, input: &Value) -> anyhow::Res
     };
 
     let timer = LspTimer::start();
-    let hover_text = retry_on_mux_disconnect(ctx, &full_path, client, lang, |c, l| {
-        let p = full_path.clone();
-        async move { c.hover(&p, line_0, col, &l).await }
-    })
-    .await?;
+    let hover_text =
+        retry_on_mux_disconnect(&ctx.agent, &*ctx.lsp, &full_path, client, lang, |c, l| {
+            let p = full_path.clone();
+            async move { c.hover(&p, line_0, col, &l).await }
+        })
+        .await?;
     let root = ctx.agent.require_project_root().await?;
-    timer.record(ctx, raw_lang, &root).await;
+    timer.record(&*ctx.lsp, raw_lang, &root).await;
 
     let source_tag = tag_external_path(&full_path, &root, &ctx.agent).await;
     let location = format!(
