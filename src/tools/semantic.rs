@@ -164,6 +164,25 @@ impl Tool for SemanticSearch {
         }
         let query_embedding = codescout_embed::embed_one(embedder.as_ref(), query).await?;
 
+        // Drain files written by tools in this session and re-embed them before searching.
+        let dirty_paths = ctx.agent.drain_dirty_files().await;
+        if !dirty_paths.is_empty() {
+            match crate::embed::index::reindex_files(&root, &dirty_paths, &embedder).await {
+                Ok(n) => {
+                    if n > 0 {
+                        tracing::info!("auto-reindexed {} file(s) before semantic_search", n);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("auto-reindex failed, search proceeds on stale data: {e}");
+                    // Re-insert so next search can retry
+                    for path in dirty_paths {
+                        ctx.agent.mark_file_dirty(path).await;
+                    }
+                }
+            }
+        }
+
         // Sync SQLite off async runtime
         let root2 = root.clone();
         let model2 = model.clone();
@@ -287,20 +306,6 @@ impl Tool for SemanticSearch {
                     "note": "Recent commits not yet indexed — run index(action='build') to include new code. Existing results are unaffected."
                 });
             }
-        }
-        // Warn if write tools have modified files in this session that haven't been re-indexed.
-        let dirty = ctx.agent.dirty_file_count().await;
-        if dirty > 0 {
-            result["unindexed_writes"] = json!({
-                "status": "warn",
-                "file_count": dirty,
-                "note": format!(
-                    "{} file{} modified in this session but not yet re-indexed — \
-                     run index(action='build') to include recent changes in semantic search.",
-                    dirty,
-                    if dirty == 1 { " was" } else { "s were" }
-                )
-            });
         }
         // Check for stale libraries
         let stale = {
