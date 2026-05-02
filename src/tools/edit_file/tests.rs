@@ -3506,6 +3506,88 @@ fn search_missing_matches_key() {
     assert_eq!(format_grep(&val), "");
 }
 
+#[tokio::test]
+async fn grep_identifier_pattern_adds_suggestion() {
+    let ctx = test_ctx().await;
+    let dir = tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("code.rs"),
+        "pub struct WriteMemory;\nimpl WriteMemory {}\n",
+    )
+    .unwrap();
+
+    let result = Grep
+        .call(
+            json!({ "pattern": "WriteMemory", "path": dir.path().to_str().unwrap() }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let suggestion = result["suggestion"]
+        .as_str()
+        .expect("suggestion field missing");
+    assert!(
+        suggestion.contains("symbols(name='WriteMemory')"),
+        "got: {suggestion}"
+    );
+    assert!(
+        suggestion.contains("references(symbol='WriteMemory')"),
+        "got: {suggestion}"
+    );
+    assert!(
+        suggestion.contains("call_graph(symbol='WriteMemory'"),
+        "got: {suggestion}"
+    );
+}
+
+#[tokio::test]
+async fn grep_regex_pattern_no_suggestion() {
+    let ctx = test_ctx().await;
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("code.rs"), "fn main() {}\n").unwrap();
+
+    let result = Grep
+        .call(
+            json!({ "pattern": "fn.*main", "path": dir.path().to_str().unwrap() }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        result.get("suggestion").is_none(),
+        "regex pattern should not add suggestion"
+    );
+}
+
+#[tokio::test]
+async fn grep_pipe_alternation_suggestion_uses_first_part() {
+    let ctx = test_ctx().await;
+    let dir = tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("code.rs"),
+        "struct WriteMemory;\nstruct ReadMemory;\n",
+    )
+    .unwrap();
+
+    let result = Grep
+        .call(
+            json!({ "pattern": "WriteMemory|ReadMemory", "path": dir.path().to_str().unwrap() }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let suggestion = result["suggestion"]
+        .as_str()
+        .expect("suggestion field missing");
+    assert!(
+        suggestion.contains("symbols(name='WriteMemory')"),
+        "got: {suggestion}"
+    );
+}
+
 // --- format_read_file tests ---
 
 #[test]

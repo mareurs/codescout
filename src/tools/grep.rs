@@ -191,6 +191,15 @@ impl Tool for Grep {
             result["mode"] = json!("literal_fallback");
             result["reason"] = json!("pattern was not valid regex — searched as literal text");
         }
+        if crate::util::path_security::is_identifier_pattern(pattern) {
+            let name = pattern.split('|').next().unwrap_or(pattern);
+            result["suggestion"] = json!(format!(
+                "Pattern looks like a symbol name. Consider: \
+                 symbols(name='{name}') for declarations, \
+                 references(symbol='{name}') for direct callers, \
+                 call_graph(symbol='{name}', direction='callers') for transitive blast radius."
+            ));
+        }
         Ok(result)
     }
 
