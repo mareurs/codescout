@@ -669,6 +669,7 @@ Follow it to re-read memories and regenerate system-prompt.md."
 pub(crate) fn build_prompt_refresh_subagent_prompt(memory_topics: &[String]) -> String {
     let memory_reads = memory_topics
         .iter()
+        .filter(|t| t.as_str() != "system-prompt")
         .map(|t| format!("  - memory(action=\"read\", topic=\"{t}\")"))
         .collect::<Vec<_>>()
         .join("\n");
@@ -681,7 +682,7 @@ Steps:
 1. workspace(action=\"activate\", path=\".\", read_only=false) — enable writes
 2. Read each project memory that contributes to the system prompt:
 {memory_reads}
-3. Read the current system-prompt.md (if it exists) to understand its structure
+3. Read the current system-prompt.md (if it exists) for Entry Points and Key Abstractions structure only — do NOT copy tool navigation examples from it, as those may be stale
 4. Regenerate system-prompt.md using the standard template sections:
    - ## Entry Points
    - ## Key Abstractions

@@ -16,7 +16,7 @@ use super::{parse_bool_param, Tool, ToolContext};
 /// Bump this when system prompt surfaces change significantly.
 /// Missing or lower stored version triggers auto-refresh of the system prompt.
 /// See CLAUDE.md § "Onboarding Version" for when to bump.
-pub(crate) const ONBOARDING_VERSION: u32 = 19;
+pub(crate) const ONBOARDING_VERSION: u32 = 20;
 
 /// Returns true if the stored onboarding version is stale (needs refresh).
 /// `None` means pre-versioning project — always stale.
@@ -603,7 +603,7 @@ async fn handle_already_onboarded(ctx: &ToolContext) -> anyhow::Result<Option<Va
         ));
     }
     if !per_project_memories.is_empty() {
-        message.push_str(" Per-project memories (use `project: \"<id>\"` parameter):");
+        message.push_str(" Per-project memories (use `project_id=\"<id>\"` parameter):");
         for (id, topics) in &per_project_memories {
             message.push_str(&format!(" {}: {};", id, topics.join(", ")));
         }

@@ -719,15 +719,15 @@ async fn onboarding_status_includes_per_project_memories_for_workspace() {
         "project_memories should be non-empty after workspace onboarding"
     );
 
-    // Message mentions per-project memories and the project: param hint
+    // Message mentions per-project memories and the project_id param hint
     let msg = result["message"].as_str().unwrap();
     assert!(
         msg.contains("Per-project memories"),
         "message should mention per-project memories"
     );
     assert!(
-        msg.contains("project:"),
-        "message should include project scoping hint"
+        msg.contains("project_id="),
+        "message should include project_id scoping hint"
     );
 }
 
@@ -2363,7 +2363,7 @@ fn system_prompt_points_to_tool_guide_resource() {
         prompt.contains("doc://codescout-tool-guide"),
         "system prompt must point agents to the tool-guide resource"
     );
-    assert_eq!(ONBOARDING_VERSION, 19);
+    assert_eq!(ONBOARDING_VERSION, 20);
 }
 
 #[test]
