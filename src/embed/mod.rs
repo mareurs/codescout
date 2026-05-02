@@ -11,6 +11,9 @@
 //!   - RemoteEmbedder (reqwest, feature "remote-embed")   — OpenAI-compatible API
 
 pub mod ast_chunker;
+pub mod bm25;
+pub mod fusion;
+
 pub use codescout_embed::chunker;
 pub use codescout_embed::{chunk_markdown, split, split_markdown, RawChunk};
 pub mod drift;
