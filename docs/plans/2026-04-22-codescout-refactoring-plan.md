@@ -2,7 +2,7 @@
 
 **Created:** 2026-04-22
 **Branch:** `refactoring` (off `master`)
-**Status:** Phase 1 in progress (Hooves 1–2 complete)
+**Status:** Phases 0–7 complete. Phase 6 complete (2026-05-02). Phase 8 partial (8.3 deferred).
 **Source review:** see conversation that produced this plan — three voices (Architecture Snow Lion, Refactoring Yak, Docs Lotus Frog).
 
 ---
@@ -367,15 +367,11 @@ shape exactly.
 
 ### Phase 6 — Lift providers out of tool code
 
-**Status:** 🟡 PARTIAL (commit `f7ca520` — 6.1 symbol provider done).
-Remaining fs/text lifts deferred: the context-free candidates (`is_glob`,
-`classify_reference_path`, `format_library_path`, `uri_to_path`,
-`path_in_excluded_dir`) are a tight 5-function cluster that doesn't
-earn its own `src/fs/` module without a wider API redesign — most
-neighbours take `&ToolContext` and resist a clean crate-root lift.
-Revisit when a concrete consumer outside `src/tools/` appears. Full
-inventory of remaining lifts tracked in
-`docs/TODO-phase6-provider-lifts.md`.
+**Status:** ✅ COMPLETE — 6.1 (symbol) + 6.2 (fs) done. 6.3 (text) deferred:
+single-caller helpers, not worth `src/text/` at current scale. 6.4
+(tool-file thinning) done 2026-05-02: split `semantic.rs` (4 tools, 2198 lines)
+and `markdown.rs` (2 tools, 1982 lines) into directory modules — each tool now
+in its own file, tests extracted to `tests.rs`. See `docs/TODO-phase6-provider-lifts.md`.
 
 **Goal:** Tool files become thin adapters. Domain logic lives in provider
 modules.
@@ -455,11 +451,13 @@ Step 1 alone is enough. Step 2 is a Phase 8 candidate if needed.
 ### Phase 8 — Documentation reorg (Frog's phase)
 
 **Status:** 🟡 PARTIAL. 8.1 + 8.2 done (commits `4f242c7`, `1c98e00`):
-archived 8 shipped plans + 885-line bug log. Plan's other sub-tasks
-turned out to be already-done on the ground (README 133 lines,
-CONTRIBUTING.md exists, docs/ARCHITECTURE.md exists) so they were not
-executed. Trim of CLAUDE.md deferred — the user hand-edits that file
-and Frog will not rewrite it without an explicit ask.
+archived 8 shipped plans + 885-line bug log. 8.5 done 2026-05-02: remaining
+shipped plans archived; only live plan + 2 deferred ideas remain in `docs/plans/`.
+Plan's other sub-tasks turned out to be already-done on the ground (README 133
+lines, CONTRIBUTING.md exists) so they were not executed. 8.3 (trim CLAUDE.md)
+deferred — user hand-edits that file. 8.4 dropped (ARCHITECTURE.md removed;
+architecture knowledge lives in codescout memory). 8.6 dropped (misbehaviors
+file stays as live tracker per user instruction).
 
 **Goal:** README serves new readers, CONTRIBUTING serves contributors,
 CLAUDE.md serves the LLM, ARCHITECTURE.md is the canonical structural
@@ -475,11 +473,8 @@ reference. No file serves three audiences.
    today's CLAUDE.md.
 3. **Trim `CLAUDE.md`** to LLM-runtime guidance only: tool-selection
    rules, prompt-surface review rule, `json!("ok")` rule, Iron Laws.
-4. **Author canonical `docs/ARCHITECTURE.md`**: the six-box diagram, the
-   three load-bearing abstractions (`Tool`, `ToolContext`,
-   `RecoverableError`), LSP lifecycle, embedding pipeline, write-gate
-   flow. Replaces scattered architecture knowledge in CLAUDE.md +
-   memories + module preambles.
+4. ~~**Author canonical `docs/ARCHITECTURE.md`**~~ — dropped; architecture
+   knowledge lives in codescout memory (`architecture`). No doc needed.
 5. **Audit `docs/plans/`**: delete shipped plans (point to commit ranges
    in CHANGELOG.md instead).
 6. **Refactor `docs/TODO-tool-misbehaviors.md`**: open bugs as GitHub
