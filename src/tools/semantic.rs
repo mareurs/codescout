@@ -218,7 +218,12 @@ impl Tool for SemanticSearch {
             // BM25 leg — project scope only; other scopes fall back to pure vector
             let bm25_results = if matches!(scope2, crate::library::scope::Scope::Project) {
                 match crate::embed::bm25::BM25Index::open(&root2)? {
-                    Some(idx) => idx.search(&query2, search_limit).unwrap_or_default(),
+                    Some(idx) => idx.search(&query2, search_limit).unwrap_or_else(|e| {
+                        tracing::warn!(
+                            "BM25 search failed, falling back to pure vector: {e}"
+                        );
+                        vec![]
+                    }),
                     None => vec![],
                 }
             } else {
@@ -231,6 +236,15 @@ impl Tool for SemanticSearch {
             } else {
                 let fused_ids =
                     crate::embed::fusion::rrf_fuse(&vector_results, &bm25_results, 60.0);
+
+                // Compute RRF score per chunk_id so BM25-only hits get a meaningful
+                // score instead of 0.0 (which would push them to the bottom of the
+                // post-spawn_blocking sort-by-score step).
+                let rrf_scores: HashMap<u64, f32> = fused_ids
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &id)| (id, 1.0 / (60.0 + (i + 1) as f32)))
+                    .collect();
 
                 // Build lookup from vector results (already have full data)
                 let mut sr_map: HashMap<u64, crate::embed::schema::SearchResult> =
@@ -259,15 +273,16 @@ impl Tool for SemanticSearch {
                     let params =
                         rusqlite::params_from_iter(bm25_only.iter().map(|id| *id as i64));
                     let rows = stmt.query_map(params, |row| {
+                        let chunk_id = row.get::<_, i64>(0)? as u64;
                         Ok(crate::embed::schema::SearchResult {
-                            id: row.get::<_, i64>(0)? as u64,
+                            id: chunk_id,
                             file_path: row.get(1)?,
                             language: row.get(2)?,
                             content: row.get(3)?,
                             start_line: row.get::<_, i64>(4)? as usize,
                             end_line: row.get::<_, i64>(5)? as usize,
                             source: row.get(6)?,
-                            score: 0.0,
+                            score: rrf_scores.get(&chunk_id).copied().unwrap_or(0.0),
                             project_id: row.get(7)?,
                         })
                     })?;
