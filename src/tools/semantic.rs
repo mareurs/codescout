@@ -9,6 +9,9 @@ use serde_json::{json, Value};
 /// disable. See docs/manual/src/experimental/file-diversity-rerank.md.
 const MAX_CHUNKS_PER_FILE: usize = 3;
 
+use std::collections::HashMap;
+
+
 /// Apply a per-file cap to a score-sorted list of search results. Iterates in
 /// order and keeps at most `max_per_file` entries sharing the same `file_path`;
 /// later duplicates are dropped. Passing 0 disables the cap (returns input).
@@ -188,6 +191,7 @@ impl Tool for SemanticSearch {
         let model2 = model.clone();
         let scope2 = scope.clone();
         let library_registry2 = library_registry.clone();
+        let query2 = query.to_string();
         let (results, memory_results, staleness) = tokio::task::spawn_blocking(move || {
             // Guard: catch model/dimension mismatch before sqlite-vec sees the
             // wrong-dimensioned query vector and emits a cryptic error.
@@ -202,7 +206,7 @@ impl Tool for SemanticSearch {
                     )
                 })?;
             }
-            let results = crate::embed::index::search_multi_db(
+            let vector_results = crate::embed::index::search_multi_db(
                 &root2,
                 &query_embedding,
                 search_limit,
@@ -210,6 +214,75 @@ impl Tool for SemanticSearch {
                 &library_registry2,
                 project_filter.as_deref(),
             )?;
+
+            // BM25 leg — project scope only; other scopes fall back to pure vector
+            let bm25_results = if matches!(scope2, crate::library::scope::Scope::Project) {
+                match crate::embed::bm25::BM25Index::open(&root2)? {
+                    Some(idx) => idx.search(&query2, search_limit).unwrap_or_default(),
+                    None => vec![],
+                }
+            } else {
+                vec![]
+            };
+
+            // RRF fusion: re-rank when BM25 has results, else preserve vector order
+            let results = if bm25_results.is_empty() {
+                vector_results
+            } else {
+                let fused_ids =
+                    crate::embed::fusion::rrf_fuse(&vector_results, &bm25_results, 60.0);
+
+                // Build lookup from vector results (already have full data)
+                let mut sr_map: HashMap<u64, crate::embed::schema::SearchResult> =
+                    vector_results.into_iter().map(|r| (r.id, r)).collect();
+
+                // Fetch BM25-only hits that vector search didn't return
+                let bm25_only: Vec<u64> = fused_ids
+                    .iter()
+                    .filter(|id| !sr_map.contains_key(id))
+                    .copied()
+                    .collect();
+                if !bm25_only.is_empty() {
+                    let conn2 = crate::embed::index::open_db(&root2)?;
+                    let placeholders = bm25_only
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| format!("?{}", i + 1))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let sql = format!(
+                        "SELECT id, file_path, language, content, start_line, \
+                         end_line, source, project_id FROM chunks WHERE id IN ({})",
+                        placeholders
+                    );
+                    let mut stmt = conn2.prepare(&sql)?;
+                    let params =
+                        rusqlite::params_from_iter(bm25_only.iter().map(|id| *id as i64));
+                    let rows = stmt.query_map(params, |row| {
+                        Ok(crate::embed::schema::SearchResult {
+                            id: row.get::<_, i64>(0)? as u64,
+                            file_path: row.get(1)?,
+                            language: row.get(2)?,
+                            content: row.get(3)?,
+                            start_line: row.get::<_, i64>(4)? as usize,
+                            end_line: row.get::<_, i64>(5)? as usize,
+                            source: row.get(6)?,
+                            score: 0.0,
+                            project_id: row.get(7)?,
+                        })
+                    })?;
+                    for row in rows.flatten() {
+                        sr_map.insert(row.id, row);
+                    }
+                }
+
+                // Reconstruct Vec<SearchResult> in fused order
+                fused_ids
+                    .into_iter()
+                    .filter_map(|id| sr_map.remove(&id))
+                    .collect()
+            };
+
             let results = apply_file_diversity_cap(results, MAX_CHUNKS_PER_FILE);
             let results: Vec<_> = results.into_iter().take(limit).collect();
             let memory_results = if include_memories {
@@ -306,32 +379,6 @@ impl Tool for SemanticSearch {
                     "note": "Recent commits not yet indexed — run index(action='build') to include new code. Existing results are unaffected."
                 });
             }
-        }
-        // Check for stale libraries
-        let stale = {
-            let inner = ctx.agent.inner.read().await;
-            if let Some(p) = inner.active_project() {
-                p.library_registry
-                    .stale_libraries()
-                    .into_iter()
-                    .map(|e| {
-                        json!({
-                            "name": e.name,
-                            "indexed": e.version_indexed,
-                            "current": e.version,
-                            "hint": format!(
-                                "{} was updated — run index(action='build', scope='lib:{}') to re-index",
-                                e.name, e.name
-                            )
-                        })
-                    })
-                    .collect::<Vec<_>>()
-            } else {
-                vec![]
-            }
-        };
-        if !stale.is_empty() {
-            result["stale_libraries"] = json!(stale);
         }
         Ok(result)
     }
@@ -1166,6 +1213,24 @@ mod tests {
     use crate::embed::index;
     use crate::lsp::LspManager;
     use tempfile::tempdir;
+
+    #[test]
+    fn rrf_fuse_integration_empty_bm25_returns_vector_order() {
+        use crate::embed::fusion;
+        use crate::embed::schema::SearchResult;
+
+        let vector = vec![
+            SearchResult { id: 1, file_path: "a.rs".into(), language: "rust".into(),
+                content: "a".into(), start_line: 0, end_line: 1, score: 0.9,
+                source: "project".into(), project_id: "root".into() },
+            SearchResult { id: 2, file_path: "b.rs".into(), language: "rust".into(),
+                content: "b".into(), start_line: 0, end_line: 1, score: 0.8,
+                source: "project".into(), project_id: "root".into() },
+        ];
+        let fused_ids = fusion::rrf_fuse(&vector, &[], 60.0);
+        assert_eq!(fused_ids, vec![1, 2]);
+    }
+
 
     fn sr(file: &str, score: f32) -> crate::embed::schema::SearchResult {
         crate::embed::schema::SearchResult {
