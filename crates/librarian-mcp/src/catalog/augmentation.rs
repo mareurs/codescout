@@ -1,4 +1,5 @@
 use crate::catalog::Catalog;
+use crate::tools::{schema_validate, RecoverableError};
 use anyhow::Result;
 use serde_json::{json, Value};
 
@@ -75,6 +76,11 @@ pub fn merge_params(cat: &Catalog, artifact_id: &str, patch: &Value) -> Result<b
     };
     let mut current: Value = serde_json::from_str(&existing.params).unwrap_or_else(|_| json!({}));
     apply_merge_patch(&mut current, patch);
+    if let Some(schema_text) = existing.params_schema.as_deref() {
+        schema_validate::validate_against_stored(schema_text, &current).map_err(|e| {
+            RecoverableError::new(format!("merge_params: patch violates params_schema: {e}"))
+        })?;
+    }
     let new_params = serde_json::to_string(&current)?;
     cat.conn.execute(
         "UPDATE artifact_augmentation SET params = ?1,
@@ -342,6 +348,46 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         let found = merge_params(&cat, "nope", &json!({"x": 1})).unwrap();
         assert!(!found);
+    }
+    #[test]
+    fn merge_params_rejects_violation() {
+        let cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("art1")).unwrap();
+        let schema = json!({
+            "type": "object",
+            "properties": {"count": {"type": "integer"}},
+            "additionalProperties": false
+        });
+        let mut a = aug("art1");
+        a.params_schema = Some(serde_json::to_string(&schema).unwrap());
+        upsert(&cat, &a).unwrap();
+        let patch = json!({"count": "not-a-number"});
+        let err = merge_params(&cat, "art1", &patch).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("merge_params: patch violates params_schema"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
+    fn merge_params_accepts_valid() {
+        let cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("art1")).unwrap();
+        let schema = json!({
+            "type": "object",
+            "properties": {"count": {"type": "integer"}},
+            "additionalProperties": false
+        });
+        let mut a = aug("art1");
+        a.params_schema = Some(serde_json::to_string(&schema).unwrap());
+        upsert(&cat, &a).unwrap();
+        let patch = json!({"count": 42});
+        let found = merge_params(&cat, "art1", &patch).unwrap();
+        assert!(found);
+        let row = get(&cat, "art1").unwrap().unwrap();
+        let params: Value = serde_json::from_str(&row.params).unwrap();
+        assert_eq!(params["count"], 42);
     }
 
     #[test]
