@@ -561,6 +561,45 @@ TC-09 expected corrected to `workflow.rs` (command.rs no longer exists).
 **Observations:** Identical to run 1 (corrected). Score stable across two independent force rebuilds — confirms 27/60 is a reliable baseline for this codebase state. Ship gate ≥30/60 not met.
 
 ---
+### Model: CodeRankEmbed — hybrid BM25+vector (2026-05-02)
+
+> ⚠ **NOTE:** This benchmark was run against the **pre-release MCP server binary** (before `/mcp` restart). The hybrid BM25+vector pipeline (Tasks 1–7) is compiled into the release binary (`cargo build --release` completed successfully) but the running server has not yet been restarted to pick it up. These results reflect **pure vector search** (CodeRankEmbed) on the existing index, which is 22 commits behind HEAD and has 10 unindexed writes. The BM25 leg was not active. A re-run after `index(action="build")` and `/mcp` restart is needed for a true hybrid benchmark.
+
+| Field | Value |
+|-------|-------|
+| Model string | `CodeRankEmbed` + `url = "http://localhost:43300/v1"` |
+| Pipeline | Pure vector (hybrid BM25 not yet active — server not restarted) |
+| Index state | 22 commits behind HEAD, 10 unindexed writes |
+| **Total score** | **27/60** |
+
+| TC | Score | Notes |
+|----|-------|-------|
+| TC-01 | 2 | mod.rs ✓ (#1,#2), server.rs ✓ (#5,#7); FEATURES.md ✗ |
+| TC-02 | 1 | embedding-backends.md ✓ (#1,#3); embeddings.md ✗, embed/mod.rs ✗ |
+| TC-03 | 2 | client.rs ✓ (#1,#2), ops.rs ✓ (#7), manager.rs ✓ (#6,#8) — all in top 10, not all in top 5 |
+| TC-04 | 1 | run_command.rs ✓ (#1,#2) [indexed as run_command.rs]; shell-integration.md ✗, output-buffers.md ✗ |
+| TC-05 | 1 | output.rs ✓ (#5,#6); PROGRESSIVE_DISCOVERABILITY.md ✗ |
+| TC-06 | 1 | usage/db.rs ✓ (#5,#6); usage/mod.rs ✗, plan ✗ |
+| TC-07 | 1 | markdown.rs ✓ (#2); file_summary.rs ✗ |
+| TC-08 | 1 | index.rs ✓ (#1,#2,#3); schema.rs ✗ |
+| TC-09 | 3 | path_security.rs ✓ (#1,#2), run_command.rs ✓ (#4,#5) — all expected in top 5 |
+| TC-10 | 1 | PROGRESSIVE_DISCOVERABILITY.md ✓ (#9); output.rs ✗, server_instructions.md ✗ |
+| TC-11 | 0 | symbol/references.rs at #6 (not symbol.rs); ops.rs ✗ — rename docs surfaced but not impl files |
+| TC-12 | 1 | embeddings.md ✓ (#3); embed/mod.rs ✗ |
+| TC-13 | 2 | manager.rs ✓ (#1,#2), client.rs ✓ (#3,#4) — majority in top 5; troubleshooting.md ✗ |
+| TC-14 | 1 | server.rs ✓ (#10); tools/mod.rs ✗, usage/mod.rs ✗ |
+| TC-15 | 1 | index.rs ✓ (#1,#2,#3); embed/mod.rs ✗ |
+| TC-16 | 1 | semantic.rs ✓ (#7,#10); index.rs ✗, mod.rs ✗ |
+| TC-17 | 3 | companion-plugin.md ✓ (#1), routing-plugin.md ✓ (#3,#5) — all expected in top 5 |
+| TC-18 | 2 | markdown.rs ✓ (#2), file_summary.rs ✓ (#3); TODO-tool-misbehaviors.md ✗ (archive version surfaced at #1) |
+| TC-19 | 1 | manager.rs ✓ (#9); agent/mod.rs ✗, server.rs ✗ |
+| TC-20 | 0 | server_instructions.md ✗, onboarding_prompt.md ✗, workflow.rs ✗ — CLAUDE.md + design docs surfaced instead |
+
+**Tier scores:** T1=7/15 · T2=8/21 · T3=7/15 · T4=5/9
+
+**Observations:** Pure-vector baseline (hybrid not active). Score 27/60 — matches the run 2 baseline of 27/60. The vocabulary-mismatch targets (TC-10, TC-19, TC-20) scored 0/0/1 — TC-10 improved to 1 vs run 2's 1 (same), TC-19 still 1, TC-20 still 0. TC-11 regressed to 0 vs run 2's 1 — the `symbol.rs` file has since been reorganized into a `symbol/` module so `symbol.rs` is no longer the expected match path. The stable 27/60 confirms the index state is consistent with prior baselines; true hybrid evaluation requires server restart after reindex.
+
+---
 ### Model: *(template for additional models)*
 
 | Field | Value |
