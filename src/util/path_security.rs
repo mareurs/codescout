@@ -616,6 +616,25 @@ pub fn is_source_path(path: &str) -> bool {
         .as_ref()
         .is_some_and(|re| re.is_match(path))
 }
+/// Returns true if `s` is a plain identifier or pipe-alternation of identifiers.
+/// Used to decide whether to suggest symbol tools instead of grep.
+pub fn is_identifier_pattern(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    s.split('|').all(|part| {
+        if part.is_empty() {
+            return false;
+        }
+        let mut chars = part.chars();
+        match chars.next() {
+            Some(c) if c.is_alphabetic() || c == '_' => {}
+            _ => return false,
+        }
+        chars.all(|c| c.is_alphanumeric() || c == '_')
+    })
+}
+
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -1478,5 +1497,27 @@ mod tests {
 
         let result = is_dangerous_command("rm -rf /", &config);
         assert!(result.is_some());
+    }
+    #[test]
+    fn is_identifier_pattern_accepts_single() {
+        assert!(is_identifier_pattern("WriteMemory"));
+        assert!(is_identifier_pattern("snake_case"));
+        assert!(is_identifier_pattern("_private"));
+        assert!(is_identifier_pattern("CamelCase123"));
+    }
+
+    #[test]
+    fn is_identifier_pattern_accepts_pipe_alternation() {
+        assert!(is_identifier_pattern("WriteMemory|ReadMemory|ListMemories"));
+    }
+
+    #[test]
+    fn is_identifier_pattern_rejects_regex_and_empty() {
+        assert!(!is_identifier_pattern(""));
+        assert!(!is_identifier_pattern("foo.*bar"));
+        assert!(!is_identifier_pattern("^start"));
+        assert!(!is_identifier_pattern("foo(bar)"));
+        assert!(!is_identifier_pattern("foo[0-9]"));
+        assert!(!is_identifier_pattern("||")); // empty parts
     }
 }
