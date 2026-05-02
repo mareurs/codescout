@@ -102,10 +102,11 @@ impl AgentInner {
 /// - In-module mutation requires `AgentInner::active_project_mut()` and is
 ///   limited to a small number of well-named call sites in `agent/mod.rs`
 ///   (e.g. `activate`, `reload_config_if_project_toml`).
-/// - Cross-cutting state (`dirty_files`, `write_lock`, `file_lock`) is
+/// - Cross-cutting state (`dirty_files`, `write_lock`, `file_lock`, `session_write_roots`) is
 ///   `Arc<Mutex<_>>` / `Arc<File>` and self-protects via interior mutability;
 ///   external access is routed through `Agent` accessor methods such as
-///   `mark_file_dirty`, `dirty_file_count`, `dirty_files_arc`.
+///   `mark_file_dirty`, `dirty_file_count`, `dirty_files_arc`, `add_session_write_root`,
+///   `session_write_roots_snapshot`.
 ///
 /// If codescout is ever split into multiple crates, fields with cross-field
 /// invariants (`read_only`, `config`, `head_sha`/`has_git_remote`) should be
@@ -624,6 +625,30 @@ impl Agent {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .insert(path);
+        }
+    }
+
+    /// Append a session-approved write root for the current project.
+    pub async fn add_session_write_root(&self, path: PathBuf) {
+        let inner = self.inner.read().await;
+        if let Some(p) = inner.active_project() {
+            p.session_write_roots
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(path);
+        }
+    }
+
+    /// Return a snapshot of the current session-approved write roots.
+    pub async fn session_write_roots_snapshot(&self) -> Vec<PathBuf> {
+        let inner = self.inner.read().await;
+        match inner.active_project() {
+            Some(p) => p
+                .session_write_roots
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone(),
+            None => Vec::new(),
         }
     }
 
@@ -1792,5 +1817,47 @@ mod tests {
 
         // Set must be empty after drain
         assert!(agent.drain_dirty_files().await.is_empty());
+    }
+    #[tokio::test]
+    async fn session_write_roots_empty_by_default() {
+        let dir = tempdir().unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let roots = agent.session_write_roots_snapshot().await;
+        assert!(roots.is_empty());
+    }
+
+    #[tokio::test]
+    async fn add_session_write_root_visible_in_snapshot() {
+        let dir = tempdir().unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let extra = dir.path().join("extra");
+        agent.add_session_write_root(extra.clone()).await;
+        let roots = agent.session_write_roots_snapshot().await;
+        assert_eq!(roots, vec![extra]);
+    }
+
+    #[tokio::test]
+    async fn session_write_roots_cleared_on_reactivation() {
+        let dir = tempdir().unwrap();
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let extra = dir.path().join("extra");
+        agent.add_session_write_root(extra.clone()).await;
+        // Snapshot shows the root
+        let roots = agent.session_write_roots_snapshot().await;
+        assert!(
+            !roots.is_empty(),
+            "root should be visible before re-activation"
+        );
+        // Re-activate same project
+        agent
+            .activate(dir.path().to_path_buf(), None)
+            .await
+            .unwrap();
+        // Snapshot is now empty — re-activation created a fresh ActiveProject
+        let roots_after = agent.session_write_roots_snapshot().await;
+        assert!(
+            roots_after.is_empty(),
+            "session roots must clear on re-activation"
+        );
     }
 }
