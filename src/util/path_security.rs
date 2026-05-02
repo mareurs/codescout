@@ -348,6 +348,9 @@ pub fn validate_approve_path(
     if raw.is_empty() {
         bail!("path must not be empty");
     }
+    if raw.contains('\0') {
+        bail!("path must not contain null bytes");
+    }
 
     let path = Path::new(raw);
     let resolved = if path.is_absolute() {
@@ -1683,6 +1686,14 @@ mod tests {
         assert!(result.is_ok());
         let resolved = result.unwrap();
         assert!(resolved.ends_with("subdir"));
+    }
+
+    #[test]
+    fn validate_approve_path_rejects_null_byte() {
+        let dir = tempdir().unwrap();
+        let result = validate_approve_path("sub\0dir", dir.path(), &default_config());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("null bytes"));
     }
 
     #[test]
