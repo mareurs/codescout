@@ -447,7 +447,8 @@ pub fn check_tool_access(tool_name: &str, config: &PathSecurityConfig) -> Result
                 );
             }
         }
-        "create_file" | "edit_file" | "edit_code" | "library" | "edit_markdown" => {
+        "approve_write" | "create_file" | "edit_file" | "edit_code" | "library"
+        | "edit_markdown" => {
             if !config.file_write_enabled {
                 bail!(
                     "File writes are disabled for this project. If this project was activated in read-only mode, call workspace(action='activate', read_only: false) to enable writes."
@@ -847,14 +848,20 @@ mod tests {
     #[test]
     fn write_empty_path_rejected() {
         let dir = tempdir().unwrap();
-        let result = validate_write_path("", dir.path(), &default_config(), &default_session_roots());
+        let result =
+            validate_write_path("", dir.path(), &default_config(), &default_session_roots());
         assert!(result.is_err());
     }
 
     #[test]
     fn write_null_byte_rejected() {
         let dir = tempdir().unwrap();
-        let result = validate_write_path("file\0evil", dir.path(), &default_config(), &default_session_roots());
+        let result = validate_write_path(
+            "file\0evil",
+            dir.path(),
+            &default_config(),
+            &default_session_roots(),
+        );
         assert!(result.is_err());
     }
 
@@ -864,7 +871,12 @@ mod tests {
         // Create the target directory so canonicalize resolves properly
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
 
-        let result = validate_write_path("src/new.rs", dir.path(), &default_config(), &default_session_roots());
+        let result = validate_write_path(
+            "src/new.rs",
+            dir.path(),
+            &default_config(),
+            &default_session_roots(),
+        );
         assert!(result.is_ok());
         assert!(result
             .unwrap()
@@ -878,7 +890,12 @@ mod tests {
         // test remains valid now that /tmp is an allowed write root.
         let target = "/var/outside_ce_test/evil.rs";
 
-        let result = validate_write_path(target, project.path(), &default_config(), &default_session_roots());
+        let result = validate_write_path(
+            target,
+            project.path(),
+            &default_config(),
+            &default_session_roots(),
+        );
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -893,7 +910,12 @@ mod tests {
 
         // Traverse to /var (not /tmp) so the result lands outside both the
         // project root and the /tmp allowed root.
-        let result = validate_write_path("../../../var/evil.rs", project.path(), &default_config(), &default_session_roots());
+        let result = validate_write_path(
+            "../../../var/evil.rs",
+            project.path(),
+            &default_config(),
+            &default_session_roots(),
+        );
         assert!(result.is_err());
     }
 
@@ -942,7 +964,12 @@ mod tests {
         };
 
         let target = extra.path().join("sub/file.rs");
-        let result = validate_write_path(target.to_str().unwrap(), project.path(), &config, &default_session_roots());
+        let result = validate_write_path(
+            target.to_str().unwrap(),
+            project.path(),
+            &config,
+            &default_session_roots(),
+        );
         assert!(result.is_ok());
     }
 
@@ -951,8 +978,12 @@ mod tests {
         let project = tempdir().unwrap();
         // /tmp itself must exist on the system for this test to be meaningful
         let target = PathBuf::from("/tmp/codescout-test-write.txt");
-        let result =
-            validate_write_path(target.to_str().unwrap(), project.path(), &default_config(), &default_session_roots());
+        let result = validate_write_path(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &default_session_roots(),
+        );
         assert!(
             result.is_ok(),
             "writes to /tmp should be allowed: {:?}",
@@ -1074,8 +1105,12 @@ mod tests {
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink("/var/tmp", &link).unwrap();
-            let result =
-                validate_write_path("sneaky/escaped.txt", project.path(), &default_config(), &default_session_roots());
+            let result = validate_write_path(
+                "sneaky/escaped.txt",
+                project.path(),
+                &default_config(),
+                &default_session_roots(),
+            );
             // After canonicalization the symlink resolves to /var/tmp/escaped.txt
             // which is outside both the project root and /tmp.
             assert!(result.is_err());
@@ -1210,6 +1245,19 @@ mod tests {
         assert!(
             err.to_string().contains("project.toml"),
             "error should mention config file"
+        );
+    }
+
+    #[test]
+    fn file_write_enabled_disabled_blocks_approve_write() {
+        let config = PathSecurityConfig {
+            file_write_enabled: false,
+            ..PathSecurityConfig::default()
+        };
+        let err = check_tool_access("approve_write", &config).unwrap_err();
+        assert!(
+            err.to_string().contains("disabled"),
+            "should block approve_write when writes disabled: {err}"
         );
     }
 
@@ -1608,7 +1656,12 @@ mod tests {
             ..PathSecurityConfig::default()
         };
 
-        let result = validate_write_path(target.to_str().unwrap(), &project_root, &config, &default_session_roots());
+        let result = validate_write_path(
+            target.to_str().unwrap(),
+            &project_root,
+            &config,
+            &default_session_roots(),
+        );
         assert!(result.is_ok(), "root profile should bypass write boundary");
     }
 
@@ -1643,7 +1696,11 @@ mod tests {
             &default_config(),
             &session_roots,
         );
-        assert!(result.is_ok(), "approved root should allow writes: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "approved root should allow writes: {:?}",
+            result
+        );
     }
 
     #[test]

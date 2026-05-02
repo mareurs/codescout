@@ -13,10 +13,14 @@ impl Tool for ApproveWrite {
     }
 
     fn description(&self) -> &str {
-        "Grant session-scoped write access to a directory outside the project root. \
-         Approval clears on restart or project re-activation. Use before edit_file, \
-         create_file, edit_code, or edit_markdown on paths outside the project root. \
-         Protected paths (e.g. ~/.ssh) cannot be approved."
+        "Grant write access to a directory outside the project root for this session. \
+         Session-scoped — cleared on server restart. Call before edit_file, create_file, \
+         edit_code, or edit_markdown on paths outside the project. Protected paths (e.g. ~/.ssh) \
+         cannot be approved."
+    }
+
+    fn is_write(&self, _input: &Value) -> bool {
+        true
     }
 
     fn input_schema(&self) -> Value {
@@ -33,6 +37,7 @@ impl Tool for ApproveWrite {
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
+        super::guard_worktree_write(ctx).await?;
         let raw = super::require_str_param(&input, "path")?;
 
         let root = ctx.agent.require_project_root().await.map_err(|_| {
