@@ -333,6 +333,53 @@ pub fn validate_write_path(
     Ok(resolved)
 }
 
+/// Validate a path for **session approval** via the `approve_write` tool.
+///
+/// Checks:
+/// 1. Rejects the filesystem root (`/`) and `$HOME` — too broad.
+/// 2. Checks the deny-list — protected paths can never be approved.
+///
+/// Returns the canonicalized path on success.
+pub fn validate_approve_path(
+    raw: &str,
+    project_root: &Path,
+    config: &PathSecurityConfig,
+) -> Result<PathBuf> {
+    if raw.is_empty() {
+        bail!("path must not be empty");
+    }
+
+    let path = Path::new(raw);
+    let resolved = if path.is_absolute() {
+        best_effort_canonicalize(path)
+    } else {
+        best_effort_canonicalize(&project_root.join(raw))
+    };
+
+    // Breadth guard: reject / and $HOME
+    let is_fs_root = resolved == Path::new("/");
+    let is_home = home_dir()
+        .map(|h| best_effort_canonicalize(&h) == resolved)
+        .unwrap_or(false);
+    if is_fs_root || is_home {
+        bail!(
+            "approve_write: '{}' is too broad — specify a subdirectory",
+            resolved.display()
+        );
+    }
+
+    // Deny-list: protected paths can never be approved
+    let denied = denied_read_paths(config);
+    if is_denied(&resolved, &denied) {
+        bail!(
+            "approve_write: '{}' is in a protected location and cannot be approved",
+            resolved.display()
+        );
+    }
+
+    Ok(resolved)
+}
+
 /// List the root paths of all linked git worktrees for `project_root`.
 ///
 /// Reads `.git/worktrees/<name>/gitdir` files, which contain absolute paths
@@ -1581,6 +1628,61 @@ mod tests {
     #[test]
     fn is_identifier_pattern_accepts_pipe_alternation() {
         assert!(is_identifier_pattern("WriteMemory|ReadMemory|ListMemories"));
+    }
+
+    // ── Approve write validation ──────────────────────────────────────────
+
+    #[test]
+    fn validate_approve_path_accepts_normal_directory() {
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("other");
+        std::fs::create_dir_all(&target).unwrap();
+        let result = validate_approve_path(target.to_str().unwrap(), dir.path(), &default_config());
+        assert!(
+            result.is_ok(),
+            "normal directory should be approved: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn validate_approve_path_rejects_filesystem_root() {
+        let dir = tempdir().unwrap();
+        let result = validate_approve_path("/", dir.path(), &default_config());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("too broad"));
+    }
+
+    #[test]
+    fn validate_approve_path_rejects_home_directory() {
+        let dir = tempdir().unwrap();
+        let home = home_dir().unwrap();
+        let result = validate_approve_path(home.to_str().unwrap(), dir.path(), &default_config());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("too broad"));
+    }
+
+    #[test]
+    fn validate_approve_path_rejects_denied_path() {
+        let dir = tempdir().unwrap();
+        let home = home_dir().unwrap();
+        let ssh = home.join(".ssh");
+        let result = validate_approve_path(ssh.to_str().unwrap(), dir.path(), &default_config());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("protected location"));
+    }
+
+    #[test]
+    fn validate_approve_path_resolves_relative_path() {
+        let dir = tempdir().unwrap();
+        let result = validate_approve_path("subdir", dir.path(), &default_config());
+        // subdir doesn't need to exist — best_effort_canonicalize handles it
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        assert!(resolved.ends_with("subdir"));
     }
 
     #[test]
