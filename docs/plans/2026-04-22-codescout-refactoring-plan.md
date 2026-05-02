@@ -448,6 +448,19 @@ Step 1 alone is enough. Step 2 is a Phase 8 candidate if needed.
 
 ---
 
+### Phase 7b — `src/tools/` file splits (DONE)
+
+**Status:** ✅ DONE (2026-05-02). Tracked in `docs/trackers/tools-mod-refactor-2026-05.md`.
+
+Three mechanical splits, done B→C→A:
+- **B** — `file_summary.rs` tests extracted to `file_summary/tests.rs` (directory module pattern)
+- **C** — `run_command/mod.rs` (~1196 lines) split into `inner.rs` / `interactive.rs` / `output.rs`
+- **A** — `tools/mod.rs` (~1487 lines) split into `core/types.rs` + `core/params.rs` + `core/guards.rs` + `core/tests.rs`
+
+No file in `src/tools/` exceeds ~600 lines. All callers unaffected (re-export facade preserves `crate::tools::X` paths).
+
+---
+
 ### Phase 8 — Documentation reorg (Frog's phase)
 
 **Status:** 🟡 PARTIAL. 8.1 + 8.2 done (commits `4f242c7`, `1c98e00`):

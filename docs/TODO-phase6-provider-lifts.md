@@ -57,14 +57,23 @@ Commit `f7ca520`:
 
 **Plan exit criterion:** `src/tools/*.rs` files are ≤ 100 lines each (typical case).
 
-**Not measured yet.** Worth a pass after Phase 7 lands. Current larger tool files (spot-check):
+**Status after Phase 7b (2026-05-02):** 🟡 Partial.
 
-- `src/tools/symbol/find_symbol.rs` (~500 lines incl. impl Tool body)
-- `src/tools/symbol/rename_symbol.rs` (~265 lines)
-- `src/tools/edit_file.rs` (bundled test mod — deferred from Phase 3)
+Test extraction is done — all large test blocks moved to `tests.rs` siblings. Remaining non-test files over 600 lines:
 
-Most of the remaining bulk is `impl Tool for X { async fn call(...) { ... } }` bodies, not helpers — can't be thinned further without lifting the ctx-coupled fs/LSP plumbing described in 6.2.
+| File | Lines | Why large |
+|------|-------|-----------|
+| `output_buffer.rs` | 1312 | monolithic buffer subsystem |
+| `onboarding.rs` | 1032 | large prompt assembly logic |
+| `memory/mod.rs` | 906 | impl Tool body + helpers |
+| `command_summary.rs` | 873 | command type detection + summarisers |
+| `read_file.rs` | 869 | impl Tool body |
+| `file_summary/file_summary.rs` | 772 | impl Tool body |
+| `semantic/index.rs` | 728 | index pipeline |
 
+These cannot be thinned further with mechanical splits — bulk is `impl Tool` bodies coupled to `ToolContext`. The structural fix requires the `ToolContext → &Agent + &dyn LspProvider` redesign (Phase 6's real shape).
+
+**Recommendation:** close 6.4 as "won't do at this scale." Reopen if/when the `ToolContext` redesign is taken on.
 ## When to revisit
 
 - A new tool/consumer lands outside `src/tools/symbol/` that wants one of the pure helpers above.

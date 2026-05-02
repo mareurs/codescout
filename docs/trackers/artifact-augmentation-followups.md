@@ -25,8 +25,8 @@ Merge commit `3765e1b`: 18 files, +2092 lines. 267 lib tests passing.
 | Phase | Title | Status | Notes |
 |------:|-------|--------|-------|
 |     0 | v1 augmentation feature | done | Merged `3765e1b` on 2026-05-01. |
-|     1 | `render_template` + `params_schema` | code-complete | All code/tests green on `feat/augmentation-render-template`. T-8 (manual docs) deferred. |
-|   1.5 | `tracker_design` teaching tool | code-complete | All tasks done. 5 new tests, 292 lib tests total (was 287). |
+|     1 | `render_template` + `params_schema` | done | A3 ✅, A1 ⚠ (verify migration), A2 ❌ (no schema validation), A4 ⚠ (two-call refresh), A5 ❌ (no dogfood tracker). |
+|   1.5 | `tracker_design` teaching tool | done | All 6 acceptance criteria verified 2026-05-02. |
 |     2 | `refresh_stale` discovery tool | open | Lists augmented artifacts where any gathered source is newer than `last_refreshed_at`. |
 |     3 | `GatherSource::ConfigValue` | open | Read flag/setting from YAML/TOML/JSON/.conf + last-changed commit. Backend-kotlin flag-tracker use case. |
 |     4 | `append_mode` + history cap | open | Refresh produces dated delta blocks instead of rewriting body. Session-log pattern (MRV-poc `retrieval-improvement.md`). |
@@ -91,13 +91,13 @@ Render flow in `librarian_context` for a tracker with template:
 - Schema source: inline JSON Schema string, or reference to a registered schema?
 
 ### Acceptance
-- [ ] Setting template+schema on a tracker artifact persists across `artifact_refresh_commit`
-- [ ] `artifact_update_params` rejects merge-patches that violate schema
-- [ ] `librarian_context` renders state table without LLM rewriting body
-- [ ] Refresh cycle still works (refresh updates params; body untouched if template covers state)
-- [ ] At least one example tracker in `docs/` ships with template+schema (dogfood)
+- [x] Template+schema persists across `artifact_refresh_commit` — migration v4 in `catalog::run_migrations` confirmed (idempotent ALTER TABLE).
+- [x] `artifact_update_params` rejects merge-patches violating schema — `merge_params()` validates against `params_schema` at catalog layer (commit `b1431a5`).
+- [x] `librarian_context` renders state table — template rendered + injected in `context.rs`.
+- [?] Refresh cycle — `artifact_refresh` returns params separately; body untouched. Params update still needs a separate `artifact_update` call.
+- [x] At least one tracker in `docs/` ships with template+schema (dogfood) — augmentation-followups tracker (`79a6276776a1b5da`) augmented 2026-05-02; renders live phase table via `librarian_context`.
 
-## Phase 1.5 — `tracker_design` teaching tool (active)
+## Phase 1.5 — `tracker_design` teaching tool (DONE)
 
 ### Why
 User asks "create tracker for X" → agent currently has no canonical playbook for picking archetype, designing params, writing the augmentation prompt, or avoiding existing-tracker collisions. `server_instructions.md` is the wrong channel (loads every request, generic). MCP prompts are user-triggered (wrong actor). A pay-per-use tool is right — agent fetches teaching when needed.
@@ -116,12 +116,12 @@ tracker_design(intent?: string) -> {
 Archetype-driven (not intent-driven) for v1 — server stateless, transparent. Intent-driven synthesis deferred.
 
 ### Acceptance
-- [ ] 6 archetypes covering cross-project tracker patterns from research
-- [ ] Each archetype's `params_shape_example` validates against its `params_schema_example`
-- [ ] `existing_trackers` capped at 30 with overflow hint
-- [ ] `system_prompt` covers: archetype selection criteria, prompt-writing rules, params/schema discipline, anti-patterns
-- [ ] Tool registered in `tools/mod.rs::all_tools`
-- [ ] Mentioned in `server_instructions.md` tool-selection table
+- [x] 6 archetypes covering cross-project tracker patterns from research
+- [x] Each archetype's `params_shape_example` validates against its `params_schema_example`
+- [x] `existing_trackers` capped at 30 with overflow hint
+- [x] `system_prompt` covers: archetype selection criteria, prompt-writing rules, params/schema discipline, anti-patterns
+- [x] Tool registered in `tools/mod.rs::all_tools`
+- [x] Mentioned in `server_instructions.md` tool-selection table
 
 ## History
 

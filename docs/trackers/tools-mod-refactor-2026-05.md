@@ -1,7 +1,7 @@
 ---
 id: ccd1cda1b4135fff
 kind: tracker
-status: active
+status: complete
 title: src/tools — Phase 7 File Splits (B→C→A)
 owners: []
 tags: []
@@ -40,7 +40,7 @@ Reference plan: `docs/plans/2026-04-22-codescout-refactoring-plan.md`
 
 **Risk:** Low. Pure mechanical extraction. No visibility changes needed if all helpers are already `pub(crate)`.
 
-**Status:** [ ] pending
+**Status:** [x] complete — commit `1fc60c4`
 
 ---
 
@@ -75,7 +75,7 @@ src/tools/run_command/
 
 **Risk:** Medium. Cross-calls between the 3 functions mean order matters. Start with the leaf (most self-contained) first.
 
-**Status:** [ ] pending
+**Status:** [x] complete — commit `ba9fe16`
 
 ---
 
@@ -116,14 +116,13 @@ src/tools/
 
 **Risk:** High foundation impact — but all callers already use `crate::tools::X` so the public API surface doesn't change. Risk is internal cross-deps between the three new files.
 
-**Status:** [ ] pending
+**Status:** [x] complete
 
 ---
 
 ## Completion Criteria
 
 All three tasks done when:
-- [ ] `cargo fmt && cargo clippy -- -D warnings && cargo test` passes clean
-- [ ] No file in `src/tools/` exceeds ~600 lines
+- [x] `cargo fmt && cargo clippy -- -D warnings && cargo test` passes clean
+- [x] No file in `src/tools/` exceeds ~600 lines
 - [ ] Plan doc `docs/plans/2026-04-22-codescout-refactoring-plan.md` updated to reflect completion
-
