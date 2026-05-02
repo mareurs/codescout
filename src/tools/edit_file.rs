@@ -3097,16 +3097,22 @@ mod tests {
             )
             .await;
 
-        assert!(result.is_err(), "should block source edits when debug_enforce_symbol_tools=true");
+        assert!(
+            result.is_err(),
+            "should block source edits when debug_enforce_symbol_tools=true"
+        );
         let err = result.unwrap_err();
-        let recoverable = err.downcast_ref::<RecoverableError>().expect("should be RecoverableError");
+        let recoverable = err
+            .downcast_ref::<RecoverableError>()
+            .expect("should be RecoverableError");
         assert!(
             err.to_string().contains("debug_enforce_symbol_tools"),
             "error should mention the flag, got: {err}"
         );
         assert!(
             recoverable.hint().unwrap_or("").contains("edit_code"),
-            "hint should point to edit_code, got: {:?}", recoverable.hint()
+            "hint should point to edit_code, got: {:?}",
+            recoverable.hint()
         );
     }
 

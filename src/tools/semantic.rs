@@ -11,7 +11,6 @@ const MAX_CHUNKS_PER_FILE: usize = 3;
 
 use std::collections::HashMap;
 
-
 /// Apply a per-file cap to a score-sorted list of search results. Iterates in
 /// order and keeps at most `max_per_file` entries sharing the same `file_path`;
 /// later duplicates are dropped. Passing 0 disables the cap (returns input).
@@ -1235,17 +1234,32 @@ mod tests {
         use crate::embed::schema::SearchResult;
 
         let vector = vec![
-            SearchResult { id: 1, file_path: "a.rs".into(), language: "rust".into(),
-                content: "a".into(), start_line: 0, end_line: 1, score: 0.9,
-                source: "project".into(), project_id: "root".into() },
-            SearchResult { id: 2, file_path: "b.rs".into(), language: "rust".into(),
-                content: "b".into(), start_line: 0, end_line: 1, score: 0.8,
-                source: "project".into(), project_id: "root".into() },
+            SearchResult {
+                id: 1,
+                file_path: "a.rs".into(),
+                language: "rust".into(),
+                content: "a".into(),
+                start_line: 0,
+                end_line: 1,
+                score: 0.9,
+                source: "project".into(),
+                project_id: "root".into(),
+            },
+            SearchResult {
+                id: 2,
+                file_path: "b.rs".into(),
+                language: "rust".into(),
+                content: "b".into(),
+                start_line: 0,
+                end_line: 1,
+                score: 0.8,
+                source: "project".into(),
+                project_id: "root".into(),
+            },
         ];
         let fused_ids = fusion::rrf_fuse(&vector, &[], 60.0);
         assert_eq!(fused_ids, vec![1, 2]);
     }
-
 
     fn sr(file: &str, score: f32) -> crate::embed::schema::SearchResult {
         crate::embed::schema::SearchResult {

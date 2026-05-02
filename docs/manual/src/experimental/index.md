@@ -14,3 +14,4 @@
 - [tracker_design](./tracker-design.md) — pre-creation teaching tool returning 6 archetypes + 7-step design guide + existing-tracker landscape; call before `tracker_create`.
 - [artifact_refresh_stale](./artifact-refresh-stale.md) — discovery tool listing augmented artifacts due for refresh, oldest-first (never-refreshed first).
 - [Librarian tool consolidation](./librarian-tool-consolidation.md) — 22 → 16 tools: six single-purpose tools absorbed into parent tools (`artifact_find`, `artifact_create`, `artifact_augment`, `artifact_get`, `artifact_update`).
+- [Hybrid BM25 + Vector Retrieval](./hybrid-bm25-vector.md) — `semantic_search` now fuses dense vector search with sparse BM25 keyword search via Reciprocal Rank Fusion (RRF), using a code-aware tokenizer that handles camelCase and snake_case.

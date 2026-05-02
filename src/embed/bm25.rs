@@ -237,7 +237,9 @@ impl BM25Index {
                 let chunk_id = doc
                     .get_first(self.chunk_id)
                     .and_then(|v| v.as_u64())
-                    .ok_or_else(|| anyhow::anyhow!("missing chunk_id in BM25 doc — index may be corrupt"))?;
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("missing chunk_id in BM25 doc — index may be corrupt")
+                    })?;
                 Ok(BM25Result {
                     chunk_id,
                     score: *score,
