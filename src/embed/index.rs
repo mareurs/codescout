@@ -2708,7 +2708,10 @@ pub async fn reindex_files(
         match is_file_changed_mtime_hash(&conn, project_root, &rel) {
             Ok(false) => continue,
             Ok(true) => {}
-            Err(_) => continue,
+            Err(e) => {
+                tracing::warn!("reindex_files: hash check failed for {}: {e}", rel);
+                continue;
+            }
         }
 
         let Some(lang) = crate::ast::detect_language(abs_path) else {
@@ -2716,11 +2719,17 @@ pub async fn reindex_files(
         };
         let source = match std::fs::read_to_string(abs_path) {
             Ok(s) => s,
-            Err(_) => continue,
+            Err(e) => {
+                tracing::warn!("reindex_files: cannot read {}: {e}", rel);
+                continue;
+            }
         };
         let hash = match hash_file(abs_path) {
             Ok(h) => h,
-            Err(_) => continue,
+            Err(e) => {
+                tracing::warn!("reindex_files: cannot hash {}: {e}", rel);
+                continue;
+            }
         };
         let mtime = file_mtime(abs_path).unwrap_or(0);
 
@@ -5013,4 +5022,45 @@ mod tests {
             .unwrap();
         assert_eq!(count, 0);
     }
+    #[test]
+    fn reindex_files_embeds_changed_file() {
+        // File NOT in hash table → is_file_changed_mtime_hash returns true → gets embedded
+        let dir = tempdir().unwrap();
+
+        let file = dir.path().join("lib.rs");
+        std::fs::write(&file, "pub fn hello() -> &'static str { \"hello\" }").unwrap();
+
+        struct InstantEmbedder;
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for InstantEmbedder {
+            fn dimensions(&self) -> usize {
+                3
+            }
+            async fn embed(
+                &self,
+                texts: &[&str],
+            ) -> anyhow::Result<Vec<codescout_embed::Embedding>> {
+                Ok(texts.iter().map(|_| vec![1.0_f32, 0.0, 0.0]).collect())
+            }
+        }
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let embedder: std::sync::Arc<dyn codescout_embed::Embedder> =
+            std::sync::Arc::new(InstantEmbedder);
+        let count = rt
+            .block_on(reindex_files(dir.path(), &[file], &embedder))
+            .unwrap();
+        assert_eq!(count, 1, "changed file should be embedded");
+
+        // Verify chunk was written to DB
+        let conn = open_db(dir.path()).unwrap();
+        let chunk_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM chunks WHERE file_path = 'lib.rs'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(chunk_count > 0, "chunk should be in DB after embed");
+    }
+
 }
