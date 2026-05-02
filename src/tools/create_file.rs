@@ -46,7 +46,8 @@ impl Tool for CreateFile {
         let overwrite = super::parse_bool_param(&input["overwrite"]);
         let root = ctx.agent.require_project_root().await?;
         let security = ctx.agent.security_config().await;
-        let resolved = crate::util::path_security::validate_write_path(path, &root, &security)?;
+        let session_roots = ctx.agent.session_write_roots_snapshot().await;
+        let resolved = crate::util::path_security::validate_write_path(path, &root, &security, &session_roots)?;
         if !overwrite && resolved.exists() {
             return Err(super::RecoverableError::with_hint(
                 format!("file already exists: {}", resolved.display()),

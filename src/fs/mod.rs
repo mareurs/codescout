@@ -73,7 +73,8 @@ pub(crate) async fn resolve_write_path(
 ) -> anyhow::Result<PathBuf> {
     let root = agent.require_project_root().await?;
     let security = agent.security_config().await;
-    crate::util::path_security::validate_write_path(relative_path, &root, &security)
+    let session_roots = agent.session_write_roots_snapshot().await;
+    crate::util::path_security::validate_write_path(relative_path, &root, &security, &session_roots)
 }
 
 /// Resolve which library directories to search for a given scope.

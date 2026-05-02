@@ -249,6 +249,7 @@ pub fn validate_write_path(
     raw: &str,
     project_root: &Path,
     config: &PathSecurityConfig,
+    session_roots: &[PathBuf],
 ) -> Result<PathBuf> {
     if raw.is_empty() {
         bail!("path must not be empty");
@@ -324,10 +325,17 @@ pub fn validate_write_path(
     for extra in &config.extra_write_roots {
         allowed.push(best_effort_canonicalize(extra));
     }
+    for root in session_roots {
+        allowed.push(best_effort_canonicalize(root));
+    }
 
     let under_allowed_root = allowed.iter().any(|root| resolved.starts_with(root));
     if !under_allowed_root {
-        bail!("write denied: '{}' is outside the project root", raw);
+        bail!(
+            "write denied: '{}' is outside the project root. \
+             Call approve_write('<dir>') first to grant write access for this session.",
+            raw
+        );
     }
 
     Ok(resolved)
@@ -732,6 +740,9 @@ mod tests {
     fn default_config() -> PathSecurityConfig {
         PathSecurityConfig::default()
     }
+    fn default_session_roots() -> Vec<PathBuf> {
+        vec![]
+    }
 
     // ── Read validation ──────────────────────────────────────────────────
 
@@ -836,14 +847,14 @@ mod tests {
     #[test]
     fn write_empty_path_rejected() {
         let dir = tempdir().unwrap();
-        let result = validate_write_path("", dir.path(), &default_config());
+        let result = validate_write_path("", dir.path(), &default_config(), &default_session_roots());
         assert!(result.is_err());
     }
 
     #[test]
     fn write_null_byte_rejected() {
         let dir = tempdir().unwrap();
-        let result = validate_write_path("file\0evil", dir.path(), &default_config());
+        let result = validate_write_path("file\0evil", dir.path(), &default_config(), &default_session_roots());
         assert!(result.is_err());
     }
 
@@ -853,7 +864,7 @@ mod tests {
         // Create the target directory so canonicalize resolves properly
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
 
-        let result = validate_write_path("src/new.rs", dir.path(), &default_config());
+        let result = validate_write_path("src/new.rs", dir.path(), &default_config(), &default_session_roots());
         assert!(result.is_ok());
         assert!(result
             .unwrap()
@@ -867,7 +878,7 @@ mod tests {
         // test remains valid now that /tmp is an allowed write root.
         let target = "/var/outside_ce_test/evil.rs";
 
-        let result = validate_write_path(target, project.path(), &default_config());
+        let result = validate_write_path(target, project.path(), &default_config(), &default_session_roots());
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -882,7 +893,7 @@ mod tests {
 
         // Traverse to /var (not /tmp) so the result lands outside both the
         // project root and the /tmp allowed root.
-        let result = validate_write_path("../../../var/evil.rs", project.path(), &default_config());
+        let result = validate_write_path("../../../var/evil.rs", project.path(), &default_config(), &default_session_roots());
         assert!(result.is_err());
     }
 
@@ -906,6 +917,7 @@ mod tests {
             "nonexistent/../../var/evil.rs",
             project.path(),
             &default_config(),
+            &default_session_roots(),
         );
         assert!(
             result.is_err(),
@@ -930,7 +942,7 @@ mod tests {
         };
 
         let target = extra.path().join("sub/file.rs");
-        let result = validate_write_path(target.to_str().unwrap(), project.path(), &config);
+        let result = validate_write_path(target.to_str().unwrap(), project.path(), &config, &default_session_roots());
         assert!(result.is_ok());
     }
 
@@ -940,7 +952,7 @@ mod tests {
         // /tmp itself must exist on the system for this test to be meaningful
         let target = PathBuf::from("/tmp/codescout-test-write.txt");
         let result =
-            validate_write_path(target.to_str().unwrap(), project.path(), &default_config());
+            validate_write_path(target.to_str().unwrap(), project.path(), &default_config(), &default_session_roots());
         assert!(
             result.is_ok(),
             "writes to /tmp should be allowed: {:?}",
@@ -980,6 +992,7 @@ mod tests {
             target.to_str().unwrap(),
             project.path(), // active project root is different
             &default_config(),
+            &default_session_roots(),
         );
 
         assert!(
@@ -998,6 +1011,7 @@ mod tests {
                 ssh_path.to_str().unwrap(),
                 &home, // pretend home is the project root
                 &default_config(),
+                &default_session_roots(),
             );
             assert!(result.is_err());
             assert!(result
@@ -1061,7 +1075,7 @@ mod tests {
         {
             std::os::unix::fs::symlink("/var/tmp", &link).unwrap();
             let result =
-                validate_write_path("sneaky/escaped.txt", project.path(), &default_config());
+                validate_write_path("sneaky/escaped.txt", project.path(), &default_config(), &default_session_roots());
             // After canonicalization the symlink resolves to /var/tmp/escaped.txt
             // which is outside both the project root and /tmp.
             assert!(result.is_err());
@@ -1594,8 +1608,59 @@ mod tests {
             ..PathSecurityConfig::default()
         };
 
-        let result = validate_write_path(target.to_str().unwrap(), &project_root, &config);
+        let result = validate_write_path(target.to_str().unwrap(), &project_root, &config, &default_session_roots());
         assert!(result.is_ok(), "root profile should bypass write boundary");
+    }
+
+    #[test]
+    fn validate_write_path_outside_root_mentions_approve_write() {
+        let dir = tempdir().unwrap();
+        // Use /var — outside both the project root and /tmp, so the deny check
+        // fires and the error message must mention approve_write.
+        let target = "/var/outside_ce_test_approve_write_hint.rs";
+        let result = validate_write_path(
+            target,
+            dir.path(),
+            &default_config(),
+            &default_session_roots(),
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("approve_write"),
+            "error should mention approve_write: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_write_path_allows_session_approved_root() {
+        let dir = tempdir().unwrap();
+        let other = tempdir().unwrap();
+        let session_roots = vec![other.path().to_path_buf()];
+        let target = other.path().join("file.txt");
+        let result = validate_write_path(
+            target.to_str().unwrap(),
+            dir.path(),
+            &default_config(),
+            &session_roots,
+        );
+        assert!(result.is_ok(), "approved root should allow writes: {:?}", result);
+    }
+
+    #[test]
+    fn validate_write_path_session_root_still_respects_deny_list() {
+        let dir = tempdir().unwrap();
+        let home = crate::platform::home_dir().unwrap();
+        let ssh = home.join(".ssh");
+        // Even if someone manages to sneak ~/.ssh into session_roots, deny-list wins
+        let session_roots = vec![ssh.clone()];
+        let target = ssh.join("authorized_keys");
+        let result = validate_write_path(
+            target.to_str().unwrap(),
+            dir.path(),
+            &default_config(),
+            &session_roots,
+        );
+        assert!(result.is_err(), "deny-list must win over session roots");
     }
 
     #[test]

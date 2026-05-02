@@ -126,6 +126,7 @@ impl EditCode {
 
         let rename_root = ctx.agent.require_project_root().await?;
         let rename_security = ctx.agent.security_config().await;
+        let rename_session_roots = ctx.agent.session_write_roots_snapshot().await;
         let mut lsp_files: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
 
         struct PlannedWrite {
@@ -149,6 +150,7 @@ impl EditCode {
                 path_str,
                 &rename_root,
                 &rename_security,
+                &rename_session_roots,
             )?;
             let pre_image = std::fs::read_to_string(&path)?;
             let new_content = apply_text_edits(&pre_image, &plain_edits);
