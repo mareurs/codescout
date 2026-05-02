@@ -25,9 +25,9 @@ Merge commit `3765e1b`: 18 files, +2092 lines. 267 lib tests passing.
 | Phase | Title | Status | Notes |
 |------:|-------|--------|-------|
 |     0 | v1 augmentation feature | done | Merged `3765e1b` on 2026-05-01. |
-|     1 | `render_template` + `params_schema` | done | A3 ✅, A1 ⚠ (verify migration), A2 ❌ (no schema validation), A4 ⚠ (two-call refresh), A5 ❌ (no dogfood tracker). |
+|     1 | `render_template` + `params_schema` | done | All 5 acceptance criteria met 2026-05-02. A2 commit `b1431a5`, A5 dogfood on artifact `79a6276776a1b5da`. |
 |   1.5 | `tracker_design` teaching tool | done | All 6 acceptance criteria verified 2026-05-02. |
-|     2 | `refresh_stale` discovery tool | open | Lists augmented artifacts where any gathered source is newer than `last_refreshed_at`. |
+|     2 | `refresh_stale` discovery tool | done | Shipped as `refresh_stale.rs`; registered, 6 tests. Verified 2026-05-02. |
 |     3 | `GatherSource::ConfigValue` | open | Read flag/setting from YAML/TOML/JSON/.conf + last-changed commit. Backend-kotlin flag-tracker use case. |
 |     4 | `append_mode` + history cap | open | Refresh produces dated delta blocks instead of rewriting body. Session-log pattern (MRV-poc `retrieval-improvement.md`). |
 |     5 | `kind: experiment` first-class | open | Promote `benchmarks/experiments/<dated>/` to artifacts; trackers fan in via existing `artifacts` source. |
@@ -48,9 +48,11 @@ Skipped for now (in brainstorm but deferred):
 | T-6 | Spike: pick template engine (`minijinja` vs `handlebars-rust`) | done | 1 | Picked `minijinja` per user. |
 | T-7 | Tests: schema-validate-on-update, template-render, fall-through when absent | done | 1 | 287 lib tests (was 267); 20 new across `schema_validate`, `render`, `update_params`, `augment`, `context`, `catalog`. |
 | T-8 | Docs: `docs/manual/src/experimental/artifact-augmentation.md` extends to v2 surface | done | 1 | Shipped as `augmentation-render-template.md`. |
-| T-9 | `artifact_refresh_stale` tool design | done | 2 | Shipped as `crates/librarian-mcp/src/tools/refresh_stale.rs`. |
-| T-10 | `GatherSource::ConfigValue` design (which formats? key path syntax?) | open | 3 |  |
-| T-11 | `append_mode` design — where does the date come from? cap policy? | open | 4 |  |
+| T-9 | `artifact_refresh_stale` tool — shipped + verified | done | 2 | `crates/librarian-mcp/src/tools/refresh_stale.rs`, 6 tests. |
+| T-10 | `GatherSource::ConfigValue` design (which formats? key path syntax?) | done | 3 | Detailed spec written 2026-05-02 — see Phase 3 section. |
+| T-19 | `GatherSource::ConfigValue` implementation | open | 3 | See Phase 3 steps. |
+| T-11 | `append_mode` design — where does the date come from? cap policy? | done | 4 | Detailed spec written 2026-05-02 — see Phase 4 section. |
+| T-20 | `append_mode` + history cap implementation | open | 4 | See Phase 4 steps. |
 | T-12 | `kind: experiment` schema + auto-discovery from filesystem | open | 5 |  |
 | T-13 | New tool `tracker_design` (archetype-driven) | done | 1.5 | `tools/tracker_design.rs`. |
 | T-14 | 6 archetypes: deployment_state, failure_table, metric_baseline, audit_issues, reflective, task_list | done | 1.5 | All 6 shipped. |
@@ -122,6 +124,131 @@ Archetype-driven (not intent-driven) for v1 — server stateless, transparent. I
 - [x] `system_prompt` covers: archetype selection criteria, prompt-writing rules, params/schema discipline, anti-patterns
 - [x] Tool registered in `tools/mod.rs::all_tools`
 - [x] Mentioned in `server_instructions.md` tool-selection table
+
+## Phase 3 — `GatherSource::ConfigValue`
+
+### Why
+
+`GatherSource::File` gives you the whole file. `ConfigValue` gives you one key from a structured config file — plus the last commit that touched it. Use case: a Kotlin backend flag-tracker that always surfaces the current flag value and when it last changed, without the LLM grepping.
+
+### Shape
+
+New variant in `crates/librarian-mcp/src/tools/gather.rs`:
+
+```rust
+ConfigValue {
+    path: String,        // relative to project root, e.g. "Cargo.toml"
+    key: String,         // dotted key path, e.g. "package.version" or "flags.dark_mode"
+},
+```
+
+Format auto-detected from extension: `.toml`, `.yaml`/`.yml`, `.json`. Other extensions → warning, skip.
+
+Key path syntax: dotted segments (`a.b.c`). Array index by position: `dependencies.0.name`. Simple and human-readable; no JSON Pointer overhead.
+
+Return value (under `source_key = "config_value"`):
+```json
+{
+  "path": "Cargo.toml",
+  "key": "package.version",
+  "value": "0.8.1",
+  "last_changed_commit": "abc1234",
+  "last_changed_at": "2026-04-10T11:32:00Z"
+}
+```
+`last_changed_commit` comes from `git log -1 --format="%H %aI" -- <path>`. If git unavailable or key missing → `null`.
+
+### Implementation steps
+
+1. Add `ConfigValue { path, key }` variant to `GatherSource` enum (`gather.rs:13`)
+2. Add `gather_config_value(ctx, path, key) -> Result<Value>`:
+   - Read file via project root path resolution (same as `gather_file`)
+   - Parse with `toml::Value` / `serde_yaml::Value` / `serde_json::Value` by extension
+   - Walk dotted key segments; return `RecoverableError` if key not found
+   - Run `git log -1 --format="%H %aI" -- path` for last-changed commit (best-effort)
+3. Add match arm in `gather_all` (line 62), source_key `"config_value"`
+4. Tests: TOML key found, YAML key found, JSON key found, key not found → warning not error, unknown extension → warning
+
+### Dependencies
+
+- `toml` — already in `Cargo.toml` (used elsewhere)
+- `serde_yaml` — check if present; add if needed
+- No new MCP tool needed — this is a gather source variant only
+
+### Acceptance
+
+- [ ] `ConfigValue` variant deserialises from `{"source": "config_value", "path": "...", "key": "..."}`
+- [ ] Value extracted correctly for TOML, YAML, JSON
+- [ ] `last_changed_commit` populated when git available
+- [ ] Missing key produces a warning (not a hard error) — gather continues
+- [ ] Unknown extension produces a warning and skips
+- [ ] Tests cover all 5 cases above
+
+---
+
+## Phase 4 — `append_mode` + history cap
+
+### Why
+
+Currently `artifact_refresh` returns a package → LLM rewrites the whole body → `artifact_update(body=...)`. For session logs, experiment journals, and incident timelines, rewriting destroys history. `append_mode` flips the write semantics: each refresh prepends a new dated section; old sections accumulate up to `history_cap`.
+
+### Shape
+
+Two new columns on `artifact_augmentation` (migration v5):
+
+```sql
+ALTER TABLE artifact_augmentation ADD COLUMN append_mode INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE artifact_augmentation ADD COLUMN history_cap  INTEGER;  -- NULL = unlimited
+```
+
+Set via `artifact_augment`:
+```
+artifact_augment(id, prompt, append_mode=true, history_cap=10)
+```
+
+Changed write flow when `append_mode = true`:
+1. `artifact_refresh` — unchanged; returns same package. Prompt should instruct LLM to write only the new delta block.
+2. `artifact_update(id, patch={body: "<delta>"}, commit_refresh=true)` — detects `append_mode` from augmentation row:
+   - Reads current file body
+   - Prepends `## <ISO date>\n\n<delta>\n\n` at top of body section
+   - If `history_cap` set: counts `## YYYY-MM-DD` headers; drops oldest entries beyond cap
+   - Writes file
+3. Date: `chrono::Utc::now().format("%Y-%m-%d")` at write time in `artifact_update`
+
+### Implementation steps
+
+1. Migration v5: add `append_mode` + `history_cap` to `artifact_augmentation`; update `AugmentationRow` struct
+2. `artifact_augment` tool: add `append_mode: Option<bool>` + `history_cap: Option<usize>` to input schema; persist to row
+3. `artifact_update/call`: after resolving body write path, check augmentation row for `append_mode`:
+   - If true: load current body, prepend dated block, apply history cap trim, write
+   - If false (default): existing replace behaviour unchanged
+4. Helper `trim_history(body: &str, cap: usize) -> String`: scan for `## \d{4}-\d{2}-\d{2}` headers, keep first `cap`, drop rest
+5. `artifact_refresh` response: when `append_mode=true`, add `"append_mode": true` hint so LLM knows to write a delta not a full body rewrite
+
+### Key decision: cap trim strategy
+
+Keep the **N most recent** sections (top of file = newest). Trim by scanning for dated `##` headers top-to-bottom; drop everything from entry N+1 onward. Prose above the first dated header (intro paragraph etc.) is preserved.
+
+### Tests
+
+- Append prepends new dated section at top
+- Second append produces two sections in reverse-chronological order
+- `history_cap=2` with 3 appends keeps only 2 newest
+- Intro prose above first dated header is not dropped by trim
+- `append_mode=false` (default): existing replace behaviour unaffected
+- `artifact_refresh` hints `append_mode: true` when set
+
+### Acceptance
+
+- [ ] `append_mode` + `history_cap` persist across `artifact_augment` → `artifact_refresh` → `artifact_update`
+- [ ] `artifact_update` prepends dated block when `append_mode=true`
+- [ ] `history_cap` trims oldest entries correctly
+- [ ] Intro prose preserved through trim
+- [ ] `artifact_refresh` response includes `append_mode` hint
+- [ ] Default (`append_mode=false`) behaviour unchanged — no regression
+- [ ] All 6 test cases above pass
+
+---
 
 ## History
 
