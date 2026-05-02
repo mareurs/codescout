@@ -148,17 +148,17 @@ external dependencies on the fly.
 
 **Create workflow:**
 
-1. `artifact_find(semantic="...")` — semantic search first; never create without checking
-2. If **tracker** (multi-entry: issue list, ADR log, experiment record): call `tracker_design` → pick an archetype → then `artifact_create`
-3. If **regular artifact**: `artifact_create` directly (fails if path exists — `artifact_find` guards this)
-4. `artifact_link(source, target)` to connect related artifacts
+1. `artifact(action=find, semantic="...")` — semantic search first; never create without checking
+2. If **tracker** (multi-entry: issue list, ADR log, experiment record): call `librarian(action=tracker_design)` → pick an archetype → then `artifact(action=create)`
+3. If **regular artifact**: `artifact(action=create)` directly (fails if path exists — `artifact(action=find)` guards this)
+4. `artifact(action=link, source, target)` to connect related artifacts
 
 **Other key tools:**
-- `artifact_graph` — relationships and dependencies between artifacts
-- `artifact_timeline` — chronological history of an artifact
-- `artifact_state_at(id, date)` — snapshot at a point in time
-- `artifact_refresh_stale` — update stale artifacts after codebase changes
-- `artifact_event_create` — log significant events on an artifact
+- `artifact(action=graph)` — relationships and dependencies between artifacts
+- `artifact_event(action=list)` — chronological history of an artifact
+- `artifact(action=state_at, id, date)` — snapshot at a point in time
+- `artifact_refresh(action=list_stale)` — update stale artifacts after codebase changes
+- `artifact_event(action=create)` — log significant events on an artifact
 ## Output System
 
 **File paths in tool output are relative to the project root** (e.g. `src/tools/mod.rs`,
@@ -251,11 +251,11 @@ Multi-tool chains for common tasks. Follow the steps in order.
 | Step | Tool | Purpose |
 |------|------|---------|
 | 1 | `librarian_context(topic)` | Get relevant artifact bundle and staleness warnings |
-| 2 | `artifact_find(semantic="...")` | Search by meaning — don't create duplicates |
-| 3a | `tracker_design` → `artifact_create` | For trackers: pick archetype first, then create |
-| 3b | `artifact_create(...)` | For plain artifacts: create directly |
-| 4 | `artifact_link(source, target)` | Connect to related artifacts |
-| 5 | `artifact_event_create(id, ...)` | Log significant events as they happen |
+| 2 | `artifact(action=find, semantic="...")` | Search by meaning — don't create duplicates |
+| 3a | `librarian(action=tracker_design)` → `artifact(action=create)` | For trackers: pick archetype first, then create |
+| 3b | `artifact(action=create, ...)` | For plain artifacts: create directly |
+| 4 | `artifact(action=link, source, target)` | Connect to related artifacts |
+| 5 | `artifact_event(action=create, id, ...)` | Log significant events as they happen |
 
 More workflows (markdown editing, dependency tracing) available via `resources/read doc://codescout-tool-guide`.
 ## MCP Resources

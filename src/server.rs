@@ -1379,6 +1379,8 @@ mod tests {
             || name.starts_with("tracker_")
             || name == "workspace_state_at"
             || name == "tracker_design"
+            || name == "artifact"
+            || name == "librarian"
     }
 
     #[tokio::test]
