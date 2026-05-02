@@ -546,13 +546,26 @@ fn split_outside_quotes(s: &str, seps: &[&str]) -> Vec<String> {
 }
 
 /// Extracts the pattern argument from a grep shell segment.
-/// Skips the command name and any flag tokens (starting with `-`).
+/// Skips the command name, any flag tokens (starting with `-`), and numeric
+/// arguments that immediately follow value-taking flags like `-A`, `-B`, `-C`, `-m`.
 fn extract_grep_pattern(segment: &str) -> Option<&str> {
-    segment
-        .split_whitespace()
-        .skip(1)
-        .find(|t| !t.starts_with('-'))
-        .map(|t| t.trim_matches('"').trim_matches('\''))
+    let mut skip_next = false;
+    for token in segment.split_whitespace().skip(1) {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if token.starts_with('-') {
+            // Short value-taking flags: -A, -B, -C, -m (numeric context/count args)
+            let flag = token.trim_start_matches('-');
+            if matches!(flag, "A" | "B" | "C" | "m") {
+                skip_next = true;
+            }
+            continue;
+        }
+        return Some(token.trim_matches('"').trim_matches('\''));
+    }
+    None
 }
 
 /// Returns a hint string if `command` is a file-reading tool targeting a source file,
@@ -589,7 +602,7 @@ pub fn check_source_file_access(command: &str) -> Option<String> {
         }
         // Only the *first token* of a segment is the actual command being executed.
         // Matching against the first token (not the full segment string) prevents
-        // false positives from quoted arguments containing command names, e.g.:\
+        // false positives from quoted arguments containing command names, e.g.:
         //   git commit -m "feat: tail-50 of log, output_buffer.rs"
         let first_token = seg.split_whitespace().next().unwrap_or("");
         if !cmd_re.is_match(first_token) {
@@ -1320,6 +1333,12 @@ mod tests {
     fn grep_pipe_alternation_uses_first_part_in_hint() {
         let hint =
             check_source_file_access("grep 'WriteMemory|ReadMemory' src/tools/memory.rs").unwrap();
+        assert!(hint.contains("symbols(name='WriteMemory')"), "got: {hint}");
+    }
+
+    #[test]
+    fn grep_value_taking_flag_skipped_for_identifier() {
+        let hint = check_source_file_access("grep -A 3 WriteMemory src/tools/memory.rs").unwrap();
         assert!(hint.contains("symbols(name='WriteMemory')"), "got: {hint}");
     }
 
