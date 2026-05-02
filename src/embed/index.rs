@@ -2107,6 +2107,13 @@ pub async fn build_index(
     embed_result?; // embed error takes precedence
     let (indexed, drift_results) = writer_result?;
 
+    // BM25 index: full rebuild from the freshly-written chunks table.
+    // conn was moved into db_writer — re-open for the BM25 pass.
+    {
+        let bm25_conn = open_db(project_root)?;
+        crate::embed::bm25::BM25Index::build(project_root, &bm25_conn)?;
+    }
+
     tracing::info!(
         "Index complete: {} files indexed, {} deleted",
         indexed,
@@ -4287,6 +4294,28 @@ mod tests {
         assert_eq!(results[0].title, "keep me");
         assert_eq!(results[0].content, "important knowledge");
     }
+    #[test]
+    fn bm25_index_built_after_build_index() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "pub fn hello() {}").unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname=\"t\"\nversion=\"0.1.0\"",
+        )
+        .unwrap();
+
+        let tantivy_dir = root.join(".codescout").join("tantivy");
+        crate::embed::bm25::BM25Index::build(root, &crate::embed::index::open_db(root).unwrap())
+            .unwrap();
+        assert!(
+            tantivy_dir.exists(),
+            ".codescout/tantivy/ must be created by build"
+        );
+    }
 
     #[test]
     fn search_memories_empty_db() {
@@ -5119,5 +5148,4 @@ mod tests {
             .unwrap();
         assert!(chunk_count > 0, "chunk should be in DB after embed");
     }
-
 }
