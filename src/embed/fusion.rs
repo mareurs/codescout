@@ -1,5 +1,7 @@
 use crate::embed::schema::SearchResult;
 
+use std::collections::HashMap;
+
 #[derive(Debug, Clone)]
 pub struct BM25Result {
     pub chunk_id: u64,
@@ -11,8 +13,6 @@ pub struct BM25Result {
 /// Returns chunk_ids in descending RRF score order.
 /// k=60 is the canonical constant — set it lower (e.g. 1.0) to amplify rank differences.
 pub fn rrf_fuse(vector: &[SearchResult], bm25: &[BM25Result], k: f32) -> Vec<u64> {
-    use std::collections::HashMap;
-
     let mut scores: HashMap<u64, f32> = HashMap::new();
 
     // Vector leg: rank = 1-indexed position in the slice
