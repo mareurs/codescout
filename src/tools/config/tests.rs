@@ -1187,3 +1187,52 @@ async fn activation_response_includes_stale_warning_when_version_outdated() {
         crate::tools::onboarding::ONBOARDING_VERSION as u64
     );
 }
+
+#[test]
+fn format_activate_project_prepends_warning_when_stale() {
+    let result = json!({
+        "status": "ok",
+        "project": "my-project",
+        "project_root": "/home/user/my-project",
+        "read_only": false,
+        "memories": ["arch"],
+        "index": {"status": "not_indexed"},
+        "system_prompt_stale": {
+            "stored_version": 20,
+            "current_version": 22,
+            "action": "Run onboarding(action=\"refresh_prompt\") — tool names or signatures have changed."
+        },
+        "hint": "CWD: /home/user/my-project"
+    });
+    let compact = format_activate_project(&result);
+    assert!(
+        compact.starts_with("⚠ SYSTEM PROMPT STALE (v20 → v22):"),
+        "compact should start with stale warning but was: {compact}"
+    );
+    assert!(
+        compact.contains("activated · my-project (rw)"),
+        "compact should still contain activation summary but was: {compact}"
+    );
+}
+
+#[test]
+fn format_activate_project_no_warning_when_current() {
+    let result = json!({
+        "status": "ok",
+        "project": "my-project",
+        "project_root": "/home/user/my-project",
+        "read_only": false,
+        "memories": ["arch"],
+        "index": {"status": "not_indexed"},
+        "hint": "CWD: /home/user/my-project"
+    });
+    let compact = format_activate_project(&result);
+    assert!(
+        !compact.contains("STALE"),
+        "no stale warning expected but was: {compact}"
+    );
+    assert_eq!(
+        compact,
+        "activated · my-project (rw) · 1 memories · index: not_indexed"
+    );
+}

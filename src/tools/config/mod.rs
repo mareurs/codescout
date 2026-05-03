@@ -538,7 +538,23 @@ fn format_activate_project(result: &Value) -> String {
         }
     }
 
-    parts.join(" · ")
+    let body = parts.join(" · ");
+
+    if let Some(stale) = result["system_prompt_stale"].as_object() {
+        let stored = stale
+            .get("stored_version")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let current = stale
+            .get("current_version")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        format!(
+            "⚠ SYSTEM PROMPT STALE (v{stored} → v{current}): run onboarding(action=\"refresh_prompt\") now.\n{body}"
+        )
+    } else {
+        body
+    }
 }
 
 fn format_project_status(result: &Value) -> String {
