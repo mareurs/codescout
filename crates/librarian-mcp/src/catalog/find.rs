@@ -57,6 +57,7 @@ pub fn count_matching(cat: &Catalog, filter: Option<&FilterNode>) -> Result<usiz
     Ok(n.max(0) as usize)
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CatalogSummary {
     pub total: usize,
     pub by_kind: std::collections::BTreeMap<String, usize>,
@@ -367,10 +368,12 @@ mod tests {
     #[test]
     fn catalog_summary_respects_scoped_filter() {
         use crate::catalog::artifact::{upsert, ArtifactRow};
+        use crate::catalog::augmentation;
         use crate::filter::FilterNode;
         use serde_json::json;
         let cat = crate::catalog::Catalog::open_in_memory().unwrap();
         let now = chrono::Utc::now().timestamp_millis();
+        let now_ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
         for (id, repo) in [("a1", "repo-a"), ("a2", "repo-b")] {
             upsert(&cat, &ArtifactRow {
                 id: id.into(), repo: repo.into(), rel_path: format!("{id}.md"),
@@ -381,11 +384,26 @@ mod tests {
                 file_sha256: "".into(), confidence: 1.0,
             }).unwrap();
         }
+        // Augment the repo-b artifact — filter to repo-a must exclude it
+        augmentation::upsert(&cat, &crate::catalog::augmentation::AugmentationRow {
+            artifact_id: "a2".into(),
+            prompt: "track".into(),
+            params: "{}".into(),
+            last_refreshed_at: None,
+            refresh_count: 0,
+            created_at: now_ts.clone(),
+            updated_at: now_ts,
+            render_template: None,
+            params_schema: None,
+            append_mode: false,
+            history_cap: None,
+        }).unwrap();
         let f = FilterNode::Leaf(
             [("repo".to_string(), json!({"eq": "repo-a"}))].into_iter().collect()
         );
         let s = catalog_summary(&cat, Some(&f)).unwrap();
         assert_eq!(s.total, 1);
+        assert_eq!(s.augmented, 0, "augmented count must respect the scope filter");
     }
 
 }
