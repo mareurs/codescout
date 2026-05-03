@@ -57,6 +57,65 @@ pub fn count_matching(cat: &Catalog, filter: Option<&FilterNode>) -> Result<usiz
     Ok(n.max(0) as usize)
 }
 
+pub struct CatalogSummary {
+    pub total: usize,
+    pub by_kind: std::collections::BTreeMap<String, usize>,
+    pub augmented: usize,
+}
+
+/// Catalog-level summary for the given scoped filter: total non-archived
+/// artifact count, count by kind, and count of augmented artifacts.
+/// Caller is responsible for passing a filter that already excludes
+/// archived/superseded rows if desired.
+pub fn catalog_summary(
+    cat: &Catalog,
+    scoped_filter: Option<&FilterNode>,
+) -> Result<CatalogSummary> {
+    let (where_sql, params) = match scoped_filter {
+        Some(f) => {
+            let frag = compile(f)?;
+            (format!(" WHERE {}", frag.sql), frag.params)
+        }
+        None => (String::new(), Vec::new()),
+    };
+
+    let mut by_kind = std::collections::BTreeMap::new();
+    let mut total = 0usize;
+    {
+        let sql = format!(
+            "SELECT kind, COUNT(*) FROM artifact{} GROUP BY kind",
+            where_sql
+        );
+        let mut stmt = cat.conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(params.iter()),
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+        )?;
+        for row in rows {
+            let (kind, count) = row?;
+            let c = count.max(0) as usize;
+            total += c;
+            by_kind.insert(kind, c);
+        }
+    }
+
+    let augmented = {
+        let aug_sql = format!(
+            "SELECT COUNT(*) FROM artifact_augmentation \
+             WHERE artifact_id IN (SELECT id FROM artifact{})",
+            where_sql
+        );
+        let mut stmt = cat.conn.prepare(&aug_sql)?;
+        let n: i64 = stmt.query_row(
+            rusqlite::params_from_iter(params.iter()),
+            |r| r.get(0),
+        )?;
+        n.max(0) as usize
+    };
+
+    Ok(CatalogSummary { total, by_kind, augmented })
+}
+
 /// Two-phase semantic search with iterative K backfill:
 ///
 /// 1. KNN query against artifact_vec to get top-K candidate ids by cosine distance.
@@ -241,4 +300,92 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id, "a");
     }
+
+    #[test]
+    fn catalog_summary_counts_by_kind_and_total() {
+        use crate::catalog::artifact::{upsert, ArtifactRow};
+        let cat = crate::catalog::Catalog::open_in_memory().unwrap();
+        let now = chrono::Utc::now().timestamp_millis();
+        for (id, kind) in [("a1", "tracker"), ("a2", "tracker"), ("a3", "plan")] {
+            upsert(&cat, &ArtifactRow {
+                id: id.into(), repo: "r".into(), rel_path: format!("{id}.md"),
+                kind: kind.into(), status: "draft".into(),
+                title: None, owners: vec![], tags: vec![], topic: None,
+                time_scope: None, source: None,
+                created_at: now, updated_at: now, file_mtime: now,
+                file_sha256: "".into(), confidence: 1.0,
+            }).unwrap();
+        }
+        let s = catalog_summary(&cat, None).unwrap();
+        assert_eq!(s.total, 3);
+        assert_eq!(s.by_kind["tracker"], 2);
+        assert_eq!(s.by_kind["plan"], 1);
+        assert_eq!(s.augmented, 0);
+    }
+
+    #[test]
+    fn catalog_summary_counts_augmented() {
+        use crate::catalog::artifact::{upsert, ArtifactRow};
+        use crate::catalog::augmentation;
+        let cat = crate::catalog::Catalog::open_in_memory().unwrap();
+        let now = chrono::Utc::now().timestamp_millis();
+        let now_ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+        upsert(&cat, &ArtifactRow {
+            id: "a1".into(), repo: "r".into(), rel_path: "a1.md".into(),
+            kind: "tracker".into(), status: "draft".into(),
+            title: None, owners: vec![], tags: vec![], topic: None,
+            time_scope: None, source: None,
+            created_at: now, updated_at: now, file_mtime: now,
+            file_sha256: "".into(), confidence: 1.0,
+        }).unwrap();
+        upsert(&cat, &ArtifactRow {
+            id: "a2".into(), repo: "r".into(), rel_path: "a2.md".into(),
+            kind: "plan".into(), status: "draft".into(),
+            title: None, owners: vec![], tags: vec![], topic: None,
+            time_scope: None, source: None,
+            created_at: now, updated_at: now, file_mtime: now,
+            file_sha256: "".into(), confidence: 1.0,
+        }).unwrap();
+        augmentation::upsert(&cat, &crate::catalog::augmentation::AugmentationRow {
+            artifact_id: "a1".into(),
+            prompt: "track".into(),
+            params: "{}".into(),
+            last_refreshed_at: None,
+            refresh_count: 0,
+            created_at: now_ts.clone(),
+            updated_at: now_ts,
+            render_template: None,
+            params_schema: None,
+            append_mode: false,
+            history_cap: None,
+        }).unwrap();
+        let s = catalog_summary(&cat, None).unwrap();
+        assert_eq!(s.total, 2);
+        assert_eq!(s.augmented, 1);
+    }
+
+    #[test]
+    fn catalog_summary_respects_scoped_filter() {
+        use crate::catalog::artifact::{upsert, ArtifactRow};
+        use crate::filter::FilterNode;
+        use serde_json::json;
+        let cat = crate::catalog::Catalog::open_in_memory().unwrap();
+        let now = chrono::Utc::now().timestamp_millis();
+        for (id, repo) in [("a1", "repo-a"), ("a2", "repo-b")] {
+            upsert(&cat, &ArtifactRow {
+                id: id.into(), repo: repo.into(), rel_path: format!("{id}.md"),
+                kind: "plan".into(), status: "draft".into(),
+                title: None, owners: vec![], tags: vec![], topic: None,
+                time_scope: None, source: None,
+                created_at: now, updated_at: now, file_mtime: now,
+                file_sha256: "".into(), confidence: 1.0,
+            }).unwrap();
+        }
+        let f = FilterNode::Leaf(
+            [("repo".to_string(), json!({"eq": "repo-a"}))].into_iter().collect()
+        );
+        let s = catalog_summary(&cat, Some(&f)).unwrap();
+        assert_eq!(s.total, 1);
+    }
+
 }
