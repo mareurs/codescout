@@ -766,17 +766,34 @@ mod tests {
         use crate::catalog::artifact::{upsert, ArtifactRow};
         let cat = crate::catalog::Catalog::open_in_memory().unwrap();
         let now = chrono::Utc::now().timestamp_millis();
-        upsert(&cat, &ArtifactRow {
-            id: "a1".into(), repo: "claude".into(), rel_path: "code-explorer/a1.md".into(),
-            kind: "tracker".into(), status: "draft".into(),
-            title: None, owners: vec![], tags: vec![], topic: None,
-            time_scope: None, source: None,
-            created_at: now, updated_at: now, file_mtime: now,
-            file_sha256: "".into(), confidence: 1.0,
-        }).unwrap();
+        upsert(
+            &cat,
+            &ArtifactRow {
+                id: "a1".into(),
+                repo: "claude".into(),
+                rel_path: "code-explorer/a1.md".into(),
+                kind: "tracker".into(),
+                status: "draft".into(),
+                title: None,
+                owners: vec![],
+                tags: vec![],
+                topic: None,
+                time_scope: None,
+                source: None,
+                created_at: now,
+                updated_at: now,
+                file_mtime: now,
+                file_sha256: "".into(),
+                confidence: 1.0,
+            },
+        )
+        .unwrap();
         let ctx = mk_ctx(cat);
         let result = call(&ctx, serde_json::json!({})).await.unwrap();
-        assert!(result["catalog"].is_object(), "cold call must include catalog field");
+        assert!(
+            result["catalog"].is_object(),
+            "cold call must include catalog field"
+        );
         assert_eq!(result["catalog"]["total"], 1);
         assert_eq!(result["catalog"]["by_kind"]["tracker"], 1);
         assert_eq!(result["catalog"]["augmented"], 0);
@@ -787,20 +804,35 @@ mod tests {
         use crate::catalog::artifact::{upsert, ArtifactRow};
         let cat = crate::catalog::Catalog::open_in_memory().unwrap();
         let now = chrono::Utc::now().timestamp_millis();
-        upsert(&cat, &ArtifactRow {
-            id: "a1".into(), repo: "claude".into(), rel_path: "code-explorer/a1.md".into(),
-            kind: "tracker".into(), status: "draft".into(),
-            title: None, owners: vec![], tags: vec![], topic: None,
-            time_scope: None, source: None,
-            created_at: now, updated_at: now, file_mtime: now,
-            file_sha256: "".into(), confidence: 1.0,
-        }).unwrap();
+        upsert(
+            &cat,
+            &ArtifactRow {
+                id: "a1".into(),
+                repo: "claude".into(),
+                rel_path: "code-explorer/a1.md".into(),
+                kind: "tracker".into(),
+                status: "draft".into(),
+                title: None,
+                owners: vec![],
+                tags: vec![],
+                topic: None,
+                time_scope: None,
+                source: None,
+                created_at: now,
+                updated_at: now,
+                file_mtime: now,
+                file_sha256: "".into(),
+                confidence: 1.0,
+            },
+        )
+        .unwrap();
         let ctx = mk_ctx(cat);
-        let result = call(&ctx, serde_json::json!({"kind": "tracker"})).await.unwrap();
+        let result = call(&ctx, serde_json::json!({"kind": "tracker"}))
+            .await
+            .unwrap();
         assert!(
             result.get("catalog").is_none() || result["catalog"].is_null(),
             "filtered find must not include catalog field"
         );
     }
-
 }

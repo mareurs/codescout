@@ -88,10 +88,9 @@ pub fn catalog_summary(
             where_sql
         );
         let mut stmt = cat.conn.prepare(&sql)?;
-        let rows = stmt.query_map(
-            rusqlite::params_from_iter(params.iter()),
-            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
-        )?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?;
         for row in rows {
             let (kind, count) = row?;
             let c = count.max(0) as usize;
@@ -107,14 +106,15 @@ pub fn catalog_summary(
             where_sql
         );
         let mut stmt = cat.conn.prepare(&aug_sql)?;
-        let n: i64 = stmt.query_row(
-            rusqlite::params_from_iter(params.iter()),
-            |r| r.get(0),
-        )?;
+        let n: i64 = stmt.query_row(rusqlite::params_from_iter(params.iter()), |r| r.get(0))?;
         n.max(0) as usize
     };
 
-    Ok(CatalogSummary { total, by_kind, augmented })
+    Ok(CatalogSummary {
+        total,
+        by_kind,
+        augmented,
+    })
 }
 
 /// Two-phase semantic search with iterative K backfill:
@@ -308,14 +308,28 @@ mod tests {
         let cat = crate::catalog::Catalog::open_in_memory().unwrap();
         let now = chrono::Utc::now().timestamp_millis();
         for (id, kind) in [("a1", "tracker"), ("a2", "tracker"), ("a3", "plan")] {
-            upsert(&cat, &ArtifactRow {
-                id: id.into(), repo: "r".into(), rel_path: format!("{id}.md"),
-                kind: kind.into(), status: "draft".into(),
-                title: None, owners: vec![], tags: vec![], topic: None,
-                time_scope: None, source: None,
-                created_at: now, updated_at: now, file_mtime: now,
-                file_sha256: "".into(), confidence: 1.0,
-            }).unwrap();
+            upsert(
+                &cat,
+                &ArtifactRow {
+                    id: id.into(),
+                    repo: "r".into(),
+                    rel_path: format!("{id}.md"),
+                    kind: kind.into(),
+                    status: "draft".into(),
+                    title: None,
+                    owners: vec![],
+                    tags: vec![],
+                    topic: None,
+                    time_scope: None,
+                    source: None,
+                    created_at: now,
+                    updated_at: now,
+                    file_mtime: now,
+                    file_sha256: "".into(),
+                    confidence: 1.0,
+                },
+            )
+            .unwrap();
         }
         let s = catalog_summary(&cat, None).unwrap();
         assert_eq!(s.total, 3);
@@ -330,36 +344,70 @@ mod tests {
         use crate::catalog::augmentation;
         let cat = crate::catalog::Catalog::open_in_memory().unwrap();
         let now = chrono::Utc::now().timestamp_millis();
-        let now_ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
-        upsert(&cat, &ArtifactRow {
-            id: "a1".into(), repo: "r".into(), rel_path: "a1.md".into(),
-            kind: "tracker".into(), status: "draft".into(),
-            title: None, owners: vec![], tags: vec![], topic: None,
-            time_scope: None, source: None,
-            created_at: now, updated_at: now, file_mtime: now,
-            file_sha256: "".into(), confidence: 1.0,
-        }).unwrap();
-        upsert(&cat, &ArtifactRow {
-            id: "a2".into(), repo: "r".into(), rel_path: "a2.md".into(),
-            kind: "plan".into(), status: "draft".into(),
-            title: None, owners: vec![], tags: vec![], topic: None,
-            time_scope: None, source: None,
-            created_at: now, updated_at: now, file_mtime: now,
-            file_sha256: "".into(), confidence: 1.0,
-        }).unwrap();
-        augmentation::upsert(&cat, &crate::catalog::augmentation::AugmentationRow {
-            artifact_id: "a1".into(),
-            prompt: "track".into(),
-            params: "{}".into(),
-            last_refreshed_at: None,
-            refresh_count: 0,
-            created_at: now_ts.clone(),
-            updated_at: now_ts,
-            render_template: None,
-            params_schema: None,
-            append_mode: false,
-            history_cap: None,
-        }).unwrap();
+        let now_ts = chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string();
+        upsert(
+            &cat,
+            &ArtifactRow {
+                id: "a1".into(),
+                repo: "r".into(),
+                rel_path: "a1.md".into(),
+                kind: "tracker".into(),
+                status: "draft".into(),
+                title: None,
+                owners: vec![],
+                tags: vec![],
+                topic: None,
+                time_scope: None,
+                source: None,
+                created_at: now,
+                updated_at: now,
+                file_mtime: now,
+                file_sha256: "".into(),
+                confidence: 1.0,
+            },
+        )
+        .unwrap();
+        upsert(
+            &cat,
+            &ArtifactRow {
+                id: "a2".into(),
+                repo: "r".into(),
+                rel_path: "a2.md".into(),
+                kind: "plan".into(),
+                status: "draft".into(),
+                title: None,
+                owners: vec![],
+                tags: vec![],
+                topic: None,
+                time_scope: None,
+                source: None,
+                created_at: now,
+                updated_at: now,
+                file_mtime: now,
+                file_sha256: "".into(),
+                confidence: 1.0,
+            },
+        )
+        .unwrap();
+        augmentation::upsert(
+            &cat,
+            &crate::catalog::augmentation::AugmentationRow {
+                artifact_id: "a1".into(),
+                prompt: "track".into(),
+                params: "{}".into(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: now_ts.clone(),
+                updated_at: now_ts,
+                render_template: None,
+                params_schema: None,
+                append_mode: false,
+                history_cap: None,
+            },
+        )
+        .unwrap();
         let s = catalog_summary(&cat, None).unwrap();
         assert_eq!(s.total, 2);
         assert_eq!(s.augmented, 1);
@@ -373,37 +421,61 @@ mod tests {
         use serde_json::json;
         let cat = crate::catalog::Catalog::open_in_memory().unwrap();
         let now = chrono::Utc::now().timestamp_millis();
-        let now_ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+        let now_ts = chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string();
         for (id, repo) in [("a1", "repo-a"), ("a2", "repo-b")] {
-            upsert(&cat, &ArtifactRow {
-                id: id.into(), repo: repo.into(), rel_path: format!("{id}.md"),
-                kind: "plan".into(), status: "draft".into(),
-                title: None, owners: vec![], tags: vec![], topic: None,
-                time_scope: None, source: None,
-                created_at: now, updated_at: now, file_mtime: now,
-                file_sha256: "".into(), confidence: 1.0,
-            }).unwrap();
+            upsert(
+                &cat,
+                &ArtifactRow {
+                    id: id.into(),
+                    repo: repo.into(),
+                    rel_path: format!("{id}.md"),
+                    kind: "plan".into(),
+                    status: "draft".into(),
+                    title: None,
+                    owners: vec![],
+                    tags: vec![],
+                    topic: None,
+                    time_scope: None,
+                    source: None,
+                    created_at: now,
+                    updated_at: now,
+                    file_mtime: now,
+                    file_sha256: "".into(),
+                    confidence: 1.0,
+                },
+            )
+            .unwrap();
         }
         // Augment the repo-b artifact — filter to repo-a must exclude it
-        augmentation::upsert(&cat, &crate::catalog::augmentation::AugmentationRow {
-            artifact_id: "a2".into(),
-            prompt: "track".into(),
-            params: "{}".into(),
-            last_refreshed_at: None,
-            refresh_count: 0,
-            created_at: now_ts.clone(),
-            updated_at: now_ts,
-            render_template: None,
-            params_schema: None,
-            append_mode: false,
-            history_cap: None,
-        }).unwrap();
+        augmentation::upsert(
+            &cat,
+            &crate::catalog::augmentation::AugmentationRow {
+                artifact_id: "a2".into(),
+                prompt: "track".into(),
+                params: "{}".into(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: now_ts.clone(),
+                updated_at: now_ts,
+                render_template: None,
+                params_schema: None,
+                append_mode: false,
+                history_cap: None,
+            },
+        )
+        .unwrap();
         let f = FilterNode::Leaf(
-            [("repo".to_string(), json!({"eq": "repo-a"}))].into_iter().collect()
+            [("repo".to_string(), json!({"eq": "repo-a"}))]
+                .into_iter()
+                .collect(),
         );
         let s = catalog_summary(&cat, Some(&f)).unwrap();
         assert_eq!(s.total, 1);
-        assert_eq!(s.augmented, 0, "augmented count must respect the scope filter");
+        assert_eq!(
+            s.augmented, 0,
+            "augmented count must respect the scope filter"
+        );
     }
-
 }

@@ -89,8 +89,8 @@ impl GlobalConfig {
 pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 mod tests {
-    use super::*;
     use super::ENV_LOCK;
+    use super::*;
 
     #[test]
     fn global_config_path_uses_xdg_config_home() {

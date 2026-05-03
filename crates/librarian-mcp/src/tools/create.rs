@@ -298,18 +298,22 @@ mod tests {
         assert_eq!(row.status, "active");
     }
 
-
     #[tokio::test]
     async fn tracker_without_augment_returns_hint() {
         let tmp = TempDir::new().unwrap();
         let ctx = mk_ctx(tmp.path().to_path_buf());
-        let result = call(&ctx, serde_json::json!({
-            "repo": "r",
-            "rel_path": "docs/trackers/my-tracker.md",
-            "kind": "tracker",
-            "title": "My Tracker",
-            "body": ""
-        })).await.unwrap();
+        let result = call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r",
+                "rel_path": "docs/trackers/my-tracker.md",
+                "kind": "tracker",
+                "title": "My Tracker",
+                "body": ""
+            }),
+        )
+        .await
+        .unwrap();
         assert!(
             result["tracker_hint"].is_string(),
             "tracker without augment must include tracker_hint"
@@ -320,14 +324,19 @@ mod tests {
     async fn tracker_with_augment_no_hint() {
         let tmp = TempDir::new().unwrap();
         let ctx = mk_ctx(tmp.path().to_path_buf());
-        let result = call(&ctx, serde_json::json!({
-            "repo": "r",
-            "rel_path": "docs/trackers/augmented-tracker.md",
-            "kind": "tracker",
-            "title": "Augmented Tracker",
-            "body": "",
-            "augment": {"prompt": "track the state of X"}
-        })).await.unwrap();
+        let result = call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r",
+                "rel_path": "docs/trackers/augmented-tracker.md",
+                "kind": "tracker",
+                "title": "Augmented Tracker",
+                "body": "",
+                "augment": {"prompt": "track the state of X"}
+            }),
+        )
+        .await
+        .unwrap();
         assert!(
             result.get("tracker_hint").is_none(),
             "tracker with augment must not include tracker_hint"
@@ -338,17 +347,21 @@ mod tests {
     async fn non_tracker_kind_no_hint() {
         let tmp = TempDir::new().unwrap();
         let ctx = mk_ctx(tmp.path().to_path_buf());
-        let result = call(&ctx, serde_json::json!({
-            "repo": "r",
-            "rel_path": "docs/plans/my-plan.md",
-            "kind": "plan",
-            "title": "My Plan",
-            "body": ""
-        })).await.unwrap();
+        let result = call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r",
+                "rel_path": "docs/plans/my-plan.md",
+                "kind": "plan",
+                "title": "My Plan",
+                "body": ""
+            }),
+        )
+        .await
+        .unwrap();
         assert!(
             result.get("tracker_hint").is_none(),
             "non-tracker kind must not include tracker_hint"
         );
     }
-
 }
