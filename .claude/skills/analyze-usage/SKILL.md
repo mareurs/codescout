@@ -1,6 +1,6 @@
 ---
 name: analyze-usage
-description: Use when asked to analyze codescout tool usage, check for error patterns, audit tool health, generate a usage report, or spot anti-patterns across workspace projects.
+description: Use when asked to analyze codescout tool usage, check for error patterns, audit tool health, generate a usage report, spot anti-patterns, or clear usage statistics to start fresh.
 ---
 
 # analyze-usage
@@ -14,10 +14,12 @@ file and prints a compact inline summary.
 
 ## When to Use
 
-- User invokes `/analyze-usage`
+- User invokes `/analyze-usage` → run the full analysis report
+- User invokes `/analyze-usage clear` → clear all projects' usage data
+- User invokes `/analyze-usage clear <project>` → clear one project's usage data
 - User asks for a tool usage health check, error audit, or anti-pattern review
 - User wants an actionable improvement list for code-explorer tools
-
+- User wants to reset statistics before a new measurement period
 ## When NOT to Use
 
 - Single ad-hoc query — just run `sqlite3` directly
@@ -219,6 +221,62 @@ Full report: docs/usage-reports/YYYY-MM-DD-usage-analysis.md
 
 Limit top issues to 4–6, ordered by severity.
 
+
+## Clear Mode
+
+Invoked when the user passes `clear` as the argument. Resets usage data so future analysis starts fresh.
+
+### 1. Discover DBs (same as analysis mode)
+
+```bash
+find ~/work -path "*/.codescout/usage.db"
+```
+
+If a project name or path was given after `clear` (e.g. `/analyze-usage clear code-explorer`), filter to that project only.
+
+### 2. Show what will be cleared
+
+List the DB paths that will be cleared, including their current `total_calls` count:
+
+```bash
+sqlite3 <db> "SELECT COUNT(*) FROM tool_calls;"
+```
+
+Print to the conversation:
+
+```
+About to clear usage data from N project(s):
+- code-explorer  (5,050 calls)
+- backend-kotlin (1,745 calls)
+...
+
+This cannot be undone. Confirm? (yes/no)
+```
+
+**Wait for explicit confirmation before proceeding.** If the user says anything other than "yes" / "y", abort and report "Cancelled."
+
+### 3. Clear each DB
+
+For each confirmed DB, run:
+
+```bash
+sqlite3 <db> "DELETE FROM tool_calls; DELETE FROM lsp_events; DELETE FROM call_edges; VACUUM;"
+```
+
+`VACUUM` reclaims disk space after the deletions. The schema is preserved — codescout does not need to recreate the file.
+
+### 4. Report
+
+Print:
+
+```
+Cleared N project(s):
+- code-explorer  — 5,050 calls removed
+- backend-kotlin — 1,745 calls removed
+...
+Total removed: X calls
+```
+
 ## Common Mistakes
 
 - **Using `find .`** — always `find ~/work`. CWD may not contain all projects.
@@ -227,3 +285,6 @@ Limit top issues to 4–6, ordered by severity.
 - **Cross-project summary at the bottom** — it always goes at the TOP.
 - **Not passing `overwrite: true`** to `create_file` on re-run same day.
 - **Printing empty sections** — if D/F/H return no rows, omit those sections entirely.
+- **Clearing without confirmation** — always show what will be removed and wait for explicit "yes" before running DELETE.
+- **Deleting the .db file** — use `DELETE + VACUUM`, not `rm`. Deleting the file works but forces codescout to recreate it on next activation; DELETE preserves the schema cleanly.
+- **Forgetting `call_edges`** — three tables need clearing: `tool_calls`, `lsp_events`, `call_edges`.
