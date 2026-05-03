@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::scope::{apply_scope, Scope, ScopeApplied};
-use super::ToolContext;
+use super::{RecoverableError, ToolContext};
 use crate::catalog::augmentation;
 use crate::catalog::find::{catalog_summary, count_matching, find, FindOpts};
 use crate::filter::FilterNode;
@@ -299,6 +299,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         combine_user_with_archived_hide(user_filter, a.include_archived, user_constrains_status);
 
     let requested_scope = a.scope.unwrap_or_default();
+    if a.scope == Some(Scope::All) {
+        if let Some(cp) = ctx.current_project.as_deref() {
+            if cp.umbrella.is_none() {
+                return Err(RecoverableError::new(
+                    "scope=\"all\" requires a configured umbrella — without one it crosses into \
+                     unrelated workspace projects. Use scope=\"repo\" to widen to your repo, or \
+                     configure [[umbrella]] in workspace.toml to group related projects.",
+                ));
+            }
+        }
+    }
     let (effective_scope, scope_fallback) = match (requested_scope, ctx.current_project.is_some()) {
         (Scope::Project | Scope::Repo, false) => (Scope::All, true),
         (s, _) => (s, false),
@@ -654,9 +665,7 @@ mod tests {
         )
         .unwrap();
         let ctx = mk_ctx(cat);
-        let result = call(&ctx, json!({"augmented": true, "scope": "all"}))
-            .await
-            .unwrap();
+        let result = call(&ctx, json!({"augmented": true})).await.unwrap();
         let items = result["items"].as_array().unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["id"], "aug");
@@ -686,9 +695,7 @@ mod tests {
         )
         .unwrap();
         let ctx = mk_ctx(cat);
-        let result = call(&ctx, json!({"augmented": false, "scope": "all"}))
-            .await
-            .unwrap();
+        let result = call(&ctx, json!({"augmented": false})).await.unwrap();
         let items = result["items"].as_array().unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["id"], "plain");
@@ -878,5 +885,52 @@ mod tests {
             result.get("catalog").is_none() || result["catalog"].is_null(),
             "filtered find must not include catalog field"
         );
+    }
+    #[tokio::test]
+    async fn scope_all_blocked_without_umbrella() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("a", "A")).unwrap();
+        let ctx = mk_ctx(cat);
+        let err = call(&ctx, json!({"scope": "all"})).await.unwrap_err();
+        assert!(
+            err.downcast_ref::<crate::tools::RecoverableError>()
+                .is_some(),
+            "scope=all without umbrella must be RecoverableError, got: {err}"
+        );
+        assert!(
+            err.to_string().contains("umbrella"),
+            "error must mention umbrella"
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_all_allowed_with_umbrella() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("a", "A")).unwrap();
+        let ctx = ToolContext {
+            catalog: Arc::new(parking_lot::Mutex::new(cat)),
+            workspace: Arc::new(crate::workspace::WorkspaceConfig {
+                roots: vec![crate::workspace::Root {
+                    name: "claude".into(),
+                    path: "/tmp/claude".into(),
+                }],
+                ignore: vec![],
+                rules: vec![],
+                umbrellas: vec![crate::workspace::Umbrella {
+                    name: "main".into(),
+                    members: vec!["claude".into()],
+                }],
+            }),
+            rules: Arc::new(vec![]),
+            embedding: None,
+            current_project: Some(Arc::new(crate::current_project::CurrentProject {
+                root: "claude".into(),
+                subdir: "code-explorer".into(),
+                umbrella: Some("main".into()),
+                ..Default::default()
+            })),
+        };
+        let result = call(&ctx, json!({"scope": "all"})).await.unwrap();
+        assert_eq!(result["count"].as_u64(), Some(1));
     }
 }
