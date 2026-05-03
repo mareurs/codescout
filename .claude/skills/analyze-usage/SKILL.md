@@ -31,22 +31,37 @@ file and prints a compact inline summary.
 find ~/work -path "*/.codescout/usage.db"
 ```
 
+`~/work` is the standard project root on this machine. Adjust if projects live elsewhere.
+
 Optional: if a project name or path was given as argument, filter results to that path only.
+
+**If no DBs found:** stop and report: "No usage.db files found under ~/work. Check that codescout projects have been activated at least once."
+
 Store the list of DB paths — loop over each one in Steps 2–4.
 
 ### 2. For Each DB — Run SQL Queries (8 total)
 
 Run each query below via `run_command`. Replace `<db>` with the full DB path.
 
+Invoke pattern:
+
+```bash
+sqlite3 -line <db> "SELECT ..."
+```
+
+The `-line` flag formats output as `column = value` pairs — readable in markdown reports. Replace `SELECT ...` with the full query text for each section.
+
 **A. Overview**
 ```sql
 SELECT COUNT(*) as total_calls,
-       ROUND(100.0 * SUM(CASE WHEN outcome='error' THEN 1 ELSE 0 END) / COUNT(*), 1) as error_pct,
+       ROUND(100.0 * SUM(CASE WHEN outcome='error' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 1) as error_pct,
        MIN(DATE(called_at)) as from_date,
        MAX(DATE(called_at)) as to_date,
        COUNT(DISTINCT session_id) as sessions
 FROM tool_calls;
 ```
+
+> If `total_calls` is 0, skip this project entirely — do not include it in the report.
 
 **B. Tool popularity**
 ```sql
