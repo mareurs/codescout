@@ -159,6 +159,8 @@ external dependencies on the fly.
 
 **Entry point:** `librarian_context(topic)` — packs a semantic bundle of relevant artifacts and context. Call this first before any artifact task to orient and avoid duplicates.
 
+**Artifact model:** Artifacts can carry **augmentation** — a persistent prompt that auto-refreshes their body as the codebase evolves. **Trackers** (`kind=tracker`) are the canonical augmented artifact: living documents for issue lists, ADR logs, experiment records, and similar multi-entry state.
+
 **Create workflow:**
 
 1. `artifact(action=find, semantic="...")` — semantic search first; never create without checking
