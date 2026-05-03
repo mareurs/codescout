@@ -1143,3 +1143,47 @@ async fn activation_response_no_stale_warning_when_version_current() {
         "system_prompt_stale should be absent; got: {result}"
     );
 }
+
+#[tokio::test]
+async fn activation_response_includes_stale_warning_when_version_outdated() {
+    let dir = tempdir().unwrap();
+    let cs_dir = dir.path().join(".codescout");
+    std::fs::create_dir_all(&cs_dir).unwrap();
+    // Write project.toml with an outdated onboarding version
+    std::fs::write(
+        cs_dir.join("project.toml"),
+        format!(
+            "[project]\nname = \"test\"\nlanguages = []\nonboarding_version = {}\n",
+            crate::tools::onboarding::ONBOARDING_VERSION.saturating_sub(1)
+        ),
+    )
+    .unwrap();
+    let ctx = ToolContext {
+        agent: Agent::new(None).await.unwrap(),
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+    };
+    let result = ActivateProject
+        .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
+        .await
+        .unwrap();
+    let stale = &result["system_prompt_stale"];
+    assert!(
+        stale.is_object(),
+        "system_prompt_stale missing; got: {result}"
+    );
+    assert_eq!(
+        stale["stored_version"].as_u64().unwrap(),
+        crate::tools::onboarding::ONBOARDING_VERSION.saturating_sub(1) as u64,
+        "stored_version should reflect the outdated version"
+    );
+    assert_eq!(
+        stale["current_version"].as_u64().unwrap(),
+        crate::tools::onboarding::ONBOARDING_VERSION as u64
+    );
+}

@@ -495,6 +495,7 @@ async fn build_activation_response(
         });
     }
 
+    // stored > ONBOARDING_VERSION (downgrade scenario) intentionally treated as current by onboarding_version_stale
     if version_stale {
         result["system_prompt_stale"] = json!({
             "stored_version": stored_onboarding_version,
