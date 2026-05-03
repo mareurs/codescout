@@ -1071,3 +1071,75 @@ async fn workspace_action_unknown_errors() {
         "expected unknown action error, got: {err}"
     );
 }
+
+#[tokio::test]
+async fn activation_response_includes_stale_warning_when_no_stored_version() {
+    // No project.toml → onboarding_version = None → stale
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let ctx = ToolContext {
+        agent: Agent::new(None).await.unwrap(),
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+    };
+    let result = ActivateProject
+        .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
+        .await
+        .unwrap();
+    let stale = &result["system_prompt_stale"];
+    assert!(
+        stale.is_object(),
+        "system_prompt_stale missing; got: {result}"
+    );
+    assert!(
+        stale["stored_version"].is_null(),
+        "stored_version should be null for None"
+    );
+    assert_eq!(
+        stale["current_version"].as_u64().unwrap(),
+        crate::tools::onboarding::ONBOARDING_VERSION as u64
+    );
+    assert!(
+        stale["action"].as_str().unwrap().contains("refresh_prompt"),
+        "action should mention refresh_prompt"
+    );
+}
+
+#[tokio::test]
+async fn activation_response_no_stale_warning_when_version_current() {
+    let dir = tempdir().unwrap();
+    let cs_dir = dir.path().join(".codescout");
+    std::fs::create_dir_all(&cs_dir).unwrap();
+    // Write project.toml with current onboarding version
+    std::fs::write(
+        cs_dir.join("project.toml"),
+        format!(
+            "[project]\nname = \"test\"\nlanguages = []\nonboarding_version = {}\n",
+            crate::tools::onboarding::ONBOARDING_VERSION
+        ),
+    )
+    .unwrap();
+    let ctx = ToolContext {
+        agent: Agent::new(None).await.unwrap(),
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+    };
+    let result = ActivateProject
+        .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
+        .await
+        .unwrap();
+    assert!(
+        result["system_prompt_stale"].is_null(),
+        "system_prompt_stale should be absent; got: {result}"
+    );
+}

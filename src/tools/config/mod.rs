@@ -1,6 +1,7 @@
 //! Configuration and project management tools.
 
 use super::{optional_bool_param, parse_bool_param, Tool, ToolContext};
+use crate::tools::onboarding::{onboarding_version_stale, ONBOARDING_VERSION};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
@@ -375,6 +376,7 @@ async fn build_activation_response(
         memories,
         has_index,
         security,
+        stored_onboarding_version,
     ) = ctx
         .agent
         .with_project(|p| {
@@ -394,9 +396,12 @@ async fn build_activation_response(
                 memories,
                 has_index,
                 security,
+                p.config.project.onboarding_version,
             ))
         })
         .await?;
+
+    let version_stale = onboarding_version_stale(stored_onboarding_version);
 
     let index = if has_index {
         json!({"status": "indexed"})
@@ -487,6 +492,14 @@ async fn build_activation_response(
         result["auto_registered_libs"] = json!({
             "count": auto_registered.len(),
             "without_source": without_source,
+        });
+    }
+
+    if version_stale {
+        result["system_prompt_stale"] = json!({
+            "stored_version": stored_onboarding_version,
+            "current_version": ONBOARDING_VERSION,
+            "action": "Run onboarding(action=\"refresh_prompt\") — tool names or signatures have changed."
         });
     }
 
