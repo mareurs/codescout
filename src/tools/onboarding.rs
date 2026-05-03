@@ -16,7 +16,7 @@ use super::{parse_bool_param, Tool, ToolContext};
 /// Bump this when system prompt surfaces change significantly.
 /// Missing or lower stored version triggers auto-refresh of the system prompt.
 /// See CLAUDE.md § "Onboarding Version" for when to bump.
-pub(crate) const ONBOARDING_VERSION: u32 = 21;
+pub(crate) const ONBOARDING_VERSION: u32 = 22;
 
 /// Returns true if the stored onboarding version is stale (needs refresh).
 /// `None` means pre-versioning project — always stale.
@@ -1029,4 +1029,33 @@ fn format_onboarding(result: &Value) -> String {
         String::new()
     };
     format!("[{langs}]{config_note}{workspace_note}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn onboarding_version_stale_returns_true_for_none() {
+        assert!(
+            onboarding_version_stale(None),
+            "None (pre-versioning) should be treated as stale"
+        );
+    }
+
+    #[test]
+    fn onboarding_version_stale_returns_true_for_older_version() {
+        assert!(
+            onboarding_version_stale(Some(ONBOARDING_VERSION - 1)),
+            "stored < current should be treated as stale"
+        );
+    }
+
+    #[test]
+    fn onboarding_version_stale_returns_false_for_downgrade() {
+        assert!(
+            !onboarding_version_stale(Some(ONBOARDING_VERSION + 1)),
+            "downgrade (stored > current) should not be treated as stale"
+        );
+    }
 }
