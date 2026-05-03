@@ -16,7 +16,9 @@ impl Tool for Artifact {
         "Artifact CRUD and query. action: find | get | create | update | link | graph | state_at. \
          Defaults: scope=project (current sub-project only), archived/superseded hidden when \
          filter does not constrain status. Shortcut params kind/status expand to eq-filters \
-         and combine with filter via AND."
+         and combine with filter via AND. \
+         Trackers are artifacts with kind=tracker — augmented documents that auto-refresh their \
+         body via a persistent prompt; call librarian(tracker_design) before creating one."
     }
 
     fn input_schema(&self) -> Value {
