@@ -33,7 +33,7 @@ impl Tool for Artifact {
                 },
                 "filter": {
                     "type": "object",
-                    "description": "find: filter AST (and/or/not + eq/ne/in/nin/gt/lt/gte/lte/contains/prefix leaves)"
+                    "description": "find: filter AST. Compose with {\"and\":[...]}, {\"or\":[...]}, {\"not\":{...}}. Leaf format: {\"field_name\": {\"op\": value}}, e.g. {\"rel_path\": {\"contains\": \"docs/trackers\"}}, {\"kind\": {\"eq\": \"spec\"}}, {\"tags\": {\"in\": [\"foo\",\"bar\"]}}. Ops: eq ne in nin gt lt gte lte contains prefix. contains on strings = LIKE '%v%' (works on title, rel_path, etc.); prefix = LIKE 'v%'. contains on tags/owners = array membership."
                 },
                 "kind": {
                     "type": "string",
@@ -81,7 +81,7 @@ impl Tool for Artifact {
                 },
                 "start_line": { "type": "integer", "description": "get: 1-indexed start of line slice" },
                 "end_line": { "type": "integer", "description": "get: 1-indexed inclusive end of line slice" },
-                "rel_path": { "type": "string", "description": "create: relative path for new file" },
+                "rel_path": { "type": "string", "description": "create: relative path for new file. In find results: path relative to repo root — does NOT include the repo name (use the `repo` field for that). When filtering by path use contains/prefix on the path portion only, e.g. {\"contains\": {\"field\": \"rel_path\", \"value\": \"docs/trackers\"}}." },
                 "repo": { "type": "string", "description": "create: workspace root name" },
                 "title": { "type": "string", "description": "create: artifact title" },
                 "body": { "type": "string", "description": "create: markdown body" },

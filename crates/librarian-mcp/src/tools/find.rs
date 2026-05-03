@@ -223,6 +223,67 @@ fn is_status_nin_clause(n: &FilterNode) -> bool {
     }
     false
 }
+/// Extract the first `rel_path` contains/prefix value from a filter tree.
+fn rel_path_hint(node: &FilterNode) -> Option<String> {
+    match node {
+        FilterNode::And { and } => and.iter().find_map(rel_path_hint),
+        FilterNode::Or { or } => or.iter().find_map(rel_path_hint),
+        FilterNode::Not { not } => rel_path_hint(not),
+        FilterNode::Leaf(map) => map
+            .get("rel_path")?
+            .as_object()?
+            .iter()
+            .find_map(|(op, v)| {
+                if matches!(op.as_str(), "contains" | "prefix") {
+                    v.as_str().map(str::to_owned)
+                } else {
+                    None
+                }
+            }),
+    }
+}
+
+/// Walk the current project directory for `.md` files whose repo-relative path
+/// contains `hint`. Returns relative paths (relative to the repo root).
+fn scan_unindexed_md(
+    roots: &[crate::workspace::Root],
+    cp: &crate::current_project::CurrentProject,
+    hint: &str,
+    ignore_patterns: &[String],
+) -> Vec<String> {
+    let Some(root) = roots.iter().find(|r| r.name == cp.root) else {
+        return vec![];
+    };
+    let base = if cp.subdir.is_empty() {
+        root.path.clone()
+    } else {
+        root.path.join(&cp.subdir)
+    };
+    let ignore = crate::workspace::compile_ignore(ignore_patterns).unwrap_or_else(|_| {
+        globset::GlobSetBuilder::new()
+            .build()
+            .expect("empty globset")
+    });
+    let mut found = Vec::new();
+    let walker = ignore::WalkBuilder::new(&base)
+        .standard_filters(true)
+        .build();
+    for entry in walker.flatten() {
+        let path = entry.path();
+        if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        let rel = match path.strip_prefix(&root.path) {
+            Ok(r) => crate::util::normalize_rel_path(&r.to_string_lossy()),
+            Err(_) => continue,
+        };
+        if !ignore.is_match(&rel) && rel.contains(hint) {
+            found.push(rel);
+        }
+    }
+    found
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args)?;
     let is_cold_call = a.filter.is_none()
@@ -245,6 +306,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     // Merge kind/status shortcut params into the base filter.
     let status_shortcut_set = a.status.is_some();
+    let rel_path_filter_hint = a.filter.as_ref().and_then(rel_path_hint);
     let base_filter = merge_kind_status(a.filter, a.kind.as_deref(), a.status.as_deref());
 
     // Build augmented pre-filter if requested, then merge with user filter.
@@ -332,59 +394,88 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let (scoped_filter, applied) =
         apply_scope(base.clone(), effective_scope, &ctx.workspace, current)?;
 
-    let cat = ctx.catalog.lock();
+    let (items, hints, catalog_value) = {
+        let cat = ctx.catalog.lock();
 
-    let catalog_value: Option<serde_json::Value> = if is_cold_call {
-        let summary = catalog_summary(&cat, scoped_filter.as_ref())?;
-        Some(serde_json::json!({
-            "total": summary.total,
-            "by_kind": summary.by_kind,
-            "augmented": summary.augmented,
-        }))
-    } else {
-        None
-    };
+        let catalog_value: Option<serde_json::Value> = if is_cold_call {
+            let summary = catalog_summary(&cat, scoped_filter.as_ref())?;
+            Some(serde_json::json!({
+                "total": summary.total,
+                "by_kind": summary.by_kind,
+                "augmented": summary.augmented,
+            }))
+        } else {
+            None
+        };
 
-    let rows = find(
-        &cat,
-        &FindOpts {
-            filter: scoped_filter,
-            limit,
-            offset,
-            semantic: semantic_vec,
-        },
-    )?;
-    let items: Vec<Value> = rows
-        .into_iter()
-        .map(|r| {
-            json!({
-                "id": r.id,
-                "kind": r.kind,
-                "status": r.status,
-                "title": r.title,
-                "repo": r.repo,
-                "rel_path": r.rel_path,
-                "updated_at": r.updated_at,
-            })
-        })
-        .collect();
-
-    // Hints only meaningful for non-semantic queries — semantic results are
-    // KNN-bounded and a count comparison would be misleading.
-    let hints = if a.semantic.is_some() {
-        json!({})
-    } else {
-        build_hints(
+        let rows = find(
             &cat,
-            base.as_ref(),
-            &applied,
-            &ctx.workspace,
-            current,
-            scope_fallback,
-            user_constrains_status,
-            a.include_archived,
-        )?
+            &FindOpts {
+                filter: scoped_filter,
+                limit,
+                offset,
+                semantic: semantic_vec,
+            },
+        )?;
+        let items: Vec<Value> = rows
+            .into_iter()
+            .map(|r| {
+                json!({
+                    "id": r.id,
+                    "kind": r.kind,
+                    "status": r.status,
+                    "title": r.title,
+                    "repo": r.repo,
+                    "rel_path": r.rel_path,
+                    "updated_at": r.updated_at,
+                })
+            })
+            .collect();
+
+        // Hints only meaningful for non-semantic queries — semantic results are
+        // KNN-bounded and a count comparison would be misleading.
+        let hints = if a.semantic.is_some() {
+            json!({})
+        } else {
+            build_hints(
+                &cat,
+                base.as_ref(),
+                &applied,
+                &ctx.workspace,
+                current,
+                scope_fallback,
+                user_constrains_status,
+                a.include_archived,
+            )?
+        };
+
+        (items, hints, catalog_value)
     };
+
+    // When a rel_path filter returns nothing, scan the filesystem for unindexed
+    // matching files so the caller gets an actionable error instead of silent empty.
+    if items.is_empty() && a.semantic.is_none() {
+        if let Some(ref hint) = rel_path_filter_hint {
+            if let Some(ref cp) = ctx.current_project {
+                let unindexed =
+                    scan_unindexed_md(&ctx.workspace.roots, cp, hint, &ctx.workspace.ignore);
+                if !unindexed.is_empty() {
+                    let sample = unindexed
+                        .iter()
+                        .take(5)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return Err(RecoverableError::new(format!(
+                        "No indexed artifacts match rel_path ~ {hint:?}. \
+                         Found {} unindexed file(s): {sample}. \
+                         Run librarian(action=\"reindex\", scope=\"project\") to index them, then retry.",
+                        unindexed.len()
+                    )));
+                }
+            }
+        }
+    }
 
     let mut response = serde_json::json!({
         "count": items.len(),
@@ -413,8 +504,8 @@ mod tests {
             catalog: Arc::new(parking_lot::Mutex::new(cat)),
             workspace: Arc::new(WorkspaceConfig {
                 roots: vec![Root {
-                    name: "claude".into(),
-                    path: "/tmp/claude".into(),
+                    name: "code-explorer".into(),
+                    path: "/tmp/code-explorer".into(),
                 }],
                 ignore: vec![],
                 rules: vec![],
@@ -423,8 +514,8 @@ mod tests {
             rules: Arc::new(vec![]),
             embedding: None,
             current_project: Some(Arc::new(CurrentProject {
-                root: "claude".into(),
-                subdir: "code-explorer".into(),
+                root: "code-explorer".into(),
+                subdir: "".into(),
                 umbrella: None,
                 ..Default::default()
             })),
@@ -449,8 +540,8 @@ mod tests {
     fn sample_row(id: &str, title: &str) -> ArtifactRow {
         ArtifactRow {
             id: id.into(),
-            repo: "claude".into(),
-            rel_path: format!("code-explorer/{id}.md"),
+            repo: "code-explorer".into(),
+            rel_path: format!("{id}.md"),
             kind: "spec".into(),
             status: "active".into(),
             title: Some(title.into()),
@@ -540,21 +631,21 @@ mod tests {
             catalog: Arc::new(parking_lot::Mutex::new(make_cat())),
             workspace: Arc::new(crate::workspace::WorkspaceConfig {
                 roots: vec![crate::workspace::Root {
-                    name: "claude".into(),
-                    path: "/tmp/claude".into(),
+                    name: "code-explorer".into(),
+                    path: "/tmp/code-explorer".into(),
                 }],
                 ignore: vec![],
                 rules: vec![],
                 umbrellas: vec![crate::workspace::Umbrella {
                     name: "main".into(),
-                    members: vec!["claude".into(), "agents".into()],
+                    members: vec!["code-explorer".into(), "agents".into()],
                 }],
             }),
             rules: Arc::new(vec![]),
             embedding: None,
             current_project: Some(Arc::new(crate::current_project::CurrentProject {
-                root: "claude".into(),
-                subdir: "code-explorer".into(),
+                root: "code-explorer".into(),
+                subdir: "".into(),
                 umbrella: Some("main".into()),
                 ..Default::default()
             })),
@@ -721,8 +812,8 @@ mod tests {
         fn row(id: &str, kind: &str) -> ArtifactRow {
             ArtifactRow {
                 id: id.into(),
-                repo: "claude".into(),
-                rel_path: format!("code-explorer/{id}.md"),
+                repo: "code-explorer".into(),
+                rel_path: format!("{id}.md"),
                 kind: kind.into(),
                 status: "active".into(),
                 title: Some(id.into()),
@@ -754,8 +845,8 @@ mod tests {
         fn row(id: &str, kind: &str, status: &str) -> ArtifactRow {
             ArtifactRow {
                 id: id.into(),
-                repo: "claude".into(),
-                rel_path: format!("code-explorer/{id}.md"),
+                repo: "code-explorer".into(),
+                rel_path: format!("{id}.md"),
                 kind: kind.into(),
                 status: status.into(),
                 title: Some(id.into()),
@@ -797,8 +888,8 @@ mod tests {
         fn row(id: &str, status: &str) -> ArtifactRow {
             ArtifactRow {
                 id: id.into(),
-                repo: "claude".into(),
-                rel_path: format!("code-explorer/{id}.md"),
+                repo: "code-explorer".into(),
+                rel_path: format!("{id}.md"),
                 kind: "spec".into(),
                 status: status.into(),
                 title: Some(id.into()),
@@ -834,8 +925,8 @@ mod tests {
             &cat,
             &ArtifactRow {
                 id: "a1".into(),
-                repo: "claude".into(),
-                rel_path: "code-explorer/a1.md".into(),
+                repo: "code-explorer".into(),
+                rel_path: "docs/a1.md".into(),
                 kind: "tracker".into(),
                 status: "draft".into(),
                 title: None,
@@ -872,8 +963,8 @@ mod tests {
             &cat,
             &ArtifactRow {
                 id: "a1".into(),
-                repo: "claude".into(),
-                rel_path: "code-explorer/a1.md".into(),
+                repo: "code-explorer".into(),
+                rel_path: "docs/a1.md".into(),
                 kind: "tracker".into(),
                 status: "draft".into(),
                 title: None,
@@ -924,26 +1015,79 @@ mod tests {
             catalog: Arc::new(parking_lot::Mutex::new(cat)),
             workspace: Arc::new(crate::workspace::WorkspaceConfig {
                 roots: vec![crate::workspace::Root {
-                    name: "claude".into(),
-                    path: "/tmp/claude".into(),
+                    name: "code-explorer".into(),
+                    path: "/tmp/code-explorer".into(),
                 }],
                 ignore: vec![],
                 rules: vec![],
                 umbrellas: vec![crate::workspace::Umbrella {
                     name: "main".into(),
-                    members: vec!["claude".into()],
+                    members: vec!["code-explorer".into()],
                 }],
             }),
             rules: Arc::new(vec![]),
             embedding: None,
             current_project: Some(Arc::new(crate::current_project::CurrentProject {
-                root: "claude".into(),
-                subdir: "code-explorer".into(),
+                root: "code-explorer".into(),
+                subdir: "".into(),
                 umbrella: Some("main".into()),
                 ..Default::default()
             })),
         };
         let result = call(&ctx, json!({"scope": "all"})).await.unwrap();
         assert_eq!(result["count"].as_u64(), Some(1));
+    }
+
+    #[tokio::test]
+    async fn rel_path_filter_empty_suggests_reindex_when_file_exists() {
+        use std::io::Write as _;
+        // Set up a project root with an unindexed tracker file.
+        let dir = tempfile::tempdir().unwrap();
+        let trackers = dir.path().join("docs").join("trackers");
+        std::fs::create_dir_all(&trackers).unwrap();
+        let mut f = std::fs::File::create(trackers.join("my-tracker.md")).unwrap();
+        writeln!(f, "# My Tracker").unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        // Nothing indexed — catalog is empty.
+        let ctx = ToolContext {
+            catalog: Arc::new(parking_lot::Mutex::new(cat)),
+            workspace: Arc::new(WorkspaceConfig {
+                roots: vec![Root {
+                    name: "myproject".into(),
+                    path: dir.path().to_path_buf(),
+                }],
+                ignore: vec![],
+                rules: vec![],
+                umbrellas: vec![],
+            }),
+            rules: Arc::new(vec![]),
+            embedding: None,
+            current_project: Some(Arc::new(CurrentProject {
+                root: "myproject".into(),
+                subdir: "".into(),
+                umbrella: None,
+                ..Default::default()
+            })),
+        };
+
+        let err = call(
+            &ctx,
+            json!({"filter": {"rel_path": {"contains": "my-tracker"}}}),
+        )
+        .await
+        .unwrap_err();
+
+        let rec = err.downcast_ref::<crate::tools::RecoverableError>();
+        assert!(rec.is_some(), "must be RecoverableError");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("unindexed"),
+            "message must mention unindexed files: {msg}"
+        );
+        assert!(
+            msg.contains("reindex"),
+            "message must suggest reindex: {msg}"
+        );
     }
 }

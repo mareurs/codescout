@@ -44,12 +44,12 @@ Example: `artifact {action: "find", kind: "tracker"}` — live trackers in the
 **current sub-project** (default scope). Pass `scope: "all"` to widen.
 ## Filter AST (one-liner)
 
-JSON tree. `and|or|not` compose; leaves use `eq|ne|in|nin|gt|lt|gte|lte|contains|prefix`.
-`contains` = membership on `tags`/`owners`, substring on `title`. `prefix` = LIKE
-`val%` (used by scope to match `rel_path`). Times = ms-epoch.
-Allowed fields: `id, kind, status, repo, title, topic, time_scope, tags, owners,
-rel_path, updated_at, created_at, confidence`. Unknown fields rejected.
-
+JSON tree. `{"and":[...]}` / `{"or":[...]}` / `{"not":{...}}` compose nodes.
+**Leaf format: `{"field_name": {"op": value}}`** — field name is the key, operator is nested.
+Examples: `{"rel_path": {"contains": "docs/trackers"}}`, `{"kind": {"eq": "spec"}}`, `{"tags": {"in": ["foo"]}}`.
+Ops: `eq ne in nin gt lt gte lte contains prefix`.
+`contains` on strings = `LIKE '%v%'` (title, rel_path, etc.); `prefix` = `LIKE 'v%'`; `contains` on `tags`/`owners` = array membership. Times = ms-epoch.
+Allowed fields: `id, kind, status, repo, title, topic, time_scope, tags, owners, rel_path, updated_at, created_at, confidence`. Unknown fields rejected.
 ## Default scope (project, archived hidden)
 
 Listing tools (`artifact` with `action=find`, `librarian` with `action=context`)
