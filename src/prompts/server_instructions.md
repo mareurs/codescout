@@ -67,6 +67,9 @@ These are non-negotiable. Violating the letter IS violating the spirit.
 | `edit_file` / `create_file` to rewrite an entire markdown section | `edit_markdown(path, heading, action, content)` | Heading-addressed, no string matching needed |
 | `grep("fn_name")` to find all callers | `references(symbol, path)` | LSP finds actual usages; regex matches comments, strings, partial names |
 | `read_file` on a `.md` file | `read_markdown(path)` | Heading navigation > line guessing |
+| `read_markdown("docs/trackers/foo.md")` directly | `artifact(action="find", semantic="foo")` then `artifact(action="get", id=...)` | Raw file lacks catalog metadata: link graph, augmentation state, event history |
+| `git mv docs/trackers/foo.md docs/archive/foo.md` | `artifact(action="move", id, new_rel_path="docs/archive/foo.md")` | Moving the backing file orphans the catalog record; use artifact(move) instead |
+| `artifact(action="find", filter={"in":{"field":"title","value":[...]}})` | `filter={"title":{"in":[...]}}` | Filter leaf is `{field:{op:value}}` — not `{op:{field,value}}` |
 | `cat <file> \| head -N` to inspect source | `symbols(path=...)` | Iron Law #1 + #3 double violation — shell gives raw text; symbols give structure |
 | `grep("x", path=<dir>)` again after finding files, to trace access patterns | `symbols(name=X)` → `references(symbol, path)` | grep matched files → now you know the symbol name; switch to LSP for precise call sites |
 | `semantic_search("concept")` when you already know the directory | `grep(pattern, path=<dir>)` | Embeddings rank by whole-codebase similarity; grep with `path=` is a hard filter — no noise from tests/docs/config |
@@ -157,13 +160,15 @@ external dependencies on the fly.
 
 **When to use artifact tools** — tracking decisions, issues, plans, experiments, or anything with evolving state. Prefer artifacts over plain markdown for anything you'd want to query by meaning, link to other artifacts, or time-travel through.
 
-**Entry point:** `librarian_context(topic)` — packs a semantic bundle of relevant artifacts and context. Call this first before any artifact task to orient and avoid duplicates.
+**Entry point:** `librarian(action="context", topic="...")` — packs a semantic bundle of relevant artifacts and context. Call this first before any artifact task to orient and avoid duplicates.
 
 **Artifact model:** Artifacts can carry **augmentation** — a persistent prompt that auto-refreshes their body as the codebase evolves. **Trackers** (`kind=tracker`) are the canonical augmented artifact: living documents for issue lists, ADR logs, experiment records, and similar multi-entry state.
 
 **Create workflow:**
 
-1. `artifact(action=find, semantic="...")` — semantic search first; never create without checking
+1. `artifact(action="find", semantic="...")` — semantic search first; never create without checking
+   - Filter by field: `artifact(action="find", filter={"kind": {"eq": "tracker"}})` — leaf format: `{"field": {"op": value}}`
+   - Combine: `{"and": [{"kind": {"eq": "tracker"}}, {"status": {"eq": "active"}}]}`
 2. If **tracker** (multi-entry: issue list, ADR log, experiment record): call `librarian(action=tracker_design)` → pick an archetype → then `artifact(action=create)`
 3. If **regular artifact**: `artifact(action=create)` directly (fails if path exists — `artifact(action=find)` guards this)
 4. `artifact(action=link, source, target)` to connect related artifacts
@@ -174,6 +179,8 @@ external dependencies on the fly.
 - `artifact(action=state_at, id, date)` — snapshot at a point in time
 - `artifact_refresh(action=list_stale)` — update stale artifacts after codebase changes
 - `artifact_event(action=create)` — log significant events on an artifact
+
+**Full reference** (filter syntax, tracker archetypes, augmentation lifecycle): `resources/read doc://librarian-guide`
 ## Output System
 
 **File paths in tool output are relative to the project root** (e.g. `src/tools/mod.rs`,
@@ -270,7 +277,7 @@ Multi-tool chains for common tasks. Follow the steps in order.
 
 | Step | Tool | Purpose |
 |------|------|---------|
-| 1 | `librarian_context(topic)` | Get relevant artifact bundle and staleness warnings |
+| 1 | `librarian(action="context", topic="...")` | Get relevant artifact bundle and staleness warnings |
 | 2 | `artifact(action=find, semantic="...")` | Search by meaning — don't create duplicates |
 | 3a | `librarian(action=tracker_design)` → `artifact(action=create)` | For trackers: pick archetype first, then create |
 | 3b | `artifact(action=create, ...)` | For plain artifacts: create directly |

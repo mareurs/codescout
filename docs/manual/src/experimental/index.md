@@ -6,6 +6,8 @@
 
 ## Available Features
 
+- [`artifact(action="move")`](./artifact-move.md) — atomic file rename + catalog `rel_path` update in one step; replaces `git mv` + manual reindex.
+- [`doc://librarian-guide` MCP resource](./librarian-guide-resource.md) — dense librarian reference (filter syntax, tracker workflow, common mistakes) available via `resources/read doc://librarian-guide`.
 - [Librarian tools collapse (16 → 5)](./librarian-tools-collapse.md) — 16 individual librarian tools collapsed into 5 action-dispatched tools: `artifact`, `artifact_event`, `artifact_augment`, `artifact_refresh`, `librarian`.
 - [Auto-Reindex on Edit](./auto-reindex-on-edit.md)
 - [Librarian (embedded in codescout)](./librarian-embedded.md) — workspace doc/spec/plan index served as part of codescout when built with the `librarian` cargo feature; **disabled by default** — opt in via `LIBRARIAN_ENABLED=1` env or `[librarian] enabled = true` in `.codescout/project.toml`.

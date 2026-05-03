@@ -780,6 +780,16 @@ async fn build_resource_registry(
                 description: Some("Living log of observed codescout tool bugs.".into()),
                 path: project_root.join("docs/TODO-tool-misbehaviors.md"),
             },
+            DocSource {
+                uri: "doc://librarian-guide".into(),
+                name: "librarian-guide".into(),
+                description: Some(
+                    "Full reference: artifact model, filter syntax, tracker workflow, \
+                     augmentation lifecycle, librarian actions."
+                        .into(),
+                ),
+                path: project_root.join("src/prompts/librarian-guide.md"),
+            },
         ])));
     }
 
