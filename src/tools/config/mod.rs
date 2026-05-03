@@ -541,16 +541,16 @@ fn format_activate_project(result: &Value) -> String {
     let body = parts.join(" · ");
 
     if let Some(stale) = result["system_prompt_stale"].as_object() {
-        let stored = stale
-            .get("stored_version")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
+        let stored_label = match stale.get("stored_version").and_then(|v| v.as_u64()) {
+            Some(v) => format!("v{v}"),
+            None => "none".to_string(),
+        };
         let current = stale
             .get("current_version")
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
         format!(
-            "⚠ SYSTEM PROMPT STALE (v{stored} → v{current}): run onboarding(action=\"refresh_prompt\") now.\n{body}"
+            "⚠ SYSTEM PROMPT STALE ({stored_label} → v{current}): run onboarding(action=\"refresh_prompt\") now.\n{body}"
         )
     } else {
         body

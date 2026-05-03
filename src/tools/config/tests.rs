@@ -1236,3 +1236,26 @@ fn format_activate_project_no_warning_when_current() {
         "activated · my-project (rw) · 1 memories · index: not_indexed"
     );
 }
+
+#[test]
+fn format_activate_project_prepends_warning_with_none_stored_version() {
+    let result = json!({
+        "status": "ok",
+        "project": "my-project",
+        "project_root": "/home/user/my-project",
+        "read_only": false,
+        "memories": [],
+        "index": {"status": "not_indexed"},
+        "system_prompt_stale": {
+            "stored_version": null,
+            "current_version": 22,
+            "action": "Run onboarding(action=\"refresh_prompt\") — tool names or signatures have changed."
+        },
+        "hint": "CWD: /home/user/my-project"
+    });
+    let compact = format_activate_project(&result);
+    assert!(
+        compact.starts_with("⚠ SYSTEM PROMPT STALE (none → v22):"),
+        "should show 'none' not 'v0' for null stored_version; got: {compact}"
+    );
+}
