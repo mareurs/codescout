@@ -37,6 +37,10 @@ Optional: if a project name or path was given as argument, filter results to tha
 
 **If no DBs found:** stop and report: "No usage.db files found under ~/work. Check that codescout projects have been activated at least once."
 
+After running query A for each DB, skip projects with fewer than 20 calls — include them only as a row in a summary table at the end of the report rather than with full per-project sections.
+
+Note: `find` may return nested DBs (e.g. `code-explorer/crates/librarian-mcp/.codescout/usage.db`). Include these as separate projects — each sub-project DB tracks its own activation context.
+
 Store the list of DB paths — loop over each one in Steps 2–4.
 
 ### 2. For Each DB — Run SQL Queries (8 total)
