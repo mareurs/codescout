@@ -28,7 +28,7 @@ impl Tool for Artifact {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["find", "get", "create", "update", "link", "graph", "state_at"],
+                    "enum": ["find", "get", "create", "update", "move", "link", "graph", "state_at"],
                     "description": "Operation to perform"
                 },
                 "filter": {
@@ -81,6 +81,7 @@ impl Tool for Artifact {
                 },
                 "start_line": { "type": "integer", "description": "get: 1-indexed start of line slice" },
                 "end_line": { "type": "integer", "description": "get: 1-indexed inclusive end of line slice" },
+                "new_rel_path": { "type": "string", "description": "move: destination path relative to repo root (e.g. 'docs/archive/foo.md'). Parent directories are created automatically. Fails if destination already exists." },
                 "rel_path": { "type": "string", "description": "create: relative path for new file. In find results: path relative to repo root — does NOT include the repo name (use the `repo` field for that). When filtering by path use contains/prefix on the path portion only, e.g. {\"contains\": {\"field\": \"rel_path\", \"value\": \"docs/trackers\"}}." },
                 "repo": { "type": "string", "description": "create: workspace root name" },
                 "title": { "type": "string", "description": "create: artifact title" },
@@ -157,7 +158,7 @@ impl Tool for Artifact {
     async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
         let action = args["action"].as_str().ok_or_else(|| {
             RecoverableError::new(
-                "action required — one of: find, get, create, update, link, graph, state_at",
+                "action required — one of: find, get, create, update, move, link, graph, state_at",
             )
         })?;
         match action {
@@ -165,11 +166,12 @@ impl Tool for Artifact {
             "get"      => super::get::call(ctx, args).await,
             "create"   => super::create::call(ctx, args).await,
             "update"   => super::update::call(ctx, args).await,
+            "move"     => super::mv::call(ctx, args).await,
             "link"     => super::link::call(ctx, args).await,
             "graph"    => super::graph::call(ctx, args).await,
             "state_at" => super::state_at::call(ctx, args).await,
             other => Err(RecoverableError::new(format!(
-                "unknown action '{other}' — expected one of: find, get, create, update, link, graph, state_at"
+                "unknown action '{other}' — expected one of: find, get, create, update, move, link, graph, state_at"
             ))),
         }
     }

@@ -90,6 +90,8 @@ pub mod update;
 
 pub mod link;
 
+pub mod mv;
+
 pub mod event_create;
 pub mod state_at;
 pub mod workspace_state_at;

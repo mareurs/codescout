@@ -96,6 +96,9 @@ impl Tool for ReadMarkdown {
             (resolved, text)
         };
 
+        // Reject librarian-managed artifacts — use artifact(action="get") instead.
+        crate::util::librarian_guard::guard_not_librarian_managed(path, &text)?;
+
         // Extract params
         let heading = input["heading"].as_str();
         let headings_param = crate::tools::optional_array_param(&input, "headings");

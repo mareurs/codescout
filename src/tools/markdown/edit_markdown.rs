@@ -366,6 +366,9 @@ impl Tool for EditMarkdown {
 
         let file_content = std::fs::read_to_string(&resolved)?;
 
+        // Reject librarian-managed artifacts — use artifact(action="update") instead.
+        crate::util::librarian_guard::guard_not_librarian_managed(path, &file_content)?;
+
         // Determine mode: batch vs single
         let has_edits = input["edits"].is_array();
         let has_heading = input["heading"].is_string();

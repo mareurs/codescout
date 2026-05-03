@@ -279,6 +279,8 @@ impl Tool for EditFile {
                 &session_roots,
             )?;
             let content = std::fs::read_to_string(&resolved)?;
+            // Reject librarian-managed artifacts — use artifact(action="update") instead.
+            crate::util::librarian_guard::guard_not_librarian_managed(path, &content)?;
             let new_content = match insert {
                 "prepend" => format!("{}{}", new_string, content),
                 "append" => format!("{}{}", content, new_string),
