@@ -13,12 +13,12 @@
 ### Task 1: Write the SKILL.md
 
 **Files:**
-- Create: `../claude-plugins/codescout-companion/skills/analyze-usage/SKILL.md`
+- Create: `.claude/skills/analyze-usage/SKILL.md`
 
 - [ ] **Step 1: Create the skill file**
 
 ```bash
-mkdir -p /home/marius/work/claude/claude-plugins/codescout-companion/skills/analyze-usage
+mkdir -p /home/marius/work/claude/code-explorer/.claude/skills/analyze-usage
 ```
 
 Then create `SKILL.md` with this exact content:

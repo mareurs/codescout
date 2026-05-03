@@ -27,13 +27,13 @@ cargo build --release   # required before live MCP testing
 
 ## Per-Project Conventions
 
-- **code-explorer:** `memory(project="code-explorer", topic="conventions")`
-  — Tool authoring rules, OutputGuard, write-tool `json!("ok")`, prompt surface updates
-- **codescout-embed:** `memory(project="codescout-embed", topic="conventions")`
-  — Embedder trait impl rules, backend feature flag patterns, chunk size formula
-- **librarian-mcp:** `memory(project="librarian-mcp", topic="conventions")`
-  — FilterNode safety, SQL injection protection, TimeMachine patterns
-
+- Core: see `memory(project_id="core", topic="conventions")` — trailing underscore generics, Config→Factory→Runtime, section separators
+- Examples: see `memory(project_id="optaplanner-examples", topic="conventions")` — per-example package structure
+- Benchmark: see `memory(project_id="optaplanner-benchmark", topic="conventions")` — JAXB config, result hierarchy
+- Test: see `memory(project_id="optaplanner-test", topic="conventions")` — fluent assertion builder
+- Spring: see `memory(project_id="optaplanner-spring-integration", topic="conventions")` — @ConditionalOnMissingBean, EntityScanner
+- Quarkus: see `memory(project_id="optaplanner-quarkus-integration", topic="conventions")` — build-time/runtime split, Gizmo, ARC workarounds
+- Persistence: see `memory(project_id="optaplanner-persistence", topic="conventions")` — serializer per score type
 ## Fixture Projects (tests/fixtures/)
 
 All 5 fixtures (java/kotlin/python/rust/typescript) share the same intentional design:

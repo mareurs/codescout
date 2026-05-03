@@ -222,6 +222,74 @@ Full report: docs/usage-reports/YYYY-MM-DD-usage-analysis.md
 Limit top issues to 4–6, ordered by severity.
 
 
+
+## Step 7: Session Drill-Down (when warranted)
+
+usage.db tracks codescout tool calls only. For sessions that look anomalous in query G
+(high call count, high errors, many overflows), drill into the full picture using
+**claude-traces** (`cc.py` + `lf.py`).
+
+**Trigger criteria — drill down on any session where:**
+- `total_calls > 50`
+- `errors / total_calls > 10%`
+- Session appears in query D results (many overflows)
+
+**Step 7a — Locate the session's JSONL**
+
+Query G returns `session_id` values. Before using `--project`, verify the path:
+
+```bash
+# Locate actual JSONL file (avoids path-decode ambiguity)
+find ~/.claude/projects -name "<session_id_prefix>*" 2>/dev/null
+# The parent directory name encodes the project path: -home-user-work-project-name
+# Decode: replace leading -  with /, then each - with / — BUT directory names with dashes are ambiguous.
+# Always verify: ls /decoded/path 2>/dev/null || echo "path invalid"
+```
+
+**Step 7b — Get actual tool sequence**
+
+```bash
+python3 <skill_dir>/scripts/cc.py tool-calls <session_id> --project <verified_path>
+```
+
+Returns every tool call in order with input preview. This is the ground truth for what
+the model actually did — codescout tools AND native CC tools (Skill, Agent, TaskCreate, etc.).
+
+**Step 7c — Get cost + stop reasons**
+
+```bash
+# Langfuse keys live at ~/agents/llm-proxy/.env
+# If lf.py reports missing keys, set them explicitly:
+LANGFUSE_PUBLIC_KEY=<key> LANGFUSE_SECRET_KEY=<key> LANGFUSE_BASE_URL=http://localhost:3000 \
+  python3 <skill_dir>/scripts/lf.py session <session_id>
+```
+
+Returns: API call count, time range, cost, stop reasons. A `max_tokens` stop reason
+indicates context overflow — flag in report.
+
+**Step 7d — Synthesize**
+
+In the report, add a `### Session Drill-Down` subsection per drilled session:
+
+```
+### Session Drill-Down: <session_id_prefix>
+
+**Cost:** $X.XX | **API calls:** N | **Stop reasons:** {tool_use: X, end_turn: Y, max_tokens: Z ⚠}
+
+**Tool sequence summary:** [N codescout tools, M native CC tools]
+Top tools: symbols ×N, grep ×N, edit_code ×N
+
+**Findings:**
+- [violation or anti-pattern observed]
+- [efficiency note]
+```
+
+Flag `max_tokens` stops and sessions with >20% native-CC-to-codescout ratio (may indicate
+the model is using native tools where codescout tools belong).
+
+**Note:** `lf.py trace <id>` shows "Tools (N)" which is the full available schema, NOT
+which tools were actually called. For actual call sequence always use `cc.py tool-calls`.
+
 ## Clear Mode
 
 Invoked when the user passes `clear` as the argument. Resets usage data so future analysis starts fresh.
@@ -288,3 +356,5 @@ Total removed: X calls
 - **Clearing without confirmation** — always show what will be removed and wait for explicit "yes" before running DELETE.
 - **Deleting the .db file** — use `DELETE + VACUUM`, not `rm`. Deleting the file works but forces codescout to recreate it on next activation; DELETE preserves the schema cleanly.
 - **Forgetting `call_edges`** — three tables need clearing: `tool_calls`, `lsp_events`, `call_edges`.
+- **Trusting `--all` project paths** — cc.py decodes project paths by replacing `-` with `/`, but directory names containing `-` (e.g. `backend-kotlin`) become `backend/kotlin`. Always verify the reconstructed path exists before using it in `--project` flags: `ls <path> 2>/dev/null || echo "path invalid"`. If invalid, use `find ~/.claude/projects -name "<session_prefix>*"` to find the real encoded path.
+- **Stopping at usage.db for session analysis** — usage.db tracks codescout tool calls only. For the full picture (token cost, stop reasons, actual tool sequence including native CC tools), see Step 7.

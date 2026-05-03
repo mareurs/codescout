@@ -83,15 +83,14 @@ impl GlobalConfig {
         toml::Value::try_from(self).expect("GlobalConfig is always serializable")
     }
 }
-#[cfg(test)]
+
+// Process-wide lock for tests that read or write HOME / XDG_CONFIG_HOME.
+// Declared at module level so preflight and other modules can import it.
+pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    // Env vars (HOME, XDG_CONFIG_HOME) are process-global. This mutex serializes tests
-    // within this module — it does NOT protect against concurrent env mutations in other
-    // modules. Acceptable here since no other tests in this binary mutate these vars.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    use super::ENV_LOCK;
 
     #[test]
     fn global_config_path_uses_xdg_config_home() {

@@ -23,6 +23,61 @@ See codescout memory `development-commands` for the full command reference.
 
 This applies to ALL unexpected tool behavior: `edit_file`, `rename_symbol`, `replace_symbol`, `symbols`, `semantic_search`, etc.
 
+
+## Session Intelligence Trackers
+
+Two living trackers capture observations from real sessions. Keep them current — they feed
+prompt improvements and skill refactors.
+
+### Skill Frictions — `docs/trackers/skill-frictions.md`
+
+Rough edges found while using project skills (`/claude-traces`, `/analyze-usage`, etc.).
+Entries are numbered F-NNN with root cause, impact, and fix idea.
+
+**Claude — append when:**
+- A skill command fails unexpectedly or requires a workaround
+- A skill's documented behavior diverges from reality
+- A friction recurs across sessions (escalate priority)
+
+**How to append (Claude):**
+```
+edit_markdown("docs/trackers/skill-frictions.md",
+  action="insert_after", heading="## `/<skill-name>`",
+  content="### F-NNN — <title>\n**When:** ...\n**Got:** ...\n**Fix idea:** ...")
+```
+
+**User — browse:** open `docs/trackers/skill-frictions.md` directly; entries are grouped by
+skill. Mark fixed entries with a `(FIXED <date>)` note rather than deleting them.
+
+### Tool Usage Patterns — `docs/trackers/tool-usage-patterns.md`
+
+Observed tool calls from real sessions judged against the ideal — our internal Langfuse for
+tool selection quality. Entries are T-NNN with tool, verdict (legitimate / debatable /
+wrong-tool), and prompt gap. Feeds Iron Law and Anti-Patterns updates.
+
+This file is a **librarian artifact** (id: `abc513d3ee0f0b50`). Params hold the structured
+T-N table; body holds full per-observation analysis.
+
+**Claude — append when:**
+- Analyzing a session and a tool choice is noteworthy (right or wrong)
+- A new pattern emerges that isn't already covered by an existing T-N entry
+
+**How to append (Claude):**
+```
+# 1. Add structured entry to params
+artifact_augment(id="abc513d3ee0f0b50", merge=true,
+  params={observations: [...existing..., {id:"T-NNN", tool:"...", verdict:"...", ...}]})
+
+# 2. Add analysis prose to body
+edit_markdown("docs/trackers/tool-usage-patterns.md",
+  action="insert_before", heading="## Prompt improvement candidates",
+  content="### T-NNN — <title>\n...")
+```
+
+**User — browse:** open `docs/trackers/tool-usage-patterns.md`; the live params table is
+rendered at the top by the librarian. Prompt improvement candidates are at the bottom —
+these are the direct inputs to `src/prompts/server_instructions.md` edits.
+
 ## Git Workflow
 
 **This is a public repo.** Do not push incomplete or untested work.
@@ -236,27 +291,39 @@ update all three surfaces in the same commit.
 
 ### Onboarding Version
 
-When modifying system prompt surfaces, bump `ONBOARDING_VERSION` in
-`src/tools/onboarding.rs`. This triggers automatic system prompt refresh for all
-projects onboarded with the previous version.
+Bump `ONBOARDING_VERSION` in `src/tools/onboarding.rs` when changing prompt surfaces
+that produce the **stored per-project system prompt** — i.e. `onboarding_prompt.md` or
+`build_system_prompt_draft()` in `builders.rs`. The bump triggers automatic system prompt
+regeneration for all projects onboarded with the previous version.
 
-Bump when the generated system prompt would reference tool names, parameters,
-or workflows that no longer exist:
+**Do NOT bump for `server_instructions.md` changes.** That file is injected fresh at
+every MCP session start (each `/mcp` connect re-reads it from disk). There is no cached
+copy — changes take effect immediately on the next connect without any version bump.
+
+### Which surface needs a bump?
+
+| Surface | How delivered | Bump needed? |
+|---|---|---|
+| `server_instructions.md` | Loaded fresh at every MCP session start | **No** — live on next connect |
+| `onboarding_prompt.md` | Drives stored system prompt generation | **Yes** — cached per project |
+| `build_system_prompt_draft()` in `builders.rs` | Same — generates stored system prompt | **Yes** — cached per project |
+
+### Bump when
+
 - Tool names change (rename, consolidate)
-- Tool parameter semantics change
-- Server instructions (`server_instructions.md`) change significantly
+- Tool parameter semantics change in `onboarding_prompt.md` or `builders.rs`
 - Onboarding prompt templates change in ways that affect the generated system prompt
 
-Do NOT bump for:
+### Do NOT bump for
+
+- Any change to `server_instructions.md` (no matter how significant)
 - Bug fixes that don't change tool behavior
 - Internal refactors
 - Memory template changes (memories are re-read during refresh anyway)
 
-**Style guide for `server_instructions.md` / `onboarding_prompt.md` edits:**
-see `src/prompts/README.md` for the 7 writing rules (rule caps, repetition
-budget, caching, etc.) and links to the research behind them. Load that only
-when actually editing a prompt surface — it's not needed otherwise.
-
+**Style guide for prompt surface edits:**
+see `src/prompts/README.md` for the 7 writing rules. Load that only when actually
+editing a prompt surface — it's not needed otherwise.
 ## Companion Plugin: codescout-companion
 
 This project has a companion Claude Code plugin at **`../claude-plugins/codescout-companion/`** that is **always active** when working on codescout. You must be aware of it.

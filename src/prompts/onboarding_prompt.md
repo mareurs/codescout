@@ -440,7 +440,7 @@ provided to you separately.
 
 **What to include:**
 - Entry points: where to start exploring this codebase (specific files + symbols)
-- Key abstractions: 3-5 core types/traits that form the skeleton of this project
+- Key abstractions: **3-5 entries max.** Each entry = **one line only**: `` `TypeName` (`path/to/file`) — one-line purpose ``. NO architecture narrative, NO state machine descriptions, NO config detail — those go in the `architecture` memory. The reader needs to know WHERE to find the type, not HOW it works.
 - Search tips: semantic_search queries that work well for THIS codebase, and terms to avoid (too broad, too generic)
 - Navigation strategy: recommended exploration order for a new task in this project
 - Project rules: conventions the AI should always follow that aren't captured by linters

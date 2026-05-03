@@ -235,6 +235,7 @@ mod tests {
 
     #[test]
     fn classify_path_detects_home_directory() {
+        let _guard = crate::config::global::ENV_LOCK.lock().unwrap();
         let Some(home) = crate::platform::home_dir() else {
             return;
         };
@@ -243,6 +244,7 @@ mod tests {
 
     #[test]
     fn classify_path_detects_home_parent() {
+        let _guard = crate::config::global::ENV_LOCK.lock().unwrap();
         let Some(home) = crate::platform::home_dir() else {
             return;
         };
@@ -263,6 +265,7 @@ mod tests {
 
     #[test]
     fn classify_path_detects_usr_etc_var() {
+        let _guard = crate::config::global::ENV_LOCK.lock().unwrap();
         for p in ["/usr", "/etc", "/var", "/tmp", "/opt"] {
             if !Path::new(p).exists() {
                 continue;

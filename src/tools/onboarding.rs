@@ -13,9 +13,11 @@ use serde_json::{json, Value};
 
 use super::{parse_bool_param, Tool, ToolContext};
 
-/// Bump this when system prompt surfaces change significantly.
-/// Missing or lower stored version triggers auto-refresh of the system prompt.
-/// See CLAUDE.md § "Onboarding Version" for when to bump.
+/// Bump when `onboarding_prompt.md` or `build_system_prompt_draft()` change in ways
+/// that affect the stored per-project system prompt.
+/// Do NOT bump for `server_instructions.md` — that file is loaded fresh at every MCP
+/// session start and has no cached copy.
+/// See CLAUDE.md § "Onboarding Version" for the full decision table.
 pub(crate) const ONBOARDING_VERSION: u32 = 22;
 
 /// Returns true if the stored onboarding version is stale (needs refresh).

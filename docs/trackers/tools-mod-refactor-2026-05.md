@@ -1,8 +1,8 @@
 ---
 id: ccd1cda1b4135fff
 kind: tracker
-status: complete
-title: src/tools — Phase 7 File Splits (B→C→A)
+status: done
+title: src/tools — Phase 7 File Splits (B→C→A) — COMPLETE
 owners: []
 tags: []
 topic: null

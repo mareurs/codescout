@@ -126,7 +126,7 @@ uuid = { version = "1.20.0", features = ["v4"] }
 parking_lot = "0.12"
 
 [features]
-default = ["remote-embed", "local-embed", "dashboard", "http", "librarian"]
+default = ["remote-embed", "local-embed", "http", "librarian"]
 # Embedded librarian-mcp (workspace doc/spec/plan index). Compiled in by
 # default for dev; turn off for production publishes via `--no-default-features`.
 # Runtime registration is **disabled by default** even when compiled in

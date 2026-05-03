@@ -9,36 +9,42 @@ pub(crate) fn language_navigation_hints(lang: &str) -> Option<&'static str> {
             "- symbol: `StructName/method`, `impl Trait for Type/method`\n\
              - symbols(kind=\"struct\") for data types, kind=\"function\" for free fns\n\
              - impl blocks: `symbols(name=\"impl MyStruct\")` or symbols(path) shows `impl Trait for Type`\n\
-             - Example: `symbols(name=\"Server/handle_request\")` finds a method on Server",
+             - Example: `symbols(name=\"Server/handle_request\")` finds a method on Server\n\
+             - call_graph(symbol, path, direction=\"callers\") — blast radius before refactor; direction=\"callees\" for flow tracing",
         ),
         "python" => Some(
             "- symbol: `ClassName/method_name`, `module_func`\n\
              - symbols(kind=\"class\") for classes, kind=\"function\" for functions/methods\n\
              - Decorators aren't in symbol — search for the function name\n\
-             - Example: `symbols(name=\"UserService/create\")` finds a method on UserService",
+             - Example: `symbols(name=\"UserService/create\")` finds a method on UserService\n\
+             - call_graph(symbol, path, direction=\"callers\") — blast radius before refactor; direction=\"callees\" for flow tracing",
         ),
         "typescript" | "javascript" | "tsx" | "jsx" => Some(
             "- symbol: `ClassName/method`, `exportedFunction`\n\
              - symbols(kind=\"class\") for classes, kind=\"function\" for functions/arrow fns\n\
              - React components are functions — use kind=\"function\" not kind=\"class\"\n\
-             - Example: `symbols(name=\"AuthProvider/login\")` finds a class method",
+             - Example: `symbols(name=\"AuthProvider/login\")` finds a class method\n\
+             - call_graph(symbol, path, direction=\"callers\") — blast radius before refactor; direction=\"callees\" for flow tracing",
         ),
         "go" => Some(
             "- symbol: `TypeName/MethodName`, `PackageFunc`\n\
              - symbols(kind=\"function\") covers both functions and methods\n\
              - Receiver methods: `symbols(name=\"Server/ListenAndServe\")`\n\
-             - Interfaces: symbols(kind=\"interface\") then symbols(path) for signatures",
+             - Interfaces: symbols(kind=\"interface\") then symbols(path) for signatures\n\
+             - call_graph(symbol, path, direction=\"callers\") — blast radius before refactor; direction=\"callees\" for flow tracing",
         ),
         "java" | "kotlin" => Some(
             "- symbol: `ClassName/methodName`, `InnerClass`\n\
              - symbols(kind=\"class\") for classes/interfaces, kind=\"function\" for methods\n\
              - Annotations aren't in symbol — search by method name\n\
-             - Example: `symbols(name=\"UserRepository/findById\")`",
+             - Example: `symbols(name=\"UserRepository/findById\")`\n\
+             - call_graph(symbol, path, direction=\"callers\") — blast radius before refactor; direction=\"callees\" for flow tracing",
         ),
         "c" | "cpp" => Some(
             "- symbol: `ClassName/method`, `namespace_func`\n\
              - symbols(kind=\"struct\") or kind=\"class\" depending on codebase style\n\
-             - Header vs implementation: symbols shows both — use path= to narrow",
+             - Header vs implementation: symbols shows both — use path= to narrow\n\
+             - call_graph(symbol, path, direction=\"callers\") — blast radius before refactor; direction=\"callees\" for flow tracing",
         ),
         _ => None,
     }
@@ -225,7 +231,7 @@ pub(crate) fn build_system_prompt_draft(
 
     // Key abstractions — placeholder for the LLM to fill
     draft.push_str("## Key Abstractions\n");
-    draft.push_str("- [Discover with `symbols` on main source directories]\n\n");
+    draft.push_str("- [3-5 entries max. Each = one line: `TypeName` (`path/`) — one-line purpose only. No narrative.]\n\n");
 
     // Search tips
     draft.push_str("## Search Tips\n");
@@ -317,9 +323,12 @@ pub(crate) fn build_system_prompt_draft(
                 p.id
             ));
             draft.push_str(&format!(
-                "3. `memory(project_id=\"{}\", action=\"read\", topic=\"architecture\")` — project-specific knowledge\n\n",
+                "3. `memory(project_id=\"{}\", action=\"read\", topic=\"architecture\")` — project-specific knowledge\n",
                 p.id
             ));
+            draft.push_str(
+                "4. `call_graph(symbol=\"Name\", path=\"...\", direction=\"callers\")` — blast radius before any structural change; `direction=\"callees\"` for flow tracing\n\n",
+            );
         }
 
         draft.push_str("**Cross-project navigation:**\n");
@@ -682,13 +691,43 @@ Steps:
 1. workspace(action=\"activate\", path=\".\", read_only=false) — enable writes
 2. Read each project memory that contributes to the system prompt:
 {memory_reads}
-3. Read the current system-prompt.md (if it exists) for Entry Points and Key Abstractions structure only — do NOT copy tool navigation examples from it, as those may be stale
-4. Regenerate system-prompt.md using the standard template sections:
-   - ## Entry Points
-   - ## Key Abstractions
-   - ## Search Tips
-   - ## Navigation Strategy
-   - ## Project Rules
+3. Read the current system-prompt.md (if it exists) for Entry Points structure only — do NOT copy tool navigation examples from it, as those may be stale
+4. Regenerate system-prompt.md following the canonical template spec:
+
+   **What to include:**
+   - Entry points: specific file paths + symbol names to start exploring
+   - Key abstractions: **3-5 entries max**. Each = one line: `TypeName` (`path/`) — one-line purpose only. NO architecture narrative, NO state machine descriptions, NO config details — those go in the `architecture` memory.
+   - Search tips: concrete query examples that work well for THIS codebase; terms to avoid
+   - Navigation strategy: recommended tool call sequence for a new task. Every step must name a codescout tool. Include `call_graph(symbol, path, direction=\"callers\")` for blast-radius checking before edits, and `direction=\"callees\"` for tracing data/control flow.
+   - Project rules: conventions the AI must follow that linters don't catch
+
+   **What NOT to include:**
+   - How codescout tools work (static tool guidance covers this)
+   - Full architecture details (architecture memory covers this)
+   - Command lists, glossary, detailed conventions (other memories cover these)
+   - More than ~30 lines total (injected every session — keep it dense)
+   - Native host tool names (Read, Grep, Glob, Edit, Bash) — blocked in codescout sessions
+
+   **Template:**
+   ```
+   # [Project Name] — Code Explorer Guidance
+
+   ## Entry Points
+   [Specific files + symbols, not module descriptions]
+
+   ## Key Abstractions
+   [3-5 lines: `TypeName` (`path/`) — one-line purpose]
+
+   ## Search Tips
+   [Concrete queries + terms to avoid]
+
+   ## Navigation Strategy
+   [Numbered steps, each naming a codescout tool. Include call_graph step.]
+
+   ## Project Rules
+   [Conventions not caught by linters]
+   ```
+
 5. Write the updated content to .codescout/system-prompt.md
 6. Do NOT re-explore the codebase — the memories already contain the relevant knowledge
 7. workspace(action=\"activate\", path=\".\") — restore normal state

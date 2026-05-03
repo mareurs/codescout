@@ -27,8 +27,8 @@ Merge commit `3765e1b`: 18 files, +2092 lines. 267 lib tests passing.
 |     1 | `render_template` + `params_schema` | done | All 5 acceptance criteria met 2026-05-02. A2 commit `b1431a5`, A5 dogfood on artifact `79a6276776a1b5da`. |
 |   1.5 | `tracker_design` teaching tool | done | All 6 acceptance criteria verified 2026-05-02. |
 |     2 | `refresh_stale` discovery tool | done | Shipped as `refresh_stale.rs`; registered, 6 tests. Verified 2026-05-02. |
-|     3 | `GatherSource::ConfigValue` | open | Read flag/setting from YAML/TOML/JSON/.conf + last-changed commit. Backend-kotlin flag-tracker use case. |
-|     4 | `append_mode` + history cap | open | Refresh produces dated delta blocks instead of rewriting body. Session-log pattern (MRV-poc `retrieval-improvement.md`). |
+|     3 | `GatherSource::ConfigValue` | done | Implemented 2026-05-02 — commit `00e57f7`. TOML/YAML/JSON + git blame annotation. |
+|     4 | `append_mode` + history cap | done | Implemented 2026-05-02 — commit `5a2797c`. 13 tests, trim_history, dated prepend, history cap. |
 |     5 | `kind: experiment` first-class | open | Promote `benchmarks/experiments/<dated>/` to artifacts; trackers fan in via existing `artifacts` source. |
 
 Skipped for now (in brainstorm but deferred):
@@ -51,7 +51,7 @@ Skipped for now (in brainstorm but deferred):
 | T-10 | `GatherSource::ConfigValue` design (which formats? key path syntax?) | done | 3 | Detailed spec written 2026-05-02 — see Phase 3 section. |
 | T-19 | `GatherSource::ConfigValue` implementation | done | 3 | Implemented 2026-05-02 — commit `00e57f7` on `experiments`. 7 tests, TOML/YAML/JSON + git blame annotation. |
 | T-11 | `append_mode` design — where does the date come from? cap policy? | done | 4 | Detailed spec written 2026-05-02 — see Phase 4 section. |
-| T-20 | `append_mode` + history cap implementation | open | 4 | See Phase 4 steps. |
+| T-20 | `append_mode` + history cap implementation | done | 4 | Implemented 2026-05-02 — commit `5a2797c` on `experiments`. 13 tests: catalog roundtrip, augment tool, trim_history unit (4), update integration (4), refresh hint. |
 | T-12 | `kind: experiment` schema + auto-discovery from filesystem | open | 5 |  |
 | T-13 | New tool `tracker_design` (archetype-driven) | done | 1.5 | `tools/tracker_design.rs`. |
 | T-14 | 6 archetypes: deployment_state, failure_table, metric_baseline, audit_issues, reflective, task_list | done | 1.5 | All 6 shipped. |

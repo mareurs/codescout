@@ -20,7 +20,8 @@ These are non-negotiable. Violating the letter IS violating the spirit.
    LSP-supported languages return a hard error — the tool tells you which symbol tool to use.
 
 3. **NO PIPING `run_command` OUTPUT.** Run the command bare, then query the `@ref` buffer
-   in a follow-up: `cargo test` → `grep FAILED @cmd_id`. Never `cargo test 2>&1 | grep FAILED`.
+   in a follow-up: `cargo test` → `grep FAILED @cmd_id`; `npm run build` → `grep "error TS" @cmd_id`.
+   Never `cargo test 2>&1 | grep FAILED` or `npm run build 2>&1 | grep error`.
    The buffer system exists to save your context window — use it.
 
 4. **ALWAYS RESTORE THE ACTIVE PROJECT.** After `workspace(action="activate", path=...)` to
@@ -40,12 +41,15 @@ These are non-negotiable. Violating the letter IS violating the spirit.
    progressive-disclosure contract. Applies to `read_file`, `read_markdown`,
    and any tool that consumes `@file_*`.
 
-7. **`grep` IS FOR DATA FILES AND STRING LITERALS, NOT CODE STRUCTURE.**
-   Use `symbols`, `references`, or `semantic_search` for code.
+7. **`grep` IS FOR SCOPED SCANS AND LITERALS, NOT CODEBASE-WIDE STRUCTURE.**
    Decision tree:
    - "What does symbol X look like?" → `symbols(name=X, include_body=true)`
    - "What's in this file/dir?" → `symbols(path=...)`
    - "How does X work / what calls Y?" → `semantic_search` or `references(symbol, path)`
+   - "Which files in **this directory** reference these property names?" → `grep(pattern, path=<dir>)` ✓ — hard path filter beats embedding similarity
+   - "Which files **anywhere** deal with this concept?" → `semantic_search(query)` — not grep
+   - "How is symbol X accessed at call sites?" → `symbols(name=X)` to find defining file → `references(symbol, path)` — not a second grep
+   - "Find an enum value or string constant?" → `grep` ✓ — constant values aren't navigable symbols
    - "Find a string literal in JSONL/YAML/config" → `grep` ✓
 
    `grep` on code gives raw text you must interpret; `symbols` gives structured
@@ -56,12 +60,17 @@ These are non-negotiable. Violating the letter IS violating the spirit.
 | ❌ Never do this | ✅ Do this instead | Why |
 |---|---|---|
 | `run_command("jq '.key' @file_ref")` to query JSON | `read_file(path, json_path="$.key")` | Navigation params > shell buffer queries |
+| Edit a symbol without blast-radius check | `call_graph(symbol, path, direction="callers", max_depth=3)` first | Transitive callers invisible to grep/references alone — silent breakage |
 | Repeat a broad `symbols(name=...)` after overflow | Narrow with `path=`, `kind=`, or more specific pattern | Follow the overflow hint |
 | Ignore `by_file` in overflow response | Use top file from `by_file` as `path=` filter | The hint tells you exactly where to look |
 | `workspace(action="activate")` for a single lookup | Pass `project_id: "<id>"` on the tool call | No state mutation, no risk of forgetting to return |
 | `edit_file` / `create_file` to rewrite an entire markdown section | `edit_markdown(path, heading, action, content)` | Heading-addressed, no string matching needed |
 | `grep("fn_name")` to find all callers | `references(symbol, path)` | LSP finds actual usages; regex matches comments, strings, partial names |
 | `read_file` on a `.md` file | `read_markdown(path)` | Heading navigation > line guessing |
+| `cat <file> \| head -N` to inspect source | `symbols(path=...)` | Iron Law #1 + #3 double violation — shell gives raw text; symbols give structure |
+| `grep("x", path=<dir>)` again after finding files, to trace access patterns | `symbols(name=X)` → `references(symbol, path)` | grep matched files → now you know the symbol name; switch to LSP for precise call sites |
+| `semantic_search("concept")` when you already know the directory | `grep(pattern, path=<dir>)` | Embeddings rank by whole-codebase similarity; grep with `path=` is a hard filter — no noise from tests/docs/config |
+| `edit_file` to add a callback, handler, or field inside a function body | `edit_code` | Adding anything inside a function body is a structural edit regardless of how small it looks |
 | `symbols(query="foo\|bar")` | `grep(pattern="foo\|bar")` or separate `symbols` calls | `symbols` rejects regex-like patterns |
 | Call `edit_code(...)` without loading schema | `ToolSearch("select:mcp__codescout__edit_code")` before first call each session | Schema is deferred — fails with "missing 'action' parameter" until loaded |
 ## Tool Routing & Gotchas
@@ -88,6 +97,8 @@ covers only cross-tool routing and non-obvious behaviors.
 - **Find across project then read body:**
   `symbols(name="edit_code")` → `symbols(name_path="ToolName/edit_code", include_body=true)`
 
+- **Before editing X** → `call_graph(symbol, path, direction="callers")` — size blast radius before any structural change; `direction="callees"` for flow tracing
+
 Language `kind` quirks:
 
 | Language      | `kind=`       | Note                                        |
@@ -103,6 +114,8 @@ Language `kind` quirks:
 
 - **Know the name** → `symbols(name=...)` or `symbols(path)`
 - **Know the concept / "How does X work?"** → `semantic_search(query)` — faster and more relevant than grep for conceptual questions; drill with symbol tools after
+- **Know a text pattern and the directory** → `grep(pattern, path=<dir>)` — hard filter, no noise from unrelated files; beats semantic_search when scope is already known
+- **Know a concept but not the directory** → `semantic_search(query)` — whole-codebase ranking; follow with grep/symbols to confirm
 - **Know a text pattern in data/config files** → `grep(pattern)` (not for code structure — see Iron Law #7)
 - **Know a filename** → `tree(glob=...)`
 - **All callers of X** → `references(symbol, path)` (not `grep`)
