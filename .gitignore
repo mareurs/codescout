@@ -24,7 +24,8 @@ tests/fixtures/*/.codescout/
 .codescout/private-memories/
 /temp-docs/
 /.env
-/.claude/
+/.claude/*
+!/.claude/skills/
 /.fastembed_cache/
 /.codescout/tmp/
 /.buddy/
