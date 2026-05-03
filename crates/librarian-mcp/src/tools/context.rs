@@ -431,7 +431,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn project_scope_excludes_other_repos() {
+    async fn repo_scope_excludes_other_repos() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().to_path_buf();
         let cat = Catalog::open_in_memory().unwrap();
@@ -475,7 +475,7 @@ mod tests {
         let included = v["included_ids"].as_array().unwrap();
         assert_eq!(included.len(), 1);
         assert_eq!(included[0], "in");
-        assert_eq!(v["scope"]["applied"], "project");
+        assert_eq!(v["scope"]["applied"], "repo");
     }
 
     #[tokio::test]

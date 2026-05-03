@@ -172,7 +172,7 @@ fn build_hints(
         expand.push("scope=\"repo\"");
     }
     if hints.contains_key("more_in_umbrella") {
-        expand.push("scope=\"umbrella\"");
+        expand.push("scope=\"all\"");
     }
     if hints.contains_key("more_in_workspace") {
         expand.push("scope=\"all\"");
@@ -310,6 +310,19 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             }
         }
     }
+    // scope=all is an alias for umbrella when the current project has one;
+    // without a current project or umbrella, All passes through (no-cwd fallback path).
+    let requested_scope = if requested_scope == Scope::All
+        && ctx
+            .current_project
+            .as_deref()
+            .and_then(|c| c.umbrella.as_deref())
+            .is_some()
+    {
+        Scope::Umbrella
+    } else {
+        requested_scope
+    };
     let (effective_scope, scope_fallback) = match (requested_scope, ctx.current_project.is_some()) {
         (Scope::Project | Scope::Repo, false) => (Scope::All, true),
         (s, _) => (s, false),

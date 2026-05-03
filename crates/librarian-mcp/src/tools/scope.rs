@@ -21,8 +21,8 @@ use crate::workspace::WorkspaceConfig;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Scope {
-    #[default]
     Project,
+    #[default]
     Repo,
     Umbrella,
     All,
