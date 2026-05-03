@@ -143,7 +143,10 @@ fn build_hints(
         }
     }
 
-    if !matches!(applied.scope, Scope::All) {
+    // Only hint scope="all" when an umbrella exists — without one, workspace projects
+    // are unrelated and crossing into them would be misleading.
+    if !matches!(applied.scope, Scope::All) && current.and_then(|c| c.umbrella.as_deref()).is_some()
+    {
         let in_workspace = count_for_scope(cat, base, ws, current, Scope::All)?;
         let extra = in_workspace.saturating_sub(here);
         if extra > 0 {
@@ -487,22 +490,63 @@ mod tests {
 
     #[tokio::test]
     async fn scope_all_widens_to_workspace() {
-        let cat = Catalog::open_in_memory().unwrap();
-        artifact::upsert(&cat, &sample_row("a", "in-project")).unwrap();
-        let mut elsewhere = sample_row("b", "elsewhere");
-        elsewhere.repo = "agents".into();
-        elsewhere.rel_path = "x/y.md".into();
-        artifact::upsert(&cat, &elsewhere).unwrap();
+        let make_cat = || {
+            let cat = Catalog::open_in_memory().unwrap();
+            artifact::upsert(&cat, &sample_row("a", "in-project")).unwrap();
+            let mut elsewhere = sample_row("b", "elsewhere");
+            elsewhere.repo = "agents".into();
+            elsewhere.rel_path = "x/y.md".into();
+            artifact::upsert(&cat, &elsewhere).unwrap();
+            cat
+        };
 
-        let ctx = mk_ctx(cat);
+        // Without umbrella: more_in_workspace hint must NOT appear — other repos are unrelated.
+        let ctx = mk_ctx(make_cat());
         let v_default = call(&ctx, json!({"filter": {"kind": {"eq": "spec"}}}))
             .await
             .unwrap();
         assert_eq!(v_default["count"].as_u64(), Some(1));
-        assert_eq!(v_default["hints"]["more_in_workspace"].as_u64(), Some(1));
+        assert!(
+            v_default["hints"]["more_in_workspace"].is_null(),
+            "no umbrella → more_in_workspace hint must be absent"
+        );
+
+        // With umbrella: more_in_workspace hint must appear.
+        let ctx_umbrella = ToolContext {
+            catalog: Arc::new(parking_lot::Mutex::new(make_cat())),
+            workspace: Arc::new(crate::workspace::WorkspaceConfig {
+                roots: vec![crate::workspace::Root {
+                    name: "claude".into(),
+                    path: "/tmp/claude".into(),
+                }],
+                ignore: vec![],
+                rules: vec![],
+                umbrellas: vec![crate::workspace::Umbrella {
+                    name: "main".into(),
+                    members: vec!["claude".into(), "agents".into()],
+                }],
+            }),
+            rules: Arc::new(vec![]),
+            embedding: None,
+            current_project: Some(Arc::new(crate::current_project::CurrentProject {
+                root: "claude".into(),
+                subdir: "code-explorer".into(),
+                umbrella: Some("main".into()),
+                ..Default::default()
+            })),
+        };
+        let v_umbrella = call(&ctx_umbrella, json!({"filter": {"kind": {"eq": "spec"}}}))
+            .await
+            .unwrap();
+        assert_eq!(v_umbrella["count"].as_u64(), Some(1));
+        assert_eq!(
+            v_umbrella["hints"]["more_in_workspace"].as_u64(),
+            Some(1),
+            "with umbrella → more_in_workspace hint must appear"
+        );
 
         let v_all = call(
-            &ctx,
+            &ctx_umbrella,
             json!({"filter": {"kind": {"eq": "spec"}}, "scope": "all"}),
         )
         .await
