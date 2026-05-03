@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use super::scope::{apply_scope, Scope, ScopeApplied};
 use super::ToolContext;
 use crate::catalog::augmentation;
-use crate::catalog::find::{count_matching, find, FindOpts};
+use crate::catalog::find::{catalog_summary, count_matching, find, FindOpts};
 use crate::filter::FilterNode;
 
 const MAX_LIMIT: usize = 500;
@@ -222,6 +222,11 @@ fn is_status_nin_clause(n: &FilterNode) -> bool {
 }
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args)?;
+    let is_cold_call = a.filter.is_none()
+        && a.semantic.is_none()
+        && a.kind.is_none()
+        && a.status.is_none()
+        && a.augmented.is_none();
     let limit = a.limit.min(MAX_LIMIT);
     let offset = a.offset.min(MAX_OFFSET);
 
@@ -301,6 +306,18 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         apply_scope(base.clone(), effective_scope, &ctx.workspace, current)?;
 
     let cat = ctx.catalog.lock();
+
+    let catalog_value: Option<serde_json::Value> = if is_cold_call {
+        let summary = catalog_summary(&cat, scoped_filter.as_ref())?;
+        Some(serde_json::json!({
+            "total": summary.total,
+            "by_kind": summary.by_kind,
+            "augmented": summary.augmented,
+        }))
+    } else {
+        None
+    };
+
     let rows = find(
         &cat,
         &FindOpts {
@@ -342,12 +359,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         )?
     };
 
-    Ok(json!({
+    let mut response = serde_json::json!({
         "count": items.len(),
         "items": items,
         "scope": applied.to_json(),
         "hints": hints,
-    }))
+    });
+    if let Some(cat_val) = catalog_value {
+        response["catalog"] = cat_val;
+    }
+    Ok(response)
 }
 
 #[cfg(test)]
@@ -739,4 +760,47 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["id"], "a");
     }
+
+    #[tokio::test]
+    async fn cold_call_returns_catalog_field() {
+        use crate::catalog::artifact::{upsert, ArtifactRow};
+        let cat = crate::catalog::Catalog::open_in_memory().unwrap();
+        let now = chrono::Utc::now().timestamp_millis();
+        upsert(&cat, &ArtifactRow {
+            id: "a1".into(), repo: "claude".into(), rel_path: "code-explorer/a1.md".into(),
+            kind: "tracker".into(), status: "draft".into(),
+            title: None, owners: vec![], tags: vec![], topic: None,
+            time_scope: None, source: None,
+            created_at: now, updated_at: now, file_mtime: now,
+            file_sha256: "".into(), confidence: 1.0,
+        }).unwrap();
+        let ctx = mk_ctx(cat);
+        let result = call(&ctx, serde_json::json!({})).await.unwrap();
+        assert!(result["catalog"].is_object(), "cold call must include catalog field");
+        assert_eq!(result["catalog"]["total"], 1);
+        assert_eq!(result["catalog"]["by_kind"]["tracker"], 1);
+        assert_eq!(result["catalog"]["augmented"], 0);
+    }
+
+    #[tokio::test]
+    async fn find_with_kind_filter_omits_catalog_field() {
+        use crate::catalog::artifact::{upsert, ArtifactRow};
+        let cat = crate::catalog::Catalog::open_in_memory().unwrap();
+        let now = chrono::Utc::now().timestamp_millis();
+        upsert(&cat, &ArtifactRow {
+            id: "a1".into(), repo: "claude".into(), rel_path: "code-explorer/a1.md".into(),
+            kind: "tracker".into(), status: "draft".into(),
+            title: None, owners: vec![], tags: vec![], topic: None,
+            time_scope: None, source: None,
+            created_at: now, updated_at: now, file_mtime: now,
+            file_sha256: "".into(), confidence: 1.0,
+        }).unwrap();
+        let ctx = mk_ctx(cat);
+        let result = call(&ctx, serde_json::json!({"kind": "tracker"})).await.unwrap();
+        assert!(
+            result.get("catalog").is_none() || result["catalog"].is_null(),
+            "filtered find must not include catalog field"
+        );
+    }
+
 }
