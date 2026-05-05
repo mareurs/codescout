@@ -109,6 +109,16 @@ covers only cross-tool routing and non-obvious behaviors.
 
 - **Before editing X** → `call_graph(symbol, path, direction="callers")` — size blast radius before any structural change; `direction="callees"` for flow tracing
 
+**`name_path` examples by language:**
+
+| Language | Source construct | `name_path` |
+|---|---|---|
+| Rust — struct method | `impl MyStruct { fn call() }` | `"MyStruct/call"` |
+| Rust — trait impl method | `impl Tool for EditCode { fn call() }` | `"impl Tool for EditCode/call"` |
+| Python | `class Agent: def run(self)` | `"Agent/run"` |
+| TypeScript / JS | `class Router { handle() }` | `"Router/handle"` |
+| Kotlin / Java | `class Service { fun process() }` | `"Service/process"` |
+
 Language `kind` quirks:
 
 | Language      | `kind=`       | Note                                        |
