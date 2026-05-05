@@ -17,7 +17,9 @@ impl Tool for ReadFile {
 
     fn description(&self) -> &str {
         "Read a file. Large files return a summary + @file_* handle. \
-         Format-aware: json_path (JSON), toml_key (TOML/YAML). Use read_markdown for .md files."
+         Format-aware: json_path (JSON), toml_key (TOML/YAML). Use read_markdown for .md files. \
+         Source files: a start_line+end_line range overlapping a named symbol is redirected \
+         to symbols(include_body=true); pass force=true to bypass."
     }
 
     fn input_schema(&self) -> Value {
@@ -30,7 +32,8 @@ impl Tool for ReadFile {
                 "start_line": { "type": "integer", "description": "First line (1-indexed). Pair with end_line." },
                 "end_line": { "type": "integer", "description": "Last line (1-indexed, inclusive). Pair with start_line." },
                 "json_path": { "type": "string", "description": "JSON subtree by path (e.g. \"$.dependencies\")." },
-                "toml_key": { "type": "string", "description": "TOML table or YAML section by key (e.g. \"dependencies\")." }
+                "toml_key": { "type": "string", "description": "TOML table or YAML section by key (e.g. \"dependencies\")." },
+                "force": { "type": "boolean", "description": "Skip source-symbol hint and read the raw line range." }
             }
         })
     }
@@ -91,8 +94,20 @@ impl Tool for ReadFile {
         if let Some(tk) = input["toml_key"].as_str() {
             return read_toml_yaml_key(&text, &resolved, tk);
         }
+
+        let force = input["force"].as_bool().unwrap_or(false);
+
         if let (Some(start), Some(end)) = (start_line, end_line) {
-            return read_with_line_range(path, &text, &resolved, start, end, &source_tag, ctx);
+            return read_with_line_range(
+                path,
+                &text,
+                &resolved,
+                start,
+                end,
+                &source_tag,
+                ctx,
+                force,
+            );
         }
         read_full_file(path, &text, &resolved, &input, &source_tag, ctx)
     }
@@ -373,6 +388,7 @@ fn read_toml_yaml_key(text: &str, resolved: &std::path::Path, tk: &str) -> Resul
 }
 
 /// Handle an explicit `start_line`+`end_line` range read from a real file.
+#[allow(clippy::too_many_arguments)]
 fn read_with_line_range(
     path: &str,
     text: &str,
@@ -381,6 +397,7 @@ fn read_with_line_range(
     end: u64,
     source_tag: &str,
     ctx: &ToolContext,
+    force: bool,
 ) -> Result<Value> {
     if start == 0 || end < start {
         return Err(RecoverableError::with_hint(
@@ -393,6 +410,30 @@ fn read_with_line_range(
         )
         .into());
     }
+
+    if !force
+        && crate::tools::file_summary::detect_file_type(path)
+            == crate::tools::file_summary::FileSummaryType::Source
+    {
+        let matches = find_symbols_for_range(text, resolved, start, end);
+        if !matches.is_empty() {
+            let names: Vec<_> = matches.iter().take(3).map(|s| format!("'{s}'")).collect();
+            let mut label = names.join(", ");
+            if matches.len() > 3 {
+                label.push_str(&format!(" and {} more", matches.len() - 3));
+            }
+            let first = &matches[0];
+            return Err(RecoverableError::with_hint(
+                format!("source range overlaps named symbol(s): {label}"),
+                format!(
+                    "Use symbols(name='{first}', include_body=true) to read the body directly. \
+                     Pass force=true to read the raw line range anyway."
+                ),
+            )
+            .into());
+        }
+    }
+
     let content = extract_lines(text, start as usize, end as usize);
 
     let is_md = path.ends_with(".md") || path.ends_with(".markdown");
@@ -866,4 +907,48 @@ fn format_read_file_summary(val: &Value, file_type: &str) -> String {
     }
 
     out
+}
+
+/// Recursively flatten a symbol tree into a single Vec of references.
+fn flatten_symbols<'a>(
+    syms: &'a [crate::lsp::SymbolInfo],
+    out: &mut Vec<&'a crate::lsp::SymbolInfo>,
+) {
+    for sym in syms {
+        out.push(sym);
+        flatten_symbols(&sym.children, out);
+    }
+}
+
+/// Return the `name_path` of every symbol whose body overlaps (inclusive) the
+/// read range: symbol contains range, range contains symbol, or they share a boundary.
+///
+/// `start` and `end` are 1-indexed (as received from tool input).
+/// `SymbolInfo.start_line` / `end_line` are 0-indexed.
+/// Returns an empty Vec on parse error (fail open).
+fn find_symbols_for_range(
+    text: &str,
+    resolved: &std::path::Path,
+    start: u64,
+    end: u64,
+) -> Vec<String> {
+    let syms = match crate::ast::extract_symbols_from_text(text, resolved) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+    let mut flat = Vec::new();
+    flatten_symbols(&syms, &mut flat);
+
+    let s0 = (start.saturating_sub(1)) as u32;
+    let e0 = (end.saturating_sub(1)) as u32;
+
+    flat.into_iter()
+        .filter(|sym| {
+            // symbol body contains read range
+            (sym.start_line <= s0 && e0 <= sym.end_line)
+            // read range contains symbol body
+            || (s0 <= sym.start_line && sym.end_line <= e0)
+        })
+        .map(|sym| sym.name_path.clone())
+        .collect()
 }
