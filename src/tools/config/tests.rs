@@ -1199,14 +1199,14 @@ fn format_activate_project_prepends_warning_when_stale() {
         "index": {"status": "not_indexed"},
         "system_prompt_stale": {
             "stored_version": 20,
-            "current_version": 22,
+            "current_version": 23,
             "action": "Run onboarding(action=\"refresh_prompt\") — tool names or signatures have changed."
         },
         "hint": "CWD: /home/user/my-project"
     });
     let compact = format_activate_project(&result);
     assert!(
-        compact.starts_with("⚠ SYSTEM PROMPT STALE (v20 → v22):"),
+        compact.starts_with("⚠ SYSTEM PROMPT STALE (v20 → v23):"),
         "compact should start with stale warning but was: {compact}"
     );
     assert!(
@@ -1248,14 +1248,14 @@ fn format_activate_project_prepends_warning_with_none_stored_version() {
         "index": {"status": "not_indexed"},
         "system_prompt_stale": {
             "stored_version": null,
-            "current_version": 22,
+            "current_version": 23,
             "action": "Run onboarding(action=\"refresh_prompt\") — tool names or signatures have changed."
         },
         "hint": "CWD: /home/user/my-project"
     });
     let compact = format_activate_project(&result);
     assert!(
-        compact.starts_with("⚠ SYSTEM PROMPT STALE (none → v22):"),
+        compact.starts_with("⚠ SYSTEM PROMPT STALE (none → v23):"),
         "should show 'none' not 'v0' for null stored_version; got: {compact}"
     );
 }
