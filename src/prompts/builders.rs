@@ -318,6 +318,8 @@ pub(crate) fn build_system_prompt_draft(
                 "1. `symbols(\"{}\")` — [fill in entry point during onboarding]\n",
                 p.relative_root.display()
             ));
+            draft.push_str("1b. `symbol_at(path, line)` — hover + type sig when you have an exact location\n");
+            draft.push_str("1c. `references(symbol, path)` — all call sites before any edit\n");
             draft.push_str(&format!(
                 "2. `semantic_search(\"your concept\", project_id=\"{}\")` — search within this project\n",
                 p.id
@@ -359,6 +361,8 @@ pub(crate) fn build_system_prompt_draft(
         draft.push_str("3. `semantic_search(\"your concept\")` — find relevant code\n");
         draft.push_str("4. `symbols(name=\"Name\", include_body=true)` — read implementation\n");
         draft.push_str("   - regex-like patterns belong in `grep`, not `symbols`\n");
+        draft.push_str("4b. `symbol_at(path, line)` — hover + type sig when you have an exact location from prior tool output; skip re-searching\n");
+        draft.push_str("4c. `references(symbol, path)` — all call sites before any edit\n");
         draft.push_str(
             "5. `call_graph(symbol=\"Name\", direction=\"callers\")` — transitive blast radius; `direction=\"callees\"` for flow tracing\n",
         );
