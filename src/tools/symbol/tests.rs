@@ -5920,3 +5920,81 @@ async fn symbols_overview_force_mode_symbols_bypasses_threshold() {
     assert!(result["mode"].is_null(), "no mode field in symbols output");
     assert!(result["files"].is_array(), "files array present");
 }
+
+#[tokio::test]
+async fn edit_code_replace_appends_caller_hint() {
+    if !std::process::Command::new("rust-analyzer")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        eprintln!("Skipping: rust-analyzer not installed");
+        return;
+    }
+
+    let dir = tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        "[package]\nname = \"test-hint\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::write(
+        dir.path().join("src/lib.rs"),
+        "pub fn greet(name: &str) -> String {\n    format!(\"Hello, {}!\", name)\n}\n",
+    )
+    .unwrap();
+
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = test_ctx_with_agent(agent);
+
+    // Retry loop: rust-analyzer needs time to index
+    let mut outcome: Option<Value> = None;
+    for attempt in 0..5 {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(600 * attempt)).await;
+        }
+        let result = EditCode
+            .call(
+                json!({
+                    "symbol": "greet",
+                    "path": "src/lib.rs",
+                    "action": "replace",
+                    "body": "pub fn greet(name: &str) -> String {\n    format!(\"Hi, {}!\", name)\n}\n"
+                }),
+                &ctx,
+            )
+            .await;
+        match result {
+            Ok(v) => {
+                outcome = Some(v);
+                break;
+            }
+            Err(e) => {
+                eprintln!("Attempt {}: {}", attempt + 1, e);
+            }
+        }
+    }
+
+    let result = match outcome {
+        Some(v) => v,
+        None => {
+            eprintln!("Skipping: LSP did not respond in time");
+            return;
+        }
+    };
+
+    let hint = result["hint"]
+        .as_str()
+        .expect("replace result must contain 'hint' field");
+    assert!(
+        hint.contains("references("),
+        "hint should mention references: {hint}"
+    );
+    assert!(
+        hint.contains("greet"),
+        "hint should include symbol name: {hint}"
+    );
+}

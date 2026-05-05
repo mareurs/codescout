@@ -83,14 +83,24 @@ impl Tool for EditCode {
                 let Some(new_name) = input["new_name"].as_str() else {
                     return Err(RecoverableError::new("action 'rename' requires 'new_name'").into());
                 };
-                self.do_rename(ctx, name_path, rel_path, new_name).await
+                let mut result = self.do_rename(ctx, name_path, rel_path, new_name).await?;
+                result["hint"] = json!(format!(
+                    "verify callers: references(\"{}\", \"{}\")",
+                    name_path, rel_path
+                ));
+                Ok(result)
             }
             "remove" => self.do_remove(ctx, name_path, rel_path).await,
             "replace" => {
                 let Some(body) = input["body"].as_str() else {
                     return Err(RecoverableError::new("action 'replace' requires 'body'").into());
                 };
-                self.do_replace(ctx, name_path, rel_path, body).await
+                let mut result = self.do_replace(ctx, name_path, rel_path, body).await?;
+                result["hint"] = json!(format!(
+                    "verify callers: references(\"{}\", \"{}\")",
+                    name_path, rel_path
+                ));
+                Ok(result)
             }
             "insert" => {
                 let Some(body) = input["body"].as_str() else {
