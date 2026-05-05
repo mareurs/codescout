@@ -34,6 +34,15 @@ pub fn extract_symbols(path: &Path) -> Result<Vec<SymbolInfo>> {
     parser::extract_symbols_from_source(&source, language, path)
 }
 
+/// Extract symbols from already-loaded source text using tree-sitter.
+///
+/// Prefer this over `extract_symbols` when the file content is already in memory
+/// to avoid a second disk read.
+pub fn extract_symbols_from_text(text: &str, path: &Path) -> Result<Vec<SymbolInfo>> {
+    let language = detect_language(path);
+    parser::extract_symbols_from_source(text, language, path)
+}
+
 /// Extract docstrings/comments from a file using tree-sitter.
 pub fn extract_docstrings(path: &Path) -> Result<Vec<DocstringInfo>> {
     let source = std::fs::read_to_string(path)?;
