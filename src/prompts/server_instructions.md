@@ -44,6 +44,7 @@ These are non-negotiable. Violating the letter IS violating the spirit.
 7. **`grep` IS FOR SCOPED SCANS AND LITERALS, NOT CODEBASE-WIDE STRUCTURE.**
    Decision tree:
    - "What does symbol X look like?" → `symbols(name=X, include_body=true)`
+   - "I have a path + line number from tool output" → `symbol_at(path, line)` — type sig + hover docs, no re-search needed
    - "What's in this file/dir?" → `symbols(path=...)`
    - "How does X work / what calls Y?" → `semantic_search` or `references(symbol, path)`
    - "Which files in **this directory** reference these property names?" → `grep(pattern, path=<dir>)` ✓ — hard path filter beats embedding similarity
@@ -54,6 +55,11 @@ These are non-negotiable. Violating the letter IS violating the spirit.
 
    `grep` on code gives raw text you must interpret; `symbols` gives structured
    output (signature, body, line range) in fewer tokens with zero ambiguity.
+
+8. **REFERENCES BEFORE EDITING.** Before `edit_code(action="rename"|"replace")`,
+   run `references(symbol, path)` to get the concrete call-site list.
+   `call_graph` gives transitive reach; `references` gives the actual locations.
+   Skip only when you already ran references for this symbol in this session.
 
 ## Anti-Patterns — STOP if you catch yourself doing these
 
@@ -76,6 +82,7 @@ These are non-negotiable. Violating the letter IS violating the spirit.
 | `edit_file` to add a callback, handler, or field inside a function body | `edit_code` | Adding anything inside a function body is a structural edit regardless of how small it looks |
 | `symbols(query="foo\|bar")` | `grep(pattern="foo\|bar")` or separate `symbols` calls | `symbols` rejects regex-like patterns |
 | Call `edit_code(...)` without loading schema | `ToolSearch("select:mcp__codescout__edit_code")` before first call each session | Schema is deferred — fails with "missing 'action' parameter" until loaded |
+| `semantic_search("X")` when you already have path+line for X | `symbol_at(path, line)` | Re-searching wastes tokens; you already have the location |
 ## Tool Routing & Gotchas
 
 Tool descriptions and parameters are in the MCP tool schemas — this section
@@ -113,6 +120,14 @@ Language `kind` quirks:
 | Kotlin / Java | `"class"`     | classes, objects, annotations               |
 | Python        | `"class"`     | classes; methods via `name_path`            |
 
+### LSP Workflow — Standard Sequence
+
+For any symbol change, in order:
+1. `symbols(name=X)` — locate the symbol, get its defining file + line
+2. `symbol_at(path, line)` — inspect type signature + docs (when you need to understand what it IS)
+3. `references(symbol, path)` — enumerate all call sites before touching anything
+4. `call_graph(symbol, path, direction="callers", max_depth=3)` — transitive blast radius for renames/structural changes
+5. `edit_code(...)` — make the change
 ### Search Routing
 
 - **Know the name** → `symbols(name=...)` or `symbols(path)`
