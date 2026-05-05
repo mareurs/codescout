@@ -59,7 +59,7 @@ impl Tool for EditCode {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        if result.get("files_changed").is_some() {
+        let mut base = if result.get("files_changed").is_some() {
             Some(format_rename_symbol(result))
         } else if result.get("removed_lines").is_some() {
             Some(format_remove_symbol(result))
@@ -69,7 +69,12 @@ impl Tool for EditCode {
             Some(format_insert_code(result))
         } else {
             None
+        };
+        if let (Some(s), Some(h)) = (base.as_mut(), result["hint"].as_str()) {
+            s.push('\n');
+            s.push_str(h);
         }
+        base
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
