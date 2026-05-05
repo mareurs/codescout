@@ -5997,4 +5997,8 @@ async fn edit_code_replace_appends_caller_hint() {
         hint.contains("greet"),
         "hint should include symbol name: {hint}"
     );
+    assert!(
+        hint.contains("src/lib.rs"),
+        "hint should include file path: {hint}"
+    );
 }

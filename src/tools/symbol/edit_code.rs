@@ -85,7 +85,7 @@ impl Tool for EditCode {
                 };
                 let mut result = self.do_rename(ctx, name_path, rel_path, new_name).await?;
                 result["hint"] = json!(format!(
-                    "verify callers: references(\"{}\", \"{}\")",
+                    "verify callers: references(symbol=\"{}\", path=\"{}\")",
                     name_path, rel_path
                 ));
                 Ok(result)
@@ -97,7 +97,7 @@ impl Tool for EditCode {
                 };
                 let mut result = self.do_replace(ctx, name_path, rel_path, body).await?;
                 result["hint"] = json!(format!(
-                    "verify callers: references(\"{}\", \"{}\")",
+                    "verify callers: references(symbol=\"{}\", path=\"{}\")",
                     name_path, rel_path
                 ));
                 Ok(result)
