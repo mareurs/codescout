@@ -88,6 +88,7 @@ these are the direct inputs to `src/prompts/server_instructions.md` edits.
 - **All experimental work goes on the `experiments` branch** (or a dedicated feature branch). Iterate freely there.
 - **Cherry-pick to `master`** only after: all tests pass, clippy clean, manually verified via MCP (`cargo build --release` + `/mcp` restart).
 - **`experiments` is never deleted.** After any merge to `master`, `experiments` continues from the same commit — no recreation, no force-reset.
+- **Before any merge or cherry-pick to `master`**, invoke the Docs Lotus Frog (`/buddy:summon frog`) to: (1) audit experimental features eligible for graduation, and (2) identify documentation gaps in the commits being merged.
 - Never commit directly to `master` for in-progress or exploratory work.
 
 ### Release Cycle
