@@ -47,3 +47,45 @@ fn client_from_env_constructs_when_urls_present() {
         std::env::remove_var(k);
     }
 }
+
+use codescout::retrieval::drift::{diff_chunks, ChunkRef};
+
+fn cr(id: &str, hash: &str) -> ChunkRef {
+    ChunkRef { chunk_id: id.into(), content_hash: hash.into() }
+}
+
+#[test]
+fn diff_identical_yields_noop() {
+    let server = vec![cr("a","h1"), cr("b","h2")];
+    let local = vec![cr("a","h1"), cr("b","h2")];
+    let d = diff_chunks(&server, &local);
+    assert!(d.to_upsert.is_empty());
+    assert!(d.to_delete.is_empty());
+}
+
+#[test]
+fn diff_added_chunk_yields_upsert() {
+    let server = vec![cr("a","h1")];
+    let local = vec![cr("a","h1"), cr("b","h2")];
+    let d = diff_chunks(&server, &local);
+    assert_eq!(d.to_upsert, vec!["b".to_string()]);
+    assert!(d.to_delete.is_empty());
+}
+
+#[test]
+fn diff_deleted_chunk_yields_delete() {
+    let server = vec![cr("a","h1"), cr("b","h2")];
+    let local = vec![cr("a","h1")];
+    let d = diff_chunks(&server, &local);
+    assert!(d.to_upsert.is_empty());
+    assert_eq!(d.to_delete, vec!["b".to_string()]);
+}
+
+#[test]
+fn diff_modified_chunk_yields_upsert_for_new_id() {
+    let server = vec![cr("a-old","h1")];
+    let local = vec![cr("a-new","h2")];
+    let d = diff_chunks(&server, &local);
+    assert_eq!(d.to_upsert, vec!["a-new".to_string()]);
+    assert_eq!(d.to_delete, vec!["a-old".to_string()]);
+}
