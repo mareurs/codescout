@@ -1,0 +1,94 @@
+name: codescout-retrieval
+
+x-shared-volumes: &shared-volumes
+  - model_cache:/data
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.13.0
+    container_name: codescout-qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    environment:
+      QDRANT__LOG_LEVEL: INFO
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/6333'"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [retrieval_net]
+
+  embedder-cpu:
+    profiles: [cpu]
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    container_name: codescout-embedder
+    restart: unless-stopped
+    command: ["--model-id", "BAAI/bge-m3", "--dtype", "float32"]
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - model_cache:/data
+    networks: [retrieval_net]
+
+  embedder-gpu:
+    profiles: [gpu]
+    image: ghcr.io/huggingface/text-embeddings-inference:1.6
+    container_name: codescout-embedder
+    restart: unless-stopped
+    command: ["--model-id", "Qwen/Qwen3-Embedding-8B", "--dtype", "float16"]
+    ports:
+      - "127.0.0.1:8080:80"
+    shm_size: 2g
+    volumes:
+      - model_cache:/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks: [retrieval_net]
+
+  reranker-cpu:
+    profiles: [cpu]
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    container_name: codescout-reranker
+    restart: unless-stopped
+    command: ["--model-id", "Qwen/Qwen3-Reranker-0.6B", "--dtype", "float32"]
+    ports:
+      - "127.0.0.1:8081:80"
+    volumes:
+      - model_cache:/data
+    networks: [retrieval_net]
+
+  reranker-gpu:
+    profiles: [gpu]
+    image: ghcr.io/huggingface/text-embeddings-inference:1.6
+    container_name: codescout-reranker
+    restart: unless-stopped
+    command: ["--model-id", "BAAI/bge-reranker-v2-m3", "--dtype", "float16"]
+    ports:
+      - "127.0.0.1:8081:80"
+    volumes:
+      - model_cache:/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks: [retrieval_net]
+
+volumes:
+  qdrant_storage:
+  model_cache:
+
+networks:
+  retrieval_net:
+    driver: bridge
