@@ -51,6 +51,28 @@ Then use in Claude Code — it will route all file/symbol/search operations thro
 > See the [Claude Code integration guide](docs/agents/claude-code.md) for details.
 
 > **Tip:** Install the [codescout-companion plugin](docs/manual/src/getting-started/companion-plugin.md) to automatically steer Claude toward codescout tools in every session — including subagents.
+## Retrieval Stack (experimental)
+
+Codescout uses an external Docker Compose stack for semantic embedding and retrieval. Start it once before using `semantic_search`:
+
+```bash
+cp .env.example .env
+# Edit .env if you want the gpu profile (default: cpu)
+./scripts/retrieval-stack.sh up
+```
+
+Wait ~2 min on first run for models to download. Subsequent starts are instant.
+
+| Service | Default URL | Purpose |
+|---|---|---|
+| Qdrant | http://127.0.0.1:6333 | Vector store |
+| Embedder | http://127.0.0.1:8080 | BGE-M3 dense + sparse embeddings |
+| Reranker | http://127.0.0.1:8081 | Qwen3 cross-encoder reranking |
+
+**Stop the stack:**
+```bash
+./scripts/retrieval-stack.sh down
+```
 ## Agent integrations
 
 | Agent | Guide |
