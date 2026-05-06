@@ -4,3 +4,4 @@ pub mod reranker;
 pub mod qdrant;
 pub mod client;
 pub mod drift;
+pub mod payload;

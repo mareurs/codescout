@@ -89,3 +89,28 @@ fn diff_modified_chunk_yields_upsert_for_new_id() {
     assert_eq!(d.to_upsert, vec!["a-new".to_string()]);
     assert_eq!(d.to_delete, vec!["a-old".to_string()]);
 }
+
+use codescout::retrieval::payload::{CodePayload, payload_to_map, map_to_payload};
+
+#[test]
+fn payload_roundtrip_preserves_fields() {
+    let p = CodePayload {
+        project_id:          "code-explorer".into(),
+        file_path:           "src/lib.rs".into(),
+        language:            "rust".into(),
+        start_line:          10,
+        end_line:            42,
+        ast_kind:            "fn".into(),
+        ast_header:          "fn main()".into(),
+        content:             "fn main() {}".into(),
+        content_hash:        "h1".into(),
+        last_indexed_commit: "abc".into(),
+        chunk_id:            "id1".into(),
+    };
+    let map = payload_to_map(&p);
+    let back = map_to_payload(&map).expect("decode");
+    assert_eq!(back.project_id, p.project_id);
+    assert_eq!(back.start_line, p.start_line);
+    assert_eq!(back.content_hash, p.content_hash);
+    assert_eq!(back.file_path, p.file_path);
+}
