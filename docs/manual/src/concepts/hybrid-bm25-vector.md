@@ -1,5 +1,3 @@
-> ⚠ Experimental — may change without notice.
-
 # Hybrid BM25 + Vector Retrieval
 
 `semantic_search` now uses a hybrid retrieval pipeline combining dense vector search with sparse BM25 keyword search, fused via Reciprocal Rank Fusion (RRF).

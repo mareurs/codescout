@@ -1,7 +1,5 @@
 # `call_graph`
 
-> ⚠ Experimental — may change without notice.
-
 Transitive call graph for a symbol. Two directions:
 
 - `callers` (default): who calls this symbol, transitively. Use for blast-radius

@@ -1,5 +1,3 @@
-> ⚠ Experimental — may change without notice.
-
 # Auto-Reindex on Edit
 
 Semantic search results stay current as files are edited, without requiring an explicit `index(action='build')` call.

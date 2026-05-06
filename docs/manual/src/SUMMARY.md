@@ -30,6 +30,8 @@
   - [Asymmetric Query Prefix](concepts/asymmetric-query-prefix.md)
   - [Metadata-Enriched Chunks](concepts/metadata-enriched-chunks.md)
   - [Index Scope Guard](concepts/index-scope-guard.md)
+  - [Auto-Reindex on Edit](concepts/auto-reindex-on-edit.md)
+  - [Hybrid BM25 + Vector Retrieval](concepts/hybrid-bm25-vector.md)
 
 - [Library Navigation](concepts/library-navigation.md)
   - [Auto-Registration](concepts/multi-ecosystem-auto-registration.md)
@@ -78,6 +80,7 @@
   - [API Naming Reference](tools/api-redesign.md)
   - [Symbol Navigation](tools/symbol-navigation.md)
     - [Progressive Directory Overview](tools/list-symbols-progressive.md)
+    - [Call Graph](tools/call-graph.md)
   - [File Operations](tools/file-operations.md)
     - [grep: Literal Fallback](tools/search-pattern-literal-fallback.md)
   - [Editing](tools/editing.md)
