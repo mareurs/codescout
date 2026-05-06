@@ -41,3 +41,32 @@ async fn embedder_dim_mismatch_errors() {
     let err = eb.embed("hi").await.unwrap_err();
     assert!(err.to_string().contains("dim"), "got: {err}");
 }
+
+use codescout::retrieval::reranker::RerankerHttp;
+
+#[tokio::test]
+async fn reranker_returns_scores_in_input_order() {
+    let mut server = mockito::Server::new_async().await;
+    server.mock("POST", "/rerank")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"[{"index":1,"score":0.9},{"index":0,"score":0.1}]"#)
+        .create_async().await;
+
+    let rr = RerankerHttp::new(server.url());
+    let scores = rr.rerank("query", &["a".to_string(), "b".to_string()]).await.expect("rerank");
+    assert_eq!(scores.len(), 2);
+    assert!((scores[0] - 0.1_f32).abs() < 1e-6);
+    assert!((scores[1] - 0.9_f32).abs() < 1e-6);
+}
+
+#[tokio::test]
+async fn reranker_503_returns_error() {
+    let mut server = mockito::Server::new_async().await;
+    server.mock("POST", "/rerank")
+        .with_status(503)
+        .create_async().await;
+    let rr = RerankerHttp::new(server.url());
+    let err = rr.rerank("q", &["a".to_string()]).await.unwrap_err();
+    assert!(err.to_string().contains("rerank"), "got {err}");
+}
