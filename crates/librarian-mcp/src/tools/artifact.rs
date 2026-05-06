@@ -37,7 +37,7 @@ impl Tool for Artifact {
                 },
                 "kind": {
                     "type": "string",
-                    "description": "find: shortcut eq-filter on kind. create: artifact kind (spec/plan/adr/tracker/…)"
+                    "description": "find: shortcut eq-filter on kind. create: artifact kind (spec/plan/adr/tracker/...)"
                 },
                 "status": {
                     "type": "string",
@@ -83,7 +83,7 @@ impl Tool for Artifact {
                 "end_line": { "type": "integer", "description": "get: 1-indexed inclusive end of line slice" },
                 "new_rel_path": { "type": "string", "description": "move: destination path relative to repo root (e.g. 'docs/archive/foo.md'). Parent directories are created automatically. Fails if destination already exists." },
                 "rel_path": { "type": "string", "description": "create: relative path for new file. In find results: path relative to repo root — does NOT include the repo name (use the `repo` field for that). When filtering by path use contains/prefix on the path portion only, e.g. {\"contains\": {\"field\": \"rel_path\", \"value\": \"docs/trackers\"}}." },
-                "repo": { "type": "string", "description": "create: workspace root name" },
+                "repo": { "type": "string", "description": "create: workspace root name (git repo basename). Omit to infer from active project — rel_path is then treated as project-relative and the subdir prefix is prepended automatically." },
                 "title": { "type": "string", "description": "create: artifact title" },
                 "body": { "type": "string", "description": "create: markdown body" },
                 "owners": {
@@ -127,7 +127,7 @@ impl Tool for Artifact {
                 "activeForm": { "type": "string", "description": "update: present-continuous label shown in spinner" },
                 "src_id": { "type": "string", "description": "link: source artifact id" },
                 "dst_id": { "type": "string", "description": "link: destination artifact id" },
-                "rel": { "type": "string", "description": "link: relation type (supersedes, implements, …)" },
+                "rel": { "type": "string", "description": "link: relation type (supersedes, implements, ...)" },
                 "depth": {
                     "type": "integer",
                     "minimum": 1,

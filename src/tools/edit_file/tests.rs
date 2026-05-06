@@ -574,6 +574,117 @@ async fn read_file_full_buffer_auto_chunks() {
     );
 }
 
+// ── ReadFile: source-range hint gate ─────────────────────────────────────
+
+#[tokio::test]
+async fn read_file_source_range_blocked_when_symbol_overlaps() {
+    let ctx = test_ctx().await;
+    let dir = tempdir().unwrap();
+    // .rs extension → detected as Source
+    let file = dir.path().join("fixture.rs");
+    std::fs::write(
+        &file,
+        "use std::io;\n\npub fn greet(name: &str) -> String {\n    format!(\"Hello, {}!\", name)\n}\n",
+    )
+    .unwrap();
+    let path = file.to_str().unwrap();
+
+    // Lines 3–5 span the body of `fn greet` exactly.
+    let result = ReadFile
+        .call(
+            json!({ "path": path, "start_line": 3, "end_line": 5 }),
+            &ctx,
+        )
+        .await;
+
+    assert!(
+        result.is_err(),
+        "range overlapping a symbol body must be blocked"
+    );
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("greet"),
+        "error must name the overlapping symbol, got: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn read_file_source_range_force_bypasses_gate() {
+    let ctx = test_ctx().await;
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("fixture.rs");
+    std::fs::write(
+        &file,
+        "use std::io;\n\npub fn greet(name: &str) -> String {\n    format!(\"Hello, {}!\", name)\n}\n",
+    )
+    .unwrap();
+    let path = file.to_str().unwrap();
+
+    // Same range as above, but force=true skips the gate.
+    let result = ReadFile
+        .call(
+            json!({ "path": path, "start_line": 3, "end_line": 5, "force": true }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        result["content"].as_str().unwrap().contains("greet"),
+        "force=true must return the raw content"
+    );
+}
+
+#[tokio::test]
+async fn read_file_source_range_not_blocked_for_imports() {
+    let ctx = test_ctx().await;
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("fixture.rs");
+    std::fs::write(
+        &file,
+        "use std::io;\n\npub fn greet(name: &str) -> String {\n    format!(\"Hello, {}!\", name)\n}\n",
+    )
+    .unwrap();
+    let path = file.to_str().unwrap();
+
+    // Line 1 only (`use std::io;`) — no named symbol body spans it.
+    let result = ReadFile
+        .call(
+            json!({ "path": path, "start_line": 1, "end_line": 1 }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        result["content"].as_str().unwrap().contains("use std::io"),
+        "import-only range must pass through"
+    );
+}
+
+#[tokio::test]
+async fn read_file_source_range_non_source_not_blocked() {
+    let ctx = test_ctx().await;
+    let dir = tempdir().unwrap();
+    // .toml extension → not a Source file
+    let file = dir.path().join("config.toml");
+    std::fs::write(&file, "[package]\nname = \"foo\"\nversion = \"0.1.0\"\n").unwrap();
+    let path = file.to_str().unwrap();
+
+    let result = ReadFile
+        .call(
+            json!({ "path": path, "start_line": 1, "end_line": 2 }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        result["content"].as_str().unwrap().contains("package"),
+        "non-source file line range must pass through"
+    );
+}
+
 // ── Tree (list_dir mode) ─────────────────────────────────────────────────
 
 #[tokio::test]

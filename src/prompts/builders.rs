@@ -326,7 +326,9 @@ pub(crate) fn build_system_prompt_draft(
                 "3. `memory(project_id=\"{}\", action=\"read\", topic=\"architecture\")` — project-specific knowledge\n",
                 p.id
             ));
-            draft.push_str("3b. `symbol_at(path, line)` — hover + type sig when you have an exact location\n");
+            draft.push_str(
+                "3b. `symbol_at(path, line)` — hover + type sig when you have an exact location\n",
+            );
             draft.push_str("3c. `references(symbol, path)` — all call sites before any edit\n");
             draft.push_str(
                 "4. `call_graph(symbol=\"Name\", path=\"...\", direction=\"callers\")` — blast radius before any structural change; `direction=\"callees\"` for flow tracing\n\n",

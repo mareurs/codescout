@@ -133,6 +133,16 @@ impl Tool for ActivateProject {
                     HintScenario::SwitchAway
                 };
                 let project_root = ctx.agent.require_project_root().await?;
+                let prewarm_langs = ctx
+                    .agent
+                    .with_project(|p| Ok(p.config.project.languages.clone()))
+                    .await
+                    .unwrap_or_default();
+                crate::lsp::prewarm_lsp_background(
+                    ctx.lsp.clone(),
+                    project_root.clone(),
+                    &prewarm_langs,
+                );
                 let auto_registered =
                     crate::library::auto_register::auto_register_deps(&project_root, ctx).await;
                 return build_activation_response(ctx, scenario, &auto_registered).await;
@@ -152,6 +162,13 @@ impl Tool for ActivateProject {
         let had_home = ctx.agent.home_root().await.is_some();
 
         ctx.agent.activate(root.clone(), read_only).await?;
+
+        let prewarm_langs = ctx
+            .agent
+            .with_project(|p| Ok(p.config.project.languages.clone()))
+            .await
+            .unwrap_or_default();
+        crate::lsp::prewarm_lsp_background(ctx.lsp.clone(), root.clone(), &prewarm_langs);
 
         let scenario = if !had_home {
             HintScenario::FirstActivation

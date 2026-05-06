@@ -133,6 +133,16 @@ impl CodeScoutServer {
         let resources = Arc::new(tokio::sync::RwLock::new(Arc::new(
             build_resource_registry(&agent, Arc::clone(&lsp), &tools).await,
         )));
+
+        // Pre-warm JVM LSP servers if the startup project contains java/kotlin.
+        if let Some(root) = agent.project_root().await {
+            let prewarm_langs = agent
+                .with_project(|p| Ok(p.config.project.languages.clone()))
+                .await
+                .unwrap_or_default();
+            crate::lsp::prewarm_lsp_background(Arc::clone(&lsp), root, &prewarm_langs);
+        }
+
         Self {
             agent,
             lsp,
