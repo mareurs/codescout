@@ -75,17 +75,22 @@ impl EmbedderHttp {
         let mut out = Vec::with_capacity(texts.len());
         for chunk in texts.chunks(BATCH) {
             let inputs: Vec<&str> = chunk.iter().map(String::as_str).collect();
-            let body = EmbedReq { inputs };
+            let body = serde_json::json!({ "inputs": inputs });
 
-            let dense_batch: Vec<Vec<f32>> = self.client
+            let dense_fut = self.client
                 .post(&dense_url).json(&body)
-                .send().await.context("embed_batch dense")?
+                .send();
+            let sparse_fut = self.client
+                .post(&sparse_url).json(&body)
+                .send();
+
+            let (dense_resp, sparse_resp) = tokio::try_join!(dense_fut, sparse_fut)
+                .context("embed_batch send")?;
+
+            let dense_batch: Vec<Vec<f32>> = dense_resp
                 .error_for_status().context("embed_batch dense status")?
                 .json().await.context("embed_batch dense json")?;
-
-            let sparse_batch: Vec<Vec<SparseEntry>> = self.client
-                .post(&sparse_url).json(&body)
-                .send().await.context("embed_batch sparse")?
+            let sparse_batch: Vec<Vec<SparseEntry>> = sparse_resp
                 .error_for_status().context("embed_batch sparse status")?
                 .json().await.context("embed_batch sparse json")?;
 
