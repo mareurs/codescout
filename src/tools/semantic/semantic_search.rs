@@ -109,6 +109,48 @@ impl Tool for SemanticSearch {
             .map(|s| s.to_string());
         let guard = OutputGuard::from_input(&input);
 
+        // Stack backend routing
+        let backend = std::env::var("CODESCOUT_RETRIEVAL_BACKEND")
+            .unwrap_or_else(|_| "legacy".into());
+        if backend == "stack" {
+            let project_id = {
+                let inner = ctx.agent.inner.read().await;
+                let p = inner.active_project().ok_or_else(|| {
+                    crate::tools::RecoverableError::with_hint(
+                        "No active project. Use workspace(action='activate') first.",
+                        "Call workspace(action='activate', path=\"/path/to/project\") to set the active project.",
+                    )
+                })?;
+                p.config.project.name.clone()
+            };
+            let client = crate::retrieval::client::RetrievalClient::from_env().await
+                .map_err(|e| crate::tools::RecoverableError::with_hint(
+                    format!("retrieval stack offline: {e}"),
+                    "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack.",
+                ))?;
+            let opts = crate::retrieval::search::SearchOpts {
+                limit,
+                overfetch: limit * 2,
+                rerank: true,
+            };
+            let hits = client.search_code(&project_id, query, opts).await
+                .map_err(|e| crate::tools::RecoverableError::with_hint(
+                    format!("stack search failed: {e}"),
+                    "Check the retrieval stack is running: `./scripts/retrieval-stack.sh ps`",
+                ))?;
+            let result_items: Vec<serde_json::Value> = hits.iter().map(|h| {
+                format_search_result_item(
+                    &h.file_path,
+                    h.start_line as usize,
+                    h.end_line as usize,
+                    "stack",
+                    h.content.clone(),
+                )
+            }).collect();
+            let total = result_items.len();
+            return Ok(serde_json::json!({ "results": result_items, "total": total }));
+        }
+
         let (root, model, library_registry) = {
             let inner = ctx.agent.inner.read().await;
             let p = inner.active_project().ok_or_else(|| {
