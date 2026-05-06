@@ -34,3 +34,16 @@ fn config_from_env_reads_overrides() {
         std::env::remove_var(k);
     }
 }
+
+#[test]
+fn client_from_env_constructs_when_urls_present() {
+    std::env::set_var("CODESCOUT_QDRANT_URL", "http://127.0.0.1:6333");
+    std::env::set_var("CODESCOUT_EMBEDDER_URL", "http://127.0.0.1:8080");
+    std::env::set_var("CODESCOUT_RERANKER_URL", "http://127.0.0.1:8081");
+    let cfg = codescout::retrieval::config::RetrievalConfig::from_env().unwrap();
+    let _ = codescout::retrieval::client::RetrievalClient::from_config_only(cfg);
+    // doesn't connect — just constructs
+    for k in ["CODESCOUT_QDRANT_URL","CODESCOUT_EMBEDDER_URL","CODESCOUT_RERANKER_URL"] {
+        std::env::remove_var(k);
+    }
+}
