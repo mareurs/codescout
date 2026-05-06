@@ -14,7 +14,8 @@ pub struct EmbedOutput {
 }
 
 pub struct EmbedderHttp {
-    base: String,
+    dense_base: String,
+    sparse_base: String,
     expected_dim: usize,
     client: reqwest::Client,
 }
@@ -26,13 +27,22 @@ struct EmbedReq<'a> { inputs: Vec<&'a str> }
 struct SparseEntry { index: u32, value: f32 }
 
 impl EmbedderHttp {
-    pub fn new(base: impl Into<String>, expected_dim: usize) -> Self {
-        Self { base: base.into(), expected_dim, client: reqwest::Client::new() }
+    pub fn new(
+        dense_base: impl Into<String>,
+        sparse_base: impl Into<String>,
+        expected_dim: usize,
+    ) -> Self {
+        Self {
+            dense_base: dense_base.into(),
+            sparse_base: sparse_base.into(),
+            expected_dim,
+            client: reqwest::Client::new(),
+        }
     }
 
     pub async fn embed(&self, text: &str) -> Result<EmbedOutput> {
-        let dense_url  = format!("{}/embed", self.base);
-        let sparse_url = format!("{}/embed_sparse", self.base);
+        let dense_url  = format!("{}/embed", self.dense_base);
+        let sparse_url = format!("{}/embed_sparse", self.sparse_base);
         let body = EmbedReq { inputs: vec![text] };
 
         let dense: Vec<Vec<f32>> = self.client.post(&dense_url).json(&body)
@@ -59,9 +69,39 @@ impl EmbedderHttp {
     }
 
     pub async fn embed_batch(&self, texts: &[String]) -> Result<Vec<EmbedOutput>> {
+        const BATCH: usize = 32;
+        let dense_url  = format!("{}/embed", self.dense_base);
+        let sparse_url = format!("{}/embed_sparse", self.sparse_base);
         let mut out = Vec::with_capacity(texts.len());
-        for t in texts {
-            out.push(self.embed(t).await?);
+        for chunk in texts.chunks(BATCH) {
+            let inputs: Vec<&str> = chunk.iter().map(String::as_str).collect();
+            let body = EmbedReq { inputs };
+
+            let dense_batch: Vec<Vec<f32>> = self.client
+                .post(&dense_url).json(&body)
+                .send().await.context("embed_batch dense")?
+                .error_for_status().context("embed_batch dense status")?
+                .json().await.context("embed_batch dense json")?;
+
+            let sparse_batch: Vec<Vec<SparseEntry>> = self.client
+                .post(&sparse_url).json(&body)
+                .send().await.context("embed_batch sparse")?
+                .error_for_status().context("embed_batch sparse status")?
+                .json().await.context("embed_batch sparse json")?;
+
+            for (dense, sparse_vec) in dense_batch.into_iter().zip(sparse_batch) {
+                if dense.len() != self.expected_dim {
+                    return Err(anyhow!(
+                        "embed dim mismatch: got {}, expected {}",
+                        dense.len(), self.expected_dim
+                    ));
+                }
+                let (indices, values): (Vec<u32>, Vec<f32>) = sparse_vec
+                    .into_iter()
+                    .map(|e| (e.index, e.value))
+                    .unzip();
+                out.push(EmbedOutput { dense, sparse: SparseVector { indices, values } });
+            }
         }
         Ok(out)
     }
