@@ -2,7 +2,7 @@ name: codescout-retrieval
 
 services:
   qdrant:
-    image: qdrant/qdrant:v1.13.0
+    image: qdrant/qdrant:v1.17.0
     container_name: codescout-qdrant
     restart: unless-stopped
     ports:

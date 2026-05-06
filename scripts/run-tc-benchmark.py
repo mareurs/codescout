@@ -222,7 +222,10 @@ class McpClient:
             raw = self._proc.stdout.readline()
             if not raw:
                 raise RuntimeError("MCP server closed stdout unexpectedly")
-            msg = json.loads(raw)
+            try:
+                msg = json.loads(raw)
+            except json.JSONDecodeError:
+                continue  # skip non-JSON lines (e.g. qdrant version warnings on stdout)
             if msg.get("id") == req_id:
                 return msg
 
@@ -269,6 +272,36 @@ class McpClient:
             data = json.loads(text)
         except json.JSONDecodeError:
             return []
+        # Resolve output buffer reference — read_file paginates; loop until complete
+        if "output_id" in data:
+            ref_id = data["output_id"]
+            raw_parts: list[str] = []
+            start_line = 1
+            for _ in range(50):  # safety cap
+                buf_result = self.call_tool("read_file", {
+                    "path": ref_id,
+                    "start_line": start_line,
+                    "end_line": start_line + 99,
+                })
+                buf_content = buf_result.get("content", [])
+                if not buf_content:
+                    break
+                try:
+                    envelope = json.loads(buf_content[0].get("text", "{}"))
+                except json.JSONDecodeError:
+                    break
+                raw_parts.append(envelope.get("content", ""))
+                shown = envelope.get("shown_lines")
+                if envelope.get("complete", True):
+                    break
+                if isinstance(shown, list) and len(shown) == 2:
+                    start_line = shown[1] + 1
+                else:
+                    break
+            try:
+                data = json.loads("".join(raw_parts))
+            except json.JSONDecodeError:
+                return []
         items = data.get("results", data) if isinstance(data, dict) else data
         if isinstance(items, list):
             return [
@@ -303,7 +336,7 @@ def main() -> None:
 
     env = os.environ.copy()
     proc = subprocess.Popen(
-        [args.binary],
+        [args.binary, "start"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
