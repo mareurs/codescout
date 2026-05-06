@@ -579,7 +579,7 @@ fn tool_skips_server_timeout(name: &str) -> bool {
 /// 1. `LIBRARIAN_ENABLED=0|false|off` env var disables (overrides everything).
 /// 2. `LIBRARIAN_ENABLED=1|true|on` env var enables (overrides config).
 /// 3. `[librarian] enabled = true|false` in `<project>/.codescout/project.toml`.
-/// 4. Default: disabled (experimental — set `LIBRARIAN_ENABLED=1` to opt in).
+/// 4. Default: enabled (set `LIBRARIAN_ENABLED=0` or `[librarian] enabled = false` to opt out).
 #[cfg(feature = "librarian")]
 fn librarian_enabled_at_runtime(project_path: Option<&str>) -> bool {
     if let Ok(v) = std::env::var("LIBRARIAN_ENABLED") {
@@ -607,7 +607,7 @@ fn librarian_enabled_at_runtime(project_path: Option<&str>) -> bool {
             }
         }
     }
-    false
+    true
 }
 
 impl ServerHandler for CodeScoutServer {
