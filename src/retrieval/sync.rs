@@ -1,0 +1,155 @@
+use anyhow::Result;
+use sha2::{Digest, Sha256};
+use std::path::Path;
+
+#[derive(Debug, Clone, Default)]
+pub struct SyncOpts {
+    pub languages: Option<Vec<String>>,
+    pub force_reindex: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct SyncReport {
+    pub added: usize,
+    pub updated: usize,
+    pub deleted: usize,
+    pub elapsed_ms: u128,
+}
+
+impl std::fmt::Display for SyncReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "added={} updated={} deleted={} elapsed_ms={}",
+            self.added, self.updated, self.deleted, self.elapsed_ms
+        )
+    }
+}
+
+pub fn content_hash(text: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(text.as_bytes());
+    format!("{:x}", h.finalize())
+}
+
+impl crate::retrieval::client::RetrievalClient {
+    pub async fn sync_project(
+        &self,
+        project_id: &str,
+        root: &Path,
+        _opts: SyncOpts,
+    ) -> Result<SyncReport> {
+        use crate::embed::ast_chunker::{split_file, AST_CHUNK_TARGET};
+        use crate::retrieval::drift::{diff_chunks, ChunkRef};
+        use crate::retrieval::payload::{payload_to_map, CodePayload};
+
+        let started = std::time::Instant::now();
+        self.qdrant
+            .ensure_collection("code_chunks", self.config.model_dim as u64)
+            .await?;
+
+        // 1. Walk files and chunk them
+        let mut local: Vec<(CodePayload, String)> = Vec::new();
+        for entry in walkdir::WalkDir::new(root)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let path = entry.path();
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            let lang = match ext {
+                "rs" => "rust",
+                "py" => "python",
+                "ts" | "tsx" => "typescript",
+                "js" | "jsx" => "javascript",
+                "go" => "go",
+                "java" => "java",
+                "kt" => "kotlin",
+                _ => continue,
+            };
+            let source = match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let rel_path = path.strip_prefix(root).unwrap_or(path);
+            let chunks = split_file(&source, lang, path, AST_CHUNK_TARGET);
+            for c in chunks {
+                let hash = content_hash(&c.content);
+                let chunk_id = format!("{project_id}:{}:{hash}", rel_path.display());
+                let p = CodePayload {
+                    project_id: project_id.into(),
+                    file_path: rel_path.display().to_string(),
+                    language: lang.into(),
+                    start_line: c.start_line as i64,
+                    end_line: c.end_line as i64,
+                    ast_kind: String::new(),
+                    ast_header: String::new(),
+                    content: c.content.clone(),
+                    content_hash: hash,
+                    last_indexed_commit: String::new(),
+                    chunk_id,
+                };
+                local.push((p, c.content));
+            }
+        }
+
+        // 2. Fetch existing chunk refs from Qdrant for this project
+        let server: Vec<ChunkRef> = self
+            .qdrant
+            .scroll_chunk_refs("code_chunks", project_id)
+            .await
+            .unwrap_or_default();
+        let local_refs: Vec<ChunkRef> = local
+            .iter()
+            .map(|(p, _)| ChunkRef {
+                chunk_id: p.chunk_id.clone(),
+                content_hash: p.content_hash.clone(),
+            })
+            .collect();
+        let action = diff_chunks(&server, &local_refs);
+
+        // 3. Embed + upsert new/changed chunks
+        let upsert_set: std::collections::HashSet<&str> =
+            action.to_upsert.iter().map(String::as_str).collect();
+        let to_upsert: Vec<&(CodePayload, String)> = local
+            .iter()
+            .filter(|(p, _)| upsert_set.contains(p.chunk_id.as_str()))
+            .collect();
+        let texts: Vec<String> = to_upsert.iter().map(|(_, c)| c.clone()).collect();
+        let embeds = if !texts.is_empty() {
+            self.embedder.embed_batch(&texts).await?
+        } else {
+            vec![]
+        };
+        let added = to_upsert.len();
+        if !to_upsert.is_empty() {
+            let points: Vec<(
+                String,
+                std::collections::HashMap<String, qdrant_client::qdrant::Value>,
+                crate::retrieval::embedder::EmbedOutput,
+            )> = to_upsert
+                .iter()
+                .zip(embeds.into_iter())
+                .map(|((p, _), e)| (p.chunk_id.clone(), payload_to_map(p), e))
+                .collect();
+            self.qdrant.upsert_points("code_chunks", &points).await?;
+        }
+
+        // 4. Delete obsolete chunks
+        let deleted = action.to_delete.len();
+        if !action.to_delete.is_empty() {
+            self.qdrant
+                .delete_points("code_chunks", &action.to_delete)
+                .await?;
+        }
+
+        Ok(SyncReport {
+            added,
+            deleted,
+            updated: 0,
+            elapsed_ms: started.elapsed().as_millis(),
+        })
+    }
+}

@@ -154,6 +154,8 @@ e2e-python = []     # needs: pyright-langserver
 e2e-typescript = [] # needs: typescript-language-server
 e2e-kotlin = []     # needs: kotlin-lsp
 e2e-java = []       # needs: jdtls
+# Retrieval stack E2E tests — require live Qdrant + TEI/Ollama (see docker-compose.yml)
+retrieval-e2e = []
 
 [profile.dev]
 opt-level = 0

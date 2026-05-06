@@ -5,3 +5,4 @@ pub mod qdrant;
 pub mod client;
 pub mod drift;
 pub mod payload;
+pub mod sync;

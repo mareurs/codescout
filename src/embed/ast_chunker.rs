@@ -825,7 +825,7 @@ fn sub_split_node(
 /// 3000 chars ≈ 1000 tokens — fits comfortably in any embedding model context,
 /// covers most single functions without splitting, and forces impl/class blocks
 /// to decompose into per-method chunks via recursive inner-node extraction.
-const AST_CHUNK_TARGET: usize = 3000;
+pub const AST_CHUNK_TARGET: usize = 3000;
 
 /// Split a source file into chunks, using language-aware strategies where possible.
 ///

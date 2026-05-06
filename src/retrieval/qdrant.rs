@@ -54,6 +54,36 @@ impl QdrantWrap {
 
         Ok(())
     }
+
+    /// Scroll all chunk refs for a project. Implemented in Task 3.4.
+    pub async fn scroll_chunk_refs(
+        &self,
+        _collection: &str,
+        _project_id: &str,
+    ) -> Result<Vec<crate::retrieval::drift::ChunkRef>> {
+        // TODO(3.4): implement scroll with filter on project_id payload field
+        Ok(vec![])
+    }
+
+    /// Upsert points with dense+sparse vectors and payload. Implemented in Task 3.4.
+    pub async fn upsert_points(
+        &self,
+        _collection: &str,
+        _points: &[(
+            String,
+            std::collections::HashMap<String, qdrant_client::qdrant::Value>,
+            crate::retrieval::embedder::EmbedOutput,
+        )],
+    ) -> Result<()> {
+        // TODO(3.4): implement batch upsert
+        Ok(())
+    }
+
+    /// Delete points by chunk_id. Implemented in Task 3.4.
+    pub async fn delete_points(&self, _collection: &str, _ids: &[String]) -> Result<()> {
+        // TODO(3.4): implement delete by payload filter
+        Ok(())
+    }
 }
 
 #[cfg(test)]
