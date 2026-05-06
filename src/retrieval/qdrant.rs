@@ -13,6 +13,12 @@ use qdrant_client::Qdrant;
 pub struct QdrantWrap {
     pub client: Qdrant,
 }
+/// Qdrant point IDs must be u64 or UUID — hash the chunk_id string to u64.
+fn chunk_id_to_point_id(s: &str) -> u64 {
+    use sha2::Digest;
+    let hash = sha2::Sha256::digest(s.as_bytes());
+    u64::from_le_bytes(hash[..8].try_into().unwrap())
+}
 
 impl QdrantWrap {
     pub async fn connect(url: &str) -> Result<Self> {
@@ -115,7 +121,6 @@ impl QdrantWrap {
         Ok(refs)
     }
 
-    /// Upsert points with dense+sparse named vectors and payload.
     pub async fn upsert_points(
         &self,
         collection: &str,
@@ -143,7 +148,7 @@ impl QdrantWrap {
                     )
                     .into(),
                 );
-                PointStruct::new(chunk_id.as_str(), named, payload.clone())
+                PointStruct::new(chunk_id_to_point_id(chunk_id), named, payload.clone())
             })
             .collect();
 
@@ -221,14 +226,13 @@ impl QdrantWrap {
         Ok(hits)
     }
 
-    /// Delete points by chunk_id (string UUID).
     pub async fn delete_points(&self, collection: &str, ids: &[String]) -> Result<()> {
         if ids.is_empty() {
             return Ok(());
         }
 
         let point_ids: Vec<qdrant_client::qdrant::PointId> =
-            ids.iter().map(|id| id.as_str().into()).collect();
+            ids.iter().map(|id| chunk_id_to_point_id(id).into()).collect();
 
         self.client
             .delete_points(

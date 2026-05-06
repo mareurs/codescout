@@ -26,20 +26,51 @@ services:
     restart: unless-stopped
     command: ["--model-id", "BAAI/bge-m3", "--dtype", "float32"]
     ports:
-      - "127.0.0.1:8080:80"
+      - "127.0.0.1:8081:80"
+    volumes:
+      - model_cache:/data
+    networks: [retrieval_net]
+
+  embedder-sparse-cpu:
+    profiles: [cpu]
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    container_name: codescout-embedder-sparse-cpu
+    restart: unless-stopped
+    command: ["--model-id", "naver/splade-cocondenser-ensembledistil", "--pooling", "splade", "--dtype", "float32", "--auto-truncate"]
+    ports:
+      - "127.0.0.1:8084:80"
     volumes:
       - model_cache:/data
     networks: [retrieval_net]
 
   embedder-gpu:
     profiles: [gpu]
-    image: ghcr.io/huggingface/text-embeddings-inference:1.6
+    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8
     container_name: codescout-embedder-gpu
     restart: unless-stopped
-    command: ["--model-id", "Qwen/Qwen3-Embedding-8B", "--dtype", "float16"]
+    command: ["--model-id", "BAAI/bge-m3", "--dtype", "float16", "--auto-truncate"]
     ports:
-      - "127.0.0.1:8080:80"
+      - "127.0.0.1:8081:80"
     shm_size: 2g
+    volumes:
+      - model_cache:/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks: [retrieval_net]
+
+  embedder-sparse-gpu:
+    profiles: [gpu]
+    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8
+    container_name: codescout-embedder-sparse-gpu
+    restart: unless-stopped
+    command: ["--model-id", "naver/splade-cocondenser-ensembledistil", "--pooling", "splade", "--dtype", "float16", "--auto-truncate"]
+    ports:
+      - "127.0.0.1:8084:80"
     volumes:
       - model_cache:/data
     deploy:
@@ -56,21 +87,21 @@ services:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
     container_name: codescout-reranker-cpu
     restart: unless-stopped
-    command: ["--model-id", "Qwen/Qwen3-Reranker-0.6B", "--dtype", "float32"]
+    command: ["--model-id", "BAAI/bge-reranker-v2-m3", "--dtype", "float32"]
     ports:
-      - "127.0.0.1:8081:80"
+      - "127.0.0.1:8083:80"
     volumes:
       - model_cache:/data
     networks: [retrieval_net]
 
   reranker-gpu:
     profiles: [gpu]
-    image: ghcr.io/huggingface/text-embeddings-inference:1.6
+    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8
     container_name: codescout-reranker-gpu
     restart: unless-stopped
-    command: ["--model-id", "BAAI/bge-reranker-v2-m3", "--dtype", "float16"]
+    command: ["--model-id", "BAAI/bge-reranker-v2-m3", "--dtype", "float16", "--auto-truncate"]
     ports:
-      - "127.0.0.1:8081:80"
+      - "127.0.0.1:8083:80"
     volumes:
       - model_cache:/data
     deploy:
