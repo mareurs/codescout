@@ -77,6 +77,10 @@ rusqlite = { version = "0.39" }
 sqlite-vec = "0.1"
 tantivy = "0.22"
 
+# Retrieval stack client (Qdrant gRPC)
+qdrant-client = "1.13"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+
 # File system traversal (respects .gitignore)
 walkdir = "2"
 ignore = "0.4"
