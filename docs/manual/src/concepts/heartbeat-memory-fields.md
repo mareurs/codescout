@@ -1,7 +1,5 @@
 # Heartbeat memory fields
 
-> ⚠ Experimental — may change without notice.
-
 When codescout runs with `--debug`, the periodic heartbeat tracing event now
 includes per-instance memory snapshots taken from `/proc/self/status`:
 

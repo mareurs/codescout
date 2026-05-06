@@ -1,7 +1,5 @@
 # Librarian Tools Collapse (16 → 5)
 
-> ⚠ Experimental — may change without notice.
-
 The 16 individual librarian tools have been collapsed into 5 action-dispatched tools, reducing MCP surface area and improving discoverability.
 
 ## New tools

@@ -1,7 +1,5 @@
 # `artifact_refresh_stale`
 
-> ⚠ Experimental — may change without notice.
-
 Discovery tool: surfaces augmented artifacts whose last refresh is older than a
 threshold. Returns them oldest-first (never-refreshed first) so the agent knows
 what to call `artifact_refresh` on next.

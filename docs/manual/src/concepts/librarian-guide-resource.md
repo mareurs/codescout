@@ -1,7 +1,5 @@
 # `doc://librarian-guide` MCP Resource
 
-> ⚠ Experimental — may change without notice.
-
 A dense reference document for the librarian subsystem, surfaced as an MCP resource so agents can pull it on demand without consuming system-prompt tokens.
 
 ## Usage

@@ -1,7 +1,5 @@
 # `tracker_design`
 
-> ⚠ Experimental — may change without notice.
-
 Teaching tool that guides tracker creation. Call it **before** `tracker_create`
 whenever the user asks to create a tracker.
 

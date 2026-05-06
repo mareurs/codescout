@@ -1,7 +1,5 @@
 # `artifact(action="move")` — Atomic File Rename
 
-> ⚠ Experimental — may change without notice.
-
 Atomically renames a librarian-managed artifact file and updates the catalog's `rel_path` in a single operation. Replaces the previous `git mv` + `artifact(update, patch={rel_path:...})` + `librarian(action="reindex")` three-step sequence.
 
 ## Usage

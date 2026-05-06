@@ -1,7 +1,5 @@
 # Librarian (embedded in codescout)
 
-> ⚠ Experimental — may change without notice.
-
 `librarian-mcp` is no longer a standalone MCP server. It is embedded inside
 the codescout binary as an opt-in subsystem behind the `librarian` cargo
 feature, which is on by default in dev builds and off in `--no-default-features`
@@ -32,19 +30,19 @@ cargo build --release --no-default-features \
 
 ## Runtime override
 
-Even with the feature compiled in, librarian registration is **disabled by
-default**. Opt in per session via env var, or per project via `project.toml`.
+Even with the feature compiled in, librarian registration is **enabled by
+default**. Opt out per session via env var, or per project via `project.toml`.
 
 | Knob | Value | Effect |
 |------|-------|--------|
-| `LIBRARIAN_ENABLED` env | `1` / `true` / `on` / `yes` | Enable for this codescout process |
-| `LIBRARIAN_ENABLED` env | `0` / `false` / `off` / `no` | Force disable (overrides project.toml) |
-| `[librarian] enabled = true` in `<project>/.codescout/project.toml` | bool | Per-project enable when env unset |
-| (default) | — | **Disabled** (experimental) |
+| `LIBRARIAN_ENABLED` env | `0` / `false` / `off` / `no` | Disable for this codescout process |
+| `LIBRARIAN_ENABLED` env | `1` / `true` / `on` / `yes` | Force enable (overrides project.toml) |
+| `[librarian] enabled = false` in `<project>/.codescout/project.toml` | bool | Per-project disable when env unset |
+| (default) | — | **Enabled** |
 
 The env var wins; project.toml is consulted only when the env var is unset.
 
-To enable globally, set `LIBRARIAN_ENABLED=1` in the codescout MCP server
+To opt out globally, set `LIBRARIAN_ENABLED=0` in the codescout MCP server
 launch env (e.g. the `env` block of `.mcp.json` or your shell rc).
 ## What you lose with `librarian` off
 
@@ -55,13 +53,13 @@ launch env (e.g. the `env` block of `.mcp.json` or your shell rc).
   workspace.toml are untouched — flipping the feature back on resumes where
   the previous session left off.
 
-## Why this is opt-in for production
+## Opting out in production
 
-Production users of codescout-as-MCP rarely have a workspace.toml or a
-configured catalog, and the library lookups + tool descriptions are token
-overhead they don't need. Keeping the cargo feature off by default in
-publish builds keeps the production binary lean.
-
+Production users of codescout-as-MCP without a workspace.toml or a
+configured catalog can opt out via `LIBRARIAN_ENABLED=0` to avoid the
+token overhead of the librarian tool descriptions. The cargo feature can
+also be compiled out entirely (`--no-default-features`) for a leaner
+production binary.
 ## Default scope: project (not workspace)
 
 All listing tools default to `scope="project"`, returning only artifacts

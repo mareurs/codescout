@@ -44,6 +44,14 @@
   - [Tool Usage Doctor](concepts/tool-usage-doctor.md)
 
 - [librarian-mcp](concepts/librarian-mcp.md)
+  - [Librarian Embedded](concepts/librarian-embedded.md)
+  - [Librarian Tools Collapse (16 → 5)](concepts/librarian-tools-collapse.md)
+  - [doc://librarian-guide Resource](concepts/librarian-guide-resource.md)
+  - [artifact_refresh (list_stale)](concepts/artifact-refresh-stale.md)
+  - [artifact (action="move")](concepts/artifact-move.md)
+  - [tracker_design](concepts/tracker-design.md)
+  - [workspace_state_at](concepts/workspace-state-at.md)
+  - [Augmentation: Templates & Schemas](concepts/augmentation-render-template.md)
 - [LSP Idle TTL](concepts/lsp-idle-ttl.md)
 
 - [Memory](concepts/memory.md)
@@ -112,4 +120,5 @@
   - [The Tool Trait](extending/tool-trait.md)
 
 - [Debug Mode](concepts/diagnostic-logging.md)
+  - [Heartbeat Memory Fields](concepts/heartbeat-memory-fields.md)
 - [Troubleshooting](troubleshooting.md)

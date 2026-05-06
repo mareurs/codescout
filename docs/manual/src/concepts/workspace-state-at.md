@@ -1,7 +1,5 @@
 # workspace_state_at — Time-Travel Workspace Snapshot
 
-> ⚠ Experimental — may change without notice.
-
 The `workspace_state_at` tool returns a snapshot of every artifact in scope
 as it stood at a given commit or timestamp, with a per-artifact comparison of
 `freshness_at_as_of` (freshness replayed up to the cutoff) vs `freshness_now`

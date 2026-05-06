@@ -1,7 +1,5 @@
 # Augmentation: `render_template` + `params_schema`
 
-> ⚠ Experimental — may change without notice.
-
 Two optional fields on augmented artifacts that decouple live state (params)
 from narrative (artifact body).
 
