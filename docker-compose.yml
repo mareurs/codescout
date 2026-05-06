@@ -1,8 +1,5 @@
 name: codescout-retrieval
 
-x-shared-volumes: &shared-volumes
-  - model_cache:/data
-
 services:
   qdrant:
     image: qdrant/qdrant:v1.13.0
@@ -25,7 +22,7 @@ services:
   embedder-cpu:
     profiles: [cpu]
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
-    container_name: codescout-embedder
+    container_name: codescout-embedder-cpu
     restart: unless-stopped
     command: ["--model-id", "BAAI/bge-m3", "--dtype", "float32"]
     ports:
@@ -37,7 +34,7 @@ services:
   embedder-gpu:
     profiles: [gpu]
     image: ghcr.io/huggingface/text-embeddings-inference:1.6
-    container_name: codescout-embedder
+    container_name: codescout-embedder-gpu
     restart: unless-stopped
     command: ["--model-id", "Qwen/Qwen3-Embedding-8B", "--dtype", "float16"]
     ports:
@@ -57,7 +54,7 @@ services:
   reranker-cpu:
     profiles: [cpu]
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
-    container_name: codescout-reranker
+    container_name: codescout-reranker-cpu
     restart: unless-stopped
     command: ["--model-id", "Qwen/Qwen3-Reranker-0.6B", "--dtype", "float32"]
     ports:
@@ -69,7 +66,7 @@ services:
   reranker-gpu:
     profiles: [gpu]
     image: ghcr.io/huggingface/text-embeddings-inference:1.6
-    container_name: codescout-reranker
+    container_name: codescout-reranker-gpu
     restart: unless-stopped
     command: ["--model-id", "BAAI/bge-reranker-v2-m3", "--dtype", "float16"]
     ports:
