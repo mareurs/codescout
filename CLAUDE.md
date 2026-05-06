@@ -87,6 +87,7 @@ these are the direct inputs to `src/prompts/server_instructions.md` edits.
 - **`master` is protected.** Only cherry-picked, thoroughly tested commits land here.
 - **All experimental work goes on the `experiments` branch** (or a dedicated feature branch). Iterate freely there.
 - **Cherry-pick to `master`** only after: all tests pass, clippy clean, manually verified via MCP (`cargo build --release` + `/mcp` restart).
+- **`experiments` is never deleted.** After any merge to `master`, `experiments` continues from the same commit — no recreation, no force-reset.
 - Never commit directly to `master` for in-progress or exploratory work.
 
 ### Release Cycle
