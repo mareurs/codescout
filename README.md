@@ -73,6 +73,7 @@ Wait ~2 min on first run for models to download. Subsequent starts are instant.
 ```bash
 ./scripts/retrieval-stack.sh down
 ```
+
 ## Agent integrations
 
 | Agent | Guide |
