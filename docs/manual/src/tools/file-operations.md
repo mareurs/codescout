@@ -68,6 +68,24 @@ When you supply both `start_line` and `end_line`, the tool returns exactly those
 - For large files, prefer reading in chunks with explicit `start_line`/`end_line` over reading the whole file.
 - If you want to search for a pattern rather than read, use `grep` instead.
 
+### Source-range gate
+
+When `start_line` / `end_line` is supplied on a **source file** (`.rs`, `.ts`, `.py`, and other languages codescout recognises), the tool checks whether the requested range overlaps a named symbol body. If it does, the request is blocked and the error names the overlapping symbol:
+
+```
+Error: range 45–72 overlaps symbol `MyStruct/validate` — use symbols(name='validate', include_body=true) instead
+```
+
+This steers you toward `symbols(include_body=true)`, which is robust to line-number shifts caused by later edits.
+
+**Bypass:** Add `"force": true` to skip the gate and return the raw content regardless:
+
+```json
+{ "path": "src/model.rs", "start_line": 45, "end_line": 72, "force": true }
+```
+
+**Scope:** Only recognised source files are gated. Config files, Markdown, TOML, JSON, and other non-code formats are never affected.
+
 ---
 
 ## `tree`

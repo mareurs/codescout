@@ -318,3 +318,31 @@ When topics appear in `stale`, review them and either rewrite the memory (`actio
 - Pass `threshold: 0.1` after re-indexing to surface files that changed semantically — a whitespace reformat scores near `0.0`, a full function rewrite approaches `1.0`.
 - If you need to change configuration, edit `.codescout/project.toml` directly — the config is re-read on each tool call, so changes take effect immediately without restarting the server.
 - For full per-tool call stats with charts and time-window filtering, see the [Dashboard](../concepts/dashboard.md).
+
+---
+
+## `approve_write`
+
+Grant write access to a directory **outside the project root** for this session.
+
+Write tools (`edit_file`, `edit_code`, `create_file`) reject paths outside the active project root by default. `approve_write` lifts that restriction for a specific directory.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `path` | string | yes | Directory to approve (absolute or project-relative) |
+
+**Example — allow writes to a sibling plugin directory:**
+
+```json
+{ "path": "/home/user/plugins/my-plugin" }
+```
+
+**Output:** `"ok"` on success; an error if the path is protected or too broad.
+
+**Session scope.** Approval lasts for the current activation — any `workspace(action="activate", ...)` call, including to the same project, clears all approvals.
+
+**Protected paths.** Sensitive locations such as `~/.ssh` and `~/.gnupg` are permanently blocked and cannot be approved regardless of the argument.
+
+**Overly broad paths are rejected.** Approving a root like `/home/user` or `/` is not allowed — the path must point to a specific subdirectory.

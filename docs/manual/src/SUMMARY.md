@@ -84,6 +84,7 @@
   - [File Operations](tools/file-operations.md)
     - [grep: Literal Fallback](tools/search-pattern-literal-fallback.md)
   - [Editing](tools/editing.md)
+    - [edit_code](tools/edit-code.md)
     - [Structural Edit Gate](tools/edit-file-structural-gate.md)
     - [Document Section Editing](tools/document-section-editing.md)
     - [Markdown Tools](tools/markdown-tools.md)

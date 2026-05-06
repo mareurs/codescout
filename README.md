@@ -6,7 +6,7 @@ Works with Claude Code, GitHub Copilot, Cursor, and any MCP-capable agent.
 
 ## What it does
 
-- **Symbol navigation** — `symbols`, `references`, `symbol_at`, `replace_symbol`, backed by LSP across 9 languages
+- **Symbol navigation** — `symbols`, `references`, `symbol_at`, `call_graph`, `edit_code`, backed by LSP across 9 languages
 - **Semantic search** — find code by concept using a bundled ONNX embedding model (22 MB, zero setup), not grep
 - **Library navigation** — explore dependency source code with scoped search, version tracking, and auto-discovery
 - **Multi-project workspaces** — register related projects in `workspace.toml` for cross-project navigation with per-project memory and indexing
