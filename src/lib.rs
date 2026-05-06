@@ -21,6 +21,7 @@ pub mod mcp_resources;
 pub mod memory;
 pub mod platform;
 pub mod prompts;
+pub mod retrieval;
 pub mod server;
 pub mod symbol;
 pub mod tools;
