@@ -48,13 +48,18 @@ impl crate::retrieval::client::RetrievalClient {
             .ensure_collection("code_chunks", self.config.model_dim as u64)
             .await?;
 
-        // 1. Walk files and chunk them
+        // 1. Walk files and chunk them — ignore crate respects .gitignore at all levels
         let mut local: Vec<(CodePayload, String)> = Vec::new();
-        for entry in walkdir::WalkDir::new(root)
-            .into_iter()
+        for entry in ignore::WalkBuilder::new(root)
+            .hidden(false) // index tracked dotfiles; gitignore handles exclusions
+            .build()
             .filter_map(|e| e.ok())
         {
-            if !entry.file_type().is_file() {
+            let ft = match entry.file_type() {
+                Some(ft) => ft,
+                None => continue,
+            };
+            if !ft.is_file() {
                 continue;
             }
             let path = entry.path();
