@@ -296,6 +296,6 @@ See [Editing](editing.md#create_file) for more usage guidance.
 **Tips:**
 - `old_string` must match exactly — including indentation and line endings.
 - Use for imports, constants, config values, and small literal changes.
-- For changes to a function or struct body, prefer `replace_symbol` — it's robust to line number shifts.
+- For changes to a function or struct body, prefer `edit_code(action="replace")` — it's robust to line number shifts.
 
 See [Editing](editing.md#edit_file) for full parameter details and more examples.

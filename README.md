@@ -29,7 +29,7 @@ cargo build
 ./target/debug/codescout start --project /path/to/code
 ```
 
-Add codescout as an MCP server in `~/.claude.json`:
+Add codescout as an MCP server in `~/.claude/settings.json`:
 
 ```json
 {
@@ -88,14 +88,13 @@ process per workspace.
 
 → [Kotlin LSP Multiplexer docs](docs/manual/src/concepts/kotlin-lsp-multiplexer.md)
 
-## Tools (22)
+## Tools (20)
 
-`Symbol navigation (9)` · `File operations (6)` · `Semantic search (3)` · `Memory (1)` · `Library navigation (1)` · `Workflow & Config (2)`
+`Symbol navigation (5)` · `File operations (7)` · `Shell (1)` · `Semantic search (2)` · `Memory (1)` · `Library navigation (1)` · `Workflow & Config (3)`
 
 Supported languages: Rust, Python, TypeScript/JavaScript, Go, Java, Kotlin, C/C++, C#, Ruby.
 
 → [Tool reference](docs/manual/src/tools/overview.md)
-
 ## Semantic Search & Embeddings
 
 codescout bundles **all-MiniLM-L6-v2** (quantized, 22 MB) as its default embedding model.

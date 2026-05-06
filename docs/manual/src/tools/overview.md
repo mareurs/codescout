@@ -1,6 +1,6 @@
 # Tools Overview
 
-codescout exposes 22 tools organized into seven categories. This page is a
+codescout exposes 20 tools organized into seven categories. This page is a
 quick map. Each category has a dedicated reference page linked from the headings
 below.
 
@@ -11,18 +11,15 @@ below.
 LSP-backed tools for locating and editing code by name rather than by line
 number. These tools require an LSP server to be running for the target language.
 
-The navigation tools (`symbols`, `symbols`, `references`) accept an optional **`scope`** parameter to search library code as well as project code — see [Library Navigation](#library-navigation) below.
+The navigation tools (`symbols`, `references`) accept an optional **`scope`** parameter to search library code as well as project code — see [Library Navigation](#library-navigation) below.
 
 | Tool | Description |
 |------|-------------|
-| `symbols` | Find symbols by name pattern across the project or within a file |
-| `symbols` | Symbol tree for a file, directory, or glob — classes, functions, structs |
+| `symbols` | Find symbols by name pattern across the project or within a file; also provides a symbol tree for a file, directory, or glob |
 | `symbol_at` | Inspect a symbol at a position via LSP — definition location and/or hover (type + docs); auto-discovers libraries |
 | `references` | All callers and usages of a given symbol |
-| `replace_symbol` | Replace the entire body of a named symbol with new source |
-| `remove_symbol` | Delete a named symbol entirely from the file |
-| `insert_code` | Insert code immediately before or after a named symbol |
-| `rename_symbol` | Rename a symbol across the entire codebase using LSP |
+| `call_graph` | Transitive call graph for a symbol — callers, callees, or both |
+| `edit_code` | Mutate a symbol: `action="replace"` rewrites a body, `action="insert"` injects adjacent code, `action="remove"` deletes a symbol, `action="rename"` renames across the codebase via LSP |
 
 ---
 
@@ -34,11 +31,12 @@ language support.
 | Tool | Description |
 |------|-------------|
 | `read_file` | Read lines from a file, with optional range and pagination |
-| `tree` | List files and directories, optionally recursive |
+| `read_markdown` | Read a Markdown file with heading-based navigation |
+| `tree` | List files and directories, optionally recursive; also finds files by glob pattern, respecting `.gitignore` |
 | `grep` | Search file contents with a regex pattern |
-| `tree` (with glob) | Find files by glob pattern, respecting `.gitignore` |
 | `create_file` | Create or overwrite a file with given content |
 | `edit_file` | Find-and-replace editing within a file |
+| `edit_markdown` | Edit a Markdown document by heading |
 
 ---
 
@@ -99,6 +97,7 @@ Project setup, shell execution, and server configuration.
 |------|-------------|
 | `onboarding` | Initial project discovery: detect languages, read key files, write startup memory |
 | `run_command` | Run a shell command in the project root and return stdout/stderr |
+| `approve_write` | Grant write access to a directory outside the project root for this session |
 | `workspace` | Switch the active project (`action: activate`), display project state (`action: status`), or list all projects (`action: list_projects`) |
 
 ---
@@ -115,9 +114,10 @@ for.
 | Jump to a symbol's definition | `symbol_at` with `fields: ["def"]` |
 | Get type info or docs for a symbol | `symbol_at` with `fields: ["hover"]` |
 | Find all callers of a function | `references` |
-| Rewrite a function body | `replace_symbol` |
-| Add a new function next to an existing one | `insert_code` |
-| Rename a function everywhere | `rename_symbol` |
+| Rewrite a function body | `edit_code(action="replace")` |
+| Add a new function next to an existing one | `edit_code(action="insert")` |
+| Delete a symbol entirely | `edit_code(action="remove")` |
+| Rename a function everywhere | `edit_code(action="rename")` |
 | Find code that does something (concept, not name) | `semantic_search` |
 | Find code by concept inside a library | `semantic_search` with `scope: "lib:<name>"` (after `index(action: build)` on the library) |
 | See what third-party libraries are registered | `library(action: list)` |
@@ -148,9 +148,9 @@ a target by name, optionally across the whole project. Start with
 
 ### Choosing Between LSP Editing and Direct Editing
 
-`replace_symbol`, `insert_code`, and `rename_symbol` operate on named symbols.
-They do not care about line numbers and are robust to changes above the target.
-Use them when you know the symbol name.
+`edit_code` operates on named symbols via its `action` parameter (`replace`, `insert`, `remove`, `rename`).
+It does not care about line numbers and is robust to changes above the target.
+Use it when you know the symbol name.
 
 `edit_file` operates on text via exact string matching. Use it for changes that are not naturally
 symbol-scoped: adding an import, changing a constant value, patching a
