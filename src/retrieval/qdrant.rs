@@ -1,5 +1,8 @@
 use anyhow::{Context, Result};
-use qdrant_client::qdrant::{Distance, Modifier};
+use qdrant_client::qdrant::{
+    Condition, DeletePointsBuilder, Distance, Filter, Modifier, PointStruct, PointsIdsList,
+    ScrollPointsBuilder, SparseVectorBuilder, UpsertPointsBuilder, Vector,
+};
 use qdrant_client::qdrant::{
     CreateCollectionBuilder, SparseVectorParamsBuilder, SparseVectorsConfigBuilder,
     VectorParamsBuilder, VectorsConfigBuilder,
@@ -55,33 +58,120 @@ impl QdrantWrap {
         Ok(())
     }
 
-    /// Scroll all chunk refs for a project. Implemented in Task 3.4.
+    /// Scroll all chunk refs for a project, paginating until exhausted.
     pub async fn scroll_chunk_refs(
         &self,
-        _collection: &str,
-        _project_id: &str,
+        collection: &str,
+        project_id: &str,
     ) -> Result<Vec<crate::retrieval::drift::ChunkRef>> {
-        // TODO(3.4): implement scroll with filter on project_id payload field
-        Ok(vec![])
+        let filter = Filter::must([Condition::matches("project_id", project_id.to_string())]);
+
+        let mut refs = Vec::new();
+        let mut offset: Option<qdrant_client::qdrant::PointId> = None;
+
+        loop {
+            let mut builder = ScrollPointsBuilder::new(collection)
+                .filter(filter.clone())
+                .with_payload(true)
+                .with_vectors(false)
+                .limit(1000u32);
+
+            if let Some(off) = offset.take() {
+                builder = builder.offset(off);
+            }
+
+            let resp = self
+                .client
+                .scroll(builder)
+                .await
+                .context("scroll_chunk_refs")?;
+
+            for pt in &resp.result {
+                let chunk_id = pt
+                    .get("chunk_id")
+                    .as_str()
+                    .map(|s| s.as_str().to_owned())
+                    .unwrap_or_default();
+                let content_hash = pt
+                    .get("content_hash")
+                    .as_str()
+                    .map(|s| s.as_str().to_owned())
+                    .unwrap_or_default();
+                if !chunk_id.is_empty() {
+                    refs.push(crate::retrieval::drift::ChunkRef {
+                        chunk_id,
+                        content_hash,
+                    });
+                }
+            }
+
+            match resp.next_page_offset {
+                None => break,
+                Some(next) => offset = Some(next),
+            }
+        }
+
+        Ok(refs)
     }
 
-    /// Upsert points with dense+sparse vectors and payload. Implemented in Task 3.4.
+    /// Upsert points with dense+sparse named vectors and payload.
     pub async fn upsert_points(
         &self,
-        _collection: &str,
-        _points: &[(
+        collection: &str,
+        points: &[(
             String,
             std::collections::HashMap<String, qdrant_client::qdrant::Value>,
             crate::retrieval::embedder::EmbedOutput,
         )],
     ) -> Result<()> {
-        // TODO(3.4): implement batch upsert
+        if points.is_empty() {
+            return Ok(());
+        }
+
+        let structs: Vec<PointStruct> = points
+            .iter()
+            .map(|(chunk_id, payload, embed)| {
+                let mut named: std::collections::HashMap<String, Vector> =
+                    std::collections::HashMap::new();
+                named.insert("dense".to_owned(), embed.dense.clone().into());
+                named.insert(
+                    "sparse".to_owned(),
+                    SparseVectorBuilder::new(
+                        embed.sparse.indices.clone(),
+                        embed.sparse.values.clone(),
+                    )
+                    .into(),
+                );
+                PointStruct::new(chunk_id.as_str(), named, payload.clone())
+            })
+            .collect();
+
+        self.client
+            .upsert_points(UpsertPointsBuilder::new(collection, structs).wait(true))
+            .await
+            .context("upsert_points")?;
+
         Ok(())
     }
 
-    /// Delete points by chunk_id. Implemented in Task 3.4.
-    pub async fn delete_points(&self, _collection: &str, _ids: &[String]) -> Result<()> {
-        // TODO(3.4): implement delete by payload filter
+    /// Delete points by chunk_id (string UUID).
+    pub async fn delete_points(&self, collection: &str, ids: &[String]) -> Result<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+
+        let point_ids: Vec<qdrant_client::qdrant::PointId> =
+            ids.iter().map(|id| id.as_str().into()).collect();
+
+        self.client
+            .delete_points(
+                DeletePointsBuilder::new(collection)
+                    .points(PointsIdsList { ids: point_ids })
+                    .wait(true),
+            )
+            .await
+            .context("delete_points")?;
+
         Ok(())
     }
 }
