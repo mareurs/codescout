@@ -6,3 +6,4 @@ pub mod client;
 pub mod drift;
 pub mod payload;
 pub mod sync;
+pub mod search;

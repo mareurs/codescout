@@ -45,3 +45,21 @@ async fn sync_detects_file_modification() {
     assert!(r2.added > 0, "modified file should trigger upsert");
     assert!(r2.deleted > 0, "old chunk should be deleted");
 }
+
+#[tokio::test]
+async fn search_finds_synced_symbol() {
+    let client = RetrievalClient::from_env().await.expect("client");
+    let project_id = "search-e2e-test";
+    let root = std::path::Path::new("tests/fixtures/rust-library");
+    let _ = client
+        .sync_project(project_id, root, SyncOpts::default())
+        .await
+        .expect("sync");
+
+    let opts = codescout::retrieval::search::SearchOpts::new(10);
+    let hits = client
+        .search_code(project_id, "fibonacci", opts)
+        .await
+        .expect("search");
+    assert!(!hits.is_empty(), "expected at least one hit for 'fibonacci'");
+}

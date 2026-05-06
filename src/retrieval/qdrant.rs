@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
 use qdrant_client::qdrant::{
-    Condition, DeletePointsBuilder, Distance, Filter, Modifier, PointStruct, PointsIdsList,
-    ScrollPointsBuilder, SparseVectorBuilder, UpsertPointsBuilder, Vector,
+    Condition, DeletePointsBuilder, Distance, Filter, Fusion, Modifier, PointStruct,
+    PointsIdsList, PrefetchQueryBuilder, Query, QueryPointsBuilder, ScrollPointsBuilder,
+    SparseVectorBuilder, UpsertPointsBuilder, Vector, VectorInput,
 };
 use qdrant_client::qdrant::{
     CreateCollectionBuilder, SparseVectorParamsBuilder, SparseVectorsConfigBuilder,
@@ -152,6 +153,72 @@ impl QdrantWrap {
             .context("upsert_points")?;
 
         Ok(())
+    }
+
+    /// Hybrid RRF query: two prefetch legs (dense cosine + sparse BM25), fused
+    /// with Reciprocal Rank Fusion. Returns decoded `Hit` values. Points whose
+    /// payload cannot be decoded are silently skipped.
+    pub async fn hybrid_query(
+        &self,
+        collection: &str,
+        project_id: &str,
+        dense: &[f32],
+        sparse: &crate::retrieval::embedder::SparseVector,
+        limit: usize,
+    ) -> Result<Vec<crate::retrieval::search::Hit>> {
+        let filter = Filter::must([Condition::matches(
+            "project_id",
+            project_id.to_string(),
+        )]);
+
+        // Prefetch leg 1 — dense cosine ANN
+        let dense_prefetch = PrefetchQueryBuilder::default()
+            .query(Query::new_nearest(VectorInput::new_dense(dense.to_vec())))
+            .using("dense")
+            .filter(filter.clone())
+            .limit(limit as u64)
+            .build();
+
+        // Prefetch leg 2 — sparse BM25 (IDF-weighted)
+        let sparse_prefetch = PrefetchQueryBuilder::default()
+            .query(Query::new_nearest(VectorInput::new_sparse(
+                sparse.indices.clone(),
+                sparse.values.clone(),
+            )))
+            .using("sparse")
+            .filter(filter.clone())
+            .limit(limit as u64)
+            .build();
+
+        let req = QueryPointsBuilder::new(collection)
+            .add_prefetch(dense_prefetch)
+            .add_prefetch(sparse_prefetch)
+            .query(Query::new_fusion(Fusion::Rrf))
+            .limit(limit as u64)
+            .with_payload(true)
+            .build();
+
+        let resp = self.client.query(req).await.context("hybrid_query")?;
+
+        let hits = resp
+            .result
+            .into_iter()
+            .filter_map(|pt| {
+                let score = pt.score;
+                let p = crate::retrieval::payload::map_to_payload(&pt.payload).ok()?;
+                Some(crate::retrieval::search::Hit {
+                    chunk_id: p.chunk_id,
+                    file_path: p.file_path,
+                    start_line: p.start_line,
+                    end_line: p.end_line,
+                    content: p.content,
+                    score,
+                    rerank_score: None,
+                })
+            })
+            .collect();
+
+        Ok(hits)
     }
 
     /// Delete points by chunk_id (string UUID).
