@@ -146,7 +146,6 @@ manifest:
   empty_stub_eligible: true
 ```
 
-<!-- TASK 3 will append workspace-scope sections below this line -->
 
 ## Workspace-Scope Memories
 
