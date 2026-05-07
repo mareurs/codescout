@@ -12,6 +12,7 @@ topic: tool usage patterns audit optimization prompt quality
 time_scope: null
 ---
 
+
 # Tool Usage Patterns
 
 Our internal instrumentation for codescout tool decisions — analogous to Langfuse but for
@@ -131,6 +132,13 @@ Started with `edit_code` correctly for service file structural changes (calls 39
 **Pattern:** model used the right tool first then regressed. `edit_file` feels natural when "adding a field to an options object".  
 **Prompt gap:** Anti-Patterns table should add: "Adding a callback/handler inside a function call → `edit_code`, not `edit_file`".
 
+## onboarding observations
+
+### T-009 — workspace onboarding HARD-GATE checked one topic per project
+**Tool:** mcp__codescout__memory (read)  
+**Verdict:** wrong-tool — gate logic was a single read per project; should have been a 6×N matrix.  
+**Prompt gap:** workspace_onboarding_prompt.md HARD-GATE language was "verify project-overview" rather than "verify all required topics". Fixed 2026-05-07 with Phase 4 read-back loop.
+
 ## Prompt improvement candidates
 
 ### Iron Law #7 — Scope distinction for grep vs semantic_search
@@ -165,3 +173,4 @@ for scoped-directory multi-symbol discovery. Framing: internal Langfuse for tool
 ### 2026-05-03 — Initial population (as grep-usage-patterns)
 First 3 observations from session 64618681 (Kotlin backend). G-001 verdict corrected
 from debatable to legitimate after live proof.
+

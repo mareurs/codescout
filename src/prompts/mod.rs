@@ -725,4 +725,16 @@ mod tests {
             "Phase 0 must carry a STABLE-HEADING comment to prevent cross-prompt drift"
         );
     }
+    #[test]
+    fn workspace_phase_0_reference_resolves() {
+        let single = load_prompt("onboarding_prompt.md");
+        let workspace = load_prompt("workspace_onboarding_prompt.md");
+        let referenced = "## Phase 0: Embedding Model Selection";
+        if workspace.contains(referenced) {
+            assert!(
+                single.contains(referenced),
+                "workspace prompt references heading missing from single-project prompt"
+            );
+        }
+    }
 }

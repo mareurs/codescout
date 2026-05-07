@@ -472,7 +472,7 @@ async fn onboarding_returns_instruction_prompt() {
     let result = Onboarding.call(json!({}), &ctx).await.unwrap();
     let prompt = result["subagent_prompt"].as_str().unwrap();
     assert!(prompt.contains("## Rules"));
-    assert!(prompt.contains("## Memories to Create"));
+    assert!(prompt.contains("### project-scope: project-overview"));
     assert!(prompt.contains("rust")); // detected language
 }
 
@@ -2363,7 +2363,7 @@ fn system_prompt_points_to_tool_guide_resource() {
         prompt.contains("doc://codescout-tool-guide"),
         "system prompt must point agents to the tool-guide resource"
     );
-    assert_eq!(ONBOARDING_VERSION, 23);
+    assert_eq!(ONBOARDING_VERSION, 24);
 }
 
 #[test]

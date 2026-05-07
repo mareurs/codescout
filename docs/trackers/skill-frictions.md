@@ -104,3 +104,15 @@ Running log of rough edges found while using project skills. Feed into refactor 
 **When:** User asked to create a tracker for grep usage patterns  
 **Got:** File created manually with `create_file` instead of `artifact(action="create", kind="tracker")`  
 **Prompt gap:** Neither `/claude-traces` nor `/analyze-usage` skill mentions that trackers should go through the librarian. A one-liner "create any tracker via `artifact(action=create, kind=tracker)` — call `librarian(tracker_design)` first" would prevent this.
+
+## `/onboarding`
+
+### F-001 — workspace onboarding silently over-reported per-project memory writes
+**When:** Multi-project workspace with `force=true`. HARD-GATE only verified `project-overview` per project, allowing subagents to pass with 2 of 6 memories.
+**Got:** Final summary claimed 6/6 coverage; in reality some projects had 2–3 memories.
+**Fix idea (FIXED 2026-05-07):** Phase 4 Coverage Verification reads back all 6 topics per project; subagent MANIFEST line is advisory only.
+
+### F-002 — onboarding root-layer content not captured
+**When:** Monorepo with real root-layer code (dev scripts, docker-compose, top-level scripts).
+**Got:** Workspace prompt explicitly forbade a root subagent and had no fallback to capture root content.
+**Fix idea (FIXED 2026-05-07):** workspace `architecture` template grew Top-Level Code Map + Generic Navigation subsections; the no-root-subagent rule now states the reason.
