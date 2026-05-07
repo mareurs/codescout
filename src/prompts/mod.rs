@@ -122,11 +122,21 @@ pub struct ProjectStatus {
     pub workspace: Option<Vec<WorkspaceProjectSummary>>,
 }
 
-/// Onboarding prompt template — instructs Claude what to explore and what memories to create.
-pub const ONBOARDING_PROMPT: &str = include_str!("onboarding_prompt.md");
+pub const INCLUDE_MARKER: &str = "{{include: memory-templates.md}}";
 
-/// Workspace-specific onboarding prompt — appended when multiple projects are discovered.
-pub const WORKSPACE_ONBOARDING_PROMPT: &str = include_str!("workspace_onboarding_prompt.md");
+const RAW_ONBOARDING_PROMPT: &str = include_str!("onboarding_prompt.md");
+const RAW_WORKSPACE_ONBOARDING_PROMPT: &str = include_str!("workspace_onboarding_prompt.md");
+const MEMORY_TEMPLATES: &str = include_str!("memory-templates.md");
+
+/// Load a prompt with `{{include: memory-templates.md}}` markers substituted.
+pub fn load_prompt(name: &str) -> String {
+    let raw = match name {
+        "onboarding_prompt.md" => RAW_ONBOARDING_PROMPT,
+        "workspace_onboarding_prompt.md" => RAW_WORKSPACE_ONBOARDING_PROMPT,
+        other => panic!("unknown prompt: {other}"),
+    };
+    raw.replace(INCLUDE_MARKER, MEMORY_TEMPLATES)
+}
 
 /// Context for building the onboarding prompt.
 pub struct OnboardingContext<'a> {
@@ -154,9 +164,9 @@ pub fn build_onboarding_prompt(ctx: &OnboardingContext) -> String {
     let workspace_mode = ctx.is_workspace && ctx.projects.len() > 1;
 
     let mut prompt = if workspace_mode {
-        WORKSPACE_ONBOARDING_PROMPT.to_string()
+        load_prompt("workspace_onboarding_prompt.md")
     } else {
-        ONBOARDING_PROMPT.to_string()
+        load_prompt("onboarding_prompt.md")
     };
 
     prompt.push_str("\n\n---\n\n");
@@ -294,31 +304,44 @@ mod tests {
 
     #[test]
     fn onboarding_prompt_contains_key_sections() {
-        assert!(ONBOARDING_PROMPT.contains("### Rules"));
-        assert!(ONBOARDING_PROMPT.contains("### Memories to Create"));
-        assert!(ONBOARDING_PROMPT.contains("project-overview"));
-        assert!(ONBOARDING_PROMPT.contains("architecture"));
-        assert!(ONBOARDING_PROMPT.contains("conventions"));
-        assert!(ONBOARDING_PROMPT.contains("development-commands"));
-        assert!(ONBOARDING_PROMPT.contains("domain-glossary"));
-        assert!(ONBOARDING_PROMPT.contains("gotchas"));
-        assert!(ONBOARDING_PROMPT.contains("## Gathered Project Data"));
+        assert!(load_prompt("onboarding_prompt.md").contains("### Rules"));
+        assert!(load_prompt("onboarding_prompt.md").contains("### Memories to Create"));
+        assert!(load_prompt("onboarding_prompt.md").contains("project-overview"));
+        assert!(load_prompt("onboarding_prompt.md").contains("architecture"));
+        assert!(load_prompt("onboarding_prompt.md").contains("conventions"));
+        assert!(load_prompt("onboarding_prompt.md").contains("development-commands"));
+        assert!(load_prompt("onboarding_prompt.md").contains("domain-glossary"));
+        assert!(load_prompt("onboarding_prompt.md").contains("gotchas"));
+        assert!(load_prompt("onboarding_prompt.md").contains("## Gathered Project Data"));
         // Verify enforcement sections exist
-        assert!(ONBOARDING_PROMPT.contains("## Phase 1: Semantic Index Check"));
-        assert!(ONBOARDING_PROMPT.contains("## THE IRON LAW"));
-        assert!(ONBOARDING_PROMPT.contains("<HARD-GATE>"));
-        assert!(ONBOARDING_PROMPT.contains("## Red Flags"));
-        assert!(ONBOARDING_PROMPT.contains("## Common Rationalizations"));
+        assert!(load_prompt("onboarding_prompt.md").contains("## Phase 1: Semantic Index Check"));
+        assert!(load_prompt("onboarding_prompt.md").contains("## THE IRON LAW"));
+        assert!(load_prompt("onboarding_prompt.md").contains("<HARD-GATE>"));
+        assert!(load_prompt("onboarding_prompt.md").contains("## Red Flags"));
+        assert!(load_prompt("onboarding_prompt.md").contains("## Common Rationalizations"));
     }
 
     #[test]
     fn workspace_onboarding_prompt_contains_key_sections() {
-        assert!(WORKSPACE_ONBOARDING_PROMPT.contains("Workspace Survey"));
-        assert!(WORKSPACE_ONBOARDING_PROMPT.contains("Workspace Deep Dives"));
-        assert!(WORKSPACE_ONBOARDING_PROMPT.contains("Phase 2"));
-        assert!(WORKSPACE_ONBOARDING_PROMPT.contains("Subagent"));
-        assert!(WORKSPACE_ONBOARDING_PROMPT.contains("HARD-GATE"));
-        assert!(WORKSPACE_ONBOARDING_PROMPT.contains("Re-Onboarding"));
+        assert!(load_prompt("workspace_onboarding_prompt.md").contains("Workspace Survey"));
+        assert!(load_prompt("workspace_onboarding_prompt.md").contains("Workspace Deep Dives"));
+        assert!(load_prompt("workspace_onboarding_prompt.md").contains("Phase 2"));
+        assert!(load_prompt("workspace_onboarding_prompt.md").contains("Subagent"));
+        assert!(load_prompt("workspace_onboarding_prompt.md").contains("HARD-GATE"));
+        assert!(load_prompt("workspace_onboarding_prompt.md").contains("Re-Onboarding"));
+    }
+    #[test]
+    fn load_prompt_substitutes_include_marker() {
+        let single = load_prompt("onboarding_prompt.md");
+        let workspace = load_prompt("workspace_onboarding_prompt.md");
+        assert!(
+            !single.contains("{{include: memory-templates.md}}"),
+            "include marker should be substituted in single-project prompt"
+        );
+        assert!(
+            !workspace.contains("{{include: memory-templates.md}}"),
+            "include marker should be substituted in workspace prompt"
+        );
     }
 
     #[test]
