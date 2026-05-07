@@ -129,6 +129,46 @@ pub(crate) fn rank_workspace_languages(
     ranked.into_iter().take(max).map(|(k, _)| k).collect()
 }
 
+const LEAD_IN: &str = "### Symbol Navigation Patterns\n\
+\n\
+- **Hierarchical nav** — impl/class methods, all languages:\n\
+  `symbols(name_path=\"MyStruct/my_method\", include_body=true)`\n\
+- **Kind filter + path scope:**\n\
+  `symbols(path=\"src/tools/\", kind=\"struct\")`\n\
+- **Find across project then read body:**\n\
+  `symbols(name=\"edit_code\")` → `symbols(name_path=\"ToolName/edit_code\", include_body=true)`\n\
+\n";
+
+const GENERIC: &str = "### Generic Patterns (any language)\n\
+\n\
+- `name_path` syntax: `Container/member` for methods on classes/structs/objects;\n\
+  bare name for top-level functions or types.\n\
+- `kind` filter values vary by language: `function`, `class`, `struct`, `interface`,\n\
+  `type`, `enum`, `module`, `constant`. Run `symbols(path)` once on a representative\n\
+  file to see what kinds your LSP emits.\n\
+- For impact analysis before any structural change:\n\
+  `call_graph(symbol, path, direction=\"callers\")` traces blast radius;\n\
+  `direction=\"callees\"` traces outbound flow.\n\
+- When the symbol's exact name is unknown, start with\n\
+  `semantic_search(\"what it does\")` then drill down with `symbols(name_path=...)`.\n";
+
+pub(crate) fn render_symbol_navigation_block(
+    project_languages: &[Vec<String>],
+) -> String {
+    let ranked = rank_workspace_languages(project_languages, 2);
+    let mut out = String::with_capacity(2048);
+    out.push_str(LEAD_IN);
+    for key in ranked {
+        if let Some(block) = nav_block(key) {
+            out.push_str(block.markdown);
+            out.push('\n');
+        }
+    }
+    out.push_str(GENERIC);
+    out
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,6 +306,58 @@ mod tests {
         ];
         let ranked = rank_workspace_languages(&lists, 2);
         assert_eq!(ranked, vec!["typescript"]);
+    }
+
+    #[test]
+    fn render_with_no_languages_emits_lead_in_and_generic() {
+        let lists: Vec<Vec<String>> = vec![];
+        let out = render_symbol_navigation_block(&lists);
+        assert!(out.contains("### Symbol Navigation Patterns"));
+        assert!(out.contains("### Generic Patterns (any language)"));
+        // No per-language sections
+        assert!(!out.contains("### Rust — Symbol Navigation"));
+        assert!(!out.contains("### Python — Symbol Navigation"));
+    }
+
+    #[test]
+    fn render_with_one_language_emits_one_block() {
+        let lists: Vec<Vec<String>> = vec![vec!["rust".into()]];
+        let out = render_symbol_navigation_block(&lists);
+        assert!(out.contains("### Rust — Symbol Navigation"));
+        assert!(!out.contains("### Python — Symbol Navigation"));
+        assert!(out.contains("### Generic Patterns (any language)"));
+    }
+
+    #[test]
+    fn render_with_many_languages_caps_at_two() {
+        let lists: Vec<Vec<String>> = vec![vec![
+            "rust".into(), "python".into(), "kotlin".into(),
+            "go".into(), "csharp".into(),
+        ]];
+        let out = render_symbol_navigation_block(&lists);
+        let n_blocks = ["### Rust — Symbol Navigation",
+                         "### Python — Symbol Navigation",
+                         "### Kotlin / Java — Symbol Navigation",
+                         "### Go — Symbol Navigation",
+                         "### C# — Symbol Navigation"]
+            .iter()
+            .filter(|h| out.contains(*h))
+            .count();
+        assert_eq!(n_blocks, 2);
+    }
+
+    #[test]
+    fn render_contains_no_deprecated_tool_names() {
+        let lists: Vec<Vec<String>> = vec![vec![
+            "rust".into(), "python".into(), "typescript".into(),
+            "kotlin".into(), "go".into(),
+        ]];
+        let out = render_symbol_navigation_block(&lists);
+        for dead in ["find_symbol", "list_symbols", "replace_symbol",
+                     "insert_code", "rename_symbol", "search_pattern"] {
+            assert!(!out.contains(dead),
+                "rendered block contains deprecated tool name: {dead}");
+        }
     }
 
 }
