@@ -5,7 +5,6 @@
 //! on project state.
 
 pub mod builders;
-#[allow(dead_code)]
 pub(crate) mod language_nav;
 
 /// Static server instructions — tool reference, workflow patterns, steering rules.
@@ -25,7 +24,21 @@ the other session first, or use a single codescout instance for Kotlin projects.
 /// Build the full server instructions string, optionally appending
 /// dynamic project status.
 pub fn build_server_instructions(project_status: Option<&ProjectStatus>) -> String {
-    let mut instructions = SERVER_INSTRUCTIONS.to_string();
+    // Collect all languages across the active project and workspace peers.
+    let project_languages: Vec<Vec<String>> = match project_status {
+        Some(s) => {
+            let mut v: Vec<Vec<String>> = vec![s.languages.clone()];
+            if let Some(ws) = &s.workspace {
+                for p in ws {
+                    v.push(p.languages.clone());
+                }
+            }
+            v
+        }
+        None => Vec::new(),
+    };
+    let nav_content = language_nav::render_symbol_navigation_block(&project_languages);
+    let mut instructions = SERVER_INSTRUCTIONS.replace(SYMBOL_NAV_TOKEN, &nav_content);
 
     if let Some(status) = project_status {
         instructions.push_str("\n\n## Project Status\n\n");
@@ -125,6 +138,7 @@ pub struct ProjectStatus {
 }
 
 pub const INCLUDE_MARKER: &str = "{{include: memory-templates.md}}";
+pub const SYMBOL_NAV_TOKEN: &str = "{{symbol_navigation_block}}";
 
 const RAW_ONBOARDING_PROMPT: &str = include_str!("onboarding_prompt.md");
 const RAW_WORKSPACE_ONBOARDING_PROMPT: &str = include_str!("workspace_onboarding_prompt.md");
@@ -263,9 +277,13 @@ mod tests {
     }
 
     #[test]
-    fn build_without_project_returns_static() {
+    fn build_without_project_returns_substituted_static() {
         let result = build_server_instructions(None);
-        assert_eq!(result, SERVER_INSTRUCTIONS);
+        // Token is substituted even with no project status.
+        assert!(!result.contains("{{symbol_navigation_block}}"));
+        assert!(result.contains("### Symbol Navigation Patterns"));
+        // No per-language block when there are no languages.
+        assert!(!result.contains("### Rust — Symbol Navigation"));
         assert!(!result.contains("## Project Status"));
     }
 
@@ -739,4 +757,38 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn server_instructions_template_has_symbol_nav_token() {
+        let raw = SERVER_INSTRUCTIONS;
+        assert_eq!(
+            raw.matches("{{symbol_navigation_block}}").count(),
+            1,
+            "server_instructions.md must contain exactly one symbol_navigation_block token"
+        );
+    }
+
+    #[test]
+    fn build_server_instructions_substitutes_symbol_nav_token() {
+        let result = build_server_instructions(None);
+        assert!(!result.contains("{{symbol_navigation_block}}"),
+            "token must be substituted in build_server_instructions output");
+        assert!(result.contains("### Symbol Navigation Patterns"));
+        assert!(result.contains("### Generic Patterns (any language)"));
+    }
+
+    #[test]
+    fn build_server_instructions_renders_languages_from_status() {
+        let status = ProjectStatus {
+            name: "x".into(),
+            path: "/tmp/x".into(),
+            languages: vec!["rust".into()],
+            memories: vec![],
+            has_index: false,
+            system_prompt: None,
+            workspace: None,
+        };
+        let result = build_server_instructions(Some(&status));
+        assert!(result.contains("### Rust — Symbol Navigation"));
+    }
+
 }

@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 
 /// One language's symbol-navigation hint block.
+#[allow(dead_code)]
 pub(crate) struct NavBlock {
     pub language: &'static str,
     pub display_name: &'static str,
@@ -89,6 +90,7 @@ pub(crate) fn nav_block(lang: &str) -> Option<&'static NavBlock> {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn supported_languages() -> &'static [&'static str] {
     &["rust", "python", "typescript", "kotlin", "go", "csharp"]
 }
