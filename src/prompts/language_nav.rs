@@ -1,6 +1,9 @@
 //! Per-language navigation hints rendered into `server_instructions.md`
 //! at session start. Pure data + pure functions — no I/O.
 
+use std::collections::BTreeMap;
+
+
 /// One language's symbol-navigation hint block.
 pub(crate) struct NavBlock {
     pub language: &'static str,
@@ -90,6 +93,42 @@ pub(crate) fn supported_languages() -> &'static [&'static str] {
     &["rust", "python", "typescript", "kotlin", "go", "csharp"]
 }
 
+
+
+/// Map an arbitrary language string to its canonical key (the one that
+/// appears in `supported_languages()`). Returns `None` for unsupported.
+fn canonical_key(lang: &str) -> Option<&'static str> {
+    match lang {
+        "rust" => Some("rust"),
+        "python" => Some("python"),
+        "typescript" | "javascript" | "tsx" | "jsx" => Some("typescript"),
+        "kotlin" | "java" => Some("kotlin"),
+        "go" => Some("go"),
+        "csharp" => Some("csharp"),
+        _ => None,
+    }
+}
+
+/// Rank workspace languages by occurrence count and return the top `max`
+/// supported canonical keys. Ties broken alphabetically for determinism.
+pub(crate) fn rank_workspace_languages(
+    project_languages: &[Vec<String>],
+    max: usize,
+) -> Vec<&'static str> {
+    let mut counts: BTreeMap<&'static str, u32> = BTreeMap::new();
+    for langs in project_languages {
+        for lang in langs {
+            if let Some(key) = canonical_key(lang) {
+                *counts.entry(key).or_insert(0) += 1;
+            }
+        }
+    }
+    let mut ranked: Vec<(&'static str, u32)> = counts.into_iter().collect();
+    // Sort by count descending; BTreeMap iter is already alphabetical for ties.
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    ranked.into_iter().take(max).map(|(k, _)| k).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,4 +212,60 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn rank_workspace_languages_picks_top_2_by_weight() {
+        // Three projects: rust appears 3x, python 2x, kotlin 1x
+        let lists: Vec<Vec<String>> = vec![
+            vec!["rust".into()],
+            vec!["rust".into(), "python".into()],
+            vec!["rust".into(), "python".into(), "kotlin".into()],
+        ];
+        let ranked = rank_workspace_languages(&lists, 2);
+        assert_eq!(ranked, vec!["rust", "python"]);
+    }
+
+    #[test]
+    fn rank_workspace_languages_filters_unsupported() {
+        let lists: Vec<Vec<String>> = vec![vec!["bash".into(), "rust".into()]];
+        let ranked = rank_workspace_languages(&lists, 2);
+        assert_eq!(ranked, vec!["rust"]);
+    }
+
+    #[test]
+    fn rank_workspace_languages_deterministic_on_ties() {
+        // rust and python both appear once → alphabetical order
+        let lists: Vec<Vec<String>> = vec![vec!["rust".into(), "python".into()]];
+        let ranked = rank_workspace_languages(&lists, 2);
+        assert_eq!(ranked, vec!["python", "rust"]);
+    }
+
+    #[test]
+    fn rank_workspace_languages_caps_at_max() {
+        let lists: Vec<Vec<String>> = vec![vec![
+            "rust".into(), "python".into(), "kotlin".into(),
+            "go".into(), "csharp".into(),
+        ]];
+        let ranked = rank_workspace_languages(&lists, 2);
+        assert_eq!(ranked.len(), 2);
+    }
+
+    #[test]
+    fn rank_workspace_languages_handles_empty() {
+        let lists: Vec<Vec<String>> = vec![];
+        let ranked = rank_workspace_languages(&lists, 2);
+        assert!(ranked.is_empty());
+    }
+
+    #[test]
+    fn rank_workspace_languages_normalizes_aliases() {
+        // "javascript" should bucket into "typescript" canonical key
+        let lists: Vec<Vec<String>> = vec![
+            vec!["javascript".into()],
+            vec!["typescript".into()],
+            vec!["jsx".into()],
+        ];
+        let ranked = rank_workspace_languages(&lists, 2);
+        assert_eq!(ranked, vec!["typescript"]);
+    }
+
 }
