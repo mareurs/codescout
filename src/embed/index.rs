@@ -19,9 +19,10 @@
 
 use anyhow::{Context as _, Result};
 use rusqlite::{params, Connection};
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::Once;
+
+pub use crate::memory::hash::hash_file;
 
 use super::schema::{CodeChunk, SearchResult};
 
@@ -916,13 +917,6 @@ pub fn upsert_memory_by_title(
         }
         None => insert_memory(conn, bucket, title, content, embedding),
     }
-}
-
-/// Hash the content of a file for change detection.
-pub fn hash_file(path: &Path) -> Result<String> {
-    let bytes = std::fs::read(path)?;
-    let digest = Sha256::digest(&bytes);
-    Ok(hex::encode(digest))
 }
 
 /// Get file modification time as Unix epoch seconds.
@@ -3469,26 +3463,6 @@ mod tests {
         }
         let results = search(&conn, &[1.0, 0.0], 3).unwrap();
         assert_eq!(results.len(), 3);
-    }
-
-    #[test]
-    fn hash_file_produces_64_char_hex() {
-        let dir = tempdir().unwrap();
-        let file = dir.path().join("test.rs");
-        std::fs::write(&file, b"fn main() {}").unwrap();
-        let hash = hash_file(&file).unwrap();
-        assert_eq!(hash.len(), 64);
-        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
-    }
-
-    #[test]
-    fn hash_file_differs_for_different_content() {
-        let dir = tempdir().unwrap();
-        let f1 = dir.path().join("a.rs");
-        let f2 = dir.path().join("b.rs");
-        std::fs::write(&f1, b"fn a() {}").unwrap();
-        std::fs::write(&f2, b"fn b() {}").unwrap();
-        assert_ne!(hash_file(&f1).unwrap(), hash_file(&f2).unwrap());
     }
 
     #[test]

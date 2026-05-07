@@ -15,7 +15,7 @@ Treat this as the punch-list before `cargo rm src/embed/index.rs` becomes safe.
 | ID | Surface | What still uses legacy | What replacing it requires |
 |---|---|---|---|
 | L-01 | `src/tools/memory/mod.rs` (8 call sites: 276, 277, 278, 318, 319, 322, 325, 336, 348, 707, 716, 790) | `memory(action='remember' \| 'recall' \| 'forget')` writes/reads sqlite-vec via `open_db`, `ensure_vec_memories`, `upsert_memory_by_title`, `ensure_memory_anchors`, `delete_semantic_anchors`, `insert_semantic_anchor`, `search_memories`, `delete_memory`, `get_file_hash` | New Qdrant collection `memories` (per-project), payload schema { bucket, title, content, anchor_path, anchor_hash, created_at, updated_at }. Re-implement upsert/scroll/search/delete on top of `RetrievalClient`. Migration tool that reads the existing sqlite-vec store and bulk-imports. |
-| L-02 | `src/memory/anchors.rs` (4 sites: 79, 107, 158, 284) | `crate::embed::index::hash_file()` — file-content hash for memory staleness | Move `hash_file` to a util module (`src/util/hash.rs` or `src/memory/hash.rs`) — pure function, no DB. Drop-in replacement, single commit. |
+| L-02 | ~~`src/memory/anchors.rs` (4 sites)~~ | ✅ DONE 2026-05-07 — moved to `src/memory/hash.rs` with re-export shim at `embed::index::hash_file` for in-file callers (deletes for free with index.rs). Tests moved with the function. | — |
 | L-03 | `src/prompts/builders.rs:429-430` | System-prompt generation calls `index::open_db` + `ensure_vec_memories` to inject memory pointers into the per-project draft | Rewire to read from the new Qdrant memories collection (depends on L-01) OR drop memory-pointer injection from the draft and rely on the agent's own `memory(action='list')` call after onboarding. |
 | L-04 | `src/tools/semantic/semantic_search.rs:352` | When the user passes `topic="memories"`, the LEGACY else branch in semantic_search calls `index::search_memories(...)`. The narrow Phase 7 deletes the legacy code-CHUNK branch but the memory branch may share the same code path. | Re-route memory queries to `RetrievalClient::search_memories` (already exists in `src/retrieval/search.rs:118`) once L-01 has populated the `memories` collection. |
 | L-05 | `src/embed/local.rs` | `LocalEmbedder` (ONNX) — only consumed by legacy code paths; no stack consumer | Will fall away when L-01 lands and the legacy index is removed. No work needed standalone — track as "deletes for free with index.rs". |
@@ -39,7 +39,7 @@ Treat this as the punch-list before `cargo rm src/embed/index.rs` becomes safe.
 
 ## Suggested ordering for full removal
 
-1. L-02 — move `hash_file` out of `embed::index`. Trivial. No behavior change.
+1. ~~L-02 — move `hash_file` out of `embed::index`.~~ ✅ DONE 2026-05-07.
 2. L-01 — design + implement Qdrant `memories` collection, port `memory.remember/recall/forget`,
    write a one-shot migration script. **Largest single piece. Needs its own design doc.**
 3. L-03 + L-04 + L-09 — rewire builders, semantic_search else branch, onboarding flow on

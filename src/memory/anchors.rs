@@ -76,7 +76,7 @@ pub fn seed_anchors(project_root: &Path, content: &str) -> Result<AnchorFile> {
     for p in paths {
         let full = project_root.join(&p);
         if full.is_file() {
-            let hash = crate::embed::index::hash_file(&full)?;
+            let hash = super::hash::hash_file(&full)?;
             anchors.push(PathAnchor { path: p, hash });
         }
     }
@@ -104,7 +104,7 @@ pub fn merge_anchors(
     for a in &existing.anchors {
         if seen.insert(a.path.clone()) {
             let full = project_root.join(&a.path);
-            if let Ok(hash) = crate::embed::index::hash_file(&full) {
+            if let Ok(hash) = super::hash::hash_file(&full) {
                 anchors.push(PathAnchor {
                     path: a.path.clone(),
                     hash,
@@ -155,7 +155,7 @@ pub fn check_path_staleness(
                 status: AnchorStatus::Deleted,
             });
         } else {
-            let current_hash = crate::embed::index::hash_file(&full)?;
+            let current_hash = super::hash::hash_file(&full)?;
             if current_hash != anchor.hash {
                 stale_files.push(StaleFile {
                     path: anchor.path.clone(),
@@ -281,7 +281,7 @@ pub fn refresh_hashes(project_root: &Path, memories_dir: &Path, topic: &str) -> 
     // Re-hash existing paths, remove entries for deleted files
     anchor_file.anchors.retain_mut(|a| {
         let full = project_root.join(&a.path);
-        if let Ok(hash) = crate::embed::index::hash_file(&full) {
+        if let Ok(hash) = super::hash::hash_file(&full) {
             a.hash = hash;
             true
         } else {
