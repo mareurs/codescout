@@ -318,14 +318,13 @@ pub(crate) fn build_system_prompt_draft(
         );
     }
 
-    // Retrieval stack — semantic_search routes through Qdrant by default
+    // Retrieval stack — semantic_search routes through Qdrant
     draft.push_str("## Retrieval Stack\n");
     draft.push_str(
-        "`semantic_search` routes through the Qdrant + TEI hybrid stack by default. \
+        "`semantic_search` runs through the Qdrant + TEI hybrid stack. \
          Start it once per machine with `./scripts/retrieval-stack.sh up`, then index this \
          project with `cargo run --release --bin sync_project -- <path> <project_id>`. \
-         If a call returns `retrieval stack offline`, the stack isn't running. \
-         Set `CODESCOUT_RETRIEVAL_BACKEND=legacy` to fall back to the in-process sqlite-vec path.\n\n",
+         If a call returns `retrieval stack offline`, the stack isn't running.\n\n",
     );
 
     // MCP resource pointers — always included so agents know where to get extended docs

@@ -94,7 +94,6 @@ def collection_stats() -> tuple[int, int]:
 def cell_env(model: Model, chunk_target: int, *, disable_sparse: bool, bm25_boost: float) -> dict[str, str]:
     env = os.environ.copy()
     env.update({
-        "CODESCOUT_RETRIEVAL_BACKEND":    "stack",
         "CODESCOUT_EMBEDDER_URL":         model.url,
         "CODESCOUT_SPARSE_EMBEDDER_URL":  SPARSE_URL,
         "CODESCOUT_MODEL_DIM":            str(model.dim),

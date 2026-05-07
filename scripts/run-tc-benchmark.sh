@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Run the 20-TC retrieval benchmark.
+# Run the 20-TC retrieval benchmark (Qdrant stack only since Phase 7).
 #
 # Usage:
-#   CODESCOUT_RETRIEVAL_BACKEND=legacy ./scripts/run-tc-benchmark.sh > /tmp/legacy.json
-#   CODESCOUT_RETRIEVAL_BACKEND=stack  ./scripts/run-tc-benchmark.sh > /tmp/stack.json
+#   ./scripts/run-tc-benchmark.sh > /tmp/stack.json
 #
 # Override binary or project path:
 #   CODESCOUT_BINARY=./target/debug/codescout \

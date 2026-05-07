@@ -11,7 +11,6 @@ export CODESCOUT_EMBEDDER_URL="http://127.0.0.1:8081"
 export CODESCOUT_SPARSE_EMBEDDER_URL="http://127.0.0.1:8084"
 export CODESCOUT_RERANKER_URL="http://127.0.0.1:8083"
 export CODESCOUT_MODEL_DIM="768"
-export CODESCOUT_RETRIEVAL_BACKEND="stack"
 
 echo "boost  score  p50ms  p95ms"
 echo "-----  -----  -----  -----"

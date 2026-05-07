@@ -23,9 +23,9 @@ cargo run --release --bin sync_project -- . codescout   # build the per-project 
 ```
 
 E2E retrieval tests are gated by `--features retrieval-e2e` and assume the stack is
-reachable on `127.0.0.1`. For unit/integration tests that don't exercise retrieval,
-either set `CODESCOUT_RETRIEVAL_BACKEND=legacy` or stay on the default — the stack
-codepath returns a `RecoverableError` when offline rather than panicking.
+reachable on `127.0.0.1`. Unit/integration tests that don't exercise retrieval pass
+without the stack — `semantic_search` returns a `RecoverableError` when the stack
+is offline rather than panicking.
 
 Tuning knobs live in `.env.example` with matrix-validated defaults
 (see `docs/research/2026-05-06-retrieval-stack-benchmark.md` for the empirical record).

@@ -10,7 +10,6 @@ BIN_SYNC=./target/release/sync_project
 BIN_CC=./target/release/codescout
 OUT=results-bm25-cr1200.tsv
 
-export CODESCOUT_RETRIEVAL_BACKEND=stack
 export CODESCOUT_EMBEDDER_URL=http://127.0.0.1:43300
 export CODESCOUT_SPARSE_EMBEDDER_URL=http://127.0.0.1:8091
 export CODESCOUT_MODEL_DIM=768

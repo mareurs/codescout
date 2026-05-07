@@ -120,7 +120,7 @@ For any symbol change, in order:
 - **All callers of X** → `references(symbol, path)` (not `grep`)
 - **Transitive call graphs** → `call_graph(symbol, direction, max_depth)` — `direction="callers"` for blast-radius sizing; `direction="callees"` for flow tracing. `call_graph(depth=1, direction="callers")` also filters refs to call sites only.
 
-**Retrieval backend.** `semantic_search` routes through the Qdrant + TEI hybrid stack by default. If a call returns `retrieval stack offline`, the user must run `./scripts/retrieval-stack.sh up` once per machine. Set `CODESCOUT_RETRIEVAL_BACKEND=legacy` to fall back to the in-process sqlite-vec path (no external services required, lower quality).
+**Retrieval stack required.** `semantic_search` runs through the Qdrant + TEI hybrid stack. If a call returns `retrieval stack offline`, the user must run `./scripts/retrieval-stack.sh up` once per machine. There is no in-process fallback — the legacy sqlite-vec code-search path was removed in Phase 7.
 ### Gotchas
 
 - **MUST FOLLOW:** `edit_code(action="rename")` may corrupt string literals containing the

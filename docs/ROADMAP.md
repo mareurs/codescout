@@ -20,7 +20,7 @@ See [`FEATURES.md`](FEATURES.md) for the full feature reference. Summary:
 - **29 tools** across 7 categories (file, workflow, symbol, semantic, memory, config/nav, GitHub)
 - **LSP client** — transport, lifecycle, document symbols, references, definition, hover, rename + text sweep
 - **Tree-sitter AST** — symbol extraction + docstrings for Rust, Python, TypeScript, Go, Java, Kotlin
-- **Semantic search** — Qdrant + TEI hybrid retrieval (dense + BM25 sparse, RRF fusion) is the default since Phase 6 ([benchmark](research/2026-05-06-retrieval-stack-benchmark.md)); legacy in-process sqlite-vec `vec0` KNN remains available via `CODESCOUT_RETRIEVAL_BACKEND=legacy` ([concepts](manual/src/concepts/semantic-search.md), [backends](manual/src/configuration/embedding-backends.md))
+- **Semantic search** — Qdrant + TEI hybrid retrieval (dense + BM25 sparse, RRF fusion); see [benchmark](research/2026-05-06-retrieval-stack-benchmark.md). Memory storage and recall still run on the in-process sqlite-vec path; see [legacy-removal tracker](trackers/2026-05-07-legacy-retrieval-removal.md) ([concepts](manual/src/concepts/semantic-search.md), [backends](manual/src/configuration/embedding-backends.md))
 - **Library search** — navigate third-party deps via LSP-inferred discovery, scoped symbol nav + semantic search
 - **OutputBuffer** — `@cmd_*` / `@file_*` handles; large output stored, queried with Unix tools
 - **run_command** — cwd, acknowledge_risk, dangerous-cmd speed bump, smart summaries per command type

@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
 """
-codescout retrieval benchmark harness — 20-TC suite.
+codescout retrieval benchmark harness — 20-TC suite (Qdrant stack only since Phase 7).
 
 Usage:
-    CODESCOUT_RETRIEVAL_BACKEND=legacy python3 scripts/run-tc-benchmark.py \
-        --binary ./target/release/codescout \
-        --project-path /path/to/project \
-        > /tmp/legacy.json
-
-    CODESCOUT_RETRIEVAL_BACKEND=stack python3 scripts/run-tc-benchmark.py \
+    python3 scripts/run-tc-benchmark.py \
         --binary ./target/release/codescout \
         --project-path /path/to/project \
         > /tmp/stack.json
@@ -339,8 +334,6 @@ def main() -> None:
                         help="Top-N results to retrieve per query (default: 10)")
     args = parser.parse_args()
 
-    backend = os.environ.get("CODESCOUT_RETRIEVAL_BACKEND", "legacy")
-
     test_cases = TEST_CASES
     if args.tc_suite:
         with open(args.tc_suite) as fh:
@@ -403,7 +396,7 @@ def main() -> None:
 
     aggregate_score = sum(r["score"] for r in tc_results)
     output = {
-        "backend": backend,
+        "backend": "stack",
         "project_path": args.project_path,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "aggregate": {
