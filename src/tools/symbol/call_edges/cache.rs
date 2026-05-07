@@ -140,7 +140,7 @@ mod tests {
             col: 0,
             source: EdgeSource::Lsp,
         };
-        cache.upsert(&[edge.clone()]).unwrap();
+        cache.upsert(std::slice::from_ref(&edge)).unwrap();
         let got = cache.lookup_callers("a").unwrap();
         assert_eq!(got, vec![edge]);
     }
@@ -157,7 +157,7 @@ mod tests {
             col: 4,
             source: EdgeSource::Ts,
         };
-        cache.upsert(&[edge.clone()]).unwrap();
+        cache.upsert(std::slice::from_ref(&edge)).unwrap();
         let got = cache.lookup_callees("a").unwrap();
         assert_eq!(got, vec![edge]);
     }
@@ -202,8 +202,8 @@ mod tests {
             col: 0,
             source: EdgeSource::Lsp,
         };
-        cache.upsert(&[edge.clone()]).unwrap();
-        cache.upsert(&[edge.clone()]).unwrap(); // second upsert
+        cache.upsert(std::slice::from_ref(&edge)).unwrap();
+        cache.upsert(std::slice::from_ref(&edge)).unwrap(); // second upsert
         let got = cache.lookup_callers("a").unwrap();
         assert_eq!(got.len(), 1); // not doubled
     }
@@ -221,7 +221,7 @@ mod tests {
             col: 0,
             source: EdgeSource::Lsp,
         };
-        cache_a.upsert(&[edge.clone()]).unwrap();
+        cache_a.upsert(std::slice::from_ref(&edge)).unwrap();
         // project-b should not see project-a's edges
         let got = cache_b.lookup_callers("a").unwrap();
         assert!(got.is_empty());
@@ -251,7 +251,7 @@ mod tests {
         };
 
         // Step 1: seed.
-        cache.upsert(&[edge.clone()]).unwrap();
+        cache.upsert(std::slice::from_ref(&edge)).unwrap();
 
         // Step 2: baseline — edge is present.
         let before = cache.lookup_callers("a").unwrap();

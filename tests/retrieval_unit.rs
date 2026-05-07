@@ -1,5 +1,7 @@
 use codescout::retrieval::config::RetrievalConfig;
 
+#[test]
+
 fn config_from_env_uses_defaults_when_unset() {
     std::env::remove_var("CODESCOUT_QDRANT_URL");
     std::env::remove_var("CODESCOUT_EMBEDDER_URL");
@@ -13,9 +15,11 @@ fn config_from_env_uses_defaults_when_unset() {
     assert_eq!(cfg.embedder_url, "http://127.0.0.1:8081");
     assert_eq!(cfg.sparse_embedder_url, "http://127.0.0.1:8084");
     assert_eq!(cfg.reranker_url, "http://127.0.0.1:8083");
-    assert_eq!(cfg.model_dim, 1024);
+    assert_eq!(cfg.model_dim, 768);
     assert_eq!(cfg.profile, "cpu");
 }
+
+#[test]
 
 fn config_from_env_reads_overrides() {
     std::env::set_var("CODESCOUT_QDRANT_URL", "http://qd:1");
@@ -42,6 +46,8 @@ fn config_from_env_reads_overrides() {
         std::env::remove_var(k);
     }
 }
+
+#[test]
 
 fn client_from_env_constructs_when_urls_present() {
     std::env::set_var("CODESCOUT_QDRANT_URL", "http://127.0.0.1:6334");

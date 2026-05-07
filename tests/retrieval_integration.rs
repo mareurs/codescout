@@ -1,5 +1,7 @@
 use codescout::retrieval::embedder::EmbedderHttp;
 
+#[tokio::test]
+
 async fn embedder_returns_dense_and_sparse() {
     let mut dense_server = mockito::Server::new_async().await;
     let mut sparse_server = mockito::Server::new_async().await;
@@ -28,6 +30,8 @@ async fn embedder_returns_dense_and_sparse() {
     dense_mock.assert_async().await;
     sparse_mock.assert_async().await;
 }
+
+#[tokio::test]
 
 async fn embedder_dim_mismatch_errors() {
     let mut dense_server = mockito::Server::new_async().await;

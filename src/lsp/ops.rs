@@ -71,6 +71,7 @@ pub trait LspClientOps: Send + Sync {
     ) -> anyhow::Result<Vec<lsp_types::CallHierarchyOutgoingCall>>;
 }
 
+#[allow(clippy::items_after_test_module)]
 #[cfg(test)]
 mod call_hierarchy_trait_tests {
     use super::*;
