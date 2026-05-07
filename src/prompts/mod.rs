@@ -321,14 +321,14 @@ mod tests {
         assert!(load_prompt("onboarding_prompt.md").contains("## Common Rationalizations"));
     }
 
-    #[test]
     fn workspace_onboarding_prompt_contains_key_sections() {
-        assert!(load_prompt("workspace_onboarding_prompt.md").contains("Workspace Survey"));
-        assert!(load_prompt("workspace_onboarding_prompt.md").contains("Workspace Deep Dives"));
-        assert!(load_prompt("workspace_onboarding_prompt.md").contains("Phase 2"));
-        assert!(load_prompt("workspace_onboarding_prompt.md").contains("Subagent"));
-        assert!(load_prompt("workspace_onboarding_prompt.md").contains("HARD-GATE"));
-        assert!(load_prompt("workspace_onboarding_prompt.md").contains("Re-Onboarding"));
+        let prompt = load_prompt("workspace_onboarding_prompt.md");
+        assert!(prompt.contains("# WORKSPACE MODE"));
+        assert!(prompt.contains("## Phase 1 — Workspace Survey"));
+        assert!(prompt.contains("## Phase 3 — Per-Project Deep Dives"));
+        assert!(prompt.contains("## Phase 4 — Coverage Verification"));
+        assert!(prompt.contains("## Phase 5 — Workspace Synthesis"));
+        assert!(prompt.contains("## Phase 6 — CLAUDE.md Refresh"));
     }
     #[test]
     fn load_prompt_substitutes_include_marker() {
@@ -664,6 +664,46 @@ mod tests {
             assert!(
                 templates.contains(&format!("- `## {sub}`")),
                 "workspace architecture template missing required subsection: {sub}"
+            );
+        }
+    }
+
+    #[test]
+    fn workspace_prompt_has_six_phases() {
+        let workspace = load_prompt("workspace_onboarding_prompt.md");
+        for phase in [
+            "## Phase 1 — Workspace Survey",
+            "## Phase 2 — Stale-Project Cleanup",
+            "## Phase 3 — Per-Project Deep Dives",
+            "## Phase 4 — Coverage Verification",
+            "## Phase 5 — Workspace Synthesis",
+            "## Phase 6 — CLAUDE.md Refresh",
+        ] {
+            assert!(
+                workspace.contains(phase),
+                "workspace prompt missing phase: {phase}"
+            );
+        }
+    }
+
+    #[test]
+    fn workspace_prompt_requires_six_memories_per_project() {
+        let workspace = load_prompt("workspace_onboarding_prompt.md");
+        assert!(
+            workspace.contains("6 memories"),
+            "workspace subagent prompt must require 6 memories per project"
+        );
+        for topic in [
+            "project-overview",
+            "architecture",
+            "conventions",
+            "development-commands",
+            "domain-glossary",
+            "gotchas",
+        ] {
+            assert!(
+                workspace.contains(topic),
+                "workspace prompt missing topic name: {topic}"
             );
         }
     }
