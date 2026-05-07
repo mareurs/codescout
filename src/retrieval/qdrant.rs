@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use qdrant_client::qdrant::{
-    Condition, DeletePointsBuilder, Distance, Filter, Fusion, Modifier, PointStruct,
-    PointsIdsList, PrefetchQueryBuilder, Query, QueryPointsBuilder, ScrollPointsBuilder,
-    SparseVectorBuilder, UpsertPointsBuilder, Vector, VectorInput,
+    Condition, DeletePointsBuilder, Distance, Filter, Fusion, Modifier, PointStruct, PointsIdsList,
+    PrefetchQueryBuilder, Query, QueryPointsBuilder, ScrollPointsBuilder, SparseVectorBuilder,
+    UpsertPointsBuilder, Vector, VectorInput,
 };
 use qdrant_client::qdrant::{
     CreateCollectionBuilder, SparseVectorParamsBuilder, SparseVectorsConfigBuilder,
@@ -22,7 +22,10 @@ fn chunk_id_to_point_id(s: &str) -> u64 {
 
 impl QdrantWrap {
     pub async fn connect(url: &str) -> Result<Self> {
-        let client = Qdrant::from_url(url).build().context("qdrant connect")?;
+        let client = Qdrant::from_url(url)
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .context("qdrant connect")?;
         Ok(Self { client })
     }
 
@@ -42,10 +45,7 @@ impl QdrantWrap {
         }
 
         let mut vectors = VectorsConfigBuilder::default();
-        vectors.add_named_vector_params(
-            "dense",
-            VectorParamsBuilder::new(dim, Distance::Cosine),
-        );
+        vectors.add_named_vector_params("dense", VectorParamsBuilder::new(dim, Distance::Cosine));
 
         let mut sparse = SparseVectorsConfigBuilder::default();
         sparse.add_named_vector_params(
@@ -163,6 +163,11 @@ impl QdrantWrap {
     /// Hybrid RRF query: two prefetch legs (dense cosine + sparse BM25), fused
     /// with Reciprocal Rank Fusion. Returns decoded `Hit` values. Points whose
     /// payload cannot be decoded are silently skipped.
+    ///
+    /// `bm25_boost` multiplies the sparse candidate pool relative to dense.
+    /// 1.0 = equal weight; 2.0 = sparse fetches 2× more candidates before RRF.
+    /// `disable_sparse` skips the sparse leg entirely → pure dense ANN ranking.
+    #[allow(clippy::too_many_arguments)]
     pub async fn hybrid_query(
         &self,
         collection: &str,
@@ -170,40 +175,54 @@ impl QdrantWrap {
         dense: &[f32],
         sparse: &crate::retrieval::embedder::SparseVector,
         limit: usize,
+        bm25_boost: f32,
+        disable_sparse: bool,
     ) -> Result<Vec<crate::retrieval::search::Hit>> {
-        let filter = Filter::must([Condition::matches(
-            "project_id",
-            project_id.to_string(),
-        )]);
+        let filter = Filter::must([Condition::matches("project_id", project_id.to_string())]);
 
-        // Prefetch leg 1 — dense cosine ANN
-        let dense_prefetch = PrefetchQueryBuilder::default()
-            .query(Query::new_nearest(VectorInput::new_dense(dense.to_vec())))
-            .using("dense")
-            .filter(filter.clone())
-            .limit(limit as u64)
-            .build();
+        let resp = if disable_sparse {
+            // Pure dense ANN — no fusion, no sparse leg.
+            let req = QueryPointsBuilder::new(collection)
+                .query(Query::new_nearest(VectorInput::new_dense(dense.to_vec())))
+                .using("dense")
+                .filter(filter)
+                .limit(limit as u64)
+                .with_payload(true)
+                .build();
+            self.client
+                .query(req)
+                .await
+                .context("hybrid_query (dense-only)")?
+        } else {
+            let sparse_limit = ((limit as f32) * bm25_boost.max(0.1)).ceil() as u64;
 
-        // Prefetch leg 2 — sparse BM25 (IDF-weighted)
-        let sparse_prefetch = PrefetchQueryBuilder::default()
-            .query(Query::new_nearest(VectorInput::new_sparse(
-                sparse.indices.clone(),
-                sparse.values.clone(),
-            )))
-            .using("sparse")
-            .filter(filter.clone())
-            .limit(limit as u64)
-            .build();
+            let dense_prefetch = PrefetchQueryBuilder::default()
+                .query(Query::new_nearest(VectorInput::new_dense(dense.to_vec())))
+                .using("dense")
+                .filter(filter.clone())
+                .limit(limit as u64)
+                .build();
 
-        let req = QueryPointsBuilder::new(collection)
-            .add_prefetch(dense_prefetch)
-            .add_prefetch(sparse_prefetch)
-            .query(Query::new_fusion(Fusion::Rrf))
-            .limit(limit as u64)
-            .with_payload(true)
-            .build();
+            let sparse_prefetch = PrefetchQueryBuilder::default()
+                .query(Query::new_nearest(VectorInput::new_sparse(
+                    sparse.indices.clone(),
+                    sparse.values.clone(),
+                )))
+                .using("sparse")
+                .filter(filter.clone())
+                .limit(sparse_limit)
+                .build();
 
-        let resp = self.client.query(req).await.context("hybrid_query")?;
+            let req = QueryPointsBuilder::new(collection)
+                .add_prefetch(dense_prefetch)
+                .add_prefetch(sparse_prefetch)
+                .query(Query::new_fusion(Fusion::Rrf))
+                .limit(limit as u64)
+                .with_payload(true)
+                .build();
+
+            self.client.query(req).await.context("hybrid_query")?
+        };
 
         let hits = resp
             .result
@@ -231,8 +250,10 @@ impl QdrantWrap {
             return Ok(());
         }
 
-        let point_ids: Vec<qdrant_client::qdrant::PointId> =
-            ids.iter().map(|id| chunk_id_to_point_id(id).into()).collect();
+        let point_ids: Vec<qdrant_client::qdrant::PointId> = ids
+            .iter()
+            .map(|id| chunk_id_to_point_id(id).into())
+            .collect();
 
         self.client
             .delete_points(

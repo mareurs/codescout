@@ -1,9 +1,9 @@
-pub mod config;
-pub mod embedder;
-pub mod reranker;
-pub mod qdrant;
 pub mod client;
+pub mod config;
 pub mod drift;
+pub mod embedder;
 pub mod payload;
-pub mod sync;
+pub mod qdrant;
+pub mod reranker;
 pub mod search;
+pub mod sync;

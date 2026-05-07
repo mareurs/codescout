@@ -16,9 +16,16 @@ async fn main() -> Result<()> {
     eprintln!("Connecting to retrieval stack...");
     let client = RetrievalClient::from_env().await?;
 
-    let opts = SyncOpts { languages: None, force_reindex: false };
+    let opts = SyncOpts {
+        languages: None,
+        force_reindex: false,
+    };
 
-    eprintln!("Syncing project '{}' from {} ...", project_id, root.display());
+    eprintln!(
+        "Syncing project '{}' from {} ...",
+        project_id,
+        root.display()
+    );
     let report = client.sync_project(&project_id, &root, opts).await?;
 
     println!(

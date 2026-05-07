@@ -48,7 +48,7 @@ services:
     image: ghcr.io/huggingface/text-embeddings-inference:86-1.8
     container_name: codescout-embedder-gpu
     restart: unless-stopped
-    command: ["--model-id", "BAAI/bge-m3", "--dtype", "float16", "--auto-truncate"]
+    command: ["--model-id", "jinaai/jina-embeddings-v2-base-code", "--dtype", "float16", "--auto-truncate"]
     ports:
       - "127.0.0.1:8081:80"
     shm_size: 2g

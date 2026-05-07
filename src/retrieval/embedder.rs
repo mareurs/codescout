@@ -4,27 +4,66 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone)]
 pub struct SparseVector {
     pub indices: Vec<u32>,
-    pub values:  Vec<f32>,
+    pub values: Vec<f32>,
 }
 
 #[derive(Debug, Clone)]
 pub struct EmbedOutput {
-    pub dense:  Vec<f32>,
+    pub dense: Vec<f32>,
     pub sparse: SparseVector,
+}
+
+/// Wire format for the dense leg.
+///
+/// * `Tei` — Hugging Face TEI native: `POST {base}/embed` with `{"inputs":[...]}`,
+///   response `[[f32], ...]`.
+/// * `OpenAi` — OpenAI-compatible (llama-server, vLLM, OpenAI proper):
+///   `POST {base}/v1/embeddings` with `{"input":[...],"model":"..."}`,
+///   response `{"data":[{"embedding":[...],"index":N},...]}`.
+///
+/// Selected via `CODESCOUT_EMBEDDER_PROTOCOL` env var (default `tei`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DenseProtocol {
+    Tei,
+    OpenAi,
 }
 
 pub struct EmbedderHttp {
     dense_base: String,
     sparse_base: String,
     expected_dim: usize,
+    dense_protocol: DenseProtocol,
+    dense_model_name: String,
     client: reqwest::Client,
 }
 
 #[derive(Serialize)]
-struct EmbedReq<'a> { inputs: Vec<&'a str> }
+struct EmbedReq<'a> {
+    inputs: Vec<&'a str>,
+}
+
+#[derive(Serialize)]
+struct OpenAiEmbedReq<'a> {
+    input: Vec<&'a str>,
+    model: &'a str,
+}
 
 #[derive(Deserialize)]
-struct SparseEntry { index: u32, value: f32 }
+struct OpenAiEmbedResp {
+    data: Vec<OpenAiEmbedItem>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiEmbedItem {
+    embedding: Vec<f32>,
+    index: usize,
+}
+
+#[derive(Deserialize)]
+struct SparseEntry {
+    index: u32,
+    value: f32,
+}
 
 impl EmbedderHttp {
     pub fn new(
@@ -32,80 +71,147 @@ impl EmbedderHttp {
         sparse_base: impl Into<String>,
         expected_dim: usize,
     ) -> Self {
+        let dense_protocol = match std::env::var("CODESCOUT_EMBEDDER_PROTOCOL")
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "openai" => DenseProtocol::OpenAi,
+            _ => DenseProtocol::Tei,
+        };
+        let dense_model_name = std::env::var("CODESCOUT_EMBEDDER_MODEL_NAME").unwrap_or_default();
         Self {
             dense_base: dense_base.into(),
             sparse_base: sparse_base.into(),
             expected_dim,
+            dense_protocol,
+            dense_model_name,
             client: reqwest::Client::new(),
         }
     }
 
-    pub async fn embed(&self, text: &str) -> Result<EmbedOutput> {
-        let dense_url  = format!("{}/embed", self.dense_base);
-        let sparse_url = format!("{}/embed_sparse", self.sparse_base);
-        let body = EmbedReq { inputs: vec![text] };
+    /// Send a dense-embedding batch using the configured protocol.
+    /// Returns one vector per input, in the same order.
+    async fn dense_batch(&self, inputs: &[&str]) -> Result<Vec<Vec<f32>>> {
+        match self.dense_protocol {
+            DenseProtocol::Tei => {
+                let url = format!("{}/embed", self.dense_base);
+                let body = serde_json::json!({ "inputs": inputs });
+                let resp: Vec<Vec<f32>> = self
+                    .client
+                    .post(&url)
+                    .json(&body)
+                    .send()
+                    .await
+                    .context("dense tei send")?
+                    .error_for_status()
+                    .context("dense tei status")?
+                    .json()
+                    .await
+                    .context("dense tei json")?;
+                Ok(resp)
+            }
+            DenseProtocol::OpenAi => {
+                let url = format!("{}/v1/embeddings", self.dense_base);
+                let body = OpenAiEmbedReq {
+                    input: inputs.to_vec(),
+                    model: &self.dense_model_name,
+                };
+                let resp: OpenAiEmbedResp = self
+                    .client
+                    .post(&url)
+                    .json(&body)
+                    .send()
+                    .await
+                    .context("dense openai send")?
+                    .error_for_status()
+                    .context("dense openai status")?
+                    .json()
+                    .await
+                    .context("dense openai json")?;
+                let mut items = resp.data;
+                items.sort_by_key(|i| i.index);
+                Ok(items.into_iter().map(|i| i.embedding).collect())
+            }
+        }
+    }
 
-        let dense: Vec<Vec<f32>> = self.client.post(&dense_url).json(&body)
-            .send().await.context("embed dense")?
-            .error_for_status().context("embed dense status")?
-            .json().await.context("embed dense json")?;
-        let dense = dense.into_iter().next()
+    pub async fn embed(&self, text: &str) -> Result<EmbedOutput> {
+        let sparse_url = format!("{}/embed_sparse", self.sparse_base);
+        let sparse_body = EmbedReq { inputs: vec![text] };
+        let dense_inputs = [text];
+
+        let (dense_batch, sparse_resp) =
+            tokio::try_join!(self.dense_batch(&dense_inputs), async {
+                self.client
+                    .post(&sparse_url)
+                    .json(&sparse_body)
+                    .send()
+                    .await
+                    .context("embed sparse")?
+                    .error_for_status()
+                    .context("embed sparse status")?
+                    .json::<Vec<Vec<SparseEntry>>>()
+                    .await
+                    .context("embed sparse json")
+            })?;
+
+        let dense = dense_batch
+            .into_iter()
+            .next()
             .ok_or_else(|| anyhow!("empty dense response"))?;
         if dense.len() != self.expected_dim {
-            return Err(anyhow!("embed dim mismatch: got {}, expected {}",
-                dense.len(), self.expected_dim));
+            return Err(anyhow!(
+                "embed dim mismatch: got {}, expected {}",
+                dense.len(),
+                self.expected_dim
+            ));
         }
-
-        let sparse: Vec<Vec<SparseEntry>> = self.client.post(&sparse_url).json(&body)
-            .send().await.context("embed sparse")?
-            .error_for_status().context("embed sparse status")?
-            .json().await.context("embed sparse json")?;
-        let sparse_vec = sparse.into_iter().next().unwrap_or_default();
-        let (indices, values): (Vec<u32>, Vec<f32>) = sparse_vec.into_iter()
-            .map(|e| (e.index, e.value))
-            .unzip();
-
-        Ok(EmbedOutput { dense, sparse: SparseVector { indices, values } })
+        let sparse_vec = sparse_resp.into_iter().next().unwrap_or_default();
+        let (indices, values): (Vec<u32>, Vec<f32>) =
+            sparse_vec.into_iter().map(|e| (e.index, e.value)).unzip();
+        Ok(EmbedOutput {
+            dense,
+            sparse: SparseVector { indices, values },
+        })
     }
 
     pub async fn embed_batch(&self, texts: &[String]) -> Result<Vec<EmbedOutput>> {
         const BATCH: usize = 32;
-        let dense_url  = format!("{}/embed", self.dense_base);
         let sparse_url = format!("{}/embed_sparse", self.sparse_base);
         let mut out = Vec::with_capacity(texts.len());
         for chunk in texts.chunks(BATCH) {
             let inputs: Vec<&str> = chunk.iter().map(String::as_str).collect();
-            let body = serde_json::json!({ "inputs": inputs });
+            let sparse_body = serde_json::json!({ "inputs": &inputs });
 
-            let dense_fut = self.client
-                .post(&dense_url).json(&body)
-                .send();
-            let sparse_fut = self.client
-                .post(&sparse_url).json(&body)
-                .send();
+            let (dense_batch, sparse_resp) = tokio::try_join!(self.dense_batch(&inputs), async {
+                self.client
+                    .post(&sparse_url)
+                    .json(&sparse_body)
+                    .send()
+                    .await
+                    .context("embed_batch sparse send")?
+                    .error_for_status()
+                    .context("embed_batch sparse status")?
+                    .json::<Vec<Vec<SparseEntry>>>()
+                    .await
+                    .context("embed_batch sparse json")
+            })?;
 
-            let (dense_resp, sparse_resp) = tokio::try_join!(dense_fut, sparse_fut)
-                .context("embed_batch send")?;
-
-            let dense_batch: Vec<Vec<f32>> = dense_resp
-                .error_for_status().context("embed_batch dense status")?
-                .json().await.context("embed_batch dense json")?;
-            let sparse_batch: Vec<Vec<SparseEntry>> = sparse_resp
-                .error_for_status().context("embed_batch sparse status")?
-                .json().await.context("embed_batch sparse json")?;
-
-            for (dense, sparse_vec) in dense_batch.into_iter().zip(sparse_batch) {
+            for (dense, sparse_vec) in dense_batch.into_iter().zip(sparse_resp) {
                 if dense.len() != self.expected_dim {
                     return Err(anyhow!(
                         "embed dim mismatch: got {}, expected {}",
-                        dense.len(), self.expected_dim
+                        dense.len(),
+                        self.expected_dim
                     ));
                 }
-                let (indices, values): (Vec<u32>, Vec<f32>) = sparse_vec
-                    .into_iter()
-                    .map(|e| (e.index, e.value))
-                    .unzip();
-                out.push(EmbedOutput { dense, sparse: SparseVector { indices, values } });
+                let (indices, values): (Vec<u32>, Vec<f32>) =
+                    sparse_vec.into_iter().map(|e| (e.index, e.value)).unzip();
+                out.push(EmbedOutput {
+                    dense,
+                    sparse: SparseVector { indices, values },
+                });
             }
         }
         Ok(out)

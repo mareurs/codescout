@@ -31,8 +31,14 @@ fn config_from_env_reads_overrides() {
     assert_eq!(cfg.model_dim, 4096);
     assert_eq!(cfg.profile, "gpu");
 
-    for k in ["CODESCOUT_QDRANT_URL","CODESCOUT_EMBEDDER_URL","CODESCOUT_SPARSE_EMBEDDER_URL",
-              "CODESCOUT_RERANKER_URL","CODESCOUT_MODEL_DIM","CODESCOUT_RETRIEVAL_PROFILE"] {
+    for k in [
+        "CODESCOUT_QDRANT_URL",
+        "CODESCOUT_EMBEDDER_URL",
+        "CODESCOUT_SPARSE_EMBEDDER_URL",
+        "CODESCOUT_RERANKER_URL",
+        "CODESCOUT_MODEL_DIM",
+        "CODESCOUT_RETRIEVAL_PROFILE",
+    ] {
         std::env::remove_var(k);
     }
 }
@@ -45,7 +51,12 @@ fn client_from_env_constructs_when_urls_present() {
     let cfg = codescout::retrieval::config::RetrievalConfig::from_env().unwrap();
     let _ = codescout::retrieval::client::RetrievalClient::from_config_only(cfg);
     // doesn't connect — just constructs
-    for k in ["CODESCOUT_QDRANT_URL","CODESCOUT_EMBEDDER_URL","CODESCOUT_SPARSE_EMBEDDER_URL","CODESCOUT_RERANKER_URL"] {
+    for k in [
+        "CODESCOUT_QDRANT_URL",
+        "CODESCOUT_EMBEDDER_URL",
+        "CODESCOUT_SPARSE_EMBEDDER_URL",
+        "CODESCOUT_RERANKER_URL",
+    ] {
         std::env::remove_var(k);
     }
 }
@@ -53,13 +64,16 @@ fn client_from_env_constructs_when_urls_present() {
 use codescout::retrieval::drift::{diff_chunks, ChunkRef};
 
 fn cr(id: &str, hash: &str) -> ChunkRef {
-    ChunkRef { chunk_id: id.into(), content_hash: hash.into() }
+    ChunkRef {
+        chunk_id: id.into(),
+        content_hash: hash.into(),
+    }
 }
 
 #[test]
 fn diff_identical_yields_noop() {
-    let server = vec![cr("a","h1"), cr("b","h2")];
-    let local = vec![cr("a","h1"), cr("b","h2")];
+    let server = vec![cr("a", "h1"), cr("b", "h2")];
+    let local = vec![cr("a", "h1"), cr("b", "h2")];
     let d = diff_chunks(&server, &local);
     assert!(d.to_upsert.is_empty());
     assert!(d.to_delete.is_empty());
@@ -67,8 +81,8 @@ fn diff_identical_yields_noop() {
 
 #[test]
 fn diff_added_chunk_yields_upsert() {
-    let server = vec![cr("a","h1")];
-    let local = vec![cr("a","h1"), cr("b","h2")];
+    let server = vec![cr("a", "h1")];
+    let local = vec![cr("a", "h1"), cr("b", "h2")];
     let d = diff_chunks(&server, &local);
     assert_eq!(d.to_upsert, vec!["b".to_string()]);
     assert!(d.to_delete.is_empty());
@@ -76,8 +90,8 @@ fn diff_added_chunk_yields_upsert() {
 
 #[test]
 fn diff_deleted_chunk_yields_delete() {
-    let server = vec![cr("a","h1"), cr("b","h2")];
-    let local = vec![cr("a","h1")];
+    let server = vec![cr("a", "h1"), cr("b", "h2")];
+    let local = vec![cr("a", "h1")];
     let d = diff_chunks(&server, &local);
     assert!(d.to_upsert.is_empty());
     assert_eq!(d.to_delete, vec!["b".to_string()]);
@@ -85,29 +99,29 @@ fn diff_deleted_chunk_yields_delete() {
 
 #[test]
 fn diff_modified_chunk_yields_upsert_for_new_id() {
-    let server = vec![cr("a-old","h1")];
-    let local = vec![cr("a-new","h2")];
+    let server = vec![cr("a-old", "h1")];
+    let local = vec![cr("a-new", "h2")];
     let d = diff_chunks(&server, &local);
     assert_eq!(d.to_upsert, vec!["a-new".to_string()]);
     assert_eq!(d.to_delete, vec!["a-old".to_string()]);
 }
 
-use codescout::retrieval::payload::{CodePayload, payload_to_map, map_to_payload};
+use codescout::retrieval::payload::{map_to_payload, payload_to_map, CodePayload};
 
 #[test]
 fn payload_roundtrip_preserves_fields() {
     let p = CodePayload {
-        project_id:          "code-explorer".into(),
-        file_path:           "src/lib.rs".into(),
-        language:            "rust".into(),
-        start_line:          10,
-        end_line:            42,
-        ast_kind:            "fn".into(),
-        ast_header:          "fn main()".into(),
-        content:             "fn main() {}".into(),
-        content_hash:        "h1".into(),
+        project_id: "code-explorer".into(),
+        file_path: "src/lib.rs".into(),
+        language: "rust".into(),
+        start_line: 10,
+        end_line: 42,
+        ast_kind: "fn".into(),
+        ast_header: "fn main()".into(),
+        content: "fn main() {}".into(),
+        content_hash: "h1".into(),
         last_indexed_commit: "abc".into(),
-        chunk_id:            "id1".into(),
+        chunk_id: "id1".into(),
     };
     let map = payload_to_map(&p);
     let back = map_to_payload(&map).expect("decode");

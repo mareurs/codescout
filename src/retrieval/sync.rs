@@ -39,9 +39,19 @@ impl crate::retrieval::client::RetrievalClient {
         root: &Path,
         _opts: SyncOpts,
     ) -> Result<SyncReport> {
-        use crate::embed::ast_chunker::{split_file, AST_CHUNK_TARGET};
+        use crate::embed::ast_chunker::split_file;
         use crate::retrieval::drift::{diff_chunks, ChunkRef};
         use crate::retrieval::payload::{payload_to_map, CodePayload};
+
+        // chunk=1200 was the universal sweet spot in the Phase 5.5 chunk×model matrix
+        // (see docs/research/2026-05-06-retrieval-stack-benchmark.md). Override with
+        // CODESCOUT_CHUNK_TARGET when retuning.
+        const STACK_CHUNK_TARGET: usize = 1200;
+        let chunk_target: usize = std::env::var("CODESCOUT_CHUNK_TARGET")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(STACK_CHUNK_TARGET);
+        tracing::info!(chunk_target, "retrieval sync starting");
 
         let started = std::time::Instant::now();
         self.qdrant
@@ -72,6 +82,9 @@ impl crate::retrieval::client::RetrievalClient {
                 "go" => "go",
                 "java" => "java",
                 "kt" => "kotlin",
+                "md" | "mdx" => "markdown",
+                "sh" | "bash" => "shell",
+                "toml" => "toml",
                 _ => continue,
             };
             let source = match std::fs::read_to_string(path) {
@@ -79,8 +92,12 @@ impl crate::retrieval::client::RetrievalClient {
                 Err(_) => continue,
             };
             let rel_path = path.strip_prefix(root).unwrap_or(path);
-            let chunks = split_file(&source, lang, path, AST_CHUNK_TARGET);
+            let chunks = split_file(&source, lang, path, chunk_target);
             for c in chunks {
+                // Skip empty/whitespace-only chunks — embedders reject empty inputs
+                if c.content.trim().is_empty() {
+                    continue;
+                }
                 let hash = content_hash(&c.content);
                 let chunk_id = format!("{project_id}:{}:{hash}", rel_path.display());
                 let p = CodePayload {

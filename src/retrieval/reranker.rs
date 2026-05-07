@@ -29,7 +29,11 @@ impl RerankerHttp {
 
     pub async fn rerank(&self, query: &str, texts: &[String]) -> Result<Vec<f32>> {
         let url = format!("{}/rerank", self.base);
-        let body = RerankReq { query, texts, raw_scores: false };
+        let body = RerankReq {
+            query,
+            texts,
+            raw_scores: false,
+        };
         let items: Vec<RerankItem> = self
             .client
             .post(&url)

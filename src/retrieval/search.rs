@@ -60,7 +60,15 @@ impl RetrievalClient {
         let q = self.embedder.embed(query).await?;
         let candidates = self
             .qdrant
-            .hybrid_query(collection, project_id, &q.dense, &q.sparse, opts.overfetch)
+            .hybrid_query(
+                collection,
+                project_id,
+                &q.dense,
+                &q.sparse,
+                opts.overfetch,
+                self.config.bm25_boost,
+                self.config.disable_sparse,
+            )
             .await?;
 
         if !opts.rerank || candidates.is_empty() {
@@ -70,11 +78,8 @@ impl RetrievalClient {
         let texts: Vec<String> = candidates.iter().map(|h| h.content.clone()).collect();
         match self.reranker.rerank(query, &texts).await {
             Ok(scores) => {
-                let mut zipped: Vec<(Hit, f32)> =
-                    candidates.into_iter().zip(scores).collect();
-                zipped.sort_by(|a, b| {
-                    b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-                });
+                let mut zipped: Vec<(Hit, f32)> = candidates.into_iter().zip(scores).collect();
+                zipped.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                 Ok(zipped
                     .into_iter()
                     .take(opts.limit)
@@ -120,11 +125,7 @@ impl RetrievalClient {
     }
 
     /// Search across all library chunks regardless of project.
-    pub async fn search_libraries(
-        &self,
-        query: &str,
-        opts: SearchOpts,
-    ) -> Result<Vec<Hit>> {
+    pub async fn search_libraries(&self, query: &str, opts: SearchOpts) -> Result<Vec<Hit>> {
         self.search_in("library_chunks", "*", query, opts).await
     }
 }
