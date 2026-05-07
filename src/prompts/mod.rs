@@ -321,6 +321,7 @@ mod tests {
         assert!(load_prompt("onboarding_prompt.md").contains("## Common Rationalizations"));
     }
 
+    #[test]
     fn workspace_onboarding_prompt_contains_key_sections() {
         let prompt = load_prompt("workspace_onboarding_prompt.md");
         assert!(prompt.contains("# WORKSPACE MODE"));
