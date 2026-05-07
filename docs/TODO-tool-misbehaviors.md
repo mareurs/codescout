@@ -121,7 +121,17 @@ These are fixed in the happy path but still have edge cases worth knowing about.
 - **Broader implication:** any code that checks `RecoverableError` content via `anyhow::Error::to_string()` or `Display` only sees the message. Tests for hint/warning/must_follow content must either downcast (`err.downcast_ref::<RecoverableError>()` + `.hint()`) or put the asserted text in the message instead.
 - **Status:** Fixed by convention (2026-05-02) — no `Display` change made; document pattern for future test authors.
 
-## Archive
+### BUG-053 — `semantic_search` MCP server panics on UTF-8 multi-byte char near byte 47 of result preview
+
+**Symptom:** Calling `semantic_search` via MCP returns `RpcError` / "MCP server closed stdout"; subprocess exits via SIGABRT mid-tool-call; subsequent calls fail with broken pipe.
+
+**Trigger:** A returned chunk's first line contains a non-ASCII char (`→`, `—`, smart quotes, accented letters) crossing byte index 47.
+
+**Root cause:** `src/tools/semantic/semantic_search.rs:491` did `&first_line[..47]` — a byte-index slice that panics if byte 47 is mid-UTF-8 sequence.
+
+**Fix (2026-05-07):** Use `is_char_boundary` to floor the slice end to the nearest valid char boundary; also count chars (not bytes) for the >50 threshold.
+
+**Lessons:** Any tool that builds string previews via byte-slice `&s[..N]` is a panic waiting to happen on UTF-8. Audit other `[..N]` usages in formatter code paths.## Archive
 
 Fixed / superseded entries: `docs/archive/bug-reports/`.
 

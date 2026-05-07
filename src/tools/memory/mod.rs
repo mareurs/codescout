@@ -805,8 +805,12 @@ impl Tool for Memory {
                         } else {
                             // Exploring mode: first line only, max 50 chars
                             let first_line = r.content.lines().next().unwrap_or("").trim();
-                            if first_line.len() > 50 {
-                                format!("{}...", &first_line[..47])
+                            if first_line.chars().count() > 50 {
+                                let mut end = 47.min(first_line.len());
+                                while !first_line.is_char_boundary(end) {
+                                    end -= 1;
+                                }
+                                format!("{}...", &first_line[..end])
                             } else {
                                 first_line.to_string()
                             }

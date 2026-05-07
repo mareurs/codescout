@@ -806,7 +806,9 @@ async fn semantic_search_uses_scope_for_library_search() {
                     || msg.contains("embed")
                     || msg.contains("project")
                     || msg.contains("not registered")
-                    || msg.contains("registered"),
+                    || msg.contains("registered")
+                    || msg.contains("hybrid_query")
+                    || msg.contains("retrieval stack"),
                 "unexpected error (not embedder or registry-related): {msg}"
             );
         }

@@ -110,9 +110,12 @@ impl Tool for SemanticSearch {
         let guard = OutputGuard::from_input(&input);
 
         // Stack backend routing
-        let backend = std::env::var("CODESCOUT_RETRIEVAL_BACKEND")
-            .unwrap_or_else(|_| "legacy".into());
+        let backend =
+            std::env::var("CODESCOUT_RETRIEVAL_BACKEND").unwrap_or_else(|_| "stack".into());
         if backend == "stack" {
+            if let Some(p) = ctx.progress.as_ref() {
+                p.report_text("loading embedding model").await;
+            }
             let project_id = {
                 let inner = ctx.agent.inner.read().await;
                 let p = inner.active_project().ok_or_else(|| {
@@ -123,30 +126,43 @@ impl Tool for SemanticSearch {
                 })?;
                 p.config.project.name.clone()
             };
-            let client = crate::retrieval::client::RetrievalClient::from_env().await
-                .map_err(|e| crate::tools::RecoverableError::with_hint(
-                    format!("retrieval stack offline: {e}"),
-                    "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack.",
-                ))?;
+            let client = crate::retrieval::client::RetrievalClient::from_env()
+                .await
+                .map_err(|e| {
+                    crate::tools::RecoverableError::with_hint(
+                        format!("retrieval stack offline: {e}"),
+                        "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack.",
+                    )
+                })?;
             let opts = crate::retrieval::search::SearchOpts {
                 limit,
                 overfetch: limit * 2,
                 rerank: true,
             };
-            let hits = client.search_code(&project_id, query, opts).await
-                .map_err(|e| crate::tools::RecoverableError::with_hint(
-                    format!("stack search failed: {e}"),
-                    "Check the retrieval stack is running: `./scripts/retrieval-stack.sh ps`",
-                ))?;
-            let result_items: Vec<serde_json::Value> = hits.iter().map(|h| {
-                format_search_result_item(
-                    &h.file_path,
-                    h.start_line as usize,
-                    h.end_line as usize,
-                    "stack",
-                    h.content.clone(),
-                )
-            }).collect();
+            if let Some(p) = ctx.progress.as_ref() {
+                p.report_text("searching").await;
+            }
+            let hits = client
+                .search_code(&project_id, query, opts)
+                .await
+                .map_err(|e| {
+                    crate::tools::RecoverableError::with_hint(
+                        format!("stack search failed: {e}"),
+                        "Check the retrieval stack is running: `./scripts/retrieval-stack.sh ps`",
+                    )
+                })?;
+            let result_items: Vec<serde_json::Value> = hits
+                .iter()
+                .map(|h| {
+                    format_search_result_item(
+                        &h.file_path,
+                        h.start_line as usize,
+                        h.end_line as usize,
+                        "stack",
+                        h.content.clone(),
+                    )
+                })
+                .collect();
             let total = result_items.len();
             return Ok(serde_json::json!({ "results": result_items, "total": total }));
         }
@@ -382,8 +398,12 @@ impl Tool for SemanticSearch {
                 mr.content.clone()
             } else {
                 let first_line = mr.content.lines().next().unwrap_or("").trim();
-                if first_line.len() > 50 {
-                    format!("{}...", &first_line[..47])
+                if first_line.chars().count() > 50 {
+                    let mut end = 47.min(first_line.len());
+                    while !first_line.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    format!("{}...", &first_line[..end])
                 } else {
                     first_line.to_string()
                 }
@@ -487,8 +507,12 @@ pub(crate) fn format_semantic_search(val: &Value) -> String {
             // Content preview: first line, truncated to ~50 chars
             let content = r["content"].as_str().unwrap_or("");
             let first_line = content.lines().next().unwrap_or("").trim();
-            let preview = if first_line.len() > 50 {
-                format!("{}...", &first_line[..47])
+            let preview = if first_line.chars().count() > 50 {
+                let mut end = 47.min(first_line.len());
+                while !first_line.is_char_boundary(end) {
+                    end -= 1;
+                }
+                format!("{}...", &first_line[..end])
             } else {
                 first_line.to_string()
             };
