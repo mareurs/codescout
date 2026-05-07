@@ -798,18 +798,31 @@ mod tests {
         let status = ProjectStatus {
             name: "x".into(),
             path: "/tmp/x".into(),
-            languages: vec!["rust".into(), "python".into(), "typescript".into(),
-                             "kotlin".into(), "go".into()],
+            languages: vec![
+                "rust".into(),
+                "python".into(),
+                "typescript".into(),
+                "kotlin".into(),
+                "go".into(),
+            ],
             memories: vec![],
             has_index: false,
             system_prompt: None,
             workspace: None,
         };
         let rendered = build_server_instructions(Some(&status));
-        for dead in ["find_symbol", "list_symbols", "replace_symbol",
-                      "insert_code", "rename_symbol", "search_pattern"] {
-            assert!(!rendered.contains(dead),
-                "rendered server instructions contains deprecated tool name: {dead}");
+        for dead in [
+            "find_symbol",
+            "list_symbols",
+            "replace_symbol",
+            "insert_code",
+            "rename_symbol",
+            "search_pattern",
+        ] {
+            assert!(
+                !rendered.contains(dead),
+                "rendered server instructions contains deprecated tool name: {dead}"
+            );
         }
     }
 
@@ -820,5 +833,4 @@ mod tests {
         assert_eq!(count, 1,
             "### Symbol Navigation Patterns appears {count} times — LEAD_IN must not duplicate the section heading");
     }
-
 }

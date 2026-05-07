@@ -51,29 +51,38 @@ Then use in Claude Code — it will route all file/symbol/search operations thro
 > See the [Claude Code integration guide](docs/agents/claude-code.md) for details.
 
 > **Tip:** Install the [codescout-companion plugin](docs/manual/src/getting-started/companion-plugin.md) to automatically steer Claude toward codescout tools in every session — including subagents.
-## Retrieval Stack (experimental)
+## Retrieval Stack
 
-Codescout uses an external Docker Compose stack for semantic embedding and retrieval. Start it once before using `semantic_search`:
+codescout uses an external Docker Compose stack (Qdrant + TEI) for semantic embedding
+and hybrid retrieval. **Required for `semantic_search`** — start it once per machine:
 
 ```bash
 cp .env.example .env
-# Edit .env if you want the gpu profile (default: cpu)
+# Edit .env to choose embedder/profile (default: cpu, bge-small-en-v1.5)
 ./scripts/retrieval-stack.sh up
+cargo run --release --bin sync_project -- . codescout   # build the per-project index
 ```
 
 Wait ~2 min on first run for models to download. Subsequent starts are instant.
 
 | Service | Default URL | Purpose |
 |---|---|---|
-| Qdrant | http://127.0.0.1:6333 | Vector store |
-| Embedder | http://127.0.0.1:8080 | BGE-M3 dense + sparse embeddings |
-| Reranker | http://127.0.0.1:8081 | Qwen3 cross-encoder reranking |
+| Qdrant | http://127.0.0.1:6333 (HTTP), :6334 (gRPC) | Vector store |
+| Dense embedder | http://127.0.0.1:8081 | Code embeddings (CodeRankEmbed / bge-small / jina) |
+| Sparse embedder | http://127.0.0.1:8084 | SPLADE BM25-style sparse vectors |
+| Reranker | http://127.0.0.1:8083 | Cross-encoder reranking (optional) |
+
+Tuned defaults (Phase 5.5 chunk×model matrix) live in `.env.example`. Empirical record:
+[`docs/research/2026-05-06-retrieval-stack-benchmark.md`](docs/research/2026-05-06-retrieval-stack-benchmark.md).
 
 **Stop the stack:**
 ```bash
 ./scripts/retrieval-stack.sh down
 ```
 
+**Legacy fallback** (in-process sqlite-vec, no Docker): set
+`CODESCOUT_RETRIEVAL_BACKEND=legacy`. Lower quality (−4 pts on the benchmark suite),
+no external services.
 ## Agent integrations
 
 | Agent | Guide |

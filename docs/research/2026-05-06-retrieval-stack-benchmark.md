@@ -110,6 +110,11 @@ incremental updates.
 
 ---
 
+> **Status (updated 2026-05-07).** The Phase 5.1 verdict below — "stack does not yet beat legacy" —
+> is **superseded** by the Phase 5.5 chunk×model matrix at the bottom of this document.
+> Post-tuning ceiling is **30/60 vs legacy 26/60** (cr_c1200 @ bm25_boost=3.0, +15%).
+> Phase 6 has graduated the stack to default. Read the Phase 5.5 sections first; the
+> Phase 5.1 record below is preserved for the empirical history of how we got there.
 # Phase 5.5 — Chunk × Model Matrix (2026-05-07)
 
 After the v1 benchmark (stack 18/60 vs legacy 25/60 → revised legacy 26/60 with v2 TC suite),
