@@ -128,8 +128,7 @@ pub(crate) fn rank_workspace_languages(
     ranked.into_iter().take(max).map(|(k, _)| k).collect()
 }
 
-const LEAD_IN: &str = "### Symbol Navigation Patterns\n\
-\n\
+const LEAD_IN: &str = "\
 - **Hierarchical nav** — impl/class methods, all languages:\n\
   `symbols(name_path=\"MyStruct/my_method\", include_body=true)`\n\
 - **Kind filter + path scope:**\n\
@@ -311,7 +310,8 @@ mod tests {
     fn render_with_no_languages_emits_lead_in_and_generic() {
         let lists: Vec<Vec<String>> = vec![];
         let out = render_symbol_navigation_block(&lists);
-        assert!(out.contains("### Symbol Navigation Patterns"));
+        // LEAD_IN no longer contains the heading (server_instructions.md provides it)
+        assert!(out.contains("**Hierarchical nav**"));
         assert!(out.contains("### Generic Patterns (any language)"));
         // No per-language sections
         assert!(!out.contains("### Rust — Symbol Navigation"));

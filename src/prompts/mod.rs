@@ -792,4 +792,33 @@ mod tests {
         let result = build_server_instructions(Some(&status));
         assert!(result.contains("### Rust — Symbol Navigation"));
     }
+
+    #[test]
+    fn rendered_server_instructions_contains_no_deprecated_tool_names() {
+        let status = ProjectStatus {
+            name: "x".into(),
+            path: "/tmp/x".into(),
+            languages: vec!["rust".into(), "python".into(), "typescript".into(),
+                             "kotlin".into(), "go".into()],
+            memories: vec![],
+            has_index: false,
+            system_prompt: None,
+            workspace: None,
+        };
+        let rendered = build_server_instructions(Some(&status));
+        for dead in ["find_symbol", "list_symbols", "replace_symbol",
+                      "insert_code", "rename_symbol", "search_pattern"] {
+            assert!(!rendered.contains(dead),
+                "rendered server instructions contains deprecated tool name: {dead}");
+        }
+    }
+
+    #[test]
+    fn build_server_instructions_has_no_duplicate_symbol_nav_heading() {
+        let result = build_server_instructions(None);
+        let count = result.matches("### Symbol Navigation Patterns").count();
+        assert_eq!(count, 1,
+            "### Symbol Navigation Patterns appears {count} times — LEAD_IN must not duplicate the section heading");
+    }
+
 }
