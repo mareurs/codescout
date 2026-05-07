@@ -27,7 +27,8 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 TEST_CASES = [
-    # Tier 1: Direct Concept (1-5)
+    # Tier 1: Direct symbol/keyword lookup (1-5)
+    # Style: short keyword-dense queries matching real usage patterns
     {
         "id": "TC-01", "tier": 1,
         "query": "RecoverableError",
@@ -35,7 +36,7 @@ TEST_CASES = [
     },
     {
         "id": "TC-02", "tier": 1,
-        "query": "embedding model configuration",
+        "query": "CODESCOUT_EMBEDDER_URL prefix backend local remote ONNX",
         "expected": [
             "src/embed/mod.rs",
             "docs/manual/src/configuration/embeddings.md",
@@ -49,9 +50,9 @@ TEST_CASES = [
     },
     {
         "id": "TC-04", "tier": 1,
-        "query": "run_command shell execution",
+        "query": "run_command shell dangerous command output_id stderr",
         "expected": [
-            "src/tools/workflow.rs",
+            "src/tools/run_command/mod.rs",
             "docs/manual/src/concepts/shell-integration.md",
             "docs/manual/src/concepts/output-buffers.md",
         ],
@@ -61,34 +62,37 @@ TEST_CASES = [
         "query": "OutputGuard progressive disclosure capping",
         "expected": ["src/tools/output.rs", "docs/PROGRESSIVE_DISCOVERABILITY.md"],
     },
-    # Tier 2: Two-Concept Composition (6-12)
+    # Tier 2: Symbol + concept composition (6-12)
     {
         "id": "TC-06", "tier": 2,
-        "query": "how are tool calls recorded in the usage database",
+        "query": "tool_calls usage.db latency outcome session_id record",
         "expected": [
             "src/usage/db.rs",
             "src/usage/mod.rs",
-            "docs/plans/2026-04-02-usage-traceability-design.md",
+            "src/tools/usage.rs",
         ],
     },
     {
         "id": "TC-07", "tier": 2,
-        "query": "section boundary detection in markdown editing",
-        "expected": ["src/tools/markdown.rs", "src/tools/file_summary.rs"],
+        "query": "parse_all_headings compute_section_end heading boundary markdown",
+        "expected": [
+            "src/tools/markdown/edit_markdown.rs",
+            "src/tools/file_summary/file_summary.rs",
+        ],
     },
     {
         "id": "TC-08", "tier": 2,
-        "query": "dimension mismatch when switching embedding models",
+        "query": "embedding dimension mismatch vec0 schema migration",
         "expected": ["src/embed/index.rs", "src/embed/schema.rs"],
     },
     {
         "id": "TC-09", "tier": 2,
-        "query": "dangerous command detection and safety checks",
-        "expected": ["src/util/path_security.rs", "src/tools/workflow.rs"],
+        "query": "dangerous command detection deny block path_security run_command",
+        "expected": ["src/util/path_security.rs", "src/tools/run_command/mod.rs"],
     },
     {
         "id": "TC-10", "tier": 2,
-        "query": "how overflow hints guide the agent to narrow results",
+        "query": "OutputGuard overflow hint cap_items by_file narrow suggestion",
         "expected": [
             "src/tools/output.rs",
             "docs/PROGRESSIVE_DISCOVERABILITY.md",
@@ -97,63 +101,63 @@ TEST_CASES = [
     },
     {
         "id": "TC-11", "tier": 2,
-        "query": "renaming a symbol across all references in the codebase",
-        "expected": ["src/tools/symbol.rs", "src/lsp/ops.rs"],
+        "query": "rename_symbol workspace_edit textDocument LSP references sites",
+        "expected": ["src/tools/symbol/edit_code.rs", "src/lsp/ops.rs"],
     },
     {
         "id": "TC-12", "tier": 2,
-        "query": "how the embedding URL and model prefix determine which backend is used",
+        "query": "CODESCOUT_EMBEDDER_URL model_prefix local remote backend factory",
         "expected": [
             "src/embed/mod.rs",
             "docs/manual/src/configuration/embeddings.md",
         ],
     },
-    # Tier 3: Multi-Concept Cross-Cutting (13-17)
+    # Tier 3: Multi-symbol cross-cutting (13-17)
     {
         "id": "TC-13", "tier": 3,
-        "query": "what happens when an LSP server crashes mid-request and how does the circuit breaker recover",
+        "query": "LSP circuit breaker crash recovery restart client manager",
         "expected": ["src/lsp/client.rs", "src/lsp/manager.rs", "docs/manual/src/troubleshooting.md"],
     },
     {
         "id": "TC-14", "tier": 3,
-        "query": "how does the tool dispatch pipeline handle both recoverable errors and fatal failures differently",
+        "query": "RecoverableError anyhow bail call_content dispatch isError routing",
         "expected": ["src/tools/mod.rs", "src/server.rs", "src/usage/mod.rs"],
     },
     {
         "id": "TC-15", "tier": 3,
-        "query": "end-to-end force re-indexing flow including dimension migration and vec0 table recreation",
+        "query": "force_reindex vec0 recreate dimension migration build_index",
         "expected": ["src/embed/index.rs", "src/embed/mod.rs"],
     },
     {
         "id": "TC-16", "tier": 3,
-        "query": "how a semantic search query flows from input through embedding to KNN ranked results",
+        "query": "semantic_search embedding KNN vec0 ranked results query flow",
         "expected": [
-            "src/tools/semantic.rs",
+            "src/tools/semantic/semantic_search.rs",
             "src/embed/index.rs",
             "src/embed/mod.rs",
         ],
     },
     {
         "id": "TC-17", "tier": 3,
-        "query": "how does the companion plugin route native Read and Grep calls to codescout MCP tools",
+        "query": "companion plugin PreToolUse hook Read Grep block routing codescout",
         "expected": [
             "docs/manual/src/concepts/routing-plugin.md",
             "docs/manual/src/getting-started/companion-plugin.md",
         ],
     },
-    # Tier 4: Architectural Insight (18-20)
+    # Tier 4: Architectural insight (18-20)
     {
         "id": "TC-18", "tier": 4,
-        "query": "why heading detection in parse_all_headings and compute_section_end must use the same code block tracking",
+        "query": "parse_all_headings compute_section_end code_block tracking same path",
         "expected": [
-            "src/tools/markdown.rs",
-            "src/tools/file_summary.rs",
+            "src/tools/markdown/edit_markdown.rs",
+            "src/tools/file_summary/file_summary.rs",
             "docs/TODO-tool-misbehaviors.md",
         ],
     },
     {
         "id": "TC-19", "tier": 4,
-        "query": "relationship between project activation, LSP server lifecycle, and tool context wiring",
+        "query": "project activate LSP lifecycle ActiveProject tool_context server wiring",
         "expected": [
             "src/agent/mod.rs",
             "src/lsp/manager.rs",
@@ -162,11 +166,11 @@ TEST_CASES = [
     },
     {
         "id": "TC-20", "tier": 4,
-        "query": "how to keep the three prompt surfaces consistent when tools are renamed or behavior changes",
+        "query": "prompt_surfaces_reference_only_real_tools server_instructions onboarding consistency",
         "expected": [
             "src/prompts/server_instructions.md",
             "src/prompts/onboarding_prompt.md",
-            "src/tools/workflow.rs",
+            "src/server.rs",
         ],
     },
 ]
@@ -328,11 +332,25 @@ def main() -> None:
                         help="Path to codescout binary")
     parser.add_argument("--project-path", required=True,
                         help="Absolute path to the project to activate")
+    parser.add_argument("--tc-suite",
+                        help="Optional path to a JSON file with custom TCs (overrides built-in TEST_CASES). "
+                             "Each TC must have: id, query, expected_files (list); optional tier (default 1).")
     parser.add_argument("--limit", type=int, default=10,
                         help="Top-N results to retrieve per query (default: 10)")
     args = parser.parse_args()
 
     backend = os.environ.get("CODESCOUT_RETRIEVAL_BACKEND", "legacy")
+
+    test_cases = TEST_CASES
+    if args.tc_suite:
+        with open(args.tc_suite) as fh:
+            raw = json.load(fh)
+        test_cases = [
+            {"id": t["id"], "tier": t.get("tier", 1),
+             "query": t["query"], "expected": t["expected_files"]}
+            for t in raw
+        ]
+        print(f"[INFO] loaded {len(test_cases)} TCs from {args.tc_suite}", file=sys.stderr)
 
     env = os.environ.copy()
     proc = subprocess.Popen(
@@ -355,7 +373,7 @@ def main() -> None:
     tc_results = []
     latencies: list[float] = []
 
-    for tc in TEST_CASES:
+    for tc in test_cases:
         t0 = time.monotonic()
         try:
             top10 = client.semantic_search(tc["query"], limit=args.limit)
@@ -390,7 +408,7 @@ def main() -> None:
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "aggregate": {
             "total": aggregate_score,
-            "max": 60,
+            "max": len(test_cases) * 3,
             "p50_latency_ms": round(p50, 1),
             "p95_latency_ms": round(p95, 1),
         },

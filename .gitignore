@@ -35,3 +35,8 @@ tests/fixtures/*/.codescout/
 # Runtime / session files
 .codescout/cc_session_id
 .codescout/tantivy/
+
+# Benchmark artifacts (regenerated locally)
+/results-*.tsv
+/.codescout/crash.log
+/scripts/__pycache__/

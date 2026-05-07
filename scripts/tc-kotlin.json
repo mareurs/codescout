@@ -1,0 +1,303 @@
+[
+  {
+    "id": "K-01",
+    "query": "Stage1Lesson constructor build from subject scheduled lessons repository",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/solver/services/stage1/GanttLessonCreatorImpl.kt"
+    ],
+    "when": "2026-05-04 11:54:39",
+    "session_id": "576c6f6b-b4d3-4d23-ae70-82d6b630717e"
+  },
+  {
+    "id": "K-02",
+    "query": "scheduling config constraint weight storage database table solution",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/database/tables/ConstraintProfilesTable.kt",
+      "ktor-server/src/main/kotlin/edu/planner/solver/services/stage1/GanttLessonCreatorImpl.kt"
+    ],
+    "when": "2026-05-04 11:54:06",
+    "session_id": "576c6f6b-b4d3-4d23-ae70-82d6b630717e"
+  },
+  {
+    "id": "K-03",
+    "query": "Stage1ToStage2Converter Stage2Lesson minSessionDuration subject converter build",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/solver/constraints/stage1/hard",
+      "ktor-server/src/main/kotlin/edu/planner/database/tables/ConstraintProfilesTable.kt",
+      "ktor-server/src/main/kotlin/edu/planner/solver/services/stage1/GanttLessonCreatorImpl.kt"
+    ],
+    "when": "2026-05-04 11:53:13",
+    "session_id": "576c6f6b-b4d3-4d23-ae70-82d6b630717e"
+  },
+  {
+    "id": "K-04",
+    "query": "ConsecutivenessConstraints consecutive same subject lessons Stage2 hard",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/solver/constraints/stage2/hard/ConsecutivenessConstraints.kt",
+      "ktor-server/src/main/kotlin/edu/planner/solver/constraints/stage1/hard",
+      "ktor-server/src/main/kotlin/edu/planner/database/tables/ConstraintProfilesTable.kt",
+      "ktor-server/src/main/kotlin/edu/planner/solver/services/stage1/GanttLessonCreatorImpl.kt"
+    ],
+    "when": "2026-05-04 11:51:23",
+    "session_id": "576c6f6b-b4d3-4d23-ae70-82d6b630717e"
+  },
+  {
+    "id": "K-05",
+    "query": "minSessionDuration maxSessionDuration subject entity database column",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/database/tables/SubjectsTable.kt",
+      "ktor-server/src/main/kotlin/edu/planner/solver/models/stage1/WeekCapacity.kt"
+    ],
+    "when": "2026-05-04 11:19:05",
+    "session_id": "576c6f6b-b4d3-4d23-ae70-82d6b630717e"
+  },
+  {
+    "id": "K-06",
+    "query": "hour pattern consecutive blocks 2 3 4 hours lesson grouping constraint",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/solver/models/stage2/Stage2PatternMatching.kt",
+      "ktor-server/src/main/kotlin/edu/planner/solver/constraints/stage1",
+      "ktor-server/src/main/kotlin/edu/planner/solver/constraints/stage1/soft",
+      "ktor-server/src/main/kotlin/edu/planner",
+      "ktor-server/src/main/kotlin/edu/planner/database/tables/SubjectsTable.kt"
+    ],
+    "when": "2026-05-04 11:18:00",
+    "session_id": "576c6f6b-b4d3-4d23-ae70-82d6b630717e"
+  },
+  {
+    "id": "K-07",
+    "query": "Stage2Lesson data class fields timeslot",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/solver/models",
+      "ktor-server/src/main/kotlin/edu/planner/solver/models/stage2/Stage2Lesson.kt",
+      "ktor-server/src/test/kotlin/edu/planner/solver/services/PinnedLessonConverterGridAlignmentTest.kt"
+    ],
+    "when": "2026-05-04 10:35:58",
+    "session_id": "d06492da-6db8-4b1d-b372-0ca3064dce30"
+  },
+  {
+    "id": "K-08",
+    "query": "ScheduledLesson data class startTime durationHours scheduledDate pinReason",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/solver/models/stage2/TimeSlot.kt",
+      "ktor-server/src/main/kotlin/edu/planner/domain/models/ScheduledLesson.kt",
+      "ktor-server/src/main/kotlin/edu/planner/service/TeacherExceptionService.kt",
+      "ktor-server/src/main/kotlin/edu/planner/domain/models",
+      "ktor-server/src/main/kotlin/edu/planner/domain/models/StudentGroup.kt"
+    ],
+    "when": "2026-05-04 10:00:06",
+    "session_id": "d06492da-6db8-4b1d-b372-0ca3064dce30"
+  },
+  {
+    "id": "K-09",
+    "query": "SolverConfig schedulingConfig field dayStartTime grid",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/domain",
+      "ktor-server/src/main/kotlin/edu/planner/api/DependencyInjection.kt",
+      "ktor-server/src/main/kotlin/edu/planner/service/BackupService.kt"
+    ],
+    "when": "2026-05-04 09:36:06",
+    "session_id": "d06492da-6db8-4b1d-b372-0ca3064dce30"
+  },
+  {
+    "id": "K-10",
+    "query": "PipelineContext construction config solve trigger backup restore",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/solver/services/MonthOrchestrator.kt",
+      "ktor-server/src/main/kotlin/edu/planner/domain",
+      "ktor-server/src/main/kotlin/edu/planner/api/DependencyInjection.kt",
+      "ktor-server/src/main/kotlin/edu/planner/service/BackupService.kt"
+    ],
+    "when": "2026-05-04 09:36:00",
+    "session_id": "d06492da-6db8-4b1d-b372-0ca3064dce30"
+  },
+  {
+    "id": "K-11",
+    "query": "SchedulingConfigHolder get set refresh from calendar database",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/api/DependencyInjection.kt",
+      "ktor-server/src/main/kotlin/edu/planner/solver/services/MonthOrchestrator.kt",
+      "ktor-server/src/main/kotlin/edu/planner/domain",
+      "ktor-server/src/main/kotlin/edu/planner/service/BackupService.kt"
+    ],
+    "when": "2026-05-04 09:35:19",
+    "session_id": "d06492da-6db8-4b1d-b372-0ca3064dce30"
+  },
+  {
+    "id": "K-12",
+    "query": "SchedulingConfig constructor build from calendar dayStartTime slotsPerDay",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/service/CalendarService.kt",
+      "ktor-server/src/main/kotlin/edu/planner/solver/config/SchedulingConfig.kt",
+      "ktor-server/src/main/kotlin/edu/planner/api/DependencyInjection.kt",
+      "ktor-server/src/main/kotlin/edu/planner/solver/services/MonthOrchestrator.kt",
+      "ktor-server/src/main/kotlin/edu/planner/domain"
+    ],
+    "when": "2026-05-04 09:35:01",
+    "session_id": "d06492da-6db8-4b1d-b372-0ca3064dce30"
+  },
+  {
+    "id": "K-13",
+    "query": "pinned lesson slot index assignment pre-pin before solve",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/solver/services/PinnedLessonConverter.kt",
+      "ktor-server/src/main/kotlin/edu/planner/solver/models/stage2/Stage2Lesson.kt",
+      "ktor-server/src/main/kotlin/edu/planner/solver/config/SchedulingConfig.kt",
+      "ktor-server/src/main/kotlin/edu/planner/service/CalendarService.kt",
+      "ktor-server/src/main/kotlin/edu/planner/api/DependencyInjection.kt"
+    ],
+    "when": "2026-05-04 09:34:11",
+    "session_id": "d06492da-6db8-4b1d-b372-0ca3064dce30"
+  },
+  {
+    "id": "K-14",
+    "query": "SchedulingConfig grid timeslot generation slots",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/solver/config/TimeSlotGrid.kt",
+      "ktor-server/src/main/kotlin/edu/planner/solver/config/SchedulingConfig.kt",
+      "@tool_f255de3b",
+      "ktor-server/src/main/kotlin/edu/planner/solver/pipeline/SolverPipeline.kt",
+      "ktor-server/src/main/kotlin/edu/planner/solver/pipeline/steps/Stage1SolverStep.kt"
+    ],
+    "when": "2026-05-04 09:33:28",
+    "session_id": "d06492da-6db8-4b1d-b372-0ca3064dce30"
+  },
+  {
+    "id": "K-15",
+    "query": "school external id name identifier model domain",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner",
+      "docs/superpowers/plans/2026-04-08-school-switching.md",
+      "ktor-server/src/main/kotlin/edu/planner/solver/config/SchedulingConfig.kt",
+      "use-school.sh"
+    ],
+    "when": "2026-05-04 09:20:01",
+    "session_id": "088eb65d-ba4e-4059-a279-b0fb7737fa73"
+  },
+  {
+    "id": "K-16",
+    "query": "admin user school association repository lookup",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/repository",
+      "ktor-server/src/main/kotlin/edu/planner/repository/UserRepository.kt",
+      "ktor-server/src/main/kotlin/edu/planner",
+      "docs/superpowers/plans/2026-04-08-school-switching.md",
+      "ktor-server/src/main/kotlin/edu/planner/solver/config/SchedulingConfig.kt"
+    ],
+    "when": "2026-05-04 09:19:53",
+    "session_id": "088eb65d-ba4e-4059-a279-b0fb7737fa73"
+  },
+  {
+    "id": "K-17",
+    "query": "JWT principal claims school institution tenant",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/api/Auth.kt",
+      "ktor-server/src/main/kotlin/edu/planner/repository",
+      "ktor-server/src/main/kotlin/edu/planner/repository/UserRepository.kt",
+      "ktor-server/src/main/kotlin/edu/planner",
+      "docs/superpowers/plans/2026-04-08-school-switching.md"
+    ],
+    "when": "2026-05-04 09:19:20",
+    "session_id": "088eb65d-ba4e-4059-a279-b0fb7737fa73"
+  },
+  {
+    "id": "K-18",
+    "query": "backup list endpoint route",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/api/routes/admin/BackupRoutes.kt",
+      "ktor-server/src/main/kotlin/edu/planner/service/BackupService.kt"
+    ],
+    "when": "2026-05-04 09:12:06",
+    "session_id": "088eb65d-ba4e-4059-a279-b0fb7737fa73"
+  },
+  {
+    "id": "K-19",
+    "query": "Stage2Lesson isStage isPinned set stage lesson pinned",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/solver/services/PinnedLessonConverter.kt",
+      "@tool_edc05758",
+      "ktor-server/src/main/kotlin/edu/planner/solver/constraints/stage2",
+      "ktor-server/src/main/kotlin",
+      "ktor-server/src/main/kotlin/edu/planner/solver/constraints/stage1/Stage1ConstraintProvider.kt"
+    ],
+    "when": "2026-05-03 12:11:36",
+    "session_id": "83179a74-9e33-48dd-a6df-3db16d879b52"
+  },
+  {
+    "id": "K-20",
+    "query": "lesson builder DSL asManual assignedTo duration default test helpers",
+    "expected_files": [
+      "ktor-server/src/test/kotlin/edu/planner/solver/services/Stage1TestDataBuilder.kt",
+      "ktor-server/src/main/kotlin/edu/planner/solver/constraints/stage1/hard",
+      "ktor-server/src/main/kotlin/edu/planner/solver/constraints/stage1/hard/H13CalendarBoundaryConstraint.kt",
+      "ktor-server/src/main/kotlin/edu/planner/solver/constraints/stage2/hard/SchedulingPolicyConstraints.kt"
+    ],
+    "when": "2026-05-03 12:05:26",
+    "session_id": "83179a74-9e33-48dd-a6df-3db16d879b52"
+  },
+  {
+    "id": "K-21",
+    "query": "StudentGroupTeacherAvailabilityUnion constraint weight configuration",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/solver",
+      "ktor-server/src/main/kotlin/edu/planner/solver/config/Stage1ConstraintConfiguration.kt",
+      "ktor-server/src/test/kotlin/edu/planner/solver/services/Stage1TestDataBuilder.kt",
+      "ktor-server/src/main/kotlin/edu/planner/solver/constraints/stage1/hard",
+      "ktor-server/src/main/kotlin/edu/planner/solver/constraints/stage1/hard/H13CalendarBoundaryConstraint.kt"
+    ],
+    "when": "2026-05-03 12:05:05",
+    "session_id": "83179a74-9e33-48dd-a6df-3db16d879b52"
+  },
+  {
+    "id": "K-22",
+    "query": "H10 daily capacity constraint penalizeConfigurable weight",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/solver/constraints/stage1/hard",
+      "ktor-server/src/main/kotlin",
+      "ktor-server/src/main/kotlin/edu/planner/solver/config/ManualLessonPolicy.kt",
+      "ktor-server/src/test/kotlin/edu/planner/solver/constraints/stage1/H13StudentGroupCalendarTest.kt",
+      "ktor-server/src/main/kotlin/edu/planner/solver"
+    ],
+    "when": "2026-05-03 12:04:27",
+    "session_id": "83179a74-9e33-48dd-a6df-3db16d879b52"
+  },
+  {
+    "id": "K-23",
+    "query": "Stage1Lesson isStage isManual field definition",
+    "expected_files": [
+      "ktor-server/src/test/kotlin/edu/planner/solver/services/Stage1TestDataBuilder.kt",
+      "ktor-server/src/main/kotlin/edu/planner/solver/models/stage1/Stage1Lesson.kt",
+      "ktor-server/src/test/kotlin/edu/planner/solver/constraints/stage1/H13StudentGroupCalendarTest.kt",
+      "ktor-server/src/main/kotlin/edu/planner/solver/constraints/stage1/hard/H13CalendarBoundaryConstraint.kt",
+      "ktor-server/build/test-results/solverTest/TEST-edu.planner.solver.constraints.stage1.H13StudentGroupCalendarTest.xml"
+    ],
+    "when": "2026-05-03 11:59:26",
+    "session_id": "83179a74-9e33-48dd-a6df-3db16d879b52"
+  },
+  {
+    "id": "K-24",
+    "query": "isWithinDateBounds StudentGroupCalendar",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/domain/models/Calendar.kt",
+      "ktor-server/src/main/kotlin",
+      "@tool_edb50a47",
+      "ktor-server/src/main/kotlin/edu/planner/solver/models/stage1",
+      "ktor-server/src/main/kotlin/edu/planner/solver/config/ManualLessonPolicy.kt"
+    ],
+    "when": "2026-05-03 11:58:48",
+    "session_id": "83179a74-9e33-48dd-a6df-3db16d879b52"
+  },
+  {
+    "id": "K-25",
+    "query": "isStage isManual Stage1Lesson lesson flags",
+    "expected_files": [
+      "ktor-server/src/main/kotlin/edu/planner/domain/models/Calendar.kt",
+      "ktor-server/src/main/kotlin",
+      "@tool_edb50a47",
+      "ktor-server/src/main/kotlin/edu/planner/solver/models/stage1",
+      "ktor-server/src/main/kotlin/edu/planner/solver/config/ManualLessonPolicy.kt"
+    ],
+    "when": "2026-05-03 11:58:48",
+    "session_id": "83179a74-9e33-48dd-a6df-3db16d879b52"
+  }
+]
