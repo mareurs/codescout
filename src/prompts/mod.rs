@@ -5,6 +5,8 @@
 //! on project state.
 
 pub mod builders;
+#[allow(dead_code)]
+pub(crate) mod language_nav;
 
 /// Static server instructions — tool reference, workflow patterns, steering rules.
 pub const SERVER_INSTRUCTIONS: &str = include_str!("server_instructions.md");
