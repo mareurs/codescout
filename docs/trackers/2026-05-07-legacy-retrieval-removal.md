@@ -53,3 +53,7 @@ Treat this as the punch-list before `cargo rm src/embed/index.rs` becomes safe.
 - Spec: `docs/superpowers/specs/2026-05-06-retrieval-stack-design.md`
 - Empirical record: `docs/research/2026-05-06-retrieval-stack-benchmark.md`
 - Phase 6 commit baseline: `master @ 62a0d50`
+- L-02 follow-up (S-17): when L-01 deletes `src/embed/index.rs`, also flip
+  the two `run_command/tests.rs` callers (lines 2948, 3002) from
+  `crate::embed::index::hash_file` to `crate::memory::hash::hash_file`.
+  Re-export shim is the only thing keeping them green today.

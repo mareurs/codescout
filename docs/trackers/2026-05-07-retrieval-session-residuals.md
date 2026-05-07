@@ -109,12 +109,58 @@ stack only needs the regular `docker-compose.yml`. Either document
 `docker-compose.matrix.yml` as a benchmark-only file or move it under
 `scripts/bench/` so it's not picked up by `docker compose up` accidentally.
 
+### S-15 — `cargo clippy --tests -- -D warnings` fails on master (7 errors)
+
+`master` HEAD violates the CLAUDE.md "clippy clean before completion" gate.
+Errors are pre-existing — present before this session's L-02 commit and
+unrelated to the retrieval stack work. Breakdown:
+
+- **`src/tools/symbol/call_edges/cache.rs`** — 6× `cloned_ref_to_slice_refs`
+  (e.g. `cache.upsert(&[edge.clone()])` → suggested `std::slice::from_ref(&edge)`).
+  Likely surfaced by a clippy version bump on rust-1.94.0; the lint is recent.
+- **`src/lsp/ops.rs:75`** — `items after a test module` on
+  `mod call_hierarchy_trait_tests`. Structural — module ordering wrong.
+- **`tests/retrieval_unit.rs` and `tests/retrieval_integration.rs`** — 5×
+  `dead_code` on `#[test]`/`async fn` test functions. The functions miss
+  `#[test]` / `#[tokio::test]` attributes (or their gating cfg is off in default
+  build). Either restore the missing attributes or move the file behind a
+  `#[cfg(feature = "...")]` so the lint stops firing.
+
+All seven are mechanical fixes, single commit. Do this **before** any
+release tag — `cargo publish` runs clippy implicitly on some CI configs.
+
+### S-16 — Four uncommitted docs sit in working tree on master
+
+`git status` after L-02 reports four untracked artifacts that have lived
+outside version control across multiple sessions:
+
+- `docs/superpowers/plans/2026-05-07-onboarding-refactor.md`
+- `docs/superpowers/plans/2026-05-07-server-instructions-consolidation.md`
+- `docs/superpowers/specs/2026-05-07-onboarding-refactor-design.md`
+- `docs/trackers/retrieval-benchmark.md`
+
+Either commit them (if they are still load-bearing) or delete them (if they
+are scratch). They show up in `git status` on every session, increasing the
+chance one is accidentally `git add .`-ed without review. Audit + decide
+in a single triage pass.
+
+### S-17 — L-02 leaves a `pub use` re-export shim in `embed::index`
+
+To avoid touching the 4 in-file callers + 2 `run_command/tests.rs` callers
+that already deletes when L-01 lands, L-02 left
+`pub use crate::memory::hash::hash_file;` at the top of `src/embed/index.rs`.
+When L-01 actually deletes `src/embed/index.rs`, the two test sites in
+`src/tools/run_command/tests.rs` (lines 2948, 3002) that import via
+`crate::embed::index::hash_file` must be flipped to
+`crate::memory::hash::hash_file` in the same commit. Add a checklist note
+to L-01 in the legacy-removal tracker if not already there.
+
 ## Operational
 
-### S-13 — Local `master` is 62 commits ahead of `origin/master`
+### S-13 — Local `master` is 64 commits ahead of `origin/master`
 
-24 prior prompt commits + 35 retrieval commits + 3 Phase 7 commits. Single
-push moves them all. Worth eyeballing `git log --oneline origin/master..master`
+24 prior prompt commits + 35 retrieval commits + 3 Phase 7 commits +
+2 tracker/L-02 commits = 64. Worth eyeballing `git log --oneline origin/master..master`
 before push, especially the prompt-surface commits from earlier sessions
 that have not been individually reviewed in this session.
 
