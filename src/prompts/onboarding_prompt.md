@@ -30,6 +30,7 @@ These gates are non-negotiable. There are no exceptions.
 
 ---
 
+<!-- STABLE-HEADING: workspace_onboarding_prompt.md may reference this section by exact title. Do not rename without updating cross-references. -->
 ## Phase 0: Embedding Model Selection
 
 The `onboarding` tool has already written a recommended model to `.codescout/project.toml`
@@ -265,6 +266,11 @@ are always excluded from protection.
 
 ### Memories to Create
 
+Apply the **project-scope** sections of the included memory templates below. Write all 6 project-scope memories. Use the empty stub for `domain-glossary` and `gotchas` if nothing project-specific applies — do NOT skip them.
+
+For `system-prompt`, apply the `workspace-scope: system-prompt` section (single-project flow treats the project as its own workspace).
+
+{{include: memory-templates.md}}
 ### 1. `project-overview`
 
 **What:** Project purpose, tech stack, key dependencies, runtime requirements.
@@ -533,26 +539,30 @@ After confirming all 6 memories and the system prompt with the user, deliver thi
 
 ### Refresh CLAUDE.md
 
-Read `read_markdown("CLAUDE.md")` to see its heading structure.
+Compute the canonical memory table from what was written this run. Each row's "What's inside" cell is the first `## H2` of the memory body.
 
-Compare each section with the memories you just wrote. For sections that
-overlap with memory content, offer to replace the body with a memory reference:
-`See codescout memory 'architecture' (Key Patterns section).`
+Read existing `CLAUDE.md`. Locate `## codescout Memories` (or propose adding it). Generate a unified diff for the table block.
 
-**Preserve user-specific content:** personal preferences, code style rules,
-iron rules, git workflow specifics, private notes — anything not derivable
-from the codebase. Do NOT touch sections the user wrote for their own use.
+Ask the user **once**:
 
-**Add memory discovery hints** if CLAUDE.md doesn't already list available
-memory topics so future agents know they exist.
+```
+Proposed CLAUDE.md memory-table update:
 
-Present a summary of proposed changes and ask for approval before modifying.
+  [unified diff]
 
-Finally, inform the user:
+Apply? [y/N]
+```
 
-> **Onboarding complete.** To activate the new project configuration in this session,
-> restart Claude Code or run `/mcp` to reconnect the MCP server.
+On `y`: `edit_markdown(path: "CLAUDE.md", action: "replace", heading: "## codescout Memories", content: <new table>)`. On `N` or no answer: log `claude_md: skipped (user declined)` for the final summary. No follow-up questions.
+## Coverage Verification
 
+After writing all 6 project-scope memories, read each back:
+
+```
+memory(action: "read", topic: "<topic>")
+```
+
+Verify each is present (or matches the canonical empty stub for eligible topics). If any read fails or returns content shorter than the empty stub, retry the missing write up to 2 times. If still missing, abort with a clear error and do NOT proceed to CLAUDE.md refresh.
 ## Gathered Project Data
 
 The data below was collected automatically. Use it as your starting point, then explore with codescout tools to fill gaps.
@@ -577,6 +587,3 @@ project-specific learnings — use semantic memories:
 
 Semantic memories with `bucket: "preferences"` are automatically included in future
 onboarding prompts, so they persist across sessions without manual recall.
-
-<!-- TASK 5 will move this marker to the right location -->
-{{include: memory-templates.md}}
