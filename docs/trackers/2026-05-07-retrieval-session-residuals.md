@@ -109,7 +109,16 @@ stack only needs the regular `docker-compose.yml`. Either document
 `docker-compose.matrix.yml` as a benchmark-only file or move it under
 `scripts/bench/` so it's not picked up by `docker compose up` accidentally.
 
-### S-15 — `cargo clippy --tests -- -D warnings` fails on master (7 errors)
+### S-15 — `cargo clippy --tests -- -D warnings` fails on master (7 errors) ✅ DONE 2026-05-07 (`b483d48`)
+
+Cleared in three groups. Worth flagging: the test-attribute group (3 + 2)
+was a silent test-coverage bug — `config_from_env_*`, `client_from_env_*`,
+`embedder_returns_dense_and_sparse`, `embedder_dim_mismatch_errors` had
+been compiling but never running since the file was first added. One
+assertion (`model_dim == 1024`) was stale by ~3 model swaps; flipped to
+768 (CodeRankEmbed, current default).
+
+Original analysis kept for retrospective:
 
 `master` HEAD violates the CLAUDE.md "clippy clean before completion" gate.
 Errors are pre-existing — present before this session's L-02 commit and
