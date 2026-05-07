@@ -33,6 +33,20 @@ These gates are non-negotiable. There are no exceptions.
 <!-- STABLE-HEADING: workspace_onboarding_prompt.md may reference this section by exact title. Do not rename without updating cross-references. -->
 ## Phase 0: Embedding Model Selection
 
+> **Note on retrieval backends.** codescout supports two backends for `semantic_search`:
+> - **Stack (default)** — Qdrant + TEI hybrid retrieval. Started once per machine
+>   via `./scripts/retrieval-stack.sh up`; index built per project via
+>   `cargo run --release --bin sync_project -- <path> <project_id>`. Higher quality;
+>   requires Docker. The Phase 0 model selection below is **not consulted** when the
+>   stack is active — the stack is configured via env vars in `.env`
+>   (`CODESCOUT_EMBEDDER_URL`, `CODESCOUT_BM25_BOOST`, etc.). See
+>   `docs/research/2026-05-06-retrieval-stack-benchmark.md`.
+> - **Legacy** — in-process sqlite-vec + ONNX. No external services, lower quality.
+>   Activated by setting `CODESCOUT_RETRIEVAL_BACKEND=legacy`. The Phase 0/1 flow
+>   below applies to this path.
+>
+> If the user has the stack running, you can skip Phase 0/1 and proceed to Phase 2.
+
 The `onboarding` tool has already written a recommended model to `.codescout/project.toml`
 based on your system hardware. Present the options to the user now, before indexing starts.
 
