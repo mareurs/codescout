@@ -2106,9 +2106,6 @@ async fn run_command_buffer_only_within_limit_no_truncation_fields() {
     );
 }
 
-
-
-
 #[test]
 fn system_prompt_draft_omits_hints_for_unsupported_languages() {
     let langs = vec!["markdown".to_string()];
@@ -2118,7 +2115,6 @@ fn system_prompt_draft_omits_hints_for_unsupported_languages() {
         "should not have Language Navigation for markdown-only"
     );
 }
-
 
 #[test]
 fn system_prompt_draft_includes_language_patterns_hint() {

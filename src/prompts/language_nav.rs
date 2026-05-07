@@ -3,7 +3,6 @@
 
 use std::collections::BTreeMap;
 
-
 /// One language's symbol-navigation hint block.
 #[allow(dead_code)]
 pub(crate) struct NavBlock {
@@ -95,8 +94,6 @@ pub(crate) fn supported_languages() -> &'static [&'static str] {
     &["rust", "python", "typescript", "kotlin", "go", "csharp"]
 }
 
-
-
 /// Map an arbitrary language string to its canonical key (the one that
 /// appears in `supported_languages()`). Returns `None` for unsupported.
 fn canonical_key(lang: &str) -> Option<&'static str> {
@@ -154,9 +151,7 @@ const GENERIC: &str = "### Generic Patterns (any language)\n\
 - When the symbol's exact name is unknown, start with\n\
   `semantic_search(\"what it does\")` then drill down with `symbols(name_path=...)`.\n";
 
-pub(crate) fn render_symbol_navigation_block(
-    project_languages: &[Vec<String>],
-) -> String {
+pub(crate) fn render_symbol_navigation_block(project_languages: &[Vec<String>]) -> String {
     let ranked = rank_workspace_languages(project_languages, 2);
     let mut out = String::with_capacity(2048);
     out.push_str(LEAD_IN);
@@ -169,7 +164,6 @@ pub(crate) fn render_symbol_navigation_block(
     out.push_str(GENERIC);
     out
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -284,8 +278,11 @@ mod tests {
     #[test]
     fn rank_workspace_languages_caps_at_max() {
         let lists: Vec<Vec<String>> = vec![vec![
-            "rust".into(), "python".into(), "kotlin".into(),
-            "go".into(), "csharp".into(),
+            "rust".into(),
+            "python".into(),
+            "kotlin".into(),
+            "go".into(),
+            "csharp".into(),
         ]];
         let ranked = rank_workspace_languages(&lists, 2);
         assert_eq!(ranked.len(), 2);
@@ -333,33 +330,48 @@ mod tests {
     #[test]
     fn render_with_many_languages_caps_at_two() {
         let lists: Vec<Vec<String>> = vec![vec![
-            "rust".into(), "python".into(), "kotlin".into(),
-            "go".into(), "csharp".into(),
+            "rust".into(),
+            "python".into(),
+            "kotlin".into(),
+            "go".into(),
+            "csharp".into(),
         ]];
         let out = render_symbol_navigation_block(&lists);
-        let n_blocks = ["### Rust — Symbol Navigation",
-                         "### Python — Symbol Navigation",
-                         "### Kotlin / Java — Symbol Navigation",
-                         "### Go — Symbol Navigation",
-                         "### C# — Symbol Navigation"]
-            .iter()
-            .filter(|h| out.contains(*h))
-            .count();
+        let n_blocks = [
+            "### Rust — Symbol Navigation",
+            "### Python — Symbol Navigation",
+            "### Kotlin / Java — Symbol Navigation",
+            "### Go — Symbol Navigation",
+            "### C# — Symbol Navigation",
+        ]
+        .iter()
+        .filter(|h| out.contains(*h))
+        .count();
         assert_eq!(n_blocks, 2);
     }
 
     #[test]
     fn render_contains_no_deprecated_tool_names() {
         let lists: Vec<Vec<String>> = vec![vec![
-            "rust".into(), "python".into(), "typescript".into(),
-            "kotlin".into(), "go".into(),
+            "rust".into(),
+            "python".into(),
+            "typescript".into(),
+            "kotlin".into(),
+            "go".into(),
         ]];
         let out = render_symbol_navigation_block(&lists);
-        for dead in ["find_symbol", "list_symbols", "replace_symbol",
-                     "insert_code", "rename_symbol", "search_pattern"] {
-            assert!(!out.contains(dead),
-                "rendered block contains deprecated tool name: {dead}");
+        for dead in [
+            "find_symbol",
+            "list_symbols",
+            "replace_symbol",
+            "insert_code",
+            "rename_symbol",
+            "search_pattern",
+        ] {
+            assert!(
+                !out.contains(dead),
+                "rendered block contains deprecated tool name: {dead}"
+            );
         }
     }
-
 }

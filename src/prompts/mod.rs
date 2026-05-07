@@ -770,8 +770,10 @@ mod tests {
     #[test]
     fn build_server_instructions_substitutes_symbol_nav_token() {
         let result = build_server_instructions(None);
-        assert!(!result.contains("{{symbol_navigation_block}}"),
-            "token must be substituted in build_server_instructions output");
+        assert!(
+            !result.contains("{{symbol_navigation_block}}"),
+            "token must be substituted in build_server_instructions output"
+        );
         assert!(result.contains("### Symbol Navigation Patterns"));
         assert!(result.contains("### Generic Patterns (any language)"));
     }
@@ -790,5 +792,4 @@ mod tests {
         let result = build_server_instructions(Some(&status));
         assert!(result.contains("### Rust — Symbol Navigation"));
     }
-
 }
