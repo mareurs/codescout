@@ -264,239 +264,24 @@ The protected topics list is configured in `project.toml` under `[memory] protec
 Users can add custom topics. The programmatic memories (`onboarding`, `language-patterns`)
 are always excluded from protection.
 
-### Memories to Create
 
 Apply the **project-scope** sections of the included memory templates below. Write all 6 project-scope memories. Use the empty stub for `domain-glossary` and `gotchas` if nothing project-specific applies — do NOT skip them.
 
 For `system-prompt`, apply the `workspace-scope: system-prompt` section (single-project flow treats the project as its own workspace).
 
 {{include: memory-templates.md}}
-### 1. `project-overview`
 
-**What:** Project purpose, tech stack, key dependencies, runtime requirements.
-
-**Template:**
-```
-# [Project Name]
-
-## Purpose
-[1-2 sentences: what does this project do and who is it for?]
-
-## Tech Stack
-- **Language:** [lang] [version if known]
-- **Framework:** [framework] [version]
-- **Database:** [if any]
-- **Key deps:** [3-5 most important dependencies]
-
-## Runtime Requirements
-[What's needed to run: Node 20+, Java 21+, Docker, specific env vars, etc.]
-```
-
-**Anti-patterns:** Don't copy the README or CLAUDE.md. Don't list every dependency — just the ones not obvious from the build file. Don't include directory listings (CLAUDE.md already has the src/ tree). Focus on what's missing from those sources: runtime env requirements, non-obvious feature flags, external service dependencies.
-
----
-
-### 2. `architecture`
-
-**What:** Module structure, key abstractions with file locations, data flow, design patterns, entry points.
-
-**Template:**
-```
-# Architecture
-
-## Layer Structure
-[Main modules/layers and their responsibilities]
-[Include file paths: `src/services/` → business logic]
-
-## Key Abstractions
-[3-5 most important types/traits/interfaces]
-[Name + file path for each]
-
-## Data Flow
-[How a typical request flows through the system]
-[Entry point → layer 1 → layer 2 → output]
-
-## Design Patterns
-[Only patterns actually in use: DI, repository, event-driven, etc.]
-
-## Invariants
-[Hard rules — for each candidate ask: "what *concretely* breaks if this is ignored?"]
-[If the failure mode is vague, it belongs in Strong Defaults, not here]
-[Keep to ~5 entries max — if everything is an invariant, nothing is]
-
-| Rule | Why it exists |
-|---|---|
-| [rule] | [specific failure if broken] |
-
-## Strong Defaults
-[Preferred behaviors that CAN be overridden with deliberate reason]
-
-| Default | When it's okay to break it |
-|---|---|
-| [default behavior] | [specific condition that justifies breaking it] |
-```
-
-**Anti-patterns:** Don't repeat what CLAUDE.md's "Project Structure" or "Key Patterns" sections already say — they're loaded every session. Don't copy layer diagrams from `docs/ARCHITECTURE.md`; reference them instead (`see docs/ARCHITECTURE.md`). Focus on what's NOT in those docs: internal struct shapes, concrete data flow with actual function/method names, non-obvious wiring. Inline content here goes stale as code evolves — keep it minimal and specific.
-
-**Invariants / Strong Defaults:** Don't lift every rule from CLAUDE.md into Invariants — only the ones an agent would realistically violate. If there's no specific observable failure mode, it belongs in Strong Defaults. Every Strong Default must include its override condition — a default with no escape hatch is just an invariant written poorly.
-
----
-
-### 3. `conventions`
-
-**What:** Code style, naming conventions, error handling, testing patterns.
-
-**Template:**
-```
-# Conventions
-
-## Naming
-[Table: entity type → convention → example]
-
-## Patterns
-[Key patterns: error handling, DI, async, testing]
-[Short code examples where helpful]
-
-## Code Quality
-[Linter, formatter, type checker — exact commands]
-
-## Testing
-[Framework, organization, how to write a new test]
-```
-
-**Anti-patterns:** Don't repeat CLAUDE.md's "Design Principles" section — it's already loaded. Reference it: `"see CLAUDE.md § Design Principles"`. Write only conventions that are absent from CLAUDE.md: naming tables, code templates, file organization patterns discovered during exploration.
-
----
-
-### 4. `development-commands`
-
-**What:** Build, test, lint, format, run commands with gotchas. Includes pre-completion checklist.
-
-**Template:**
-```
-# Development Commands
-
-## Build & Run
-[command] — [what it does] [gotchas if any]
-
-## Test
-[command] — [scope]
-
-## Quality
-[lint, format, type-check commands]
-
-## Before Completing Work
-1. [Step 1: specific command]
-2. [Step 2: specific command]
-...
-```
-
-**Anti-patterns:** Don't repeat commands from CLAUDE.md's "Development Commands" section — write `"see CLAUDE.md"` and only add what's missing: feature flags, optional tooling, environment setup not covered there. Don't copy the pre-completion checklist verbatim; CLAUDE.md's "Always run…" line already covers it.
-
----
-
-### 5. `domain-glossary`
-
-**What:** Project-specific terms, abbreviations, concepts that aren't obvious from code alone.
-
-**Template:**
-```
-# Domain Glossary
-
-**[Term]** — [1-sentence definition]. [File/module where it lives if relevant.]
-**[Term]** — [1-sentence definition].
-```
-
-**What to include:** Domain model names with specific meaning, project-specific abbreviations, concepts requiring context.
-
-**Anti-patterns:** Don't define terms that CLAUDE.md already explains. Don't copy definitions from docs — link to them. **Drift risk is high here:** glossary entries that describe specific types or APIs go stale as the code evolves. Prefer: `"OutputGuard — see src/tools/output.rs and CLAUDE.md § Design Principles"` over a full description. Only write inline definitions for concepts that exist nowhere else.
-
----
-
-### 6. `gotchas`
-
-> **Note:** `gotchas` is protected by default. If it already exists and the
-> onboarding result shows it in `protected_memories`, follow the Protected
-> Memories flow above instead of overwriting.
-
-**What:** Known issues, common mistakes, things that trip people up.
-
-**Template:**
-```
-# Gotchas & Known Issues
-
-## [Category]
-- **Problem:** [what goes wrong]
-  **Fix:** [what to do instead]
-```
-
-**What to include:** Config pitfalls, framework traps, build/test gotchas, flaky tests.
-
-**Anti-patterns:** Don't invent problems that don't exist. Don't re-document issues already called out in CLAUDE.md. Gotchas here should be things discovered during exploration that aren't in CLAUDE.md. If nothing new was found, write: "No additional gotchas discovered during onboarding. Update as issues are found." **Note:** gotchas about specific tool behavior or config values are high drift-risk — add a note about where to verify them (e.g. the config file or source line) so they can be checked rather than blindly trusted.
-
----
-
-### 7. System Prompt — `.codescout/system-prompt.md`
-
-After creating the 6 memories above, synthesize a concise system prompt (15-30 lines)
-for this project. This prompt is injected into EVERY codescout session
-automatically — it must be short and high-value. Do NOT repeat information from the
-static tool guidance (how to use symbols, etc.) — that's already
-provided to you separately.
-
-**What to include:**
-- Entry points: where to start exploring this codebase (specific files + symbols)
-- Key abstractions: **3-5 entries max.** Each entry = **one line only**: `` `TypeName` (`path/to/file`) — one-line purpose ``. NO architecture narrative, NO state machine descriptions, NO config detail — those go in the `architecture` memory. The reader needs to know WHERE to find the type, not HOW it works.
-- Search tips: semantic_search queries that work well for THIS codebase, and terms to avoid (too broad, too generic)
-- Navigation strategy: recommended exploration order for a new task in this project
-- Project rules: conventions the AI should always follow that aren't captured by linters
-
-**What NOT to include (already covered elsewhere):**
-- How codescout tools work (the static tool guidance handles this)
-- Full architecture details (the `architecture` memory covers this)
-- Command lists, glossary, detailed conventions (memories cover these)
-- Anything over 30 lines (keep it concise — this is injected every session)
-- Natural-language commands to "read", "open", or "view" source files — future sessions will have `read_file` blocked on any file whose extension maps to a language in `ast::detect_language` (`.rs`, `.py`, `.ts`, `.tsx`, `.js`, `.jsx`, `.go`, `.java`, `.kt`, `.c`, `.cpp`, `.cs`, `.rb`, `.html`, `.css`, `.scss`, `.less`, `.php`, `.swift`, `.scala`, `.ex`, `.hs`, `.lua`, `.sh`, `.bash`). Instead always reference `symbols(name=..., include_body=true)`, `symbols`, `grep`, or `semantic_search`. Only `.md` (→ `read_markdown`) and data formats like `.json`, `.toml`, `.yaml` go through `read_file`.
-- Native host tool names (`Read`, `Grep`, `Glob`, `Edit`, `Bash`) — those are blocked in codescout-enabled sessions; only codescout MCP tools belong in recommendations.
-
-**Template:**
-```
-# [Project Name] — Code Explorer Guidance
-
-## Entry Points
-[Where to start. Specific files + symbols, not module descriptions.]
-
-## Key Abstractions
-[3-5 core types with file paths. What to understand first.]
-
-## Search Tips
-[Concrete query examples that work well. Terms to avoid.]
-
-## Navigation Strategy
-[Recommended exploration order for new tasks. Every step must name a
-codescout tool — never "read X" in natural language. Example:
-  1. `symbols("src/core")` — survey module structure
-  2. `symbols(name="Orchestrator", include_body=true)` — read core type end-to-end
-  3. `semantic_search("retry backoff")` — find cross-cutting logic
-  4. `grep(pattern="FOO_KEY", path="src/hooks")` — locate literal occurrences
-  5. `call_graph(symbol="handle_request", direction="callers")` — transitive blast radius or flow tracing
-  6. `read_markdown("docs/ARCHITECTURE.md")` — for markdown only
-]
-
-## Project Rules
-[Conventions the AI should always follow.]
-```
-
-**Process:** Present the draft to the user and ask: "Does this system prompt look
-right? I'll save it to `.codescout/system-prompt.md`." After confirmation, write
-the file using `create_file`. Inform the user they can edit it anytime.
-
-**Editing markdown files later:** Use `edit_markdown` to replace/insert/remove sections
-by heading, or for scoped string replacement within a section (action="edit").
-Use `read_markdown` to navigate markdown files by heading.
-
----
 ## After Everything Is Created
+
+## Coverage Verification
+
+After writing all 6 project-scope memories, read each back:
+
+```
+memory(action: "read", topic: "<topic>")
+```
+
+Verify each is present (or matches the canonical empty stub for eligible topics). If any read fails or returns content shorter than the empty stub, retry the missing write up to 2 times. If still missing, abort with a clear error and do NOT proceed to CLAUDE.md refresh.
 
 After confirming all 6 memories and the system prompt with the user, deliver this:
 
@@ -554,15 +339,6 @@ Apply? [y/N]
 ```
 
 On `y`: `edit_markdown(path: "CLAUDE.md", action: "replace", heading: "## codescout Memories", content: <new table>)`. On `N` or no answer: log `claude_md: skipped (user declined)` for the final summary. No follow-up questions.
-## Coverage Verification
-
-After writing all 6 project-scope memories, read each back:
-
-```
-memory(action: "read", topic: "<topic>")
-```
-
-Verify each is present (or matches the canonical empty stub for eligible topics). If any read fails or returns content shorter than the empty stub, retry the missing write up to 2 times. If still missing, abort with a clear error and do NOT proceed to CLAUDE.md refresh.
 ## Gathered Project Data
 
 The data below was collected automatically. Use it as your starting point, then explore with codescout tools to fill gaps.
