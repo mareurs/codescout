@@ -631,4 +631,40 @@ mod tests {
             "memory-templates.md must define the canonical empty stub"
         );
     }
+
+    #[test]
+    fn memory_templates_have_all_workspace_scope_sections() {
+        let templates = include_str!("memory-templates.md");
+        for topic in [
+            "architecture",
+            "conventions",
+            "development-commands",
+            "domain-glossary",
+            "gotchas",
+            "system-prompt",
+        ] {
+            let heading = format!("### workspace-scope: {topic}");
+            assert!(
+                templates.contains(&heading),
+                "memory-templates.md missing heading: {heading}"
+            );
+        }
+    }
+
+    #[test]
+    fn workspace_architecture_template_has_required_subsections() {
+        let templates = include_str!("memory-templates.md");
+        for sub in [
+            "Project Map",
+            "Cross-Project Dependencies",
+            "Shared Infrastructure",
+            "Top-Level Code Map",
+            "Generic Navigation",
+        ] {
+            assert!(
+                templates.contains(&format!("- `## {sub}`")),
+                "workspace architecture template missing required subsection: {sub}"
+            );
+        }
+    }
 }

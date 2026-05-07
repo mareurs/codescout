@@ -147,3 +147,131 @@ manifest:
 ```
 
 <!-- TASK 3 will append workspace-scope sections below this line -->
+
+## Workspace-Scope Memories
+
+Apply this set when synthesizing workspace-level memories from per-project
+data. Use `memory(action: "write", topic: "<topic>", content: "...")` —
+no `project_id` parameter.
+
+### workspace-scope: architecture
+
+Purpose: top-level map of the multi-project workspace. Absorbs root-layer
+content (dev scripts, docker-compose, generic navigation).
+
+Required subsections:
+- `## Project Map` — for each project: `<id>/ — <one-line purpose> · entry-point: <file>:<symbol> · activate: <command>`
+- `## Cross-Project Dependencies` — `<a> → <b> (<what is shared>)`
+- `## Shared Infrastructure` — CI workflows, deployment, shared tooling
+- `## Top-Level Code Map` — root-layer scripts, docker-compose, env templates, generated artifacts (one line per file)
+- `## Generic Navigation` — 5–8 bullets pointing at memories or files for: build/test/lint, common bugs, domain modeling, cross-project flows
+
+40–80 lines. This memory is the entry point for all workspace navigation.
+
+```
+---
+manifest:
+  topic: architecture
+  scope: workspace
+  required_subsections: [Project Map, Cross-Project Dependencies, Shared Infrastructure, Top-Level Code Map, Generic Navigation]
+```
+
+### workspace-scope: conventions
+
+Purpose: monorepo-wide conventions; per-project specifics live in each
+project's `conventions` memory.
+
+Required subsections:
+- `## Shared` — commit style, PR process, CI rules
+- `## Per-Project` — for each project: `see memory(project_id: "<id>", topic: "conventions")`
+
+15–30 lines.
+
+```
+---
+manifest:
+  topic: conventions
+  scope: workspace
+  required_subsections: [Shared, Per-Project]
+```
+
+### workspace-scope: development-commands
+
+Purpose: cross-project orchestration commands (whole-monorepo build/test,
+dev startup scripts, school switching). Per-project commands stay in each
+project's `development-commands`.
+
+Required subsections:
+- `## Whole-Repo` — build/test/lint commands that span projects
+- `## Dev Startup` — how to start the full stack locally
+- `## Per-Project` — for each project: `see memory(project_id: "<id>", topic: "development-commands")`
+
+15–40 lines.
+
+```
+---
+manifest:
+  topic: development-commands
+  scope: workspace
+  required_subsections: [Whole-Repo, Dev Startup, Per-Project]
+```
+
+### workspace-scope: domain-glossary
+
+Purpose: terms shared across two or more projects. Project-private terms
+stay in each project's `domain-glossary`.
+
+Required subsections:
+- `## Terms` — bullet list, `term — definition`
+
+If no cross-project terms exist, write the empty stub.
+
+```
+---
+manifest:
+  topic: domain-glossary
+  scope: workspace
+  required_subsections: [Terms]
+  empty_stub_eligible: true
+```
+
+### workspace-scope: gotchas
+
+Purpose: cross-project pitfalls, dependency mismatches, things that surprise
+contributors moving between projects.
+
+Required subsections:
+- `## Gotchas` — bullet list, each: situation + symptom + workaround
+
+If none, empty stub.
+
+```
+---
+manifest:
+  topic: gotchas
+  scope: workspace
+  required_subsections: [Gotchas]
+  empty_stub_eligible: true
+```
+
+### workspace-scope: system-prompt
+
+Purpose: the per-project system prompt rendered into `.codescout/system-prompt.md`.
+Generated from the prompt-builder logic, not authored directly.
+
+Required subsections:
+- `## Entry Points`
+- `## Key Abstractions`
+- `## Search Tips`
+- `## Navigation Strategy`
+- `## Project Rules`
+
+See `src/prompts/builders.rs::build_system_prompt_draft` for the generator.
+
+```
+---
+manifest:
+  topic: system-prompt
+  scope: workspace
+  required_subsections: [Entry Points, Key Abstractions, Search Tips, Navigation Strategy, Project Rules]
+```
