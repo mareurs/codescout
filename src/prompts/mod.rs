@@ -8,7 +8,8 @@ pub mod builders;
 pub mod source;
 
 /// Static server instructions — tool reference, workflow patterns, steering rules.
-pub const SERVER_INSTRUCTIONS: &str = include_str!("server_instructions.md");
+pub const SERVER_INSTRUCTIONS: &str =
+    include_str!(concat!(env!("OUT_DIR"), "/server_instructions.md"));
 
 /// Kotlin-specific known issues — only injected for projects with Kotlin.
 const KOTLIN_KNOWN_ISSUES: &str = "\n\n## Language Support — Known Issues\n\n\
@@ -124,7 +125,7 @@ pub struct ProjectStatus {
 }
 
 /// Onboarding prompt template — instructs Claude what to explore and what memories to create.
-pub const ONBOARDING_PROMPT: &str = include_str!("onboarding_prompt.md");
+pub const ONBOARDING_PROMPT: &str = include_str!(concat!(env!("OUT_DIR"), "/onboarding_prompt.md"));
 
 /// Workspace-specific onboarding prompt — appended when multiple projects are discovered.
 pub const WORKSPACE_ONBOARDING_PROMPT: &str = include_str!("workspace_onboarding_prompt.md");
