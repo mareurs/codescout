@@ -140,7 +140,37 @@ These are fixed in the happy path but still have edge cases worth knowing about.
 
 **Fix (2026-05-07):** Use `is_char_boundary` to floor the slice end to the nearest valid char boundary; also count chars (not bytes) for the >50 threshold.
 
-**Lessons:** Any tool that builds string previews via byte-slice `&s[..N]` is a panic waiting to happen on UTF-8. Audit other `[..N]` usages in formatter code paths.## Archive
+**Lessons:** Any tool that builds string previews via byte-slice `&s[..N]` is a panic waiting to happen on UTF-8. Audit other `[..N]` usages in formatter code paths.
+
+### BUG-058 — `artifact(create)` leaves orphan file on disk when DB insert fails
+
+(Originally filed as BUG-055 on a parallel branch; renumbered on merge to avoid ID collision with the `edit_code` doc-comment-stripping BUG-055.)
+
+**When:** `artifact(create)` is called but the `upsert` fails (e.g. `NOT NULL constraint failed: artifact.repo` during v6 pre-migration state).
+
+**Got:** File written to disk at the target path, no DB record created. Subsequent `artifact(create)` calls for the same path fail with `"path exists"` even though the artifact is not in the DB.
+
+**Probable cause:** `create.rs` calls `std::fs::write` before `artifact::upsert`. If `upsert` fails, the file is already on disk with no rollback.
+
+**Workaround:** Manually delete the orphan file, then retry `artifact(create)`.
+
+**Fix idea:** Wrap file write + upsert in a two-phase pattern: write to a temp path, upsert, then `fs::rename` to final path. Rename is atomic on POSIX.
+
+---
+
+### BUG-056 — `artifact(update, patch={params: ...})` silently drops `params`
+
+**When:** Caller follows the documented refresh pattern and passes `patch={params: {entries: [...]}}` to `artifact(update)`.
+
+**Got:** `params` is silently ignored — `UpdatePatch` struct has no `params` field, so serde drops it. The augmentation params remain unchanged. `commit_refresh=true` still fires, recording a refresh with stale params.
+
+**Probable cause:** `params` belongs to the `artifact_augmentation` table, not `artifact`. The `update` tool only patches the artifact row.
+
+**Workaround:** Use `artifact_augment(id, merge=true, params={...})` to update params, then call `artifact(update, commit_refresh=true)` separately to record the refresh timestamp.
+
+**Fix idea:** Either add `params` to `UpdatePatch` and route it to `augmentation::upsert_params`, or document the correct two-call pattern clearly in the tool description.
+
+## Archive
 
 Fixed / superseded entries: `docs/archive/bug-reports/`.
 
