@@ -41,7 +41,7 @@ ephemeral session state (don't persist).
 | Discover stale augmented artifacts            | `artifact_refresh` with `action=list_stale` |
 
 Example: `artifact {action: "find", kind: "tracker"}` — live trackers in the
-**current sub-project** (default scope). Pass `scope: "all"` to widen.
+**active project** (default scope). Pass `scope: "all"` to widen.
 ## Filter AST (one-liner)
 
 JSON tree. `{"and":[...]}` / `{"or":[...]}` / `{"not":{...}}` compose nodes.
@@ -53,36 +53,42 @@ Allowed fields: `id, kind, status, repo, title, topic, time_scope, tags, owners,
 ## Default scope (project, archived hidden)
 
 Listing tools (`artifact` with `action=find`, `librarian` with `action=context`)
-default to **the agent's current sub-project** and **hide archived/superseded**
-rows. The current project = nearest `.git` ancestor of cwd, mapped onto a
-workspace root.
+default to **the active project's path** and **hide archived/superseded**
+rows. The active project is whatever `workspace(action="activate", path=...)`
+has set on the host.
 
-Responses include a `scope` block (`{applied, root, subdir, umbrella, …}`) and
-`hints` listing how many extra rows live at wider scopes:
+Responses include a `scope` block (`{applied, abs_path, git_root, umbrella, …}`)
+and `hints` listing how many extra rows live at wider scopes:
 
 ```
 "hints": {
   "more_in_repo": 4,
   "more_in_workspace": 27,
   "hidden_archived": 3,
-  "expand": ["scope=\"repo\"", "scope=\"all\""]
+  "expand": ["scope=\"repo\"", "scope=\"all\"]"]
 }
 ```
 
-Widen by passing `scope: "repo" | "umbrella" | "all"`. Surface archived rows
-with `include_archived: true`. An explicit `status` filter wins over the
-archived-hide default.
+Widen by passing `scope: "repo" | "umbrella" | "all"`:
+
+- `repo` — artifacts under the active project's enclosing git repo (nearest
+  `.git` ancestor; falls back to project path).
+- `umbrella` — artifacts under any member of the umbrella the active project
+  belongs to (declared in `workspace.toml`).
+- `all` — pre-scoping workspace-wide.
+
+Surface archived rows with `include_archived: true`. An explicit `status`
+filter wins over the archived-hide default.
 
 **Umbrellas are user-declared in `workspace.toml`**:
 
 ```toml
 [[umbrella]]
 name = "my-platform"
-members = ["infra/svc-a", "infra/svc-b"]
+members = ["/abs/path/to/svc-a", "/abs/path/to/svc-b"]
 ```
 
 With no umbrellas declared, `scope: "umbrella"` errors — use `repo` or `all`.
-
 ## Gotchas
 
 - **No file watcher.** Files added/moved outside `artifact` `action=create`/`action=update` are

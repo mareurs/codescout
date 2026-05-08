@@ -19,7 +19,7 @@ use super::{parse_bool_param, Tool, ToolContext};
 /// Do NOT bump for `server_instructions` surface changes — it is loaded fresh
 /// at every MCP session start and has no cached copy.
 /// See CLAUDE.md § "Onboarding Version" for the full decision table.
-pub(crate) const ONBOARDING_VERSION: u32 = 23;
+pub(crate) const ONBOARDING_VERSION: u32 = 24;
 
 /// Returns true if the stored onboarding version is stale (needs refresh).
 /// `None` means pre-versioning project — always stale.

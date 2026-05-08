@@ -74,9 +74,9 @@ Equivalent to `filter={"and":[{"kind":{"eq":"tracker"}},{"status":{"eq":"active"
 - `prefix` → `LIKE 'v%'`.
 
 **Scope:**
-- `scope="project"` (default) — current sub-project only
-- `scope="repo"` — all projects in this repo
-- `scope="umbrella"` — all repos in configured umbrella (requires `[[umbrella]]` in workspace.toml)
+- `scope="project"` (default) — active project only (artifacts under its path)
+- `scope="repo"` — widen to the active project's enclosing git repo
+- `scope="umbrella"` — all projects in the umbrella the active project belongs to (requires `[[umbrella]]` in workspace.toml)
 
 ---
 
@@ -88,7 +88,7 @@ artifact(
   kind="...",          ← required
   title="...",         ← required
   rel_path="...",      ← required — e.g. "docs/plans/my-plan.md"
-  repo="...",          ← required — workspace root name (e.g. "code-explorer")
+  repo="...",          ← optional — workspace root name; if omitted, base path is derived from the active project
   body="...",          ← markdown body (optional but recommended)
   tags=[...],          ← optional
   owners=[...],        ← optional
@@ -222,7 +222,7 @@ This atomically renames the backing file **and** updates the catalog `rel_path`.
 | `artifact(action="update", patch={"rel_path":"..."})` | `artifact(action="move", id="<id>", new_rel_path="...")` — `rel_path` is not patchable via `update` |
 | `filter={"eq":{"field":"kind","value":"tracker"}}` | `filter={"kind":{"eq":"tracker"}}` — leaf is `{field:{op:value}}` not `{op:{field,value}}` |
 | `filter={"in":{"field":"title","value":[...]}}` | `filter={"title":{"in":[...]}}` — same inverted-format mistake |
-| `artifact(action="create")` without `repo` | Always pass `repo="<workspace-root-name>"` |
+| `artifact(action="create")` without active project AND without `repo` | Either activate a project via `workspace(action="activate", path=...)` OR pass `repo="<workspace-root-name>"` |
 | `scope="all"` without umbrella | Use `scope="repo"` to widen beyond current project |
 | Creating without searching first | `artifact(action="find", semantic="...")` — prevent duplicates |
 | Forgetting `commit_refresh=true` after writing a refreshed body | Pass it in the same `artifact(action="update")` call |
