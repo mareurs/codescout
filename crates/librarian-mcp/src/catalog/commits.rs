@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommitRow {
     pub hash: String,
-    pub repo: String,
+    pub git_root: String,
     pub authored_at: Option<i64>,
     pub subject: Option<String>,
     pub topo_order: Option<i64>,
@@ -17,7 +17,7 @@ pub fn upsert_many(cat: &Catalog, rows: &[CommitRow]) -> Result<usize> {
     let mut n = 0;
     {
         let mut stmt = tx.prepare(
-            "INSERT INTO commits (hash, repo, authored_at, subject, topo_order)
+            "INSERT INTO commits (hash, git_root, authored_at, subject, topo_order)
              VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(hash) DO UPDATE SET
                authored_at=excluded.authored_at,
@@ -27,7 +27,7 @@ pub fn upsert_many(cat: &Catalog, rows: &[CommitRow]) -> Result<usize> {
         for r in rows {
             stmt.execute(params![
                 r.hash,
-                r.repo,
+                r.git_root,
                 r.authored_at,
                 r.subject,
                 r.topo_order
@@ -39,14 +39,14 @@ pub fn upsert_many(cat: &Catalog, rows: &[CommitRow]) -> Result<usize> {
     Ok(n)
 }
 
-/// Topo distance between two commits in the same repo. Returns None if either
+/// Topo distance between two commits in the same git_root. Returns None if either
 /// commit is missing or `topo_order` is not yet computed.
-pub fn topo_distance(cat: &Catalog, repo: &str, a: &str, b: &str) -> Result<Option<i64>> {
+pub fn topo_distance(cat: &Catalog, git_root: &str, a: &str, b: &str) -> Result<Option<i64>> {
     let pair: (Option<i64>, Option<i64>) = cat.conn.query_row(
         "SELECT
-            (SELECT topo_order FROM commits WHERE repo=?1 AND hash=?2),
-            (SELECT topo_order FROM commits WHERE repo=?1 AND hash=?3)",
-        params![repo, a, b],
+            (SELECT topo_order FROM commits WHERE git_root=?1 AND hash=?2),
+            (SELECT topo_order FROM commits WHERE git_root=?1 AND hash=?3)",
+        params![git_root, a, b],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
     Ok(match pair {
@@ -65,21 +65,21 @@ mod tests {
         let rows = vec![
             CommitRow {
                 hash: "a".into(),
-                repo: "r".into(),
+                git_root: "/r".into(),
                 authored_at: Some(1),
                 subject: Some("a".into()),
                 topo_order: Some(0),
             },
             CommitRow {
                 hash: "b".into(),
-                repo: "r".into(),
+                git_root: "/r".into(),
                 authored_at: Some(2),
                 subject: Some("b".into()),
                 topo_order: Some(1),
             },
             CommitRow {
                 hash: "c".into(),
-                repo: "r".into(),
+                git_root: "/r".into(),
                 authored_at: Some(3),
                 subject: Some("c".into()),
                 topo_order: Some(2),
@@ -87,8 +87,8 @@ mod tests {
         ];
         let n = upsert_many(&cat, &rows).unwrap();
         assert_eq!(n, 3);
-        assert_eq!(topo_distance(&cat, "r", "a", "c").unwrap(), Some(2));
-        assert_eq!(topo_distance(&cat, "r", "a", "missing").unwrap(), None);
+        assert_eq!(topo_distance(&cat, "/r", "a", "c").unwrap(), Some(2));
+        assert_eq!(topo_distance(&cat, "/r", "a", "missing").unwrap(), None);
     }
 
     #[test]
@@ -96,7 +96,7 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         let row = CommitRow {
             hash: "a".into(),
-            repo: "r".into(),
+            git_root: "/r".into(),
             authored_at: Some(1),
             subject: Some("a".into()),
             topo_order: Some(0),
