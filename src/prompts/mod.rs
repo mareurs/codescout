@@ -148,6 +148,20 @@ pub const ONBOARDING_PROMPT: &str = include_str!(concat!(env!("OUT_DIR"), "/onbo
 /// Workspace-specific onboarding prompt — appended when multiple projects are discovered.
 pub const WORKSPACE_ONBOARDING_PROMPT: &str = include_str!("workspace_onboarding_prompt.md");
 
+pub const INCLUDE_MARKER: &str = "{{include: memory-templates.md}}";
+
+const MEMORY_TEMPLATES: &str = include_str!("memory-templates.md");
+
+/// Load a prompt with `{{include: memory-templates.md}}` markers substituted.
+pub fn load_prompt(name: &str) -> String {
+    let raw = match name {
+        "onboarding_prompt.md" => ONBOARDING_PROMPT,
+        "workspace_onboarding_prompt.md" => WORKSPACE_ONBOARDING_PROMPT,
+        other => panic!("unknown prompt: {other}"),
+    };
+    raw.replace(INCLUDE_MARKER, MEMORY_TEMPLATES)
+}
+
 /// Context for building the onboarding prompt.
 pub struct OnboardingContext<'a> {
     pub languages: &'a [String],
@@ -773,5 +787,19 @@ mod tests {
     fn prompt_surfaces_system_prompt_draft_empty_snapshot() {
         let draft = crate::prompts::builders::build_system_prompt_draft(&[], &[], None, None, &[]);
         check_or_update_snapshot("build_system_prompt_draft_empty.md", &draft);
+    }
+
+    #[test]
+    fn load_prompt_substitutes_include_marker() {
+        let single = load_prompt("onboarding_prompt.md");
+        let workspace = load_prompt("workspace_onboarding_prompt.md");
+        assert!(
+            !single.contains("{{include: memory-templates.md}}"),
+            "include marker should be substituted in single-project prompt"
+        );
+        assert!(
+            !workspace.contains("{{include: memory-templates.md}}"),
+            "include marker should be substituted in workspace prompt"
+        );
     }
 }

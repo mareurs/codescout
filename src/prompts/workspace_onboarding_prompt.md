@@ -150,3 +150,6 @@ When `onboarding(force: true)` is called:
 3. **Removed projects**: If a project directory no longer exists but has memories, inform the user and suggest `memory(action: "delete", project_id: "{id}", topic: "...")` for cleanup.
 
 4. **Workspace memory merge**: After subagent updates, re-run Phase 2 synthesis but merge changes rather than overwriting — note what changed.
+
+<!-- TASK 6 will move this marker to the right location -->
+{{include: memory-templates.md}}

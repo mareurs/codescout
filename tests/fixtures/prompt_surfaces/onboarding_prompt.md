@@ -577,3 +577,6 @@ project-specific learnings — use semantic memories:
 
 Semantic memories with `bucket: "preferences"` are automatically included in future
 onboarding prompts, so they persist across sessions without manual recall.
+
+<!-- TASK 5 will move this marker to the Memories to Create section -->
+{{include: memory-templates.md}}
