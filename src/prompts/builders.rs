@@ -3,7 +3,6 @@
 
 use std::path::Path;
 
-
 /// Returns curated anti-patterns and correct patterns for a language.
 /// Content sourced from docs/research/claude-language-patterns.md.
 pub(crate) fn language_patterns(lang: &str) -> Option<&'static str> {

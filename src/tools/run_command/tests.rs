@@ -2106,11 +2106,6 @@ async fn run_command_buffer_only_within_limit_no_truncation_fields() {
     );
 }
 
-
-
-
-
-
 #[test]
 fn system_prompt_draft_includes_language_patterns_hint() {
     let langs = vec!["rust".to_string(), "python".to_string()];

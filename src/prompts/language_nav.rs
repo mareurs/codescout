@@ -151,9 +151,7 @@ const GENERIC: &str = "### Generic Patterns (any language)\n\
 - When the symbol's exact name is unknown, start with\n\
   `semantic_search(\"what it does\")` then drill down with `symbols(name_path=...)`.\n";
 
-pub(crate) fn render_symbol_navigation_block(
-    project_languages: &[Vec<String>],
-) -> String {
+pub(crate) fn render_symbol_navigation_block(project_languages: &[Vec<String>]) -> String {
     let ranked = rank_workspace_languages(project_languages, 2);
     let mut out = String::with_capacity(2048);
     out.push_str(LEAD_IN);
@@ -173,8 +171,18 @@ mod tests {
 
     #[test]
     fn nav_block_returns_some_for_all_supported_languages() {
-        for lang in ["rust", "python", "typescript", "javascript", "tsx", "jsx",
-                      "kotlin", "java", "go", "csharp"] {
+        for lang in [
+            "rust",
+            "python",
+            "typescript",
+            "javascript",
+            "tsx",
+            "jsx",
+            "kotlin",
+            "java",
+            "go",
+            "csharp",
+        ] {
             assert!(nav_block(lang).is_some(), "missing nav_block for {lang}");
         }
     }
@@ -189,7 +197,10 @@ mod tests {
     #[test]
     fn supported_languages_lists_all_with_nav_blocks() {
         for lang in supported_languages() {
-            assert!(nav_block(lang).is_some(), "supported but no nav_block: {lang}");
+            assert!(
+                nav_block(lang).is_some(),
+                "supported but no nav_block: {lang}"
+            );
         }
     }
 
@@ -198,9 +209,13 @@ mod tests {
         for lang in supported_languages() {
             let block = nav_block(lang).unwrap();
             let md = block.markdown;
-            for marker in ["**`name_path` form:**", "**Find a method:**",
-                            "**List by kind:**", "**Language note:**",
-                            "**Before refactor:**"] {
+            for marker in [
+                "**`name_path` form:**",
+                "**Find a method:**",
+                "**List by kind:**",
+                "**Language note:**",
+                "**Before refactor:**",
+            ] {
                 assert!(md.contains(marker), "{} missing bullet: {marker}", lang);
             }
         }
@@ -208,15 +223,25 @@ mod tests {
 
     #[test]
     fn every_nav_block_uses_only_generic_example_names() {
-        let banned = ["MyStruct", "UserService", "AuthProvider", "UserRepository",
-                       "Server/handle_request", "UserService/create",
-                       "AuthProvider/login", "UserRepository/findById"];
+        let banned = [
+            "MyStruct",
+            "UserService",
+            "AuthProvider",
+            "UserRepository",
+            "Server/handle_request",
+            "UserService/create",
+            "AuthProvider/login",
+            "UserRepository/findById",
+        ];
         for lang in supported_languages() {
             let block = nav_block(lang).unwrap();
             let md = block.markdown;
             for b in banned {
-                assert!(!md.contains(b),
-                    "{} uses banned example name {b} (drift risk)", lang);
+                assert!(
+                    !md.contains(b),
+                    "{} uses banned example name {b} (drift risk)",
+                    lang
+                );
             }
         }
     }
@@ -250,8 +275,11 @@ mod tests {
     #[test]
     fn rank_workspace_languages_caps_at_max() {
         let lists: Vec<Vec<String>> = vec![vec![
-            "rust".into(), "python".into(), "kotlin".into(),
-            "go".into(), "csharp".into(),
+            "rust".into(),
+            "python".into(),
+            "kotlin".into(),
+            "go".into(),
+            "csharp".into(),
         ]];
         let ranked = rank_workspace_languages(&lists, 2);
         assert_eq!(ranked.len(), 2);
@@ -297,32 +325,48 @@ mod tests {
     #[test]
     fn render_with_many_languages_caps_at_two() {
         let lists: Vec<Vec<String>> = vec![vec![
-            "rust".into(), "python".into(), "kotlin".into(),
-            "go".into(), "csharp".into(),
+            "rust".into(),
+            "python".into(),
+            "kotlin".into(),
+            "go".into(),
+            "csharp".into(),
         ]];
         let out = render_symbol_navigation_block(&lists);
-        let n_blocks = ["### Rust — Symbol Navigation",
-                         "### Python — Symbol Navigation",
-                         "### Kotlin / Java — Symbol Navigation",
-                         "### Go — Symbol Navigation",
-                         "### C# — Symbol Navigation"]
-            .iter()
-            .filter(|h| out.contains(*h))
-            .count();
+        let n_blocks = [
+            "### Rust — Symbol Navigation",
+            "### Python — Symbol Navigation",
+            "### Kotlin / Java — Symbol Navigation",
+            "### Go — Symbol Navigation",
+            "### C# — Symbol Navigation",
+        ]
+        .iter()
+        .filter(|h| out.contains(*h))
+        .count();
         assert_eq!(n_blocks, 2);
     }
 
     #[test]
     fn render_contains_no_deprecated_tool_names() {
         let lists: Vec<Vec<String>> = vec![vec![
-            "rust".into(), "python".into(), "typescript".into(),
-            "kotlin".into(), "go".into(),
+            "rust".into(),
+            "python".into(),
+            "typescript".into(),
+            "kotlin".into(),
+            "go".into(),
         ]];
         let out = render_symbol_navigation_block(&lists);
-        for dead in ["find_symbol", "list_symbols", "replace_symbol",
-                     "insert_code", "rename_symbol", "search_pattern"] {
-            assert!(!out.contains(dead),
-                "rendered block contains deprecated tool name: {dead}");
+        for dead in [
+            "find_symbol",
+            "list_symbols",
+            "replace_symbol",
+            "insert_code",
+            "rename_symbol",
+            "search_pattern",
+        ] {
+            assert!(
+                !out.contains(dead),
+                "rendered block contains deprecated tool name: {dead}"
+            );
         }
     }
 }
