@@ -68,10 +68,12 @@ pub struct SqlFragment {
     pub params: Vec<rusqlite::types::Value>,
 }
 
+// rel_path is accepted as a filter alias for abs_path (schema v6 dropped
+// the separate rel_path column; abs_path is now the single path field).
+// repo was also dropped in v6 — use the `scope` param to narrow by repo.
 const ALLOWED_FIELDS: &[&str] = &[
     "kind",
     "status",
-    "repo",
     "topic",
     "time_scope",
     "updated_at",
@@ -127,6 +129,14 @@ fn compile_leaf(map: &serde_json::Map<String, Value>) -> Result<SqlFragment> {
         bail!("unknown field `{}`; allowed: {:?}", field, ALLOWED_FIELDS);
     }
 
+    // rel_path was dropped in schema v6; abs_path is the DB column now.
+    // Remap here so documented filter examples continue to work.
+    let sql_field = if field == "rel_path" {
+        "abs_path"
+    } else {
+        field.as_str()
+    };
+
     let ops = ops
         .as_object()
         .ok_or_else(|| anyhow::anyhow!("ops must be object"))?;
@@ -142,7 +152,7 @@ fn compile_leaf(map: &serde_json::Map<String, Value>) -> Result<SqlFragment> {
     if op == LeafOp::Contains && is_array_col {
         let lit = json_value_to_sql(value)?;
         return Ok(SqlFragment {
-            sql: format!("EXISTS (SELECT 1 FROM json_each({field}) WHERE value = ?)"),
+            sql: format!("EXISTS (SELECT 1 FROM json_each({sql_field}) WHERE value = ?)"),
             params: vec![lit],
         });
     }
@@ -163,7 +173,7 @@ fn compile_leaf(map: &serde_json::Map<String, Value>) -> Result<SqlFragment> {
                 .map(json_value_to_sql)
                 .collect::<Result<Vec<_>>>()?;
             Ok(SqlFragment {
-                sql: format!("{field} {} ({})", op.sql(), placeholders),
+                sql: format!("{sql_field} {} ({})", op.sql(), placeholders),
                 params,
             })
         }
@@ -172,7 +182,7 @@ fn compile_leaf(map: &serde_json::Map<String, Value>) -> Result<SqlFragment> {
                 .as_str()
                 .ok_or_else(|| anyhow::anyhow!("contains expects string"))?;
             Ok(SqlFragment {
-                sql: format!("{field} LIKE ?"),
+                sql: format!("{sql_field} LIKE ?"),
                 params: vec![rusqlite::types::Value::Text(format!("%{s}%"))],
             })
         }
@@ -180,19 +190,17 @@ fn compile_leaf(map: &serde_json::Map<String, Value>) -> Result<SqlFragment> {
             let s = value
                 .as_str()
                 .ok_or_else(|| anyhow::anyhow!("prefix expects string"))?;
-            // Escape SQL LIKE wildcards in the user-supplied prefix so a
-            // path containing `%` or `_` cannot widen the match.
             let escaped = s
                 .replace('\\', "\\\\")
                 .replace('%', "\\%")
                 .replace('_', "\\_");
             Ok(SqlFragment {
-                sql: format!("{field} LIKE ? ESCAPE '\\'"),
+                sql: format!("{sql_field} LIKE ? ESCAPE '\\'"),
                 params: vec![rusqlite::types::Value::Text(format!("{escaped}%"))],
             })
         }
         _ => Ok(SqlFragment {
-            sql: format!("{field} {} ?", op.sql()),
+            sql: format!("{sql_field} {} ?", op.sql()),
             params: vec![json_value_to_sql(value)?],
         }),
     }
@@ -305,6 +313,23 @@ mod tests {
     #[test]
     fn rejects_non_allowlisted_column() {
         let node = parse(json!({"sqlite_master": {"eq": "x"}}));
+        assert!(compile(&node).is_err());
+    }
+
+    #[test]
+    fn rel_path_filter_compiles_to_abs_path_sql() {
+        let node = parse(json!({"rel_path": {"contains": "docs/trackers"}}));
+        let f = compile(&node).unwrap();
+        assert_eq!(f.sql, "abs_path LIKE ?");
+        assert_eq!(
+            f.params,
+            vec![rusqlite::types::Value::Text("%docs/trackers%".into())]
+        );
+    }
+
+    #[test]
+    fn repo_filter_rejected() {
+        let node = parse(json!({"repo": {"eq": "codescout"}}));
         assert!(compile(&node).is_err());
     }
 }
