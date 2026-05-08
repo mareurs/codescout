@@ -802,4 +802,32 @@ mod tests {
             "include marker should be substituted in workspace prompt"
         );
     }
+
+    #[test]
+    fn memory_templates_have_all_project_scope_sections() {
+        let templates = include_str!("memory-templates.md");
+        for topic in [
+            "project-overview",
+            "architecture",
+            "conventions",
+            "development-commands",
+            "domain-glossary",
+            "gotchas",
+        ] {
+            let heading = format!("### project-scope: {topic}");
+            assert!(
+                templates.contains(&heading),
+                "memory-templates.md missing heading: {heading}"
+            );
+        }
+    }
+
+    #[test]
+    fn memory_templates_define_empty_stub() {
+        let templates = include_str!("memory-templates.md");
+        assert!(
+            templates.contains("EMPTY_STUB:"),
+            "memory-templates.md must define the canonical empty stub"
+        );
+    }
 }
