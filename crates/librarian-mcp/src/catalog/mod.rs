@@ -107,6 +107,40 @@ fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
     Ok(false)
 }
 
+fn catalog_needs_v6_migration(db_path: &Path) -> Result<bool> {
+    if !db_path.exists() {
+        return Ok(false);
+    }
+    let conn = Connection::open(db_path)
+        .with_context(|| format!("inspecting {} for v6 migration", db_path.display()))?;
+    // schema_version may not exist on a truly fresh DB; default to 0.
+    let version: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    Ok(version < 6)
+}
+
+fn backup_db(db_path: &Path) -> Result<()> {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let bak = db_path.with_extension(format!("db.pre-v6-bak.{ts}"));
+    std::fs::copy(db_path, &bak).with_context(|| {
+        format!(
+            "backing up catalog before v6 migration: {} -> {}",
+            db_path.display(),
+            bak.display()
+        )
+    })?;
+    tracing::info!("v6 migration backup created at {}", bak.display());
+    Ok(())
+}
+
 impl Catalog {
     pub fn open(db_path: &Path) -> Result<Self> {
         if let Some(parent) = db_path.parent() {
@@ -142,12 +176,19 @@ impl Catalog {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating catalog dir {}", parent.display()))?;
         }
+        let needs_v6 = catalog_needs_v6_migration(db_path)?;
+        if needs_v6 {
+            backup_db(db_path)?;
+        }
         init_sqlite_vec();
         let conn =
             Connection::open(db_path).with_context(|| format!("opening {}", db_path.display()))?;
         conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
         conn.execute_batch(SCHEMA_SQL).context("applying schema")?;
         run_migrations(&conn, Some(ws)).context("running migrations")?;
+        if needs_v6 {
+            migrate_v6::drop_legacy_and_stamp(&conn).context("dropping legacy columns")?;
+        }
         // Clean up any artifact_vec rows that lost their parent artifact row
         // (e.g. orphans from before the cascade-delete trigger was added).
         conn.execute_batch("DELETE FROM artifact_vec WHERE id NOT IN (SELECT id FROM artifact);")?;
@@ -197,7 +238,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 5);
+        assert_eq!(v, 6);
     }
 
     #[test]
@@ -232,7 +273,7 @@ mod tests {
             .conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 5);
+        assert_eq!(v, 6);
     }
 
     #[test]

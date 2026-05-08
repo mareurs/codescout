@@ -1,8 +1,7 @@
--- v1 schema
+-- Schema v6 (final shape — abs_path replaces repo/rel_path)
 CREATE TABLE IF NOT EXISTS artifact (
   id            TEXT PRIMARY KEY,
-  repo          TEXT,
-  rel_path      TEXT,
+  abs_path      TEXT NOT NULL UNIQUE,
   kind          TEXT NOT NULL,
   status        TEXT NOT NULL,
   title         TEXT,
@@ -15,8 +14,7 @@ CREATE TABLE IF NOT EXISTS artifact (
   updated_at    INTEGER NOT NULL,
   file_mtime    INTEGER NOT NULL,
   file_sha256   TEXT NOT NULL,
-  confidence    REAL NOT NULL DEFAULT 1.0,
-  abs_path      TEXT
+  confidence    REAL NOT NULL DEFAULT 1.0
 );
 
 CREATE TABLE IF NOT EXISTS artifact_link (
@@ -47,7 +45,6 @@ BEGIN
 END;
 
 CREATE INDEX IF NOT EXISTS idx_artifact_kind_status ON artifact(kind, status);
-CREATE INDEX IF NOT EXISTS idx_artifact_repo ON artifact(repo);
 CREATE INDEX IF NOT EXISTS idx_link_dst ON artifact_link(dst_id, rel);
 
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -77,13 +74,11 @@ CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind);
 
 CREATE TABLE IF NOT EXISTS commits (
   hash         TEXT PRIMARY KEY,
-  repo         TEXT NOT NULL,
+  git_root     TEXT NOT NULL,
   authored_at  INTEGER,
   subject      TEXT,
-  topo_order   INTEGER,
-  git_root     TEXT
+  topo_order   INTEGER
 );
-CREATE INDEX IF NOT EXISTS idx_commits_repo_topo ON commits(repo, topo_order);
 
 CREATE TABLE IF NOT EXISTS sources (
   id           TEXT PRIMARY KEY,
@@ -131,3 +126,6 @@ CREATE TABLE IF NOT EXISTS artifact_augmentation (
 CREATE INDEX IF NOT EXISTS idx_augmentation_artifact ON artifact_augmentation(artifact_id);
 
 INSERT OR IGNORE INTO schema_version (version) VALUES (3);
+
+-- v6: legacy repo/rel_path columns dropped; abs_path replaces them.
+INSERT OR IGNORE INTO schema_version (version) VALUES (6);

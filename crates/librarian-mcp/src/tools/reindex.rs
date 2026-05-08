@@ -18,7 +18,6 @@ struct Args {
 fn backfill_commits(
     catalog: &crate::catalog::Catalog,
     repo_path: &std::path::Path,
-    repo_name: &str,
 ) -> anyhow::Result<()> {
     use git2::{Repository, Sort};
 
@@ -29,12 +28,9 @@ fn backfill_commits(
             return Ok(());
         }
     };
-
     let mut walk = repo.revwalk()?;
-    // TOPOLOGICAL | REVERSE = parents before children = lowest topo_order for oldest commit
     walk.set_sorting(Sort::TOPOLOGICAL | Sort::REVERSE)?;
     if let Err(e) = walk.push_head() {
-        // Empty repo or detached HEAD with no commits
         tracing::debug!(
             "revwalk push_head failed for {}: {}",
             repo_path.display(),
@@ -43,6 +39,7 @@ fn backfill_commits(
         return Ok(());
     }
 
+    let git_root_str = repo_path.to_string_lossy().into_owned();
     let rows: anyhow::Result<Vec<_>> = walk
         .enumerate()
         .map(|(order, oid_result)| {
@@ -50,7 +47,7 @@ fn backfill_commits(
             let commit = repo.find_commit(oid)?;
             Ok(crate::catalog::commits::CommitRow {
                 hash: oid.to_string(),
-                repo: repo_name.to_string(),
+                git_root: git_root_str.clone(),
                 authored_at: Some(commit.time().seconds() * 1000),
                 subject: commit.summary().map(String::from),
                 topo_order: Some(order as i64),
@@ -184,12 +181,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
         {
             let cat = ctx.catalog.lock();
-            // Derive a repo name for git backfill from the path's last component.
-            let repo_name = abs_root
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            if let Err(e) = backfill_commits(&cat, abs_root, &repo_name) {
+            // Derive a git_root for git backfill from the abs_root path.
+            if let Err(e) = backfill_commits(&cat, abs_root) {
                 tracing::debug!("backfill_commits skipped for {}: {}", abs_root.display(), e);
             }
         }
@@ -491,8 +484,8 @@ mod tests {
             let cat = ctx.catalog.lock();
             cat.conn
                 .query_row(
-                    "SELECT COUNT(*) FROM commits WHERE repo=?1",
-                    rusqlite::params!["r1"],
+                    "SELECT COUNT(*) FROM commits WHERE git_root=?1",
+                    rusqlite::params![repo_path.to_string_lossy()],
                     |r| r.get(0),
                 )
                 .unwrap()
@@ -504,8 +497,8 @@ mod tests {
             let cat = ctx.catalog.lock();
             cat.conn
                 .query_row(
-                    "SELECT MAX(topo_order) FROM commits WHERE repo=?1",
-                    rusqlite::params!["r1"],
+                    "SELECT MAX(topo_order) FROM commits WHERE git_root=?1",
+                    rusqlite::params![repo_path.to_string_lossy()],
                     |r| r.get(0),
                 )
                 .unwrap()
@@ -517,8 +510,8 @@ mod tests {
             let cat = ctx.catalog.lock();
             cat.conn
                 .query_row(
-                    "SELECT MIN(topo_order) FROM commits WHERE repo=?1",
-                    rusqlite::params!["r1"],
+                    "SELECT MIN(topo_order) FROM commits WHERE git_root=?1",
+                    rusqlite::params![repo_path.to_string_lossy()],
                     |r| r.get(0),
                 )
                 .unwrap()

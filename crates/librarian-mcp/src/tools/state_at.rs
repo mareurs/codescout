@@ -342,7 +342,7 @@ mod tests {
                 &cat,
                 &[CommitRow {
                     hash: "abc".into(),
-                    repo: "r".into(),
+                    git_root: "/r".into(),
                     authored_at: Some(15),
                     subject: None,
                     topo_order: None,
