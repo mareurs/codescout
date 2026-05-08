@@ -19,6 +19,10 @@ struct UpdatePatch {
     topic: Option<String>,
     #[serde(default)]
     body: Option<String>,
+    /// RFC 7396 merge-patch applied to the augmentation params.
+    /// Requires an existing augmentation; ignored silently if none.
+    #[serde(default)]
+    params: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -122,6 +126,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         confidence: row.confidence,
     };
     artifact::upsert(&cat, &updated_row)?;
+
+    if let Some(params_patch) = &patch.params {
+        crate::catalog::augmentation::merge_params(&cat, &a.id, params_patch)?;
+    }
 
     let committed = if a.commit_refresh {
         Some(crate::catalog::augmentation::commit_refresh(&cat, &a.id)?)
@@ -541,6 +549,53 @@ mod tests {
         assert!(content.contains("entry 3"), "newest missing");
         assert!(content.contains("entry 2"), "second missing");
         assert!(!content.contains("entry 1"), "oldest should be dropped");
+    }
+
+    #[tokio::test]
+    async fn patch_params_updates_augmentation() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = seed_with_augment(&ctx, "p1.md", false, None).await;
+
+        call(
+            &ctx,
+            serde_json::json!({
+                "id": id,
+                "patch": {"params": {"entries": [{"id": "x", "title": "X"}]}}
+            }),
+        )
+        .await
+        .unwrap();
+
+        let cat = ctx.catalog.lock();
+        let aug = augmentation::get(&cat, &id).unwrap().unwrap();
+        let params: serde_json::Value = serde_json::from_str(&aug.params).unwrap();
+        assert_eq!(params["entries"][0]["id"], "x");
+    }
+
+    #[tokio::test]
+    async fn patch_params_with_commit_refresh() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = seed_with_augment(&ctx, "p2.md", false, None).await;
+
+        let result = call(
+            &ctx,
+            serde_json::json!({
+                "id": id,
+                "patch": {"params": {"count": 3}},
+                "commit_refresh": true
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result["committed"], serde_json::json!(true));
+        let cat = ctx.catalog.lock();
+        let aug = augmentation::get(&cat, &id).unwrap().unwrap();
+        let params: serde_json::Value = serde_json::from_str(&aug.params).unwrap();
+        assert_eq!(params["count"], 3);
+        assert_eq!(aug.refresh_count, 1);
     }
 
     #[tokio::test]

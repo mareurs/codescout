@@ -107,7 +107,7 @@ impl Tool for Artifact {
                 },
                 "patch": {
                     "type": "object",
-                    "description": "update: fields to change (body, title, status, topic, owners, tags)"
+                    "description": "update: fields to change (body, title, status, topic, owners, tags, params). `params` is RFC 7396 merge-patched into the augmentation params — use null values to delete keys."
                 },
                 "addBlocks": {
                     "type": "array",
