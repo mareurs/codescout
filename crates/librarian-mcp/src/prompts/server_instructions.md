@@ -22,7 +22,7 @@ through file frontmatter.
 | Append observation note                          | `artifact_event` with `action=create`, `kind=note` |
 | Manual re-scan (project-scoped by default)       | `librarian` with `action=reindex` |
 | Attach/replace prompt+params on artifact         | `artifact_augment`     |
-| Merge-patch params on existing augmentation      | `artifact_augment` with `merge=true` |
+| Merge-patch params on existing augmentation      | `artifact_augment` with `merge=true`, or `artifact(update, patch={params:{...}})` |
 | Gather context for refresh (read-only)           | `artifact_refresh` with `action=gather` |
 | Design a tracker (archetypes + teaching prompt)  | `librarian` with `action=tracker_design` |
 | List/find augmented artifacts                    | `artifact` with `action=find`, `augmented: true` |
