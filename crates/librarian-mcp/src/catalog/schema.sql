@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS artifact (
   file_mtime    INTEGER NOT NULL,
   file_sha256   TEXT NOT NULL,
   confidence    REAL NOT NULL DEFAULT 1.0,
+  abs_path      TEXT,
   UNIQUE(repo, rel_path)
 );
 
@@ -80,7 +81,8 @@ CREATE TABLE IF NOT EXISTS commits (
   repo         TEXT NOT NULL,
   authored_at  INTEGER,
   subject      TEXT,
-  topo_order   INTEGER
+  topo_order   INTEGER,
+  git_root     TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_commits_repo_topo ON commits(repo, topo_order);
 

@@ -9,6 +9,7 @@ pub mod event_edges;
 pub mod events;
 pub mod find;
 pub mod links;
+mod migrate_v6;
 pub mod observations;
 pub mod sources;
 
@@ -82,6 +83,9 @@ fn run_migrations(conn: &Connection) -> Result<()> {
         "INSERT OR IGNORE INTO schema_version (version) VALUES (5)",
         [],
     )?;
+    // v6 migration step 1: add new columns alongside legacy ones.
+    // Backfill + drop legacy happens in later phases (Tasks 2 + 6).
+    migrate_v6::add_columns(conn)?;
     Ok(())
 }
 
@@ -185,6 +189,12 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         assert!(column_exists(&cat.conn, "artifact_augmentation", "append_mode").unwrap());
         assert!(column_exists(&cat.conn, "artifact_augmentation", "history_cap").unwrap());
+    }
+    #[test]
+    fn migration_adds_abs_path_and_git_root_columns() {
+        let cat = Catalog::open_in_memory().unwrap();
+        assert!(column_exists(&cat.conn, "artifact", "abs_path").unwrap());
+        assert!(column_exists(&cat.conn, "commits", "git_root").unwrap());
     }
 
     #[test]
