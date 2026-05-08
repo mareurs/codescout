@@ -11,6 +11,40 @@ cargo build
 cargo test
 ```
 
+## Dev Loop — Faster Live MCP Iteration
+
+The default workflow documented in `CLAUDE.md` is `cargo build --release` + `/mcp`
+restart. That's the right choice for users (release performance, stable artifact)
+but it costs ~30s per iteration during active development.
+
+For tighter iteration on tools, prompts, or hook surfaces:
+
+1. Build the dev binary once: `cargo build` (no `--release`).
+2. Point your MCP config at the debug binary instead of the release one. In
+   `~/.claude/settings.json`:
+
+   ```json
+   {
+     "mcpServers": {
+       "codescout": {
+         "command": "/absolute/path/to/codescout/target/debug/codescout",
+         "args": ["start", "--project", "."]
+       }
+     }
+   }
+   ```
+
+3. After each edit, just `cargo build` (~3s incremental) and `/mcp` reconnect.
+   No `--release`.
+
+**Trade-off:** debug builds are ~5–10× slower per call than release, but the
+inner-loop savings dominate when you're iterating on tool descriptions, prompt
+surfaces, or test scenarios where compile time matters more than runtime.
+
+**Switch back before merging:** verify the change against `cargo build --release`
++ `/mcp` once before committing — the release build catches optimizations and
+LTO-time issues that debug skips.
+
 ## Before Submitting a PR
 
 Run the same checks CI will run:
