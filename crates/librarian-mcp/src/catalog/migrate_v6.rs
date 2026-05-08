@@ -107,15 +107,14 @@ pub(super) fn backfill(conn: &Connection, ws: &WorkspaceConfig, drop_orphans: bo
 /// Step 3 of the migration: drop legacy columns and stamp v6.
 /// Caller MUST have already run `add_columns` and `backfill`.
 /// Backup is the caller's responsibility (in `Catalog::open_with_workspace`).
+///
+/// Uses table-copy migration rather than `ALTER TABLE DROP COLUMN` because:
+/// - UNIQUE(repo, rel_path) prevents dropping `repo` with plain ALTER TABLE.
+/// - SQLite validates trigger bodies during DDL, which requires vec0 as a
+///   loadable extension (.so); vec0 is statically linked here, so the CLI
+///   sqlite3 binary (and any non-codescout process) cannot validate the
+///   trigger, causing the DROP COLUMN to fail.
 pub(super) fn drop_legacy_and_stamp(conn: &Connection) -> Result<()> {
-    let v: String = conn.query_row("SELECT sqlite_version()", [], |r| r.get(0))?;
-    if !sqlite_version_supports_drop_column(&v) {
-        anyhow::bail!(
-            "SQLite {v} does not support ALTER DROP COLUMN (need >= 3.35). \
-             Upgrade SQLite or restore the .pre-v6-bak file and downgrade librarian-mcp."
-        );
-    }
-
     let has_repo = column_exists(conn, "artifact", "repo")?;
     let has_rel_path = column_exists(conn, "artifact", "rel_path")?;
     let has_commits_repo = column_exists(conn, "commits", "repo")?;
@@ -129,33 +128,67 @@ pub(super) fn drop_legacy_and_stamp(conn: &Connection) -> Result<()> {
         return Ok(());
     }
 
-    if has_repo {
-        conn.execute("ALTER TABLE artifact DROP COLUMN repo", [])?;
-    }
-    if has_rel_path {
-        conn.execute("ALTER TABLE artifact DROP COLUMN rel_path", [])?;
-    }
-    if has_commits_repo {
-        conn.execute("ALTER TABLE commits DROP COLUMN repo", [])?;
-    }
     conn.execute_batch(
         r#"
-        DROP INDEX IF EXISTS idx_artifact_repo;
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_abs_path ON artifact(abs_path);
-        DROP INDEX IF EXISTS idx_commits_repo_topo;
-        CREATE INDEX IF NOT EXISTS idx_commits_git_root ON commits(git_root, topo_order);
-    "#,
-    )?;
-    conn.execute(
-        "INSERT OR IGNORE INTO schema_version (version) VALUES (6)",
-        [],
-    )?;
-    Ok(())
-}
+        BEGIN;
 
-fn sqlite_version_supports_drop_column(v: &str) -> bool {
-    let parts: Vec<u32> = v.split('.').filter_map(|s| s.parse().ok()).collect();
-    matches!(parts.as_slice(), [maj, min, ..] if (*maj, *min) >= (3, 35))
+        -- Clean up any leftover temp tables from a previously aborted attempt.
+        DROP TABLE IF EXISTS artifact_new;
+        DROP TABLE IF EXISTS commits_new;
+
+        CREATE TABLE artifact_new (
+          id            TEXT PRIMARY KEY,
+          abs_path      TEXT NOT NULL,
+          kind          TEXT NOT NULL,
+          status        TEXT NOT NULL,
+          title         TEXT,
+          owners        TEXT NOT NULL DEFAULT '[]',
+          tags          TEXT NOT NULL DEFAULT '[]',
+          topic         TEXT,
+          time_scope    TEXT,
+          source        TEXT,
+          created_at    INTEGER NOT NULL,
+          updated_at    INTEGER NOT NULL,
+          file_mtime    INTEGER NOT NULL,
+          file_sha256   TEXT NOT NULL,
+          confidence    REAL NOT NULL DEFAULT 1.0
+        );
+        INSERT INTO artifact_new
+          SELECT id, abs_path, kind, status, title, owners, tags, topic,
+                 time_scope, source, created_at, updated_at, file_mtime,
+                 file_sha256, confidence
+          FROM artifact;
+
+        -- DROP TABLE implicitly drops the artifact_vec_cascade_delete trigger.
+        DROP TABLE artifact;
+        ALTER TABLE artifact_new RENAME TO artifact;
+        CREATE UNIQUE INDEX idx_artifact_abs_path  ON artifact(abs_path);
+        CREATE        INDEX idx_artifact_kind_status ON artifact(kind, status);
+        CREATE TRIGGER artifact_vec_cascade_delete
+          AFTER DELETE ON artifact BEGIN
+            DELETE FROM artifact_vec WHERE id = OLD.id;
+          END;
+
+        CREATE TABLE commits_new (
+          hash         TEXT PRIMARY KEY,
+          git_root     TEXT,
+          authored_at  INTEGER,
+          subject      TEXT,
+          topo_order   INTEGER
+        );
+        INSERT INTO commits_new
+          SELECT hash, git_root, authored_at, subject, topo_order
+          FROM commits;
+        DROP TABLE commits;
+        ALTER TABLE commits_new RENAME TO commits;
+        CREATE INDEX idx_commits_git_root ON commits(git_root, topo_order);
+
+        INSERT OR IGNORE INTO schema_version (version) VALUES (6);
+        COMMIT;
+        "#,
+    )?;
+
+    Ok(())
 }
 
 #[cfg(test)]
