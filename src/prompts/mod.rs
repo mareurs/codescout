@@ -5,6 +5,7 @@
 //! on project state.
 
 pub mod builders;
+pub mod source;
 
 /// Static server instructions — tool reference, workflow patterns, steering rules.
 pub const SERVER_INSTRUCTIONS: &str = include_str!("server_instructions.md");

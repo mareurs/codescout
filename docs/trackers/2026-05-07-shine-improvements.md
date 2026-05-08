@@ -16,6 +16,7 @@ Each item: surface, observed problem, what fixing requires, why it matters now.
 | ID | Item | Evidence |
 |---|---|---|
 | Y-C | Prompt-surfaces roundtrip snapshot test | `src/prompts/mod.rs::tests` — 3 new tests (`prompt_surfaces_server_instructions_snapshot`, `prompt_surfaces_onboarding_snapshot`, `prompt_surfaces_system_prompt_draft_empty_snapshot`) compare each surface against fixtures in `tests/fixtures/prompt_surfaces/`. `UPDATE_PROMPT_SNAPSHOTS=1` env var regenerates intentionally. Locks the byte-level contract that I-01 must preserve. |
+| I-01 Phase 1a | Single-source-of-truth `source.md` for two .md surfaces | `src/prompts/source.md` (new — concatenation of `server_instructions.md` + `onboarding_prompt.md` with `<!-- @surface NAME -->` / `<!-- @end -->` tags). `src/prompts/source.rs::extract_surface` slices a named surface byte-for-byte. 5 unit tests assert `extract_surface(SOURCE, "server_instructions") == SERVER_INSTRUCTIONS` and same for `onboarding_prompt`. Phase 1b: switch `include_str!` to read source.md slices. Phase 1c: handle `build_system_prompt_draft` skeleton. |
 
 ## Shipped — 2026-05-07 session
 
