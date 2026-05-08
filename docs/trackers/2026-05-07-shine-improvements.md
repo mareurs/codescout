@@ -11,6 +11,17 @@ Punch-list of changes that would lift the project from "above industry mean" to
 
 Each item: surface, observed problem, what fixing requires, why it matters now.
 
+## Shipped — 2026-05-08 session
+
+| ID | Item | Evidence |
+|---|---|---|
+| Y-C | Prompt-surfaces roundtrip snapshot test | `src/prompts/mod.rs::tests` — 3 new tests (`prompt_surfaces_server_instructions_snapshot`, `prompt_surfaces_onboarding_snapshot`, `prompt_surfaces_system_prompt_draft_empty_snapshot`) compare each surface against fixtures in `tests/fixtures/prompt_surfaces/`. `UPDATE_PROMPT_SNAPSHOTS=1` env var regenerates intentionally. Locks the byte-level contract that I-01 must preserve. |
+| I-01 Phase 1a | Single-source-of-truth `source.md` for two .md surfaces | `src/prompts/source.md` (new — concatenation of `server_instructions.md` + `onboarding_prompt.md` with `<!-- @surface NAME -->` / `<!-- @end -->` tags). `src/prompts/source.rs::extract_surface` slices a named surface byte-for-byte. 5 unit tests assert `extract_surface(SOURCE, "server_instructions") == SERVER_INSTRUCTIONS` and same for `onboarding_prompt`. Phase 1b: switch `include_str!` to read source.md slices. Phase 1c: handle `build_system_prompt_draft` skeleton. |
+| I-01 Phase 2 | Switch `SERVER_INSTRUCTIONS` / `ONBOARDING_PROMPT` to source.md slices | `build.rs::emit_prompt_surfaces` slices `src/prompts/source.md` into `OUT_DIR/{surface}.md` files at compile time; `src/prompts/mod.rs` constants `include_str!` from `OUT_DIR`. `pub const &str` semantics preserved — no call-site changes. cargo:rerun-if-changed pinned to source.md + build.rs. |
+| I-01 Phase 3 | Delete unused originals + redirect callers | `src/prompts/server_instructions.md` and `src/prompts/onboarding_prompt.md` deleted (now sourced from `source.md`). `src/server.rs::prompt_surfaces_reference_only_real_tools` redirects to runtime constants. `src/prompts/README.md` and `src/tools/onboarding.rs` doc references updated to point at source.md. cargo test --lib: 1893 passed (zero regression). |
+| I-01 Phase 3b | Allowlist tripwire + tightening | `src/server.rs::prompt_surfaces_reference_only_real_tools` now also asserts every allowlist entry actually appears backticked in some surface — stale entries fail the test with names listed. Initial fire dropped 20/49 entries (`code`, `detail_level`, `domain_glossary`, `fn`, `include_body`, `language_patterns`, `name`, `new_body`, `new_string`, `old_string`, `path`, `project_overview`, `query`, `read_only`, `replace_all`, `scope`, `symbol`, `system_prompt`, `timeout_secs`, `toml_key`) — defensive bloat from earlier surface revisions. Allowlist now 29 entries; future surface edits are forced to keep it tight. |
+| Y-B | Shell-level test for post-tool-use hook (closes the gap) | `claude-plugins/buddy/tests/test_hooks_post_tool_use.sh` (new, 9 assertions) — pipes synthetic events into `bash hooks/post-tool-use.sh`, verifies `state.json` + `narrative.jsonl` side effects, malformed-JSON resilience, missing-session_id fallback. `pre-tool-use.sh` intentionally not duplicated — `test_pre_tool_hook.py` already subprocess()s the bash hook with 11 integration assertions; companion hook tests cover every event hook. Y-B unblocks I-05/I-06/I-07/I-11/I-13. |
+
 ## Shipped — 2026-05-07 session
 
 The following items landed in this session. Tracker entries below remain for
