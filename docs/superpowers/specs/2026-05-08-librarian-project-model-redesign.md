@@ -423,3 +423,17 @@ half-migrated. Each commit compiles and passes tests independently.
 | Per-call `derive_ctx` becomes hot in profiling                  | No cache today; if hotspot found, add a last-seen cache invalidated on `workspace(activate)`. Not built upfront. |
 | Standalone librarian-mcp users with no `[[roots]]`/`LIBRARIAN_CWD` | Existing "scope=all required" error path preserved; messaging refreshed                           |
 | Cross-codebase references to `repo` / `root`                    | `prompt_surfaces_reference_only_real_tools` test fails build until all three prompt surfaces and tool descriptions are updated |
+
+## Implementation status
+
+Implemented on the `experiments` branch in commits:
+
+- `d81acf9` schema(v6): add abs_path/git_root columns + migration scaffolding
+- `383a76f` catalog(v6): backfill abs_path from repo + workspace.toml lookup
+- `ee97ce4` current_project: replace root/subdir with abs_path/git_root *(includes scope clause rewrite — Task 3 + Task 4 landed together because the data-model change forces every `apply_scope` consumer to update simultaneously)*
+- `1c88ad9` librarian: dynamic LibToolContext per call from active project
+- `2ffd969` schema(v6): drop repo/rel_path columns + bump schema_version
+- `ca8c6ef` workspace.toml: deprecate [[roots]], emit warning
+- `0ca840f` prompts: update server_instructions + companion_hint + onboarding for new scope ladder
+
+Verification status: full `cargo test --lib` passes (1893 / 0 failed); librarian-mcp suite passes (344+ tests). Manual end-to-end verification (live MCP, multi-project switching) deferred to post-merge smoke.

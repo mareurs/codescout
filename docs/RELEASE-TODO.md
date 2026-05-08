@@ -11,6 +11,7 @@ Tracking remaining work items for the first public release of codescout.
 - [x] **Memory store path traversal fix** — Absolute path bypass in `topic_path()`
 - [x] **Test coverage boost** — 227 → 296 tests across agent, server, memory, file, path security, shell, regex
 - [x] **Tool access controls** — Per-category enable/disable in `[security]` config (shell disabled by default)
+- [x] **Librarian project-model redesign (schema v6)** — Catalog now keys artifacts by absolute path instead of `(repo, rel_path)`. First launch on an existing catalog triggers an automatic migration that backfills `abs_path`/`git_root` and creates a `catalog.db.pre-v6-bak.<ts>` backup before dropping legacy columns. `workspace.toml` `[[roots]]` is deprecated (still parsed for the migration; emits a boot warning). New scope ladder: `scope=project|repo|umbrella|all` resolves against the host's active project path. See `docs/superpowers/specs/2026-05-08-librarian-project-model-redesign.md`.
 
 ## High Priority
 
