@@ -13,10 +13,11 @@ use serde_json::{json, Value};
 
 use super::{parse_bool_param, Tool, ToolContext};
 
-/// Bump when `onboarding_prompt.md` or `build_system_prompt_draft()` change in ways
-/// that affect the stored per-project system prompt.
-/// Do NOT bump for `server_instructions.md` — that file is loaded fresh at every MCP
-/// session start and has no cached copy.
+/// Bump when the `onboarding_prompt` surface (in `src/prompts/source.md`) or
+/// `build_system_prompt_draft()` change in ways that affect the stored
+/// per-project system prompt.
+/// Do NOT bump for `server_instructions` surface changes — it is loaded fresh
+/// at every MCP session start and has no cached copy.
 /// See CLAUDE.md § "Onboarding Version" for the full decision table.
 pub(crate) const ONBOARDING_VERSION: u32 = 23;
 
