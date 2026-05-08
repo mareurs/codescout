@@ -217,23 +217,12 @@ async fn resolve_via_ts(
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Convert an LSP `file://` URI to a [`PathBuf`].
+/// Convert an LSP URI to a filesystem path.
 ///
-/// Delegates to `url::Url` for correct handling of Windows drive letters,
-/// UNC paths, and percent-encoding.  Falls back to the raw path string if
-/// the URI cannot be parsed.
+/// Delegates to [`crate::util::file_address::FileAddress::from_lsp_uri`].
 fn lsp_uri_to_path(uri: &lsp_types::Uri) -> Option<PathBuf> {
-    url::Url::parse(uri.as_str())
-        .ok()
-        .and_then(|u| u.to_file_path().ok())
-        .or_else(|| {
-            let s = uri.path().as_str();
-            if s.is_empty() {
-                None
-            } else {
-                Some(PathBuf::from(s))
-            }
-        })
+    crate::util::file_address::FileAddress::from_lsp_uri(uri)
+        .map(crate::util::file_address::FileAddress::into_path)
 }
 
 /// Convert a `(line, col)` pair (0-indexed, UTF-16 columns) to a byte offset
