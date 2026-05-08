@@ -31,35 +31,23 @@ const MAX_STDERR_LINES: usize = 200;
 
 use super::call_hierarchy::supports_call_hierarchy;
 
-/// Convert an LSP `file://` URI back to a filesystem path.
+/// Convert an LSP URI to a filesystem path.
 ///
-/// Uses `url::Url` for correct handling of Windows drive letters,
-/// UNC paths, and percent-encoding. Falls back to raw path extraction
-/// if the URI cannot be parsed.
+/// Delegates to [`crate::util::file_address::FileAddress::from_lsp_uri`] for the
+/// canonical conversion. Falls back to `PathBuf::from(uri.path())` when neither
+/// the URI parse nor the raw-path component yields a value (empty URI), to
+/// preserve the original infallible signature.
 fn uri_to_path(uri: &lsp_types::Uri) -> PathBuf {
-    // Parse the lsp_types URI string with url::Url which handles
-    // Windows drive letters and percent-encoding correctly.
-    url::Url::parse(uri.as_str())
-        .ok()
-        .and_then(|u| u.to_file_path().ok())
+    crate::util::file_address::FileAddress::from_lsp_uri(uri)
+        .map(crate::util::file_address::FileAddress::into_path)
         .unwrap_or_else(|| PathBuf::from(uri.path().as_str()))
 }
 
 /// Convert a filesystem path to an LSP `file://` URI.
 ///
-/// Uses `url::Url` for correct encoding of special characters and
-/// proper `file:///` formatting on all platforms.
+/// Delegates to [`crate::util::file_address::FileAddress::as_lsp_uri`].
 fn path_to_uri(path: &Path) -> Result<lsp_types::Uri> {
-    let abs = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()?.join(path)
-    };
-    let u = url::Url::from_file_path(&abs)
-        .map_err(|_| anyhow::anyhow!("cannot convert path to URI: {}", abs.display()))?;
-    u.as_str()
-        .parse()
-        .map_err(|e| anyhow::anyhow!("invalid URI: {}", e))
+    crate::util::file_address::FileAddress::from_path(path).as_lsp_uri()
 }
 
 /// Return true if the given LSP method is safe to retry after a

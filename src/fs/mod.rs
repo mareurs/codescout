@@ -318,14 +318,12 @@ where
     }
 }
 
-/// Convert a `file://` URI to a filesystem path.
+/// Convert a `file://` URI string to a filesystem path.
 ///
-/// Uses `url::Url` for correct handling of Windows drive letters,
-/// UNC paths, and percent-encoding.
+/// Delegates to [`crate::util::file_address::FileAddress::from_uri_str`].
 pub(crate) fn uri_to_path(uri: &str) -> Option<PathBuf> {
-    url::Url::parse(uri)
-        .ok()
-        .and_then(|u| u.to_file_path().ok())
+    crate::util::file_address::FileAddress::from_uri_str(uri)
+        .map(crate::util::file_address::FileAddress::into_path)
 }
 
 /// Returns `true` if any component of `path` is a well-known build-artifact directory.
