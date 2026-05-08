@@ -291,6 +291,18 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn iron_law_8_promotes_call_graph_before_references() {
+        let raw = SERVER_INSTRUCTIONS;
+        let idx = raw.find("8. **CALL GRAPH BEFORE STRUCTURAL EDITS.**")
+            .expect("Iron Law 8 must be the call_graph promotion");
+        let body = &raw[idx..idx.saturating_add(500)];
+        let cg = body.find("call_graph").expect("call_graph must appear");
+        let refs = body.find("references").expect("references must appear");
+        assert!(cg < refs, "call_graph must be named before references");
+    }
+
+    #[test]
     fn build_with_project_appends_status() {
         let status = ProjectStatus {
             name: "my-project".into(),
