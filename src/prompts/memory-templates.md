@@ -146,7 +146,6 @@ manifest:
   empty_stub_eligible: true
 ```
 
-
 ## Workspace-Scope Memories
 
 Apply this set when synthesizing workspace-level memories from per-project
@@ -197,7 +196,7 @@ manifest:
 ### workspace-scope: development-commands
 
 Purpose: cross-project orchestration commands (whole-monorepo build/test,
-dev startup scripts, school switching). Per-project commands stay in each
+dev startup scripts, stack switching). Per-project commands stay in each
 project's `development-commands`.
 
 Required subsections:
