@@ -349,6 +349,24 @@ mod tests {
     }
 
     #[test]
+    fn impact_analysis_section_contains_call_graph_with_full_arguments() {
+        let raw = SERVER_INSTRUCTIONS;
+        let section_start = raw.find("### Impact Analysis").expect("section must exist");
+        let next = raw[section_start..].find("\n### ").map(|i| section_start + i)
+            .unwrap_or(raw.len());
+        let section = &raw[section_start..next];
+
+        assert!(section.contains("call_graph(symbol="),
+            "Impact Analysis must include a call_graph call with named symbol arg");
+        assert!(section.contains("direction=\"callers\""),
+            "Impact Analysis must demonstrate direction=\"callers\"");
+        assert!(section.contains("max_depth=3"),
+            "Impact Analysis must demonstrate max_depth=3");
+        assert!(section.contains("`references`"),
+            "Impact Analysis must reference the references tool");
+    }
+
+    #[test]
     fn build_with_project_appends_status() {
         let status = ProjectStatus {
             name: "my-project".into(),
