@@ -260,14 +260,21 @@ Multi-tool chains for common tasks. Follow the steps in order.
 
 ### Impact Analysis — "What breaks if I change X?"
 
-| Step | Tool | Purpose |
-|------|------|---------|
-| 1 | `symbols(name=..., include_body=true)` | Read current implementation |
-| 2 | `references(symbol, path)` | Find all callers and dependents |
-| 2b | `call_graph(symbol, direction="callers", max_depth=3)` | Transitive blast radius beyond direct callers |
-| 3 | `symbol_at` with `fields: ["hover"]` on key call sites | Reveal concrete types (especially generics/traits) |
-| 4 | Edit with full knowledge of blast radius | |
+`references` = direct call sites. `call_graph` = transitive reach.
+Both required for any rename / signature change / contract change.
 
+1. `symbols(name="Service/handle", include_body=true)` — read it.
+2. `call_graph(symbol="Service/handle", path="src/service.rs",
+   direction="callers", max_depth=3)` — blast radius.
+   Tree depth ≈ change risk: shallow = local; deep+branching = contract.
+3. `references(symbol, path)` — file:line edit targets.
+4. `symbol_at(path, line, fields=["hover"])` on non-obvious callers
+   from step 2 — reveal concrete types behind generics/traits.
+5. `edit_code(...)`.
+
+`direction`: `callers` (refactors) | `callees` (flow) | `both` (hubs, rare).
+`max_depth`: `1` ≈ references; `3` default; `5` only for deep reach.
+Skip call_graph only for body-only edits with identical signature.
 ### Safe Rename
 
 | Step | Tool | Purpose |
