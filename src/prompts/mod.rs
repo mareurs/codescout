@@ -729,7 +729,7 @@ mod tests {
     #[test]
     fn onboarding_prompt_uses_include_marker() {
         // The raw file (pre-substitution) must have the marker
-        let raw = include_str!("onboarding_prompt.md");
+        let raw = RAW_ONBOARDING_PROMPT;
         assert!(
             raw.contains("{{include: memory-templates.md}}"),
             "onboarding_prompt.md must contain the include marker"
@@ -742,7 +742,7 @@ mod tests {
 
     #[test]
     fn onboarding_prompt_phase_0_has_stable_heading_marker() {
-        let raw = include_str!("onboarding_prompt.md");
+        let raw = RAW_ONBOARDING_PROMPT;
         assert!(
             raw.contains("STABLE-HEADING"),
             "Phase 0 must carry a STABLE-HEADING comment to prevent cross-prompt drift"

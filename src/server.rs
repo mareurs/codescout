@@ -1506,12 +1506,9 @@ mod tests {
         let surfaces: &[(&str, &str)] = &[
             (
                 "server_instructions.md",
-                include_str!("prompts/server_instructions.md"),
+                crate::prompts::SERVER_INSTRUCTIONS,
             ),
-            (
-                "onboarding_prompt.md",
-                include_str!("prompts/onboarding_prompt.md"),
-            ),
+            ("onboarding_prompt.md", crate::prompts::ONBOARDING_PROMPT),
             ("build_system_prompt_draft", draft.as_str()),
         ];
 

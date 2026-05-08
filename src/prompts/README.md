@@ -1,14 +1,14 @@
 # Prompt surfaces — editing guide
 
-Read this when touching `server_instructions.md`, `onboarding_prompt.md`, or `builders.rs`. Operational rules about *which* surfaces exist and *when* to bump `ONBOARDING_VERSION` live in the top-level `CLAUDE.md` § Prompt Surface Consistency — this file is the **style guide** for the writing itself.
+Read this when touching `source.md` (the single source for the `server_instructions` and `onboarding_prompt` surfaces) or `builders.rs`. Operational rules about *which* surfaces exist and *when* to bump `ONBOARDING_VERSION` live in the top-level `CLAUDE.md` § Prompt Surface Consistency — this file is the **style guide** for the writing itself.
 
 ## Surfaces
 
-- `src/prompts/server_instructions.md` — injected **once at MCP session start**, not per-request. Token cost is session-scoped, not per-call — invest in clarity over brevity.
-- `src/prompts/onboarding_prompt.md` — one-time onboarding, read only when a project is activated for the first time.
+- `src/prompts/source.md` — the **single editable document** for the next two surfaces. `build.rs` slices it into `OUT_DIR` at compile time; `src/prompts/source.rs::extract_surface` is the matching runtime parser. Edit here.
+  - `server_instructions` surface — injected **once at MCP session start**, not per-request. Token cost is session-scoped, not per-call — invest in clarity over brevity.
+  - `onboarding_prompt` surface — one-time onboarding, read only when a project is activated for the first time.
 - `build_system_prompt_draft()` in `src/prompts/builders.rs` — generated per-project and embedded into the project's system prompt via onboarding.
-
-## Rules for editing `server_instructions.md`
+## Rules for editing the `server_instructions` surface
 
 1. **Cap hard rules at 5–8.** Beyond 8 behavioral constraints, compliance on all drops. Consolidate, don't accumulate.
 2. **No triple-layer repetition.** A rule in Iron Laws should NOT be restated in Anti-Patterns AND Rules. Max 2 appearances: once as a law, optionally once as a closing reminder (for the 1–2 most-violated rules only).
