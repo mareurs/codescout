@@ -43,6 +43,13 @@ pub fn default_config_path() -> Result<PathBuf> {
 pub fn load(path: &Path) -> Result<WorkspaceConfig> {
     let s = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let cfg: WorkspaceConfig = toml::from_str(&s).context("parsing workspace.toml")?;
+    if !cfg.roots.is_empty() {
+        tracing::warn!(
+            "[[roots]] is deprecated; safe to remove from {} after the v6 migration completes. \
+             Roots are no longer consulted at query time. See the v6 release notes.",
+            path.display()
+        );
+    }
     Ok(cfg)
 }
 
@@ -101,5 +108,21 @@ path = "/tmp"
         )
         .unwrap();
         assert!(load(f.path()).is_err());
+    }
+
+    #[test]
+    fn load_warns_on_legacy_roots() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(
+            f,
+            r#"
+[[roots]]
+name = "x"
+path = "/abs/x"
+"#
+        )
+        .unwrap();
+        let cfg = load(f.path()).unwrap();
+        assert_eq!(cfg.roots.len(), 1, "still parsed");
     }
 }
