@@ -1,3 +1,11 @@
+---
+title: Context Loss and Compound Error in Multi-Agent LLM Systems
+date: 2026-03-15
+topic: agent-architecture
+summary: Empirical and theoretical analysis of compound error in delegation trees vs single-session skill-based architectures.
+status: complete
+---
+
 # Context Loss and Compound Error in Multi-Agent LLM Systems
 
 > Research compiled March 2026. Sources include peer-reviewed papers (arXiv),

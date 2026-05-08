@@ -1,3 +1,11 @@
+---
+title: Usage Analysis — 2026-04-02
+date: 2026-04-02
+topic: telemetry
+summary: "Cross-project analysis of `usage.db` from codescout (self, Rust) and backend-kotlin (client)."
+status: complete
+---
+
 # Usage Analysis — 2026-04-02
 
 Cross-project analysis of `usage.db` from **codescout** (self, Rust) and **backend-kotlin** (client, Kotlin/Python/TS).
