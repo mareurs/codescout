@@ -9,7 +9,8 @@ pub(crate) mod language_nav;
 pub mod source;
 
 /// Static server instructions — tool reference, workflow patterns, steering rules.
-pub const SERVER_INSTRUCTIONS: &str = include_str!("server_instructions.md");
+pub const SERVER_INSTRUCTIONS: &str =
+    include_str!(concat!(env!("OUT_DIR"), "/server_instructions.md"));
 
 /// Kotlin-specific known issues — only injected for projects with Kotlin.
 const KOTLIN_KNOWN_ISSUES: &str = "\n\n## Language Support — Known Issues\n\n\
@@ -141,7 +142,8 @@ pub struct ProjectStatus {
 pub const INCLUDE_MARKER: &str = "{{include: memory-templates.md}}";
 pub const SYMBOL_NAV_TOKEN: &str = "{{symbol_navigation_block}}";
 
-const RAW_ONBOARDING_PROMPT: &str = include_str!("onboarding_prompt.md");
+const RAW_ONBOARDING_PROMPT: &str =
+    include_str!(concat!(env!("OUT_DIR"), "/onboarding_prompt.md"));
 const RAW_WORKSPACE_ONBOARDING_PROMPT: &str = include_str!("workspace_onboarding_prompt.md");
 const MEMORY_TEMPLATES: &str = include_str!("memory-templates.md");
 
