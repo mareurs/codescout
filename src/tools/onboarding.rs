@@ -23,7 +23,8 @@ use super::{parse_bool_param, Tool, ToolContext};
 // (6 mandatory per project), Phase 6 CLAUDE.md flow, empty-stub convention.
 // Bumped 2026-05-07 (server-instructions consolidation): removed ## Language Navigation
 // from build_system_prompt_draft; language nav now injected dynamically via server_instructions.
-pub(crate) const ONBOARDING_VERSION: u32 = 27;
+// Bumped 2026-05-08 (scope ladder): librarian-guide updated for new project/repo/umbrella/all ladder.
+pub(crate) const ONBOARDING_VERSION: u32 = 28;
 
 /// Returns true if the stored onboarding version is stale (needs refresh).
 /// `None` means pre-versioning project — always stale.

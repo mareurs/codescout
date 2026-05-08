@@ -14,7 +14,7 @@ impl Tool for Artifact {
 
     fn description(&self) -> &'static str {
         "Artifact CRUD and query. action: find | get | create | update | link | graph | state_at. \
-         Defaults: scope=project (current sub-project only), archived/superseded hidden when \
+         Defaults: scope=project (active project only), archived/superseded hidden when \
          filter does not constrain status. Shortcut params kind/status expand to eq-filters \
          and combine with filter via AND. \
          Trackers are artifacts with kind=tracker — augmented documents that auto-refresh their \
@@ -51,7 +51,7 @@ impl Tool for Artifact {
                     "type": "string",
                     "enum": ["project", "repo", "umbrella", "all"],
                     "default": "project",
-                    "description": "find: scope for listing. Defaults to current sub-project."
+                    "description": "find: scope for listing. Defaults to active project."
                 },
                 "augmented": {
                     "type": "boolean",

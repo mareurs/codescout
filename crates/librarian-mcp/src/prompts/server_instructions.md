@@ -71,25 +71,27 @@ Times are ms-epoch integers, not ISO-8601.
 ## Default scope (project, archived hidden)
 
 Listing tools (`artifact` with `action=find`, `librarian` with `action=context`)
-default to **the agent's current sub-project** and **hide archived/superseded**.
+default to **the active project's path** and **hide archived/superseded**.
 
 - `scope`: `"project"` (default) | `"repo"` | `"umbrella"` | `"all"`.
-  - `project` = files under the current sub-project (cwd → nearest `.git`
-    inside a configured root).
-  - `repo` = whole current root.
-  - `umbrella` = members of the umbrella the current project belongs to;
-    errors when no umbrella is declared for it.
+  - `project` = artifacts whose `abs_path` is under the active project's path.
+    Sibling projects under the same git repo are excluded.
+  - `repo` = artifacts under the active project's enclosing git checkout
+    (nearest `.git` ancestor, falling back to the project path itself).
+  - `umbrella` = artifacts under any member path of the umbrella the active
+    project belongs to; errors when no umbrella is declared for it.
   - `all` = pre-scoping workspace-wide behaviour.
 - `include_archived: true` surfaces `archived` / `superseded` rows.
 - An explicit `status` filter wins over the archived-hide default.
-- Responses include a `scope` block (applied scope + resolved root/subdir/
-  umbrella) and `hints` reporting how many extra rows live at wider scopes
-  (`more_in_repo`, `more_in_umbrella`, `more_in_workspace`,
-  `hidden_archived`) plus an `expand` list of args to widen.
-- When cwd is outside every configured root, scope falls back to `all` and
-  the response surfaces `scope_fallback` in hints.
+- Responses include a `scope` block (applied scope + resolved
+  `abs_path`/`git_root`/`umbrella`) and `hints` reporting how many extra rows
+  live at wider scopes (`more_in_repo`, `more_in_umbrella`,
+  `more_in_workspace`, `hidden_archived`) plus an `expand` list of args to widen.
+- The host's active project is always the reference path; activate via
+  `workspace(action="activate", path=...)`.
 
-**Umbrellas are user-declared** in `workspace.toml`:
+**Umbrellas are user-declared** in `workspace.toml` `[[umbrella]]` blocks
+with `members` = list of absolute project paths.
 ## Limits
 
 - `limit` capped at 500, `offset` capped at 100_000 per query.
@@ -153,7 +155,7 @@ from narrative (artifact body):
 Both fields are optional; legacy augmentations work unchanged.## When indexing is stale
 
 `librarian` with `action=reindex` and `{scope?, repo?, force?}` to manually trigger. Defaults
-to `scope="project"` (current sub-project only) — sibling-project rows under
+to `scope="project"` (active project only) — sibling-project rows under
 the same workspace root are NOT touched. Pass `scope="repo"|"umbrella"|"all"`
 to widen, mirroring read-tool semantics. `force=true` wipes only the
 targeted scope's rows before re-walking.

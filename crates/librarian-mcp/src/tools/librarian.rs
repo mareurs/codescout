@@ -39,7 +39,7 @@ impl Tool for Librarian {
                     "type": "string",
                     "enum": ["project", "repo", "umbrella", "all"],
                     "default": "project",
-                    "description": "context/reindex/workspace_state_at: scope. Defaults to current sub-project."
+                    "description": "context/reindex/workspace_state_at: scope. Defaults to active project."
                 },
                 "repo": { "type": "string", "description": "reindex: restrict to a specific workspace root" },
                 "force": { "type": "boolean", "description": "reindex: wipe rows for targeted scope before re-walking" },
