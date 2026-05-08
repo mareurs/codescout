@@ -73,9 +73,9 @@ pub async fn build_tool_context() -> Result<tools::ToolContext> {
         .map(std::sync::Arc::new);
     if let Some(cp) = current_project.as_deref() {
         tracing::info!(
-            "current project resolved: root={} subdir={:?} umbrella={:?}",
-            cp.root,
-            cp.subdir,
+            "current project resolved: abs_path={} git_root={} umbrella={:?}",
+            cp.abs_path.display(),
+            cp.git_root.display(),
             cp.umbrella,
         );
     } else {
@@ -86,12 +86,12 @@ pub async fn build_tool_context() -> Result<tools::ToolContext> {
     // First-match-wins, so order matters.
     let mut rules: Vec<classify::CompiledRule> = Vec::new();
     if let Some(cp) = current_project.as_deref() {
-        let project_rules = classify::load_project_rules(&cp.path)?;
+        let project_rules = classify::load_project_rules(&cp.abs_path)?;
         if !project_rules.is_empty() {
             tracing::info!(
                 "loaded {} project-local classifier rule(s) from {}",
                 project_rules.len(),
-                cp.path.join(classify::PROJECT_RULES_REL).display()
+                cp.abs_path.join(classify::PROJECT_RULES_REL).display()
             );
         }
         rules.extend(project_rules);
@@ -294,15 +294,15 @@ pub async fn reindex_cli(repo: Option<&str>, force: bool) -> Result<()> {
     if force {
         for root in &roots {
             cat.conn.execute(
-                "DELETE FROM artifact WHERE repo = ?1",
-                rusqlite::params![root.name],
+                "DELETE FROM artifact WHERE abs_path LIKE ?1",
+                rusqlite::params![format!("{}/", root.path.to_string_lossy())],
             )?;
         }
     }
 
     // Whole-workspace reindex: drop rows for repos no longer in workspace.toml.
     if repo.is_none() {
-        let active: Vec<&str> = ws.roots.iter().map(|r| r.name.as_str()).collect();
+        let active: Vec<&std::path::Path> = ws.roots.iter().map(|r| r.path.as_path()).collect();
         let orphans = catalog::artifact::delete_orphan_repos(&cat, &active)?;
         if orphans > 0 {
             eprintln!("dropped {orphans} orphan rows from inactive repos");
@@ -311,16 +311,7 @@ pub async fn reindex_cli(repo: Option<&str>, force: bool) -> Result<()> {
 
     let mut total = indexer::IndexReport::default();
     for root in roots {
-        let r = indexer::index_repo(
-            &cat,
-            &rules,
-            &root.name,
-            &root.path,
-            None,
-            &ignore,
-            embedding.as_ref(),
-        )
-        .await?;
+        let r = indexer::index_repo(&cat, &rules, &root.path, &ignore, embedding.as_ref()).await?;
         total.added += r.added;
         total.updated += r.updated;
         total.removed += r.removed;

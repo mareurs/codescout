@@ -163,7 +163,7 @@ fn project_root(ctx: &ToolContext) -> Option<std::path::PathBuf> {
     // CurrentProject.path is already the resolved absolute path to the project root
     ctx.current_project
         .as_ref()
-        .map(|cp| cp.path.clone())
+        .map(|cp| cp.abs_path.clone())
         .or_else(|| ctx.workspace.roots.first().map(|r| r.path.clone()))
 }
 
@@ -247,7 +247,7 @@ fn gather_artifacts(
                 "status": r.status,
                 "title": r.title,
                 "topic": r.topic,
-                "rel_path": r.rel_path,
+                "abs_path": r.abs_path.display().to_string(),
             })
         })
         .collect();

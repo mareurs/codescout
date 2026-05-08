@@ -9,6 +9,13 @@ pub fn artifact_id(repo: &str, rel_path: &str) -> String {
     let hex = format!("{:x}", h.finalize());
     hex[..16].into()
 }
+/// Stable artifact id: sha256(abs_path) hex, truncated to 16 chars.
+pub fn artifact_id_from_abs(abs_path: &std::path::Path) -> String {
+    let mut h = Sha256::new();
+    h.update(abs_path.to_string_lossy().as_bytes());
+    let hex = format!("{:x}", h.finalize());
+    hex[..16].into()
+}
 
 #[cfg(test)]
 mod tests {

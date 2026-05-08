@@ -251,14 +251,16 @@ fn scan_unindexed_md(
     hint: &str,
     ignore_patterns: &[String],
 ) -> Vec<String> {
-    let Some(root) = roots.iter().find(|r| r.name == cp.root) else {
+    // Transitional bridge: derive legacy root/subdir from cp.git_root.
+    let cp_root: String = cp
+        .git_root
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let Some(root) = roots.iter().find(|r| r.name == cp_root) else {
         return vec![];
     };
-    let base = if cp.subdir.is_empty() {
-        root.path.clone()
-    } else {
-        root.path.join(&cp.subdir)
-    };
+    let base = root.path.clone();
     let ignore = crate::workspace::compile_ignore(ignore_patterns).unwrap_or_else(|_| {
         globset::GlobSetBuilder::new()
             .build()
@@ -425,8 +427,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     "kind": r.kind,
                     "status": r.status,
                     "title": r.title,
-                    "repo": r.repo,
-                    "rel_path": r.rel_path,
+                    "abs_path": r.abs_path.display().to_string(),
                     "updated_at": r.updated_at,
                 })
             })
@@ -514,10 +515,9 @@ mod tests {
             rules: Arc::new(vec![]),
             embedding: None,
             current_project: Some(Arc::new(CurrentProject {
-                root: "code-explorer".into(),
-                subdir: "".into(),
+                abs_path: std::path::PathBuf::from("/test/code-explorer"),
+                git_root: std::path::PathBuf::from("/test/code-explorer"),
                 umbrella: None,
-                ..Default::default()
             })),
         }
     }
@@ -540,8 +540,7 @@ mod tests {
     fn sample_row(id: &str, title: &str) -> ArtifactRow {
         ArtifactRow {
             id: id.into(),
-            repo: "code-explorer".into(),
-            rel_path: format!("{id}.md"),
+            abs_path: std::path::PathBuf::from(format!("/test/code-explorer/{id}.md")),
             kind: "spec".into(),
             status: "active".into(),
             title: Some(title.into()),
@@ -609,8 +608,7 @@ mod tests {
             let cat = Catalog::open_in_memory().unwrap();
             artifact::upsert(&cat, &sample_row("a", "in-project")).unwrap();
             let mut elsewhere = sample_row("b", "elsewhere");
-            elsewhere.repo = "agents".into();
-            elsewhere.rel_path = "x/y.md".into();
+            elsewhere.abs_path = std::path::PathBuf::from("/test/agents/x/y.md");
             artifact::upsert(&cat, &elsewhere).unwrap();
             cat
         };
@@ -638,16 +636,18 @@ mod tests {
                 rules: vec![],
                 umbrellas: vec![crate::workspace::Umbrella {
                     name: "main".into(),
-                    members: vec!["code-explorer".into(), "agents".into()],
+                    members: vec![
+                        std::path::PathBuf::from("/test/code-explorer"),
+                        std::path::PathBuf::from("/test/agents"),
+                    ],
                 }],
             }),
             rules: Arc::new(vec![]),
             embedding: None,
             current_project: Some(Arc::new(crate::current_project::CurrentProject {
-                root: "code-explorer".into(),
-                subdir: "".into(),
+                abs_path: std::path::PathBuf::from("/test/code-explorer"),
+                git_root: std::path::PathBuf::from("/test/code-explorer"),
                 umbrella: Some("main".into()),
-                ..Default::default()
             })),
         };
         let v_umbrella = call(&ctx_umbrella, json!({"filter": {"kind": {"eq": "spec"}}}))
@@ -812,8 +812,7 @@ mod tests {
         fn row(id: &str, kind: &str) -> ArtifactRow {
             ArtifactRow {
                 id: id.into(),
-                repo: "code-explorer".into(),
-                rel_path: format!("{id}.md"),
+                abs_path: std::path::PathBuf::from(format!("/test/code-explorer/{id}.md")),
                 kind: kind.into(),
                 status: "active".into(),
                 title: Some(id.into()),
@@ -845,8 +844,7 @@ mod tests {
         fn row(id: &str, kind: &str, status: &str) -> ArtifactRow {
             ArtifactRow {
                 id: id.into(),
-                repo: "code-explorer".into(),
-                rel_path: format!("{id}.md"),
+                abs_path: std::path::PathBuf::from(format!("/test/code-explorer/{id}.md")),
                 kind: kind.into(),
                 status: status.into(),
                 title: Some(id.into()),
@@ -888,8 +886,7 @@ mod tests {
         fn row(id: &str, status: &str) -> ArtifactRow {
             ArtifactRow {
                 id: id.into(),
-                repo: "code-explorer".into(),
-                rel_path: format!("{id}.md"),
+                abs_path: std::path::PathBuf::from(format!("/test/code-explorer/{id}.md")),
                 kind: "spec".into(),
                 status: status.into(),
                 title: Some(id.into()),
@@ -925,8 +922,7 @@ mod tests {
             &cat,
             &ArtifactRow {
                 id: "a1".into(),
-                repo: "code-explorer".into(),
-                rel_path: "docs/a1.md".into(),
+                abs_path: std::path::PathBuf::from("/test/code-explorer/docs/a1.md"),
                 kind: "tracker".into(),
                 status: "draft".into(),
                 title: None,
@@ -963,8 +959,7 @@ mod tests {
             &cat,
             &ArtifactRow {
                 id: "a1".into(),
-                repo: "code-explorer".into(),
-                rel_path: "docs/a1.md".into(),
+                abs_path: std::path::PathBuf::from("/test/code-explorer/docs/a1.md"),
                 kind: "tracker".into(),
                 status: "draft".into(),
                 title: None,
@@ -1022,16 +1017,15 @@ mod tests {
                 rules: vec![],
                 umbrellas: vec![crate::workspace::Umbrella {
                     name: "main".into(),
-                    members: vec!["code-explorer".into()],
+                    members: vec![std::path::PathBuf::from("/test/code-explorer")],
                 }],
             }),
             rules: Arc::new(vec![]),
             embedding: None,
             current_project: Some(Arc::new(crate::current_project::CurrentProject {
-                root: "code-explorer".into(),
-                subdir: "".into(),
+                abs_path: std::path::PathBuf::from("/test/code-explorer"),
+                git_root: std::path::PathBuf::from("/test/code-explorer"),
                 umbrella: Some("main".into()),
-                ..Default::default()
             })),
         };
         let result = call(&ctx, json!({"scope": "all"})).await.unwrap();
@@ -1064,10 +1058,9 @@ mod tests {
             rules: Arc::new(vec![]),
             embedding: None,
             current_project: Some(Arc::new(CurrentProject {
-                root: "myproject".into(),
-                subdir: "".into(),
+                abs_path: std::path::PathBuf::from("/test/myproject"),
+                git_root: std::path::PathBuf::from("/test/myproject"),
                 umbrella: None,
-                ..Default::default()
             })),
         };
 

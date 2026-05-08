@@ -4,15 +4,16 @@ use std::path::{Path, PathBuf};
 
 use crate::classify::Rule;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceConfig {
+    #[serde(default)]
     pub roots: Vec<Root>,
     #[serde(default)]
     pub ignore: Vec<String>,
     #[serde(default, rename = "rule")]
     pub rules: Vec<Rule>,
-    #[serde(default, rename = "umbrella")]
+    #[serde(default)]
     pub umbrellas: Vec<Umbrella>,
 }
 
@@ -24,13 +25,14 @@ pub struct Root {
 }
 
 /// User-declared grouping of sub-projects that share enough context to be
-/// queried together. Members are `"<root_name>/<rel_subdir>"` strings; an
-/// empty subdir (`"<root_name>"`) means the entire root.
+/// queried together. Members are absolute filesystem paths; the umbrella
+/// matches any current project whose `abs_path` is a descendant of any member.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Umbrella {
     pub name: String,
-    pub members: Vec<String>,
+    #[serde(default)]
+    pub members: Vec<PathBuf>,
 }
 
 pub fn default_config_path() -> Result<PathBuf> {

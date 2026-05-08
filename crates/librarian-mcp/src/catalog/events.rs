@@ -138,8 +138,7 @@ mod tests {
     fn art(id: &str) -> ArtifactRow {
         ArtifactRow {
             id: id.into(),
-            repo: "r".into(),
-            rel_path: format!("{id}.md"),
+            abs_path: std::path::PathBuf::from(format!("/test/r/{id}.md")),
             kind: "spec".into(),
             status: "active".into(),
             title: None,

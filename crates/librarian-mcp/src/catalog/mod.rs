@@ -89,8 +89,7 @@ fn run_migrations(conn: &Connection, ws: Option<&WorkspaceConfig>) -> Result<()>
     // Backfill + drop legacy happens in later phases (Tasks 2 + 6).
     migrate_v6::add_columns(conn)?;
     if let Some(ws) = ws {
-        let drop_orphans =
-            std::env::var("LIBRARIAN_MIGRATE_DROP_ORPHANS").as_deref() == Ok("1");
+        let drop_orphans = std::env::var("LIBRARIAN_MIGRATE_DROP_ORPHANS").as_deref() == Ok("1");
         migrate_v6::backfill(conn, ws, drop_orphans)?;
     }
     Ok(())

@@ -410,8 +410,7 @@ pub(crate) mod tests {
     fn art(id: &str) -> ArtifactRow {
         ArtifactRow {
             id: id.into(),
-            repo: "r".into(),
-            rel_path: format!("{id}.md"),
+            abs_path: std::path::PathBuf::from(format!("/test/r/{id}.md")),
             kind: "spec".into(),
             status: "active".into(),
             title: None,
@@ -814,7 +813,7 @@ pub(crate) mod tests {
             art_insert(
                 &cat,
                 &ArtifactRow {
-                    rel_path: rel_path.into(),
+                    abs_path: std::path::PathBuf::from(format!("/test/r/{rel_path}")),
                     ..art("a-fp")
                 },
             )

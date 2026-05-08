@@ -39,8 +39,8 @@ fn scope_summary(
             Scope::Umbrella => "umbrella",
             Scope::All => "all",
         },
-        "root": current.map(|c| c.root.clone()),
-        "subdir": current.map(|c| c.subdir.clone()),
+        "root": current.map(|c| c.git_root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()),
+        "subdir": current.map(|_| String::new()),
         "umbrella": current.and_then(|c| c.umbrella.clone()),
         "scope_fallback": fallback,
     })
@@ -160,7 +160,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 .collect::<Vec<_>>()
                 .join(", ");
             let sql = format!(
-                "SELECT id, repo, rel_path, kind, status, title, owners, tags, topic, \
+                "SELECT id, abs_path, kind, status, title, owners, tags, topic, \
                  time_scope, source, created_at, updated_at, file_mtime, \
                  file_sha256, confidence FROM artifact WHERE id IN ({placeholders})"
             );
@@ -191,13 +191,6 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
     });
 
-    let root_map: std::collections::HashMap<String, std::path::PathBuf> = ctx
-        .workspace
-        .roots
-        .iter()
-        .map(|r| (r.name.clone(), r.path.clone()))
-        .collect();
-
     let mut markdown = String::new();
     let mut included_ids: Vec<String> = Vec::new();
 
@@ -206,11 +199,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             Some(r) => r,
             None => continue,
         };
-        let repo_root = match root_map.get(&row.repo) {
-            Some(p) => p,
-            None => continue,
-        };
-        let full_path = repo_root.join(&row.rel_path);
+        let full_path = row.abs_path.clone();
         let content = match std::fs::read_to_string(&full_path) {
             Ok(c) => c,
             Err(_) => continue,
@@ -234,7 +223,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             format!(
                 "<!-- [LIVE]: {} | last refreshed: {} | refresh #{} -->\n\
                  > Prompt: {}\n\n\
-                 {}## {}  — {}/{}  ({}/{})\n{}\n\n",
+                 {}## {}  — {}/{}  ({})\n{}\n\n",
                 title,
                 refreshed,
                 aug.refresh_count,
@@ -243,14 +232,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 title,
                 row.kind,
                 row.status,
-                row.repo,
-                row.rel_path,
+                row.abs_path.display(),
                 first_30
             )
         } else {
             format!(
-                "## {}  — {}/{}  ({}/{})\n{}\n\n",
-                title, row.kind, row.status, row.repo, row.rel_path, first_30
+                "## {}  — {}/{}  ({})\n{}\n\n",
+                title,
+                row.kind,
+                row.status,
+                row.abs_path.display(),
+                first_30
             )
         };
         if !markdown.is_empty() && (markdown.len() + section.len()) > char_cap {
@@ -288,8 +280,7 @@ mod tests {
         let now = chrono::Utc::now().timestamp_millis();
         ArtifactRow {
             id: id.into(),
-            repo: repo.into(),
-            rel_path: rel_path.into(),
+            abs_path: std::path::PathBuf::from(format!("/{repo}/{rel_path}")),
             kind: "spec".into(),
             status: "active".into(),
             title: Some(title.into()),
@@ -307,6 +298,15 @@ mod tests {
     }
 
     fn mk_ctx(tmp_root: std::path::PathBuf, cat: Catalog) -> ToolContext {
+        // Realign rows whose `sample_row` placeholder abs_path is `/r/{rel}`
+        // to point under `tmp_root`, so files written under tmp_root resolve.
+        let new_prefix = format!("{}/", tmp_root.display());
+        cat.conn
+            .execute(
+                "UPDATE artifact SET abs_path = REPLACE(abs_path, '/r/', ?1)",
+                rusqlite::params![new_prefix],
+            )
+            .unwrap();
         ToolContext {
             catalog: Arc::new(parking_lot::Mutex::new(cat)),
             workspace: Arc::new(WorkspaceConfig {
@@ -436,17 +436,23 @@ mod tests {
         let root = tmp.path().to_path_buf();
         let cat = Catalog::open_in_memory().unwrap();
 
-        let in_proj = sample_row(
+        // Active project lives at root/code-explorer with file inside.
+        let proj_dir = root.join("code-explorer");
+        std::fs::create_dir_all(&proj_dir).unwrap();
+        std::fs::write(proj_dir.join("auth.md"), "# auth\nbody").unwrap();
+
+        let mut in_proj = sample_row(
             "in",
             "claude",
             "code-explorer/auth.md",
             "auth notes",
             Some("auth"),
         );
-        let out_proj = sample_row("out", "agents", "x/auth.md", "auth elsewhere", Some("auth"));
-        let auth_path = root.join("code-explorer");
-        std::fs::create_dir_all(&auth_path).unwrap();
-        std::fs::write(auth_path.join("auth.md"), "# auth\nbody").unwrap();
+        in_proj.abs_path = proj_dir.join("auth.md");
+        let mut out_proj = sample_row("out", "agents", "x/auth.md", "auth elsewhere", Some("auth"));
+        // Place the other repo's row outside the active git_root so scope=Repo excludes it.
+        let other_root = std::path::PathBuf::from("/some/other/repo");
+        out_proj.abs_path = other_root.join("x/auth.md");
         artifact::upsert(&cat, &in_proj).unwrap();
         artifact::upsert(&cat, &out_proj).unwrap();
 
@@ -455,7 +461,7 @@ mod tests {
             workspace: Arc::new(WorkspaceConfig {
                 roots: vec![Root {
                     name: "claude".into(),
-                    path: root,
+                    path: root.clone(),
                 }],
                 ignore: vec![],
                 rules: vec![],
@@ -464,10 +470,9 @@ mod tests {
             rules: Arc::new(vec![]),
             embedding: None,
             current_project: Some(Arc::new(crate::current_project::CurrentProject {
-                root: "claude".into(),
-                subdir: "code-explorer".into(),
+                abs_path: proj_dir.clone(),
+                git_root: root.clone(),
                 umbrella: None,
-                ..Default::default()
             })),
         };
 

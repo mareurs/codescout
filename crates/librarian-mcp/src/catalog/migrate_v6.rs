@@ -22,26 +22,22 @@ use std::path::PathBuf;
 /// Step 2 of the migration: backfill `abs_path` and `git_root` for every
 /// legacy row, using the workspace.toml `[[roots]]` lookup. Idempotent —
 /// rows that already have a non-NULL `abs_path` are skipped.
-pub(super) fn backfill(
-    conn: &Connection,
-    ws: &WorkspaceConfig,
-    drop_orphans: bool,
-) -> Result<()> {
-    let lookup: HashMap<&str, &PathBuf> =
-        ws.roots.iter().map(|r| (r.name.as_str(), &r.path)).collect();
+pub(super) fn backfill(conn: &Connection, ws: &WorkspaceConfig, drop_orphans: bool) -> Result<()> {
+    let lookup: HashMap<&str, &PathBuf> = ws
+        .roots
+        .iter()
+        .map(|r| (r.name.as_str(), &r.path))
+        .collect();
 
     // Detect orphans BEFORE writing.
     let orphan_ids: Vec<String> = {
-        let mut stmt = conn.prepare(
-            "SELECT id, repo FROM artifact WHERE abs_path IS NULL",
-        )?;
-        let rows = stmt.query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-        })?;
+        let mut stmt = conn.prepare("SELECT id, repo FROM artifact WHERE abs_path IS NULL")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
         rows.filter_map(|row| {
             let (id, repo) = row.ok()?;
             (!lookup.contains_key(repo.as_str())).then_some(id)
-        }).collect()
+        })
+        .collect()
     };
 
     if !orphan_ids.is_empty() {
@@ -50,8 +46,7 @@ pub(super) fn backfill(
                 conn.execute("DELETE FROM artifact WHERE id = ?1", [id])?;
             }
         } else {
-            let sample: Vec<&str> =
-                orphan_ids.iter().take(5).map(String::as_str).collect();
+            let sample: Vec<&str> = orphan_ids.iter().take(5).map(String::as_str).collect();
             anyhow::bail!(
                 "{} artifact(s) reference unknown root: {}{}. Either restore the \
                  root in workspace.toml or set LIBRARIAN_MIGRATE_DROP_ORPHANS=1 \
@@ -64,12 +59,11 @@ pub(super) fn backfill(
     }
 
     // Backfill artifact.abs_path.
-    let mut stmt = conn.prepare(
-        "SELECT id, repo, rel_path FROM artifact WHERE abs_path IS NULL",
-    )?;
-    let rows: Vec<(String, String, String)> = stmt.query_map([], |r| {
-        Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-    })?.collect::<Result<_, _>>()?;
+    let mut stmt =
+        conn.prepare("SELECT id, repo, rel_path FROM artifact WHERE abs_path IS NULL")?;
+    let rows: Vec<(String, String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<Result<_, _>>()?;
     for (id, repo, rel_path) in rows {
         let root = lookup.get(repo.as_str()).expect("orphans rejected above");
         let abs = root.join(&rel_path);
@@ -80,12 +74,10 @@ pub(super) fn backfill(
     }
 
     // Backfill commits.git_root.
-    let mut stmt = conn.prepare(
-        "SELECT hash, repo FROM commits WHERE git_root IS NULL",
-    )?;
-    let rows: Vec<(String, String)> = stmt.query_map([], |r| {
-        Ok((r.get(0)?, r.get(1)?))
-    })?.collect::<Result<_, _>>()?;
+    let mut stmt = conn.prepare("SELECT hash, repo FROM commits WHERE git_root IS NULL")?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
     for (hash, repo) in rows {
         if let Some(root) = lookup.get(repo.as_str()) {
             conn.execute(
@@ -107,7 +99,8 @@ mod tests {
 
     fn new_db_with_legacy_row(repo: &str, rel_path: &str) -> Connection {
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(r#"
+        conn.execute_batch(
+            r#"
             CREATE TABLE artifact (
                 id TEXT PRIMARY KEY, repo TEXT NOT NULL, rel_path TEXT NOT NULL,
                 kind TEXT NOT NULL, status TEXT NOT NULL, title TEXT,
@@ -121,13 +114,16 @@ mod tests {
                 hash TEXT PRIMARY KEY, repo TEXT NOT NULL,
                 authored_at INTEGER, subject TEXT, topo_order INTEGER
             );
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO artifact(id, repo, rel_path, kind, status, title,
                                   created_at, updated_at, file_mtime, file_sha256)
              VALUES ('a1', ?1, ?2, 'tracker', 'active', 't', 0, 0, 0, 'sha')",
             rusqlite::params![repo, rel_path],
-        ).unwrap();
+        )
+        .unwrap();
         // Apply v6 step 1 (add columns).
         add_columns(&conn).unwrap();
         conn
@@ -135,7 +131,10 @@ mod tests {
 
     fn ws_with(root_name: &str, root_path: &str) -> WorkspaceConfig {
         WorkspaceConfig {
-            roots: vec![Root { name: root_name.into(), path: PathBuf::from(root_path) }],
+            roots: vec![Root {
+                name: root_name.into(),
+                path: PathBuf::from(root_path),
+            }],
             ignore: vec![],
             rules: vec![],
             umbrellas: vec![],
@@ -147,9 +146,11 @@ mod tests {
         let conn = new_db_with_legacy_row("code-explorer", "docs/trackers/foo.md");
         let ws = ws_with("code-explorer", "/home/u/work/code-explorer");
         backfill(&conn, &ws, false).unwrap();
-        let abs: String = conn.query_row(
-            "SELECT abs_path FROM artifact WHERE id = 'a1'", [], |r| r.get(0),
-        ).unwrap();
+        let abs: String = conn
+            .query_row("SELECT abs_path FROM artifact WHERE id = 'a1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(abs, "/home/u/work/code-explorer/docs/trackers/foo.md");
     }
 
@@ -159,9 +160,11 @@ mod tests {
         let ws = ws_with("alive", "/abs/alive");
         let err = backfill(&conn, &ws, false).unwrap_err();
         assert!(err.to_string().contains("ghost") || err.to_string().contains("a1"));
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM artifact WHERE id = 'a1'", [], |r| r.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM artifact WHERE id = 'a1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(count, 1);
     }
 
@@ -170,9 +173,11 @@ mod tests {
         let conn = new_db_with_legacy_row("ghost", "x.md");
         let ws = ws_with("alive", "/abs/alive");
         backfill(&conn, &ws, true).unwrap();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM artifact WHERE id = 'a1'", [], |r| r.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM artifact WHERE id = 'a1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(count, 0);
     }
 
@@ -181,13 +186,17 @@ mod tests {
         let conn = new_db_with_legacy_row("code-explorer", "docs/x.md");
         let ws = ws_with("code-explorer", "/abs/c");
         backfill(&conn, &ws, false).unwrap();
-        let first: String = conn.query_row(
-            "SELECT abs_path FROM artifact WHERE id = 'a1'", [], |r| r.get(0),
-        ).unwrap();
+        let first: String = conn
+            .query_row("SELECT abs_path FROM artifact WHERE id = 'a1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         backfill(&conn, &ws, false).unwrap();
-        let second: String = conn.query_row(
-            "SELECT abs_path FROM artifact WHERE id = 'a1'", [], |r| r.get(0),
-        ).unwrap();
+        let second: String = conn
+            .query_row("SELECT abs_path FROM artifact WHERE id = 'a1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(first, second);
     }
 
@@ -197,12 +206,15 @@ mod tests {
         conn.execute(
             "INSERT INTO commits(hash, repo, topo_order) VALUES ('abc', 'code-explorer', 1)",
             [],
-        ).unwrap();
+        )
+        .unwrap();
         let ws = ws_with("code-explorer", "/abs/c");
         backfill(&conn, &ws, false).unwrap();
-        let git_root: String = conn.query_row(
-            "SELECT git_root FROM commits WHERE hash = 'abc'", [], |r| r.get(0),
-        ).unwrap();
+        let git_root: String = conn
+            .query_row("SELECT git_root FROM commits WHERE hash = 'abc'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(git_root, "/abs/c");
     }
 }

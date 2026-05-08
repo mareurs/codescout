@@ -376,7 +376,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "id": id,
             "title": art.title,
             "kind": art.kind,
-            "rel_path": art.rel_path,
+            "abs_path": art.abs_path.display().to_string(),
             "last_refreshed_at": aug.as_ref().and_then(|a| a.last_refreshed_at.clone()),
             "refresh_count": aug.as_ref().map(|a| a.refresh_count).unwrap_or(0),
         }));
@@ -423,10 +423,9 @@ mod tests {
             rules: Arc::new(vec![]),
             embedding: None,
             current_project: Some(Arc::new(CurrentProject {
-                root: "x".into(),
-                subdir: "y".into(),
+                abs_path: std::path::PathBuf::from("/test/x/y"),
+                git_root: std::path::PathBuf::from("/test/x"),
                 umbrella: None,
-                ..Default::default()
             })),
         }
     }
@@ -452,8 +451,7 @@ mod tests {
                     &cat,
                     &artifact::ArtifactRow {
                         id: id.to_string(),
-                        repo: "r".into(),
-                        rel_path: format!("{id}.md"),
+                        abs_path: std::path::PathBuf::from(format!("/test/r/{id}.md")),
                         kind: kind.into(),
                         status: "active".into(),
                         title: Some(format!("Title {id}")),
@@ -509,8 +507,7 @@ mod tests {
                     &cat,
                     &artifact::ArtifactRow {
                         id: id.clone(),
-                        repo: "r".into(),
-                        rel_path: format!("{id}.md"),
+                        abs_path: std::path::PathBuf::from(format!("/test/r/{id}.md")),
                         kind: "tracker".into(),
                         status: "active".into(),
                         title: None,

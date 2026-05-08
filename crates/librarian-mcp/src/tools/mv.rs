@@ -20,14 +20,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let row = artifact::get(&cat, &a.id)?
         .ok_or_else(|| super::RecoverableError::new(format!("unknown id `{}`", a.id)))?;
 
+    // Find the workspace root that contains this artifact's abs_path.
     let root = ctx
         .workspace
         .roots
         .iter()
-        .find(|r| r.name == row.repo)
-        .ok_or_else(|| anyhow::anyhow!("unknown repo `{}`", row.repo))?;
+        .find(|r| row.abs_path.starts_with(&r.path))
+        .ok_or_else(|| anyhow::anyhow!("no workspace root contains {}", row.abs_path.display()))?;
 
-    let old_full = root.path.join(&row.rel_path);
+    let old_full = row.abs_path.clone();
     let new_full = root.path.join(&a.new_rel_path);
 
     if new_full.exists() {
@@ -58,7 +59,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let file_sha256 = crate::util::sha_of_bytes(content.as_bytes());
 
     let updated_row = crate::catalog::artifact::ArtifactRow {
-        rel_path: a.new_rel_path.clone(),
+        abs_path: new_full.clone(),
         updated_at: now,
         file_mtime,
         file_sha256,
@@ -68,8 +69,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     Ok(json!({
         "id": a.id,
-        "old_rel_path": row.rel_path,
-        "new_rel_path": a.new_rel_path,
+        "old_abs_path": old_full.display().to_string(),
+        "new_abs_path": new_full.display().to_string(),
         "moved": true
     }))
 }
@@ -89,8 +90,7 @@ mod tests {
 
         let row = ArtifactRow {
             id: "aabbccdd11223344".into(),
-            repo: "test-repo".into(),
-            rel_path: "docs/trackers/foo.md".into(),
+            abs_path: tmp.join("docs/trackers/foo.md"),
             kind: "tracker".into(),
             status: "active".into(),
             title: Some("Foo Tracker".into()),
@@ -149,15 +149,21 @@ mod tests {
         .unwrap();
 
         assert_eq!(result["moved"], true);
-        assert_eq!(result["old_rel_path"], "docs/trackers/foo.md");
-        assert_eq!(result["new_rel_path"], "docs/archive/foo.md");
+        assert!(result["old_abs_path"]
+            .as_str()
+            .unwrap()
+            .ends_with("docs/trackers/foo.md"));
+        assert!(result["new_abs_path"]
+            .as_str()
+            .unwrap()
+            .ends_with("docs/archive/foo.md"));
 
         assert!(tmp.path().join("docs/archive/foo.md").exists());
         assert!(!tmp.path().join("docs/trackers/foo.md").exists());
 
         let cat = ctx.catalog.lock();
         let row = artifact::get(&cat, "aabbccdd11223344").unwrap().unwrap();
-        assert_eq!(row.rel_path, "docs/archive/foo.md");
+        assert!(row.abs_path.ends_with("docs/archive/foo.md"));
     }
 
     #[tokio::test]

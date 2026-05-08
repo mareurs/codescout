@@ -14,14 +14,10 @@ const SOFT_CAP_LINES: usize = 500;
 const OVERFLOW_HEADING_LIMIT: usize = 10;
 
 fn resolve_file_path(
-    ctx: &ToolContext,
+    _ctx: &ToolContext,
     row: &crate::catalog::artifact::ArtifactRow,
 ) -> Option<PathBuf> {
-    ctx.workspace
-        .roots
-        .iter()
-        .find(|r| r.name == row.repo)
-        .map(|r| r.path.join(&row.rel_path))
+    Some(row.abs_path.clone())
 }
 
 fn normalize_heading(s: &str) -> String {
@@ -204,8 +200,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let mut out = json!({
         "id": row.id,
-        "repo": row.repo,
-        "rel_path": row.rel_path,
+        "abs_path": row.abs_path.display().to_string(),
         "kind": row.kind,
         "status": row.status,
         "title": row.title,
@@ -272,7 +267,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         },
         None => {
             out["preview"] = Value::Null;
-            out["body_error"] = json!(format!("repo {:?} not in workspace.roots", row.repo));
+            out["body_error"] = json!(format!(
+                "file not found on disk: {}",
+                row.abs_path.display()
+            ));
             None
         }
     };
@@ -391,8 +389,7 @@ mod tests {
     fn mk_row(id: &str) -> ArtifactRow {
         ArtifactRow {
             id: id.into(),
-            repo: "r".into(),
-            rel_path: format!("{id}.md"),
+            abs_path: std::path::PathBuf::from(format!("/test/r/{id}.md")),
             kind: "spec".into(),
             status: "active".into(),
             title: Some(id.to_uppercase()),
@@ -504,8 +501,18 @@ mod tests {
     use tempfile::TempDir;
 
     /// Helper: build a context with one root pointing at a tempdir.
+    /// Rewrites any pre-existing rows' `abs_path` from the placeholder
+    /// `/test/r/...` (set by `mk_row`) to point under the new tempdir,
+    /// so files written into `dir.path()` resolve correctly.
     fn mk_ctx_with_root(cat: Catalog) -> (ToolContext, TempDir) {
         let dir = tempfile::tempdir().unwrap();
+        let new_prefix = format!("{}/", dir.path().display());
+        cat.conn
+            .execute(
+                "UPDATE artifact SET abs_path = REPLACE(abs_path, '/test/r/', ?1)",
+                rusqlite::params![new_prefix],
+            )
+            .unwrap();
         let ctx = ToolContext {
             catalog: Arc::new(parking_lot::Mutex::new(cat)),
             workspace: Arc::new(WorkspaceConfig {
@@ -661,14 +668,13 @@ mod tests {
     async fn preview_null_when_repo_not_in_roots() {
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &mk_row("a")).unwrap();
-        let ctx = mk_ctx(cat); // mk_ctx has roots: vec![]
+        let ctx = mk_ctx(cat); // roots: vec![], row abs_path is /test/r/a.md (nonexistent)
 
         let v = call(&ctx, json!({"id": "a"})).await.unwrap();
         assert!(v["preview"].is_null());
-        assert!(v["body_error"]
-            .as_str()
-            .unwrap()
-            .contains("workspace.roots"));
+        // New model: file existence is the only criterion. The placeholder
+        // path /test/r/a.md doesn't exist on disk, so body_error is set.
+        assert!(v["body_error"].as_str().is_some());
     }
 
     #[tokio::test]
