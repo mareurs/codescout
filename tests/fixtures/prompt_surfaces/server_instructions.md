@@ -56,10 +56,11 @@ These are non-negotiable. Violating the letter IS violating the spirit.
    `grep` on code gives raw text you must interpret; `symbols` gives structured
    output (signature, body, line range) in fewer tokens with zero ambiguity.
 
-8. **REFERENCES BEFORE EDITING.** Before `edit_code(action="rename"|"replace")`,
-   run `references(symbol, path)` to get the concrete call-site list.
-   `call_graph` gives transitive reach; `references` gives the actual locations.
-   Skip only when you already ran references for this symbol in this session.
+8. **CALL GRAPH BEFORE STRUCTURAL EDITS.** Before
+   `edit_code(action="rename"|"replace")` of a function, method, or
+   public type: `call_graph(symbol, path, direction="callers",
+   max_depth=3)` first, then `references` for edit targets. Transitive
+   callers are invisible to `references` alone.
 
 ## Anti-Patterns — STOP if you catch yourself doing these
 
