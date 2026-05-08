@@ -200,6 +200,14 @@ Cursor, custom agents). In particular:
   enforcement (PreToolUse hooks) but the server itself must be self-contained:
   its gate logic, error messages, and instructions should guide any LLM toward
   the right tool without relying on external hooks.
+- **Project workflows, prompts, and standards live in the repo, not in
+  `claude-plugins/`.** codescout is consumed by multiple agents (Claude Code,
+  Copilot, Antigravity, etc.). The source of truth for any project artifact —
+  research quality criteria, save workflows, tracker conventions, etc. — must
+  be a repo file (`docs/...`, `CLAUDE.md`, etc.) any agent can read. Plugin
+  content (skills, slash commands) is allowed *as a thin UX wrapper* over
+  repo-resident content, never as the source of truth. When in doubt: would a
+  Copilot user be locked out? If yes, move it to the repo.
 
 ## Testing Patterns
 
