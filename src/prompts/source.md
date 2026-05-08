@@ -68,7 +68,7 @@ These are non-negotiable. Violating the letter IS violating the spirit.
 | ❌ Never do this | ✅ Do this instead | Why |
 |---|---|---|
 | `run_command("jq '.key' @file_ref")` to query JSON | `read_file(path, json_path="$.key")` | Navigation params > shell buffer queries |
-| Edit a symbol without blast-radius check | `call_graph(symbol, path, direction="callers", max_depth=3)` first | Transitive callers invisible to grep/references alone — silent breakage |
+| Edit a symbol without blast-radius check | `call_graph(...)` — see Impact Analysis | Transitive callers invisible to grep/references alone — silent breakage |
 | Repeat a broad `symbols(name=...)` after overflow | Narrow with `path=`, `kind=`, or more specific pattern | Follow the overflow hint |
 | Ignore `by_file` in overflow response | Use top file from `by_file` as `path=` filter | The hint tells you exactly where to look |
 | `workspace(action="activate")` for a single lookup | Pass `project_id: "<id>"` on the tool call | No state mutation, no risk of forgetting to return |
@@ -109,7 +109,7 @@ For any symbol change, in order:
 1. `symbols(name=X)` — locate the symbol, get its defining file + line
 2. `symbol_at(path, line)` — inspect type signature + docs (when you need to understand what it IS)
 3. `references(symbol, path)` — enumerate all call sites before touching anything
-4. `call_graph(symbol, path, direction="callers", max_depth=3)` — transitive blast radius for renames/structural changes
+4. For impact analysis, see Impact Analysis.
 5. `edit_code(...)` — make the change
 ### Search Routing
 
@@ -120,7 +120,7 @@ For any symbol change, in order:
 - **Know a text pattern in data/config files** → `grep(pattern)` (not for code structure — see Iron Law #7)
 - **Know a filename** → `tree(glob=...)`
 - **All callers of X** → `references(symbol, path)` (not `grep`)
-- **Transitive call graphs** → `call_graph(symbol, direction, max_depth)` — `direction="callers"` for blast-radius sizing; `direction="callees"` for flow tracing. `call_graph(depth=1, direction="callers")` also filters refs to call sites only.
+- **Transitive call graphs** → `call_graph(symbol, path, direction, max_depth)` — see Impact Analysis for the worked example.
 
 **Retrieval stack required.** `semantic_search` runs through the Qdrant + TEI hybrid stack. If a call returns `retrieval stack offline`, the user must run `./scripts/retrieval-stack.sh up` once per machine. There is no in-process fallback — the legacy sqlite-vec code-search path was removed in Phase 7.
 
@@ -278,14 +278,13 @@ Both required for any rename / signature change / contract change.
 Skip call_graph only for body-only edits with identical signature.
 ### Safe Rename
 
+Run Impact Analysis first.
+
 | Step | Tool | Purpose |
 |------|------|---------|
-| 1 | `references(symbol, path)` | Map all usages before renaming |
-| 2 | `edit_code(action="rename", symbol, path, new_name)` | LSP-powered rename across files |
-| 3 | `grep(old_name)` | Catch stragglers in comments, strings, docs |
-| 4 | `run_command("cargo check")` | Verify compilation |
-
-
+| 1 | `edit_code(action="rename", symbol, path, new_name)` | LSP-powered rename across files |
+| 2 | `grep(old_name)` | Catch stragglers in comments, strings, docs |
+| 3 | `run_command("cargo check")` | Verify compilation |
 ### Tracking a Decision or Issue
 
 | Step | Tool | Purpose |
