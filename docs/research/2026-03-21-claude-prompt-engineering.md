@@ -1,3 +1,11 @@
+---
+title: Claude System Prompt Engineering Research
+date: 2026-03-21
+topic: prompt-engineering
+summary: Patterns and anti-patterns observed across Claude system prompts in production agentic tools.
+status: complete
+---
+
 # Claude System Prompt Engineering Research
 
 **Date:** 2026-03-21
