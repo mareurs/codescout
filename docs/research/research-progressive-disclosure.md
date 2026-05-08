@@ -1,3 +1,11 @@
+---
+title: "Research Validation: Progressive Disclosure & Tool Discovery for LLM Agents"
+date: unknown
+topic: tool-discovery
+summary: Maps academic research on progressive disclosure and tool discovery to codescout's design.
+status: complete
+---
+
 # Research Validation: Progressive Disclosure & Tool Discovery for LLM Agents
 
 This document maps current academic research to codescout's progressive

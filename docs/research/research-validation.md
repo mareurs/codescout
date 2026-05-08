@@ -1,3 +1,11 @@
+---
+title: "Research Validation: The Science Behind codescout"
+date: unknown
+topic: foundational-research
+summary: Maps current academic research to codescout's core design decisions across 6 themes.
+status: complete
+---
+
 # Research Validation: The Science Behind codescout
 
 This document maps current academic research to codescout's design decisions,
