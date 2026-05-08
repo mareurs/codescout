@@ -145,7 +145,7 @@ These are fixed in the happy path but still have edge cases worth knowing about.
 
 **Workaround:** Use `artifact_augment(id, merge=true, params={...})` to update params, then call `artifact(update, commit_refresh=true)` separately to record the refresh timestamp.
 
-**Fix idea:** Either add `params` to `UpdatePatch` and route it to `augmentation::upsert_params`, or document the correct two-call pattern clearly in the tool description.
+**Fixed:** `params` added to `UpdatePatch`, routed through `augmentation::merge_params`. Commit `e406218` on `experiments`. Both prompt surfaces updated.
 ## Archive
 
 Fixed / superseded entries: `docs/archive/bug-reports/`.
