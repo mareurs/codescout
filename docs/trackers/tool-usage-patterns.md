@@ -13,6 +13,7 @@ time_scope: null
 ---
 
 
+
 # Tool Usage Patterns
 
 Our internal instrumentation for codescout tool decisions — analogous to Langfuse but for
@@ -139,6 +140,15 @@ Started with `edit_code` correctly for service file structural changes (calls 39
 **Verdict:** wrong-tool — gate logic was a single read per project; should have been a 6×N matrix.  
 **Prompt gap:** workspace_onboarding_prompt.md HARD-GATE language was "verify project-overview" rather than "verify all required topics". Fixed 2026-05-07 with Phase 4 read-back loop.
 
+## filter observations
+
+### T-010 — `artifact(find)` with `rel_path` filter hits SQLite column-not-found
+**Tool:** `artifact` (find)  
+**Verdict:** wrong-tool outcome — correct tool, broken field alias.  
+**What happened:** LLM passed `filter: {"rel_path": {"contains": "tool-usage-patterns"}}` (the example literally shown in the tool schema at `artifact.rs:85`). Got runtime error `no such column: rel_path`. Schema v6 dropped `repo` and `rel_path` as separate DB columns, consolidating to `abs_path` — but `ALLOWED_FIELDS` in `filter.rs` still listed both dead names, so the filter compiled to invalid SQL.  
+**Fix:** Remapped `rel_path` → `abs_path` in `compile_leaf` before SQL generation; removed phantom `repo` from `ALLOWED_FIELDS`. Regression tests added: `rel_path_filter_compiles_to_abs_path_sql` + `repo_filter_rejected` (`filter.rs`).  
+**Prompt gap:** None needed — the tool description example was correct and now works. Root cause was a schema-migration orphan in the filter allowlist, not a prompt issue.
+
 ## Prompt improvement candidates
 
 ### Iron Law #7 — Scope distinction for grep vs semantic_search
@@ -161,6 +171,8 @@ Add to decision tree:
 
 ## History
 
+### 2026-05-08 — filter.rs rel_path alias fix (T-010)
+Added T-010. Root cause: schema v6 dropped `rel_path`/`repo` columns in favour of `abs_path`, but `ALLOWED_FIELDS` kept both dead names. LLM passed the documented `rel_path` filter example and hit `no such column`. Fixed by remapping `rel_path` → `abs_path` in `compile_leaf`; removed `repo` from allowlist. Two regression tests added.
 
 ### 2026-05-03 — Session c5daabbe analysis (eduplanner-ui error handling refactor)
 Added T-005–T-008. Key findings: Iron Law #3 (piped run_command) is the most persistent violation — 7× in one session on `npm run build`. edit_file drift: model uses edit_code correctly then regresses to edit_file for same-type edits in a different file category. grep(^import) on specific files before editing confirmed legitimate.
@@ -173,4 +185,5 @@ for scoped-directory multi-symbol discovery. Framing: internal Langfuse for tool
 ### 2026-05-03 — Initial population (as grep-usage-patterns)
 First 3 observations from session 64618681 (Kotlin backend). G-001 verdict corrected
 from debatable to legitimate after live proof.
+
 
