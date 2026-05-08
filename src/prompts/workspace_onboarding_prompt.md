@@ -74,19 +74,17 @@ orphans were found. Record the outcome for the final summary.
 Dispatch one Agent subagent per project **in a single parallel batch** —
 all Agent tool calls in one response turn.
 
-**Subagent prompt template** (fill placeholders for each project). Each
-subagent must write all 6 memories listed below:
+**Subagent prompt template** (fill placeholders for each project):
 
 ```
 You are deep-diving the "{project_id}" project in a multi-project workspace.
-Write all 6 memories listed below.
 
 ## Workspace Context
 {paste the Workspace Exploration Summary from Phase 1}
 
 ## Your Assignment
 
-Write all 6 project-scope memories defined in memory-templates.md:
+Write all 6 memories (project-scope) defined in memory-templates.md:
 1. project-overview
 2. architecture
 3. conventions
@@ -106,14 +104,14 @@ Use: memory(action: "write", project_id: "{project_id}", topic: "<topic>", conte
 1. tree("{project_root}") — structure
 2. symbols on ALL source files in the project
 3. read_file on build config, README if present
-4. symbols(name=..., include_body=true) on 3–5 key functions/types
+4. symbols(name=..., include_body=true) on 3-5 key functions/types
 5. semantic_search for 3+ concepts specific to this project
 6. Read test files to understand testing patterns
 
 ## Rules
 - Be specific: file paths, function names, concrete patterns
 - Do NOT document sibling project internals — note dependencies only
-- 15–40 lines per memory (or empty stub for eligible topics)
+- 15-40 lines per memory (or empty stub for eligible topics)
 - When you encounter types from sibling projects, note them as
   "imports FooType from {sibling}" but do not document FooType itself
 
