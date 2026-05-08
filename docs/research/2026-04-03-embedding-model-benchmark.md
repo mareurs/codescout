@@ -1,3 +1,11 @@
+---
+title: Embedding Model Benchmark for Semantic Search
+date: 2026-04-03
+topic: retrieval-quality
+summary: Compares 5 embedding models on 20 codescout-specific test cases across 4 difficulty tiers.
+status: complete
+---
+
 # Embedding Model Benchmark for Semantic Search
 
 **Date:** 2026-04-03

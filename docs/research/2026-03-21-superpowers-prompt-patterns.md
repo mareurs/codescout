@@ -1,3 +1,11 @@
+---
+title: Superpowers Plugin — Prompt Architecture Patterns
+date: 2026-03-21
+topic: prompt-engineering
+summary: Architectural patterns used by the Superpowers plugin's skills and slash commands.
+status: complete
+---
+
 # Superpowers Plugin — Prompt Architecture Patterns
 
 **Date:** 2026-03-21
