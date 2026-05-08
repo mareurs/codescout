@@ -1431,6 +1431,13 @@ mod tests {
     /// remove a tool, the compiler won't catch stale prompt mentions — this test
     /// does.
     ///
+    /// **Two-way tripwire (I-01 Phase 3 follow-on):** the test also asserts every
+    /// allowlist entry actually appears backticked in at least one surface. When
+    /// a section is rewritten or a token disappears from the surfaces, the
+    /// allowlist must shrink — otherwise stale entries decay into permanent
+    /// false-negatives that mask real drift later. Both directions are required
+    /// for the allowlist to remain trustworthy.
+    ///
     /// Scope: **snake_case tokens only** (regex `[a-z][a-z_0-9]{2,}`). This
     /// deliberately skips PascalCase identifiers — host-harness tool names
     /// (`EnterWorktree`, `TaskCreate`), Rust type names, and tree-sitter node
@@ -1440,67 +1447,51 @@ mod tests {
     /// added in PascalCase (none today), widen the regex and grow the allowlist.
     #[tokio::test]
     async fn prompt_surfaces_reference_only_real_tools() {
-        use std::collections::HashSet;
+        use std::collections::{HashMap, HashSet};
 
         let (_dir, server) = make_server().await;
         let real_tools: HashSet<&str> = server.tools.iter().map(|t| t.name()).collect();
 
         // Tokens that appear backticked in the surfaces but are not tool names.
-        // Grow this list as prompts evolve; shrink it when a token disappears
-        // from the surfaces. Keep entries sorted.
-        let allowlist: HashSet<&str> = [
+        // Grow this list as prompts evolve; the unused-entry tripwire below will
+        // tell you when to shrink it. Keep entries sorted.
+        let allowlist_entries: &[&str] = &[
             "acknowledge_risk",
             "architecture",
             "by_file",
             "class",
-            "code",
             "conventions",
             "cwd",
-            "detail_level",
-            "domain_glossary",
             "end_line",
             "features_md",
             "file_id",
             "files",
-            "fn",
             "gotchas",
             "hardware",
-            "include_body",
             "json_path",
             "kind",
-            "language_patterns",
             "limit",
             "model",
             "model_options",
-            "name",
             "name_path",
-            "new_body",
-            "new_string",
             "next",
             "offset",
-            "old_string",
             "output_id",
-            "path",
             "pattern",
-            "project_overview",
             "protected_memories",
-            "query",
-            "read_only",
-            "replace_all",
             "run_in_background",
-            "scope",
             "sed",
             "start_line",
             "struct",
-            "symbol",
-            "system_prompt",
-            "timeout_secs",
-            "toml_key",
             "untracked",
             "url",
-        ]
-        .into_iter()
-        .collect();
+        ];
+        let allowlist: HashSet<&str> = allowlist_entries.iter().copied().collect();
+        let mut allowlist_hits: HashMap<&str, usize> = allowlist_entries
+            .iter()
+            .copied()
+            .map(|s| (s, 0usize))
+            .collect();
 
         let draft = crate::prompts::builders::build_system_prompt_draft(&[], &[], None, None, &[]);
         let surfaces: &[(&str, &str)] = &[
@@ -1517,7 +1508,11 @@ mod tests {
         for (surface, body) in surfaces {
             for cap in re.captures_iter(body) {
                 let ident = cap.get(1).unwrap().as_str();
-                if real_tools.contains(ident) || allowlist.contains(ident) {
+                if real_tools.contains(ident) {
+                    continue;
+                }
+                if allowlist.contains(ident) {
+                    *allowlist_hits.get_mut(ident).unwrap() += 1;
                     continue;
                 }
                 drift.push(format!(
@@ -1528,10 +1523,26 @@ mod tests {
             }
         }
 
+        let mut unused: Vec<&str> = allowlist_hits
+            .iter()
+            .filter(|(_, count)| **count == 0)
+            .map(|(token, _)| *token)
+            .collect();
+        unused.sort();
+
+        let mut messages = drift;
+        if !unused.is_empty() {
+            messages.push(format!(
+                "unused allowlist entries (no longer appear backticked in any \
+                 surface — remove them from the allowlist): {}",
+                unused.join(", ")
+            ));
+        }
+
         assert!(
-            drift.is_empty(),
+            messages.is_empty(),
             "prompt-surface drift detected:\n  {}",
-            drift.join("\n  ")
+            messages.join("\n  ")
         );
     }
 
