@@ -232,6 +232,20 @@ the spin begins.
 - **Fix (2026-05-15):** In `EditCode::do_replace` (`src/tools/symbol/edit_code.rs`), after computing the walk-back `start`, inspect `new_body`'s first non-empty line. If it does NOT start with a decorator (`///`/`//!`/`//`/`#[`/`/**`/`/*`/`@`), narrow `start` forward past any decorator lines (with multi-line `#[...]` bracket tracking) inside the captured range. Result: doc comments / attributes that exist above the symbol but are absent from the new body are preserved; the BUG-031 duplication-prevention path still fires when `new_body` does lead with decorators.
 - **Regression sentinel:** `tests/symbol_lsp.rs::replace_symbol_preserves_doc_when_new_body_has_no_doc_comment` (mock-LSP unit) + edit_code eval R-08 (end-to-end via live rust-analyzer).
 
+### BUG-057 — `symbols(path)` returns silent empty `[]` during LSP cold-start indexing
+
+(Originally filed as BUG-054 on a parallel branch; renumbered on merge to avoid ID collision with the `edit_code` stray-brace BUG-054.)
+
+- **Observed:** 2026-05-07
+- **Tool:** `symbols` (path-only / `list_overview` dispatch)
+- **Severity:** Medium (silent — agent thinks file has no symbols, abandons it)
+- **What I did:** Called `symbols("src/tools/mod.rs")`, `symbols("src/agent/mod.rs")`, `symbols("src/tools/output.rs")` shortly after session start.
+- **Expected:** Module declarations and other top-level symbols returned.
+- **What happened:** All three returned `{"file": "<path>", "symbols": []}`. Calling the same tool with `detail_level="full"` returned the full symbol set. Re-running the compact call ~1 minute later also returned the full set. The empty result was non-deterministic and tied to LSP cold-start.
+- **Probable cause:** rust-analyzer responds to `textDocument/documentSymbol` with `Ok([])` (success, empty list) during initial indexing rather than `-32800 RequestCancelled`. `is_idempotent_lsp_method` would have triggered the cold-start retry budget on a `RequestCancelled`, but `Ok([])` is treated as a valid empty result and propagated to the caller. Tree-sitter fallback (which would have populated module decls) is not invoked because the LSP call did not error.
+- **Workaround:** Retry the call after ~30–60s; or pass `detail_level="full"` (no different code path on this — the bug appears to require LSP warmup, and by the time the second call runs LSP is warm).
+- **Fix:** in `list_overview`'s single-file branch, when `client.document_symbols(...)` returns an empty Vec for a file with non-empty source AND tree-sitter detects the language, fall over to tree-sitter symbol extraction. Applied by this commit (tree-sitter fallback path).
+- **Status:** Fixed
 ## Template for new entries
 
 ```markdown

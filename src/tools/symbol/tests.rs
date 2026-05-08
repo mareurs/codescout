@@ -4561,6 +4561,97 @@ fn symbols_overview_empty_directory() {
     assert_eq!(result, "src/empty — 0 symbols");
 }
 
+#[tokio::test]
+async fn symbols_overview_falls_back_to_treesitter_when_lsp_returns_empty() {
+    use crate::lsp::{mock::MockLspClient, mock::MockLspProvider};
+    use crate::tools::symbol::Symbols;
+
+    // BUG-054 regression: rust-analyzer can return Ok(vec![]) during cold-start
+    // indexing. The single-file branch of `list_overview` must fall over to
+    // tree-sitter so the agent gets a usable result instead of empty `[]`.
+    let dir = tempfile::tempdir().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let file = src_dir.join("modlike.rs");
+    std::fs::write(&file, "pub mod alpha;\npub mod beta;\nfn helper() {}\n").unwrap();
+
+    // No symbols registered for the path → MockLspClient returns Ok(empty Vec),
+    // mirroring rust-analyzer's cold-start behavior.
+    let mock = MockLspClient::new();
+    let lsp = MockLspProvider::with_client(mock);
+
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+    };
+
+    let result = Symbols
+        .call(json!({"path": "src/modlike.rs"}), &ctx)
+        .await
+        .expect("call must succeed");
+
+    let syms = result["symbols"].as_array().expect("symbols array");
+    assert!(
+        !syms.is_empty(),
+        "expected tree-sitter fallback to populate symbols when LSP returns empty for non-empty file, got: {result}"
+    );
+    let names: Vec<&str> = syms.iter().filter_map(|s| s["name"].as_str()).collect();
+    assert!(
+        names.contains(&"alpha") || names.contains(&"helper"),
+        "expected at least one of the source symbols, got names: {names:?}"
+    );
+}
+
+#[tokio::test]
+async fn symbols_overview_returns_empty_for_empty_file_via_treesitter() {
+    use crate::lsp::{mock::MockLspClient, mock::MockLspProvider};
+    use crate::tools::symbol::Symbols;
+
+    // BUG-054 negative case: an actually-empty file should NOT trigger the
+    // tree-sitter fallback (would still return empty), and must not regress
+    // into a hang or error. Asserts the fallback is gated on file content.
+    let dir = tempfile::tempdir().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let file = src_dir.join("blank.rs");
+    std::fs::write(&file, "// just a comment\n").unwrap();
+
+    let mock = MockLspClient::new();
+    let lsp = MockLspProvider::with_client(mock);
+
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+    };
+
+    let result = Symbols
+        .call(json!({"path": "src/blank.rs"}), &ctx)
+        .await
+        .expect("call must succeed");
+
+    let syms = result["symbols"].as_array().expect("symbols array");
+    assert!(
+        syms.is_empty(),
+        "comment-only file should return empty symbols (no fallback needed), got: {result}"
+    );
+}
+
 #[test]
 fn symbols_overview_with_overflow() {
     let val = serde_json::json!({
