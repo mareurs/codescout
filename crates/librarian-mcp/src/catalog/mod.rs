@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::path::Path;
 
+use crate::workspace::WorkspaceConfig;
+
 pub mod artifact;
 pub mod augmentation;
 pub mod commits;
@@ -48,7 +50,7 @@ fn init_sqlite_vec() {
 /// Idempotent post-baseline migrations. SCHEMA_SQL covers v1-v3 (CREATE TABLE
 /// IF NOT EXISTS is naturally idempotent); v4+ uses ALTER TABLE which isn't,
 /// so each migration checks for its own preconditions before running.
-fn run_migrations(conn: &Connection) -> Result<()> {
+fn run_migrations(conn: &Connection, ws: Option<&WorkspaceConfig>) -> Result<()> {
     // v4: render_template + params_schema columns on artifact_augmentation
     if !column_exists(conn, "artifact_augmentation", "render_template")? {
         conn.execute(
@@ -86,6 +88,11 @@ fn run_migrations(conn: &Connection) -> Result<()> {
     // v6 migration step 1: add new columns alongside legacy ones.
     // Backfill + drop legacy happens in later phases (Tasks 2 + 6).
     migrate_v6::add_columns(conn)?;
+    if let Some(ws) = ws {
+        let drop_orphans =
+            std::env::var("LIBRARIAN_MIGRATE_DROP_ORPHANS").as_deref() == Ok("1");
+        migrate_v6::backfill(conn, ws, drop_orphans)?;
+    }
     Ok(())
 }
 
@@ -112,7 +119,7 @@ impl Catalog {
             Connection::open(db_path).with_context(|| format!("opening {}", db_path.display()))?;
         conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
         conn.execute_batch(SCHEMA_SQL).context("applying schema")?;
-        run_migrations(&conn).context("running migrations")?;
+        run_migrations(&conn, None).context("running migrations")?;
         // Clean up any artifact_vec rows that lost their parent artifact row
         // (e.g. orphans from before the cascade-delete trigger was added).
         conn.execute_batch("DELETE FROM artifact_vec WHERE id NOT IN (SELECT id FROM artifact);")?;
@@ -124,7 +131,24 @@ impl Catalog {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         conn.execute_batch(SCHEMA_SQL).context("applying schema")?;
-        run_migrations(&conn).context("running migrations")?;
+        run_migrations(&conn, None).context("running migrations")?;
+        // Clean up any artifact_vec rows that lost their parent artifact row
+        // (e.g. orphans from before the cascade-delete trigger was added).
+        conn.execute_batch("DELETE FROM artifact_vec WHERE id NOT IN (SELECT id FROM artifact);")?;
+        Ok(Self { conn })
+    }
+
+    pub fn open_with_workspace(db_path: &Path, ws: &WorkspaceConfig) -> Result<Self> {
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating catalog dir {}", parent.display()))?;
+        }
+        init_sqlite_vec();
+        let conn =
+            Connection::open(db_path).with_context(|| format!("opening {}", db_path.display()))?;
+        conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
+        conn.execute_batch(SCHEMA_SQL).context("applying schema")?;
+        run_migrations(&conn, Some(ws)).context("running migrations")?;
         // Clean up any artifact_vec rows that lost their parent artifact row
         // (e.g. orphans from before the cascade-delete trigger was added).
         conn.execute_batch("DELETE FROM artifact_vec WHERE id NOT IN (SELECT id FROM artifact);")?;
