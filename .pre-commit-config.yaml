@@ -1,0 +1,29 @@
+# Pre-commit hooks for codescout.
+# Install with: pre-commit install
+# CI already runs the same gate; this just catches issues before push.
+#
+# Tests run on pre-push only (slow); fmt + clippy run on every commit.
+repos:
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt --check
+        entry: cargo fmt --check
+        language: system
+        pass_filenames: false
+        types: [rust]
+
+      - id: cargo-clippy
+        name: cargo clippy -D warnings
+        entry: cargo clippy --lib -- -D warnings
+        language: system
+        pass_filenames: false
+        types: [rust]
+
+      - id: cargo-test
+        name: cargo test --lib
+        entry: cargo test --lib
+        language: system
+        pass_filenames: false
+        types: [rust]
+        stages: [pre-push]
