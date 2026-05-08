@@ -1460,19 +1460,24 @@ mod tests {
             "architecture",
             "by_file",
             "class",
+            "constant",
             "conventions",
             "cwd",
             "end_line",
+            "enum",
             "features_md",
             "file_id",
             "files",
+            "function",
             "gotchas",
             "hardware",
+            "interface",
             "json_path",
             "kind",
             "limit",
             "model",
             "model_options",
+            "module",
             "name_path",
             "next",
             "offset",
@@ -1483,6 +1488,7 @@ mod tests {
             "sed",
             "start_line",
             "struct",
+            "type",
             "untracked",
             "url",
         ];
@@ -1494,10 +1500,11 @@ mod tests {
             .collect();
 
         let draft = crate::prompts::builders::build_system_prompt_draft(&[], &[], None, None, &[]);
+        let rendered_instructions = crate::prompts::build_server_instructions(None);
         let surfaces: &[(&str, &str)] = &[
             (
-                "server_instructions.md",
-                crate::prompts::SERVER_INSTRUCTIONS,
+                "server_instructions.md (rendered)",
+                rendered_instructions.as_str(),
             ),
             ("onboarding_prompt.md", crate::prompts::ONBOARDING_PROMPT),
             ("build_system_prompt_draft", draft.as_str()),

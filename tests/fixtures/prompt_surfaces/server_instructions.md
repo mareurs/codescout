@@ -100,35 +100,7 @@ covers only cross-tool routing and non-obvious behaviors.
 
 ### Symbol Navigation Patterns
 
-- **Hierarchical nav** — impl/class methods, all languages:
-  `symbols(name_path="MyStruct/my_method", include_body=true)`
-- **Kind filter + path scope:**
-  `symbols(path="src/tools/", kind="struct")`
-- **Find across project then read body:**
-  `symbols(name="edit_code")` → `symbols(name_path="ToolName/edit_code", include_body=true)`
-
-- **Before editing X** → `call_graph(symbol, path, direction="callers")` — size blast radius before any structural change; `direction="callees"` for flow tracing
-
-**`name_path` examples by language:**
-
-| Language | Source construct | `name_path` |
-|---|---|---|
-| Rust — struct method | `impl MyStruct { fn call() }` | `"MyStruct/call"` |
-| Rust — trait impl method | `impl Tool for EditCode { fn call() }` | `"impl Tool for EditCode/call"` |
-| Python | `class Agent: def run(self)` | `"Agent/run"` |
-| TypeScript / JS | `class Router { handle() }` | `"Router/handle"` |
-| Kotlin / Java | `class Service { fun process() }` | `"Service/process"` |
-
-Language `kind` quirks:
-
-| Language      | `kind=`       | Note                                        |
-|---------------|---------------|---------------------------------------------|
-| Rust          | `"interface"` | traits — rust-analyzer emits Interface kind |
-| Rust          | `"struct"`    | structs; impl methods via `name_path`        |
-| TypeScript    | `"interface"` | TS interfaces                               |
-| TypeScript    | `"type"`      | type aliases                                |
-| Kotlin / Java | `"class"`     | classes, objects, annotations               |
-| Python        | `"class"`     | classes; methods via `name_path`            |
+{{symbol_navigation_block}}
 
 ### LSP Workflow — Standard Sequence
 

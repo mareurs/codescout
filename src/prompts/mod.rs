@@ -6,10 +6,14 @@
 
 pub mod builders;
 pub mod source;
+pub(crate) mod language_nav;
 
 /// Static server instructions — tool reference, workflow patterns, steering rules.
 pub const SERVER_INSTRUCTIONS: &str =
     include_str!(concat!(env!("OUT_DIR"), "/server_instructions.md"));
+
+/// Token in `server_instructions.md` replaced by the dynamic language nav block.
+pub const SYMBOL_NAV_TOKEN: &str = "{{symbol_navigation_block}}";
 
 /// Kotlin-specific known issues — only injected for projects with Kotlin.
 const KOTLIN_KNOWN_ISSUES: &str = "\n\n## Language Support — Known Issues\n\n\
@@ -25,7 +29,21 @@ the other session first, or use a single codescout instance for Kotlin projects.
 /// Build the full server instructions string, optionally appending
 /// dynamic project status.
 pub fn build_server_instructions(project_status: Option<&ProjectStatus>) -> String {
-    let mut instructions = SERVER_INSTRUCTIONS.to_string();
+    // Collect all project language lists for the nav renderer.
+    let project_languages: Vec<Vec<String>> = match project_status {
+        Some(s) => {
+            let mut v: Vec<Vec<String>> = vec![s.languages.clone()];
+            if let Some(ws) = &s.workspace {
+                for p in ws {
+                    v.push(p.languages.clone());
+                }
+            }
+            v
+        }
+        None => Vec::new(),
+    };
+    let nav_block = language_nav::render_symbol_navigation_block(&project_languages);
+    let mut instructions = SERVER_INSTRUCTIONS.replace(SYMBOL_NAV_TOKEN, &nav_block);
 
     if let Some(status) = project_status {
         instructions.push_str("\n\n## Project Status\n\n");
@@ -255,8 +273,68 @@ mod tests {
     #[test]
     fn build_without_project_returns_static() {
         let result = build_server_instructions(None);
-        assert_eq!(result, SERVER_INSTRUCTIONS);
+        // Token is substituted even with no project status.
+        assert!(!result.contains("{{symbol_navigation_block}}"));
+        assert!(result.contains("### Symbol Navigation Patterns"));
+        // No per-language block when there are no languages.
+        assert!(!result.contains("### Rust — Symbol Navigation"));
         assert!(!result.contains("## Project Status"));
+    }
+
+    #[test]
+    fn server_instructions_template_has_symbol_nav_token() {
+        let raw = SERVER_INSTRUCTIONS;
+        assert_eq!(
+            raw.matches("{{symbol_navigation_block}}").count(),
+            1,
+            "server_instructions.md must contain exactly one symbol_navigation_block token"
+        );
+    }
+
+    #[test]
+    fn build_server_instructions_substitutes_symbol_nav_token() {
+        let result = build_server_instructions(None);
+        assert!(
+            !result.contains("{{symbol_navigation_block}}"),
+            "token must be substituted in build_server_instructions output"
+        );
+        assert!(result.contains("### Symbol Navigation Patterns"));
+        assert!(result.contains("### Generic Patterns (any language)"));
+    }
+
+    #[test]
+    fn build_server_instructions_renders_languages_from_status() {
+        let status = ProjectStatus {
+            name: "x".into(),
+            path: "/tmp/x".into(),
+            languages: vec!["rust".into()],
+            memories: vec![],
+            has_index: false,
+            system_prompt: None,
+            workspace: None,
+        };
+        let result = build_server_instructions(Some(&status));
+        assert!(result.contains("### Rust — Symbol Navigation"));
+    }
+
+    #[test]
+    fn rendered_server_instructions_contains_no_deprecated_tool_names() {
+        let status = ProjectStatus {
+            name: "x".into(),
+            path: "/tmp/x".into(),
+            languages: vec!["rust".into(), "python".into(), "typescript".into(),
+                             "kotlin".into(), "go".into()],
+            memories: vec![],
+            has_index: false,
+            system_prompt: None,
+            workspace: None,
+        };
+        let rendered = build_server_instructions(Some(&status));
+        for dead in ["find_symbol", "list_symbols", "replace_symbol",
+                      "insert_code", "rename_symbol", "search_pattern"] {
+            assert!(!rendered.contains(dead),
+                "rendered server instructions contains deprecated tool name: {dead}");
+        }
     }
 
     #[test]
