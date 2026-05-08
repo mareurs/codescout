@@ -73,6 +73,18 @@ Running log of rough edges found while using project skills. Feed into refactor 
 **Impact:** Subsequent `edit_markdown(path="new/path.md")` fails with "No such file or directory"  
 **Fix idea:** artifact update of `rel_path` should either (a) rename the file atomically, or (b) document that the caller must `mv` the file manually first — currently it silently diverges
 
+## `/onboarding`
+
+### F-011 — workspace onboarding silently over-reported per-project memory writes
+**When:** Multi-project workspace with `force=true`. HARD-GATE only verified `project-overview` per project.
+**Got:** Final summary claimed 6/6 coverage; in reality some projects had 2–3 memories.
+**Fix idea (FIXED 2026-05-08):** Phase 4 Coverage Verification reads back all 6 topics per project; subagent MANIFEST line is advisory only.
+
+### F-012 — onboarding root-layer content not captured
+**When:** Monorepo with real root-layer code (dev scripts, docker-compose, top-level scripts).
+**Got:** Workspace prompt explicitly forbade a root subagent and had no fallback to capture root content.
+**Fix idea (FIXED 2026-05-08):** workspace `architecture` template grew Top-Level Code Map + Generic Navigation subsections; the no-root-subagent rule now states the reason.
+
 ## `/analyze-usage`
 
 ### F-005 — `find ~/work` assumption not portable

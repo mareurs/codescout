@@ -12,6 +12,7 @@ topic: tool usage patterns audit optimization prompt quality
 time_scope: null
 ---
 
+
 # Tool Usage Patterns
 
 Our internal instrumentation for codescout tool decisions — analogous to Langfuse but for
@@ -131,6 +132,13 @@ Started with `edit_code` correctly for service file structural changes (calls 39
 **Pattern:** model used the right tool first then regressed. `edit_file` feels natural when "adding a field to an options object".  
 **Prompt gap:** Anti-Patterns table should add: "Adding a callback/handler inside a function call → `edit_code`, not `edit_file`".
 
+## onboarding observations
+
+### T-009 — workspace onboarding HARD-GATE checked one topic per project
+**Tool:** `memory` (read)  
+**Verdict:** wrong-tool — gate logic was a single read per project; should have been a 6×N matrix.  
+**Prompt gap:** workspace_onboarding_prompt.md HARD-GATE language was "verify project-overview" rather than "verify all required topics". Fixed 2026-05-08 with Phase 4 Coverage Verification read-back loop that checks all 6 mandatory topics per project and retries missing ones before proceeding to workspace synthesis.
+
 ## Prompt improvement candidates
 
 ### Iron Law #7 — Scope distinction for grep vs semantic_search
@@ -154,6 +162,9 @@ Add to decision tree:
 ## History
 
 
+### 2026-05-08 — I-20 onboarding refactor (workspace prompt restructure)
+Added T-009. Key finding: HARD-GATE was checking only 1 of 6 required memories per project — systematic under-coverage. Fixed by Phase 4 Coverage Verification matrix with 2-attempt retry loop.
+
 ### 2026-05-03 — Session c5daabbe analysis (eduplanner-ui error handling refactor)
 Added T-005–T-008. Key findings: Iron Law #3 (piped run_command) is the most persistent violation — 7× in one session on `npm run build`. edit_file drift: model uses edit_code correctly then regresses to edit_file for same-type edits in a different file category. grep(^import) on specific files before editing confirmed legitimate.
 
@@ -165,3 +176,4 @@ for scoped-directory multi-symbol discovery. Framing: internal Langfuse for tool
 ### 2026-05-03 — Initial population (as grep-usage-patterns)
 First 3 observations from session 64618681 (Kotlin backend). G-001 verdict corrected
 from debatable to legitimate after live proof.
+
