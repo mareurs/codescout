@@ -59,8 +59,13 @@ impl crate::tools::Tool for LibrarianAdapter {
         self.inner.input_schema()
     }
 
-    async fn call(&self, input: Value, _ctx: &crate::tools::ToolContext) -> Result<Value> {
-        self.inner.call(&self.ctx, input).await
+    async fn call(&self, input: Value, ctx: &crate::tools::ToolContext) -> Result<Value> {
+        let active_root: Option<std::path::PathBuf> = {
+            let inner = ctx.agent.inner.read().await;
+            inner.active_project().map(|p| p.root.clone())
+        };
+        let lib_ctx = self.derive_ctx(active_root.as_deref());
+        self.inner.call(&lib_ctx, input).await
     }
 
     fn is_write(&self, _input: &Value) -> bool {
@@ -73,5 +78,38 @@ impl crate::tools::Tool for LibrarianAdapter {
                 | "artifact_event_create"
                 | "librarian_reindex"
         )
+    }
+}
+
+impl LibrarianAdapter {
+    /// Build a fresh `LibToolContext` for a single tool call, using the
+    /// host's currently-active project to derive `current_project`. The
+    /// catalog/workspace/rules/embedding stay shared with the boot-time ctx.
+    fn derive_ctx(&self, active: Option<&std::path::Path>) -> Arc<LibToolContext> {
+        let current_project = active.and_then(|p| match std::fs::canonicalize(p) {
+            Ok(abs_path) => {
+                let git_root = librarian_mcp::current_project::lookup_git_root(&abs_path)
+                    .unwrap_or_else(|| abs_path.clone());
+                let umbrella =
+                    librarian_mcp::current_project::lookup_umbrella(&abs_path, &self.ctx.workspace);
+                Some(Arc::new(librarian_mcp::current_project::CurrentProject {
+                    abs_path,
+                    git_root,
+                    umbrella,
+                }))
+            }
+            Err(err) => {
+                tracing::warn!("active project path unresolvable: {} ({err})", p.display());
+                None
+            }
+        });
+
+        Arc::new(LibToolContext {
+            catalog: Arc::clone(&self.ctx.catalog),
+            workspace: Arc::clone(&self.ctx.workspace),
+            rules: Arc::clone(&self.ctx.rules),
+            embedding: self.ctx.embedding.clone(),
+            current_project,
+        })
     }
 }
