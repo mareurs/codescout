@@ -85,8 +85,10 @@ fn run_migrations(conn: &Connection, ws: Option<&WorkspaceConfig>) -> Result<()>
         "INSERT OR IGNORE INTO schema_version (version) VALUES (5)",
         [],
     )?;
-    // v6 migration step 1: add new columns alongside legacy ones.
-    // Backfill + drop legacy happens in later phases (Tasks 2 + 6).
+    // v6: add abs_path/git_root alongside legacy columns, then backfill.
+    // drop_legacy_and_stamp is called separately by open_with_workspace after
+    // backfill — NOT here, because backfill requires a workspace config and
+    // Catalog::open calls this function without one.
     migrate_v6::add_columns(conn)?;
     if let Some(ws) = ws {
         let drop_orphans = std::env::var("LIBRARIAN_MIGRATE_DROP_ORPHANS").as_deref() == Ok("1");
