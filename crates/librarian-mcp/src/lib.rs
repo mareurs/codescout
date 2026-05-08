@@ -44,7 +44,8 @@ pub async fn build_tool_context() -> Result<tools::ToolContext> {
                 .unwrap_or_else(|| PathBuf::from("/tmp"))
                 .join("librarian/catalog.db")
         });
-    let catalog = catalog::Catalog::open(&db_path)?;
+    let ws_arc = std::sync::Arc::new(ws);
+    let catalog = catalog::Catalog::open_with_workspace(&db_path, &ws_arc)?;
 
     // Optionally initialise the embedding service. Requires LIBRARIAN_EMBED_MODEL env var.
     // When absent (CI, tests, first-run) we skip embedding silently.
@@ -64,7 +65,6 @@ pub async fn build_tool_context() -> Result<tools::ToolContext> {
         None
     };
 
-    let ws_arc = std::sync::Arc::new(ws);
     let current_project = std::env::var("LIBRARIAN_CWD")
         .map(PathBuf::from)
         .ok()
