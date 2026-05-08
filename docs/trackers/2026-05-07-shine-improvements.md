@@ -11,6 +11,12 @@ Punch-list of changes that would lift the project from "above industry mean" to
 
 Each item: surface, observed problem, what fixing requires, why it matters now.
 
+## Shipped — 2026-05-08 session
+
+| ID | Item | Evidence |
+|---|---|---|
+| Y-C | Prompt-surfaces roundtrip snapshot test | `src/prompts/mod.rs::tests` — 3 new tests (`prompt_surfaces_server_instructions_snapshot`, `prompt_surfaces_onboarding_snapshot`, `prompt_surfaces_system_prompt_draft_empty_snapshot`) compare each surface against fixtures in `tests/fixtures/prompt_surfaces/`. `UPDATE_PROMPT_SNAPSHOTS=1` env var regenerates intentionally. Locks the byte-level contract that I-01 must preserve. |
+
 ## Shipped — 2026-05-07 session
 
 The following items landed in this session. Tracker entries below remain for

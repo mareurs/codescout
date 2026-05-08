@@ -580,4 +580,65 @@ mod tests {
             "Non-Kotlin project must not include Kotlin known issues"
         );
     }
+
+    // ---------- Y-C: surface roundtrip snapshots (gates I-01) ----------
+    //
+    // These tests pin the rendered output of the three prompt surfaces so the
+    // I-01 refactor (consolidating into a single `source.md` template) can
+    // prove zero content drift. Regenerate intentionally with:
+    //   UPDATE_PROMPT_SNAPSHOTS=1 cargo test --lib prompt_surfaces
+
+    fn fixture_path(name: &str) -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/prompt_surfaces")
+            .join(name)
+    }
+
+    fn check_or_update_snapshot(name: &str, current: &str) {
+        let path = fixture_path(name);
+        if std::env::var("UPDATE_PROMPT_SNAPSHOTS").is_ok() {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("create fixture dir");
+            }
+            std::fs::write(&path, current).expect("write fixture");
+            eprintln!("updated snapshot: {}", path.display());
+            return;
+        }
+        let expected = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "missing snapshot `{}`: {e}\n\
+                 Regenerate with: UPDATE_PROMPT_SNAPSHOTS=1 cargo test --lib prompt_surfaces",
+                path.display()
+            )
+        });
+        if expected != current {
+            panic!(
+                "prompt surface drift in `{name}`\n  \
+                 expected: {} bytes\n  \
+                 actual:   {} bytes\n\n\
+                 If intentional, regenerate with:\n\
+                 \x20 UPDATE_PROMPT_SNAPSHOTS=1 cargo test --lib prompt_surfaces\n\n\
+                 Otherwise this is a regression — I-01 (and any later prompt-template\n\
+                 refactor) must preserve rendered content byte-for-byte.",
+                expected.len(),
+                current.len()
+            );
+        }
+    }
+
+    #[test]
+    fn prompt_surfaces_server_instructions_snapshot() {
+        check_or_update_snapshot("server_instructions.md", SERVER_INSTRUCTIONS);
+    }
+
+    #[test]
+    fn prompt_surfaces_onboarding_snapshot() {
+        check_or_update_snapshot("onboarding_prompt.md", ONBOARDING_PROMPT);
+    }
+
+    #[test]
+    fn prompt_surfaces_system_prompt_draft_empty_snapshot() {
+        let draft = crate::prompts::builders::build_system_prompt_draft(&[], &[], None, None, &[]);
+        check_or_update_snapshot("build_system_prompt_draft_empty.md", &draft);
+    }
 }
