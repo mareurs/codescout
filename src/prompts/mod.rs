@@ -441,21 +441,16 @@ mod tests {
 
     #[test]
     fn onboarding_prompt_contains_key_sections() {
-        assert!(ONBOARDING_PROMPT.contains("### Rules"));
-        assert!(ONBOARDING_PROMPT.contains("### Memories to Create"));
-        assert!(ONBOARDING_PROMPT.contains("project-overview"));
-        assert!(ONBOARDING_PROMPT.contains("architecture"));
-        assert!(ONBOARDING_PROMPT.contains("conventions"));
-        assert!(ONBOARDING_PROMPT.contains("development-commands"));
-        assert!(ONBOARDING_PROMPT.contains("domain-glossary"));
-        assert!(ONBOARDING_PROMPT.contains("gotchas"));
-        assert!(ONBOARDING_PROMPT.contains("## Gathered Project Data"));
-        // Verify enforcement sections exist
-        assert!(ONBOARDING_PROMPT.contains("## Phase 1: Semantic Index Check"));
         assert!(ONBOARDING_PROMPT.contains("## THE IRON LAW"));
-        assert!(ONBOARDING_PROMPT.contains("<HARD-GATE>"));
-        assert!(ONBOARDING_PROMPT.contains("## Red Flags"));
-        assert!(ONBOARDING_PROMPT.contains("## Common Rationalizations"));
+        assert!(ONBOARDING_PROMPT.contains("## Phase 0: Embedding Model Selection"));
+        assert!(ONBOARDING_PROMPT.contains("## Phase 1: Semantic Index Check"));
+        assert!(ONBOARDING_PROMPT.contains("## Phase 2: Explore the Code"));
+        assert!(ONBOARDING_PROMPT.contains("## Coverage Verification"));
+        assert!(ONBOARDING_PROMPT.contains("### Refresh CLAUDE.md"));
+        // After substitution, memory templates are expanded
+        let loaded = load_prompt("onboarding_prompt.md");
+        assert!(loaded.contains("### project-scope: project-overview"));
+        assert!(loaded.contains("### project-scope: architecture"));
     }
 
     #[test]
@@ -905,5 +900,24 @@ mod tests {
                 "workspace prompt missing topic name: {topic}"
             );
         }
+    }
+
+    #[test]
+    fn onboarding_prompt_uses_include_marker() {
+        assert!(
+            ONBOARDING_PROMPT.contains("{{include: memory-templates.md}}"),
+            "onboarding surface must contain the include marker"
+        );
+        let loaded = load_prompt("onboarding_prompt.md");
+        assert!(!loaded.contains("{{include:"));
+        assert!(loaded.contains("### project-scope: project-overview"));
+    }
+
+    #[test]
+    fn onboarding_prompt_phase_0_has_stable_heading_marker() {
+        assert!(
+            ONBOARDING_PROMPT.contains("STABLE-HEADING"),
+            "Phase 0 must carry a STABLE-HEADING comment to prevent cross-prompt drift"
+        );
     }
 }
