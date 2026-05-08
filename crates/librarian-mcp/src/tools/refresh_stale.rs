@@ -24,15 +24,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let current = ctx.current_project.as_deref();
 
-    let (repo, subdir_prefix): (Option<&str>, Option<&str>) = match scope {
-        Scope::All => (None, None),
+    let abs_path_prefix: Option<&std::path::Path> = match scope {
+        Scope::All => None,
         Scope::Repo => {
             let cp = current.ok_or_else(|| {
                 RecoverableError::new(
                     "scope=repo requires a resolved current project. Pass scope=\"all\".",
                 )
             })?;
-            (Some(cp.root.as_str()), None)
+            Some(cp.git_root.as_path())
         }
         Scope::Project => {
             let cp = current.ok_or_else(|| {
@@ -40,12 +40,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     "scope=project requires a resolved current project. Pass scope=\"all\".",
                 )
             })?;
-            let subdir = if cp.subdir.is_empty() {
-                None
-            } else {
-                Some(cp.subdir.as_str())
-            };
-            (Some(cp.root.as_str()), subdir)
+            Some(cp.abs_path.as_path())
         }
         Scope::Umbrella => {
             return Err(RecoverableError::new(
@@ -61,7 +56,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let entries = {
         let cat = ctx.catalog.lock();
-        augmentation::list_stale(&cat, &threshold_iso, limit, repo, subdir_prefix)?
+        augmentation::list_stale(&cat, &threshold_iso, limit, abs_path_prefix)?
     };
 
     let now = chrono::Utc::now();
@@ -77,7 +72,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 "id": e.artifact_id,
                 "kind": e.kind,
                 "title": e.title,
-                "rel_path": e.rel_path,
+                "abs_path": e.abs_path.display().to_string(),
                 "last_refreshed_at": e.last_refreshed_at,
                 "refresh_count": e.refresh_count,
                 "age_hours": age_hours,
@@ -103,16 +98,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::catalog::artifact::ArtifactRow;
     use crate::catalog::{artifact, augmentation, Catalog};
-    use serde_json::json;
 
     fn sample_art(id: &str, repo: &str, rel_path: &str) -> ArtifactRow {
         ArtifactRow {
             id: id.into(),
-            repo: repo.into(),
-            rel_path: rel_path.into(),
+            abs_path: std::path::PathBuf::from(format!("/{repo}/{rel_path}")),
             kind: "tracker".into(),
             status: "active".into(),
             title: Some(format!("Tracker {id}")),
@@ -157,8 +149,7 @@ mod tests {
         augmentation::upsert(&cat, &aug_row("a2", Some("2000-01-01T00:00:00Z"))).unwrap();
 
         // threshold far in the future so both are stale
-        let entries =
-            augmentation::list_stale(&cat, "9999-01-01T00:00:00Z", 10, None, None).unwrap();
+        let entries = augmentation::list_stale(&cat, "9999-01-01T00:00:00Z", 10, None).unwrap();
         assert_eq!(entries.len(), 2);
         // never-refreshed (NULL) sorts first
         assert_eq!(entries[0].artifact_id, "a1");
@@ -175,7 +166,7 @@ mod tests {
         augmentation::upsert(&cat, &aug_row("a2", None)).unwrap();
 
         let threshold = chrono::Utc::now().to_rfc3339();
-        let entries = augmentation::list_stale(&cat, &threshold, 10, None, None).unwrap();
+        let entries = augmentation::list_stale(&cat, &threshold, 10, None).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].artifact_id, "a2");
     }
@@ -188,9 +179,9 @@ mod tests {
         augmentation::upsert(&cat, &aug_row("a1", None)).unwrap();
         augmentation::upsert(&cat, &aug_row("a2", None)).unwrap();
 
+        let prefix = std::path::Path::new("/claude");
         let entries =
-            augmentation::list_stale(&cat, "9999-01-01T00:00:00Z", 10, Some("claude"), None)
-                .unwrap();
+            augmentation::list_stale(&cat, "9999-01-01T00:00:00Z", 10, Some(prefix)).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].artifact_id, "a1");
     }
@@ -203,14 +194,9 @@ mod tests {
         augmentation::upsert(&cat, &aug_row("a1", None)).unwrap();
         augmentation::upsert(&cat, &aug_row("a2", None)).unwrap();
 
-        let entries = augmentation::list_stale(
-            &cat,
-            "9999-01-01T00:00:00Z",
-            10,
-            Some("claude"),
-            Some("code-explorer"),
-        )
-        .unwrap();
+        let prefix = std::path::Path::new("/claude/code-explorer");
+        let entries =
+            augmentation::list_stale(&cat, "9999-01-01T00:00:00Z", 10, Some(prefix)).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].artifact_id, "a1");
     }
@@ -223,8 +209,7 @@ mod tests {
             artifact::upsert(&cat, &sample_art(&id, "claude", &format!("proj/t{i}.md"))).unwrap();
             augmentation::upsert(&cat, &aug_row(&id, None)).unwrap();
         }
-        let entries =
-            augmentation::list_stale(&cat, "9999-01-01T00:00:00Z", 3, None, None).unwrap();
+        let entries = augmentation::list_stale(&cat, "9999-01-01T00:00:00Z", 3, None).unwrap();
         assert_eq!(entries.len(), 3);
     }
 }

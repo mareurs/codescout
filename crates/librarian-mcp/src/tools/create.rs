@@ -5,7 +5,6 @@ use serde_json::{json, Value};
 use super::{RecoverableError, ToolContext};
 use crate::catalog::artifact::{self, ArtifactRow};
 use crate::frontmatter::Frontmatter;
-use crate::ids::artifact_id;
 
 fn validate_rel_path(rel: &str) -> Result<()> {
     use std::path::{Component, Path};
@@ -48,71 +47,52 @@ pub struct Args {
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut a: Args = serde_json::from_value(args)?;
 
-    // Resolve repo name: explicit arg or infer from current_project.
-    let repo_inferred = a.repo.is_none();
-    let repo_name = match a.repo.as_deref() {
-        Some(r) => r.to_string(),
+    // Resolve base directory: explicit repo arg looks up in workspace.roots
+    // (legacy compatibility), otherwise derive from current_project.abs_path.
+    let base_dir: std::path::PathBuf = match a.repo.as_deref() {
+        Some(r) => {
+            let root = ctx
+                .workspace
+                .roots
+                .iter()
+                .find(|root| root.name == r)
+                .ok_or_else(|| {
+                    let valid = ctx
+                        .workspace
+                        .roots
+                        .iter()
+                        .map(|root| root.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    RecoverableError::with_hint(
+                        format!("unknown repo `{r}`"),
+                        format!("Valid repo names: {valid}"),
+                    )
+                })?;
+            root.path.clone()
+        }
         None => ctx
             .current_project
             .as_ref()
-            .map(|p| p.root.clone())
+            .map(|p| p.abs_path.clone())
             .ok_or_else(|| {
-                let valid = ctx
-                    .workspace
-                    .roots
-                    .iter()
-                    .map(|r| r.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ");
                 RecoverableError::with_hint(
-                    "repo is required when cwd is outside any workspace root",
-                    format!("Pass repo=<name>. Available: {valid}"),
+                    "no active project — cannot resolve rel_path",
+                    "Pass repo=<name> or activate a project via workspace(action='activate', ...)",
                 )
             })?,
     };
 
-    let root = ctx
-        .workspace
-        .roots
-        .iter()
-        .find(|r| r.name == repo_name)
-        .ok_or_else(|| {
-            let valid = ctx
-                .workspace
-                .roots
-                .iter()
-                .map(|r| r.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            RecoverableError::with_hint(
-                format!("unknown repo `{repo_name}`"),
-                format!("Valid repo names: {valid}"),
-            )
-        })?;
-
-    // When repo was auto-inferred from a sub-project, treat rel_path as
-    // project-relative and auto-prepend the subdir prefix.
-    if repo_inferred {
-        if let Some(cp) = &ctx.current_project {
-            if !cp.subdir.is_empty() {
-                let prefix = format!("{}/", cp.subdir);
-                if !a.rel_path.starts_with(&prefix) {
-                    a.rel_path = format!("{}{}", prefix, a.rel_path);
-                }
-            }
-        }
-    }
-
     validate_rel_path(&a.rel_path)?;
     a.rel_path = crate::util::normalize_rel_path(&a.rel_path);
-    let full = root.path.join(&a.rel_path);
+    let full = base_dir.join(&a.rel_path);
     if full.exists() {
         bail!("path exists: {}", full.display());
     }
     if let Some(parent) = full.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let id = artifact_id(&repo_name, &a.rel_path);
+    let id = crate::ids::artifact_id_from_abs(&full);
     let status = a.status.as_deref().unwrap_or("draft").to_string();
     let fm = Frontmatter {
         id: Some(id.clone()),
@@ -129,8 +109,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let now = chrono::Utc::now().timestamp_millis();
     let row = ArtifactRow {
         id: id.clone(),
-        repo: repo_name.clone(),
-        rel_path: a.rel_path.clone(),
+        abs_path: full.clone(),
         kind: a.kind.clone(),
         status: status.clone(),
         title: Some(a.title),
@@ -174,7 +153,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             },
         )?;
     }
-    let mut result = json!({"id": id, "repo": row.repo, "rel_path": row.rel_path});
+    let mut result = json!({"id": id, "abs_path": row.abs_path.display().to_string()});
     if a.kind == "tracker" && a.augment.is_none() {
         result["tracker_hint"] = json!(
             "Tracker created without augmentation. \
@@ -286,7 +265,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_with_augment_writes_augmentation_row() {
-        use crate::catalog::{augmentation, Catalog};
+        use crate::catalog::augmentation;
         let tmp = TempDir::new().unwrap();
         let ctx = mk_ctx(tmp.path().to_path_buf());
 
@@ -340,7 +319,7 @@ mod tests {
         let cat = ctx.catalog.lock();
         let row = crate::catalog::artifact::get(
             &cat,
-            &crate::ids::artifact_id("r", "trackers/active.md"),
+            &crate::ids::artifact_id_from_abs(&tmp.path().join("trackers/active.md")),
         )
         .unwrap()
         .unwrap();
@@ -420,9 +399,8 @@ mod tests {
         let path = tmp.path().to_path_buf();
         let mut ctx = mk_ctx(path.clone());
         ctx.current_project = Some(Arc::new(CurrentProject {
-            root: "r".into(),
-            subdir: String::new(),
-            path,
+            abs_path: path.clone(),
+            git_root: path.clone(),
             umbrella: None,
         }));
         let result = call(
@@ -436,8 +414,12 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(result["repo"], "r");
-        assert_eq!(result["rel_path"], "docs/inferred.md");
+        let abs = result["abs_path"].as_str().unwrap();
+        assert!(abs.ends_with("docs/inferred.md"), "got: {abs}");
+        assert!(
+            abs.starts_with(path.to_string_lossy().as_ref()),
+            "got: {abs}"
+        );
     }
 
     #[tokio::test]
@@ -446,11 +428,10 @@ mod tests {
         let root_path = tmp.path().to_path_buf();
         let proj_path = root_path.join("myproj");
         std::fs::create_dir_all(&proj_path).unwrap();
-        let mut ctx = mk_ctx(root_path);
+        let mut ctx = mk_ctx(root_path.clone());
         ctx.current_project = Some(Arc::new(CurrentProject {
-            root: "r".into(),
-            subdir: "myproj".into(),
-            path: proj_path,
+            abs_path: proj_path.clone(),
+            git_root: root_path.clone(),
             umbrella: None,
         }));
         let result = call(
@@ -464,7 +445,9 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(result["rel_path"], "myproj/docs/foo.md");
+        let abs = result["abs_path"].as_str().unwrap();
+        let expected = proj_path.join("docs/foo.md");
+        assert_eq!(abs, expected.to_string_lossy());
     }
 
     #[tokio::test]

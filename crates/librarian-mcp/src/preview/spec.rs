@@ -29,8 +29,7 @@ mod tests {
     fn mk_row() -> ArtifactRow {
         ArtifactRow {
             id: "s".into(),
-            repo: "r".into(),
-            rel_path: "s.md".into(),
+            abs_path: std::path::PathBuf::from("/test/r/s.md"),
             kind: "spec".into(),
             status: "draft".into(),
             title: None,

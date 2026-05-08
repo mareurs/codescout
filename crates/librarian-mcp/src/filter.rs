@@ -80,6 +80,7 @@ const ALLOWED_FIELDS: &[&str] = &[
     "tags",
     "owners",
     "rel_path",
+    "abs_path",
     "title",
     "id",
 ];

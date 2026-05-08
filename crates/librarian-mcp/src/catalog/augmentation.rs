@@ -175,8 +175,7 @@ pub fn get_batch(
 #[derive(Debug, Clone)]
 pub struct StaleEntry {
     pub artifact_id: String,
-    pub repo: String,
-    pub rel_path: String,
+    pub abs_path: std::path::PathBuf,
     pub kind: String,
     pub title: Option<String>,
     pub last_refreshed_at: Option<String>,
@@ -191,11 +190,10 @@ pub fn list_stale(
     cat: &Catalog,
     threshold_iso: &str,
     limit: usize,
-    repo: Option<&str>,
-    subdir_prefix: Option<&str>,
+    abs_path_prefix: Option<&std::path::Path>,
 ) -> Result<Vec<StaleEntry>> {
     let mut sql = String::from(
-        "SELECT a.id, a.repo, a.rel_path, a.kind, a.title, \
+        "SELECT a.id, a.abs_path, a.kind, a.title, \
          au.last_refreshed_at, au.refresh_count \
          FROM artifact_augmentation au \
          JOIN artifact a ON a.id = au.artifact_id \
@@ -204,16 +202,11 @@ pub fn list_stale(
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(threshold_iso.to_string())];
     let mut idx = 2usize;
 
-    if let Some(r) = repo {
-        sql.push_str(&format!(" AND a.repo = ?{idx}"));
-        params.push(Box::new(r.to_string()));
-        idx += 1;
-    }
-
-    if let Some(prefix) = subdir_prefix {
-        if !prefix.is_empty() {
-            sql.push_str(&format!(" AND a.rel_path LIKE ?{idx}"));
-            params.push(Box::new(format!("{prefix}/%")));
+    if let Some(prefix) = abs_path_prefix {
+        let prefix_s = prefix.to_string_lossy();
+        if !prefix_s.is_empty() {
+            sql.push_str(&format!(" AND a.abs_path LIKE ?{idx}"));
+            params.push(Box::new(format!("{prefix_s}/%")));
             idx += 1;
         }
     }
@@ -225,14 +218,14 @@ pub fn list_stale(
     let mut stmt = cat.conn.prepare(&sql)?;
     let rows = stmt
         .query_map(refs.as_slice(), |row| {
+            let abs_path_s: String = row.get(1)?;
             Ok(StaleEntry {
                 artifact_id: row.get(0)?,
-                repo: row.get(1)?,
-                rel_path: row.get(2)?,
-                kind: row.get(3)?,
-                title: row.get(4)?,
-                last_refreshed_at: row.get(5)?,
-                refresh_count: row.get(6)?,
+                abs_path: std::path::PathBuf::from(abs_path_s),
+                kind: row.get(2)?,
+                title: row.get(3)?,
+                last_refreshed_at: row.get(4)?,
+                refresh_count: row.get(5)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -249,8 +242,7 @@ mod tests {
         let now = Utc::now().timestamp_millis();
         ArtifactRow {
             id: id.to_string(),
-            repo: "repo".to_string(),
-            rel_path: format!("{id}.md"),
+            abs_path: std::path::PathBuf::from(format!("/test/{id}.md")),
             kind: "tracker".to_string(),
             status: "active".to_string(),
             title: Some("T".to_string()),

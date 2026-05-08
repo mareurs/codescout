@@ -202,8 +202,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "freshness_changed": state.freshness_at_as_of != freshness_now,
             "latest_event_at_as_of": state.latest_event_summary,
             "supersession_chain": state.supersession_chain,
-            "rel_path": art.rel_path,
-            "repo": art.repo,
+            "abs_path": art.abs_path.display().to_string(),
         }));
     }
 
@@ -237,8 +236,7 @@ mod tests {
     fn art(id: &str, file_mtime: i64) -> ArtifactRow {
         ArtifactRow {
             id: id.into(),
-            repo: "r".into(),
-            rel_path: format!("{id}.md"),
+            abs_path: std::path::PathBuf::from(format!("/test/r/{id}.md")),
             kind: "spec".into(),
             status: "active".into(),
             title: None,

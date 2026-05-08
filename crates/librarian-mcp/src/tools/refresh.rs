@@ -17,16 +17,7 @@ fn read_body(ctx: &ToolContext, artifact_id: &str) -> Result<Option<String>> {
         Some(r) => r,
         None => return Ok(None),
     };
-    let root_map: HashMap<String, std::path::PathBuf> = ctx
-        .workspace
-        .roots
-        .iter()
-        .map(|r| (r.name.clone(), r.path.clone()))
-        .collect();
-    let Some(root) = root_map.get(&row.repo) else {
-        return Ok(None);
-    };
-    let full_path = root.join(&row.rel_path);
+    let full_path = row.abs_path.clone();
     match std::fs::read_to_string(&full_path) {
         Ok(s) => Ok(Some(s)),
         Err(_) => Ok(None),

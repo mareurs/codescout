@@ -21,7 +21,7 @@ pub fn find(cat: &Catalog, opts: &FindOpts) -> Result<Vec<ArtifactRow>> {
     }
 
     let mut sql = String::from(
-        "SELECT id, repo, rel_path, kind, status, title, owners, tags,\
+        "SELECT id, abs_path, kind, status, title, owners, tags,\
          topic, time_scope, source, created_at, updated_at, file_mtime,\
          file_sha256, confidence FROM artifact",
     );
@@ -160,7 +160,7 @@ fn find_semantic(cat: &Catalog, opts: &FindOpts, query_vec: &[f32]) -> Result<Ve
             .join(" ");
 
         let mut sql = format!(
-            "SELECT id, repo, rel_path, kind, status, title, owners, tags, \
+            "SELECT id, abs_path, kind, status, title, owners, tags, \
              topic, time_scope, source, created_at, updated_at, file_mtime, \
              file_sha256, confidence FROM artifact \
              WHERE id IN ({placeholders})",
@@ -240,8 +240,7 @@ mod tests {
     fn art(id: &str, kind: &str, status: &str) -> ArtifactRow {
         ArtifactRow {
             id: id.into(),
-            repo: "r".into(),
-            rel_path: format!("{id}.md"),
+            abs_path: std::path::PathBuf::from(format!("/test/{id}.md")),
             kind: kind.into(),
             status: status.into(),
             title: None,
@@ -312,8 +311,7 @@ mod tests {
                 &cat,
                 &ArtifactRow {
                     id: id.into(),
-                    repo: "r".into(),
-                    rel_path: format!("{id}.md"),
+                    abs_path: std::path::PathBuf::from(format!("/test/r/{id}.md")),
                     kind: kind.into(),
                     status: "draft".into(),
                     title: None,
@@ -351,8 +349,7 @@ mod tests {
             &cat,
             &ArtifactRow {
                 id: "a1".into(),
-                repo: "r".into(),
-                rel_path: "a1.md".into(),
+                abs_path: std::path::PathBuf::from("/test/r/a1.md"),
                 kind: "tracker".into(),
                 status: "draft".into(),
                 title: None,
@@ -373,8 +370,7 @@ mod tests {
             &cat,
             &ArtifactRow {
                 id: "a2".into(),
-                repo: "r".into(),
-                rel_path: "a2.md".into(),
+                abs_path: std::path::PathBuf::from("/test/r/a2.md"),
                 kind: "plan".into(),
                 status: "draft".into(),
                 title: None,
@@ -429,8 +425,7 @@ mod tests {
                 &cat,
                 &ArtifactRow {
                     id: id.into(),
-                    repo: repo.into(),
-                    rel_path: format!("{id}.md"),
+                    abs_path: std::path::PathBuf::from(format!("/{repo}/{id}.md")),
                     kind: "plan".into(),
                     status: "draft".into(),
                     title: None,
@@ -467,7 +462,7 @@ mod tests {
         )
         .unwrap();
         let f = FilterNode::Leaf(
-            [("repo".to_string(), json!({"eq": "repo-a"}))]
+            [("abs_path".to_string(), json!({"prefix": "/repo-a/"}))]
                 .into_iter()
                 .collect(),
         );

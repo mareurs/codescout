@@ -73,20 +73,20 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
     });
 
-    let targets: Vec<(crate::workspace::Root, Option<String>)> = match effective_scope {
+    // targets: abs_root paths to walk.
+    let targets: Vec<std::path::PathBuf> = match effective_scope {
         Scope::All => {
-            let roots: Vec<_> = if let Some(ref repo_name) = a.repo {
+            if let Some(ref repo_name) = a.repo {
                 let root = ctx
                     .workspace
                     .roots
                     .iter()
                     .find(|r| &r.name == repo_name)
                     .ok_or_else(|| anyhow::anyhow!("unknown repo `{}`", repo_name))?;
-                vec![root.clone()]
+                vec![root.path.clone()]
             } else {
-                ctx.workspace.roots.clone()
-            };
-            roots.into_iter().map(|r| (r, None)).collect()
+                ctx.workspace.roots.iter().map(|r| r.path.clone()).collect()
+            }
         }
         Scope::Repo => {
             let cp = ctx.current_project.as_deref().ok_or_else(|| {
@@ -95,13 +95,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                      workspace roots. Pass scope=\"all\" to reindex everything."
                 )
             })?;
-            let root = ctx
-                .workspace
-                .roots
-                .iter()
-                .find(|r| r.name == cp.root)
-                .ok_or_else(|| anyhow::anyhow!("workspace root `{}` not found", cp.root))?;
-            vec![(root.clone(), None)]
+            vec![cp.git_root.clone()]
         }
         Scope::Project => {
             let cp = ctx.current_project.as_deref().ok_or_else(|| {
@@ -110,18 +104,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                      workspace roots. Pass scope=\"all\" to reindex everything."
                 )
             })?;
-            let root = ctx
-                .workspace
-                .roots
-                .iter()
-                .find(|r| r.name == cp.root)
-                .ok_or_else(|| anyhow::anyhow!("workspace root `{}` not found", cp.root))?;
-            let subdir = if cp.subdir.is_empty() {
-                None
-            } else {
-                Some(cp.subdir.clone())
-            };
-            vec![(root.clone(), subdir)]
+            vec![cp.abs_path.clone()]
         }
         Scope::Umbrella => {
             let cp = ctx.current_project.as_deref().ok_or_else(|| {
@@ -129,9 +112,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             })?;
             let umbrella_name = cp.umbrella.as_deref().ok_or_else(|| {
                 anyhow::anyhow!(
-                    "scope=umbrella but no umbrella declared for {}/{}",
-                    cp.root,
-                    cp.subdir
+                    "scope=umbrella but no umbrella declared for {}",
+                    cp.abs_path.display(),
                 )
             })?;
             let umbrella = ctx
@@ -142,54 +124,28 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 .ok_or_else(|| {
                     anyhow::anyhow!("umbrella `{umbrella_name}` not found in workspace config")
                 })?;
-            let mut out = Vec::with_capacity(umbrella.members.len());
-            for m in &umbrella.members {
-                let (root_name, sub) = match m.split_once('/') {
-                    Some((r, s)) => (r, Some(s.to_string())),
-                    None => (m.as_str(), None),
-                };
-                let root = ctx
-                    .workspace
-                    .roots
-                    .iter()
-                    .find(|r| r.name == root_name)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("umbrella member root `{root_name}` not in workspace")
-                    })?;
-                out.push((root.clone(), sub));
-            }
-            out
+            umbrella.members.clone()
         }
     };
 
     if a.force == Some(true) {
         let cat = ctx.catalog.lock();
-        for (root, subdir) in &targets {
-            match subdir {
-                Some(s) if !s.is_empty() => {
-                    cat.conn.execute(
-                        "DELETE FROM artifact WHERE repo = ?1 AND rel_path LIKE ?2",
-                        rusqlite::params![root.name, format!("{s}/%")],
-                    )?;
-                }
-                _ => {
-                    cat.conn.execute(
-                        "DELETE FROM artifact WHERE repo = ?1",
-                        rusqlite::params![root.name],
-                    )?;
-                }
-            }
+        for abs_root in &targets {
+            cat.conn.execute(
+                "DELETE FROM artifact WHERE abs_path LIKE ?1",
+                rusqlite::params![format!("{}/%", abs_root.to_string_lossy())],
+            )?;
         }
     }
 
     let mut orphan_removed = 0usize;
     if effective_scope == Scope::All && a.repo.is_none() {
         let cat = ctx.catalog.lock();
-        let active: Vec<&str> = ctx
+        let active: Vec<&std::path::Path> = ctx
             .workspace
             .roots
             .iter()
-            .map(|r| r.name.as_str())
+            .map(|r| r.path.as_path())
             .collect();
         orphan_removed = crate::catalog::artifact::delete_orphan_repos(&cat, &active)?;
     }
@@ -204,19 +160,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let want_embeddings = ctx.embedding.is_some();
 
-    for (root, subdir) in &targets {
-        let subdir_ref = subdir.as_deref();
+    for abs_root in &targets {
         let (report, embed_queue) = {
             let cat = ctx.catalog.lock();
-            indexer::index_repo_sync(
-                &cat,
-                &ctx.rules,
-                &root.name,
-                &root.path,
-                subdir_ref,
-                &ignore,
-                want_embeddings,
-            )?
+            indexer::index_repo_sync(&cat, &ctx.rules, abs_root, &ignore, want_embeddings)?
         };
 
         total_added += report.added;
@@ -237,8 +184,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
         {
             let cat = ctx.catalog.lock();
-            if let Err(e) = backfill_commits(&cat, &root.path, &root.name) {
-                tracing::debug!("backfill_commits skipped for {}: {}", root.name, e);
+            // Derive a repo name for git backfill from the path's last component.
+            let repo_name = abs_root
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if let Err(e) = backfill_commits(&cat, abs_root, &repo_name) {
+                tracing::debug!("backfill_commits skipped for {}: {}", abs_root.display(), e);
             }
         }
     }
@@ -265,10 +217,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             Scope::Umbrella => "umbrella",
             Scope::All => "all",
         },
-        "targets": targets.iter().map(|(r, s)| json!({
-            "repo": r.name,
-            "subdir": s,
-        })).collect::<Vec<_>>(),
+        "targets": targets.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
     }))
 }
 
@@ -339,7 +288,10 @@ mod tests {
         std::fs::create_dir_all(root.join("docs")).unwrap();
         std::fs::write(root.join("docs/a.md"), "# A\n").unwrap();
 
-        let ctx = mk_ctx(root.to_path_buf(), "");
+        let ctx = mk_ctx(
+            root.to_path_buf(),
+            "[[rule]]\nglob = \"**/*.md\"\nkind = \"doc\"\n",
+        );
 
         // First index
         call(&ctx, json!({})).await.unwrap();
@@ -367,12 +319,14 @@ mod tests {
                 rules: vec![],
                 umbrellas: vec![],
             }),
-            rules: Arc::new(crate::classify::load_rules("").unwrap()),
+            rules: Arc::new(
+                crate::classify::load_rules("[[rule]]\nglob = \"**/*.md\"\nkind = \"doc\"\n")
+                    .unwrap(),
+            ),
             embedding: None,
             current_project: Some(Arc::new(crate::current_project::CurrentProject {
-                root: "r".into(),
-                subdir: project_subdir.into(),
-                path: tmp_root.join(project_subdir),
+                abs_path: tmp_root.join(project_subdir),
+                git_root: tmp_root.clone(),
                 umbrella: None,
             })),
         }
@@ -395,7 +349,11 @@ mod tests {
         assert_eq!(v["scope"].as_str().unwrap(), "project");
         let targets = v["targets"].as_array().unwrap();
         assert_eq!(targets.len(), 1);
-        assert_eq!(targets[0]["subdir"].as_str().unwrap(), "p1");
+        let target = targets[0].as_str().unwrap();
+        assert!(
+            target.ends_with("p1"),
+            "target should end with p1, got: {target}"
+        );
     }
 
     #[tokio::test]
@@ -408,7 +366,10 @@ mod tests {
         std::fs::write(root.join("p2/docs/b.md"), "# B\n").unwrap();
 
         // First, index everything (scope=all)
-        let ctx_all = mk_ctx(root.to_path_buf(), "");
+        let ctx_all = mk_ctx(
+            root.to_path_buf(),
+            "[[rule]]\nglob = \"**/*.md\"\nkind = \"doc\"\n",
+        );
         call(&ctx_all, json!({"scope": "all"})).await.unwrap();
         let total_before: i64 = ctx_all
             .catalog
@@ -425,9 +386,8 @@ mod tests {
             rules: ctx_all.rules.clone(),
             embedding: None,
             current_project: Some(Arc::new(crate::current_project::CurrentProject {
-                root: "r".into(),
-                subdir: "p1".into(),
-                path: root.join("p1"),
+                abs_path: root.join("p1"),
+                git_root: root.to_path_buf(),
                 umbrella: None,
             })),
         };
@@ -444,13 +404,14 @@ mod tests {
             "p2 row must survive a project-scoped force reindex of p1"
         );
 
+        let p2_pattern = format!("%{}/p2/%", root.display());
         let p2_count: i64 = ctx_p1
             .catalog
             .lock()
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM artifact WHERE rel_path LIKE 'p2/%'",
-                [],
+                "SELECT COUNT(*) FROM artifact WHERE abs_path LIKE ?1",
+                rusqlite::params![p2_pattern],
                 |r| r.get(0),
             )
             .unwrap();

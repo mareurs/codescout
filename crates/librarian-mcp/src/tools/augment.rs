@@ -198,8 +198,7 @@ mod tests {
             &cat,
             &artifact::ArtifactRow {
                 id: id.to_string(),
-                repo: "repo".to_string(),
-                rel_path: format!("{id}.md"),
+                abs_path: std::path::PathBuf::from(format!("/test/repo/{id}.md")),
                 kind: "tracker".to_string(),
                 status: "active".to_string(),
                 title: Some("T".to_string()),

@@ -15,224 +15,101 @@ use std::path::{Path, PathBuf};
 
 use crate::workspace::WorkspaceConfig;
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone)]
 pub struct CurrentProject {
-    /// Workspace root name this project lives under.
-    pub root: String,
-    /// Relative path from the root to the project directory. Empty string
-    /// when the project IS the root itself.
-    pub subdir: String,
-    /// Absolute filesystem path of the project directory. Used to discover
-    /// per-project config files (e.g. `<path>/.codescout/librarian.toml`).
-    pub path: PathBuf,
-    /// Name of the umbrella that includes this project, if any.
+    /// Absolute path of the active project (canonicalized).
+    pub abs_path: PathBuf,
+    /// Nearest enclosing `.git/` ancestor; falls back to abs_path.
+    pub git_root: PathBuf,
+    /// Umbrella name if this project is a descendant of any umbrella member.
     pub umbrella: Option<String>,
 }
 
-impl CurrentProject {
-    /// `"root"` when subdir is empty, otherwise `"root/subdir"`.
-    pub fn member_key(&self) -> String {
-        if self.subdir.is_empty() {
-            self.root.clone()
-        } else {
-            format!("{}/{}", self.root, self.subdir)
-        }
-    }
-}
-
-pub fn resolve(cwd: &Path, ws: &WorkspaceConfig) -> Option<CurrentProject> {
-    let cwd = cwd.canonicalize().ok().unwrap_or_else(|| cwd.to_path_buf());
-
-    let (root, root_path) = ws
-        .roots
-        .iter()
-        .filter_map(|r| {
-            let rp = r.path.canonicalize().ok().unwrap_or_else(|| r.path.clone());
-            cwd.starts_with(&rp).then_some((r.name.clone(), rp))
-        })
-        .max_by_key(|(_, p)| p.as_os_str().len())?;
-
-    let project_dir = nearest_git_root(&cwd, &root_path).unwrap_or_else(|| root_path.clone());
-
-    let subdir = project_dir
-        .strip_prefix(&root_path)
-        .ok()
-        .map(|p| p.to_string_lossy().replace('\\', "/"))
-        .unwrap_or_default();
-
-    let umbrella = find_umbrella(&root, &subdir, ws);
-
+pub fn resolve(active_path: &Path, ws: &WorkspaceConfig) -> Option<CurrentProject> {
+    let abs_path = std::fs::canonicalize(active_path).ok()?;
+    let git_root = lookup_git_root(&abs_path).unwrap_or_else(|| abs_path.clone());
+    let umbrella = lookup_umbrella(&abs_path, ws);
     Some(CurrentProject {
-        root,
-        subdir,
-        path: project_dir,
+        abs_path,
+        git_root,
         umbrella,
     })
 }
 
-fn nearest_git_root(start: &Path, stop_at: &Path) -> Option<PathBuf> {
+pub fn lookup_git_root(start: &Path) -> Option<PathBuf> {
     let mut cur = start;
     loop {
         if cur.join(".git").exists() {
             return Some(cur.to_path_buf());
         }
-        if cur == stop_at {
-            return None;
-        }
         cur = cur.parent()?;
     }
 }
 
-fn find_umbrella(root: &str, subdir: &str, ws: &WorkspaceConfig) -> Option<String> {
-    let key = if subdir.is_empty() {
-        root.to_string()
-    } else {
-        format!("{root}/{subdir}")
-    };
-    ws.umbrellas
-        .iter()
-        .find(|u| u.members.iter().any(|m| m == &key))
-        .map(|u| u.name.clone())
+pub fn lookup_umbrella(abs_path: &Path, ws: &WorkspaceConfig) -> Option<String> {
+    ws.umbrellas.iter().find_map(|u| {
+        u.members
+            .iter()
+            .any(|m| abs_path.starts_with(m))
+            .then(|| u.name.clone())
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workspace::{Root, Umbrella};
+    use crate::workspace::Umbrella;
     use tempfile::TempDir;
 
-    fn ws_with(roots: Vec<Root>, umbrellas: Vec<Umbrella>) -> WorkspaceConfig {
-        WorkspaceConfig {
-            roots,
+    #[test]
+    fn resolve_from_active_path_returns_self() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().to_path_buf();
+        let ws = WorkspaceConfig::default();
+        let cp = resolve(&p, &ws).unwrap();
+        assert_eq!(cp.abs_path, std::fs::canonicalize(&p).unwrap());
+    }
+
+    #[test]
+    fn resolve_finds_git_root_when_nested() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let nested = tmp.path().join("a/b/c");
+        std::fs::create_dir_all(&nested).unwrap();
+        let cp = resolve(&nested, &WorkspaceConfig::default()).unwrap();
+        assert_eq!(cp.git_root, std::fs::canonicalize(tmp.path()).unwrap());
+    }
+
+    #[test]
+    fn resolve_falls_back_to_abs_path_when_no_git() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().to_path_buf();
+        let cp = resolve(&p, &WorkspaceConfig::default()).unwrap();
+        assert_eq!(cp.git_root, cp.abs_path);
+    }
+
+    #[test]
+    fn resolve_returns_none_for_non_existent_path() {
+        let p = std::path::Path::new("/nonexistent/zzz/qqq");
+        assert!(resolve(p, &WorkspaceConfig::default()).is_none());
+    }
+
+    #[test]
+    fn umbrella_lookup_includes_descendants() {
+        let tmp = TempDir::new().unwrap();
+        let umb_root = tmp.path().to_path_buf();
+        let nested = umb_root.join("sub");
+        std::fs::create_dir_all(&nested).unwrap();
+        let ws = WorkspaceConfig {
+            roots: vec![],
             ignore: vec![],
             rules: vec![],
-            umbrellas,
-        }
-    }
-
-    #[test]
-    fn resolves_to_subdir_with_git_marker() {
-        let tmp = TempDir::new().unwrap();
-        let root = tmp.path().join("monorepo");
-        let proj = root.join("svc-a");
-        std::fs::create_dir_all(proj.join(".git")).unwrap();
-
-        let ws = ws_with(
-            vec![Root {
-                name: "mono".into(),
-                path: root.clone(),
+            umbrellas: vec![Umbrella {
+                name: "team".into(),
+                members: vec![std::fs::canonicalize(&umb_root).unwrap()],
             }],
-            vec![],
-        );
-
-        let cp = resolve(&proj, &ws).unwrap();
-        assert_eq!(cp.root, "mono");
-        assert_eq!(cp.subdir, "svc-a");
-        assert!(cp.umbrella.is_none());
-    }
-
-    #[test]
-    fn resolves_to_root_when_no_git_marker() {
-        let tmp = TempDir::new().unwrap();
-        let root = tmp.path().join("flat");
-        let inner = root.join("docs");
-        std::fs::create_dir_all(&inner).unwrap();
-
-        let ws = ws_with(
-            vec![Root {
-                name: "flat".into(),
-                path: root.clone(),
-            }],
-            vec![],
-        );
-
-        let cp = resolve(&inner, &ws).unwrap();
-        assert_eq!(cp.root, "flat");
-        assert_eq!(cp.subdir, "");
-    }
-
-    #[test]
-    fn returns_none_outside_all_roots() {
-        let tmp = TempDir::new().unwrap();
-        let root = tmp.path().join("inside");
-        let outside = tmp.path().join("elsewhere");
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::create_dir_all(&outside).unwrap();
-
-        let ws = ws_with(
-            vec![Root {
-                name: "inside".into(),
-                path: root,
-            }],
-            vec![],
-        );
-
-        assert!(resolve(&outside, &ws).is_none());
-    }
-
-    #[test]
-    fn picks_longest_matching_root() {
-        let tmp = TempDir::new().unwrap();
-        let outer = tmp.path().join("outer");
-        let inner = outer.join("inner");
-        std::fs::create_dir_all(inner.join(".git")).unwrap();
-
-        let ws = ws_with(
-            vec![
-                Root {
-                    name: "outer".into(),
-                    path: outer.clone(),
-                },
-                Root {
-                    name: "inner".into(),
-                    path: inner.clone(),
-                },
-            ],
-            vec![],
-        );
-
-        let cp = resolve(&inner, &ws).unwrap();
-        assert_eq!(cp.root, "inner");
-        assert_eq!(cp.subdir, "");
-    }
-
-    #[test]
-    fn attaches_umbrella_when_member_matches() {
-        let tmp = TempDir::new().unwrap();
-        let root = tmp.path().join("infra");
-        let proj = root.join("svc-a");
-        std::fs::create_dir_all(proj.join(".git")).unwrap();
-
-        let ws = ws_with(
-            vec![Root {
-                name: "infra".into(),
-                path: root,
-            }],
-            vec![Umbrella {
-                name: "platform".into(),
-                members: vec!["infra/svc-a".into(), "infra/svc-b".into()],
-            }],
-        );
-
-        let cp = resolve(&proj, &ws).unwrap();
-        assert_eq!(cp.umbrella.as_deref(), Some("platform"));
-    }
-
-    #[test]
-    fn member_key_handles_empty_subdir() {
-        let cp = CurrentProject {
-            root: "r".into(),
-            subdir: String::new(),
-            umbrella: None,
-            ..Default::default()
         };
-        assert_eq!(cp.member_key(), "r");
-        let cp2 = CurrentProject {
-            root: "r".into(),
-            subdir: "a/b".into(),
-            umbrella: None,
-            ..Default::default()
-        };
-        assert_eq!(cp2.member_key(), "r/a/b");
+        let cp = resolve(&nested, &ws).unwrap();
+        assert_eq!(cp.umbrella, Some("team".to_string()));
     }
 }

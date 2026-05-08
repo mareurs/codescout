@@ -7,8 +7,7 @@ use super::Catalog;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ArtifactRow {
     pub id: String,
-    pub repo: String,
-    pub rel_path: String,
+    pub abs_path: std::path::PathBuf,
     pub kind: String,
     pub status: String,
     pub title: Option<String>,
@@ -26,11 +25,11 @@ pub struct ArtifactRow {
 
 pub fn upsert(cat: &Catalog, row: &ArtifactRow) -> Result<()> {
     cat.conn.execute(
-        "INSERT INTO artifact (id, repo, rel_path, kind, status, title, owners, tags,
+        "INSERT INTO artifact (id, abs_path, kind, status, title, owners, tags,
             topic, time_scope, source, created_at, updated_at, file_mtime, file_sha256, confidence)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
          ON CONFLICT(id) DO UPDATE SET
-            repo=excluded.repo, rel_path=excluded.rel_path,
+            abs_path=excluded.abs_path,
             kind=excluded.kind, status=excluded.status,
             title=excluded.title, owners=excluded.owners, tags=excluded.tags,
             topic=excluded.topic, time_scope=excluded.time_scope,
@@ -39,8 +38,7 @@ pub fn upsert(cat: &Catalog, row: &ArtifactRow) -> Result<()> {
             confidence=excluded.confidence",
         params![
             row.id,
-            row.repo,
-            row.rel_path,
+            row.abs_path.to_string_lossy().as_ref(),
             row.kind,
             row.status,
             row.title,
@@ -61,7 +59,7 @@ pub fn upsert(cat: &Catalog, row: &ArtifactRow) -> Result<()> {
 
 pub fn get(cat: &Catalog, id: &str) -> Result<Option<ArtifactRow>> {
     cat.conn
-        .prepare("SELECT id, repo, rel_path, kind, status, title, owners, tags,
+        .prepare("SELECT id, abs_path, kind, status, title, owners, tags,
                   topic, time_scope, source, created_at, updated_at, file_mtime, file_sha256, confidence
                   FROM artifact WHERE id = ?1")?
         .query_row(params![id], row_from_sql)
@@ -76,51 +74,58 @@ pub fn delete(cat: &Catalog, id: &str) -> Result<bool> {
         > 0)
 }
 
-/// Delete all rows whose `repo` is not in `active`. Returns number of rows removed.
-pub fn delete_orphan_repos(cat: &Catalog, active: &[&str]) -> Result<usize> {
-    if active.is_empty() {
+/// Delete all rows whose `abs_path` is not under any path in `active_roots`. Returns number removed.
+pub fn delete_orphan_repos(cat: &Catalog, active_roots: &[&std::path::Path]) -> Result<usize> {
+    if active_roots.is_empty() {
         let n = cat.conn.execute("DELETE FROM artifact", [])?;
         return Ok(n);
     }
-    let placeholders = (1..=active.len())
-        .map(|i| format!("?{i}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let sql = format!("DELETE FROM artifact WHERE repo NOT IN ({placeholders})");
-    let params: Vec<&dyn rusqlite::ToSql> =
-        active.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+    // Keep rows where abs_path starts with any active root (prefix match with trailing /).
+    let keep_clauses: Vec<String> = (1..=active_roots.len())
+        .map(|i| format!("abs_path LIKE ?{i}"))
+        .collect();
+    let sql = format!(
+        "DELETE FROM artifact WHERE NOT ({})",
+        keep_clauses.join(" OR ")
+    );
+    let params: Vec<String> = active_roots
+        .iter()
+        .map(|p| format!("{}/%", p.to_string_lossy()))
+        .collect();
+    let param_refs: Vec<&dyn rusqlite::ToSql> =
+        params.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
     let n = cat
         .conn
-        .execute(&sql, rusqlite::params_from_iter(params.iter().copied()))?;
+        .execute(&sql, rusqlite::params_from_iter(param_refs.iter().copied()))?;
     Ok(n)
 }
 
 pub(crate) fn row_from_sql(r: &rusqlite::Row<'_>) -> rusqlite::Result<ArtifactRow> {
-    let owners_s: String = r.get(6)?;
-    let tags_s: String = r.get(7)?;
+    let owners_s: String = r.get(5)?;
+    let tags_s: String = r.get(6)?;
     let owners: Vec<String> = serde_json::from_str(&owners_s).map_err(|e| {
-        rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(e))
+        rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, Box::new(e))
     })?;
     let tags: Vec<String> = serde_json::from_str(&tags_s).map_err(|e| {
-        rusqlite::Error::FromSqlConversionFailure(7, rusqlite::types::Type::Text, Box::new(e))
+        rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(e))
     })?;
+    let abs_path_s: String = r.get(1)?;
     Ok(ArtifactRow {
         id: r.get(0)?,
-        repo: r.get(1)?,
-        rel_path: r.get(2)?,
-        kind: r.get(3)?,
-        status: r.get(4)?,
-        title: r.get(5)?,
+        abs_path: std::path::PathBuf::from(abs_path_s),
+        kind: r.get(2)?,
+        status: r.get(3)?,
+        title: r.get(4)?,
         owners,
         tags,
-        topic: r.get(8)?,
-        time_scope: r.get(9)?,
-        source: r.get(10)?,
-        created_at: r.get(11)?,
-        updated_at: r.get(12)?,
-        file_mtime: r.get(13)?,
-        file_sha256: r.get(14)?,
-        confidence: r.get(15)?,
+        topic: r.get(7)?,
+        time_scope: r.get(8)?,
+        source: r.get(9)?,
+        created_at: r.get(10)?,
+        updated_at: r.get(11)?,
+        file_mtime: r.get(12)?,
+        file_sha256: r.get(13)?,
+        confidence: r.get(14)?,
     })
 }
 
@@ -162,8 +167,7 @@ mod tests {
     fn sample(id: &str) -> ArtifactRow {
         ArtifactRow {
             id: id.into(),
-            repo: "r".into(),
-            rel_path: "p.md".into(),
+            abs_path: std::path::PathBuf::from(format!("/test/r/{id}.md")),
             kind: "spec".into(),
             status: "active".into(),
             title: Some("T".into()),
@@ -214,18 +218,16 @@ mod tests {
     fn delete_orphan_repos_drops_inactive() {
         let cat = Catalog::open_in_memory().unwrap();
         let mut a = sample("a1");
-        a.repo = "alive".into();
-        a.rel_path = "a.md".into();
+        a.abs_path = std::path::PathBuf::from("/roots/alive/a.md");
         let mut b = sample("b1");
-        b.repo = "alive".into();
-        b.rel_path = "b.md".into();
+        b.abs_path = std::path::PathBuf::from("/roots/alive/b.md");
         let mut c = sample("c1");
-        c.repo = "ghost".into();
-        c.rel_path = "c.md".into();
+        c.abs_path = std::path::PathBuf::from("/roots/ghost/c.md");
         for r in [&a, &b, &c] {
             upsert(&cat, r).unwrap();
         }
-        let removed = delete_orphan_repos(&cat, &["alive"]).unwrap();
+        let alive = std::path::Path::new("/roots/alive");
+        let removed = delete_orphan_repos(&cat, &[alive]).unwrap();
         assert_eq!(removed, 1);
         assert!(get(&cat, "c1").unwrap().is_none());
         assert!(get(&cat, "a1").unwrap().is_some());
@@ -245,9 +247,9 @@ mod tests {
         // Insert a row bypassing upsert, with malformed tags JSON.
         cat.conn
             .execute(
-                "INSERT INTO artifact (id, repo, rel_path, kind, status, owners, tags,
+                "INSERT INTO artifact (id, abs_path, kind, status, owners, tags,
                  created_at, updated_at, file_mtime, file_sha256, confidence)
-                 VALUES ('bad', 'r', 'x.md', 'spec', 'active', '[]',
+                 VALUES ('bad', '/test/x.md', 'spec', 'active', '[]',
                          '{not valid json',
                          0, 0, 0, 'sha', 1.0)",
                 [],

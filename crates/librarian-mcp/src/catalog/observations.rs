@@ -96,8 +96,7 @@ mod tests {
     fn art(id: &str) -> ArtifactRow {
         ArtifactRow {
             id: id.into(),
-            repo: "r".into(),
-            rel_path: format!("{id}.md"),
+            abs_path: std::path::PathBuf::from(format!("/test/r/{id}.md")),
             kind: "spec".into(),
             status: "active".into(),
             title: None,
@@ -171,8 +170,7 @@ mod tests {
         let now = chrono::Utc::now().timestamp_millis();
         let art = ArtifactRow {
             id: "a1".to_string(),
-            repo: "r".to_string(),
-            rel_path: "a.md".to_string(),
+            abs_path: std::path::PathBuf::from("/test/r/a.md"),
             kind: "tracker".to_string(),
             status: "active".to_string(),
             title: None,

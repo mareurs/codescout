@@ -1,8 +1,8 @@
 -- v1 schema
 CREATE TABLE IF NOT EXISTS artifact (
   id            TEXT PRIMARY KEY,
-  repo          TEXT NOT NULL,
-  rel_path      TEXT NOT NULL,
+  repo          TEXT,
+  rel_path      TEXT,
   kind          TEXT NOT NULL,
   status        TEXT NOT NULL,
   title         TEXT,
@@ -16,8 +16,7 @@ CREATE TABLE IF NOT EXISTS artifact (
   file_mtime    INTEGER NOT NULL,
   file_sha256   TEXT NOT NULL,
   confidence    REAL NOT NULL DEFAULT 1.0,
-  abs_path      TEXT,
-  UNIQUE(repo, rel_path)
+  abs_path      TEXT
 );
 
 CREATE TABLE IF NOT EXISTS artifact_link (

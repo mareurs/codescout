@@ -35,13 +35,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let row =
         artifact::get(&cat, &a.id)?.ok_or_else(|| anyhow::anyhow!("unknown id `{}`", a.id))?;
 
-    let root = ctx
-        .workspace
-        .roots
-        .iter()
-        .find(|r| r.name == row.repo)
-        .ok_or_else(|| anyhow::anyhow!("unknown repo `{}`", row.repo))?;
-    let full = root.path.join(&row.rel_path);
+    let full = row.abs_path.clone();
 
     let original = std::fs::read_to_string(&full)?;
     let patch = &a.patch;
@@ -112,8 +106,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let updated_row = crate::catalog::artifact::ArtifactRow {
         id: row.id.clone(),
-        repo: row.repo.clone(),
-        rel_path: row.rel_path.clone(),
+        abs_path: row.abs_path.clone(),
         kind: row.kind.clone(),
         status: patch.status.clone().unwrap_or(row.status),
         title: patch.title.clone().or(row.title),
@@ -166,13 +159,7 @@ pub(crate) fn write_field_to_frontmatter(
     let cat = ctx.catalog.lock();
     let row = artifact::get(&cat, artifact_id)?
         .ok_or_else(|| anyhow::anyhow!("unknown artifact `{artifact_id}`"))?;
-    let root = ctx
-        .workspace
-        .roots
-        .iter()
-        .find(|r| r.name == row.repo)
-        .ok_or_else(|| anyhow::anyhow!("unknown repo `{}`", row.repo))?;
-    let full = root.path.join(&row.rel_path);
+    let full = row.abs_path.clone();
     let original = std::fs::read_to_string(&full).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             crate::tools::RecoverableError::with_hint(
