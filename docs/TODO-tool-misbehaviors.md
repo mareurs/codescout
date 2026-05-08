@@ -121,6 +121,31 @@ These are fixed in the happy path but still have edge cases worth knowing about.
 - **Broader implication:** any code that checks `RecoverableError` content via `anyhow::Error::to_string()` or `Display` only sees the message. Tests for hint/warning/must_follow content must either downcast (`err.downcast_ref::<RecoverableError>()` + `.hint()`) or put the asserted text in the message instead.
 - **Status:** Fixed by convention (2026-05-02) — no `Display` change made; document pattern for future test authors.
 
+### BUG-055 — `artifact(create)` leaves orphan file on disk when DB insert fails
+
+**When:** `artifact(create)` is called but the `upsert` fails (e.g. `NOT NULL constraint failed: artifact.repo` during v6 pre-migration state).
+
+**Got:** File written to disk at the target path, no DB record created. Subsequent `artifact(create)` calls for the same path fail with `"path exists"` even though the artifact is not in the DB.
+
+**Probable cause:** `create.rs` calls `std::fs::write` before `artifact::upsert`. If `upsert` fails, the file is already on disk with no rollback.
+
+**Workaround:** Manually delete the orphan file, then retry `artifact(create)`.
+
+**Fix idea:** Wrap file write + upsert in a two-phase pattern: write to a temp path, upsert, then `fs::rename` to final path. Rename is atomic on POSIX.
+
+---
+
+### BUG-056 — `artifact(update, patch={params: ...})` silently drops `params`
+
+**When:** Caller follows the documented refresh pattern and passes `patch={params: {entries: [...]}}` to `artifact(update)`.
+
+**Got:** `params` is silently ignored — `UpdatePatch` struct has no `params` field, so serde drops it. The augmentation params remain unchanged. `commit_refresh=true` still fires, recording a refresh with stale params.
+
+**Probable cause:** `params` belongs to the `artifact_augmentation` table, not `artifact`. The `update` tool only patches the artifact row.
+
+**Workaround:** Use `artifact_augment(id, merge=true, params={...})` to update params, then call `artifact(update, commit_refresh=true)` separately to record the refresh timestamp.
+
+**Fix idea:** Either add `params` to `UpdatePatch` and route it to `augmentation::upsert_params`, or document the correct two-call pattern clearly in the tool description.
 ## Archive
 
 Fixed / superseded entries: `docs/archive/bug-reports/`.
