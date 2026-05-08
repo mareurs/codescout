@@ -3,52 +3,6 @@
 
 use std::path::Path;
 
-pub(crate) fn language_navigation_hints(lang: &str) -> Option<&'static str> {
-    match lang {
-        "rust" => Some(
-            "- symbol: `StructName/method`, `impl Trait for Type/method`\n\
-             - symbols(kind=\"struct\") for data types, kind=\"function\" for free fns\n\
-             - impl blocks: `symbols(name=\"impl MyStruct\")` or symbols(path) shows `impl Trait for Type`\n\
-             - Example: `symbols(name=\"Server/handle_request\")` finds a method on Server\n\
-             - call_graph(symbol, path, direction=\"callers\") — blast radius before refactor; direction=\"callees\" for flow tracing",
-        ),
-        "python" => Some(
-            "- symbol: `ClassName/method_name`, `module_func`\n\
-             - symbols(kind=\"class\") for classes, kind=\"function\" for functions/methods\n\
-             - Decorators aren't in symbol — search for the function name\n\
-             - Example: `symbols(name=\"UserService/create\")` finds a method on UserService\n\
-             - call_graph(symbol, path, direction=\"callers\") — blast radius before refactor; direction=\"callees\" for flow tracing",
-        ),
-        "typescript" | "javascript" | "tsx" | "jsx" => Some(
-            "- symbol: `ClassName/method`, `exportedFunction`\n\
-             - symbols(kind=\"class\") for classes, kind=\"function\" for functions/arrow fns\n\
-             - React components are functions — use kind=\"function\" not kind=\"class\"\n\
-             - Example: `symbols(name=\"AuthProvider/login\")` finds a class method\n\
-             - call_graph(symbol, path, direction=\"callers\") — blast radius before refactor; direction=\"callees\" for flow tracing",
-        ),
-        "go" => Some(
-            "- symbol: `TypeName/MethodName`, `PackageFunc`\n\
-             - symbols(kind=\"function\") covers both functions and methods\n\
-             - Receiver methods: `symbols(name=\"Server/ListenAndServe\")`\n\
-             - Interfaces: symbols(kind=\"interface\") then symbols(path) for signatures\n\
-             - call_graph(symbol, path, direction=\"callers\") — blast radius before refactor; direction=\"callees\" for flow tracing",
-        ),
-        "java" | "kotlin" => Some(
-            "- symbol: `ClassName/methodName`, `InnerClass`\n\
-             - symbols(kind=\"class\") for classes/interfaces, kind=\"function\" for methods\n\
-             - Annotations aren't in symbol — search by method name\n\
-             - Example: `symbols(name=\"UserRepository/findById\")`\n\
-             - call_graph(symbol, path, direction=\"callers\") — blast radius before refactor; direction=\"callees\" for flow tracing",
-        ),
-        "c" | "cpp" => Some(
-            "- symbol: `ClassName/method`, `namespace_func`\n\
-             - symbols(kind=\"struct\") or kind=\"class\" depending on codebase style\n\
-             - Header vs implementation: symbols shows both — use path= to narrow\n\
-             - call_graph(symbol, path, direction=\"callers\") — blast radius before refactor; direction=\"callees\" for flow tracing",
-        ),
-        _ => None,
-    }
-}
 
 /// Returns curated anti-patterns and correct patterns for a language.
 /// Content sourced from docs/research/claude-language-patterns.md.
@@ -267,19 +221,6 @@ pub(crate) fn build_system_prompt_draft(
         }
     }
     draft.push('\n');
-
-    // Language-specific navigation hints — cap at 3 to keep the draft concise
-    let hints: Vec<_> = languages
-        .iter()
-        .filter_map(|lang| language_navigation_hints(lang).map(|h| (lang.as_str(), h)))
-        .take(3)
-        .collect();
-    if !hints.is_empty() {
-        draft.push_str("## Language Navigation\n");
-        for (lang, hint) in &hints {
-            draft.push_str(&format!("**{}:**\n{}\n\n", lang, hint));
-        }
-    }
 
     // Language patterns reference — only if at least one language has patterns
     let has_patterns = languages.iter().any(|l| language_patterns(l).is_some());

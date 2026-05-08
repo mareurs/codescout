@@ -4,8 +4,7 @@ use crate::prompts::builders::{
     build_buffered_onboarding_instructions, build_buffered_refresh_instructions, build_heading_map,
     build_language_patterns_memory, build_per_project_prompt, build_prompt_refresh_subagent_prompt,
     build_subagent_epilogue, build_subagent_preamble, build_synthesis_prompt,
-    build_system_prompt_draft, build_workspace_instructions, language_navigation_hints,
-    language_patterns,
+    build_system_prompt_draft, build_workspace_instructions, language_patterns,
 };
 use crate::tools::command_summary::BUFFER_QUERY_INLINE_CAP;
 use crate::tools::onboarding::{
@@ -2107,70 +2106,10 @@ async fn run_command_buffer_only_within_limit_no_truncation_fields() {
     );
 }
 
-#[test]
-fn language_hints_covers_main_languages() {
-    for lang in &[
-        "rust",
-        "python",
-        "typescript",
-        "javascript",
-        "go",
-        "java",
-        "kotlin",
-        "c",
-        "cpp",
-        "tsx",
-        "jsx",
-    ] {
-        assert!(
-            language_navigation_hints(lang).is_some(),
-            "expected hints for '{}'",
-            lang
-        );
-    }
-}
 
-#[test]
-fn language_hints_returns_none_for_unsupported() {
-    // "bash" and "markdown" are real detect_language() values, just without hints
-    assert!(language_navigation_hints("markdown").is_none());
-    assert!(language_navigation_hints("bash").is_none());
-    assert!(language_navigation_hints("unknown_lang").is_none());
-}
 
-#[test]
-fn system_prompt_draft_includes_language_hints() {
-    let langs = vec!["rust".to_string(), "python".to_string()];
-    let draft = build_system_prompt_draft(&langs, &[], None, None, &[]);
-    assert!(
-        draft.contains("## Language Navigation"),
-        "should have Language Navigation section"
-    );
-    assert!(draft.contains("**rust:**"), "should have rust hints");
-    assert!(draft.contains("**python:**"), "should have python hints");
-    assert!(draft.contains("symbol"), "hints should mention symbol");
-}
 
-#[test]
-fn system_prompt_draft_omits_hints_for_unsupported_languages() {
-    let langs = vec!["markdown".to_string()];
-    let draft = build_system_prompt_draft(&langs, &[], None, None, &[]);
-    assert!(
-        !draft.contains("## Language Navigation"),
-        "should not have Language Navigation for markdown-only"
-    );
-}
 
-#[test]
-fn system_prompt_draft_isolates_hints_per_language() {
-    let langs = vec!["python".to_string()];
-    let draft = build_system_prompt_draft(&langs, &[], None, None, &[]);
-    assert!(draft.contains("**python:**"), "should have python hints");
-    assert!(
-        !draft.contains("impl Trait for Type"),
-        "rust hints should not leak into python-only draft"
-    );
-}
 
 #[test]
 fn system_prompt_draft_includes_language_patterns_hint() {
