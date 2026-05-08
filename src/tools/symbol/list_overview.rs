@@ -280,6 +280,24 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
         let timer = LspTimer::start();
         let symbols = client.document_symbols(&full_path, &lang).await?;
         timer.record(&*ctx.lsp, raw_lang, &root).await;
+        // BUG-054 mitigation: rust-analyzer (and similar LSPs) return Ok(vec![])
+        // during cold-start indexing instead of -32800 RequestCancelled,
+        // bypassing the cold-start retry budget in `LspClient`. When LSP returns
+        // no symbols for a non-empty source file we have a tree-sitter parser
+        // for, fall over to AST extraction so the agent gets a usable result
+        // instead of a silent empty array.
+        let symbols = if symbols.is_empty() && ast::get_ts_language(raw_lang).is_some() {
+            let has_source = std::fs::read_to_string(&full_path)
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false);
+            if has_source {
+                ast::extract_symbols(&full_path).unwrap_or(symbols)
+            } else {
+                symbols
+            }
+        } else {
+            symbols
+        };
         let include_body = guard.should_include_body();
         let source = if include_body {
             std::fs::read_to_string(&full_path).ok()
