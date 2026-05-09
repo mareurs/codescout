@@ -105,7 +105,6 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         time_scope: None,
     };
     let content = crate::frontmatter::write(&fm, &format!("\n{}\n", a.body));
-    std::fs::write(&full, &content)?;
     let now = chrono::Utc::now().timestamp_millis();
     let row = ArtifactRow {
         id: id.clone(),
@@ -153,6 +152,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             },
         )?;
     }
+    // Disk write last — the file is the user-visible side effect; the DB row
+    // is the durable record. If a catalog upsert above fails, no orphan file
+    // is left on disk to block a retry (BUG-055).
+    std::fs::write(&full, &content)?;
     let mut result = json!({"id": id, "abs_path": row.abs_path.display().to_string()});
     if a.kind == "tracker" && a.augment.is_none() {
         result["tracker_hint"] = json!(
@@ -229,6 +232,44 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.to_string().contains("path exists"));
+    }
+
+    #[tokio::test]
+    async fn create_does_not_leave_orphan_file_when_upsert_fails() {
+        // BUG-055: if the artifact upsert fails after the file has been
+        // written, future create calls bail with "path exists" even though
+        // the artifact is not in the DB. Disk write must come AFTER all
+        // catalog writes so a DB error leaves the disk untouched.
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        // Force every artifact INSERT to abort, simulating the constraint
+        // violation that BUG-055 reported under partial v6 migration state.
+        ctx.catalog
+            .lock()
+            .conn
+            .execute_batch(
+                "CREATE TRIGGER fail_artifact BEFORE INSERT ON artifact \
+                 BEGIN SELECT RAISE(ABORT, 'simulated upsert failure'); END;",
+            )
+            .unwrap();
+
+        let result = call(
+            &ctx,
+            json!({
+                "repo": "r", "rel_path": "docs/orphan.md",
+                "kind": "doc", "title": "X", "body": "hi"
+            }),
+        )
+        .await;
+
+        assert!(result.is_err(), "upsert must fail with abort trigger");
+        let target = tmp.path().join("docs/orphan.md");
+        assert!(
+            !target.exists(),
+            "no orphan file must remain after failed upsert: {}",
+            target.display()
+        );
     }
 
     #[tokio::test]
