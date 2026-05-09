@@ -1,5 +1,11 @@
 # Tool Misbehaviours — Living Log [DEPRECATED 2026-05-09]
 
+> **Going forward, all new tool quirks and misbehaviors are tracked as bug
+> files in `docs/issues/<date>-<slug>.md` using `docs/issues/_TEMPLATE.md`.**
+> Do not add new `BUG-XXX` entries below — open a bug file instead.
+> Existing entries stay here for historical reference; they will be
+> migrated in a future bulk pass.
+
 **Reader:** developers (including Claude) working on codescout's own MCP tools.
 
 **Purpose:** catch unexpected behaviour from codescout's tools (`edit_file`, `replace_symbol`, `find_symbol`, `semantic_search`, `edit_markdown`, `run_command`, …) *before* it gets normalised as "just how the tool works". Log it while the context is fresh; fix it or let it inform future work.
@@ -277,10 +283,3 @@ the spin begins.
 - **Fix:** commit or test name, or "open"
 - **Status:** Open / Fixed (YYYY-MM-DD, commit `abcdef0`) / Mitigated
 ```
-
-
-> **Going forward, all new tool quirks and misbehaviors are tracked as bug
-> files in `docs/issues/<date>-<slug>.md` using `docs/issues/_TEMPLATE.md`.**
-> Do not add new `BUG-XXX` entries below — open a bug file instead.
-> Existing entries stay here for historical reference; they will be
-> migrated in a future bulk pass.
