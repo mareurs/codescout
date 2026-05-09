@@ -63,10 +63,9 @@ These are fixed in the happy path but still have edge cases worth knowing about.
 - **What I did:** Batch `edit_file` against `crates/librarian-mcp/src/catalog/events.rs`. Second edit's `new_string` contained the literal `fn ` (declaring a new private helper function). The `old_string` for that second edit was a single-line match.
 - **Expected:** either the edit applies cleanly between existing functions, or the multi-line-fn guard rejects it.
 - **What happened:** the tool accepted the edit (no error) but injected the replacement text **mid-function**, splicing into the body of an existing fn (`insert`) and corrupting it. Caller noticed via subsequent `cargo build` failure; recovered by re-issuing the edit with surrounding context.
-- **Probable cause:** the structural-edit guard fires only when `old_string` spans multiple lines containing `fn`. A single-line `old_string` with `fn ` in `new_string` slips through the gate.
-- **Workaround:** for any new-function injection, use a multi-line `old_string` with explicit anchor lines on both sides, or use `insert_code`/`replace_symbol` instead of `edit_file`.
-- **Fix:** open
-- **Status:** Open
+- **Root cause (confirmed 2026-05-09):** `guard_structural_rewrite` returned `Ok(())` on the very first line when `old_string` lacked a newline, and `find_def_keyword` was only ever called against `old_string`. A single-line `old_string` paired with a multi-line `new_string` that introduced a new symbol slipped through the gate entirely — the new function got spliced into whatever surrounded the anchor match.
+- **Fix applied (2026-05-09):** `guard_structural_rewrite` now also rejects edits where a multi-line `new_string` contains a definition keyword for the file's language — covers both "rewriting an existing symbol" (old check) and "introducing a new symbol" (new check). Single-line `new_string` containing a `fn` token (e.g. comment edits) remains allowed. Tests: `batch_edit_blocks_new_symbol_introduction_via_new_string`, `single_edit_blocks_new_symbol_introduction_via_new_string`, `singleline_new_string_with_fn_token_still_allowed` in `src/tools/edit_file/tests.rs`.
+- **Status:** Fixed
 ### BUG-051 — `edit_code insert after`: code injected mid-function body when symbol body is truncated in display
 
 - **Observed:** 2026-05-02
