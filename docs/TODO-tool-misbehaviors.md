@@ -1,4 +1,4 @@
-# Tool Misbehaviours — Living Log
+# Tool Misbehaviours — Living Log [DEPRECATED 2026-05-09]
 
 **Reader:** developers (including Claude) working on codescout's own MCP tools.
 
@@ -110,19 +110,14 @@ These are fixed in the happy path but still have edge cases worth knowing about.
 ### BUG-052 — `RecoverableError` guidance/hint not included in `Display` / `to_string()`
 
 - **Observed:** 2026-05-02
-- **Component:** `src/tools/mod.rs` — `impl std::fmt::Display for RecoverableError`
+- **Component:** `src/tools/core/types.rs` — `impl std::fmt::Display for RecoverableError`
 - **Severity:** Low (test footgun; no runtime data loss — MCP JSON output is correct)
 - **What I did:** wrote a test asserting `result.unwrap_err().to_string().contains("did you mean ...")` where `"did you mean ..."` was set as the `hint` in `RecoverableError::with_hint(message, hint)`.
 - **Expected:** `to_string()` to include both the message and the hint text, as the LLM sees both.
-- **What happened:** test failed — `to_string()` emits only `self.message`; the `guidance` field (Hint/Warning/MustFollow) is serialized only in the MCP JSON response body, invisible to `Display`.
-- **Reproducing call:**
-  ```rust
-  let e = RecoverableError::with_hint("symbol not found: Foo/bar", "Did you mean 'Baz/bar'?");
-  assert!(e.to_string().contains("Did you mean")); // FAILS
-  ```
-- **Fix applied (same session):** moved suggestions into the `message` string itself (`"symbol not found: X — did you mean 'Y'?"`), kept the `hint` for static usage guidance. Tests now check `err_str.contains("did you mean")` against the message.
-- **Broader implication:** any code that checks `RecoverableError` content via `anyhow::Error::to_string()` or `Display` only sees the message. Tests for hint/warning/must_follow content must either downcast (`err.downcast_ref::<RecoverableError>()` + `.hint()`) or put the asserted text in the message instead.
-- **Status:** Fixed by convention (2026-05-02) — no `Display` change made; document pattern for future test authors.
+- **What happened:** test failed — `to_string()` emitted only `self.message`; the `guidance` field (Hint/Warning/MustFollow) was serialized only in the MCP JSON response body, invisible to `Display`.
+- **Initial workaround (2026-05-02):** moved suggestions into the `message` string itself (`"symbol not found: X — did you mean 'Y'?"`), kept the `hint` for static usage guidance.
+- **Proper fix (2026-05-09):** `Display` now appends attached guidance as `" — <field_name>: <text>"` when `guidance` is `Some(_)`, surfacing hint/warning/must_follow content in `to_string()`. The MCP JSON output is unchanged (it uses serde, not Display) so no double-rendering. Audit confirmed no existing test asserts exact-equality on `to_string()` for `RecoverableError`; only the canary test `recoverable_error_display_shows_message` did, and it has been updated to assert the new contract. Tests added: `display_includes_hint_text`, `display_includes_warning_text`, `display_includes_must_follow_text`, `display_no_guidance_just_message` in `src/tools/core/tests.rs`.
+- **Status:** Fixed
 
 ### BUG-053 — `semantic_search` MCP server panics on UTF-8 multi-byte char near byte 47 of result preview
 
@@ -282,3 +277,10 @@ the spin begins.
 - **Fix:** commit or test name, or "open"
 - **Status:** Open / Fixed (YYYY-MM-DD, commit `abcdef0`) / Mitigated
 ```
+
+
+> **Going forward, all new tool quirks and misbehaviors are tracked as bug
+> files in `docs/issues/<date>-<slug>.md` using `docs/issues/_TEMPLATE.md`.**
+> Do not add new `BUG-XXX` entries below — open a bug file instead.
+> Existing entries stay here for historical reference; they will be
+> migrated in a future bulk pass.

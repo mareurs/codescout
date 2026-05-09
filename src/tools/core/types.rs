@@ -234,7 +234,11 @@ impl RecoverableError {
 /// `RecoverableError` and call `.hint()` — do not parse it out of Display.
 impl std::fmt::Display for RecoverableError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)
+        write!(f, "{}", self.message)?;
+        if let Some(g) = &self.guidance {
+            write!(f, " — {}: {}", g.field_name(), g.text())?;
+        }
+        Ok(())
     }
 }
 
