@@ -112,8 +112,13 @@ fn recoverable_error_stores_hint() {
 
 #[test]
 fn recoverable_error_display_shows_message() {
+    // BUG-052 regression: Display now surfaces both message AND attached
+    // guidance text. Previously only `self.message` was emitted, which
+    // hid hint/warning/must_follow content from `to_string()` consumers.
     let e = RecoverableError::with_hint("file missing", "check the path");
-    assert_eq!(e.to_string(), "file missing");
+    let s = e.to_string();
+    assert!(s.contains("file missing"), "must keep message: {s}");
+    assert!(s.contains("check the path"), "must surface hint: {s}");
 }
 
 #[test]
@@ -171,6 +176,48 @@ fn recoverable_error_with_hint_still_produces_hint_variant() {
     let e = RecoverableError::with_hint("not found", "check path");
     assert!(matches!(e.guidance, Some(Guidance::Hint(ref s)) if s == "check path"));
     assert_eq!(e.hint(), Some("check path"));
+}
+
+/// BUG-052: `Display` (i.e. `to_string()`) must surface the attached
+/// guidance text, not just `self.message`. Test authors and log readers
+/// previously had to downcast and call `hint()`/match `guidance` to see
+/// the extra context — easy to miss.
+#[test]
+fn display_includes_hint_text() {
+    let e = RecoverableError::with_hint("not found", "check the path");
+    let s = e.to_string();
+    assert!(s.contains("not found"), "must keep message: {s}");
+    assert!(s.contains("check the path"), "must surface hint text: {s}");
+}
+
+#[test]
+fn display_includes_warning_text() {
+    let e = RecoverableError::with_warning("too many results", "narrow with path=");
+    let s = e.to_string();
+    assert!(
+        s.contains("narrow with path="),
+        "must surface warning text: {s}"
+    );
+}
+
+#[test]
+fn display_includes_must_follow_text() {
+    let e = RecoverableError::with_must_follow("heading too large", "IRON LAW #6: use @file_xxx");
+    let s = e.to_string();
+    assert!(
+        s.contains("IRON LAW #6"),
+        "must surface must_follow text: {s}"
+    );
+}
+
+#[test]
+fn display_no_guidance_just_message() {
+    let e = RecoverableError::new("simple error");
+    assert_eq!(
+        e.to_string(),
+        "simple error",
+        "no guidance attached → Display is just the message"
+    );
 }
 
 #[test]
