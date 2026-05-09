@@ -59,42 +59,46 @@ fn infer_edit_hint(old_string: &str, new_string: &str) -> &'static str {
     "edit_code(symbol, path, action='replace', body=...) — replaces the symbol body via LSP"
 }
 
-/// Returns Err if `old_string` looks like a structural rewrite on an
-/// LSP-supported source file. Enforced in both single-edit and batch modes so
-/// multi-line replacements containing `fn`/`struct`/`class`/etc. are routed
-/// through `replace_symbol` regardless of entry point.
+/// Returns Err if the edit looks structural for an LSP-supported source file.
+///
+/// Two patterns are blocked:
+///   1. Multi-line `old_string` containing a definition keyword — rewriting an
+///      existing symbol via raw text replacement.
+///   2. Multi-line `new_string` containing a definition keyword — introducing a
+///      *new* symbol whose placement depends entirely on the `old_string`
+///      anchor. BUG-050: a single-line `old_string` here lets a new `fn`
+///      silently splice into an unrelated function body.
+///
+/// Both routes should go through `edit_code` instead.
 fn guard_structural_rewrite(
     path: &str,
     old_string: &str,
     new_string: &str,
 ) -> Result<(), super::RecoverableError> {
-    let old_has_newline = old_string.contains('\n');
-    let new_has_newline = new_string.contains('\n');
-    // Pure single-line literal substitution — always safe.
-    if !old_has_newline && !new_has_newline {
-        return Ok(());
-    }
     if !crate::util::path_security::is_source_path(path) {
         return Ok(());
     }
     let Some(lang) = detect_lsp_language(path) else {
         return Ok(());
     };
-    // BUG-050: even when old_string is single-line, a multi-line new_string
-    // that introduces a definition keyword is a structural edit smuggled in
-    // through a textual substitution. Reject regardless of old_string shape.
-    let scan_target = if old_has_newline {
-        old_string
-    } else {
-        new_string
-    };
-    let Some(keyword) = find_def_keyword(scan_target, lang) else {
+
+    let old_kw = old_string
+        .contains('\n')
+        .then(|| find_def_keyword(old_string, lang))
+        .flatten();
+    let new_kw = new_string
+        .contains('\n')
+        .then(|| find_def_keyword(new_string, lang))
+        .flatten();
+
+    let Some(keyword) = old_kw.or(new_kw) else {
         return Ok(());
     };
+
     let hint = infer_edit_hint(old_string, new_string);
     Err(super::RecoverableError::with_hint(
         format!(
-            "multi-line edit contains a symbol definition ({keyword:?}) — \
+            "edit contains a symbol definition ({keyword:?}) — \
              use symbol tools for structural changes"
         ),
         hint,

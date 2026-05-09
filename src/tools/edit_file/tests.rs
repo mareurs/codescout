@@ -3418,16 +3418,14 @@ async fn batch_edit_blocks_structural_rewrite() {
 }
 
 #[tokio::test]
-async fn batch_edit_rejects_single_line_old_with_def_keyword_in_new_string() {
-    // BUG-050: a single-line old_string paired with a multi-line new_string
-    // that introduces a definition keyword (e.g. `pub fn ...`) is a structural
-    // edit hiding behind a textual one. The gate must reject it regardless of
-    // old_string shape.
+async fn batch_edit_blocks_new_symbol_introduction_via_new_string() {
+    // BUG-050 reproducer: a single-line old_string paired with a multi-line
+    // new_string that declares a new function must be rejected. Otherwise the
+    // new fn is silently spliced mid-existing-function.
     let (dir, ctx) = project_ctx().await;
     let path = dir.path().join("src").join("lib.rs");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    let original = "pub fn foo() {\n    let x = 1;\n    let y = 2;\n}\n";
-    std::fs::write(&path, original).unwrap();
+    std::fs::write(&path, "pub fn anchor() {}\n").unwrap();
 
     let result = EditFile
         .call(
@@ -3435,12 +3433,8 @@ async fn batch_edit_rejects_single_line_old_with_def_keyword_in_new_string() {
                 "path": path.to_str().unwrap(),
                 "edits": [
                     {
-                        "old_string": "    let x = 1;",
-                        "new_string": "    let x = 10;"
-                    },
-                    {
-                        "old_string": "    let y = 2;",
-                        "new_string": "    let y = 20;\n}\n\npub fn injected_helper() -> u32 {\n    42\n}\n\nfn _placeholder() {\n    let y = 2;"
+                        "old_string": "pub fn anchor() {}",
+                        "new_string": "pub fn anchor() {}\n\nfn helper() {\n    todo!();\n}"
                     }
                 ]
             }),
@@ -3450,25 +3444,87 @@ async fn batch_edit_rejects_single_line_old_with_def_keyword_in_new_string() {
 
     assert!(
         result.is_err(),
-        "batch must reject single-line→multi-line edit that introduces a def keyword"
+        "batch must reject new-symbol introduction via new_string"
     );
     let err = result.unwrap_err();
-    let recoverable = err
-        .downcast_ref::<RecoverableError>()
-        .expect("should be RecoverableError");
     assert!(
         err.to_string().contains("symbol definition"),
         "error should mention symbol definition, got: {err}"
     );
+    let recoverable = err
+        .downcast_ref::<RecoverableError>()
+        .expect("should be RecoverableError");
     let hint = recoverable.hint().unwrap_or("");
     assert!(
         hint.contains("edit_code"),
         "hint should mention edit_code, got: {hint}"
     );
 
-    // Original content untouched.
+    // File must be unmodified.
     let after = std::fs::read_to_string(&path).unwrap();
-    assert_eq!(after, original, "file must be unchanged when edit rejected");
+    assert!(
+        !after.contains("fn helper"),
+        "file must not be mutated when guard rejects edit, got: {after:?}"
+    );
+}
+
+#[tokio::test]
+async fn single_edit_blocks_new_symbol_introduction_via_new_string() {
+    // BUG-050 reproducer in single-edit mode: introducing a new fn through
+    // new_string while old_string is a benign single-line literal.
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("src/lib.rs");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "pub const VERSION: &str = \"1\";\n").unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "old_string": "pub const VERSION: &str = \"1\";",
+                "new_string": "pub const VERSION: &str = \"1\";\n\nfn helper() {\n    todo!();\n}"
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(
+        result.is_err(),
+        "single-edit must reject new-symbol introduction via new_string"
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("symbol definition"),
+        "error should mention symbol definition, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn singleline_new_string_with_fn_token_still_allowed() {
+    // Negative regression: a single-line new_string that happens to contain
+    // `fn ` (e.g. a comment edit) must NOT be blocked — only multi-line
+    // new_string introducing a definition counts as structural.
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("src/lib.rs");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "// renamed fn old to new\n").unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "old_string": "// renamed fn old to new",
+                "new_string": "// renamed fn old to new (legacy)"
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "single-line new_string with fn token should pass: {:?}",
+        result.err()
+    );
 }
 
 // --- format_list_dir tests ---
