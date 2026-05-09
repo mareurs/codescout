@@ -111,54 +111,17 @@ pub fn editing_start_line(sym: &crate::lsp::SymbolInfo, lines: &[&str]) -> usize
 /// next symbol's opening line) or under-extend (reporting the last statement line
 /// instead of `}`).
 ///
-/// We fall back to the LSP end line when:
-/// - AST extraction itself fails (e.g. `detect_language` returned a name like
-///   `"c"`/`"cpp"` with no tree-sitter grammar).
-/// - The AST produces multiple same-name candidates near `lsp_start` with no
-///   name_path tiebreaker (ambiguous — refuse to guess; see `find_ast_end_line_in`).
-/// - The file has syntax errors AND tree-sitter's error recovery fails to identify
-///   the function boundary (`find_ast_end_line_in` returns `None`): in this case
-///   `sym.end_line` is returned, which may still be a short LSP value. This is a
-///   known residual of BUG-051 — partial mitigation only.
+/// Falls back to the LSP end line when AST cannot pinpoint the symbol — see
+/// `ast_confirmed_end_line` for the precise failure modes. Operations that
+/// must NOT silently use the LSP fallback (notably `insert after`, where a
+/// short LSP value splices new code mid-function — BUG-051) should call
+/// `editing_end_line_strict` instead and surface a `RecoverableError` on
+/// `None`.
 ///
-/// Syntax errors do NOT cause an early return: we run AST regardless, because the
-/// alternative (falling back to LSP blindly) is worse — LSP regularly reports the
-/// last statement line rather than `}`, causing insertion mid-function (BUG-051).
-/// Tree-sitter's error recovery is reliable enough for function-boundary detection
-/// and is trusted unconditionally when it finds a match, same as on a clean file.
-///
-/// When AST and LSP disagree by more than a small threshold, we log a warning
+/// When AST and LSP disagree by more than a small threshold, logs a warning
 /// so large mismatches are visible under `RUST_LOG=warn`.
 pub fn editing_end_line(sym: &crate::lsp::SymbolInfo) -> u32 {
-    let source = match std::fs::read_to_string(&sym.file) {
-        Ok(s) => s,
-        Err(err) => {
-            tracing::trace!(
-                target: "codescout::editing_end_line",
-                "cannot read {:?} ({}); falling back to LSP end_line={}",
-                sym.file, err, sym.end_line,
-            );
-            return sym.end_line;
-        }
-    };
-    let lang = crate::ast::detect_language(&sym.file);
-    let ast_syms = match crate::ast::parser::extract_symbols_from_source(&source, lang, &sym.file) {
-        Ok(syms) => syms,
-        Err(err) => {
-            tracing::trace!(
-                target: "codescout::editing_end_line",
-                "AST unavailable for {:?} ({}); falling back to LSP end_line={}",
-                sym.file, err, sym.end_line,
-            );
-            return sym.end_line;
-        }
-    };
-    if let Some(ast_end) = crate::symbol::query::find_ast_end_line_in(
-        &ast_syms,
-        &sym.name,
-        sym.start_line,
-        Some(&sym.name_path),
-    ) {
+    if let Some(ast_end) = ast_confirmed_end_line(sym) {
         const DISAGREE_THRESHOLD: u32 = 64;
         if ast_end.abs_diff(sym.end_line) > DISAGREE_THRESHOLD {
             tracing::warn!(
@@ -167,9 +130,62 @@ pub fn editing_end_line(sym: &crate::lsp::SymbolInfo) -> u32 {
                 DISAGREE_THRESHOLD, sym.name, sym.file, ast_end + 1, sym.end_line + 1,
             );
         }
-        return ast_end; // AST is authoritative when available, even with syntax errors
+        return ast_end;
     }
     sym.end_line
+}
+
+/// Strict variant of [`editing_end_line`]: returns `None` when the AST cannot
+/// pinpoint the symbol's end line.
+///
+/// Use this for operations where falling back to LSP's `end_line` would
+/// silently corrupt source — most notably `edit_code action="insert"
+/// position="after"`, where a short LSP value (last statement instead of
+/// closing `}`) splices the new code mid-function (BUG-051 residual).
+///
+/// Returns `None` when:
+/// - The source file cannot be read.
+/// - AST extraction itself fails (no tree-sitter grammar for the language).
+/// - `find_ast_end_line_in` cannot pinpoint the symbol — either it's missing
+///   from the AST entirely (severe syntax errors broke the parse tree) or
+///   ambiguous (multiple same-name siblings without a `name_path` tiebreaker).
+pub fn editing_end_line_strict(sym: &crate::lsp::SymbolInfo) -> Option<u32> {
+    ast_confirmed_end_line(sym)
+}
+
+/// Internal: returns the AST-confirmed end line for `sym`, or `None` if any
+/// step of the AST resolution fails. Shared by [`editing_end_line`] (lenient
+/// — falls back to LSP) and [`editing_end_line_strict`] (refuses).
+fn ast_confirmed_end_line(sym: &crate::lsp::SymbolInfo) -> Option<u32> {
+    let source = match std::fs::read_to_string(&sym.file) {
+        Ok(s) => s,
+        Err(err) => {
+            tracing::trace!(
+                target: "codescout::editing_end_line",
+                "cannot read {:?} ({}); no AST end-line available",
+                sym.file, err,
+            );
+            return None;
+        }
+    };
+    let lang = crate::ast::detect_language(&sym.file);
+    let ast_syms = match crate::ast::parser::extract_symbols_from_source(&source, lang, &sym.file) {
+        Ok(syms) => syms,
+        Err(err) => {
+            tracing::trace!(
+                target: "codescout::editing_end_line",
+                "AST unavailable for {:?} ({}); no AST end-line available",
+                sym.file, err,
+            );
+            return None;
+        }
+    };
+    crate::symbol::query::find_ast_end_line_in(
+        &ast_syms,
+        &sym.name,
+        sym.start_line,
+        Some(&sym.name_path),
+    )
 }
 
 /// Clamp a child symbol's editing range to its parent container's body.

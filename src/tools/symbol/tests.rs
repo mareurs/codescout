@@ -18,8 +18,8 @@ use crate::fs::{
 };
 use crate::lsp::SymbolInfo;
 use crate::symbol::edit::{
-    apply_text_edits, clamp_range_to_parent, editing_end_line, editing_start_line,
-    find_insert_before_line, text_sweep, write_lines,
+    apply_text_edits, clamp_range_to_parent, editing_end_line, editing_end_line_strict,
+    editing_start_line, find_insert_before_line, text_sweep, write_lines,
 };
 use crate::symbol::query::{
     collect_matching, filter_variable_symbols, find_matching_symbol, find_symbol_by_name_path,
@@ -3055,6 +3055,66 @@ fn broken() {\n\
     assert_eq!(
         end, 2,
         "editing_end_line must trust AST (2) not max with over-extended LSP (4), got {end}"
+    );
+}
+
+/// BUG-051 residual coverage: `editing_end_line_strict` must return `None`
+/// when AST cannot pinpoint the symbol's end line. Callers (notably
+/// `do_insert` "after") use this to refuse the operation rather than fall
+/// back to LSP's possibly-wrong end_line and silently splice new code
+/// mid-function.
+#[test]
+fn editing_end_line_strict_returns_none_when_ast_cannot_find_symbol() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("test.rs");
+    std::fs::write(&file, "fn other_fn() {\n    do_thing();\n}\n").unwrap();
+
+    // Pretend LSP reported a symbol that the AST cannot find — the dangerous
+    // pre-fix path returned `sym.end_line` (LSP's bogus value) silently.
+    let sym = crate::lsp::SymbolInfo {
+        name: "ghost_fn".to_string(),
+        name_path: "ghost_fn".to_string(),
+        kind: crate::lsp::SymbolKind::Function,
+        file: file.clone(),
+        start_line: 0,
+        end_line: 1,
+        start_col: 0,
+        children: vec![],
+        range_start_line: Some(0),
+        detail: None,
+    };
+
+    let result = editing_end_line_strict(&sym);
+    assert!(
+        result.is_none(),
+        "strict variant must refuse when AST cannot find the symbol, got {result:?}"
+    );
+}
+
+/// Happy path: a clean file with a real symbol — strict and lenient agree.
+#[test]
+fn editing_end_line_strict_returns_some_when_ast_finds_symbol() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("test.rs");
+    std::fs::write(&file, "fn target() {\n    let x = 1;\n    let y = 2;\n}\n").unwrap();
+
+    let sym = crate::lsp::SymbolInfo {
+        name: "target".to_string(),
+        name_path: "target".to_string(),
+        kind: crate::lsp::SymbolKind::Function,
+        file: file.clone(),
+        start_line: 0,
+        end_line: 3,
+        start_col: 0,
+        children: vec![],
+        range_start_line: Some(0),
+        detail: None,
+    };
+
+    assert_eq!(
+        editing_end_line_strict(&sym),
+        Some(3),
+        "strict variant must return AST-confirmed end line on a clean file"
     );
 }
 
