@@ -24,6 +24,23 @@ See codescout memory `development-commands` for the full command reference.
 This applies to ALL unexpected tool behavior: `edit_file`, `rename_symbol`, `replace_symbol`, `symbols`, `semantic_search`, etc.
 
 
+
+## Bug Tracking
+
+If you notice or find a bug while working, open a bug tracker for it. This
+applies to everything: codescout's own behavior, MCP tools, LSP, plugin
+hooks, build scripts, anything that misbehaves.
+
+- Template: `docs/issues/_TEMPLATE.md`
+- Active bugs: `docs/issues/YYYY-MM-DD-<slug>.md`
+- Index: `docs/issues/INDEX.md` (update in the same response as the bug file)
+- Archive (after fix ships to master): `docs/issues/archive/`
+
+Trigger rules and status semantics are documented at the top of
+`docs/issues/_TEMPLATE.md`.
+
+`docs/TODO-tool-misbehaviors.md` is deprecated — do not add new entries.
+
 ## Session Intelligence Trackers
 
 Two living trackers capture observations from real sessions. Keep them current — they feed
