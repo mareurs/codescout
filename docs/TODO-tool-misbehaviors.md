@@ -148,14 +148,11 @@ These are fixed in the happy path but still have edge cases worth knowing about.
 
 **Got:** File written to disk at the target path, no DB record created. Subsequent `artifact(create)` calls for the same path fail with `"path exists"` even though the artifact is not in the DB.
 
-**Probable cause:** `create.rs` calls `std::fs::write` before `artifact::upsert`. If `upsert` fails, the file is already on disk with no rollback.
+**Root cause (confirmed 2026-05-09):** `crates/librarian-mcp/src/tools/create.rs::call` wrote the file via `std::fs::write` *before* `artifact::upsert` (and the optional `augmentation::upsert`). Any DB error after the disk write left the file orphaned and blocked retry on the `if full.exists()` gate.
 
-**Workaround:** Manually delete the orphan file, then retry `artifact(create)`.
+**Fix applied (2026-05-09):** Reordered `call` so the disk write is the last side effect — content is computed and `file_sha256` derived from in-memory bytes, both `artifact::upsert` and `augmentation::upsert` run first, and only after both succeed does `std::fs::write(&full, &content)` happen. A DB error now leaves the disk untouched, so retry isn't blocked. The remaining (much rarer) failure mode — DB rows committed but the file write fails — is benign because `upsert` is idempotent: a retry rewrites the row and writes the file. Test: `create_does_not_leave_orphan_file_when_upsert_fails` in `crates/librarian-mcp/src/tools/create.rs::tests` installs a `BEFORE INSERT` trigger that always raises, then asserts no file remains after the call returns Err.
 
-**Fix idea:** Wrap file write + upsert in a two-phase pattern: write to a temp path, upsert, then `fs::rename` to final path. Rename is atomic on POSIX.
-
----
-
+**Status:** Fixed
 ### BUG-056 — `artifact(update, patch={params: ...})` silently drops `params`
 
 **When:** Caller follows the documented refresh pattern and passes `patch={params: {entries: [...]}}` to `artifact(update)`.
