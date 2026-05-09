@@ -1455,6 +1455,59 @@ impl Foo {
     );
 }
 
+/// BUG-051 residual: a top-level symbol with no parent has no clamp safety net,
+/// so when AST cannot pinpoint its end (broken parse, ambiguous match, etc.)
+/// `do_insert` "after" must refuse rather than fall back to LSP's
+/// possibly-corrupted `end_line` and risk splicing new code mid-function.
+#[tokio::test]
+async fn insert_code_after_refuses_when_ast_fails_and_no_parent_clamp() {
+    let src = "\
+fn alpha() {
+    println!(\"hello\");
+}
+";
+
+    let (_dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
+        let file = root.join("src/lib.rs");
+        // Top-level fn with a name AST can't match. No parent in the symbol
+        // tree, so the parent clamp cannot recover.
+        let alpha = SymbolInfo {
+            name: "a".to_string(),
+            name_path: "a".to_string(),
+            kind: SymbolKind::Function,
+            file: file.clone(),
+            start_line: 0,
+            end_line: 1, // suspiciously short — under-extension scenario
+            start_col: 0,
+            children: vec![],
+            range_start_line: Some(0),
+            detail: None,
+        };
+        MockLspClient::new().with_symbols(file, vec![alpha])
+    })
+    .await;
+
+    let result = EditCode
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "symbol": "a",
+                "position": "after",
+                "action": "insert",
+                "body": "fn beta() {}\n"
+            }),
+            &ctx,
+        )
+        .await;
+
+    let err = result.expect_err("must refuse when AST fails and no parent clamp is available");
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("AST parse failed") || msg.contains("cannot determine end"),
+        "error should explain AST failure; got: {msg}"
+    );
+}
+
 // ── remove_symbol: trust LSP ranges ──────────────────────────────────────────
 
 /// BUG-024 regression (remove_symbol): when LSP over-extends `end_line` to include a

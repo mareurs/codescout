@@ -14,7 +14,8 @@ use crate::fs::{
 };
 use crate::symbol::edit::{
     apply_text_edits, clamp_range_to_parent, collect_all_name_paths, editing_end_line,
-    editing_start_line, find_ast_name_path, find_parent_symbol, text_sweep, write_lines,
+    editing_end_line_strict, editing_start_line, find_ast_name_path, find_parent_symbol,
+    text_sweep, write_lines,
 };
 use crate::symbol::query::{
     count_symbols_by_name_path, fetch_validated_symbol, find_unique_symbol_by_name_path,
@@ -568,7 +569,33 @@ impl EditCode {
         let code_lines: Vec<&str> = code.lines().collect();
         let insert_at0 = match position {
             "before" => editing_start_line(&sym, &lines),
-            _ => (editing_end_line(&sym) as usize + 1).min(lines.len()),
+            _ => match editing_end_line_strict(&sym) {
+                Some(end) => (end as usize + 1).min(lines.len()),
+                None => {
+                    // BUG-051 residual: AST cannot pinpoint the symbol's end
+                    // (severe syntax errors broke the parse, ambiguous match,
+                    // etc.). The lenient fallback to LSP's `end_line` is only
+                    // safe when the parent-clamp below can bound the result —
+                    // for a top-level symbol there is no safety net, so refuse
+                    // rather than risk splicing new code mid-function.
+                    if find_parent_symbol(&symbols, &sym.name_path).is_some() {
+                        (editing_end_line(&sym) as usize + 1).min(lines.len())
+                    } else {
+                        return Err(RecoverableError::with_hint(
+                            format!(
+                                "cannot determine end of '{}' for insert-after — AST \
+                                 parse failed and the symbol has no parent to bound \
+                                 the LSP fallback",
+                                sym.name
+                            ),
+                            "The file likely has syntax errors that broke tree-sitter's parse, \
+                             or the symbol has duplicate-name siblings without a clear name_path. \
+                             Fix the syntax errors first, or use edit_file with explicit context.",
+                        )
+                        .into());
+                    }
+                }
+            },
         };
 
         let insert_at = if let Some(parent) = find_parent_symbol(&symbols, &sym.name_path) {
