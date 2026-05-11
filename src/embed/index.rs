@@ -2354,17 +2354,39 @@ pub fn get_meta(conn: &Connection, key: &str) -> Result<Option<String>> {
 /// Call this at the start of `build_index` before processing any files.
 /// Returns `Ok(())` when:
 ///   - no model has been stored yet (first run), OR
-///   - the stored model matches `configured`
+///   - the stored model matches `configured`, OR
+///   - the stored model is a removed `local:` backend and the configured
+///     model is non-local (auto-wipe migration path).
 pub fn check_model_mismatch(conn: &Connection, configured: &str) -> Result<()> {
     match get_meta(conn, "embed_model")? {
         None => Ok(()), // first run
         Some(stored) if stored == configured => Ok(()),
+        Some(stored) if stored.starts_with("local:") && !configured.starts_with("local:") => {
+            tracing::info!(
+                "Embedding index was built with removed local backend '{stored}'. \
+                 Auto-wiping and re-indexing under configured model '{configured}'."
+            );
+            wipe_index_meta(conn)?;
+            Ok(())
+        }
         Some(stored) => anyhow::bail!(
             "Index was built with model '{stored}'.\n\
              Configured model is '{configured}'.\n\
              Delete .codescout/embeddings.db and re-run `index` to rebuild."
         ),
     }
+}
+
+fn wipe_index_meta(conn: &Connection) -> Result<()> {
+    // Clear meta keys that pin the index to a specific model.
+    conn.execute(
+        "DELETE FROM meta WHERE key IN ('embed_model', 'embed_dims')",
+        [],
+    )?;
+    // Clear the data tables so the next index run rebuilds cleanly.
+    conn.execute("DELETE FROM chunks", []).ok();
+    conn.execute("DELETE FROM chunk_embeddings", []).ok();
+    Ok(())
 }
 
 /// Write (insert or replace) a value in the `meta` key-value table.
@@ -3570,6 +3592,32 @@ mod tests {
             err.contains("embeddings.db"),
             "error should hint at DB deletion"
         );
+    }
+
+    #[test]
+    fn check_model_mismatch_local_to_remote_wipes_index() {
+        let (_dir, conn) = open_test_db();
+        // Simulate: previous index built with local:AllMiniLML6V2Q.
+        set_meta(&conn, "embed_model", "local:AllMiniLML6V2Q").unwrap();
+        set_meta(&conn, "embed_dims", "384").unwrap();
+
+        // User upgrades to remote-only build, configured = ollama:nomic-embed-text.
+        let result = check_model_mismatch(&conn, "ollama:nomic-embed-text");
+        assert!(result.is_ok(), "local: → non-local: must auto-wipe, got {result:?}");
+
+        // After auto-wipe, the meta keys are gone — first-run state.
+        assert!(get_meta(&conn, "embed_model").unwrap().is_none());
+        assert!(get_meta(&conn, "embed_dims").unwrap().is_none());
+    }
+
+    #[test]
+    fn check_model_mismatch_remote_to_remote_still_errors() {
+        let (_dir, conn) = open_test_db();
+        set_meta(&conn, "embed_model", "ollama:nomic-embed-text").unwrap();
+        let err = check_model_mismatch(&conn, "ollama:bge-m3").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Delete .codescout/embeddings.db"),
+            "non-local mismatch must keep manual-delete behavior, got: {msg}");
     }
 
     #[test]
