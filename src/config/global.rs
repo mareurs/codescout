@@ -160,7 +160,7 @@ mod tests {
         std::fs::create_dir_all(&config_dir).unwrap();
         std::fs::write(
             config_dir.join("config.toml"),
-            "[embeddings]\nmodel = \"local:BGESmallENV15\"\n",
+            "[embeddings]\nmodel = \"mock\"\n",
         )
         .unwrap();
         std::env::set_var("HOME", dir.path());
@@ -176,7 +176,7 @@ mod tests {
         }
         assert_eq!(
             result.embeddings.model,
-            Some("local:BGESmallENV15".to_string())
+            Some("mock".to_string())
         );
     }
 
@@ -216,7 +216,7 @@ mod tests {
     fn to_toml_value_emits_only_some_fields() {
         let config = GlobalConfig {
             embeddings: GlobalEmbeddingsSection {
-                model: Some("local:BGESmallENV15".to_string()),
+                model: Some("mock".to_string()),
                 drift_detection_enabled: None,
             },
             ..Default::default()
