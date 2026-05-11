@@ -77,10 +77,11 @@ pub struct EmbeddingsSection {
     /// (typical search returns 3–5 chunks; large chunks bloat the agent's
     /// remaining context budget across multiple searches in a session).
     ///
-    /// When `None` (the default), `embed::chunk_size_for_model` is used —
-    /// derived from the model's published context window. When `Some(n)`,
-    /// the value is capped at the model's max so users can't accidentally
-    /// exceed the embedding API's input limit.
+    /// When `None` (the default), `codescout_embed::DEFAULT_CHUNK_SIZE_CHARS`
+    /// (1600 chars) is used — the empirical sweet spot from the benchmark in
+    /// `docs/research/2026-04-03-embedding-model-benchmark.md`. When `Some(n)`
+    /// with `n > 0`, the value is honored verbatim; the AST chunker preserves
+    /// leaf-symbol boundaries even if a symbol exceeds the target.
     ///
     /// Recommended starting point for code projects: `chunk_size = 1500`
     /// (≈375–500 tokens — fits comfortably in any embedding context, keeps
@@ -342,21 +343,15 @@ impl Default for EmbeddingsSection {
 impl EmbeddingsSection {
     /// Resolve the chunk size in characters.
     ///
-    /// - User-set `chunk_size` → `min(user_value, model_max)` (user opt-in to
-    ///   larger or smaller, capped at API input limit).
-    /// - Unset/zero → `min(model_max, DEFAULT_CAP)`.
-    ///
-    /// DEFAULT_CAP of 4096 chars keeps embed throughput reasonable on large-
-    /// context models (nomic-embed, jina, bge-m3 would otherwise default to
-    /// ~20k chars per chunk, which both slows indexing and dilutes ranking
-    /// signal by averaging too many concepts into one vector).
+    /// Returns the user-set `chunk_size` if present (and positive),
+    /// otherwise `DEFAULT_CHUNK_SIZE_CHARS`. There is no model-specific
+    /// cap: the AST chunker preserves leaf-symbol boundaries even when
+    /// they exceed the target (see `prefer_chunk_size` in
+    /// `src/embed/ast_chunker.rs`).
     pub fn effective_chunk_size(&self) -> usize {
-        const DEFAULT_CAP: usize = 4096;
-        let model_max = codescout_embed::chunk_size_for_model(&self.model);
-        match self.chunk_size {
-            Some(n) if n > 0 => n.min(model_max),
-            _ => model_max.min(DEFAULT_CAP),
-        }
+        self.chunk_size
+            .filter(|&n| n > 0)
+            .unwrap_or(codescout_embed::DEFAULT_CHUNK_SIZE_CHARS)
     }
 
     /// Resolve the concurrent in-flight embedding request limit for indexing.
@@ -820,55 +815,27 @@ model = "ollama:nomic-embed-text"
         let cfg = ProjectConfig::default_for("test-project".into());
         assert_eq!(cfg.security.max_index_bytes, 500 * 1024 * 1024);
     }
-    /// Default chunk_size is None → effective uses model max.
+
+
+
+
     #[test]
-    fn effective_chunk_size_none_uses_model_max() {
+    fn effective_chunk_size_returns_default_when_unset() {
         let sec = EmbeddingsSection {
-            model: "ollama:nomic-embed-text".into(),
+            model: "nomic-embed-text".into(),
             ..Default::default()
         };
-        // nomic-embed model max is ~20k chars; default caps at 4096.
-        assert_eq!(sec.effective_chunk_size(), 4096);
+        assert_eq!(sec.effective_chunk_size(), 1600);
     }
 
-    /// Explicit chunk_size below model max is honored verbatim — fixes the
-    /// silent-ignore behavior where users could not opt into smaller chunks
-    /// for tighter LLM context budgets during semantic search.
     #[test]
-    fn effective_chunk_size_user_value_below_cap_honored() {
+    fn effective_chunk_size_honors_user_override() {
         let sec = EmbeddingsSection {
-            model: "ollama:nomic-embed-text".into(),
-            chunk_size: Some(1500),
+            model: "nomic-embed-text".into(),
+            chunk_size: Some(2400),
             ..Default::default()
         };
-        assert_eq!(sec.effective_chunk_size(), 1500);
-    }
-
-    /// Explicit chunk_size above model max is capped — protects against
-    /// API-side truncation when a user misconfigures.
-    #[test]
-    fn effective_chunk_size_user_value_above_cap_clamped() {
-        // TODO(remote-only): Task 7 deletes chunk_size_for_model — rewrite or delete this test then
-        let model_max = codescout_embed::chunk_size_for_model("all-minilm");
-        let sec = EmbeddingsSection {
-            model: "all-minilm".into(),
-            chunk_size: Some(model_max * 10),
-            ..Default::default()
-        };
-        assert_eq!(sec.effective_chunk_size(), model_max);
-    }
-
-    /// chunk_size = Some(0) is treated as unset (model max), not as a
-    /// degenerate zero chunk size.
-    #[test]
-    fn effective_chunk_size_zero_falls_back_to_model_max() {
-        let sec = EmbeddingsSection {
-            model: "ollama:nomic-embed-text".into(),
-            chunk_size: Some(0),
-            ..Default::default()
-        };
-        // Some(0) falls back to default path, which caps at 4096.
-        assert_eq!(sec.effective_chunk_size(), 4096);
+        assert_eq!(sec.effective_chunk_size(), 2400);
     }
 
     #[test]

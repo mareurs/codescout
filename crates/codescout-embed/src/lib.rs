@@ -15,87 +15,20 @@ pub use embedder::{Embedder, Embedding};
 
 use anyhow::Result;
 
-/// Returns the chunk size in characters appropriate for the given model spec.
-///
-/// Derived from each model's documented maximum sequence length using a
-/// conservative formula: `max_tokens × 0.85 × 3 chars/token`.
-///
-/// - The 0.85 factor leaves 15 % headroom for tokenisation variance and
-///   control tokens (BOS/EOS).
-/// - Code tokenises at roughly 3–4 chars/token; 3 is the conservative lower
-///   bound, ensuring chunks stay within the context window even for files with
-///   many short identifiers and operators.
-///
-/// Unknown or custom models fall back to 512 tokens (the most common context
-/// window among small embedding models). This is intentionally conservative —
-/// chunks will be smaller than necessary but will never be truncated.
-///
-/// This value is not user-configurable. It is derived from the model spec
-/// so that users cannot accidentally misconfigure it.
-pub fn chunk_size_for_model(model_spec: &str) -> usize {
-    // 85 % of context × 3 chars/token.
-    fn from_tokens(n: usize) -> usize {
-        (n as f64 * 0.85 * 3.0) as usize
-    }
 
-    // Map well-known model name substrings to their published max sequence
-    // lengths. Matching is done on the bare model name (prefix stripped) so
-    // that "ollama:nomic-embed-text" and "openai:nomic-embed-text" both match.
-    fn tokens_for_bare(name: &str) -> usize {
-        let l = name.to_lowercase();
-        // 8 192-token models
-        if l.contains("nomic-embed") || l.contains("jina") || l.contains("bge-m3") {
-            return 8192;
-        }
-        // OpenAI text-embedding-3-* and text-embedding-ada-002
-        if l.starts_with("text-embedding-") {
-            return 8191;
-        }
-        // mxbai-embed-large (MixedBread)
-        if l.contains("mxbai") {
-            return 512;
-        }
-        // BGE Small variants
-        if l.contains("bge-small") || l.starts_with("bge_small") {
-            return 512;
-        }
-        // all-MiniLM-L6-v2
-        if l.contains("all-minilm") || l.contains("minilm-l6") {
-            return 256;
-        }
-        // Unknown — conservative fallback
-        512
-    }
 
-    // Local fastembed models were removed in the remote-only migration.
-    // Legacy `local:` prefixes are still recognised here so that
-    // `check_model_mismatch` (which inspects stored model strings) and
-    // chunk-size calls for legacy indexes do not panic before auto-wipe.
-    if let Some(local_name) = model_spec.strip_prefix("local:") {
-        let max_tokens = match local_name.to_lowercase().as_str() {
-            "nomicembedtextv15" | "nomicembedtextv15q" => 8192,
-            "jinaembeddingsv2basecode" => 8192,
-            "bgesmallenv15q" | "bgesmallenv15" => 512,
-            "allminilml6v2q" | "allminilml6v2" => 256,
-            _ => 512,
-        };
-        return from_tokens(max_tokens);
-    }
-
-    // Strip backend prefix to get the bare model name.
-    let bare = model_spec
-        .strip_prefix("ollama:")
-        .or_else(|| model_spec.strip_prefix("openai:"))
-        .or_else(|| {
-            // "custom:model-name@base_url" — extract only the model-name part
-            model_spec
-                .strip_prefix("custom:")
-                .map(|rest| rest.split('@').next().unwrap_or(rest))
-        })
-        .unwrap_or(model_spec);
-
-    from_tokens(tokens_for_bare(bare))
-}
+/// Default per-chunk size in characters when the user does not override via
+/// `[embeddings] chunk_size` in project.toml.
+///
+/// 1600 chars was selected as the sweet spot in the 20-query benchmark
+/// (docs/research/2026-04-03-embedding-model-benchmark.md). It keeps methods
+/// up to ~40-45 lines whole, avoids "kitchen sink" multi-concept averaging
+/// from larger chunks, and preserves enough surface area for multi-keyword
+/// queries.
+///
+/// See spec docs/superpowers/specs/2026-05-11-remote-only-embedding-design.md
+/// for the rationale.
+pub const DEFAULT_CHUNK_SIZE_CHARS: usize = 1600;
 
 /// Convenience extension for embedding a single query text.
 ///

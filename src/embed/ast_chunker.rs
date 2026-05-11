@@ -817,9 +817,10 @@ fn sub_split_node(
 
 /// Target chunk size for AST-aware splitting (~60-80 lines of code).
 ///
-/// This caps the AST chunker independently of the model's context window.
-/// The model limit (`chunk_size_for_model`) governs what the embedding API can
-/// accept; this constant governs what produces *good* embeddings for retrieval.
+/// This caps the AST chunker independently of the user-set chunk size.
+/// `EmbeddingsSection::effective_chunk_size` governs the target chunk size for
+/// the indexer; this constant governs what produces *good* embeddings for
+/// retrieval.
 /// Smaller chunks → sharper semantic signal → more precise search results.
 ///
 /// 3000 chars ≈ 1000 tokens — fits comfortably in any embedding model context,

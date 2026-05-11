@@ -24,7 +24,7 @@ pub mod schema;
 pub use codescout_embed::remote;
 
 pub use codescout_embed::{
-    chunk_size_for_model, create_embedder, create_embedder_with_config, embed_one,
+    create_embedder, create_embedder_with_config, embed_one, DEFAULT_CHUNK_SIZE_CHARS,
 };
 pub use codescout_embed::{Embedder, Embedding};
 
@@ -62,77 +62,17 @@ mod tests {
         );
     }
 
-    // ---------- chunk_size_for_model ----------
 
-    #[test]
-    fn chunk_size_mxbai_embed_large() {
-        // Default model: 512-token context. Formula: 512 × 0.85 × 3 = 1305.
-        let sz = super::chunk_size_for_model("ollama:mxbai-embed-large");
-        assert_eq!(sz, 1305);
-    }
 
-    #[test]
-    fn chunk_size_nomic_embed_text() {
-        // 8 192-token context. Formula: 8192 × 0.85 × 3 = 20 889.
-        let sz = super::chunk_size_for_model("ollama:nomic-embed-text");
-        assert_eq!(sz, 20889);
-    }
 
-    #[test]
-    fn chunk_size_bge_m3() {
-        // bge-m3 has 8192-token context. Formula: 8192 × 0.85 × 3 = 20889.
-        let sz = super::chunk_size_for_model("ollama:bge-m3");
-        assert_eq!(sz, 20889);
-    }
 
-    #[test]
-    fn chunk_size_openai_text_embedding_3_small() {
-        let sz = super::chunk_size_for_model("openai:text-embedding-3-small");
-        assert_eq!(sz, 20887); // 8191 × 0.85 × 3
-    }
 
-    #[test]
-    fn chunk_size_local_jina() {
-        let sz = super::chunk_size_for_model("local:JinaEmbeddingsV2BaseCode");
-        assert_eq!(sz, 20889); // 8192 × 0.85 × 3
-    }
 
-    #[test]
-    fn chunk_size_local_bge_small() {
-        let sz = super::chunk_size_for_model("local:BGESmallENV15Q");
-        assert_eq!(sz, 1305); // 512 × 0.85 × 3
-    }
 
-    #[test]
-    fn chunk_size_local_all_minilm() {
-        let sz = super::chunk_size_for_model("local:AllMiniLML6V2Q");
-        assert_eq!(sz, 652); // 256 × 0.85 × 3
-    }
 
-    #[test]
-    fn chunk_size_local_nomic_v15() {
-        let sz = super::chunk_size_for_model("local:NomicEmbedTextV15Q");
-        assert_eq!(sz, 20889); // 8192 × 0.85 × 3
-    }
 
-    #[test]
-    fn chunk_size_local_nomic_v15_full() {
-        let sz = super::chunk_size_for_model("local:NomicEmbedTextV15");
-        assert_eq!(sz, 20889); // 8192 × 0.85 × 3
-    }
 
-    #[test]
-    fn chunk_size_custom_model() {
-        // custom: prefix with @url — model name extracted before @
-        let sz = super::chunk_size_for_model("custom:mxbai-embed-large@http://localhost:1234");
-        assert_eq!(sz, 1305);
-    }
 
-    #[test]
-    fn chunk_size_unknown_model_falls_back_to_512_tokens() {
-        let sz = super::chunk_size_for_model("ollama:some-unknown-model");
-        assert_eq!(sz, 1305); // 512 × 0.85 × 3
-    }
 
     #[cfg(feature = "remote-embed")]
     #[test]
@@ -173,21 +113,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn chunk_size_bare_nomic_model_name() {
-        // When url is set, model has no prefix — just the bare name.
-        // This test documents that bare model names work correctly.
-        let sz = super::chunk_size_for_model("nomic-embed-text-v1.5");
-        assert_eq!(sz, 20889); // 8192 × 0.85 × 3
-    }
 
-    #[test]
-    fn chunk_size_bare_unknown_model() {
-        // When url is set, custom model names with no prefix fall back to
-        // the conservative 512-token default.
-        let sz = super::chunk_size_for_model("some-custom-model");
-        assert_eq!(sz, 1305); // 512 × 0.85 × 3 (conservative fallback)
-    }
 
     #[cfg(feature = "remote-embed")]
     #[test]
