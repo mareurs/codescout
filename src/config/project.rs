@@ -596,11 +596,13 @@ mod tests {
 
     #[test]
     fn default_embed_model_is_allminilm() {
+        // TODO(remote-only): update assertion after Task 6 lands new default
         assert_eq!(default_embed_model(), "local:AllMiniLML6V2Q");
     }
 
     #[test]
     fn default_config_has_expected_embeddings() {
+        // TODO(remote-only): update assertion after Task 6 lands new default
         let cfg = ProjectConfig::default_for("my-project".into());
         assert_eq!(cfg.embeddings.model, "local:AllMiniLML6V2Q");
     }
@@ -851,6 +853,7 @@ model = "ollama:nomic-embed-text"
     /// API-side truncation when a user misconfigures.
     #[test]
     fn effective_chunk_size_user_value_above_cap_clamped() {
+        // TODO(remote-only): Task 7 deletes chunk_size_for_model — rewrite or delete this test then
         let model_max = codescout_embed::chunk_size_for_model("local:AllMiniLML6V2Q");
         let sec = EmbeddingsSection {
             model: "local:AllMiniLML6V2Q".into(),
@@ -916,7 +919,7 @@ model = "ollama:nomic-embed-text"
     fn embeddings_section_parses_inflight_and_group_size() {
         let toml = r#"
             [embeddings]
-            model = "local:AllMiniLML6V2Q"
+            model = "mock"
             max_inflight = 16
             file_group_size = 100
         "#;
@@ -937,7 +940,7 @@ model = "ollama:nomic-embed-text"
 [project]
 name = "test"
 [embeddings]
-model = "local:AllMiniLML6V2Q"
+model = "mock"
 chunk_size = 1500
 "#;
         let cfg: ProjectConfig = toml::from_str(toml_with).unwrap();
@@ -947,7 +950,7 @@ chunk_size = 1500
 [project]
 name = "test"
 [embeddings]
-model = "local:AllMiniLML6V2Q"
+model = "mock"
 "#;
         let cfg: ProjectConfig = toml::from_str(toml_without).unwrap();
         assert_eq!(cfg.embeddings.chunk_size, None);
@@ -1146,7 +1149,7 @@ name = "x"
 languages = []
 
 [embeddings]
-model = "local:test"
+model = "mock"
 "#;
         let mut cfg: ProjectConfig = toml::from_str(toml_str).unwrap();
 
