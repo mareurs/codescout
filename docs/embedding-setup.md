@@ -27,7 +27,7 @@ Then point codescout at the embedding endpoint. Edit
 ```toml
 [embeddings]
 model = "all-minilm"
-url   = "http://127.0.0.1:8080/v1"
+url   = "http://127.0.0.1:48080/v1"
 ```
 
 Restart the codescout MCP server (or your IDE integration) so the new
@@ -76,7 +76,7 @@ Update the `--model-id=` line in the `embed` service, then run
 
 **`error sending request for url (http://...)`**
 The embedding service isn't reachable. Confirm with
-`curl http://127.0.0.1:8080/health` — expected response: `200 OK`. If it
+`curl http://127.0.0.1:48080/health` — expected response: `200 OK`. If it
 returns nothing, run `docker compose logs embed` to see why.
 
 **`input (N tokens) is too large to process`**

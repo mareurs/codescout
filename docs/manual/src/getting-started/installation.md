@@ -154,7 +154,7 @@ Then in `.codescout/project.toml`:
 ```toml
 [embeddings]
 model = "all-minilm"
-url   = "http://127.0.0.1:8080/v1"
+url   = "http://127.0.0.1:48080/v1"
 ```
 
 For GPU acceleration:

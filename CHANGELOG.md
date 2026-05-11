@@ -50,7 +50,7 @@ model = "local:AllMiniLML6V2Q"
 # After
 [embeddings]
 model = "all-minilm"
-url   = "http://127.0.0.1:8080/v1"
+url   = "http://127.0.0.1:48080/v1"
 ```
 
 Then bring up the bundled embedding service from the repo root:

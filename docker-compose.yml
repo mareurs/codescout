@@ -5,14 +5,14 @@
 #   - rerank  : BAAI/bge-reranker-base (cross-encoder, optional)
 #
 # After `docker compose up -d`:
-#   - Embedding endpoint:  http://127.0.0.1:8080/v1
-#   - Reranker endpoint:   http://127.0.0.1:8081
+#   - Embedding endpoint:  http://127.0.0.1:48080/v1
+#   - Reranker endpoint:   http://127.0.0.1:48081
 #
 # Configure codescout's .codescout/project.toml:
 #
 #   [embeddings]
 #   model = "all-minilm"
-#   url   = "http://127.0.0.1:8080/v1"
+#   url   = "http://127.0.0.1:48080/v1"
 #
 # For GPU acceleration overlay:
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
@@ -25,7 +25,7 @@ services:
     container_name: codescout-embed
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:80"
+      - "127.0.0.1:48080:80"
     volumes:
       - tei-models:/data
     command:
@@ -43,7 +43,7 @@ services:
     container_name: codescout-rerank
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8081:80"
+      - "127.0.0.1:48081:80"
     volumes:
       - tei-models:/data
     command:
