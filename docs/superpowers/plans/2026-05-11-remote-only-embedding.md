@@ -46,6 +46,82 @@
 
 ---
 
+## Plan Amendments — 2026-05-11 (post-audit)
+
+The Phase 0 audit surfaced load-bearing surfaces the original plan missed.
+This section records the deltas; downstream tasks reference them.
+
+### A. Default model after removal
+
+`src/config/project.rs::default_embed_model` today returns
+`"local:AllMiniLML6V2Q"`. After local removal, change to:
+
+```rust
+fn default_embed_model() -> String {
+    "all-minilm".into()
+}
+```
+
+`all-minilm` is the Ollama model name for the low-resource sentence-
+transformers model that mirrors the previous default's role. It is just a
+name — the factory still requires `[embeddings] url` to be set. With no
+`url`, the factory returns `RecoverableError` regardless of model name.
+
+### B. Orphan file `src/embed/local.rs`
+
+This file exists on disk but is NOT declared as `mod local` anywhere in the
+main crate (only `crates/codescout-embed/src/lib.rs` declares it for the
+embed crate). It is dead. Phase 3 (Task 6) deletes it alongside
+`crates/codescout-embed/src/local.rs`.
+
+### C. `src/hardware.rs` local-model options
+
+`src/hardware.rs` lists `local:AllMiniLML6V2Q` and
+`local:JinaEmbeddingsV2BaseCode` as user-facing embedding hardware options
+(lines 39, 64, plus tests at 259, 276, 309, 328). Task 6 also:
+
+- Removes both `local:`-prefix entries from the options vector
+- Deletes any test that asserted `opts[0].id == "local:..."` or rewrites it
+  against the new option set
+- Keeps the existing remote-model entries (ollama, openai, etc.)
+
+### D. Expanded Task 4 scope
+
+Task 4 now covers test fixtures that pass `model = "local:..."` as TOML or
+constructor strings, not only direct `LocalEmbedder::new` calls. Known
+sites (non-exhaustive — Task 4 Step 1 re-runs the audit):
+
+- `src/config/project.rs` lines 599, 605, 854-856, 919, 940, 950, 1149
+- `src/config/global.rs` lines 163, 179, 219
+- `src/embed/mod.rs` line 54 (`unknown_prefix_returns_error`)
+- `src/embed/index.rs` lines 3558, 3566 (legacy `check_model_mismatch` test
+  — converted to the new auto-wipe test in Task 5)
+
+**Migration recipe per fixture:**
+
+- Test asserts on default value: change literal to `"all-minilm"`.
+- Test constructs an embedder via factory: change to `model = "mock"`,
+  `url = "mock:384"`.
+- Test was implicitly relying on a `local:` model existing: convert to
+  ignored integration test or delete (per Task 4 Step 4).
+
+### E. Documentation surfaces
+
+In addition to README / ARCHITECTURE / manual (Task 12), update:
+
+- `docs/manual/src/semantic-search-guide.md:74,253`
+- `docs/manual/src/tools/workflow-and-config.md:49`
+- `docs/manual/src/configuration/embeddings.md:14-16, 121-135`
+- `docs/manual/src/configuration/embedding-backends.md:96-99, 224-227`
+- `docs/manual/src/configuration/project-toml.md:215-218`
+- `docs/manual/src/getting-started/installation.md:150-158`
+- `docs/manual/src/architecture.md:193, 302`
+
+Plus the embedding-related historical issue note:
+
+- `docs/issues/memory-leak-x-session-freeze.md` — add a 2026-05-11 note
+  that the `fastembed` ONNX investigation is moot post-removal (do not
+  delete the historical analysis).
 ## Task 1: Phase 0 — Audit (no commit)
 
 **Files:**
