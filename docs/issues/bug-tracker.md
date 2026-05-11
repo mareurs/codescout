@@ -54,10 +54,10 @@ the per-bug file, not here.
 ### #3 — BUG-030: `replace_symbol` on `mod tests` can eat adjacent function body
 
 - **Symptom:** Replacing `mod tests` overwrote the body of the immediately following function.
-- **Root cause:** Stale LSP symbol positions after prior edits; range for `mod tests` extended into adjacent code.
-- **Fix (2026-03-20):** `validate_symbol_position` guard detects stale positions and returns `RecoverableError`.
-- **Status:** Mitigated. Still watch for stale positions on large files mid-edit — `/mcp` reconnect re-indexes.
-
+- **Root cause:** Stale LSP symbol positions after prior edits; range for `mod tests` extended into adjacent code. Same cluster as BUG-034 (`replace_symbol` adjacent overwrite) and BUG-037 (`insert_code` adjacent splice).
+- **Fix (2026-03-20):** `validate_symbol_position` guard detects stale positions and returns `RecoverableError`. Mitigation only — caught the easy cases.
+- **Fix (2026-04-21, commit `27848fc`):** Cluster closure via symmetric parent-clamp on both start AND end of the child's edit range in `replace_symbol`/`remove_symbol`/`insert_code` (`clamp_range_to_parent` helper), plus a pre/post-write AST `name_path` set diff in `replace_symbol`: any sibling that existed pre-write but not post-write triggers a rollback with a `RecoverableError` naming the dropped siblings. New helpers `collect_all_name_paths`, `find_ast_name_path`. Tests: 6 pure-logic clamp tests + 2 mock-LSP regressions (`replace_symbol` sibling drop, `insert_code` parent-body clamp). Design spec: `docs/superpowers/specs/2026-04-20-impl-block-symbol-cluster-fix.md`.
+- **Status:** Fixed.
 ### #4 — BUG-032: `remove_symbol` leaves orphaned `impl` block after enum removal
 
 - **Symptom:** Removing an enum left a dangling `impl` block whose type no longer existed.
@@ -170,3 +170,14 @@ caught by an earlier guard: `validate_symbol_position` rejects bogus names, and
 later end than LSP. The parent-clamp safety-net claim in `do_insert`'s comment is incorrect
 reasoning (the clamp bounds against parent body, not the target sibling's body) but harmless
 in practice. Row flipped to fixed.
+
+### 2026-05-11 — #3 BUG-030 elevated to Fixed (cluster commit reference)
+
+Audited remaining mitigated rows. Commit `27848fc` (2026-04-21) explicitly closes the
+BUG-030/034/037 cluster with symmetric parent-clamp on both start AND end of nested edit
+ranges, plus pre/post-write AST `name_path` set diff that rolls back when a sibling is
+silently dropped. The bulk migration imported BUG-030 as `mitigated` based on the earlier
+`validate_symbol_position` fix (2026-03-20) without crediting the cluster closure. Row
+flipped to fixed, design spec linked via `path`. BUG-032 (#4), BUG-021 (#2), BUG-048 (#6),
+and BUG-049 (#7) audited and confirmed correctly classified as mitigated — they sit at LSP
+boundaries or architectural surfaces that cannot be closed further without bigger redesigns.
