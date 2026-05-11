@@ -401,6 +401,42 @@ fn insert_after() {
 }
 
 #[test]
+fn insert_after_h1_spanning_whole_doc_goes_below_heading_not_eof() {
+    // Bug #1: insert_after on an H1 that spans the entire document used to
+    // append content at EOF instead of right below the heading line.
+    let content = "# Title\n## Section 1\ncontent\n## Section 2\nmore\n";
+    let result = perform_section_edit(
+        content,
+        "# Title",
+        "insert_after",
+        Some("\npreamble text\n"),
+    )
+    .unwrap();
+    assert_eq!(
+        result,
+        "# Title\n\npreamble text\n## Section 1\ncontent\n## Section 2\nmore\n"
+    );
+}
+
+#[test]
+fn insert_after_bounded_section_still_appends_at_section_end() {
+    // Regression: bounded sections (with a following sibling) must still insert
+    // at the end of the section, not right after the heading line.
+    let content = "# Title\n## Setup\ncontent\n## Usage\nuse it\n";
+    let result = perform_section_edit(
+        content,
+        "## Setup",
+        "insert_after",
+        Some("\n## Testing\ntest it\n"),
+    )
+    .unwrap();
+    assert_eq!(
+        result,
+        "# Title\n## Setup\ncontent\n\n## Testing\ntest it\n## Usage\nuse it\n"
+    );
+}
+
+#[test]
 fn remove_section() {
     let content = "# Title\n## Setup\ncontent\n\n## Usage\nuse it\n";
     let result = perform_section_edit(content, "## Setup", "remove", None).unwrap();

@@ -14,16 +14,14 @@ See codescout memory `development-commands` for the full command reference.
 
 ## Tool Misbehavior Log — MANDATORY
 
-**`docs/TODO-tool-misbehaviors.md` is a living document. You MUST maintain it.**
+**`docs/issues/bug-tracker.md` is the canonical bug log. You MUST maintain it.**
 
-- **Before starting any task**, read it to know current tool limitations.
+- **Before starting any task**, skim it to know current tool limitations.
 - **While working**, watch for: wrong edits, corrupt output, silent failures, misleading errors from codescout's own MCP tools.
-- **When you notice anything unexpected**, add an entry to that file **before continuing** — even a one-liner. Capture: what you did, what you expected, what happened, and a probable cause.
-- Do not wait until you finish the task. Log it immediately while context is fresh.
+- **When you notice anything unexpected**, add an entry (`### #N — tool: symptom`) **before continuing** — even a one-liner.
+- Do not wait until you finish. Log it immediately while context is fresh.
 
-This applies to ALL unexpected tool behavior: `edit_file`, `rename_symbol`, `replace_symbol`, `symbols`, `semantic_search`, etc.
-
-
+This applies to ALL unexpected tool behavior: `edit_file`, `edit_code`, `symbols`, `semantic_search`, etc.
 
 ## Session Intelligence Trackers
 

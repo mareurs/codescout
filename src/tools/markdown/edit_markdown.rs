@@ -84,8 +84,18 @@ pub fn perform_section_edit(
             let new = new_content.ok_or_else(|| {
                 anyhow::anyhow!("content is required for the insert_after action")
             })?;
-            let before = join_lines(&lines[..end_idx]);
-            let after = join_lines_tail(&lines[end_idx..]);
+            // H1 headings that span the entire document have no sibling, so
+            // `end_idx == lines.len()`. Inserting there appends at EOF, which is
+            // almost never the intent when targeting a document-title H1 — the
+            // user wants content right below the heading, before any subsections.
+            // H2+ last-sections keep the current append-at-end semantics.
+            let insert_idx = if end_idx == lines.len() && range.level == 1 {
+                heading_idx + 1
+            } else {
+                end_idx
+            };
+            let before = join_lines(&lines[..insert_idx]);
+            let after = join_lines_tail(&lines[insert_idx..]);
             let result = format!("{}{}{}", before, new, after);
             Ok(normalize_trailing_newline(&result))
         }
