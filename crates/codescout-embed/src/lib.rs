@@ -109,6 +109,7 @@ pub async fn embed_one(embedder: &dyn Embedder, text: &str) -> Result<Embedding>
 /// Create an embedder using explicit config fields.
 ///
 /// Resolution order:
+/// 0. (test/test-mock only) `url` = "mock:DIM" → in-memory MockEmbedder
 /// 1. `url` set → RemoteEmbedder targeting that URL
 /// 2. `model` starts with `local:` → local ONNX via fastembed
 /// 3. `model` starts with `ollama:` → Ollama (errors loudly if unreachable)
@@ -123,6 +124,16 @@ pub async fn create_embedder_with_config(
     // Suppress unused-variable warning when remote-embed feature is disabled.
     #[cfg(not(feature = "remote-embed"))]
     let _ = &api_key;
+
+    #[cfg(any(test, feature = "test-mock"))]
+    if let Some(url) = url {
+        if let Some(dims_str) = url.strip_prefix("mock:") {
+            let dims: usize = dims_str
+                .parse()
+                .map_err(|_| anyhow::anyhow!("mock: URL requires numeric dim suffix, got '{url}'"))?;
+            return Ok(Box::new(mock::MockEmbedder::new(dims)));
+        }
+    }
 
     // 1. URL takes priority — any OpenAI-compatible endpoint
     #[cfg(feature = "remote-embed")]
@@ -227,5 +238,18 @@ mod smoke {
     #[test]
     fn crate_builds() {
         assert_eq!(2 + 2, 4);
+    }
+}
+
+#[cfg(all(test, feature = "test-mock"))]
+mod mock_factory_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn factory_returns_mock_embedder_when_url_uses_mock_scheme() {
+        let e = create_embedder_with_config("ignored", Some("mock:32"), None)
+            .await
+            .expect("mock factory must succeed");
+        assert_eq!(e.dimensions(), 32);
     }
 }
