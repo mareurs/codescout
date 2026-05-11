@@ -50,11 +50,18 @@ model = "local:AllMiniLML6V2Q"
 # After
 [embeddings]
 model = "all-minilm"
-url   = "http://localhost:11434/v1"
+url   = "http://127.0.0.1:8080/v1"
 ```
 
-Start any OpenAI-compatible embedding server (recommended: Ollama via docker).
-Your existing index will auto-wipe on first run after upgrade.
+Then bring up the bundled embedding service from the repo root:
+
+```bash
+docker compose up -d
+```
+
+See `docs/embedding-setup.md` for GPU, alternative providers (Ollama,
+llama-server, OpenAI hosted), and troubleshooting. Your existing index
+auto-wipes on first run after upgrade.
 
 ---
 ## [0.2.2] — 2026-03-11

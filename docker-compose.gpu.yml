@@ -1,0 +1,33 @@
+# GPU acceleration overlay for codescout embedding infra.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# Requirements:
+#   - NVIDIA GPU
+#   - nvidia-container-toolkit installed and configured
+#   - Docker Compose 2.20+ for the `devices.driver: nvidia` syntax
+#
+# Verify GPU is visible to docker:
+#   docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
+
+services:
+  embed:
+    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  rerank:
+    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

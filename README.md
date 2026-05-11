@@ -98,11 +98,11 @@ Supported languages: Rust, Python, TypeScript/JavaScript, Go, Java, Kotlin, C/C+
 ## Semantic Search & Embeddings
 
 codescout requires an external embedding service for semantic search.
-Quick start with Ollama:
+The repo ships a `docker-compose.yml` that brings up the recommended
+configuration (Hugging Face TEI serving `all-MiniLM-L6-v2` + a reranker):
 
 ```bash
-docker run -d --name ollama -p 11434:11434 ollama/ollama
-docker exec ollama ollama pull all-minilm
+docker compose up -d
 ```
 
 Then in `.codescout/project.toml`:
@@ -110,11 +110,14 @@ Then in `.codescout/project.toml`:
 ```toml
 [embeddings]
 model = "all-minilm"
-url   = "http://localhost:11434/v1"
+url   = "http://127.0.0.1:8080/v1"
 ```
 
 Any OpenAI-compatible `/v1/embeddings` endpoint works (Ollama, llama.cpp,
-vLLM, TEI, OpenAI). See [Embedding configuration](docs/manual/src/configuration/embeddings.md).
+vLLM, TEI, OpenAI). See [`docs/embedding-setup.md`](docs/embedding-setup.md)
+for GPU, alternative providers, and troubleshooting, or
+[Embedding configuration](docs/manual/src/configuration/embeddings.md)
+for the full reference.
 
 → [Model comparison & benchmark](docs/manual/src/configuration/embedding-model-comparison.md)
 ## Experimental Features

@@ -1,0 +1,61 @@
+# codescout — embedding infrastructure (CPU default)
+#
+# Brings up two Hugging Face Text Embeddings Inference (TEI) containers:
+#   - embed   : sentence-transformers/all-MiniLM-L6-v2 (384-d, low resource)
+#   - rerank  : BAAI/bge-reranker-base (cross-encoder, optional)
+#
+# After `docker compose up -d`:
+#   - Embedding endpoint:  http://127.0.0.1:8080/v1
+#   - Reranker endpoint:   http://127.0.0.1:8081
+#
+# Configure codescout's .codescout/project.toml:
+#
+#   [embeddings]
+#   model = "all-minilm"
+#   url   = "http://127.0.0.1:8080/v1"
+#
+# For GPU acceleration overlay:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# See docs/embedding-setup.md for troubleshooting and alternative models.
+
+services:
+  embed:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.8
+    container_name: codescout-embed
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - tei-models:/data
+    command:
+      - --model-id=sentence-transformers/all-MiniLM-L6-v2
+      - --port=80
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 60s
+
+  rerank:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.8
+    container_name: codescout-rerank
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:80"
+    volumes:
+      - tei-models:/data
+    command:
+      - --model-id=BAAI/bge-reranker-base
+      - --port=80
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 60s
+
+volumes:
+  tei-models:
+    name: codescout-tei-models

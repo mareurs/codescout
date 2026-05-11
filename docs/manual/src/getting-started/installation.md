@@ -140,11 +140,13 @@ Re-run with `force: true` to rebuild from scratch: ask your agent `"Run codescou
 ## Embedding Setup
 
 codescout requires an external OpenAI-compatible embedding endpoint for
-semantic search. The simplest setup is Ollama:
+semantic search. The repo ships a `docker-compose.yml` that brings up the
+recommended configuration (Hugging Face TEI serving `all-MiniLM-L6-v2` +
+a reranker):
 
 ```bash
-docker run -d --name ollama -p 11434:11434 ollama/ollama
-docker exec ollama ollama pull all-minilm
+# From the codescout repo root:
+docker compose up -d
 ```
 
 Then in `.codescout/project.toml`:
@@ -152,12 +154,20 @@ Then in `.codescout/project.toml`:
 ```toml
 [embeddings]
 model = "all-minilm"
-url   = "http://localhost:11434/v1"
+url   = "http://127.0.0.1:8080/v1"
 ```
 
-Any server speaking the OpenAI `/v1/embeddings` API works — Ollama, llama.cpp,
-vLLM, TEI, OpenAI. See [Embedding Backends](../configuration/embedding-backends.md)
-for the full list and per-provider setup.
+For GPU acceleration:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+```
+
+Any server speaking the OpenAI `/v1/embeddings` API works — Ollama,
+llama.cpp, vLLM, TEI, OpenAI. See [`docs/embedding-setup.md`](../../../../embedding-setup.md)
+for troubleshooting and alternative providers, or
+[Embedding Backends](../configuration/embedding-backends.md) for the
+full per-provider reference.
 
 > **Why no bundled local backend?** codescout 1.0.0 removed the in-process
 > fastembed/ONNX backend. The runtime dependency on ONNX Runtime, native-library
