@@ -2297,7 +2297,7 @@ fn system_prompt_points_to_tool_guide_resource() {
         prompt.contains("doc://codescout-tool-guide"),
         "system prompt must point agents to the tool-guide resource"
     );
-    assert_eq!(ONBOARDING_VERSION, 25);
+    assert_eq!(ONBOARDING_VERSION, 26);
 }
 
 #[test]

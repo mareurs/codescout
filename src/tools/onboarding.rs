@@ -21,7 +21,7 @@ use super::{parse_bool_param, Tool, ToolContext};
 /// See CLAUDE.md § "Onboarding Version" for the full decision table.
 // Bumped 2026-05-08 for the prompt refactor: 6 mandatory memories per project,
 // Phase 4 coverage verification, Phase 6 CLAUDE.md flow, empty-stub convention.
-pub(crate) const ONBOARDING_VERSION: u32 = 25;
+pub(crate) const ONBOARDING_VERSION: u32 = 26;
 
 /// Returns true if the stored onboarding version is stale (needs refresh).
 /// `None` means pre-versioning project — always stale.

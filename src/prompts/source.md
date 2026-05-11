@@ -369,10 +369,12 @@ Present this to the user:
 >
 > Press Enter to accept [1], or type a number to choose a different option.
 >
-> **Tip:** For multi-project workspaces, running a dedicated embedding server is
-> recommended over the bundled model. Set `url` in `.codescout/project.toml` to
-> point at any OpenAI-compatible endpoint (llama.cpp, Ollama, vLLM, TEI).
-> See the embeddings guide for setup examples.
+> **Tip:** Embedding is remote-only — codescout has no bundled model. Set both
+> `model` and `url` in `[embeddings]` of `.codescout/project.toml` pointing at
+> any OpenAI-compatible endpoint (Ollama, llama-server, vLLM, TEI). Quick start:
+> `docker run -d -p 11434:11434 ollama/ollama && docker exec -it $(docker ps -lq) ollama pull all-minilm`,
+> then set `model = "all-minilm"` and `url = "http://localhost:11434/v1"`.
+> See the embeddings guide for more setup examples.
 
 Wait for the user's response, then:
 
@@ -412,7 +414,8 @@ this to the user:
 >
 > **Options:**
 > 1. **Build now** — I'll call `index(action='build')` and wait for it to finish.
->    Requires an embedding backend (bundled ONNX is the default, Ollama/OpenAI optional — see
+>    Requires a configured remote embedding backend (Ollama, llama-server, vLLM,
+>    TEI, or any OpenAI-compatible endpoint — see
 >    `docs/manual/src/configuration/embedding-backends.md` for setup).
 >    Takes 1–5 minutes depending on codebase size.
 > 2. **Build from CLI** — Run `codescout index --project .` in another
