@@ -816,9 +816,6 @@ model = "ollama:nomic-embed-text"
         assert_eq!(cfg.security.max_index_bytes, 500 * 1024 * 1024);
     }
 
-
-
-
     #[test]
     fn effective_chunk_size_returns_default_when_unset() {
         let sec = EmbeddingsSection {

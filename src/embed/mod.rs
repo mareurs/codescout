@@ -62,18 +62,6 @@ mod tests {
         );
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
     #[cfg(feature = "remote-embed")]
     #[test]
     fn create_embedder_with_url_uses_remote() {
@@ -112,8 +100,6 @@ mod tests {
             err
         );
     }
-
-
 
     #[cfg(feature = "remote-embed")]
     #[test]

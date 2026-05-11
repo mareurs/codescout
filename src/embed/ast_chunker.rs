@@ -883,89 +883,20 @@ pub fn split_file(source: &str, lang: &str, path: &Path, chunk_size: usize) -> V
         super::chunker::split(source, target, 0)
     };
 
-    enforce_max_chunk_size(chunks, target)
+    prefer_chunk_size(chunks, target)
 }
 
-/// Post-process pass: split any chunk whose content exceeds `target` chars.
-///
-/// AST chunkers can emit a single chunk per indivisible node (e.g. a big
-/// function body with no inner splittable structure). Without this guard,
-/// such chunks reach the embedder at their natural size, which on remote
-/// embedders with a small `--ubatch-size` produces HTTP 500 errors.
-///
-/// Splitting strategy (in order):
-///   1. Line-based via `chunker::split` — preserves AST/line semantics.
-///   2. Char-based slice on UTF-8 boundaries — last-resort for content
-///      that's a single long line (minified JS, base64 blobs, generated
-///      code without newlines). Without this fallback, line-based splitting
-///      cannot reduce a 10K-char single-line chunk and the embedder still
-///      OOMs.
-///
-/// Sub-chunk line numbers are computed relative to the parent chunk's
-/// `start_line` so absolute file positions are preserved.
-fn enforce_max_chunk_size(chunks: Vec<RawChunk>, target: usize) -> Vec<RawChunk> {
-    let mut out = Vec::with_capacity(chunks.len());
-    for chunk in chunks {
-        if chunk.content.len() <= target {
-            out.push(chunk);
-            continue;
-        }
-        let parent_offset = chunk.start_line.saturating_sub(1);
-        for sub in super::chunker::split(&chunk.content, target, 0) {
-            if sub.content.len() <= target {
-                out.push(RawChunk {
-                    content: sub.content,
-                    start_line: sub.start_line + parent_offset,
-                    end_line: sub.end_line + parent_offset,
-                    metadata: None,
-                });
-                continue;
-            }
-            // Line-based split couldn't reduce — single line longer than
-            // target. Slice on UTF-8 char boundaries as last resort. All
-            // slices land on the same line range as the original sub-chunk.
-            let abs_start = sub.start_line + parent_offset;
-            let abs_end = sub.end_line + parent_offset;
-            for piece in slice_on_char_boundary(&sub.content, target) {
-                out.push(RawChunk {
-                    content: piece,
-                    start_line: abs_start,
-                    end_line: abs_end,
-                    metadata: None,
-                });
-            }
-        }
-    }
-    out
-}
-
-/// Slice `s` into pieces no larger than `max_bytes`, cutting only on UTF-8
-/// character boundaries (never mid-codepoint).
-fn slice_on_char_boundary(s: &str, max_bytes: usize) -> Vec<String> {
-    if max_bytes == 0 || s.is_empty() {
-        return vec![s.to_string()];
-    }
-    let mut pieces = Vec::new();
-    let bytes = s.as_bytes();
-    let mut start = 0;
-    while start < bytes.len() {
-        let mut end = (start + max_bytes).min(bytes.len());
-        // Walk back to the nearest char boundary.
-        while end > start && !s.is_char_boundary(end) {
-            end -= 1;
-        }
-        if end == start {
-            // Single codepoint larger than max_bytes — emit it whole rather
-            // than infinite-loop. Pathological input only.
-            end = (start + max_bytes).min(bytes.len());
-            while end < bytes.len() && !s.is_char_boundary(end) {
-                end += 1;
-            }
-        }
-        pieces.push(s[start..end].to_string());
-        start = end;
-    }
-    pieces
+/// Aspirational chunk-size target used by the AST splitter to decide whether
+/// to descend into sub-boundaries (impl block → methods, module → functions).
+/// Does NOT truncate leaf symbols: a 4000-char method is emitted whole rather
+/// than cut mid-body, because a truncated body loses the return path and
+/// error handling that often carries the retrieval signal.
+fn prefer_chunk_size(chunks: Vec<RawChunk>, _target: usize) -> Vec<RawChunk> {
+    // Leaf symbols pass through unchanged. The caller already decomposed
+    // composite nodes (impl, mod) into per-method/per-function chunks when
+    // they exceeded the target — that decomposition is where the soft target
+    // is enforced. By this point, every chunk is a leaf and must remain whole.
+    chunks
 }
 
 /// Returns `true` if the given line is a doc comment line.
@@ -1123,36 +1054,34 @@ mod tests {
         assert!(!chunks.is_empty());
         assert_eq!(chunks[0].start_line, 1);
     }
-    /// Indivisible AST node larger than `chunk_size` must be split by the
-    /// post-pass — protects remote embedders with small physical batch limits.
+    /// Oversized AST leaf is sub-split by `sub_split_node` (which preserves
+    /// the signature prefix on each piece). `prefer_chunk_size` no longer
+    /// truncates further — sub_split_node alone keeps chunks near the target.
     #[test]
     fn split_file_enforces_max_chunk_size_on_oversized_node() {
-        // Large Rust function with no inner splittable structure — would
-        // produce one giant chunk without the post-pass cap.
         let mut body = String::from("pub fn huge() -> i32 {\n");
         for i in 0..200 {
             body.push_str(&format!("    let v{i} = {i};\n"));
         }
         body.push_str("    0\n}\n");
         let chunks = split_file(&body, "rust", Path::new("lib.rs"), 800);
-        assert!(!chunks.is_empty());
-        for c in &chunks {
-            assert!(
-                c.content.len() <= 800,
-                "chunk len {} exceeds target 800; chunks={}",
-                c.content.len(),
-                chunks.len()
-            );
-        }
-        // Should produce multiple chunks (~200 lines / 800 chars).
         assert!(
             chunks.len() >= 2,
-            "expected post-pass split, got {} chunks",
+            "expected sub_split into multiple chunks, got {}",
             chunks.len()
         );
+        // Every sub-chunk should carry the signature prefix.
+        for c in &chunks {
+            assert!(
+                c.content.contains("pub fn huge"),
+                "sub-chunk missing signature prefix: {}",
+                &c.content[..c.content.len().min(80)]
+            );
+        }
     }
 
-    /// Post-pass preserves absolute file line numbers when sub-splitting.
+    /// Post-pass preserves absolute file line numbers. Leaf functions stay
+    /// whole; if descent occurs the absolute line ranges remain in-file.
     #[test]
     fn split_file_post_pass_preserves_absolute_line_numbers() {
         let mut src = String::new();
@@ -1166,8 +1095,7 @@ mod tests {
         }
         src.push_str("}\n");
         let chunks = split_file(&src, "rust", Path::new("lib.rs"), 800);
-        assert!(chunks.len() >= 2);
-        // Every chunk's lines must lie within the file (1..=total_lines).
+        assert!(!chunks.is_empty());
         let total_lines = src.lines().count();
         for c in &chunks {
             assert!(
@@ -1184,79 +1112,79 @@ mod tests {
                 c.end_line
             );
         }
+        // The `pub fn big` chunk should start at line 51 (after the 50-line
+        // preamble).
+        assert!(
+            chunks.iter().any(|c| c.start_line == 51),
+            "expected a chunk starting at line 51 (the fn), got starts: {:?}",
+            chunks.iter().map(|c| c.start_line).collect::<Vec<_>>()
+        );
     }
 
-    /// Plain-text fallback path (unknown language) also honors the cap.
+    /// Plain-text fallback path (unknown language) emits a single long line
+    /// unchanged. With `prefer_chunk_size` now identity, an indivisible long
+    /// line passes through whole rather than being chopped at char boundaries.
     #[test]
     fn split_file_post_pass_applies_to_plain_text_path() {
-        // Single long line that the line-based splitter alone would emit as
-        // one chunk regardless of size.
         let src = "x".repeat(5000) + "\n";
         let chunks = split_file(&src, "unknown_xyz", Path::new("a.xyz"), 1000);
-        for c in &chunks {
-            assert!(
-                c.content.len() <= 1000,
-                "plain-text chunk len {} exceeds target",
-                c.content.len()
-            );
-        }
+        assert_eq!(chunks.len(), 1, "single long line should pass through");
+        assert!(
+            chunks[0].content.len() >= 5000,
+            "expected whole 5000-char line, got {} chars",
+            chunks[0].content.len()
+        );
     }
 
-    /// `enforce_max_chunk_size` is idempotent — chunks already under the cap
-    /// pass through unchanged.
+    /// `prefer_chunk_size` is now identity — it returns its input unchanged
+    /// regardless of size. (Previously it truncated chunks above `target`.)
     #[test]
-    fn enforce_max_chunk_size_is_noop_for_small_chunks() {
-        let small = vec![
+    fn prefer_chunk_size_is_identity() {
+        let chunks = vec![
             RawChunk {
-                content: "fn a() {}".into(),
+                content: "a".repeat(500),
                 start_line: 1,
                 end_line: 1,
                 metadata: None,
             },
             RawChunk {
-                content: "fn b() {}".into(),
-                start_line: 3,
-                end_line: 3,
+                content: "b".repeat(5000),
+                start_line: 10,
+                end_line: 10,
                 metadata: None,
             },
         ];
-        let out = enforce_max_chunk_size(small.clone(), 1000);
-        assert_eq!(out.len(), 2);
-        assert_eq!(out[0].content, small[0].content);
-        assert_eq!(out[0].start_line, 1);
-        assert_eq!(out[1].start_line, 3);
-    }
-    /// `slice_on_char_boundary` never splits a UTF-8 codepoint mid-byte.
-    #[test]
-    fn slice_on_char_boundary_respects_utf8() {
-        // Each emoji is 4 bytes; max 5 bytes per slice forces a boundary split.
-        let s = "🦀🦀🦀🦀";
-        let pieces = slice_on_char_boundary(s, 5);
-        // All pieces must be valid UTF-8 (already guaranteed by &str return type)
-        // and every char count must be > 0.
-        assert!(!pieces.is_empty());
-        let total: String = pieces.join("");
-        assert_eq!(total, s, "round-trip must equal original");
-        for p in &pieces {
-            assert!(!p.is_empty());
-            // Each piece must be ≤ max_bytes OR contain a single oversized codepoint.
-            assert!(
-                p.len() <= 5 || p.chars().count() == 1,
-                "piece {p:?} ({} bytes) violates cap",
-                p.len()
-            );
+        let out = prefer_chunk_size(chunks.clone(), 1000);
+        assert_eq!(out.len(), chunks.len());
+        for (a, b) in out.iter().zip(chunks.iter()) {
+            assert_eq!(a.content, b.content);
+            assert_eq!(a.start_line, b.start_line);
+            assert_eq!(a.end_line, b.end_line);
+            assert_eq!(a.metadata, b.metadata);
         }
     }
 
-    /// Ascii-only round-trip — basic correctness check.
+    /// A leaf-symbol chunk that exceeds the soft target must be emitted whole,
+    /// not truncated. Splitting a function body mid-statement strips the
+    /// return/error path that often carries the answer for retrieval queries.
     #[test]
-    fn slice_on_char_boundary_ascii_round_trip() {
-        let s = "hello world this is a long string";
-        let pieces = slice_on_char_boundary(s, 7);
-        assert_eq!(pieces.join(""), s);
-        for p in &pieces {
-            assert!(p.len() <= 7);
-        }
+    fn prefer_chunk_size_preserves_leaf_symbols_above_target() {
+        let oversized_body: String = "    let _ = 1;\n".repeat(300);
+        let content = format!("fn huge() {{\n{oversized_body}}}\n");
+        let chunk = RawChunk {
+            content: content.clone(),
+            start_line: 1,
+            end_line: content.lines().count(),
+            metadata: None,
+        };
+        let out = prefer_chunk_size(vec![chunk], 1600);
+        assert_eq!(
+            out.len(),
+            1,
+            "leaf symbol must not be split, got {} chunks",
+            out.len()
+        );
+        assert_eq!(out[0].content, content);
     }
 
     #[test]

@@ -15,8 +15,6 @@ pub use embedder::{Embedder, Embedding};
 
 use anyhow::Result;
 
-
-
 /// Default per-chunk size in characters when the user does not override via
 /// `[embeddings] chunk_size` in project.toml.
 ///
