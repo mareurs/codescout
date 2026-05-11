@@ -966,7 +966,7 @@ model = "mock"
         std::fs::create_dir_all(&global_dir).unwrap();
         std::fs::write(
             global_dir.join("config.toml"),
-            "[embeddings]\nmodel = \"local:BGESmallENV15\"\n",
+            "[embeddings]\nmodel = \"mock\"\n",
         )
         .unwrap();
         std::env::set_var("HOME", dir.path());
@@ -983,7 +983,7 @@ model = "mock"
             Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
             None => std::env::remove_var("XDG_CONFIG_HOME"),
         }
-        assert_eq!(cfg.embeddings.model, "local:BGESmallENV15");
+        assert_eq!(cfg.embeddings.model, "mock");
         assert_eq!(cfg.project.name, "my-project");
     }
 
