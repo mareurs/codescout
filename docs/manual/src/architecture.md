@@ -185,13 +185,10 @@ rather than by name. It has four stages:
    create semantically coherent chunks. For other files, it falls back to
    line-based splitting with configurable `chunk_size` and `chunk_overlap`.
 
-2. **Embedding** (`src/embed/remote.rs`, `src/embed/local.rs`) -- Each chunk
-   is sent to an embedding backend that returns a vector representation. Two
-   backends are available:
-   - **Remote** (default) -- HTTP client that talks to Ollama, OpenAI, or any
-     OpenAI-compatible endpoint.
-   - **Local** -- CPU-based embeddings via fastembed-rs and ONNX Runtime. No
-     external service needed.
+2. **Embedding** (`src/embed/remote.rs`) -- Each chunk is sent to an
+   external OpenAI-compatible `/v1/embeddings` endpoint (Ollama,
+   llama.cpp, vLLM, TEI, OpenAI). codescout maintains an HTTP client
+   only — there is no in-process embedding backend.
 
 3. **Storage** (`src/embed/index.rs`) -- Vectors and chunk metadata are stored
    in a SQLite database at `.codescout/embeddings.db`. On first use the table
@@ -298,8 +295,7 @@ team members share the same configuration. See
 | `tree-sitter` + language grammars | Offline AST parsing |
 | `git2` | Git operations (blame, log, diff) |
 | `rusqlite` | SQLite for embedding storage |
-| `reqwest` | HTTP client for remote embedding backends |
-| `fastembed` | Local CPU embeddings (optional, `local-embed` feature) |
+| `reqwest` | HTTP client for the embedding endpoint |
 | `tokio` | Async runtime |
 | `clap` | CLI argument parsing |
 | `serde` / `serde_json` | JSON serialization |

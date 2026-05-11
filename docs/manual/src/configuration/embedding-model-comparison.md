@@ -1,5 +1,10 @@
 # Embedding Model Comparison
-
+> **Note (codescout 1.0.0+):** The in-process `local:` backend referenced
+> below was removed in 1.0.0. All embeddings now flow through an external
+> OpenAI-compatible endpoint. The benchmark data is retained as historical
+> research — for current setup see [Embedding Backends](embedding-backends.md).
+> If you want the AllMiniL6V2Q quality profile via remote, serve `all-minilm`
+> through Ollama.
 Which embedding model should you use with codescout? This page summarizes benchmark
 results and real-world usage data to help you choose.
 

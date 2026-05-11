@@ -45,32 +45,32 @@ You rarely need to set it by hand.
 
 ## `[embeddings]` — Semantic Search Settings
 
-Controls which embedding model is used and how source files are chunked before embedding.
+Controls which embedding model is used and how source files are chunked before
+embedding. codescout requires an external OpenAI-compatible `/v1/embeddings`
+endpoint — `url` is mandatory.
 
 ```toml
 [embeddings]
-model = "ollama:mxbai-embed-large"
+model = "all-minilm"
+url   = "http://localhost:11434/v1"
 drift_detection_enabled = true
 ```
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `model` | string | `"ollama:mxbai-embed-large"` | Embedding model. The prefix selects the backend. See [Embedding Backends](embedding-backends.md) for the full list of supported prefixes and models. |
-| `drift_detection_enabled` | bool | `true` | Enable semantic drift detection during index builds. `index_project` compares old and new chunk embeddings to score how much each changed file's *meaning* shifted. Results queryable via `project_status(threshold)`. Set to `false` to opt out. Experimental — adds memory overhead proportional to changed-file count. |
+| `model` | string | `"all-minilm"` | Embedding model name; sent verbatim in the API request body. |
+| `url` | string | *(required)* | Base URL for any OpenAI-compatible `/v1/embeddings` endpoint. |
+| `api_key` | string | *(none)* | API key sent as Bearer token. Also available via `EMBED_API_KEY` env var. |
+| `chunk_size` | integer | `1600` | Character budget per chunk before AST sub-splitting. Override for very large or very small models. |
+| `drift_detection_enabled` | bool | `true` | Enable semantic drift detection during index builds. `index(action: "build")` compares old and new chunk embeddings to score how much each changed file's *meaning* shifted. Results queryable via `index(action: "status", threshold)`. Set to `false` to opt out. Experimental — adds memory overhead proportional to changed-file count. |
 
-> **Note — chunk size is automatic.** codescout derives the chunk budget
-> directly from the model's published context window using a conservative
-> `max_tokens × 3 chars/token` formula at 85 % utilisation. There is no
-> `chunk_size` or `chunk_overlap` setting — they were removed because manual
-> tuning was error-prone and the model string already encodes everything needed.
-> Existing `project.toml` files containing these keys are silently ignored.
-
-**Changing the model after indexing:** If you change `model`, you must rebuild the index
-(`index_project` with `force: true`). codescout detects model mismatches and will warn
-rather than return wrong results.
+**Changing the model after indexing:** If you change `model` or `url`, you must
+rebuild the index (`index(action: "build", force: true)`). codescout detects
+model mismatches and will warn rather than return wrong results. Legacy indexes
+built with the removed `local:`-prefix backend auto-wipe on first run after
+upgrade to 1.0.0.
 
 ---
-
 ## `[ignored_paths]` — Indexing Exclusions
 
 Glob patterns for directories and files that should be excluded from semantic search indexing,
@@ -214,7 +214,8 @@ encoding = "utf-8"
 tool_timeout_secs = 120
 
 [embeddings]
-model = "local:AllMiniLML6V2Q"
+model = "all-minilm"
+url   = "http://localhost:11434/v1"
 drift_detection_enabled = true    # set to false to opt out of semantic drift scoring
 
 [ignored_paths]

@@ -77,8 +77,6 @@ keeps the per-model knowledge localized.
 
 ## Limitations
 
-- Local (fastembed) models do not currently apply prefixes. Add an override on
-  `LocalEmbedder::embed_query` if you run an asymmetric model locally.
 - The match is a simple substring check; if a non-asymmetric model happens to
   contain `coderank` in its name you'll get an incorrect prefix. Rename the
   model or extend the match if this bites you.

@@ -63,25 +63,12 @@ lsof -i :8080
 
 ### Server crashes on startup
 
-This usually means a required shared library is missing (common with the
-`local-embed` feature, which needs ONNX Runtime as a native system library).
+codescout's startup is dependency-light — it does not load any in-process
+embedding model. Most startup crashes are caused by a missing or unreadable
+project root, a corrupt `.codescout/embeddings.db` (delete it and re-run
+`index(action: "build")`), or a binary built against an incompatible libc.
 
-**Fix:** Check the error output on stderr. If it mentions `libonnxruntime`,
-install ONNX Runtime on your system, or switch to Ollama (recommended) for
-local-free embeddings without native dependencies:
-
-```bash
-# Rebuild using only the remote backend (supports Ollama, OpenAI, etc.)
-git clone https://github.com/mareurs/codescout.git
-cd codescout
-cargo install --path . --no-default-features --features remote-embed
-```
-
-Then start Ollama and configure codescout to use it — see
-[Ollama setup](../configuration/embedding-backends.md#ollama-default).
-
----
-
+Check the error output on stderr for the specific cause.
 ## LSP and Symbol Tools
 
 ### Symbol tools return empty results
@@ -246,27 +233,26 @@ Embedding large codebases with Ollama on CPU can take minutes or longer.
 
 ### "No embedding backend compiled in"
 
-The binary was built with `--no-default-features` and no embedding feature
-was enabled.
+codescout requires an external OpenAI-compatible embedding endpoint —
+`[embeddings] url` is mandatory in `.codescout/project.toml`. There is no
+in-process backend in 1.0.0+.
 
-**Fix:** Reinstall with an embedding backend:
+**Fix:** Run an embedding server (Ollama is the easiest) and point `url` at it:
 
 ```bash
-# Remote backend — supports Ollama (recommended), OpenAI, and compatible servers
-cargo install codescout --features remote-embed
-
-# Local CPU backend — requires building from source (not available via crates.io)
-git clone https://github.com/mareurs/codescout.git
-cd codescout
-cargo install --path . --features local-embed
+# Quick start with Ollama
+docker run -d --name ollama -p 11434:11434 ollama/ollama
+docker exec ollama ollama pull all-minilm
 ```
 
-> **Tip:** For a free, local setup without building from source, use
-> [Ollama](https://ollama.com/) with the default `remote-embed` binary.
-> See [Embedding Backends](../configuration/embedding-backends.md#ollama-default).
+```toml
+[embeddings]
+model = "all-minilm"
+url   = "http://localhost:11434/v1"
+```
 
----
-
+See [Embedding Backends](../configuration/embedding-backends.md) for other
+providers (llama.cpp, vLLM, TEI, OpenAI).
 ## Configuration
 
 ### Changes to `project.toml` not taking effect

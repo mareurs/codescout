@@ -46,8 +46,8 @@ Requires an active project (set one with `workspace(action: activate)` first).
       "reason": "fast, good general baseline", "available": true, "recommended": true },
     { "id": "ollama:bge-m3", "dims": 1024, "context_tokens": 8192,
       "reason": "best quality, slower indexing (~1.2 GB)", "available": true, "recommended": false },
-    { "id": "local:JinaEmbeddingsV2BaseCode", "dims": 768, "context_tokens": 8192,
-      "reason": "code-specific, no Ollama needed (~300 MB)", "available": true, "recommended": false }
+    { "id": "nomic-embed-text", "dims": 768, "context_tokens": 8192,
+      "reason": "code-specialized, served via Ollama (~300 MB)", "available": true, "recommended": false }
   ],
   "instructions": "..."
 }

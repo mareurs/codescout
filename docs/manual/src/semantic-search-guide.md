@@ -11,20 +11,18 @@ individual tools, see [Semantic Search Tools](tools/semantic-search.md).
 
 ## Choosing an Embedding Backend
 
-codescout supports four embedding backends. The model string prefix in
-`project.toml` selects which one is used:
+codescout requires an external OpenAI-compatible embedding endpoint. The
+`[embeddings]` block in `.codescout/project.toml` selects the server and model:
 
-| Prefix | Example | When to use |
-|--------|---------|-------------|
-| `ollama:` | `ollama:mxbai-embed-large` | Local development — free, private, no API key |
-| `openai:` | `openai:text-embedding-3-small` | Best retrieval quality, cloud cost |
-| `custom:` | `custom:my-model@http://host:8080` | Any OpenAI-compatible endpoint |
-| `local:` | `local:AllMiniLML6V2Q` | Offline / air-gapped, no daemon required |
+```toml
+[embeddings]
+model = "all-minilm"
+url   = "http://localhost:11434/v1"
+```
 
-**Recommended starting point:** The bundled `local:AllMiniLML6V2Q` model — no setup
-required, works offline, and downloads only ~22 MB on first use. For higher search
-quality or multi-project setups, see [Embedding Backends](configuration/embedding-backends.md).
-
+Any server speaking the OpenAI `/v1/embeddings` API works — Ollama, llama.cpp,
+vLLM, TEI, OpenAI. See [Embedding Backends](configuration/embedding-backends.md)
+for setup details and model recommendations.
 ## Setting Up Ollama
 
 Install Ollama, pull the default model, and verify it responds correctly before
@@ -71,11 +69,12 @@ projects:
 
 ```toml
 [embeddings]
-model = "local:AllMiniLML6V2Q"
+model = "all-minilm"
+url   = "http://localhost:11434/v1"
 ```
 
-`model` is the only setting you need to change. Chunk size is derived
-automatically from the model's context window — no manual tuning required.
+`url` is required; codescout has no in-process embedding backend. Chunk size
+defaults to 1600 characters and can be overridden via `[embeddings] chunk_size`.
 
 To use OpenAI instead, set the model and export your API key:
 
@@ -205,40 +204,25 @@ relevant chunks, use the symbol tools to navigate the surrounding code:
 
 ### Chunk Size
 
-Chunk size is **not configurable** — it is derived automatically from the
-model's published context window using the formula:
+Chunk size defaults to **1600 characters** and is configurable via
+`[embeddings] chunk_size` in `project.toml`. The AST chunker splits source
+files at top-level definition boundaries (functions, methods, classes), so most
+chunks are well within budget regardless of the model's context window. The
+budget mainly controls when a single oversized leaf node is recursively
+line-split into sub-chunks (each sub-chunk keeps a signature-prefix header so
+embeddings remain self-describing).
 
-```
-chunk_size = max_tokens × 0.85 × 3 chars/token
-```
-
-The 0.85 factor leaves headroom for tokenisation variance; 3 chars/token is a
-conservative lower bound for mixed code and prose. Representative values:
-
-| Model | Context | Chunk budget |
-|---|---|---|
-| `ollama:mxbai-embed-large` | 512 tokens | ~1 300 chars |
-| `ollama:nomic-embed-text` | 8 192 tokens | ~20 900 chars |
-| `openai:text-embedding-3-small` | 8 191 tokens | ~20 900 chars |
-| `local:JinaEmbeddingsV2BaseCode` | 8 192 tokens | ~20 900 chars |
-| `local:AllMiniLML6V2Q` | 512 tokens | ~1 300 chars |
-| `local:AllMiniLML6V2Q` | 256 tokens | ~650 chars |
-
-Because AST chunking splits at function/method boundaries rather than at
-character counts, most chunks are well within the budget regardless of model.
-The budget mainly controls when a single oversized node is recursively split
-into inner methods.
-
+If you change the chunk size, run `index(action: "build", force: true)` to
+rebuild — old chunks cannot be mixed with new ones.
 ### Model Choice
 
 The embedding model has the largest effect on search quality. General-purpose
 text models (`nomic-embed-text`, `text-embedding-3-small`) work well for
 documentation and comments. Code-specific models
-(`local:JinaEmbeddingsV2BaseCode`) tend to perform
-better on function signatures and code identifiers.
+(`jina-embeddings-v2-base-code`) tend to perform better on function signatures
+and code identifiers.
 
-After changing the model, always run `index(action: build)` with `force: true`.
-
+After changing the model, always run `index(action: "build", force: true)`.
 ## Troubleshooting
 
 **"No results" or empty results list**
@@ -249,9 +233,9 @@ empty, the query may be too generic — try a more specific description.
 
 **"Connection refused" when indexing**
 
-An external embedding server (Ollama, llama.cpp, etc.) is not running. Start
-it, or switch to the bundled model by setting `model = "local:AllMiniLML6V2Q"`
-in `.codescout/project.toml`.
+An external embedding server (Ollama, llama.cpp, vLLM, TEI, etc.) is not
+running or `url` is wrong. Start it, or fix the `url` in
+`.codescout/project.toml`. codescout has no in-process embedding fallback.
 
 **"Model not found" error**
 
@@ -272,7 +256,7 @@ differ, a force reindex is required.
 
 **Indexing is very slow**
 
-If using an external server (Ollama, llama.cpp), check it is running locally
-and not routing over a slow network connection. The bundled `local:AllMiniLML6V2Q`
-model runs in-process and avoids network overhead. For the fastest throughput on
-large projects, `openai:text-embedding-3-small` batches requests via API.
+If using an external server (Ollama, llama.cpp, vLLM, TEI), check it is
+running locally and not routing over a slow network connection. For the
+fastest throughput on large projects, OpenAI's hosted API
+(`text-embedding-3-small`) batches requests efficiently.

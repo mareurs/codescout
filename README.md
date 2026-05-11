@@ -7,7 +7,7 @@ Works with Claude Code, GitHub Copilot, Cursor, and any MCP-capable agent.
 ## What it does
 
 - **Symbol navigation** — `symbols`, `references`, `symbol_at`, `call_graph`, `edit_code`, backed by LSP across 9 languages
-- **Semantic search** — find code by concept using a bundled ONNX embedding model (22 MB, zero setup), not grep
+- **Semantic search** — find code by concept via any OpenAI-compatible embedding endpoint (Ollama, llama.cpp, vLLM, TEI, OpenAI), not grep
 - **Library navigation** — explore dependency source code with scoped search, version tracking, and auto-discovery
 - **Multi-project workspaces** — register related projects in `workspace.toml` for cross-project navigation with per-project memory and indexing
 - **Token efficiency** — compact by default, details on demand, never dumps full files
@@ -97,16 +97,26 @@ Supported languages: Rust, Python, TypeScript/JavaScript, Go, Java, Kotlin, C/C+
 → [Tool reference](docs/manual/src/tools/overview.md)
 ## Semantic Search & Embeddings
 
-codescout bundles **all-MiniLM-L6-v2** (quantized, 22 MB) as its default embedding model.
-It runs locally via ONNX — no external server, no API key, no GPU needed. On first
-`index(action: build)`, the model is downloaded once to `~/.cache/huggingface/hub/`.
+codescout requires an external embedding service for semantic search.
+Quick start with Ollama:
 
-For users with Ollama or a GPU, codescout also supports external embedding servers
-(Ollama, OpenAI, llama.cpp, vLLM, TEI) via the standard `/v1/embeddings` API.
+```bash
+docker run -d --name ollama -p 11434:11434 ollama/ollama
+docker exec ollama ollama pull all-minilm
+```
 
-→ [Embedding configuration](docs/manual/src/configuration/embeddings.md)
+Then in `.codescout/project.toml`:
+
+```toml
+[embeddings]
+model = "all-minilm"
+url   = "http://localhost:11434/v1"
+```
+
+Any OpenAI-compatible `/v1/embeddings` endpoint works (Ollama, llama.cpp,
+vLLM, TEI, OpenAI). See [Embedding configuration](docs/manual/src/configuration/embeddings.md).
+
 → [Model comparison & benchmark](docs/manual/src/configuration/embedding-model-comparison.md)
-
 ## Experimental Features
 
 New features land on the `experiments` branch before reaching `master`.

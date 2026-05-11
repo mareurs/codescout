@@ -137,51 +137,34 @@ Re-run with `force: true` to rebuild from scratch: ask your agent `"Run codescou
 
 > **Note:** If you skip onboarding, tools like `symbols`, `symbols`, and `symbol_at` will return errors — they depend on LSP servers that onboarding starts.
 
-## Feature Flags
+## Embedding Setup
 
-codescout has two embedding modes, controlled at compile time via Cargo features:
-
-> **See also:** [Embedding Backends](../configuration/embedding-backends.md) —
-> full backend comparison, recommended models, and per-backend configuration.
-
-| Feature | What it does | When to use it |
-|---|---|---|
-| `remote-embed` (default) | HTTP client for OpenAI-compatible embedding APIs | You have Ollama, OpenAI, or a compatible server running |
-| `local-embed` | CPU embeddings via fastembed-rs and ONNX Runtime | Air-gapped machines; **requires building from source** |
-
-> **Want free, local embeddings without building from source?** Use
-> [Ollama](https://ollama.com/) — it is the recommended path. Install Ollama,
-> pull a model (`ollama pull nomic-embed-text`), and codescout will use it
-> automatically. The published `cargo install codescout` binary supports Ollama
-> out of the box with no extra flags.
-
-### Local Embeddings via fastembed (`local-embed`)
-
-The `local-embed` feature depends on ONNX Runtime as a native system library. Because of
-this native dependency, it is **not available via `cargo install codescout`** from crates.io.
-To use it you must build from source:
+codescout requires an external OpenAI-compatible embedding endpoint for
+semantic search. The simplest setup is Ollama:
 
 ```bash
-git clone https://github.com/mareurs/codescout.git
-cd codescout
-cargo install --path . --features local-embed
+docker run -d --name ollama -p 11434:11434 ollama/ollama
+docker exec ollama ollama pull all-minilm
 ```
 
-The first time you build a semantic search index, the local backend model downloads
-automatically to `~/.cache/huggingface/hub/`. Subsequent uses are fully offline.
+Then in `.codescout/project.toml`:
 
-### Minimal Install (No Embeddings)
-
-If you only want LSP-backed symbol navigation and git tools and do not need semantic search, you
-can build without any embedding feature:
-
-```bash
-cargo install codescout --no-default-features
+```toml
+[embeddings]
+model = "all-minilm"
+url   = "http://localhost:11434/v1"
 ```
 
-Semantic search tools (`semantic_search`, `index`) will return a clear error if called
-without an embedding backend compiled in.
+Any server speaking the OpenAI `/v1/embeddings` API works — Ollama, llama.cpp,
+vLLM, TEI, OpenAI. See [Embedding Backends](../configuration/embedding-backends.md)
+for the full list and per-provider setup.
 
+> **Why no bundled local backend?** codescout 1.0.0 removed the in-process
+> fastembed/ONNX backend. The runtime dependency on ONNX Runtime, native-library
+> distribution friction (couldn't ship via `cargo install`), and a peak-memory
+> footprint that interacted badly with the rest of the server made the trade-off
+> not worth it. See `docs/adrs/2026-05-11-remote-only-embedding.md` for the full
+> rationale.
 ## Next Steps
 
 - [Your First Project](first-project.md) — open a project, run onboarding, and try the basic tools

@@ -25,10 +25,12 @@ results link back to exact source locations.
 **2. Embedding** — Each chunk is converted to a vector (a list of floating-point
 numbers) by the configured embedding model. Semantically similar text produces
 vectors that point in similar directions in high-dimensional space.
-The model is selected by `onboarding` based on your hardware (Ollama availability, GPU, RAM);
-`ollama:nomic-embed-text` is the default when Ollama is running, and
-`local:JinaEmbeddingsV2BaseCode` is used on CPU-only machines. See
-[Embedding Backends](../configuration/embedding-backends.md) to change it manually.
+The model is selected by `onboarding` based on your hardware (Ollama
+availability, GPU, RAM) and the resulting `[embeddings] model` + `url` are
+written to `.codescout/project.toml`. codescout 1.0.0+ requires an external
+OpenAI-compatible endpoint — there is no in-process backend. See
+[Embedding Backends](../configuration/embedding-backends.md) to change it
+manually.
 The vectors are stored in `.codescout/embeddings.db`.
 
 **3. Search** — Your query is embedded with the same model and compared to every

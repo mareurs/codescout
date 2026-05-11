@@ -2,6 +2,61 @@
 
 All notable changes to codescout are documented here.
 
+## [1.0.0] — 2026-05-11
+
+### Breaking changes
+
+- **Removed local fastembed/ONNX embedding backend.** `[embeddings] url` is
+  now required in `.codescout/project.toml`. Configure an external embedding
+  service (Ollama, llama-server, or any OpenAI-compatible endpoint). See
+  README for setup. Legacy `local:`-prefix indexes auto-wipe on first run.
+
+### Changed
+
+- Default chunk size is now 1600 characters (was per-model-derived, capped at
+  4096). User can override via `[embeddings] chunk_size`.
+- AST chunker no longer truncates leaf symbols above the target size via
+  char-boundary cuts. `enforce_max_chunk_size` renamed to `prefer_chunk_size`
+  (identity). Oversized leaves are still line-split by `sub_split_node`
+  with a signature-prefix header preserved on every sub-chunk.
+- `default_embed_model()` returns `"all-minilm"` (was `"local:AllMiniLML6V2Q"`).
+
+### Removed
+
+- `local:<Model>` prefix in `[embeddings] model`.
+- `fastembed` dependency and `local-embed` Cargo feature in `codescout-embed`
+  and the workspace root.
+- `chunk_size_for_model` function (replaced by `DEFAULT_CHUNK_SIZE_CHARS = 1600`).
+- Both `LocalEmbedder` impl files (`src/embed/local.rs` orphan +
+  `crates/codescout-embed/src/local.rs`).
+- `local:`-prefix model entries from `src/hardware.rs` recommendation list.
+
+### Internal
+
+- Added `MockEmbedder` for unit tests (orthogonal-vector deterministic
+  double; forces test authors to assert on plumbing, not ranking).
+- Release binary size reduced by ~22 MiB (-39.8%).
+- `ONBOARDING_VERSION` bumped to force system-prompt regeneration.
+
+### Migration
+
+If you were running with the local backend:
+
+```toml
+# Before (.codescout/project.toml)
+[embeddings]
+model = "local:AllMiniLML6V2Q"
+
+# After
+[embeddings]
+model = "all-minilm"
+url   = "http://localhost:11434/v1"
+```
+
+Start any OpenAI-compatible embedding server (recommended: Ollama via docker).
+Your existing index will auto-wipe on first run after upgrade.
+
+---
 ## [0.2.2] — 2026-03-11
 
 ### Added

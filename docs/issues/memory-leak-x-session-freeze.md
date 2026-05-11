@@ -1,5 +1,9 @@
 # BUG: codescout memory leak → OOM → X session freeze
-
+> **2026-05-11 update:** The fastembed/ONNX memory analysis below is now
+> historical. `LocalEmbedder` was removed in v1.0.0 (see
+> `docs/adrs/2026-05-11-remote-only-embedding.md`). Retained for institutional
+> memory and for the cross-reference to ONNX session-arena behaviors that may
+> surface in other Rust-bound ONNX users.
 **Severity:** Critical (causes full desktop freeze requiring reboot)
 **Discovered:** 2026-04-18
 **Recurrence:** Confirmed on Apr 14 (3×) and Apr 18; likely earlier
