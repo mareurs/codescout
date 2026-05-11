@@ -98,10 +98,10 @@ the per-bug file, not here.
 
 - **Symptom:** `edit_code(action="insert", position="after")` injected code mid-function body, splitting an open `assert!()` and breaking compilation.
 - **Root cause (primary):** `editing_end_line` early-returned on `has_syntax_errors`, falling back to LSP `end_line` which reported the last statement line, not the closing `}`.
-- **Root cause (residual):** When AST returned `None` for a top-level symbol with no parent, silent LSP fallback still landed the insert mid-body.
-- **Fix (2026-05-02 + 2026-05-09):** AST trusted unconditionally when it finds the symbol. `editing_end_line_strict` returns `Option<u32>`; `None` for no-parent symbols → `RecoverableError` instead of corruption.
-- **Status:** Mostly fixed. Parented under-extension residual remains (rare in practice).
-
+- **Root cause (residual claim):** When AST returned `None` for a symbol with a parent, the lenient fallback to LSP could still land the insert mid-body. The accompanying comment claimed the parent-clamp at `do_insert` provides a safety net.
+- **Fix (2026-05-02 + 2026-05-09):** AST trusted unconditionally when it finds the symbol. `editing_end_line_strict` returns `Option<u32>`; `None` for no-parent symbols → `RecoverableError`.
+- **Residual closure (2026-05-11 audit):** The parent-clamp reasoning is incorrect — it bounds against the *parent's* body, not the target sibling's. But the parented residual is no longer reachable in practice: `validate_symbol_position` (name must appear at start_line) and `validate_symbol_range` (rejects when AST shows a later end than LSP) catch every realistic under-extension *before* `do_insert` runs. Verified by attempting to construct a regression test for the parented path — every plausible repro is caught by an earlier guard, including the syntax-errors + duplicate-name-siblings + name_path-mismatch combinations.
+- **Status:** Fixed. The flawed parent-clamp comment in `edit_code.rs::do_insert` is harmless given the layered guards; a future cleanup can collapse the parented/no-parent branches into a single refusal once someone wants to touch that code.
 ### #10 — BUG-052: `RecoverableError` guidance absent from `Display` / `to_string()`
 
 - **Symptom:** `err.to_string()` omitted attached hint/warning/must_follow text; tests asserting `contains("did you mean...")` failed.
@@ -159,3 +159,14 @@ fallback in `list_overview`'s single-file branch plus two regression tests. Row 
 stale `open` — flipped to `fixed`. Residual gap noted: glob branch still trusts LSP
 empty results silently; not promoted to its own row (lower-priority, would need a
 new tracker entry only if it bites in practice).
+
+### 2026-05-11 — #9 BUG-051 parented residual closed (layered guards)
+
+Audited the parented under-extension residual claimed in the original entry. Attempted to
+construct a regression test exercising the path where `editing_end_line_strict` returns
+`None`, the symbol has a parent, and LSP under-extends `end_line`. Every plausible repro is
+caught by an earlier guard: `validate_symbol_position` rejects bogus names, and
+`validate_symbol_range` (added 2026-03-02 in commit `6d6da19`) rejects whenever AST shows a
+later end than LSP. The parent-clamp safety-net claim in `do_insert`'s comment is incorrect
+reasoning (the clamp bounds against parent body, not the target sibling's body) but harmless
+in practice. Row flipped to fixed.
