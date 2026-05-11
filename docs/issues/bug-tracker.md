@@ -1,5 +1,5 @@
 ---
-id: '0ed68e66d69ceec0'
+id: '1ed658441715df5a'
 kind: tracker
 status: active
 title: Bug Tracker
@@ -112,11 +112,10 @@ the per-bug file, not here.
 ### #11 — BUG-054: `symbols(path)` returns silent empty `[]` during LSP cold-start
 
 - **Symptom:** `symbols(path)` returns `{"symbols": []}` for files with known symbols shortly after session start. Resolves after ~30–60s.
-- **Root cause (probable):** rust-analyzer returns `Ok([])` during initial indexing rather than `-32800 RequestCancelled`. `Ok([])` treated as valid empty result; tree-sitter fallback not invoked.
-- **Workaround:** Retry after ~30–60s, or use `detail_level="full"`.
-- **Fix:** Open. Proposed: in `list_overview` single-file branch, retry once + fall back to tree-sitter when LSP returns empty Vec for a non-empty file.
-- **Status:** Open.
-
+- **Root cause:** rust-analyzer (and similar LSPs) return `Ok([])` during initial indexing rather than `-32800 RequestCancelled`. `Ok([])` was treated as a valid empty result; tree-sitter fallback not invoked.
+- **Fix (2026-05-08, commit `e885509`):** Single-file branch of `list_overview` falls back to `ast::extract_symbols` when LSP returns empty for a non-empty file with tree-sitter support. Tests: `symbols_overview_falls_back_to_treesitter_when_lsp_returns_empty`, `symbols_overview_returns_empty_for_empty_file_via_treesitter`.
+- **Residual:** glob-branch (multi-file) iteration in `list_overview` still trusts LSP empty results silently. Lower priority — single-file is the dominant invocation. Track separately if it bites.
+- **Status:** Fixed.
 ### #12 — BUG-055: `artifact(create)` leaves orphan file when DB insert fails
 
 - **Symptom:** If `artifact::upsert` failed (e.g. `NOT NULL constraint failed`), the file remained on disk with no DB record, blocking retries with "path exists".
@@ -152,3 +151,11 @@ footgun observed during this very bootstrap session.
 
 Entries #2–#14 migrated from the deprecated `docs/TODO-tool-misbehaviors.md`.
 That file retains only its deprecation banner. All active refs updated to point here.
+
+### 2026-05-11 — #11 BUG-054 closed (already shipped)
+
+Audited tracker, found commit `e885509` (2026-05-08) had already landed the tree-sitter
+fallback in `list_overview`'s single-file branch plus two regression tests. Row #11 was
+stale `open` — flipped to `fixed`. Residual gap noted: glob branch still trusts LSP
+empty results silently; not promoted to its own row (lower-priority, would need a
+new tracker entry only if it bites in practice).
