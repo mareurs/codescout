@@ -12,6 +12,8 @@ remote-embed = ["dep:reqwest"]
 # Local CPU embedding via fastembed-rs (ONNX Runtime + HuggingFace model hub).
 # First use downloads the chosen model (~20-300MB) to ~/.cache/huggingface/hub/.
 local-embed = ["dep:fastembed"]
+# Deterministic in-process embedder for unit tests. No native deps.
+test-mock = []
 
 [dependencies]
 anyhow = { workspace = true }

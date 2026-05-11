@@ -10,6 +10,9 @@ pub mod local;
 #[cfg(feature = "remote-embed")]
 pub mod remote;
 
+#[cfg(any(test, feature = "test-mock"))]
+pub mod mock;
+
 pub use chunker::{chunk_markdown, split, split_markdown, RawChunk};
 pub use embedder::{Embedder, Embedding};
 
