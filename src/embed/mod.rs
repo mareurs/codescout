@@ -50,6 +50,7 @@ mod tests {
     #[cfg(not(feature = "local-embed"))]
     #[test]
     fn local_prefix_returns_helpful_error() {
+        // TODO(remote-only): after Task 6 deletes local: branch, "local:anything" will surface a different error — re-validate or delete this test then.
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on(super::create_embedder("local:anything"));
         let err = result.err().expect("expected an error");
