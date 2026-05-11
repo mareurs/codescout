@@ -4,9 +4,6 @@ pub mod chunker;
 
 mod embedder;
 
-#[cfg(feature = "local-embed")]
-pub mod local;
-
 #[cfg(feature = "remote-embed")]
 pub mod remote;
 
@@ -70,9 +67,10 @@ pub fn chunk_size_for_model(model_spec: &str) -> usize {
         512
     }
 
-    // Local fastembed models use their documented sequence lengths.
-    // These are listed here rather than in local.rs to avoid a feature-gate
-    // dependency (local.rs is #[cfg(feature = "local-embed")]).
+    // Local fastembed models were removed in the remote-only migration.
+    // Legacy `local:` prefixes are still recognised here so that
+    // `check_model_mismatch` (which inspects stored model strings) and
+    // chunk-size calls for legacy indexes do not panic before auto-wipe.
     if let Some(local_name) = model_spec.strip_prefix("local:") {
         let max_tokens = match local_name.to_lowercase().as_str() {
             "nomicembedtextv15" | "nomicembedtextv15q" => 8192,
@@ -110,12 +108,11 @@ pub async fn embed_one(embedder: &dyn Embedder, text: &str) -> Result<Embedding>
 ///
 /// Resolution order:
 /// 0. (test/test-mock only) `url` = "mock:DIM" → in-memory MockEmbedder
-/// 1. `url` set → RemoteEmbedder targeting that URL
-/// 2. `model` starts with `local:` → local ONNX via fastembed
-/// 3. `model` starts with `ollama:` → Ollama (errors loudly if unreachable)
-/// 4. `model` starts with `openai:` → OpenAI API
-/// 5. `model` starts with `custom:` → hard error with migration hint
-/// 6. No url, no prefix → default to local:AllMiniLML6V2Q
+/// 1. URL set → RemoteEmbedder targeting that URL
+/// 2. `model` starts with `ollama:` → Ollama (errors loudly if unreachable)
+/// 3. `model` starts with `openai:` → OpenAI API
+/// 4. `model` starts with `custom:` → hard error with migration hint
+/// 5. Otherwise → hard error pointing user at docker setup docs
 pub async fn create_embedder_with_config(
     model: &str,
     url: Option<&str>,
@@ -128,14 +125,14 @@ pub async fn create_embedder_with_config(
     #[cfg(any(test, feature = "test-mock"))]
     if let Some(url) = url {
         if let Some(dims_str) = url.strip_prefix("mock:") {
-            let dims: usize = dims_str
-                .parse()
-                .map_err(|_| anyhow::anyhow!("mock: URL requires numeric dim suffix, got '{url}'"))?;
+            let dims: usize = dims_str.parse().map_err(|_| {
+                anyhow::anyhow!("mock: URL requires numeric dim suffix, got '{url}'")
+            })?;
             return Ok(Box::new(mock::MockEmbedder::new(dims)));
         }
     }
 
-    // 1. URL takes priority — any OpenAI-compatible endpoint
+    // URL takes priority — any OpenAI-compatible endpoint
     #[cfg(feature = "remote-embed")]
     if let Some(url) = url {
         // Strip known routing prefixes so "ollama:nomic-embed-text" + url
@@ -143,7 +140,6 @@ pub async fn create_embedder_with_config(
         let bare_model = model
             .strip_prefix("ollama:")
             .or_else(|| model.strip_prefix("openai:"))
-            .or_else(|| model.strip_prefix("local:"))
             .unwrap_or(model);
         return Ok(Box::new(remote::RemoteEmbedder::from_url(
             url, bare_model, api_key,
@@ -157,13 +153,7 @@ pub async fn create_embedder_with_config(
         );
     }
 
-    // 2. local: prefix
-    #[cfg(feature = "local-embed")]
-    if let Some(model_id) = model.strip_prefix("local:") {
-        return Ok(Box::new(local::LocalEmbedder::new(model_id).await?));
-    }
-
-    // 3. ollama: prefix — no fallback, errors if unreachable
+    // ollama: prefix — no fallback, errors if unreachable
     #[cfg(feature = "remote-embed")]
     if let Some(model_id) = model.strip_prefix("ollama:") {
         let host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".into());
@@ -172,20 +162,19 @@ pub async fn create_embedder_with_config(
                 "Ollama is not reachable at {host}: {e}\n\
                  Start Ollama or switch to a different embedding backend.\n\n\
                  Options:\n\
-                 • url = \"http://your-server:port/v1\"    (any OpenAI-compatible endpoint)\n\
-                 • model = \"local:AllMiniLML6V2Q\"        (bundled ONNX, 22MB, no server needed)"
+                 • url = \"http://your-server:port/v1\"    (any OpenAI-compatible endpoint)"
             );
         }
         return Ok(Box::new(remote::RemoteEmbedder::ollama(model_id)?));
     }
 
-    // 4. openai: prefix
+    // openai: prefix
     #[cfg(feature = "remote-embed")]
     if let Some(model_id) = model.strip_prefix("openai:") {
         return Ok(Box::new(remote::RemoteEmbedder::openai(model_id, api_key)?));
     }
 
-    // 5. custom: prefix — removed, hard error
+    // custom: prefix — removed, hard error
     #[cfg(feature = "remote-embed")]
     if model.starts_with("custom:") {
         anyhow::bail!(
@@ -198,31 +187,24 @@ pub async fn create_embedder_with_config(
         );
     }
 
-    // 6. No prefix — try as local model name
-    #[cfg(feature = "local-embed")]
-    {
-        // Try parsing as a local model name directly
-        if local::LocalEmbedder::new(model).await.is_ok() {
-            return Ok(Box::new(local::LocalEmbedder::new(model).await?));
-        }
-    }
-
-    // Helpful error for local: prefix without the feature
-    if model.starts_with("local:") {
-        anyhow::bail!(
-            "Local embedding requires the 'local-embed' feature.\n\
-             Rebuild with: cargo build --features local-embed\n\n\
-             Recommended: local:AllMiniLML6V2Q (384d, quantized, 22MB)"
-        );
-    }
-
+    // No URL and no recognised prefix — guide the user to set up a backend.
     anyhow::bail!(
-        "Unknown model '{}'. Options:\n\
-         • Set url in [embeddings] to point at any OpenAI-compatible server\n\
-         • Use local:AllMiniLML6V2Q for bundled ONNX (384d, 22MB, no server needed)\n\
-         • Use local:JinaEmbeddingsV2BaseCode for code-specialized ONNX",
-        model
-    )
+        "Embedding backend not configured.\n\
+         \n\
+         codescout requires a remote embedding service (Ollama, llama-server, \
+         or any OpenAI-compatible endpoint). The local fastembed backend has \
+         been removed in v{}.\n\
+         \n\
+         Set in .codescout/project.toml:\n\
+         \n\
+         [embeddings]\n\
+         model = \"nomic-embed-text\"\n\
+         url   = \"http://localhost:11434/v1\"\n\
+         \n\
+         Suggested docker image: ollama/ollama (https://hub.docker.com/r/ollama/ollama).\n\
+         Setup guide: https://github.com/mareurs/codescout/blob/master/docs/embedding-setup.md",
+        env!("CARGO_PKG_VERSION"),
+    );
 }
 
 /// Create an embedder from a model string (legacy interface).

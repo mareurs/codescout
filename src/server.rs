@@ -391,11 +391,11 @@ impl CodeScoutServer {
             .await
             .unwrap_or(false);
 
-        // has_embeddings: compile-time guard — true whenever at least one embedding backend
-        // is compiled in. Both local-embed and remote-embed are in the default feature set.
+        // has_embeddings: compile-time guard — true whenever the remote embedding
+        // backend is compiled in. (The local fastembed backend was removed.)
         // No runtime "model loaded?" check exists without actually attempting a connection,
-        // so we rely on the feature flags alone.
-        let has_embeddings = cfg!(any(feature = "local-embed", feature = "remote-embed"));
+        // so we rely on the feature flag alone.
+        let has_embeddings = cfg!(feature = "remote-embed");
 
         // has_git_remote: read the value cached at activation time. The original
         // implementation called `git2::Repository::open(&root)` here, which ran
@@ -2088,7 +2088,7 @@ mod tests {
         // has_embeddings is compile-time — must be true in default feature set.
         assert!(
             caps.has_embeddings,
-            "has_embeddings should be true when local-embed or remote-embed feature is active"
+            "has_embeddings should be true when remote-embed feature is active"
         );
     }
 

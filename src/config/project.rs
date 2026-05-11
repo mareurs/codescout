@@ -43,17 +43,14 @@ pub struct ProjectSection {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingsSection {
     /// Model identifier — prefix determines the backend:
-    ///   "ollama:<model>"                    → Ollama local daemon (default)
-    ///   "openai:<model>"                    → OpenAI API (requires OPENAI_API_KEY)
-    ///   "local:<EmbeddingModel variant>"    → fastembed-rs, no daemon needed,
-    ///                                         CPU/WSL2-friendly. Downloads model
-    ///                                         on first use to ~/.cache/huggingface/
+    ///   "ollama:<model>"   → Ollama-hosted, when `url` is omitted (uses OLLAMA_HOST or localhost:11434)
+    ///   "openai:<model>"   → OpenAI API
+    ///   any name + `url`  → OpenAI-compatible endpoint at the given URL
     ///
-    /// Recommended local models (rebuild with: cargo build --features local-embed):
-    ///   "local:AllMiniLML6V2Q"              → 384d, INT8-quantized, ~22MB, **default**
-    ///   "local:BGESmallENV15"               → 384d, full precision
-    ///   "local:NomicEmbedTextV15Q"          → 768d, INT8-quantized, ~158MB
-    ///   "local:JinaEmbeddingsV2BaseCode"    → 768d, code-specific, ~300MB
+    /// Examples:
+    ///   model = "all-minilm" + url = "http://localhost:11434/v1"  → default low-resource
+    ///   model = "nomic-embed-text" + url = "http://localhost:11434/v1"
+    ///   model = "text-embedding-3-small" + url = "https://api.openai.com/v1"
     #[serde(default = "default_embed_model")]
     pub model: String,
     /// Base URL for an OpenAI-compatible embedding endpoint.
@@ -64,7 +61,7 @@ pub struct EmbeddingsSection {
     /// `POST /v1/embeddings`.
     ///
     /// When absent, the `model` field's prefix determines the backend
-    /// (`local:`, `ollama:`, `openai:`).
+    /// (`ollama:`, `openai:`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     /// API key for the embedding endpoint. Only used when `url` is set.
@@ -121,7 +118,7 @@ pub struct EmbeddingsSection {
     /// handle far more than 8 parallel batches, and higher inflight keeps it
     /// saturated while codescout writes the previous group to SQLite.
     ///
-    /// For local CPU backends (`local:`, default), keep at 8 or lower — each
+    /// For remote CPU backends, keep at 8 or lower — each
     /// embed call already uses all cores, so more inflight just queues work.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_inflight: Option<usize>,
@@ -388,7 +385,7 @@ fn default_timeout() -> u64 {
     60
 }
 fn default_embed_model() -> String {
-    "local:AllMiniLML6V2Q".into()
+    "all-minilm".into()
 }
 
 fn default_ignored_patterns() -> Vec<String> {
@@ -596,15 +593,13 @@ mod tests {
 
     #[test]
     fn default_embed_model_is_allminilm() {
-        // TODO(remote-only): update assertion after Task 6 lands new default
-        assert_eq!(default_embed_model(), "local:AllMiniLML6V2Q");
+        assert_eq!(default_embed_model(), "all-minilm");
     }
 
     #[test]
     fn default_config_has_expected_embeddings() {
-        // TODO(remote-only): update assertion after Task 6 lands new default
         let cfg = ProjectConfig::default_for("my-project".into());
-        assert_eq!(cfg.embeddings.model, "local:AllMiniLML6V2Q");
+        assert_eq!(cfg.embeddings.model, "all-minilm");
     }
 
     #[test]
@@ -854,9 +849,9 @@ model = "ollama:nomic-embed-text"
     #[test]
     fn effective_chunk_size_user_value_above_cap_clamped() {
         // TODO(remote-only): Task 7 deletes chunk_size_for_model — rewrite or delete this test then
-        let model_max = codescout_embed::chunk_size_for_model("local:AllMiniLML6V2Q");
+        let model_max = codescout_embed::chunk_size_for_model("all-minilm");
         let sec = EmbeddingsSection {
-            model: "local:AllMiniLML6V2Q".into(),
+            model: "all-minilm".into(),
             chunk_size: Some(model_max * 10),
             ..Default::default()
         };

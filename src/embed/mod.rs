@@ -6,9 +6,8 @@
 //! Architecture:
 //!   chunker → Embedder trait → sqlite-vec index
 //!
-//! Two Embedder backends:
-//!   - LocalEmbedder  (fastembed/ONNX, feature "local-embed") — fully offline, CPU/WSL2-friendly
-//!   - RemoteEmbedder (reqwest, feature "remote-embed")   — OpenAI-compatible API
+//! Embedder backend:
+//!   - RemoteEmbedder (reqwest, feature "remote-embed")   — OpenAI-compatible API (Ollama, llama-server, OpenAI, etc.)
 
 pub mod ast_chunker;
 pub mod bm25;
@@ -24,9 +23,6 @@ pub mod schema;
 #[cfg(feature = "remote-embed")]
 pub use codescout_embed::remote;
 
-#[cfg(feature = "local-embed")]
-pub use codescout_embed::local;
-
 pub use codescout_embed::{
     chunk_size_for_model, create_embedder, create_embedder_with_config, embed_one,
 };
@@ -41,20 +37,10 @@ mod tests {
         let result = rt.block_on(super::create_embedder("bogus:model"));
         let err = result.err().expect("expected an error");
         assert!(
-            err.to_string().contains("Unknown model"),
+            err.to_string().contains("Embedding backend not configured"),
             "unexpected error: {}",
             err
         );
-    }
-
-    #[cfg(not(feature = "local-embed"))]
-    #[test]
-    fn local_prefix_returns_helpful_error() {
-        // TODO(remote-only): after Task 6 deletes local: branch, "local:anything" will surface a different error — re-validate or delete this test then.
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt.block_on(super::create_embedder("local:anything"));
-        let err = result.err().expect("expected an error");
-        assert!(err.to_string().contains("local-embed"));
     }
 
     #[cfg(feature = "remote-embed")]
@@ -185,18 +171,6 @@ mod tests {
             "error should mention url field: {}",
             err
         );
-    }
-
-    #[test]
-    fn create_embedder_no_url_no_prefix_defaults_to_local_allminilm() {
-        // A bare model name with no url should be accepted as a local model
-        // when the local-embed feature is available.
-        #[cfg(feature = "local-embed")]
-        {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let result = rt.block_on(super::create_embedder("AllMiniLML6V2Q"));
-            assert!(result.is_ok(), "AllMiniLML6V2Q should load as local model");
-        }
     }
 
     #[test]

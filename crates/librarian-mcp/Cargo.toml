@@ -6,7 +6,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
-codescout-embed = { path = "../codescout-embed", features = ["remote-embed", "local-embed"] }
+codescout-embed = { path = "../codescout-embed", features = ["remote-embed"] }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }

@@ -9,9 +9,6 @@ description = "Shared embedding primitives for codescout + librarian-mcp"
 [features]
 # Remote embedding via OpenAI-compatible HTTP API (Ollama, OpenAI, etc.)
 remote-embed = ["dep:reqwest"]
-# Local CPU embedding via fastembed-rs (ONNX Runtime + HuggingFace model hub).
-# First use downloads the chosen model (~20-300MB) to ~/.cache/huggingface/hub/.
-local-embed = ["dep:fastembed"]
 # Deterministic in-process embedder for unit tests. No native deps.
 test-mock = []
 
@@ -26,5 +23,3 @@ thiserror = { workspace = true }
 
 # HTTP client (remote embeddings — OpenAI-compatible APIs, Ollama, etc.)
 reqwest = { version = "0.13", features = ["json"], optional = true }
-# Local CPU embeddings via ONNX Runtime (fastembed model hub)
-fastembed = { version = "5", optional = true }

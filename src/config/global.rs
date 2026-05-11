@@ -174,10 +174,7 @@ mod tests {
             Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
             None => std::env::remove_var("XDG_CONFIG_HOME"),
         }
-        assert_eq!(
-            result.embeddings.model,
-            Some("mock".to_string())
-        );
+        assert_eq!(result.embeddings.model, Some("mock".to_string()));
     }
 
     #[allow(dead_code)] // stale test — missing #[test] attribute, kept for future re-enable

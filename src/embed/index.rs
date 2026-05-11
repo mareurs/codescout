@@ -3577,17 +3577,14 @@ mod tests {
     fn check_model_mismatch_different_model_is_err() {
         let (_dir, conn) = open_test_db();
         set_meta(&conn, "embed_model", "ollama:mxbai-embed-large").unwrap();
-        let err = check_model_mismatch(&conn, "local:JinaEmbeddingsV2BaseCode")
+        let err = check_model_mismatch(&conn, "ollama:bge-m3")
             .unwrap_err()
             .to_string();
         assert!(
             err.contains("ollama:mxbai-embed-large"),
             "error should name stored model"
         );
-        assert!(
-            err.contains("local:JinaEmbeddingsV2BaseCode"),
-            "error should name new model"
-        );
+        assert!(err.contains("ollama:bge-m3"), "error should name new model");
         assert!(
             err.contains("embeddings.db"),
             "error should hint at DB deletion"
@@ -3603,7 +3600,10 @@ mod tests {
 
         // User upgrades to remote-only build, configured = ollama:nomic-embed-text.
         let result = check_model_mismatch(&conn, "ollama:nomic-embed-text");
-        assert!(result.is_ok(), "local: → non-local: must auto-wipe, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "local: → non-local: must auto-wipe, got {result:?}"
+        );
 
         // After auto-wipe, the meta keys are gone — first-run state.
         assert!(get_meta(&conn, "embed_model").unwrap().is_none());
@@ -3616,8 +3616,10 @@ mod tests {
         set_meta(&conn, "embed_model", "ollama:nomic-embed-text").unwrap();
         let err = check_model_mismatch(&conn, "ollama:bge-m3").unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("Delete .codescout/embeddings.db"),
-            "non-local mismatch must keep manual-delete behavior, got: {msg}");
+        assert!(
+            msg.contains("Delete .codescout/embeddings.db"),
+            "non-local mismatch must keep manual-delete behavior, got: {msg}"
+        );
     }
 
     #[test]

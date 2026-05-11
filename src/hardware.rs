@@ -33,17 +33,10 @@ pub struct ModelOption {
 }
 
 /// Pure function: derive a ranked model list from hardware facts.
-/// The first entry is always the recommended default (local:AllMiniLML6V2Q).
+/// The first entry is always the recommended default (Ollama URL hint when
+/// available, otherwise the external-server URL hint).
 pub fn model_options_for_hardware(ctx: &HardwareContext) -> Vec<ModelOption> {
-    let mut options = vec![ModelOption {
-        id: "local:AllMiniLML6V2Q".into(),
-        label: "AllMiniLML6V2Q".into(),
-        dims: 384,
-        context_tokens: 256,
-        reason: "bundled ONNX, no server needed, lightweight default (22MB, quantized)".into(),
-        available: true,
-        recommended: true,
-    }];
+    let mut options: Vec<ModelOption> = Vec::new();
 
     if ctx.ollama_available {
         options.push(ModelOption {
@@ -56,29 +49,17 @@ pub fn model_options_for_hardware(ctx: &HardwareContext) -> Vec<ModelOption> {
                 ctx.ollama_host.trim_end_matches('/')
             ),
             available: true,
-            recommended: false,
+            recommended: true,
         });
-    }
-
-    options.push(ModelOption {
-        id: "local:JinaEmbeddingsV2BaseCode".into(),
-        label: "JinaEmbeddingsV2BaseCode".into(),
-        dims: 768,
-        context_tokens: 8192,
-        reason: "code-specialized ONNX, no server needed (~300MB download)".into(),
-        available: true,
-        recommended: false,
-    });
-
-    if !ctx.ollama_available {
+    } else {
         options.push(ModelOption {
             id: "url".into(),
             label: "External server".into(),
             dims: 0,
             context_tokens: 0,
-            reason: "set url in [embeddings] to use any OpenAI-compatible embedding server".into(),
+            reason: "set url in [embeddings] to use any OpenAI-compatible embedding server (e.g. Ollama, llama-server, TEI, vLLM)".into(),
             available: true,
-            recommended: false,
+            recommended: true,
         });
     }
 
@@ -254,12 +235,11 @@ mod tests {
             cpu_cores: 8,
         };
         let opts = model_options_for_hardware(&ctx);
-        // With Ollama: local:AllMiniLML6V2Q (recommended) + url hint + Jina = 3 entries
-        assert_eq!(opts.len(), 3);
-        assert_eq!(opts[0].id, "local:AllMiniLML6V2Q");
+        // With Ollama: a single recommended url hint pointing at the running Ollama.
+        assert_eq!(opts.len(), 1);
+        assert_eq!(opts[0].id, "url");
         assert!(opts[0].recommended);
-        assert!(!opts[1].recommended);
-        assert!(!opts[2].recommended);
+        assert!(opts[0].reason.contains("Ollama"));
     }
 
     #[test]
@@ -272,11 +252,10 @@ mod tests {
             cpu_cores: 4,
         };
         let opts = model_options_for_hardware(&ctx);
-        // Without Ollama: local:AllMiniLML6V2Q (recommended) + Jina + url hint = 3 entries
-        assert_eq!(opts[0].id, "local:AllMiniLML6V2Q");
+        // Without Ollama: a single recommended url hint for an external server.
+        assert_eq!(opts.len(), 1);
+        assert_eq!(opts[0].id, "url");
         assert!(opts[0].recommended);
-        // url hint is last
-        assert_eq!(opts[opts.len() - 1].id, "url");
     }
 
     #[test]
@@ -297,7 +276,7 @@ mod tests {
     }
 
     #[test]
-    fn model_options_default_is_local_allminilm() {
+    fn model_options_default_is_url_when_no_ollama() {
         let hw = HardwareContext {
             ollama_available: false,
             ollama_host: "http://localhost:11434".into(),
@@ -306,9 +285,9 @@ mod tests {
             cpu_cores: 8,
         };
         let options = model_options_for_hardware(&hw);
-        assert_eq!(options[0].id, "local:AllMiniLML6V2Q");
+        assert_eq!(options[0].id, "url");
         assert!(options[0].recommended);
-        // Must have a url hint option
+        // Must mention url in the reason
         assert!(
             options.iter().any(|o| o.reason.contains("url")),
             "must mention url as an option"
@@ -316,7 +295,7 @@ mod tests {
     }
 
     #[test]
-    fn model_options_with_ollama_still_recommends_local() {
+    fn model_options_with_ollama_recommends_url() {
         let hw = HardwareContext {
             ollama_available: true,
             ollama_host: "http://localhost:11434".into(),
@@ -325,7 +304,7 @@ mod tests {
             cpu_cores: 8,
         };
         let options = model_options_for_hardware(&hw);
-        assert_eq!(options[0].id, "local:AllMiniLML6V2Q");
+        assert_eq!(options[0].id, "url");
         assert!(options[0].recommended);
         // Ollama option should mention url
         assert!(

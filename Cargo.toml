@@ -127,7 +127,7 @@ uuid = { version = "1.20.0", features = ["v4"] }
 parking_lot = "0.12"
 
 [features]
-default = ["remote-embed", "local-embed", "http", "librarian"]
+default = ["remote-embed", "http", "librarian"]
 # Embedded librarian-mcp (workspace doc/spec/plan index). Compiled in by
 # default for dev; turn off for production publishes via `--no-default-features`.
 # Runtime registration is **disabled by default** even when compiled in
@@ -138,9 +138,6 @@ dashboard = ["dep:axum", "dep:tower-http", "dep:open"]
 http = ["dep:axum", "dep:tower-http", "rmcp/transport-streamable-http-server"]
 # Remote embedding via OpenAI-compatible HTTP API (Ollama, OpenAI, etc.)
 remote-embed = ["codescout-embed/remote-embed"]
-# Local CPU embedding via fastembed-rs (ONNX Runtime + HuggingFace model hub).
-# First use downloads the chosen model (~20-300MB) to ~/.cache/huggingface/hub/.
-local-embed = ["codescout-embed/local-embed"]
 # Local embedding via candle (HuggingFace Rust ML — adds significant compile time)
 # candle-embed = ["dep:candle-core", "dep:candle-transformers", "dep:candle-nn", "dep:hf-hub", "dep:tokenizers"]
 

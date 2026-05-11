@@ -37,7 +37,9 @@ fn vector_for(text: &str, dims: usize) -> Embedding {
     let mut state = h.finish();
     let mut v = Vec::with_capacity(dims);
     for _ in 0..dims {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         // SplitMix64 finalizer to decorrelate output bits from the LCG state,
         // so distinct inputs produce near-orthogonal vectors even at low dims.
         let mut z = state;
@@ -83,6 +85,9 @@ mod tests {
         let a = &e.embed(&["the quick brown fox"]).await.unwrap()[0];
         let b = &e.embed(&["a completely different sentence"]).await.unwrap()[0];
         let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-        assert!(dot.abs() < 0.5, "distinct inputs must be near-orthogonal, got cos={dot}");
+        assert!(
+            dot.abs() < 0.5,
+            "distinct inputs must be near-orthogonal, got cos={dot}"
+        );
     }
 }
