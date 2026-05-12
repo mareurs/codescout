@@ -26,7 +26,7 @@ services:
     restart: unless-stopped
     command: ["--model-id", "BAAI/bge-m3", "--dtype", "float32"]
     ports:
-      - "127.0.0.1:8081:80"
+      - "127.0.0.1:48081:80"
     volumes:
       - model_cache:/data
     networks: [retrieval_net]
@@ -38,7 +38,7 @@ services:
     restart: unless-stopped
     command: ["--model-id", "naver/splade-cocondenser-ensembledistil", "--pooling", "splade", "--dtype", "float32", "--auto-truncate"]
     ports:
-      - "127.0.0.1:8084:80"
+      - "127.0.0.1:48084:80"
     volumes:
       - model_cache:/data
     networks: [retrieval_net]
@@ -50,7 +50,7 @@ services:
     restart: unless-stopped
     command: ["--model-id", "jinaai/jina-embeddings-v2-base-code", "--dtype", "float16", "--auto-truncate"]
     ports:
-      - "127.0.0.1:8081:80"
+      - "127.0.0.1:48081:80"
     shm_size: 2g
     volumes:
       - model_cache:/data
@@ -70,7 +70,7 @@ services:
     restart: unless-stopped
     command: ["--model-id", "naver/splade-cocondenser-ensembledistil", "--pooling", "splade", "--dtype", "float16", "--auto-truncate"]
     ports:
-      - "127.0.0.1:8084:80"
+      - "127.0.0.1:48084:80"
     volumes:
       - model_cache:/data
     deploy:
@@ -89,7 +89,7 @@ services:
     restart: unless-stopped
     command: ["--model-id", "BAAI/bge-reranker-v2-m3", "--dtype", "float32"]
     ports:
-      - "127.0.0.1:8083:80"
+      - "127.0.0.1:48083:80"
     volumes:
       - model_cache:/data
     networks: [retrieval_net]
@@ -101,7 +101,7 @@ services:
     restart: unless-stopped
     command: ["--model-id", "BAAI/bge-reranker-v2-m3", "--dtype", "float16", "--auto-truncate"]
     ports:
-      - "127.0.0.1:8083:80"
+      - "127.0.0.1:48083:80"
     volumes:
       - model_cache:/data
     deploy:
