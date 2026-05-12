@@ -27,7 +27,7 @@ TEST_CASES = [
     {
         "id": "TC-01", "tier": 1,
         "query": "RecoverableError",
-        "expected": ["src/tools/mod.rs", "src/server.rs", "docs/FEATURES.md"],
+        "expected": ["src/tools/core/types.rs", "src/server.rs", "docs/FEATURES.md"],
     },
     {
         "id": "TC-02", "tier": 1,
@@ -82,7 +82,7 @@ TEST_CASES = [
     },
     {
         "id": "TC-09", "tier": 2,
-        "query": "dangerous command detection deny block path_security run_command",
+        "query": "dangerous shell command detection deny block safety check",
         "expected": ["src/util/path_security.rs", "src/tools/run_command/mod.rs"],
     },
     {
@@ -110,13 +110,13 @@ TEST_CASES = [
     # Tier 3: Multi-symbol cross-cutting (13-17)
     {
         "id": "TC-13", "tier": 3,
-        "query": "LSP circuit breaker crash recovery restart client manager",
+        "query": "LSP circuit breaker crash recovery restart watchdog",
         "expected": ["src/lsp/client.rs", "src/lsp/manager.rs", "docs/manual/src/troubleshooting.md"],
     },
     {
         "id": "TC-14", "tier": 3,
         "query": "RecoverableError anyhow bail call_content dispatch isError routing",
-        "expected": ["src/tools/mod.rs", "src/server.rs", "src/usage/mod.rs"],
+        "expected": ["src/tools/core/types.rs", "src/server.rs", "src/usage/mod.rs"],
     },
     {
         "id": "TC-15", "tier": 3,
@@ -125,7 +125,7 @@ TEST_CASES = [
     },
     {
         "id": "TC-16", "tier": 3,
-        "query": "semantic_search embedding KNN vec0 ranked results query flow",
+        "query": "embedding KNN vec0 ranked results query retrieval flow",
         "expected": [
             "src/tools/semantic/semantic_search.rs",
             "src/embed/index.rs",
@@ -161,7 +161,7 @@ TEST_CASES = [
     },
     {
         "id": "TC-20", "tier": 4,
-        "query": "prompt_surfaces_reference_only_real_tools server_instructions onboarding consistency",
+        "query": "prompt surface consistency test all real tool names onboarding",
         "expected": [
             "src/prompts/server_instructions.md",
             "src/prompts/onboarding_prompt.md",
@@ -182,7 +182,7 @@ TEST_CASES = [
     },
     {
         "id": "TC-23", "tier": 5,
-        "query": "EmbedderHttp embed_batch sparse dense remote backend",
+        "query": "HTTP embed batch sparse dense remote backend protocol",
         "expected": [
             "src/retrieval/embedder.rs",
             "src/retrieval/sync.rs",
@@ -198,7 +198,7 @@ TEST_CASES = [
     },
     {
         "id": "TC-25", "tier": 5,
-        "query": "MockLspClient handshake fixture circuit breaker tests",
+        "query": "LSP test handshake fixture circuit breaker stub",
         "expected": ["src/lsp/mock.rs", "src/lsp/client.rs", "src/lsp/manager.rs"],
     },
 ]

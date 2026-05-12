@@ -4,7 +4,7 @@
     "tier": 1,
     "query": "RecoverableError",
     "expected_files": [
-      "src/tools/mod.rs",
+      "src/tools/core/types.rs",
       "src/server.rs",
       "docs/FEATURES.md"
     ]
@@ -128,7 +128,7 @@
     "tier": 3,
     "query": "how does the tool dispatch pipeline handle both recoverable errors and fatal failures differently",
     "expected_files": [
-      "src/tools/mod.rs",
+      "src/tools/core/types.rs",
       "src/server.rs",
       "src/usage/mod.rs"
     ]

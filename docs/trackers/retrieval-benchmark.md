@@ -388,3 +388,38 @@ Four configurations, all at bm25=5.0 / mode=code on pinned worktree:
 
 Teardown: stopped Infinity container; `bench_jinav2_*` and `bench_coderank_*` Qdrant
 collections preserved for future re-runs.
+
+
+### 2026-05-12 — Golden-set audit + post-fix re-baseline
+
+Audited both suites end-to-end. Findings:
+
+**Structural (clean):** all required fields present, no dup ids/queries, tier ranges valid,
+all 116 expected paths exist at the pinned SHA.
+
+**Stale expectations (fixed):**
+- TC-01 (both suites): `src/tools/mod.rs` → `src/tools/core/types.rs`. `mod.rs` is now
+  only `pub mod foo;` declarations after the tools/ refactor; `RecoverableError` lives in
+  `core/types.rs`.
+- TC-14 (both suites): same fix.
+
+**Filename-token bias:** 14/25 keyword TCs had the literal expected-file basename appearing
+in the query (e.g. `path_security` ↔ `path_security.rs`, `MockLspClient` ↔ `mock.rs`).
+Rewrote 7 queries to drop blatant cheats while preserving the underlying concept. Remaining
+8/25 tokens are concept words (`client`, `output`, `schema`, `index`, `server`, `augment`,
+`usage`) that real users would naturally type.
+
+**Re-baseline at champion config** (bm25=5.0, mode=code, TEI reranker `bge-v2-m3`):
+
+|  | natural 20-TC | full 25-TC |
+|---|---|---|
+| jina-v2 + bge | 26/60 (was 25) | 35/75 (was 36) |
+| coderank Q4 + bge | 26/60 | **37/75** (champion confirmed) |
+
+The TC-01/TC-14 expected-path fix gives +1 on natural. The bias removal costs jina-v2
+−1 on full (less BM25 lift) but leaves coderank unchanged at 37 — code-aware embedder is
+more robust to query rephrasing, which is the *desired* signal we couldn't see before
+because BM25 was masking it.
+
+The 41/60 historical claim remains unreproducible; **26/60 natural / 37/75 full** is the
+honest post-audit baseline going forward.
