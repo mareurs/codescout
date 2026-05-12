@@ -480,3 +480,81 @@ TC-14 1/3, TC-15 2/3, TC-16 1/3, TC-17 1/3, TC-18 2/3, TC-19 1/3, TC-20 0/3.
   predates the build-SHA bake-in (`ad7e7e7a`). `codescout_repo_head_sha` = 0795b208
   (recorded from `git rev-parse HEAD` in the legacy worktree).
 - Index built with `--force`; chunks differ slightly (18 229 vs current 17 827+).
+
+### 2026-05-12 — nomic-embed-code-7B Q4 (claimed CoIR SOTA) — negative result
+
+**Goal:** Test whether a much larger code-specific embedder breaks the 28-31/60 ceiling.
+Hypothesis: `nomic-ai/nomic-embed-code` (7B, Qwen2.5-Coder-7B-Instruct base, claimed SOTA
+on CoIR per Nomic's blog) should outperform 137M-class models if the bottleneck is dense
+recall on code identifiers.
+
+**Setup**
+
+- Model: `bartowski/nomic-ai_nomic-embed-code-GGUF` Q4_K_M (~4.1 GB, dim 3584, 32k ctx)
+- Server: `llama-server` (CUDA, RTX A5000 24GB) on `:43302` with `--embeddings --pooling last`
+- Query prefix: `"Represent this query for searching relevant code: "` (asymmetric, doc side raw)
+- Codescout: `ad7e7e7a` (main binary). Env: `CODESCOUT_EMBEDDER_PROTOCOL=openai`,
+  `CODESCOUT_EMBEDDER_MODEL_NAME=nomic-embed-code`, `CODESCOUT_MODEL_DIM=3584`,
+  `CODESCOUT_QUERY_PREFIX=...`, `CODESCOUT_QDRANT_COLLECTION_PREFIX=bench_nomic_`
+- Collection: `bench_nomic_code_chunks` — dim 3584, 21 371 points
+- Indexing: 24 923 chunks in 29 minutes (~14 chunks/sec — 7B fwd pass dominates)
+- Rerank: bge-reranker-v2-m3 on `:48083` (unchanged)
+- Sparse: splade-cocondenser on `:48084` (unchanged)
+- Suite: `legacy-natural.json` (20 TCs, max 60)
+
+**Result: 24/60 (worse than current stack and tavily+coderank)**
+
+| BM25 boost | Score | p50 latency |
+|---|---|---|
+| 5.0 | 24/60 | 178 ms |
+| 3.0 | 24/60 | 177 ms |
+| 1.5 | 24/60 | 175 ms |
+| 0.5 | 25/60 | 173 ms |
+
+**Comparison**
+
+| Stack | Embedder (params) | Sparse | Rerank | Legacy-natural |
+|---|---|---|---|---|
+| Qdrant + jina-v2 + bge-rerank | jina-v2-base-code (137M) | splade | bge-v2-m3 | 28/60 |
+| Tavily (sqlite-vec + tantivy) | CodeRankEmbed-Q4 (137M) | tantivy | — | 28/60 |
+| **Qdrant + nomic-embed-code-Q4 + bge-rerank** | **nomic-embed-code (7B)** | **splade** | **bge-v2-m3** | **24/60** |
+
+**Findings**
+
+1. **Bigger is not better here.** A 50× parameter model with a SOTA CoIR claim
+   scored 4 points below jina-v2 on our TC suite. Indexing was 35× slower.
+2. **BM25 fusion weight is irrelevant.** Sweeping 0.5–5.0 moves the score by 1
+   point. The signal is in dense + rerank; fusion barely shifts top-10.
+3. **Ceiling is genuinely upstream.** Across radically different dense embedders
+   (jina-v2, CodeRankEmbed, nomic-embed-code, nomic-embed-code-7B), retrieval
+   backends (Qdrant, sqlite-vec), sparse models (splade, splade-pp, tantivy
+   BM25), rerankers (bge-v2-m3, jina-rerank-v2, none), and fusion weights, the
+   top-10 hit-rate on legacy-natural sits in 24–28/60. **The bottleneck is the
+   TC suite phrasing and/or chunking, not the retrieval stack.**
+4. **Q4 quantization probably hurts but isn't the whole story.** We didn't run
+   f16 (14GB VRAM, would have to evict other services) — but the spread on
+   smaller models between Q4 and f16 was ≤1 point, so we'd expect 24→25 at
+   best, not a breakthrough.
+
+**Caveats**
+
+- Project-id mismatch caused a 0/60 first run (sync used `bench_nomic` as id,
+  search uses `p.config.project.name` from project.toml = `code-explorer`).
+  Fixed by temporarily renaming project.toml; restored after the run.
+- Discovered that `src/retrieval/embedder.rs::EmbedderHttp::embed` did not
+  apply the asymmetric query prefix in older builds — main since fixed via
+  `CODESCOUT_QUERY_PREFIX` env var. Earlier Qdrant-stack runs with CodeRankEmbed
+  may have silently underperformed because the prefix wasn't applied on the
+  query path (legacy `RemoteEmbedder` had it; new `EmbedderHttp` lacked it).
+- Bench worktree at `ede25e69` was modified with redundant patches during this
+  experiment (query_prefix_for + EmbedderHttp query_prefix). The patches are
+  redundant because main already had `CODESCOUT_QUERY_PREFIX` support. Bench
+  worktree is now slightly diverged from `ede25e69`; treat the canonical pinned
+  bench as the main binary at `ad7e7e7a` going forward.
+
+**Conclusion: drop nomic-embed-code-7B from consideration.** The
+infrastructure cost (29-min reindex, 24 GB VRAM on the AMD or 6 GB on NVIDIA,
+2× search latency) buys negative quality on our suite. If we want to break the
+ceiling, the next levers are **TC suite phrasing audit** (drop or rephrase the
+8/20 TCs that flatline at 0/3 across all configs) and **chunking strategy**
+(node-aware chunks vs char-bounded splits).
