@@ -722,6 +722,102 @@ This run scores **28/60** vs. prior hybrid CodeRankEmbed best of 41/60. The drop
 
 ---
 
+### Model: 25-TC pinned bench — jina-v2 vs CodeRankEmbed (2026-05-12)
+
+**First benchmark run on the pinned worktree** at `.worktrees/bench` @ `ede25e694b63219e1382f359d7ba242f66a516a5`,
+using the 25-TC suite (original 20 + 5 new TCs in "class name + 3-5 concept words" shape
+sampled from real external-project `semantic_search` usage). Harness now emits a `config`
+block with model, boost, collection prefix, and `project_sha` so runs are reproducible.
+
+| Param | Value |
+|---|---|
+| Project | code-explorer @ `ede25e69` (pinned worktree) |
+| Suite | 25-TC (20 legacy tiers + 5 T5 real-usage shape) |
+| Collection | `bench_jinav2_code_chunks` / `bench_coderank_code_chunks` |
+| Sparse / Reranker | naver/splade-v3 @ :48084 / BAAI/bge-reranker-v2-m3 @ :48083 |
+| bm25_boost | 3.0 |
+| disable_sparse | false |
+| Reranker | on |
+| Harness commit | `ede25e69` |
+| Hardware | NVIDIA RTX A5000 (jina via TEI), llama-server for CodeRankEmbed |
+
+#### Aggregate
+
+| Model | Total | T1 (15) | T2 (21) | T3 (15) | T4 (9) | T5 (15) | p50 (ms) | p95 (ms) |
+|---|---|---|---|---|---|---|---|---|
+| jina-v2-base-code | **32/75** | 9 | 10 | 6 | 3 | 4 | 149.7 | 163.4 |
+| CodeRankEmbed-Q4_K_M | **34/75** | 10 | 12 | 6 | 2 | 4 | 151.5 | 188.8 |
+
+**CodeRankEmbed +2 net over jina-v2.**
+
+#### Per-TC diffs (CodeRank vs jina)
+
+| TC | jina | CodeRank | Δ | Query |
+|---|---|---|---|---|
+| TC-02 | 1 | 2 | **+1** | `CODESCOUT_EMBEDDER_URL prefix backend local remote ONNX` |
+| TC-11 | 0 | 1 | **+1** | `rename_symbol workspace_edit textDocument LSP references sitter` |
+| TC-12 | 0 | 1 | **+1** | `CODESCOUT_EMBEDDER_URL model_prefix local remote backend factory` |
+| TC-20 | 1 | 0 | −1 | `prompt_surfaces_reference_only_real_tools server_instructions onboarding consistency` |
+
+CodeRankEmbed picks up env-var-name-heavy queries (TC-02, TC-12) where code-specific
+training surfaces identifier semantics. Loses on TC-20 (test-name-shaped meta-query)
+where jina's general-text bias helps.
+
+#### T5 new tier (real-usage shape) — both 4/15
+
+| TC | Query | jina | CodeRank |
+|---|---|---|---|
+| TC-21 | `ToolContext agent lsp output_buffer progress dispatch` | 1 | 1 |
+| TC-22 | `ActiveProject activate project_path config home_project` | 3 | 3 |
+| TC-23 | `EmbedderHttp embed_batch sparse dense remote backend` | 0 | 0 |
+| TC-24 | `artifact augment params merge librarian tracker` | 0 | 0 |
+| TC-25 | `MockLspClient handshake fixture circuit breaker tests` | 0 | 0 |
+
+Both models surface plans/specs/trackers ahead of impl on T5 queries. TC-23 dense leg
+finds shorter-path siblings (`src/retrieval/embedder.rs`) instead of the expected
+crate path (`crates/codescout-embed/src/embedder.rs`). Scoring uses `endswith("/" + exp)`
+so basename collisions don't help — the expected list needs to be path-flexible, or the
+queries need crate-scoped hints. **This is the harness gap to close before tier 5 is
+actionable.**
+
+#### Caveats
+
+- **No query prefix.** Historical CodeRankEmbed runs (41/60 in 2026-05-02 hybrid) used
+  `Represent this query for searching relevant code:` prefix for query-side asymmetry.
+  The retrieval-stack `EmbedderHttp` treats query and doc symmetrically. Phase 6 30/60
+  on the 20-TC slice was reached **without** this prefix, so the +2 here is consistent.
+- **Different bench file from prior runs.** This is the same 20-TC content as
+  the 2026-04-03 file, but routed through the retrieval stack instead of the legacy
+  embedder. Numbers are NOT comparable to the 41/60 legacy hybrid score.
+- **bm25_boost=3.0** is the Phase 6 plateau optimum; this run confirms it carries
+  cross-model.
+
+#### Reproducer
+
+```bash
+# jina-v2
+CODESCOUT_QDRANT_COLLECTION_PREFIX=bench_jinav2_ \
+  ./target/release/sync_project .worktrees/bench code-explorer
+python3 scripts/run-tc-benchmark.py \
+  --binary ./target/release/codescout \
+  --project-path "$(pwd)/.worktrees/bench" \
+  --collection-prefix bench_jinav2_ --label "jina-v2-bm25-3.0-pinned"
+
+# CodeRankEmbed (with llama-server up on :43300)
+CODESCOUT_QDRANT_COLLECTION_PREFIX=bench_coderank_ \
+CODESCOUT_EMBEDDER_URL=http://127.0.0.1:43300 \
+CODESCOUT_EMBEDDER_PROTOCOL=openai CODESCOUT_EMBEDDER_MODEL_NAME=coderank \
+  ./target/release/sync_project .worktrees/bench code-explorer
+python3 scripts/run-tc-benchmark.py \
+  --binary ./target/release/codescout \
+  --project-path "$(pwd)/.worktrees/bench" \
+  --collection-prefix bench_coderank_ --label "coderank-bm25-3.0-pinned"
+```
+
+> **Live table for all subsequent runs (boost sweep, sparse on/off, new models): see
+> `docs/trackers/retrieval-benchmark.md`.** That tracker is anchored to the pinned
+> baseline commit and is append-only; this file no longer accumulates new rows.
+
 ### Model: *(template for additional models)*
 
 | Field | Value |
