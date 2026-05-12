@@ -321,3 +321,33 @@ Built `.worktrees/bench`, refactored 7 hard-coded collection literals to use
 `config.collection(<kind>)` with `CODESCOUT_QDRANT_COLLECTION_PREFIX` override.
 Added 5 T5 real-usage-shape TCs sampled from external `usage.db`. First 8 runs
 land in the table above. CodeRankEmbed @ boost=5.0 is the current leader at 35/75.
+
+
+### 2026-05-12 — legacy-natural reconstruction (settling the 41/60 question)
+
+User asked why champion config scored 37/75 vs historical 41/60. Investigation:
+
+1. **Inspected commit `a55f1458`**: it rewrote both queries *and* expected paths of
+   multiple legacy TCs (natural-language → keyword-stuffed; pre-refactor paths →
+   post-refactor paths). Methodology change, not bugfix.
+2. **Extracted pre-`a55f1458` TC defs** into `scripts/tc-suites/legacy-natural.json`
+   (20 TCs, natural queries). Remapped 10 expected paths (workflow.rs → run_command/mod.rs,
+   markdown.rs → markdown/edit_markdown.rs, symbol.rs → symbol/edit_code.rs, etc.) so
+   they exist at the pinned SHA. Verified zero missing.
+3. **Ran both suites** at jina-v2 bm25=5.0 mode=code on pinned worktree:
+
+   | Suite | Score | T5 |
+   |---|---|---|
+   | legacy-natural (20-TC, natural) | 25/60 | — |
+   | legacy-keyword (20-TC subset of full suite) | 25/60 | — |
+   | full 25-TC (legacy-keyword + T5) | 36/75 | 11/15 |
+
+**Conclusion: 41/60 is not reproducible.** Natural and keyword queries scored
+identical (25/60 each), so the query-style rewrite is innocent. The gap to 41/60
+must come from one or more of: pre-pin chunking config, different bm25 boost (Phase 6
+used 3.0), or a stale `code_chunks` collection that happened to align with the
+pre-refactor expected paths. None of those states are reachable any more.
+
+The honest baseline going forward is **25/60 legacy-natural / 36/75 25-TC** at the
+pinned worktree. The `legacy-natural.json` suite is now committed so future runs
+can keep this comparison alive without recomputing it from git history.

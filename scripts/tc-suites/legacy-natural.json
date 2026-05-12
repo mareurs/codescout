@@ -1,0 +1,194 @@
+[
+  {
+    "id": "TC-01",
+    "tier": 1,
+    "query": "RecoverableError",
+    "expected_files": [
+      "src/tools/mod.rs",
+      "src/server.rs",
+      "docs/FEATURES.md"
+    ]
+  },
+  {
+    "id": "TC-02",
+    "tier": 1,
+    "query": "embedding model configuration",
+    "expected_files": [
+      "src/embed/mod.rs",
+      "docs/manual/src/configuration/embeddings.md",
+      "docs/manual/src/configuration/embedding-backends.md"
+    ]
+  },
+  {
+    "id": "TC-03",
+    "tier": 1,
+    "query": "LSP client implementation",
+    "expected_files": [
+      "src/lsp/client.rs",
+      "src/lsp/ops.rs",
+      "src/lsp/manager.rs"
+    ]
+  },
+  {
+    "id": "TC-04",
+    "tier": 1,
+    "query": "run_command shell execution",
+    "expected_files": [
+      "src/tools/run_command/mod.rs",
+      "docs/manual/src/concepts/shell-integration.md",
+      "docs/manual/src/concepts/output-buffers.md"
+    ]
+  },
+  {
+    "id": "TC-05",
+    "tier": 1,
+    "query": "OutputGuard progressive disclosure capping",
+    "expected_files": [
+      "src/tools/output.rs",
+      "docs/PROGRESSIVE_DISCOVERABILITY.md"
+    ]
+  },
+  {
+    "id": "TC-06",
+    "tier": 2,
+    "query": "how are tool calls recorded in the usage database",
+    "expected_files": [
+      "src/usage/db.rs",
+      "src/usage/mod.rs",
+      "docs/plans/archive/2026-04-02-usage-traceability-design.md"
+    ]
+  },
+  {
+    "id": "TC-07",
+    "tier": 2,
+    "query": "section boundary detection in markdown editing",
+    "expected_files": [
+      "src/tools/markdown/edit_markdown.rs",
+      "src/tools/file_summary/file_summary.rs"
+    ]
+  },
+  {
+    "id": "TC-08",
+    "tier": 2,
+    "query": "dimension mismatch when switching embedding models",
+    "expected_files": [
+      "src/embed/index.rs",
+      "src/embed/schema.rs"
+    ]
+  },
+  {
+    "id": "TC-09",
+    "tier": 2,
+    "query": "dangerous command detection and safety checks",
+    "expected_files": [
+      "src/util/path_security.rs",
+      "src/tools/run_command/mod.rs"
+    ]
+  },
+  {
+    "id": "TC-10",
+    "tier": 2,
+    "query": "how overflow hints guide the agent to narrow results",
+    "expected_files": [
+      "src/tools/output.rs",
+      "docs/PROGRESSIVE_DISCOVERABILITY.md",
+      "src/prompts/server_instructions.md"
+    ]
+  },
+  {
+    "id": "TC-11",
+    "tier": 2,
+    "query": "renaming a symbol across all references in the codebase",
+    "expected_files": [
+      "src/tools/symbol/edit_code.rs",
+      "src/lsp/ops.rs"
+    ]
+  },
+  {
+    "id": "TC-12",
+    "tier": 2,
+    "query": "how the embedding URL and model prefix determine which backend is used",
+    "expected_files": [
+      "src/embed/mod.rs",
+      "docs/manual/src/configuration/embeddings.md"
+    ]
+  },
+  {
+    "id": "TC-13",
+    "tier": 3,
+    "query": "what happens when an LSP server crashes mid-request and how does the circuit breaker recover",
+    "expected_files": [
+      "src/lsp/client.rs",
+      "src/lsp/manager.rs",
+      "docs/manual/src/troubleshooting.md"
+    ]
+  },
+  {
+    "id": "TC-14",
+    "tier": 3,
+    "query": "how does the tool dispatch pipeline handle both recoverable errors and fatal failures differently",
+    "expected_files": [
+      "src/tools/mod.rs",
+      "src/server.rs",
+      "src/usage/mod.rs"
+    ]
+  },
+  {
+    "id": "TC-15",
+    "tier": 3,
+    "query": "end-to-end force re-indexing flow including dimension migration and vec0 table recreation",
+    "expected_files": [
+      "src/embed/index.rs",
+      "src/embed/mod.rs"
+    ]
+  },
+  {
+    "id": "TC-16",
+    "tier": 3,
+    "query": "how a semantic search query flows from input through embedding to KNN ranked results",
+    "expected_files": [
+      "src/tools/semantic/semantic_search.rs",
+      "src/embed/index.rs",
+      "src/embed/mod.rs"
+    ]
+  },
+  {
+    "id": "TC-17",
+    "tier": 3,
+    "query": "how does the companion plugin route native Read and Grep calls to codescout MCP tools",
+    "expected_files": [
+      "docs/manual/src/concepts/routing-plugin.md",
+      "docs/manual/src/getting-started/companion-plugin.md"
+    ]
+  },
+  {
+    "id": "TC-18",
+    "tier": 4,
+    "query": "why heading detection in parse_all_headings and compute_section_end must use the same code block tracking",
+    "expected_files": [
+      "src/tools/markdown/edit_markdown.rs",
+      "src/tools/file_summary/file_summary.rs",
+      "docs/TODO-tool-misbehaviors.md"
+    ]
+  },
+  {
+    "id": "TC-19",
+    "tier": 4,
+    "query": "relationship between project activation, LSP server lifecycle, and tool context wiring",
+    "expected_files": [
+      "src/agent/mod.rs",
+      "src/lsp/manager.rs",
+      "src/server.rs"
+    ]
+  },
+  {
+    "id": "TC-20",
+    "tier": 4,
+    "query": "how to keep the three prompt surfaces consistent when tools are renamed or behavior changes",
+    "expected_files": [
+      "src/prompts/server_instructions.md",
+      "src/prompts/onboarding_prompt.md",
+      "src/tools/run_command/mod.rs"
+    ]
+  }
+]
