@@ -364,6 +364,20 @@ def _git_sha(path: str) -> str:
         return ""
 
 
+def _binary_version(binary: str) -> dict:
+    """Query the binary for its baked-in git SHA + dirty status.
+
+    Falls back to empty values on older binaries that lack `version`."""
+    try:
+        out = subprocess.check_output(
+            [binary, "version"],
+            text=True, stderr=subprocess.DEVNULL, timeout=5,
+        )
+        return json.loads(out.strip())
+    except Exception:
+        return {"version": "", "git_sha": "", "git_sha_full": "", "git_dirty": None}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="codescout 25-TC retrieval benchmark")
     parser.add_argument("--binary", default="./target/release/codescout",
@@ -447,7 +461,8 @@ def main() -> None:
     aggregate_score = sum(r["score"] for r in tc_results)
 
     project_sha = _git_sha(args.project_path)
-    codescout_sha = _git_sha(os.path.dirname(os.path.abspath(args.binary)) + "/../..")
+    binary_info = _binary_version(args.binary)
+    repo_head_sha = _git_sha(os.path.dirname(os.path.abspath(args.binary)) + "/../..")
     config_block = {
         "label": args.label,
         "embedder_url": env.get("CODESCOUT_EMBEDDER_URL", ""),
@@ -461,7 +476,11 @@ def main() -> None:
         "retrieval_profile": env.get("CODESCOUT_RETRIEVAL_PROFILE", ""),
         "embed_model": env.get("CODESCOUT_EMBED_MODEL", ""),
         "project_sha": project_sha,
-        "codescout_sha": codescout_sha,
+        "codescout_sha": binary_info.get("git_sha_full") or repo_head_sha,
+        "codescout_build_sha": binary_info.get("git_sha_full", ""),
+        "codescout_build_dirty": binary_info.get("git_dirty"),
+        "codescout_repo_head_sha": repo_head_sha,
+        "codescout_version": binary_info.get("version", ""),
     }
     output = {
         "backend": "stack",

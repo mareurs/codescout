@@ -105,6 +105,11 @@ enum Commands {
         #[arg(last = true, required = true)]
         server_cmd: Vec<String>,
     },
+
+    /// Print the codescout git SHA, full SHA, and dirty status baked into this
+    /// binary at build time. JSON output for use by the bench harness.
+    Version,
+
 }
 
 fn parse_env_kv(s: &str) -> Result<(String, String), String> {
@@ -156,6 +161,15 @@ async fn main() -> Result<()> {
                 .unwrap_or_else(|| std::path::PathBuf::from("."));
             tracing::info!("Indexing project at {}", root.display());
             codescout::embed::index::build_index(&root, force, None).await?;
+        }
+        Commands::Version => {
+            let info = serde_json::json!({
+                "version": env!("CARGO_PKG_VERSION"),
+                "git_sha": env!("CODESCOUT_GIT_SHA"),
+                "git_sha_full": env!("CODESCOUT_GIT_SHA_FULL"),
+                "git_dirty": env!("CODESCOUT_GIT_DIRTY") == "1",
+            });
+            println!("{info}");
         }
         #[cfg(feature = "dashboard")]
         Commands::Dashboard {
