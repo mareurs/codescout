@@ -351,3 +351,40 @@ pre-refactor expected paths. None of those states are reachable any more.
 The honest baseline going forward is **25/60 legacy-natural / 36/75 25-TC** at the
 pinned worktree. The `legacy-natural.json` suite is now committed so future runs
 can keep this comparison alive without recomputing it from git history.
+
+
+### 2026-05-12 — Reranker A/B/C: bge-v2-m3 (TEI) vs jina-rerank-v2 (Infinity)
+
+Spun up Infinity 0.0.77 on `:48085` to host `jinaai/jina-reranker-v2-base-multilingual`
+(TEI can't load it — custom XLM-R-flash architecture lacks standard `model_type` in
+config.json). Added `CODESCOUT_RERANKER_PROTOCOL=tei|infinity` toggle to
+`RerankerHttp` so codescout speaks both wire shapes (TEI uses `{texts, score}`,
+Infinity/Cohere use `{documents, results.relevance_score}`).
+
+Four configurations, all at bm25=5.0 / mode=code on pinned worktree:
+
+| Embedder | Reranker | natural 20-TC | full 25-TC | T5 |
+|---|---|---|---|---|
+| jina-v2 | bge-v2-m3 (TEI) | 25/60 | 36/75 | — |
+| jina-v2 | jina-rerank-v2 (Infinity) | 23/60 | **38/75** | 11/15 |
+| coderank Q4 | bge-v2-m3 (TEI) | not measured | 37/75 | 10/15 |
+| coderank Q4 | jina-rerank-v2 (Infinity) | 23/60 | 36/75 | 11/15 |
+
+**Findings.**
+
+- T5 (real-usage tier) is the cleanest signal: jina-rerank-v2 lifts it 10→11 on both
+  embedders. bge-v2-m3 caps at 10/15. The +1 is the same TC every time — TC-25
+  (LSP circuit breaker) flips 1→2.
+- jina-v2 + jina-rerank-v2 wins on the full suite (38/75) but loses on
+  legacy-natural (23/60). General-purpose multilingual reranker is keyword-friendly
+  but loses on long natural-language queries.
+- coderank Q4 + jina-rerank-v2 doesn't compound: 36/75 vs 37/75 for the bge baseline.
+  Two code-tuned components don't stack — likely because both already over-fit to
+  the same code patterns and add noise to each other.
+- **Recommendation:** keep coderank Q4 + bge-v2-m3 (TEI:48083) as champion for
+  full-suite stability, but consider jina-rerank-v2 swap when T5 improvement
+  matters more than legacy parity. The protocol toggle makes this a one-env-var
+  switch, no rebuild required.
+
+Teardown: stopped Infinity container; `bench_jinav2_*` and `bench_coderank_*` Qdrant
+collections preserved for future re-runs.
