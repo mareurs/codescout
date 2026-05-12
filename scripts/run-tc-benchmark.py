@@ -173,7 +173,7 @@ TEST_CASES = [
     {
         "id": "TC-21", "tier": 5,
         "query": "ToolContext agent lsp output_buffer progress dispatch",
-        "expected": ["src/tools/mod.rs", "src/agent/mod.rs", "src/server.rs"],
+        "expected": ["src/tools/core/types.rs", "src/agent/mod.rs", "src/server.rs"],
     },
     {
         "id": "TC-22", "tier": 5,
@@ -184,20 +184,22 @@ TEST_CASES = [
         "id": "TC-23", "tier": 5,
         "query": "EmbedderHttp embed_batch sparse dense remote backend",
         "expected": [
-            "crates/codescout-embed/src/embedder.rs",
-            "crates/codescout-embed/src/lib.rs",
+            "src/retrieval/embedder.rs",
             "src/retrieval/sync.rs",
         ],
     },
     {
         "id": "TC-24", "tier": 5,
         "query": "artifact augment params merge librarian tracker",
-        "expected": ["crates/librarian-mcp/src/tools/mod.rs"],
+        "expected": [
+            "crates/librarian-mcp/src/tools/augment.rs",
+            "crates/librarian-mcp/src/catalog/augmentation.rs",
+        ],
     },
     {
         "id": "TC-25", "tier": 5,
         "query": "MockLspClient handshake fixture circuit breaker tests",
-        "expected": ["src/lsp/ops.rs", "src/lsp/client.rs"],
+        "expected": ["src/lsp/mock.rs", "src/lsp/client.rs", "src/lsp/manager.rs"],
     },
 ]
 

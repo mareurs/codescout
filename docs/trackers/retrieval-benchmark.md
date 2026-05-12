@@ -147,10 +147,14 @@ relative — known gap.
 - **f16+prefix peaks at 34/75** (boost ∈ {2,3,5,7}), one point below Q4 no-prefix.
 - **CodeRankEmbed wins on env-var / identifier-bag queries** (TC-02, TC-11, TC-12)
   where code-specific training surfaces identifier semantics jina misses.
-- **T5 new tier (real-usage shape) is stuck at 4/15 on both models.** Failures cluster
-  on cross-crate basename collisions and class-name-only-no-keyword queries
-  (TC-23/24/25). The expected-path matcher is too strict for this tier.
-- **Champion (2026-05-12): CodeRankEmbed-Q4_K_M, no prefix, bm25_boost=5.0 → 35/75** (46.7%).
+- **T5 reached 7/15 on both models after fixing 4 wrong-expected truth lists** (originally
+  cited the wrong file paths for ToolContext, EmbedderHttp, artifact-augment, MockLspClient).
+- **TC-24 still 0/3 across all configs.** Top-10 is dominated by `.md` plans/specs/trackers
+  that mention the augment feature in natural language; the actual `tools/augment.rs` and
+  `catalog/augmentation.rs` are never surfaced. **Real retrieval failure mode**: code is
+  losing to descriptive prose. Next levers: md-vs-code score balancing, or a `kind:code`
+  filter on `semantic_search`.
+- **Champion (2026-05-12): CodeRankEmbed-Q4_K_M, no prefix, bm25_boost=5.0 → 37/75** (49.3%, after T5 truth-fix).
 ## Caveats and known gaps
 
 - **No CodeRankEmbed query prefix.** Historical 41/60 hybrid run used the
@@ -242,6 +246,38 @@ asymmetric vectors are mathematically "more correct" but BM25 already covers wha
 they'd recover, leaving net wash.
 
 **Current champion: CodeRankEmbed-Q4_K_M, no prefix, fusion @ bm25_boost=5.0 → 35/75.**
+
+### 2026-05-12 — T5 expected-path fix (4 of 5 TCs had wrong truth)
+
+Inspected top-10 for each T5 query against the original expected list and found
+**4 of 5 expected lists were authored against the wrong files**:
+
+| TC | Original expected | Actual symbol location |
+|---|---|---|
+| TC-21 (ToolContext) | `src/tools/mod.rs` | `src/tools/core/types.rs` |
+| TC-22 (ActiveProject) | `src/agent/mod.rs` | correct ✓ |
+| TC-23 (EmbedderHttp) | `crates/codescout-embed/src/embedder.rs` | `src/retrieval/embedder.rs` |
+| TC-24 (artifact augment) | `crates/librarian-mcp/src/tools/mod.rs` | `tools/augment.rs` + `catalog/augmentation.rs` |
+| TC-25 (MockLspClient + circuit breaker) | `src/lsp/ops.rs`, `client.rs` | `mock.rs`, `client.rs`, `manager.rs` |
+
+Re-ran champion config (CodeRank Q4 no-prefix boost=5.0) and jina baseline
+(boost=3.0) on the corrected suite. T5 jumped **4/15 → 7/15** for both models:
+
+| Run | T5 before | T5 after | Total before | Total after |
+|---|---:|---:|---:|---:|
+| CodeRank Q4 no-prefix b=5.0 | 4 | **7** | 35 | **37** |
+| jina-v2 b=3.0 | 4 | **7** | 32 | **35** |
+
+**New champion: CodeRankEmbed-Q4_K_M, no prefix, bm25_boost=5.0 → 37/75** (49.3%).
+
+#### Remaining T5 failure: TC-24
+
+`artifact augment params merge librarian tracker` still scores 0/3 — top-10 is
+**all `.md` plans/specs/trackers**, no `.rs` makes it in. The actual implementation
+(`tools/augment.rs`, `catalog/augmentation.rs`) is being out-ranked by every plan
+document that discusses the augment feature in natural language. Real failure
+mode worth surfacing — likely needs either md-vs-code score balancing or
+query-side hints that lean toward code (e.g. `pub fn augment`, `impl Augmentation`).
 
 ### 2026-05-12 — initial pinned bench
 
