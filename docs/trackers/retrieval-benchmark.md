@@ -138,15 +138,19 @@ relative — known gap.
 ## Findings so far (2026-05-12, baseline `ede25e69`)
 
 - **Fusion helps by +2** on both jina-v2 and CodeRankEmbed (sparse on vs off at boost=3.0).
-- **Boost sweep on CodeRankEmbed:** 0.5→32, 1.0→33, 2.0→34, 3.0→34, **5.0→35**.
-  Plateau higher than Phase 6 on the 20-TC suite (which capped at 3.0). The 25-TC
-  shape favors higher boost — likely the T5 keyword-bag queries pull harder on BM25.
+- **Boost sweep on CodeRankEmbed:** 0.5→32, 1.0→33, 2.0→34, 3.0→34, **5.0→35** (peak),
+  7.0→34, 10.0→33, 15.0→33, 20.0→33. Peak shifts up vs Phase 6's 3.0 plateau —
+  the 25-TC shape (T5 keyword-bags) leans harder on BM25.
 - **CodeRankEmbed wins on env-var / identifier-bag queries** (TC-02, TC-11, TC-12)
   where code-specific training surfaces identifier semantics jina misses.
+- **CodeRankEmbed query prefix hurts** by 2–4 pts across all boost values when
+  doc-side index is plain (no `search_document:` prefix during indexing). Either the
+  Q4_K_M quant collapsed the asymmetric subspace or a doc-side prefix is required for
+  the prefix to recover. Not retried with re-indexed docs.
 - **T5 new tier (real-usage shape) is stuck at 4/15 on both models.** Failures cluster
   on cross-crate basename collisions and class-name-only-no-keyword queries
   (TC-23/24/25). The expected-path matcher is too strict for this tier.
-
+- **Best so far: CodeRankEmbed @ bm25_boost=5.0, no query prefix → 35/75** (46.7%).
 ## Caveats and known gaps
 
 - **No CodeRankEmbed query prefix.** Historical 41/60 hybrid run used the
@@ -162,10 +166,51 @@ relative — known gap.
 
 ## History
 
+### 2026-05-12 — query prefix experiment (negative result) + extended boost sweep
+
+Added `CODESCOUT_QUERY_PREFIX` env to `EmbedderHttp::embed()` (query side only;
+`embed_batch()` doc-side untouched). Tested `"Represent this query for searching
+relevant code: "` against CodeRankEmbed across boost ∈ {1, 2, 3, 5}:
+
+| variant | no prefix | with prefix | Δ |
+|---|---|---|---|
+| dense-only | 32 | 30 | **−2** |
+| fusion boost=1.0 | 33 | 30 | **−3** |
+| fusion boost=2.0 | 34 | 31 | **−3** |
+| fusion boost=3.0 | 34 | 32 | −2 |
+| fusion boost=5.0 | **35** | 31 | **−4** |
+
+**Prefix consistently hurts** by 2–4 points. Hypotheses (not yet validated):
+
+1. Q4_K_M quantization may have collapsed the prefix-conditioned subspace.
+2. Our docs were indexed without the doc-side training distribution (raw code only).
+   If the model was trained with explicit `search_document:` style doc prefix
+   (Nomic family convention), then prefix-asymmetry without re-indexing docs WITH
+   the doc prefix breaks the asymmetric calibration.
+3. Re-indexing docs with `search_document: ` doc-side prefix may recover the win.
+   Not tested yet — would require a fresh `bench_coderank_qp_` collection.
+
+Extended boost sweep (no prefix):
+
+| boost | score | p50 ms |
+|---|---|---|
+| 0.5 | 32 | 143 |
+| 1.0 | 33 | 141 |
+| 2.0 | 34 | 146 |
+| 3.0 | 34 | 152 |
+| **5.0** | **35** | 148 |
+| 7.0 | 34 | 146 |
+| 10.0 | 33 | 150 |
+| 15.0 | 33 | 145 |
+| 20.0 | 33 | 157 |
+
+**Boost peak is 5.0** on the 25-TC pinned bench. Beyond 5.0, BM25 starts crowding
+out the dense candidates that actually carry signal. Plateau is broader than Phase 6
+saw (it stopped at 3.0).
+
 ### 2026-05-12 — initial pinned bench
 
 Built `.worktrees/bench`, refactored 7 hard-coded collection literals to use
 `config.collection(<kind>)` with `CODESCOUT_QDRANT_COLLECTION_PREFIX` override.
 Added 5 T5 real-usage-shape TCs sampled from external `usage.db`. First 8 runs
 land in the table above. CodeRankEmbed @ boost=5.0 is the current leader at 35/75.
-

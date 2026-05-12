@@ -34,6 +34,10 @@ pub struct EmbedderHttp {
     expected_dim: usize,
     dense_protocol: DenseProtocol,
     dense_model_name: String,
+    /// Optional prefix prepended to the dense query text in `embed()` (search side).
+    /// Doc-side `embed_batch()` is unaffected. Configure via `CODESCOUT_QUERY_PREFIX` —
+    /// e.g. `Represent this query for searching relevant code: ` for CodeRankEmbed.
+    query_prefix: String,
     client: reqwest::Client,
 }
 
@@ -80,12 +84,14 @@ impl EmbedderHttp {
             _ => DenseProtocol::Tei,
         };
         let dense_model_name = std::env::var("CODESCOUT_EMBEDDER_MODEL_NAME").unwrap_or_default();
+        let query_prefix = std::env::var("CODESCOUT_QUERY_PREFIX").unwrap_or_default();
         Self {
             dense_base: dense_base.into(),
             sparse_base: sparse_base.into(),
             expected_dim,
             dense_protocol,
             dense_model_name,
+            query_prefix,
             client: reqwest::Client::new(),
         }
     }
@@ -139,7 +145,15 @@ impl EmbedderHttp {
     pub async fn embed(&self, text: &str) -> Result<EmbedOutput> {
         let sparse_url = format!("{}/embed_sparse", self.sparse_base);
         let sparse_body = EmbedReq { inputs: vec![text] };
-        let dense_inputs = [text];
+        // Dense side may carry an asymmetric query prefix (e.g. CodeRankEmbed's
+        // "Represent this query for searching relevant code: "). Sparse SPLADE
+        // operates on raw tokens — leave it un-prefixed.
+        let dense_text = if self.query_prefix.is_empty() {
+            text.to_string()
+        } else {
+            format!("{}{}", self.query_prefix, text)
+        };
+        let dense_inputs = [dense_text.as_str()];
 
         let (dense_batch, sparse_resp) =
             tokio::try_join!(self.dense_batch(&dense_inputs), async {
