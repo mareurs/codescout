@@ -4,6 +4,41 @@ use super::super::format::format_overflow;
 use super::super::{optional_u64_param, parse_bool_param, Tool, ToolContext};
 use serde_json::{json, Value};
 
+/// Map a qdrant/search error string to an actionable recovery hint.
+///
+/// Patterns are checked in order of specificity: collection-missing first
+/// (most common after first-time setup), then dim-mismatch (model/index
+/// drift), then transport (stack went away), then a generic fallback.
+pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
+    if err_str.contains("doesn't exist")
+        || err_str.contains("not found")
+        || err_str.contains("Collection")
+    {
+        format!(
+            "Qdrant collection is missing for project `{project_id}`. \
+             Populate it: `cargo run --release --bin sync_project -- . {project_id}`"
+        )
+    } else if err_str.contains("Vector dimension") || err_str.contains("expected dim") {
+        "Embedding dim mismatch between index and configured model. \
+         Drop the collection and re-index: \
+         `curl -X DELETE $CODESCOUT_QDRANT_URL/../collections/code_chunks` \
+         then `cargo run --release --bin sync_project -- . <project-id>`"
+            .to_string()
+    } else if err_str.contains("Connection refused")
+        || err_str.contains("transport error")
+        || err_str.contains("tonic")
+    {
+        "Stack went offline mid-query. \
+         Restart with `./scripts/retrieval-stack.sh up` and retry."
+            .to_string()
+    } else {
+        "Stack reachable but query failed. \
+         Check `./scripts/retrieval-stack.sh ps` and qdrant logs \
+         (`docker logs codescout-qdrant`)."
+            .to_string()
+    }
+}
+
 #[allow(dead_code)] // re-wire when the stack search gains file-diversity capping (tracker L-15)
 /// Apply a per-file cap to a score-sorted list of search results. Iterates in
 /// order and keeps at most `max_per_file` entries sharing the same `file_path`;
@@ -154,10 +189,8 @@ impl Tool for SemanticSearch {
             .search_code(&project_id, query, opts)
             .await
             .map_err(|e| {
-                crate::tools::RecoverableError::with_hint(
-                    format!("stack search failed: {e}"),
-                    "Check the retrieval stack is running: `./scripts/retrieval-stack.sh ps`",
-                )
+                let hint = classify_search_error(&e.to_string(), &project_id);
+                crate::tools::RecoverableError::with_hint(format!("stack search failed: {e}"), hint)
             })?;
         let result_items: Vec<serde_json::Value> = hits
             .iter()
@@ -281,4 +314,68 @@ pub(crate) fn format_semantic_search(val: &Value) -> String {
     }
 
     out
+}
+
+#[cfg(test)]
+mod classify_search_error_tests {
+    use super::classify_search_error;
+
+    #[test]
+    fn missing_collection_routes_to_sync_project_hint() {
+        let err = "hybrid_query: Collection `code_chunks` doesn't exist!";
+        let hint = classify_search_error(err, "code-explorer");
+        assert!(hint.contains("sync_project"), "hint: {hint}");
+        assert!(
+            hint.contains("code-explorer"),
+            "hint must name project: {hint}"
+        );
+    }
+
+    #[test]
+    fn dim_mismatch_routes_to_drop_and_reindex_hint() {
+        let err = "upsert_points: Vector dimension error: expected dim: 512, got 768";
+        let hint = classify_search_error(err, "code-explorer");
+        assert!(hint.contains("dim mismatch"), "hint: {hint}");
+        assert!(
+            hint.contains("DELETE"),
+            "hint must give drop command: {hint}"
+        );
+        assert!(
+            hint.contains("sync_project"),
+            "hint must follow with reindex: {hint}"
+        );
+    }
+
+    #[test]
+    fn transport_error_routes_to_restart_hint() {
+        let err = "tonic::transport::Error: Connection refused (os error 111)";
+        let hint = classify_search_error(err, "code-explorer");
+        assert!(hint.contains("offline"), "hint: {hint}");
+        assert!(
+            hint.contains("retrieval-stack.sh up"),
+            "hint must restart: {hint}"
+        );
+    }
+
+    #[test]
+    fn unknown_error_routes_to_diagnostic_hint() {
+        let err = "some weird unrelated failure";
+        let hint = classify_search_error(err, "code-explorer");
+        assert!(hint.contains("ps"), "fallback must check stack: {hint}");
+        assert!(
+            hint.contains("docker logs"),
+            "fallback must point at logs: {hint}"
+        );
+    }
+
+    #[test]
+    fn collection_missing_takes_priority_over_transport() {
+        // If both signals present, collection-missing wins (more actionable).
+        let err = "Collection `code_chunks` not found via tonic transport";
+        let hint = classify_search_error(err, "code-explorer");
+        assert!(
+            hint.contains("sync_project"),
+            "specificity ordering: {hint}"
+        );
+    }
 }
