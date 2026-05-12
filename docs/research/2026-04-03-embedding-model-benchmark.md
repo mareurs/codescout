@@ -637,6 +637,91 @@ TC-09 expected corrected to `workflow.rs` (command.rs no longer exists).
 **vs pure-vector baseline (27/60):** +4 points. Vocabulary-mismatch targets: TC-10 0→1 ✓, TC-19 0→1 ✓, TC-20 still 0. Both TC-10 and TC-19 met the ≥1/3 improvement target. TC-05 improved 1→3 (output.rs + PROGRESSIVE_DISCOVERABILITY.md both surfaced). TC-20 remains at 0 — "prompt surface consistency" query still routed to CLAUDE.md and server.rs test instead of the actual prompt files.
 
 ---
+### Model: jina-v2-base-code (retrieval stack, hybrid SPLADE+dense+reranker, 2026-05-12)
+
+**Run after the remote-only embedding migration (commits 57a9a15..c2d5902, Tasks 1-8/10-14 of plan
+`docs/superpowers/plans/2026-05-11-remote-only-embedding.md`).**
+
+| Field | Value |
+|-------|-------|
+| Model | jinaai/jina-embeddings-v2-base-code (via TEI 1.8.3 GPU) |
+| Dimensions | 768 |
+| Stack | qdrant + jina dense + bge-small SPLADE sparse + bge-reranker (`source: "stack"` in results) |
+| Endpoint | embed=`127.0.0.1:48081`, sparse=`:48084`, rerank=`:48083`, qdrant=`:6334` |
+| Profile | `gpu` (`CODESCOUT_RETRIEVAL_PROFILE=gpu`) |
+| Index time | Existing qdrant index, not measured this run |
+| sqlite-vec rebuild (force) | ~5 min, 18221/19572 chunks before "database is locked" stop |
+| Chunk count (sqlite-vec, ref) | 19572 |
+| DB size (sqlite-vec, ref) | 162 MB |
+| Total score | **28/60** |
+
+#### Per-query scores
+
+| TC | Score | Notes |
+|----|------:|-------|
+| TC-01 RecoverableError | 2 | tools/core/types.rs (moved from tools/mod.rs) pos 5; FEATURES.md pos 3; server.rs missing |
+| TC-02 embedding model configuration | 2 | embedding-backends.md ×4 top, embeddings.md pos 5; mod.rs absent |
+| TC-03 LSP client implementation | 2 | client.rs pos 5; ops.rs pos 4,6,7; manager.rs absent |
+| TC-04 run_command shell execution | 2 | run_command/mod.rs pos 4,8; shell-integration.md pos 2; output-buffers.md absent |
+| TC-05 OutputGuard | 3 | output.rs pos 2,3; PROGRESSIVE_DISCOVERABILITY.md pos 4 |
+| TC-06 usage database | 1 | usage/mod.rs pos 6,7; design doc pos 2; usage/db.rs missing |
+| TC-07 section boundary | 1 | markdown chunker hits dominated; tests/markdown.rs only at pos 9; file_summary.rs missing |
+| TC-08 dimension mismatch | 1 | index.rs ×5; schema.rs absent |
+| TC-09 dangerous command | 1 | path_security.rs ×4 top; run_command/ absent |
+| TC-10 overflow hints | 1 | PROGRESSIVE_DISCOVERABILITY.md ×3; output.rs absent; server_instructions absent |
+| TC-11 rename symbol | 1 | symbol/edit_code.rs pos 6 (moved from symbol_edit.rs); ops.rs absent |
+| TC-12 embedding URL backend | 3 | embedding-backends.md pos 1; embeddings.md pos 5; codescout-embed/lib.rs pos 9,10 |
+| TC-13 LSP crash circuit breaker | 1 | manager.rs ×6 top; client.rs pos 6; troubleshooting.md absent |
+| TC-14 dispatch error classification | 1 | server.rs pos 5; tools/core/types.rs and usage/mod.rs absent |
+| TC-15 force reindex vec0 | 1 | index.rs ×5; mod.rs absent |
+| TC-16 semantic search KNN flow | 0 | Only docs/scripts; no source file from expected list in top 10 |
+| TC-17 companion plugin routing | 2 | companion-plugin.md pos 5; routing-plugin.md pos 7 |
+| TC-18 dual-path heading detection | 2 | markdown/edit_markdown.rs ×3 top; file_summary.rs pos 9; bug-reports pos 2,3 |
+| TC-19 activation wiring | 1 | server.rs ×2; agent/mod.rs and manager.rs absent |
+| TC-20 prompt surfaces | 0 | CLAUDE.md + docs only; no source surfaces in top 10 |
+
+**Scoring caveats:**
+
+1. **Path drift** since the 2026-04-03 baseline: `src/tools/mod.rs` → `src/tools/core/types.rs`,
+   `src/tools/command.rs` → `src/tools/run_command/`, `src/tools/markdown.rs` → `src/tools/markdown/`,
+   `src/agent.rs` → `src/agent/mod.rs`, `src/tools/symbol_edit.rs` → `src/tools/symbol/edit_code.rs`,
+   `src/tools/workflow.rs::build_system_prompt_draft` → `src/prompts/builders.rs`,
+   `docs/TODO-tool-misbehaviors.md` → `docs/archive/bug-reports/...`. Moved equivalents were credited.
+2. **Dual storage:** `index(force=true)` rebuilt sqlite-vec (.codescout/embeddings/project.db, jina-v2 768d).
+   `semantic_search` queries the qdrant retrieval stack independently. This run scores the qdrant stack's
+   indexed state — not the freshly rebuilt sqlite-vec.
+3. **Lock contention during rebuild:** sqlite-vec rebuild failed with "database is locked" at 18221/19572
+   chunks. Three concurrent code-explorer Claude Code sessions probing the same db. Did not affect this
+   benchmark (run against qdrant) but is a real bug for sessions sharing a project.
+
+#### Where this stack wins vs. CodeRankEmbed baseline
+
+- TC-12 (embedding URL backend) — 3/3 here vs. typically 1 — embedding-backends.md is canonical, codescout-embed/lib.rs is the new factory home, both rank high.
+- TC-05 (OutputGuard) — 3/3 — exact symbol + canonical doc both in top 5.
+
+#### Where this stack loses
+
+- TC-16 (semantic search KNN flow) — 0/3. Query embeds well, but jina-v2 ranks docs/research above source files for this query.
+- TC-20 (prompt surfaces) — 0/3. CLAUDE.md and plans dominate; the three source surfaces don't appear in top 10.
+- Many Tier 2/3 queries score 1 because only one expected file appears (often a single canonical doc), not the source-file pair.
+
+#### Comparison to prior hybrid CodeRankEmbed (2026-05-02, 41/60 best)
+
+This run scores **28/60** vs. prior hybrid CodeRankEmbed best of 41/60. The drop is driven by:
+
+- **Embedding-only retrieval here** (qdrant dense+sparse+reranker) vs. prior **BM25+vector RRF on sqlite-vec**.
+  The prior BM25 leg lifted exact-identifier queries (TC-01, TC-13, TC-14, TC-19) that this run misses.
+- jina-v2-base-code optimizes for code-text similarity; CodeRankEmbed was specifically trained for code retrieval
+  with asymmetric query prefix — likely better for these tier-2/3 architectural queries.
+
+**Action items recorded but not executed in this Task 9:**
+
+- Re-enable BM25 leg on sqlite-vec / qdrant stack for hybrid retrieval — restoring the +10 points seen in prior hybrid runs.
+- Investigate why TC-16 and TC-20 score 0 — these are precisely the cases hybrid retrieval is supposed to rescue.
+- Consider switching back to CodeRankEmbed if the qdrant stack supports it — it ran on `localhost:43300` historically.
+
+---
+
 ### Model: *(template for additional models)*
 
 | Field | Value |
