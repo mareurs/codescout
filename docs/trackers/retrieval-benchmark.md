@@ -423,3 +423,60 @@ because BM25 was masking it.
 
 The 41/60 historical claim remains unreproducible; **26/60 natural / 37/75 full** is the
 honest post-audit baseline going forward.
+
+### 2026-05-12 — Tavily stack (sqlite-vec + tantivy) + CodeRank, no reranker
+
+**Goal:** Settle the "is the retrieval backend itself the bottleneck?" question.
+Reproduce the May-2 31/60 ceiling by going back to the pre-Qdrant stack with the
+best dense embedder we have today (CodeRankEmbed-Q4_K_M on llama-server-rocm :43300).
+
+**Setup**
+
+- Worktree pinned at `0795b208e8bab76705d6582f43431e39fcccedf4` (the 31/60 commit) → `.worktrees/bench-legacy/`
+- Binary: `.worktrees/bench-legacy/target/release/codescout` (default features: `local-embed`, `remote-embed`, `dashboard`, `http`, `librarian`)
+- Index target: `.worktrees/bench` (current code at `ede25e69`) — so TC paths still align with the post-refactor layout
+- `[embeddings]` config: `model = "CodeRankEmbed-Q4_K_M.gguf"`, `url = "http://127.0.0.1:43300/v1"`
+- Stack: dense via HTTP (coderank, dim 768) + tantivy BM25 in-process; **no reranker** (didn't exist in 0795b208)
+- 730 files / 18 229 chunks indexed in ~47 s
+
+**Result: 28/60 on legacy-natural** (p50 93 ms, p95 110 ms)
+
+| Stack | Embedder | Sparse | Rerank | Legacy-natural |
+|---|---|---|---|---|
+| historical (May 2) | jina-v1-base-code | tantivy | — | 31/60 |
+| **tavily + coderank** | **CodeRankEmbed-Q4** | **tantivy** | **—** | **28/60** |
+| Qdrant + reranker (today's best) | jina-v2-base-code | splade-cocondenser | bge-v2-m3 | ~30/60 (38/75) |
+
+**Per-TC scores:** TC-01 1/3, TC-02 2/3, TC-03 3/3, TC-04 2/3, TC-05 2/3, TC-06 1/3,
+TC-07 2/3, TC-08 2/3, TC-09 2/3, TC-10 1/3, TC-11 0/3, TC-12 1/3, TC-13 1/3,
+TC-14 1/3, TC-15 2/3, TC-16 1/3, TC-17 1/3, TC-18 2/3, TC-19 1/3, TC-20 0/3.
+
+**Conclusions**
+
+1. **Ceiling confirmed.** No matter which retrieval engine we swap in (Qdrant vec0,
+   sqlite-vec, tantivy, fastembed-bm25, splade, splade-pp), top-10 hit-rate on the
+   legacy-natural suite plateaus at 28–30/60. The bottleneck is upstream of the
+   retrieval engine — query phrasing, chunk granularity, or embedding-model
+   recall on code identifiers.
+2. **Latency wins for the legacy stack.** 93 ms p50 vs Qdrant's ~300–500 ms p50 (with rerank).
+   No HTTP hop to Qdrant, no second HTTP hop to a reranker.
+3. **31/60 isn't a phantom but isn't repeatable either.** Within 3 points across
+   completely different backends — this is noise band for a 20-TC suite where each
+   TC is 0/3..3/3. The historical value was real but not load-bearing.
+4. **No retrieval-stack reason to keep tantivy/sqlite-vec.** Drop them. The
+   architecture decision is now justified: ship a thin codescout binary that talks
+   HTTP to an external retrieval stack (Qdrant + sparse + dense + rerank).
+
+**Caveats (recorded for honesty)**
+
+- The harness env block records `embedder_url=:48081`, `sparse_embedder_url=:48084`,
+  `reranker_url=:48083`, `qdrant_url=:6334`, `embed_model=jina-embeddings-v2-base-code`
+  — these are env vars at harness invocation time; the legacy binary **ignored**
+  all of them and read its own `[embeddings]` block. The recorded config block
+  misrepresents the actual stack. Followup: add `backend = "stack" | "tavily"`
+  detection in the harness (e.g. probe `codescout version` for a "retrieval-backend"
+  field, or inspect `[embeddings].url` in project.toml).
+- `codescout_build_sha` / `codescout_version` are empty because the 0795b208 binary
+  predates the build-SHA bake-in (`ad7e7e7a`). `codescout_repo_head_sha` = 0795b208
+  (recorded from `git rev-parse HEAD` in the legacy worktree).
+- Index built with `--force`; chunks differ slightly (18 229 vs current 17 827+).
