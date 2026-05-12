@@ -558,3 +558,113 @@ infrastructure cost (29-min reindex, 24 GB VRAM on the AMD or 6 GB on NVIDIA,
 ceiling, the next levers are **TC suite phrasing audit** (drop or rephrase the
 8/20 TCs that flatline at 0/3 across all configs) and **chunking strategy**
 (node-aware chunks vs char-bounded splits).
+
+### 2026-05-12 — Bench-doc pollution + mode=code blind spot (+6 points, no infra change)
+
+**Goal:** After concluding the retrieval stack is not the bottleneck, audit the
+TC suite itself. Look at zero-score TCs across the latest jina-v2 + bge-rerank
+baseline and identify systematic issues.
+
+**Findings (two no-cost bugs in the bench, not the stack)**
+
+1. **`mode=code` post-filter blind spot.** The harness called `semantic_search`
+   with default `mode="code"`, which post-filters out all markdown candidates.
+   Several TCs have markdown-only expected files (TC-05's
+   `docs/PROGRESSIVE_DISCOVERABILITY.md`, TC-17's docs in
+   `docs/manual/src/concepts/`) — these TCs returned empty top-10 lists not
+   because retrieval failed, but because every candidate was filtered out.
+   Switching to `mode="full"` lifted score 26 → 29 (+3) on identical
+   collection.
+
+2. **Bench-doc data leak.** The TC queries are stored verbatim in
+   `docs/research/2026-04-03-embedding-model-benchmark.md`,
+   `docs/research/2026-05-06-retrieval-stack-benchmark.md`,
+   `docs/trackers/retrieval-benchmark.md`, and `scripts/run-tc-benchmark.py`.
+   Semantic search legitimately ranked those highest because they contain the
+   exact query strings. **15 of 60 top-3 slots (25%) were pollution.** Deleting
+   their chunks from Qdrant: 29 → 32 (+3). Combined with `mode=full`: 26 → 32
+   (**+6 points = +23% relative**).
+
+**Result: 32/60 on legacy-natural** with no infra change — beats the 31/60
+"mythical historical ceiling" we couldn't reproduce, using the same
+jina-v2-base-code + splade-cocondenser + bge-reranker-v2-m3 stack we already
+had.
+
+**Per-TC delta (jina-v2 + bge-rerank, both runs)**
+
+| TC | mode=code | mode=full + depollute | Δ |
+|---|---:|---:|---:|
+| TC-01 | 1 | 2 | +1 |
+| TC-02 | 0 | 2 | +2 |
+| TC-03 | 2 | 2 | 0 |
+| TC-04 | 2 | 2 | 0 |
+| TC-05 | 0 | **3** | **+3** |
+| TC-06 | 1 | 2 | +1 |
+| TC-07 | 2 | 0 | -2 (now caught by audit, see below) |
+| TC-08 | 2 | 2 | 0 |
+| TC-09 | 2 | 2 | 0 |
+| TC-10 | 1 | 1 | 0 |
+| TC-11 | 2 | 2 | 0 |
+| TC-12 | 0 | 2 | +2 |
+| TC-13 | 1 | 2 | +1 |
+| TC-14 | 1 | 2 | +1 |
+| TC-15 | 2 | 2 | 0 |
+| TC-16 | 1 | 0 | -1 (audit needed) |
+| TC-17 | 1 | 2 | +1 |
+| TC-18 | 2 | 1 | -1 (audit needed) |
+| TC-19 | 1 | 1 | 0 |
+| TC-20 | 0 | 0 | 0 (audit needed) |
+| **Total** | **26** | **32** | **+6** |
+
+**Fixes committed**
+
+- `scripts/run-tc-benchmark.py`: new `--mode {code,full}` CLI flag, default
+  `full`. Default change is reasonable because the suite mixes code and
+  markdown expected files; `full` is the superset.
+- `.codescout/project.toml`: added the four bench-doc paths plus
+  `.codescout/projects/**` (codescout's own per-project memories — pure
+  internal noise) and `scripts/tc-suites/**` to `[ignored_paths] patterns`.
+  Existing chunks for these were deleted from Qdrant `code_chunks` via
+  `points/delete` filter on `chunk_id` (text-match).
+
+**Three remaining zero-score TCs — root causes, not pollution**
+
+- **TC-07** "section boundary detection in markdown editing"
+  Top-3 are all `chunker.rs` (text chunker that *also* detects section
+  boundaries — semantically right, not the expected
+  `src/tools/markdown/edit_markdown.rs`). The expected file's chunks just
+  don't surface for this phrasing. Likely fix: rephrase to
+  `"edit_markdown section heading replace insert_after action"` or accept
+  `chunker.rs` as a valid match.
+
+- **TC-16** "how a semantic search query flows from input through embedding
+  to KNN ranked results"
+  Top-10 dominated by design specs (`auto-reindex-on-edit-design.md`,
+  `hybrid-retrieval-design.md`, `library-indexing-redesign.md`). Design docs
+  legitimately answer "how does X flow?" better than the implementation
+  files. Either rephrase to be implementation-anchored
+  (`semantic_search call_tool semantic_search.rs RetrievalClient`) or
+  broaden truth set to include the matching design docs.
+
+- **TC-20** "three prompt surfaces consistent when tools are renamed"
+  Top-1 is `CLAUDE.md` — which **is** the canonical place for the three-
+  prompt-surfaces doctrine. The expected files
+  (`src/prompts/server_instructions.md`, `onboarding_prompt.md`) are the
+  prompts themselves, not the meta-discussion the query asks about. **The
+  truth set is wrong.** Either add `CLAUDE.md` to expected, or rephrase to
+  ask about prompt content rather than the consistency pattern.
+
+**Implication for the retrieval-stack design**
+
+- 28/60 was never the true ceiling — it was 26/60 with hidden mode and
+  pollution bugs. Honest current ceiling on jina-v2-base-code (137M, default
+  stack) is **32/60**, with 3 TCs requiring TC-suite repair (not retrieval
+  fixes) to potentially reach 36-38/60.
+- Reinforces the earlier conclusion: **don't strip-and-ship the stack
+  optimization-side without first repairing the TC suite**, otherwise the
+  bench remains an unreliable signal for future retrieval improvements.
+- Concretely: before locking docker-compose profiles, run a "clean bench"
+  (post-fix) sweep across the jina-v2 / CodeRankEmbed / nomic-embed-code
+  matrix to see whether the model-size ranking changes once the noise is
+  removed. The earlier negative result for nomic-embed-code (24/60) is
+  suspect because it inherited the same mode and pollution bugs.

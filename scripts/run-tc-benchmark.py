@@ -294,8 +294,8 @@ class McpClient:
     def activate_project(self, path: str) -> None:
         self.call_tool("workspace", {"action": "activate", "path": path})
 
-    def semantic_search(self, query: str, limit: int = 10) -> list[str]:
-        result = self.call_tool("semantic_search", {"query": query, "limit": limit})
+    def semantic_search(self, query: str, limit: int = 10, mode: str = "code") -> list[str]:
+        result = self.call_tool("semantic_search", {"query": query, "limit": limit, "mode": mode})
         content = result.get("content", [])
         if not content:
             return []
@@ -394,6 +394,8 @@ def main() -> None:
                              "(e.g. 'bench_jinav2_'). Empty = use live collections.")
     parser.add_argument("--label", default="",
                         help="Human label echoed into the JSON config block (e.g. 'jina-v2-bm25-3.0').")
+    parser.add_argument("--mode", default="full", choices=["code", "full"],
+                        help="semantic_search mode: 'code' filters markdown, 'full' includes everything (default: full).")
     args = parser.parse_args()
 
     test_cases = TEST_CASES
@@ -433,7 +435,7 @@ def main() -> None:
     for tc in test_cases:
         t0 = time.monotonic()
         try:
-            top10 = client.semantic_search(tc["query"], limit=args.limit)
+            top10 = client.semantic_search(tc["query"], limit=args.limit, mode=args.mode)
         except Exception as exc:
             top10 = []
             print(f"[WARN] {tc['id']} failed: {exc}", file=sys.stderr)
