@@ -12,6 +12,9 @@ pub struct SearchOpts {
     /// Whether to apply the cross-encoder reranker. Degrades gracefully on
     /// reranker failure.
     pub rerank: bool,
+    /// Payload `language` values to exclude (Qdrant `must_not` clause). Used by
+    /// `semantic_search(mode="code")` to drop markdown noise. Empty = no filter.
+    pub exclude_languages: Vec<String>,
 }
 
 impl SearchOpts {
@@ -20,6 +23,7 @@ impl SearchOpts {
             limit,
             overfetch: limit * 2,
             rerank: true,
+            exclude_languages: Vec::new(),
         }
     }
 }
@@ -30,6 +34,7 @@ impl Default for SearchOpts {
             limit: 10,
             overfetch: 20,
             rerank: true,
+            exclude_languages: Vec::new(),
         }
     }
 }
@@ -68,6 +73,7 @@ impl RetrievalClient {
                 opts.overfetch,
                 self.config.bm25_boost,
                 self.config.disable_sparse,
+                &opts.exclude_languages,
             )
             .await?;
 

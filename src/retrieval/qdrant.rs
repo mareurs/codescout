@@ -167,6 +167,8 @@ impl QdrantWrap {
     /// `bm25_boost` multiplies the sparse candidate pool relative to dense.
     /// 1.0 = equal weight; 2.0 = sparse fetches 2× more candidates before RRF.
     /// `disable_sparse` skips the sparse leg entirely → pure dense ANN ranking.
+    /// `exclude_languages` adds a `must_not` clause on the payload `language`
+    /// field (empty = no filter). Used for `semantic_search(mode="code")`.
     #[allow(clippy::too_many_arguments)]
     pub async fn hybrid_query(
         &self,
@@ -177,8 +179,18 @@ impl QdrantWrap {
         limit: usize,
         bm25_boost: f32,
         disable_sparse: bool,
+        exclude_languages: &[String],
     ) -> Result<Vec<crate::retrieval::search::Hit>> {
-        let filter = Filter::must([Condition::matches("project_id", project_id.to_string())]);
+        let must = vec![Condition::matches("project_id", project_id.to_string())];
+        let must_not: Vec<Condition> = exclude_languages
+            .iter()
+            .map(|l| Condition::matches("language", l.clone()))
+            .collect();
+        let filter = Filter {
+            must,
+            must_not,
+            ..Default::default()
+        };
 
         let resp = if disable_sparse {
             // Pure dense ANN — no fusion, no sparse leg.

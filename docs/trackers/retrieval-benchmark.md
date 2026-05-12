@@ -154,7 +154,11 @@ relative — known gap.
   `catalog/augmentation.rs` are never surfaced. **Real retrieval failure mode**: code is
   losing to descriptive prose. Next levers: md-vs-code score balancing, or a `kind:code`
   filter on `semantic_search`.
-- **Champion (2026-05-12): CodeRankEmbed-Q4_K_M, no prefix, bm25_boost=5.0 → 37/75** (49.3%, after T5 truth-fix).
+- **TC-24 went 0/3 → 3/3 in code-mode** — augment.rs and augmentation.rs surface
+  to ranks #1 and #3 when .md plans/specs are filtered out.
+- **Champion (2026-05-12): CodeRankEmbed Q4_K_M, no prefix, bm25=5.0, mode=code → 37/75**
+  (49.3% — total matches full-mode but T5 jumps from 7/15 to 10/15, signaling
+  better real-user query handling).
 ## Caveats and known gaps
 
 - **No CodeRankEmbed query prefix.** Historical 41/60 hybrid run used the
@@ -278,6 +282,38 @@ Re-ran champion config (CodeRank Q4 no-prefix boost=5.0) and jina baseline
 document that discusses the augment feature in natural language. Real failure
 mode worth surfacing — likely needs either md-vs-code score balancing or
 query-side hints that lean toward code (e.g. `pub fn augment`, `impl Augmentation`).
+
+### 2026-05-12 — code/full search modes (default to code)
+
+`semantic_search` now accepts `mode: "code" | "full"`. Default is `code`, which
+applies a Qdrant `must_not: language == markdown` filter to drop md/mdx chunks
+from results. `full` reverts to prior behavior (all indexed sources).
+
+Implementation: new `exclude_languages: Vec<String>` on `SearchOpts`, plumbed
+through `search_in` to `hybrid_query` which builds a `Filter { must, must_not }`.
+
+Re-ran champion configs on pinned bench:
+
+| Run | Total | T5 | Notes |
+|---|---:|---:|---|
+| coderank b=5.0, mode=full (prior) | 37/75 | 7/15 | |
+| **coderank b=5.0, mode=code (new default)** | **37/75** | **10/15** | T5 +3, T1-T4 −3 |
+| jina b=3.0, mode=full (prior) | 35/75 | 7/15 | |
+| **jina b=3.0, mode=code (new default)** | **36/75** | **11/15** | +1 net, T5 +4 |
+
+**TC-24 went from 0/3 → 3/3 in code-mode.** The two expected files
+(`crates/librarian-mcp/src/tools/augment.rs`, `crates/librarian-mcp/src/catalog/augmentation.rs`)
+moved to ranks #1 and #3 with the .md plans/specs filtered out.
+
+The total-score wash on coderank reflects a real trade-off: queries whose expected
+answer IS a `.md` doc (TC-02 backend config, TC-05 PROGRESSIVE_DISCOVERABILITY,
+TC-17 routing-plugin guide) lose points. This is the right behavior for the
+common LLM use case (finding implementations) but users who want docs must
+explicitly pass `mode="full"`.
+
+**Updated champion: coderank Q4 no-prefix bm25=5.0 mode=code → 37/75**, with
+the meaningful T5 improvement (10/15 vs prior 7/15) signaling better real-user
+query handling.
 
 ### 2026-05-12 — initial pinned bench
 

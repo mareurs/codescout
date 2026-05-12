@@ -121,6 +121,8 @@ For any symbol change, in order:
 - **Transitive call graphs** → `call_graph(symbol, direction, max_depth)` — `direction="callers"` for blast-radius sizing; `direction="callees"` for flow tracing. `call_graph(depth=1, direction="callers")` also filters refs to call sites only.
 
 **Retrieval stack required.** `semantic_search` runs through the Qdrant + TEI hybrid stack. If a call returns `retrieval stack offline`, the user must run `./scripts/retrieval-stack.sh up` once per machine. There is no in-process fallback — the legacy sqlite-vec code-search path was removed in Phase 7.
+
+**Modes.** `semantic_search(mode="code")` (default) excludes markdown chunks so implementations rank ahead of plans/specs/trackers. Pass `mode="full"` only when you actually want docs in the results (e.g. searching for a tracker entry by concept).
 ### Gotchas
 
 - **MUST FOLLOW:** `edit_code(action="rename")` may corrupt string literals containing the

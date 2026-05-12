@@ -97,6 +97,8 @@ impl Tool for SemanticSearch {
              - `scope`: `\"project\"` (default), `\"libraries\"`, `\"all\"`, or `\"lib:<name>\"`.\n\
              - `include_memories=true`: also search semantic memories.\n\
              - `project_id`: filter to a specific workspace sub-project.\n\
+             - `mode`: `\"code\"` (default) excludes markdown chunks — best for finding implementations.\n\
+                       `\"full\"` includes all indexed content.\n\
              \n\
              ## Output\n\
              \n\
@@ -120,7 +122,8 @@ impl Tool for SemanticSearch {
                 "offset": { "type": "integer", "description": "Pagination offset" },
                 "scope": { "type": "string", "description": "'project' (default), 'libraries', 'all', or 'lib:<name>'" },
                 "include_memories": { "type": "boolean", "default": false, "description": "Also search semantic memories." },
-                "project_id": { "type": "string", "description": "Filter to a workspace project ID." }
+                "project_id": { "type": "string", "description": "Filter to a workspace project ID." },
+                "mode": { "type": "string", "enum": ["code", "full"], "default": "code", "description": "'code' (default) excludes markdown chunks — best for finding implementations. 'full' includes all indexed content (code + docs)." }
             }
         })
     }
@@ -181,6 +184,10 @@ impl Tool for SemanticSearch {
             limit,
             overfetch: limit * 2,
             rerank: true,
+            exclude_languages: match input.get("mode").and_then(|v| v.as_str()).unwrap_or("code") {
+                "full" => Vec::new(),
+                _ => vec!["markdown".to_string()],
+            },
         };
         if let Some(p) = ctx.progress.as_ref() {
             p.report_text("searching").await;
