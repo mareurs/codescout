@@ -15,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 BINARY="${CODESCOUT_BINARY:-${REPO_ROOT}/target/release/codescout}"
-PROJECT_PATH="${CODESCOUT_PROJECT_PATH:-${REPO_ROOT}}"
+PROJECT_PATH="${CODESCOUT_PROJECT_PATH:-${REPO_ROOT}/.worktrees/bench}"
 
 if [[ ! -x "${BINARY}" ]]; then
     echo "codescout binary not found at ${BINARY}" >&2

@@ -55,7 +55,10 @@ impl crate::retrieval::client::RetrievalClient {
 
         let started = std::time::Instant::now();
         self.qdrant
-            .ensure_collection("code_chunks", self.config.model_dim as u64)
+            .ensure_collection(
+                &self.config.collection("code_chunks"),
+                self.config.model_dim as u64,
+            )
             .await?;
 
         // 1. Walk files and chunk them — ignore crate respects .gitignore at all levels
@@ -120,7 +123,7 @@ impl crate::retrieval::client::RetrievalClient {
         // 2. Fetch existing chunk refs from Qdrant for this project
         let server: Vec<ChunkRef> = self
             .qdrant
-            .scroll_chunk_refs("code_chunks", project_id)
+            .scroll_chunk_refs(&self.config.collection("code_chunks"), project_id)
             .await
             .unwrap_or_default();
         let local_refs: Vec<ChunkRef> = local
@@ -156,14 +159,16 @@ impl crate::retrieval::client::RetrievalClient {
                 .zip(embeds.into_iter())
                 .map(|((p, _), e)| (p.chunk_id.clone(), payload_to_map(p), e))
                 .collect();
-            self.qdrant.upsert_points("code_chunks", &points).await?;
+            self.qdrant
+                .upsert_points(&self.config.collection("code_chunks"), &points)
+                .await?;
         }
 
         // 4. Delete obsolete chunks
         let deleted = action.to_delete.len();
         if !action.to_delete.is_empty() {
             self.qdrant
-                .delete_points("code_chunks", &action.to_delete)
+                .delete_points(&self.config.collection("code_chunks"), &action.to_delete)
                 .await?;
         }
 

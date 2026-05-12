@@ -102,7 +102,13 @@ impl RetrievalClient {
         query: &str,
         opts: SearchOpts,
     ) -> Result<Vec<Hit>> {
-        self.search_in("code_chunks", project_id, query, opts).await
+        self.search_in(
+            &self.config.collection("code_chunks"),
+            project_id,
+            query,
+            opts,
+        )
+        .await
     }
 
     pub async fn search_markdown(
@@ -111,8 +117,13 @@ impl RetrievalClient {
         query: &str,
         opts: SearchOpts,
     ) -> Result<Vec<Hit>> {
-        self.search_in("markdown_chunks", project_id, query, opts)
-            .await
+        self.search_in(
+            &self.config.collection("markdown_chunks"),
+            project_id,
+            query,
+            opts,
+        )
+        .await
     }
 
     pub async fn search_memories(
@@ -121,11 +132,13 @@ impl RetrievalClient {
         query: &str,
         opts: SearchOpts,
     ) -> Result<Vec<Hit>> {
-        self.search_in("memories", project_id, query, opts).await
+        self.search_in(&self.config.collection("memories"), project_id, query, opts)
+            .await
     }
 
     /// Search across all library chunks regardless of project.
     pub async fn search_libraries(&self, query: &str, opts: SearchOpts) -> Result<Vec<Hit>> {
-        self.search_in("library_chunks", "*", query, opts).await
+        self.search_in(&self.config.collection("library_chunks"), "*", query, opts)
+            .await
     }
 }

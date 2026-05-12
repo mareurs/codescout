@@ -1,6 +1,5 @@
 use anyhow::Result;
 
-#[derive(Debug, Clone)]
 pub struct RetrievalConfig {
     pub qdrant_url: String,
     pub embedder_url: String,
@@ -14,9 +13,20 @@ pub struct RetrievalConfig {
     /// Skip the sparse leg entirely. Search becomes pure dense ANN.
     /// Set via CODESCOUT_DISABLE_SPARSE=1 — used in matrix control cells.
     pub disable_sparse: bool,
+    /// Prefix prepended to qdrant collection names. Default empty (live collections
+    /// `code_chunks`, `markdown_chunks`, etc.). Set via
+    /// CODESCOUT_QDRANT_COLLECTION_PREFIX to isolate benchmark runs (e.g.
+    /// `bench_jinav2_` → `bench_jinav2_code_chunks`).
+    pub collection_prefix: String,
 }
 
 impl RetrievalConfig {
+    /// Compose a per-instance collection name. With empty prefix this returns
+    /// the canonical names (`code_chunks` etc.) preserving backwards compatibility.
+    pub fn collection(&self, kind: &str) -> String {
+        format!("{}{}", self.collection_prefix, kind)
+    }
+
     pub fn from_env() -> Result<Self> {
         Ok(Self {
             qdrant_url: std::env::var("CODESCOUT_QDRANT_URL")
@@ -40,6 +50,8 @@ impl RetrievalConfig {
                 .ok()
                 .map(|v| matches!(v.as_str(), "1" | "true" | "yes"))
                 .unwrap_or(false),
+            collection_prefix: std::env::var("CODESCOUT_QDRANT_COLLECTION_PREFIX")
+                .unwrap_or_default(),
         })
     }
 }

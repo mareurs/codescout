@@ -168,6 +168,37 @@ TEST_CASES = [
             "src/server.rs",
         ],
     },
+    # Tier 5: Real-usage shape — "class name + 3-5 concept words" (21-25)
+    # Sampled from external project usage.db (eduplanner-ui, backend-kotlin, lang-pal-engine)
+    {
+        "id": "TC-21", "tier": 5,
+        "query": "ToolContext agent lsp output_buffer progress dispatch",
+        "expected": ["src/tools/mod.rs", "src/agent/mod.rs", "src/server.rs"],
+    },
+    {
+        "id": "TC-22", "tier": 5,
+        "query": "ActiveProject activate project_path config home_project",
+        "expected": ["src/agent/mod.rs"],
+    },
+    {
+        "id": "TC-23", "tier": 5,
+        "query": "EmbedderHttp embed_batch sparse dense remote backend",
+        "expected": [
+            "crates/codescout-embed/src/embedder.rs",
+            "crates/codescout-embed/src/lib.rs",
+            "src/retrieval/sync.rs",
+        ],
+    },
+    {
+        "id": "TC-24", "tier": 5,
+        "query": "artifact augment params merge librarian tracker",
+        "expected": ["crates/librarian-mcp/src/tools/mod.rs"],
+    },
+    {
+        "id": "TC-25", "tier": 5,
+        "query": "MockLspClient handshake fixture circuit breaker tests",
+        "expected": ["src/lsp/ops.rs", "src/lsp/client.rs"],
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -321,8 +352,18 @@ class McpClient:
 # Main
 # ---------------------------------------------------------------------------
 
+def _git_sha(path: str) -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "-C", path, "rev-parse", "HEAD"],
+            text=True, stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        return ""
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="codescout 20-TC retrieval benchmark")
+    parser = argparse.ArgumentParser(description="codescout 25-TC retrieval benchmark")
     parser.add_argument("--binary", default="./target/release/codescout",
                         help="Path to codescout binary")
     parser.add_argument("--project-path", required=True,
@@ -332,6 +373,11 @@ def main() -> None:
                              "Each TC must have: id, query, expected_files (list); optional tier (default 1).")
     parser.add_argument("--limit", type=int, default=10,
                         help="Top-N results to retrieve per query (default: 10)")
+    parser.add_argument("--collection-prefix", default=None,
+                        help="Set CODESCOUT_QDRANT_COLLECTION_PREFIX for the child binary "
+                             "(e.g. 'bench_jinav2_'). Empty = use live collections.")
+    parser.add_argument("--label", default="",
+                        help="Human label echoed into the JSON config block (e.g. 'jina-v2-bm25-3.0').")
     args = parser.parse_args()
 
     test_cases = TEST_CASES
@@ -346,6 +392,8 @@ def main() -> None:
         print(f"[INFO] loaded {len(test_cases)} TCs from {args.tc_suite}", file=sys.stderr)
 
     env = os.environ.copy()
+    if args.collection_prefix is not None:
+        env["CODESCOUT_QDRANT_COLLECTION_PREFIX"] = args.collection_prefix
     proc = subprocess.Popen(
         [args.binary, "start"],
         stdin=subprocess.PIPE,
@@ -395,10 +443,29 @@ def main() -> None:
     p95 = latencies_sorted[int(len(latencies_sorted) * 0.95) - 1] if latencies_sorted else 0
 
     aggregate_score = sum(r["score"] for r in tc_results)
+
+    project_sha = _git_sha(args.project_path)
+    codescout_sha = _git_sha(os.path.dirname(os.path.abspath(args.binary)) + "/../..")
+    config_block = {
+        "label": args.label,
+        "embedder_url": env.get("CODESCOUT_EMBEDDER_URL", ""),
+        "sparse_embedder_url": env.get("CODESCOUT_SPARSE_EMBEDDER_URL", ""),
+        "reranker_url": env.get("CODESCOUT_RERANKER_URL", ""),
+        "qdrant_url": env.get("CODESCOUT_QDRANT_URL", ""),
+        "model_dim": env.get("CODESCOUT_MODEL_DIM", ""),
+        "bm25_boost": env.get("CODESCOUT_BM25_BOOST", ""),
+        "disable_sparse": env.get("CODESCOUT_DISABLE_SPARSE", ""),
+        "collection_prefix": env.get("CODESCOUT_QDRANT_COLLECTION_PREFIX", ""),
+        "retrieval_profile": env.get("CODESCOUT_RETRIEVAL_PROFILE", ""),
+        "embed_model": env.get("CODESCOUT_EMBED_MODEL", ""),
+        "project_sha": project_sha,
+        "codescout_sha": codescout_sha,
+    }
     output = {
         "backend": "stack",
         "project_path": args.project_path,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "config": config_block,
         "aggregate": {
             "total": aggregate_score,
             "max": len(test_cases) * 3,
