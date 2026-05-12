@@ -138,19 +138,19 @@ relative — known gap.
 ## Findings so far (2026-05-12, baseline `ede25e69`)
 
 - **Fusion helps by +2** on both jina-v2 and CodeRankEmbed (sparse on vs off at boost=3.0).
-- **Boost sweep on CodeRankEmbed:** 0.5→32, 1.0→33, 2.0→34, 3.0→34, **5.0→35** (peak),
-  7.0→34, 10.0→33, 15.0→33, 20.0→33. Peak shifts up vs Phase 6's 3.0 plateau —
-  the 25-TC shape (T5 keyword-bags) leans harder on BM25.
+- **Boost sweep on CodeRankEmbed-Q4 (no prefix):** 0.5→32, 1.0→33, 2.0→34, 3.0→34,
+  **5.0→35** (peak), 7.0→34, 10.0→33, 15.0→33, 20.0→33.
+- **Query prefix × quantization:** prefix +3 on f16, prefix −4 on Q4_K_M. Q4 collapses
+  the asymmetric subspace. Authoritative spec confirmed locally in
+  `~/models/CodeRankEmbed-hf/config_sentence_transformers.json` (`prompts.query` only,
+  no doc prefix). Researcher unneeded.
+- **f16+prefix peaks at 34/75** (boost ∈ {2,3,5,7}), one point below Q4 no-prefix.
 - **CodeRankEmbed wins on env-var / identifier-bag queries** (TC-02, TC-11, TC-12)
   where code-specific training surfaces identifier semantics jina misses.
-- **CodeRankEmbed query prefix hurts** by 2–4 pts across all boost values when
-  doc-side index is plain (no `search_document:` prefix during indexing). Either the
-  Q4_K_M quant collapsed the asymmetric subspace or a doc-side prefix is required for
-  the prefix to recover. Not retried with re-indexed docs.
 - **T5 new tier (real-usage shape) is stuck at 4/15 on both models.** Failures cluster
   on cross-crate basename collisions and class-name-only-no-keyword queries
   (TC-23/24/25). The expected-path matcher is too strict for this tier.
-- **Best so far: CodeRankEmbed @ bm25_boost=5.0, no query prefix → 35/75** (46.7%).
+- **Champion (2026-05-12): CodeRankEmbed-Q4_K_M, no prefix, bm25_boost=5.0 → 35/75** (46.7%).
 ## Caveats and known gaps
 
 - **No CodeRankEmbed query prefix.** Historical 41/60 hybrid run used the
@@ -207,6 +207,41 @@ Extended boost sweep (no prefix):
 **Boost peak is 5.0** on the 25-TC pinned bench. Beyond 5.0, BM25 starts crowding
 out the dense candidates that actually carry signal. Plateau is broader than Phase 6
 saw (it stopped at 3.0).
+
+### 2026-05-12 — f16 vs Q4 quantization × query prefix
+
+Tested the quantization-collapsed-prefix hypothesis on f16 weights at `bench_coderank_f16_`
+(re-indexed separately). Spec lookup in `~/models/CodeRankEmbed-hf/config_sentence_transformers.json`
+confirmed:
+
+- **Query prefix:** `"Represent this query for searching relevant code: "` (exact, trailing space)
+- **Doc prefix:** none — `prompts.query` is the only entry. Docs go in raw.
+
+So our prior tests used the correct prefix. The doc-side hypothesis is invalidated.
+
+| variant | Q4_K_M | f16 |
+|---|---:|---:|
+| boost=5.0, no prefix | **35** | 31 |
+| boost=5.0, +prefix | 31 | 34 |
+
+**On Q4: prefix hurts by 4. On f16: prefix helps by 3.** Quant hypothesis confirmed —
+the asymmetric prefix subspace does not survive Q4_K_M.
+
+f16 + prefix boost sweep (search-side prefix only):
+
+| boost | 1.0 | 2.0 | 3.0 | 5.0 | 7.0 |
+|---|---:|---:|---:|---:|---:|
+| f16 +prefix | 33 | 34 | 34 | 34 | 34 |
+
+f16+prefix plateaus at **34/75** from boost=2.0 onward — close to but **not exceeding**
+Q4 no-prefix 35/75. Spec-conformant ≠ best.
+
+**Working theory:** Q4_K_M's coarser dense signal lets BM25 dominate ranking on the
+T5 keyword-bag tier (which contributes most of the score variance). f16's sharper
+asymmetric vectors are mathematically "more correct" but BM25 already covers what
+they'd recover, leaving net wash.
+
+**Current champion: CodeRankEmbed-Q4_K_M, no prefix, fusion @ bm25_boost=5.0 → 35/75.**
 
 ### 2026-05-12 — initial pinned bench
 
