@@ -42,17 +42,16 @@ a message like:
 ```
 edit_file blocked: old_string contains a Rust definition keyword ("fn ").
 Structural edits must use symbol tools — the LSP knows the exact range.
-Use: replace_symbol(name_path, path, new_body) — replaces the symbol body via LSP
+Use: edit_code(symbol, path, action="replace", body=...) — replaces the symbol body via LSP
 ```
 
 The hint is inferred from the edit shape:
 
 | Edit shape | Suggested tool |
 |---|---|
-| `new_string` is empty | `remove_symbol` |
-| `new_string` is longer than `old_string` | `insert_code` |
-| Replacing a function/struct body | `replace_symbol` |
-
+| `new_string` is empty | `edit_code(action="remove")` |
+| `new_string` is longer than `old_string` | `edit_code(action="insert")` |
+| Replacing a function/struct body | `edit_code(action="replace")` |
 ## Why no bypass?
 
 The previous `pending_ack + acknowledge_risk` mechanism was removed entirely. The rationale:

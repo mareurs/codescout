@@ -3,7 +3,7 @@
 
 ## Overview
 
-When `activate_project` runs, codescout now automatically detects and registers dependencies
+When `workspace(action: activate)` runs, codescout now automatically detects and registers dependencies
 from five ecosystems:
 
 | Ecosystem | Manifest | Source Location |
@@ -43,7 +43,7 @@ register_library(name, "/path/to/source", language) and retry.
 
 ## Output
 
-The `activate_project` response includes auto-registered libraries:
+The `workspace(action: activate)` response includes auto-registered libraries:
 
 ```json
 {

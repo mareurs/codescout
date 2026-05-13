@@ -13,7 +13,7 @@ impl Tool for ListLibraries {
 
     fn description(&self) -> &str {
         "List registered libraries and their index status. \
-         Use scope='lib:<name>' in semantic_search, symbols, or index_project to target a library. \
+         Use scope='lib:<name>' in semantic_search, symbols, or index(action='build') to target a library. \
          Version staleness detection currently supports Cargo.lock (Rust) and package-lock.json (npm/Node); \
          Go, Python, and Yarn lockfiles are not yet tracked."
     }
@@ -197,7 +197,7 @@ impl Tool for RegisterLibrary {
             "language": language,
             "hint": format!(
                 "Use scope='lib:{}' in symbols/semantic_search. \
-                 Run index_project(scope='lib:{}') to enable semantic search.",
+                 Run index(action='build', scope='lib:{}') to enable semantic search.",
                 name, name
             ),
         }))

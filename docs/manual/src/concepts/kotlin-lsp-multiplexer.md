@@ -43,7 +43,7 @@ but in normal use it is spawned by codescout itself.
 
 ## JVM Pre-warming
 
-When a project declares `java` or `kotlin` in its language list, codescout spawns background LSP `get_or_start` tasks immediately on **server startup** and on every **`activate_project`** call.
+When a project declares `java` or `kotlin` in its language list, codescout spawns background LSP `get_or_start` tasks immediately on **server startup** and on every **`workspace(action: activate)`** call.
 
 ```toml
 # .codescout/project.toml
@@ -51,9 +51,9 @@ When a project declares `java` or `kotlin` in its language list, codescout spawn
 languages = ["kotlin"]  # also triggers for "java"
 ```
 
-Pre-warming eliminates the 8–15 s cold-start penalty that would otherwise occur on the first symbol query after startup. The warm-up runs in the background — server startup and `activate_project` return immediately without waiting for the LSP to be ready.
+Pre-warming eliminates the 8–15 s cold-start penalty that would otherwise occur on the first symbol query after startup. The warm-up runs in the background — server startup and `workspace(action: activate)` return immediately without waiting for the LSP to be ready.
 
-**Concurrency safety:** `LspManager`'s watch-channel serialises parallel starters. Calling `activate_project` from concurrent sessions cannot trigger duplicate LSP processes.
+**Concurrency safety:** `LspManager`'s watch-channel serialises parallel starters. Calling `workspace(action: activate)` from concurrent sessions cannot trigger duplicate LSP processes.
 
 The multiplexer handles the rest of the connection lifecycle — see [How It Works](#how-it-works) below.
 ## How It Works

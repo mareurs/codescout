@@ -33,10 +33,10 @@ claude
 ```
 
 Claude starts with its CWD already set to the worktree. The MCP server needs one
-`activate_project` call to follow:
+`workspace(action: activate)` call to follow:
 
 ```
-activate_project("/abs/path/to/.worktrees/my-feature")
+workspace(action: activate, path: "/abs/path/to/.worktrees/my-feature")
 ```
 
 After that, every read, write, and shell command targets the worktree
@@ -111,4 +111,4 @@ you want it gone entirely.
 
 - [Git Worktrees](worktrees.md) — two-layer protection (write guard + navigation exclusions) that prevents silent cross-worktree edits
 - [Routing Plugin](routing-plugin.md) — how the plugin's `worktree-activate.sh`
-  hook auto-calls `activate_project` when `EnterWorktree` fires
+  hook auto-calls `workspace(action: activate)` when `EnterWorktree` fires

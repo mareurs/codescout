@@ -3,7 +3,7 @@
 codescout provides two categories of editing tools:
 
 - **Text-level editing** — `edit_file` finds and replaces an exact string in a file.
-- **Symbol-level editing** — `replace_symbol`, `insert_code`, and `rename_symbol` operate on named code symbols located via the LSP. These are the preferred tools for editing source code.
+- **Symbol-level editing** — `edit_code` mutates named code symbols located via the LSP (action: `replace`, `insert`, `remove`, `rename`). This is the preferred tool for editing source code.
 
 All write operations are restricted to the active project root. Attempts to write outside the project root, or to paths on the security deny-list, are rejected with an error.
 
@@ -16,17 +16,20 @@ All write operations are restricted to the active project root. Attempts to writ
 
 | Situation | Recommended tool |
 |-----------|-----------------|
-| Rewrite a function or method body | `replace_symbol` |
-| Add a new function next to an existing one | `insert_code` |
-| Rename a symbol everywhere it is used | `rename_symbol` |
+| Rewrite a function or method body | `edit_code(action="replace")` |
+| Add a new function next to an existing one | `edit_code(action="insert")` |
+| Delete a function, struct, or method | `edit_code(action="remove")` |
+| Rename a symbol everywhere it is used | `edit_code(action="rename")` |
 | Change a string, constant, or small code fragment | `edit_file` |
 | Edit a config file, Markdown, or other non-code file | `edit_file` |
 | Create a new file | `create_file` |
 
-For source code, prefer the symbol tools. They address code by name rather than by position, which means your edit remains correct even if the file was modified since you last read it. Fall back to `edit_file` when you need to change something small that is not naturally symbol-scoped.
+For source code, prefer `edit_code`. It addresses code by name rather than by
+position, which means your edit remains correct even if the file was modified
+since you last read it. Fall back to `edit_file` when you need to change
+something small that is not naturally symbol-scoped.
 
 ---
-
 ## `create_file`
 
 **Purpose:** Create a new file, or completely overwrite an existing one, with the supplied content. Parent directories are created automatically.
@@ -130,7 +133,7 @@ If `old_string` is not found, or appears multiple times without `replace_all: tr
 **Multi-line edits on source files:** When `old_string` spans multiple lines and contains a
 definition keyword (`fn`, `class`, `def`, etc.) in an LSP-supported language, the tool
 **blocks the edit** and returns a `RecoverableError` suggesting the correct symbol tool.
-There is no bypass — use `replace_symbol`, `insert_code`, or `remove_symbol` instead.
+There is no bypass — use `edit_code` (with the appropriate action) instead.
 See [Structural Edit Gate](edit-file-structural-gate.md) for the full keyword table and
 gate logic.
 
@@ -140,132 +143,32 @@ gate logic.
 - Use `grep` first to verify the exact text if you are unsure what to match.
 - If you get a multiple-matches error, expand `old_string` to include enough surrounding context to make it unique, or use `replace_all: true`.
 - Use `insert: "prepend"` or `insert: "append"` to add content at the start or end of a file when there is no anchor string to match.
-- For adding a completely new top-level definition adjacent to an existing one, `insert_code` is more convenient — it addresses the location by symbol name rather than requiring an exact text match.
+- For adding a completely new top-level definition adjacent to an existing one, `edit_code(action="insert")` is more convenient — it addresses the location by symbol name rather than requiring an exact text match.
 
 ---
 
-## Symbol editing tools
+## Symbol editing — `edit_code`
 
-The following three tools address code by symbol name and are backed by the Language Server Protocol. They work with any language that has an LSP server configured. See [Symbol Navigation](./symbol-navigation.md) for background on how symbols are identified.
+The standalone `replace_symbol`, `insert_code`, `rename_symbol`, and
+`remove_symbol` tools were consolidated in v0.11 into the single
+action-dispatched **`edit_code`** tool. It addresses code by symbol name
+via the LSP and works with any language that has an LSP server configured.
+See [Symbol Navigation](./symbol-navigation.md) for background on how
+symbols are identified.
 
-All three require:
+For full parameter reference, examples for each action, and the
+`edit_code` vs `edit_file` decision table, see the canonical page:
 
-- `name_path` — the symbol's name path as returned by `symbols` or `symbols`, e.g. `"MyStruct/my_method"`.
-- `path` — the file containing the symbol, relative to the project root.
+> **[`edit_code` documentation →](edit-code.md)**
 
-### `replace_symbol`
+Quick mapping of the four actions:
 
-**Purpose:** Replace the entire body of a named symbol — function, method, class, or any other LSP-visible construct — with new source code.
+| Action | Purpose |
+|---|---|
+| `replace` | Overwrite the body of a named symbol |
+| `insert` | Inject code before or after a named symbol (`position: "before"\|"after"`) |
+| `remove` | Delete a named symbol and its full body |
+| `rename` | Rename a symbol across the codebase via LSP `workspace/rename` |
 
-**Parameters:**
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| `name_path` | string | yes | Symbol name path (e.g. `"parse_args"`, `"Config/from_file"`) |
-| `relative_path` | string | yes | File containing the symbol |
-| `new_body` | string | yes | Complete replacement source, including the signature and braces |
-
-**Example:**
-
-```json
-{
-  "name_path": "greet",
-  "relative_path": "src/lib.rs",
-  "new_body": "pub fn greet(name: &str) -> String {\n    format!(\"Hello, {}!\", name)\n}"
-}
-```
-
-**Output:**
-
-```json
-{
-  "status": "ok",
-  "replaced_lines": "10-14"
-}
-```
-
-### `insert_code`
-
-**Purpose:** Insert code immediately before or after a named symbol (e.g. add a new function above or below an existing one, or add an attribute).
-
-**Parameters:**
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| `name_path` | string | yes | Symbol to insert relative to |
-| `path` | string | yes | File containing the symbol |
-| `code` | string | yes | Code to insert |
-| `position` | string | no | `"before"` or `"after"` (default: `"after"`) |
-
-**Example (insert after):**
-
-```json
-{
-  "name_path": "serialize",
-  "path": "src/codec.rs",
-  "code": "\npub fn deserialize(bytes: &[u8]) -> Result<Self> {\n    todo!()\n}",
-  "position": "after"
-}
-```
-
-**Example (insert before):**
-
-```json
-{
-  "name_path": "process_request",
-  "path": "src/server.rs",
-  "code": "#[tracing::instrument]\n",
-  "position": "before"
-}
-```
-
-**Output:**
-
-```json
-{
-  "status": "ok",
-  "inserted_at_line": 63
-}
-```
-
-### `rename_symbol`
-
-**Purpose:** Rename a symbol across the entire codebase using LSP. All references in all files are updated atomically.
-
-**Parameters:**
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| `name_path` | string | yes | Current symbol name path |
-| `relative_path` | string | yes | File containing the symbol's definition |
-| `new_name` | string | yes | New name for the symbol |
-
-**Example:**
-
-```json
-{
-  "name_path": "parse_config",
-  "relative_path": "src/config.rs",
-  "new_name": "load_config"
-}
-```
-
-**Output:**
-
-```json
-{
-  "status": "ok",
-  "old_name": "parse_config",
-  "new_name": "load_config",
-  "files_changed": 3,
-  "total_edits": 7
-}
-```
-
-`files_changed` is the number of distinct files that were modified. `total_edits` is the total number of individual text substitutions applied across all files.
-
-**Tips for symbol tools:**
-
-- Use `symbols` or `symbols` first to obtain the correct `name_path`. Nested symbols use a slash-separated path: `"OuterStruct/inner_method"`.
-- `rename_symbol` requires a running LSP server for the file's language. If the LSP is unavailable, the tool returns an error — fall back to `grep` combined with `edit_file` in that case, but be aware it will not respect scoping.
-- After a `replace_symbol` edit, the file content shifts. If you plan to make additional `edit_file` edits in the same file, use `grep` to verify the exact text you want to match before editing.
+All four require `symbol` (e.g. `"MyStruct/my_method"`) and `path` (file
+relative to project root).

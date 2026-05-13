@@ -12,7 +12,7 @@ search when you know the concept.
 
 Three steps happen when you call `semantic_search`:
 
-**1. Chunking** — The first time `index_project` runs, every source file is split
+**1. Chunking** — The first time `index(action: build)` runs, every source file is split
 into chunks whose size is derived from the configured model's context window
 (roughly `max_tokens × 3 chars/token` at 85 % utilisation). Splits follow
 language structure: each top-level function, method, or class becomes its own
@@ -35,7 +35,7 @@ The vectors are stored in `.codescout/embeddings.db`.
 stored chunk using cosine similarity. The closest chunks are returned, ranked by
 score.
 
-The index is incremental. On subsequent `index_project` calls, only files that
+The index is incremental. On subsequent `index(action: build)` calls, only files that
 changed since the last run are re-embedded — detected via git diff, then file
 mtime, then SHA-256 as a fallback chain.
 
@@ -72,24 +72,24 @@ and scans all stored vectors). Prefer symbol tools when you know the name.
 Build the index once before first use:
 
 ```json
-{ "tool": "index_project", "arguments": {} }
+{ "tool": "index(action: build)", "arguments": {} }
 ```
 
 Check its health:
 
 ```json
-{ "tool": "project_status", "arguments": {} }
+{ "tool": "workspace(action: status)", "arguments": {} }
 ```
 
 The index is stored in `.codescout/embeddings.db` and excluded from version
 control by default. Each team member builds their own local copy.
 
-**Drift detection:** `project_status` can report per-file drift scores — a measure
+**Drift detection:** `workspace(action: status)` can report per-file drift scores — a measure
 of how much file content has changed since it was last indexed. Pass `threshold`
 to surface files with high drift:
 
 ```json
-{ "tool": "project_status", "arguments": { "threshold": 0.3 } }
+{ "tool": "workspace(action: status)", "arguments": { "threshold": 0.3 } }
 ```
 
 Switching embedding models invalidates the entire index — all chunks must be
@@ -103,4 +103,4 @@ for model selection guidance.
 - [Embedding Backends](../configuration/embedding-backends.md) — all supported
   backends and model selection guidance
 - [Semantic Search Tools](../tools/semantic-search.md) — full reference for
-  `semantic_search`, `index_project`, and `project_status`
+  `semantic_search`, `index(action: build)`, and `workspace(action: status)`

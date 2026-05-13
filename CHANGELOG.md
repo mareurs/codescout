@@ -2,6 +2,133 @@
 
 All notable changes to codescout are documented here.
 
+## [0.12.0] — 2026-05-13
+
+### Breaking changes
+
+- **Retrieval substrate replaced.** The in-process sqlite-vec + Tantivy index
+  is gone. Semantic search now talks to a network-attached retrieval stack:
+  Qdrant (`:6334`), a dense embedder service (`:48081`), a sparse SPLADE
+  service (`:48084`), and a cross-encoder reranker (`:48083`). All four ship
+  as a single `docker-compose.yml` with `cpu` and `gpu` profiles. See
+  [`docs/manual/src/concepts/retrieval-stack.md`](docs/manual/src/concepts/retrieval-stack.md)
+  for setup, Ollama/llama.cpp/OpenAI integration, and the benchmark we used
+  to pick defaults.
+- **`local-embed` is no longer the default Cargo feature.** Default build
+  drops `local-embed` from defaults; `cargo install codescout` produces a
+  network-only binary. Use `--features local-embed` to re-enable the
+  in-process ONNX path; note that it skips the rerank + sparse fusion
+  pipeline (benchmark penalty ~9 points on the 75-query suite).
+- **Memory IDs are UUIDs now.** `memory.recall` returns string UUIDs (UUIDv5
+  of `(project_id, bucket, title)`); the prior integer rowids no longer
+  apply. `memory.forget` accepts UUID strings.
+
+### Added
+
+- **`codescout migrate-memories` subcommand** for moving legacy
+  `.codescout/embeddings/project.db` content into Qdrant. `--dry-run` previews;
+  the active-project banner shows a `⚠ LEGACY INDEX` hint when it detects an
+  old file.
+- **`CODESCOUT_RERANKER_PROTOCOL=tei|infinity`** env knob for swapping
+  between TEI-protocol (default `bge-reranker-v2-m3`) and Infinity-protocol
+  (e.g. `jina-rerank-v2`) rerankers without rebuilding.
+- **`CODESCOUT_QUERY_PREFIX`** env for asymmetric retrieval models that
+  require a query-side prefix (e.g. Nomic, BGE-large).
+- **`semantic_search` mode parameter** — `code` (default) excludes markdown
+  chunks for implementation queries; `full` includes all indexed content.
+- **`call_edges` cache extracted to `.codescout/call_edges.db`** — call-graph
+  data is now in its own SQLite file rather than co-housed with the deleted
+  chunk storage.
+
+### Changed
+
+- **Binary size 54 MiB → 30 MiB (–44%).** Dropped `ort_sys`, `tokenizers`,
+  `hf-hub`, `image`/`ravif` (~22 MiB) by moving `local-embed` out of defaults.
+  Dropped `aws_lc_sys` (~2 MiB) by switching `rustls` to the `ring` crypto
+  provider. Trimmed `qdrant-client` to `default-features = false, features =
+  ["serde"]` to drop a duplicate `reqwest` dep tree.
+- **`fs2` → `fs4`** for cross-process file locking (fs2 unmaintained since
+  2018).
+- **Tool hint strings** updated to current names (`index_project` →
+  `index(action='build')`, `Run index_project()` → `Run index(action='build')`).
+
+### Removed
+
+- `src/embed/index.rs` (~4900 LOC), `src/embed/drift.rs`, `src/embed/bm25.rs`,
+  `src/embed/chunker.rs`, `src/embed/local.rs`, `src/embed/remote.rs`.
+- `sqlite-vec` and `tantivy` dependencies (still pinned in `[workspace.dependencies]`
+  for librarian-mcp, which retains its own sqlite-vec store).
+- `percent-encoding` dep (URL handling is fully covered by the `url` crate).
+
+### Fixed
+
+- `semantic_search` now classifies retrieval-stack errors into actionable
+  hints (which service is down, how to start it) rather than opaque
+  transport errors.
+- `memory.delete` (unified-tool path) correctly removes the anchor sidecar
+  file alongside the memory entry.
+- `create_semantic_anchors` now uses the cross-encoder reranker for anchor
+  selection, raising precision.
+
+---
+
+## [0.11.0] — 2026-05-06
+
+### Breaking changes — tool consolidation
+
+- **`replace_symbol`, `insert_code`, `rename_symbol`, `remove_symbol`
+  consolidated into `edit_code`** with `action: replace|insert|remove|rename`.
+  The four standalone tools are no longer registered. Migration:
+    - `replace_symbol(name_path, path, new_body)` → `edit_code(symbol, path, action="replace", body=...)`
+    - `insert_code(name_path, path, code, position)` → `edit_code(symbol, path, action="insert", body=..., position=...)`
+    - `rename_symbol(name_path, path, new_name)` → `edit_code(symbol, path, action="rename", new_name=...)`
+    - `remove_symbol(name_path, path)` → `edit_code(symbol, path, action="remove")`
+- **GitHub tools unregistered** (`github_identity`, `github_issue`,
+  `github_pr`, `github_file`, `github_repo`). Code remains in `src/tools/github.rs`
+  but tools are not exposed to MCP clients. Use the `gh` CLI via `run_command`
+  for GitHub operations.
+
+### Added
+
+- **`edit_code`** unified structural-edit tool (consolidates four prior tools).
+- **`call_graph`** — transitive caller/callee traversal with `direction` and
+  `max_depth` for impact analysis before refactoring.
+- **`approve_write`** — session-scoped grant for writes outside the project
+  root (e.g. user's home dotfiles).
+- **`read_file` source-range gate** — line-range reads that overlap a named
+  symbol redirect to `symbols(include_body=true)`. Bypass with `force=true`.
+- **JVM pre-warm on activation** for Java/Kotlin projects — the JDTLS / Kotlin
+  LSP process starts in the background during `workspace(action="activate")`
+  rather than on first symbol query.
+- **9 experimental features graduated** to stable docs (`concepts/` from
+  `experimental/`): security profiles, diagnostic logging, memory sections
+  filter, call_graph, auto-reindex, hybrid search, librarian guide resource,
+  artifact_refresh list_stale, augmentation templates.
+- **`symbol_at`** + **`references`** added to the prompt's pre-edit
+  navigation strategy.
+
+### Changed
+
+- **Librarian-mcp default-on** — the embedded librarian indexer is compiled
+  in by default. Runtime registration remains opt-in via `LIBRARIAN_ENABLED=1`
+  or `[librarian] enabled = true` in `project.toml`.
+- **Librarian tool collapse (16 → 5)** — `artifact`, `artifact_event`,
+  `artifact_augment`, `artifact_refresh`, `librarian` cover what 16 individual
+  tools did before.
+- **`edit_code` rename/replace caller-check hint** appended to success
+  responses so the LLM verifies call sites without a separate `references`
+  call.
+
+### Fixed
+
+- `edit_code` propagates the caller hint through `format_compact` for large
+  rename results (was previously dropped on overflow).
+- Stale `replace_symbol` tip in `read_file` blocking error.
+- LSP tool enforcement gaps where `symbols` / `references` could be skipped
+  in favour of `Read` / `Grep`.
+
+---
+
 ## [0.2.2] — 2026-03-11
 
 ### Added

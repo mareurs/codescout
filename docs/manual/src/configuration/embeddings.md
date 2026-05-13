@@ -29,7 +29,7 @@ exact text matches. This guide covers how to configure the embedding backend.
 
 codescout works out of the box with a bundled embedding model. No setup needed.
 
-On first `index_project`, it downloads **all-MiniLM-L6-v2** (~22 MB, quantized)
+On first `index(action: build)`, it downloads **all-MiniLM-L6-v2** (~22 MB, quantized)
 to `~/.cache/huggingface/hub/` and runs it locally via ONNX. This is a one-time download.
 
 ```toml
@@ -215,7 +215,7 @@ If you change the `model` or `url` after indexing, the stored vectors are incomp
 Rebuild the index:
 
 ```
-index_project(force: true)
+index(action: build, force: true)
 ```
 
 ### Endpoint unreachable

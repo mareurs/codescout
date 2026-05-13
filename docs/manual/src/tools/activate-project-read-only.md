@@ -2,8 +2,8 @@
 
 When you call `workspace(action: activate)` with a path different from the home project (the one
 codescout started with), the project is now activated in **read-only mode** by default.
-All write tools (`edit_file`, `create_file`, `replace_symbol`, `insert_code`,
-`rename_symbol`, `remove_symbol`) are blocked until you explicitly opt in.
+All write tools (`edit_file`, `create_file`, `edit_code`) are blocked until
+you explicitly opt in.
 
 ## Why
 

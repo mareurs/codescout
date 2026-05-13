@@ -219,7 +219,7 @@ their source body.
   symbols, which is slower but scoped.
 - `name_path` in the result uses `/` as a separator for nested symbols, e.g.
   `AuthService/authenticate_user`. You need this value for
-  `references`, `replace_symbol`, and related editing tools.
+  `references`, `edit_code`, and related editing tools.
 - Use `include_body: true` in the same call to avoid a separate read step when
   you already know the symbol name.
 
@@ -312,235 +312,34 @@ import) a given symbol. This is the "find all usages" feature from your IDE.
 
 ## `replace_symbol`
 
-**Purpose:** Replace the entire body of a named symbol with new source code.
-The tool locates the symbol by name via LSP and replaces the lines from its
-start to its end — no line numbers required.
-
-**Parameters:**
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `name_path` | string | yes | — | Symbol identifier, e.g. `"MyStruct/my_method"` |
-| `relative_path` | string | yes | — | File containing the symbol |
-| `new_body` | string | yes | — | Complete replacement source for the symbol |
-
-**Example — rewrite a Rust function:**
-
-```json
-{
-  "tool": "replace_symbol",
-  "arguments": {
-    "name_path": "UserService/find_by_email",
-    "relative_path": "src/services/user.rs",
-    "new_body": "pub async fn find_by_email(&self, email: &str) -> Result<Option<User>> {\n    self.db\n        .query_opt(\"SELECT * FROM users WHERE email = $1\", &[&email])\n        .await\n        .map(|row| row.map(User::from_row))\n}"
-  }
-}
-```
-
-**Output:**
-
-```json
-{
-  "status": "ok",
-  "replaced_lines": "34-67"
-}
-```
-
-**Example — update a Python method:**
-
-```json
-{
-  "tool": "replace_symbol",
-  "arguments": {
-    "name_path": "TokenValidator/validate",
-    "relative_path": "auth/validators.py",
-    "new_body": "def validate(self, token: str) -> Claims:\n    try:\n        return jwt.decode(token, self.secret, algorithms=[\"HS256\"])\n    except jwt.ExpiredSignatureError:\n        raise TokenExpiredError(token)"
-  }
-}
-```
-
-**Tips:**
-
-- The `new_body` replaces the entire span from the symbol's `start_line` to its
-  `end_line`. Include everything: the function signature, decorators if they are
-  within the span, and the closing brace.
-- Read the current body first with `symbols` + `include_body: true` before
-  rewriting, to confirm you understand the existing signature and indentation.
-- Use `replace_symbol` for any change that touches a significant portion
-  of the function. For small surgical changes (renaming a variable, changing
-  one line), `edit_file` with a precise match string is less disruptive.
-- This tool is robust to refactors above the target function. Line numbers
-  change; symbol names generally do not.
+> **Renamed in v0.11.** The standalone `replace_symbol` tool was consolidated
+> into the unified `edit_code` tool. Use `edit_code(action="replace", symbol, path, body)`
+> instead — see [edit_code](edit-code.md) for parameters, examples, and the
+> full action set (`replace` / `insert` / `remove` / `rename`).
 
 ---
-
 ## `insert_code`
 
-**Purpose:** Insert code immediately before or after a named symbol. Addresses the insertion point by symbol name — no line numbers needed.
-
-**Parameters:**
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `name_path` | string | yes | — | Symbol name path (e.g. `'MyStruct/my_method'`) |
-| `path` | string | yes | — | File path (relative or absolute) |
-| `code` | string | yes | — | Code to insert (may contain newlines) |
-| `position` | string | no | `"after"` | `"before"` or `"after"` the symbol |
-
-**Example — add a helper function after an existing one:**
-
-```json
-{
-  "tool": "insert_code",
-  "arguments": {
-    "name_path": "validate_token",
-    "path": "src/auth/service.rs",
-    "code": "\npub fn revoke_token(token: &str) -> Result<()> {\n    TOKEN_STORE.remove(token);\n    Ok(())\n}\n",
-    "position": "after"
-  }
-}
-```
-
-**Example — add a test before a function:**
-
-```json
-{
-  "tool": "insert_code",
-  "arguments": {
-    "name_path": "validate_token",
-    "path": "src/auth/service.rs",
-    "code": "#[test]\nfn test_validate_token_rejects_expired() {\n    // ...\n}\n",
-    "position": "before"
-  }
-}
-```
-
-**Tips:**
-
-- Use `insert_code` when you want to add a new function, method, or block adjacent to an existing one without knowing its exact line numbers.
-- The symbol is located via LSP, so the insertion point is robust to edits above the target.
-- `position: "before"` inserts immediately above the symbol's first line; `"after"` inserts immediately below the symbol's last line.
-- The inserted code is not validated for syntax — make sure it compiles before committing.
+> **Renamed in v0.11.** Consolidated into `edit_code`. Use
+> `edit_code(action="insert", symbol, path, body, position="before"|"after")`
+> instead — see [edit_code](edit-code.md).
 
 ---
-
 ## `rename_symbol`
 
-**Purpose:** Rename a symbol across the entire codebase using the LSP rename
-operation. Every reference in every file is updated atomically.
-
-**Parameters:**
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `name_path` | string | yes | — | Symbol identifier |
-| `relative_path` | string | yes | — | File containing the symbol definition |
-| `new_name` | string | yes | — | New name for the symbol |
-
-**Example — rename a Rust struct:**
-
-```json
-{
-  "tool": "rename_symbol",
-  "arguments": {
-    "name_path": "AuthMiddleware",
-    "relative_path": "src/auth/middleware.rs",
-    "new_name": "AuthenticationMiddleware"
-  }
-}
-```
-
-**Output:**
-
-```json
-{
-  "status": "ok",
-  "files_changed": 4,
-  "total_edits": 11
-}
-```
-
-**Example — rename a Python function:**
-
-```json
-{
-  "tool": "rename_symbol",
-  "arguments": {
-    "name_path": "validate_token",
-    "relative_path": "auth/validators.py",
-    "new_name": "verify_access_token"
-  }
-}
-```
-
-**Example — rename a TypeScript interface:**
-
-```json
-{
-  "tool": "rename_symbol",
-  "arguments": {
-    "name_path": "UserDto",
-    "relative_path": "src/types/user.ts",
-    "new_name": "UserResponse"
-  }
-}
-```
-
-**Tips:**
-
-- `rename_symbol` is the safest way to rename. It uses the LSP workspace edit
-  operation, which understands import paths, qualified names, and string-based
-  references that IDEs handle. A text substitution with `search_pattern` + `edit_file` will
-  miss these cases.
-- The `relative_path` must point to the file that contains the definition, not
-  a file that merely uses it.
-- `name_path` must identify the definition unambiguously. If there are two
-  symbols with the same name in a file (e.g. a field and a method), use the
-  full `name_path` with the parent (e.g. `"MyStruct/value"`) to distinguish them.
-- After renaming, verify with `symbols` on the new name to confirm all
-  occurrences were updated.
-- LSP rename support varies by server. Most servers handle functions, methods,
-  classes, variables, and fields. Some do not rename string literals or
-  macro-generated identifiers. Check the result's `files_changed` count against
-
+> **Renamed in v0.11.** Consolidated into `edit_code`. Use
+> `edit_code(action="rename", symbol, path, new_name)` instead — see
+> [edit_code](edit-code.md). The implementation still goes through LSP
+> `workspace/rename` and sweeps textual occurrences in comments and strings.
 
 ---
-
 ## `remove_symbol`
 
-**Purpose:** Delete a named symbol (function, struct, method, test, etc.) entirely from a file.
-Uses LSP to identify the exact line range covered by the symbol — no manual line counting required.
-
-**Parameters:**
-
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `name_path` | string | yes | — | Symbol identifier, e.g. `"MyStruct/my_method"` or `"old_helper"` |
-| `path` | string | yes | — | File containing the symbol |
-
-**Example — delete a deprecated function:**
-
-```json
-{
-  "tool": "remove_symbol",
-  "arguments": {
-    "name_path": "legacy_auth_check",
-    "path": "src/auth/middleware.rs"
-  }
-}
-```
-
-**Output:** `"ok"`
-
-**Tips:**
-
-- Use `references` first to confirm nothing still calls the symbol before removing it.
-- For methods on a struct or class, use the full path: `"MyStruct/my_method"`.
-- The tool removes the exact LSP range — it will not leave behind stray blank lines from adjacent doc comments if they fall outside the symbol's range. Review the diff after removal.
-- If you want to replace rather than delete, use `replace_symbol` instead.
+> **Renamed in v0.11.** Consolidated into `edit_code`. Use
+> `edit_code(action="remove", symbol, path)` instead — see
+> [edit_code](edit-code.md).
 
 ---
-
 ## `symbol_at`
 
 **Purpose:** Inspect a symbol at a given position via LSP. Returns the symbol's

@@ -58,17 +58,15 @@ is configured and no tree-sitter grammar is bundled.
 
 | Feature                   | Full support | LSP only | Detection only |
 |---------------------------|:------------:|:--------:|:--------------:|
-| `symbols`             | Yes          | Yes      | No             |
-| `symbols`            | Yes          | Yes      | No             |
-| `references`         | Yes          | Yes      | No             |
-| `replace_symbol`          | Yes          | Yes      | No             |
-| `insert_code`             | Yes          | Yes      | No             |
-| `rename_symbol`           | Yes          | Yes      | No             |
+| `symbols`                 | Yes          | Yes      | No             |
+| `references`              | Yes          | Yes      | No             |
+| `symbol_at`               | Yes          | Yes      | No             |
+| `call_graph`              | Yes          | Yes      | No             |
+| `edit_code`               | Yes          | Yes      | No             |
 | `semantic_search`         | Yes          | Yes      | Yes            |
 | File tools                | Yes          | Yes      | Yes            |
 
 ---
-
 ## Installing LSP Servers
 
 codescout looks for each LSP server binary on `PATH`. The quickest way to

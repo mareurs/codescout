@@ -6,34 +6,34 @@ Claude Code's `EnterWorktree` creates an isolated git worktree for feature work,
 and the shell's working directory moves into it. The MCP server does not follow.
 
 codescout's project root is set when the server starts (or when
-`activate_project` is called). It has no visibility into where the shell is
+`workspace(action: activate)` is called). It has no visibility into where the shell is
 currently pointed. So after `EnterWorktree`, write tools — `edit_file`,
 `create_file`, `replace_symbol`, `insert_code`, `remove_symbol` — are still
 targeting the main repo. The AI writes to the wrong tree, silently, with no
 error, because the path is valid in both contexts.
 
-## The Fix: `activate_project`
+## The Fix: `workspace(action: activate)`
 
-After `EnterWorktree`, always call `activate_project` with the absolute worktree
+After `EnterWorktree`, always call `workspace(action: activate)` with the absolute worktree
 path before doing any writes:
 
 ```
-activate_project("/abs/path/to/.claude/worktrees/my-feature")
+workspace(action: activate, path: "/abs/path/to/.claude/worktrees/my-feature")
 ```
 
 All subsequent reads, writes, symbol navigation, and shell commands then target
 that tree. Switch back to the main repo when done:
 
 ```
-activate_project("/abs/path/to/main-repo")
+workspace(action: activate, path: "/abs/path/to/main-repo")
 ```
 
 ## Layer 1 — Write Guard (Hard Block)
 
-If the AI enters a worktree but hasn't called `activate_project`, write tools
+If the AI enters a worktree but hasn't called `workspace(action: activate)`, write tools
 detect the mismatch and raise a hard error rather than silently writing to the
 wrong place. The error message lists the detected worktree paths and the exact
-`activate_project` call needed to unblock.
+`workspace(action: activate)` call needed to unblock.
 
 ## Layer 2 — Navigation Exclusions
 
@@ -61,7 +61,7 @@ Run this from the main repo root, not from inside the (now-deleted) worktree.
 When using a workflow like [Superpowers writing-plans](superpowers.md) and
 choosing the **Parallel Session** option, don't try to launch `executing-plans`
 from the same session that created the worktree. The `EnterWorktree` +
-`activate_project` dance is easy to miss, and subagents spawned from the current
+`workspace(action: activate)` dance is easy to miss, and subagents spawned from the current
 session won't automatically inherit the right project root.
 
 The cleanest approach — one that sidesteps all of this — is:
@@ -72,7 +72,7 @@ claude
 ```
 
 Open a new terminal, `cd` into the worktree, and start Claude there. The session
-is rooted in the worktree from the first message. No `activate_project` call
+is rooted in the worktree from the first message. No `workspace(action: activate)` call
 needed, no stale context from the planning session, no risk of writes going to
 the main repo.
 
@@ -82,5 +82,5 @@ Other approaches can work, but this one always does.
 
 - [Superpowers Workflow](superpowers.md) — how the Superpowers plugin integrates
   worktrees into a full TDD + parallel-agent development workflow
-- [Workflow & Config Tools](../tools/workflow-and-config.md) — `activate_project`
+- [Workflow & Config Tools](../tools/workflow-and-config.md) — `workspace(action: activate)`
   reference: the required call after entering a worktree

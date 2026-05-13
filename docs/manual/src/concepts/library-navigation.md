@@ -40,10 +40,10 @@ code at a glance.
 ## Building a Library Index
 
 Semantic search over library code requires an embedding index, just like project
-code. Build one with `index_project` pointed at the library's root path:
+code. Build one with `index(action: build)` pointed at the library's root path:
 
 ```json
-{ "tool": "index_project", "arguments": { "path": "/path/to/tokio-1.35.1/" } }
+{ "tool": "index(action: build)", "arguments": { "path": "/path/to/tokio-1.35.1/" } }
 ```
 
 This is a one-time cost per library. The index persists in
@@ -95,12 +95,12 @@ manual steps required.
 To build or rebuild a library's index:
 
 ```json
-{ "tool": "index_project", "arguments": { "scope": "lib:tokio" } }
+{ "tool": "index(action: build)", "arguments": { "scope": "lib:tokio" } }
 ```
 
 ## Version Tracking and Staleness Hints
 
-When `index_project(scope="lib:<name>")` runs, codescout reads the project's
+When `index(action: build, scope="lib:<name>")` runs, codescout reads the project's
 lockfile (`Cargo.lock`, `package-lock.json`, etc.) to record the library version
 that was indexed.
 
@@ -113,7 +113,7 @@ After a dependency upgrade, `semantic_search` includes a `stale_libraries` field
       "name": "tokio",
       "indexed": "1.37.0",
       "current": "1.38.0",
-      "hint": "tokio was updated — run index_project(scope='lib:tokio') to re-index"
+      "hint": "tokio was updated — run index(action: build, scope='lib:tokio') to re-index"
     }
   ]
 }

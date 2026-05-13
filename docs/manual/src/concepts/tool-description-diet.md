@@ -34,7 +34,7 @@ Fetch it with:
 resources/read doc://codescout-tool-guide
 ```
 
-The guide is re-generated on every `activate_project` call so it always reflects
+The guide is re-generated on every `workspace(action: activate)` call so it always reflects
 the current tool set.
 
 ## Guard test

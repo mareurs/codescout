@@ -1,6 +1,6 @@
-# search_pattern: Literal Fallback
+# grep: Literal Fallback
 
-When `search_pattern` receives a pattern that fails regex compilation,
+When `grep` receives a pattern that fails regex compilation,
 it now checks whether the input looks like intended regex syntax before
 returning an error.
 

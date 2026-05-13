@@ -7,9 +7,9 @@ compaction, and the next navigation call may resolve to the wrong location.
 
 This feature adds a two-part fix:
 
-## Server side: `project_status(post_compact: true)`
+## Server side: `workspace(action: status, post_compact: true)`
 
-`project_status` accepts a new boolean parameter `post_compact`. When `true`,
+`workspace(action: status)` accepts a new boolean parameter `post_compact`. When `true`,
 all active LSP clients are shut down immediately and the call returns early:
 
 ```json
@@ -29,12 +29,12 @@ the MCP transport and cannot call tools directly, the hook injects an
 
 ```
 codescout PostCompact: context was compacted.
-→ Call project_status({"post_compact": true}) as your FIRST action to flush stale LSP position caches.
+→ Call workspace(action: status, post_compact: true) as your FIRST action to flush stale LSP position caches.
    LSP clients restart lazily — no disruption to the session.
 ```
 
 The agent sees this as the first message of the new turn and calls
-`project_status(post_compact: true)` before any navigation work.
+`workspace(action: status, post_compact: true)` before any navigation work.
 
 ## When is this useful?
 

@@ -1,5 +1,5 @@
 # Project Hints
-`activate_project` now returns a `project_hints` field with manifest-derived
+`workspace(action: activate)` now returns a `project_hints` field with manifest-derived
 context so agents have useful information even when `onboarding` has never been
 run.
 
@@ -10,7 +10,7 @@ Previously, an agent hitting a codescout project in a client that never calls
 no manifest info. The agent had to probe the filesystem itself — or guess.
 
 `project_hints` fills that gap with a cheap manifest probe that runs on every
-`activate_project` call.
+`workspace(action: activate)` call.
 
 ## What you get
 
@@ -28,7 +28,7 @@ no manifest info. The agent had to probe the filesystem itself — or guess.
     "onboarded": false
   },
   "memories": [],
-  "hint": "CWD: /home/you/work/codescout. Run project_status() for health checks and memory staleness."
+  "hint": "CWD: /home/you/work/codescout. Run workspace(action: status) for health checks and memory staleness."
 }
 ```
 

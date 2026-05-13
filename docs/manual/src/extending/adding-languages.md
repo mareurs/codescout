@@ -135,13 +135,11 @@ touch this function.
 
 **What this enables:**
 
-- `symbols` — symbol tree for files and directories
-- `symbols` — search symbols by name across the project
+- `symbols` — symbol tree for files and directories + name search
 - `references` — find all callers/references
-- `replace_symbol` — edit a symbol's source code
-- `insert_code` — insert code before or after symbols
-- `rename_symbol` — project-wide rename
-- `rename_symbol` — project-wide rename
+- `symbol_at` — definition + hover at a position
+- `call_graph` — transitive caller/callee traversal
+- `edit_code` — mutate code by symbol (`action: replace | insert | remove | rename`)
 
 The `LspManager` starts the server lazily on first use and keeps it alive for
 subsequent requests.

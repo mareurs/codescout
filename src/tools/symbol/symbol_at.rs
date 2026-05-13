@@ -177,7 +177,7 @@ pub(crate) async fn fetch_definition(ctx: &ToolContext, input: &Value) -> anyhow
                 def["library_hint"] = json!({
                     "name": lib_name,
                     "status": "not_indexed",
-                    "hint": format!("Library '{}' discovered but not indexed. Run index_project(scope='lib:{}') to enable semantic search.", lib_name, lib_name)
+                    "hint": format!("Library '{}' discovered but not indexed. Run index(action='build', scope='lib:{}') to enable semantic search.", lib_name, lib_name)
                 });
             }
             ctx.agent.maybe_auto_index_library(lib_name).await;
@@ -268,7 +268,7 @@ pub(crate) async fn fetch_hover(ctx: &ToolContext, input: &Value) -> anyhow::Res
                     result["library_hint"] = json!({
                         "name": lib_name,
                         "status": "not_indexed",
-                        "hint": format!("Library '{}' discovered but not indexed. Run index_project(scope='lib:{}') to enable semantic search.", lib_name, lib_name)
+                        "hint": format!("Library '{}' discovered but not indexed. Run index(action='build', scope='lib:{}') to enable semantic search.", lib_name, lib_name)
                     });
                 }
                 ctx.agent.maybe_auto_index_library(lib_name).await;

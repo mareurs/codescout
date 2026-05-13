@@ -67,6 +67,6 @@ codescout dashboard --project . --port 9000
 ## Further Reading
 
 - [Memory Tools](../tools/memory.md) — the `memory` tool that backs the Memories browser
-- [Semantic Search Tools](../tools/semantic-search.md) — `project_status` is the data source for the index health and drift panels on the Overview page
+- [Semantic Search Tools](../tools/semantic-search.md) — `workspace(action: status)` is the data source for the index health and drift panels on the Overview page
 - [Workflow & Config Tools](../tools/workflow-and-config.md) — usage data from `.codescout/usage.db` backs the Tool Stats page
 - [Project Configuration](../configuration/project-toml.md) — the Overview page shows your active configuration from `.codescout/project.toml`

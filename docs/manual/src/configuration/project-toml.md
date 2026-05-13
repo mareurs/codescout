@@ -56,7 +56,7 @@ drift_detection_enabled = true
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `model` | string | `"ollama:mxbai-embed-large"` | Embedding model. The prefix selects the backend. See [Embedding Backends](embedding-backends.md) for the full list of supported prefixes and models. |
-| `drift_detection_enabled` | bool | `true` | Enable semantic drift detection during index builds. `index_project` compares old and new chunk embeddings to score how much each changed file's *meaning* shifted. Results queryable via `project_status(threshold)`. Set to `false` to opt out. Experimental — adds memory overhead proportional to changed-file count. |
+| `drift_detection_enabled` | bool | `true` | Enable semantic drift detection during index builds. `index(action: build)` compares old and new chunk embeddings to score how much each changed file's *meaning* shifted. Results queryable via `workspace(action: status, threshold=...)`. Set to `false` to opt out. Experimental — adds memory overhead proportional to changed-file count. |
 
 > **Note — chunk size is automatic.** codescout derives the chunk budget
 > directly from the model's published context window using a conservative
@@ -66,7 +66,7 @@ drift_detection_enabled = true
 > Existing `project.toml` files containing these keys are silently ignored.
 
 **Changing the model after indexing:** If you change `model`, you must rebuild the index
-(`index_project` with `force: true`). codescout detects model mismatches and will warn
+(`index(action: build)` with `force: true`). codescout detects model mismatches and will warn
 rather than return wrong results.
 
 ---
@@ -142,7 +142,7 @@ indexing_enabled = true
 | `shell_output_limit_bytes` | integer | `102400` | Maximum bytes captured from shell command stdout or stderr. Output beyond this limit is truncated and flagged in the response. |
 | `shell_enabled` | bool | `false` | Master switch for shell execution. Must be `true` for `run_command` to run any command regardless of `shell_command_mode`. |
 | `file_write_enabled` | bool | `true` | Enables file write tools: `create_file` and the symbol write tools. Set to `false` for a read-only session. |
-| `indexing_enabled` | bool | `true` | Enables `index_project` and `project_status`. Set to `false` to prevent the agent from kicking off potentially long-running indexing. |
+| `indexing_enabled` | bool | `true` | Enables `index(action: build)` and `workspace(action: status)`. Set to `false` to prevent the agent from kicking off potentially long-running indexing. |
 
 ### Built-in Read Deny-List
 
@@ -244,20 +244,20 @@ indexing_enabled = true
 
 ## How Configuration Is Loaded
 
-At startup and whenever `activate_project` is called, codescout:
+At startup and whenever `workspace(action: activate)` is called, codescout:
 
 1. Looks for `.codescout/project.toml` in the project root.
 2. If found, parses it. Any section that is missing falls back to its defaults.
 3. If not found, constructs a default config using the directory name as the project name.
 
-The effective configuration is always visible via the `project_status` tool:
+The effective configuration is always visible via the `workspace(action: status)` tool:
 
 ```json
-{ "name": "project_status", "arguments": {} }
+{ "name": "workspace(action: status)", "arguments": {} }
 ```
 
 Changes to `project.toml` take effect the next time the project is activated — either by
-restarting the MCP server or by calling `activate_project` again with the same path.
+restarting the MCP server or by calling `workspace(action: activate)` again with the same path.
 
 ---
 

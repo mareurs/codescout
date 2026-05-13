@@ -1,5 +1,5 @@
 # Index Scope Guard
-Before `index_project` commits to walking and embedding a directory, codescout
+Before `index(action: build)` commits to walking and embedding a directory, codescout
 checks whether the scope looks broad enough to be accidental, and requires
 explicit human confirmation via an MCP elicitation dialog before proceeding.
 
@@ -13,7 +13,7 @@ Confirmation is required if either:
    - A system root: `/`, `/usr`, `/etc`, `/var`, `/tmp`, `/root`, `/opt`, `/proc`, `/sys`
 2. **The approximate raw source size exceeds the threshold** (default 500 MB of
    eligible content, respecting `.gitignore` and hidden-file rules — same
-   filter `index_project` itself uses).
+   filter `index(action: build)` itself uses).
 
 When either trigger fires, the MCP client shows a dialog like:
 
@@ -49,7 +49,7 @@ Currently, the suspicious-path list is fixed — it is not configurable.
 
 ## Rationale
 
-An agent that calls `activate_project("~")` followed by `index_project` would
+An agent that calls `workspace(action: activate, path: "~")` followed by `index(action: build)` would
 otherwise walk the entire home directory, ingest every file, and cause severe
 RAM spikes or OOM (see `docs/issues/memory-leak-x-session-freeze.md`). The
 scope guard makes that path impossible without a human in the loop.

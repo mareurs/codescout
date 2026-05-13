@@ -42,7 +42,7 @@ exploration workflows.
 | `session-start.sh` | `SessionStart` | Injects tool guide, memory hints, drift warnings, and onboarding nudge into the main agent |
 | `subagent-guidance.sh` | `SubagentStart` | Injects compact tool-use directive + `system-prompt.md` into every subagent |
 | `pre-tool-guard.sh` | `PreToolUse` on Read/Grep/Glob/Bash | Hard-blocks Read/Grep/Glob and Bash `cat`/`grep`/`head`/`tail`/`sed -i` on source files; redirects to codescout equivalents |
-| `worktree-activate.sh` | `PostToolUse` on EnterWorktree | Symlinks `.codescout/` into the new worktree and injects `activate_project` guidance |
+| `worktree-activate.sh` | `PostToolUse` on EnterWorktree | Symlinks `.codescout/` into the new worktree and injects `workspace(action: activate)` guidance |
 
 ## Why Hard Blocks, Not Soft Warnings
 
@@ -83,7 +83,7 @@ At `SessionStart`, the plugin checks whether the semantic index is behind HEAD:
    since last index), surfaces a warning in the session context
 
 This means the index is usually up to date by the time the AI needs it, without
-requiring a manual `index_project` call.
+requiring a manual `index(action: build)` call.
 
 ## Installation
 

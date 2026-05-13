@@ -82,15 +82,15 @@ but can't follow indirection.
 | Step | Tool | Purpose |
 |------|------|---------|
 | 1 | `references(name_path, path)` | Map all usages before renaming |
-| 2 | `rename_symbol(name_path, path, new_name)` | LSP-powered rename across files |
+| 2 | `edit_code(symbol, path, action="rename", new_name)` | LSP-powered rename across files |
 | 3 | `grep(old_name)` | Catch stragglers in comments, strings, docs |
 | 4 | `run_command("cargo check")` | Verify compilation |
 
-**Why both `rename_symbol` and `grep`?** LSP rename handles code
+**Why both `edit_code(action="rename")` and `grep`?** LSP rename handles code
 references precisely, but it can miss occurrences in string literals, comments,
 and documentation. Step 3 catches those stragglers. Step 1 gives you the
 expected count to verify against.
 
 **Tips:**
 - Compare the count from step 1 with the results from step 3 — any remaining matches after step 2 are the stragglers that need manual attention.
-- Always run step 4. `rename_symbol` can occasionally corrupt string literals containing the old name.
+- Always run step 4. `edit_code(action="rename")` can occasionally corrupt string literals containing the old name.

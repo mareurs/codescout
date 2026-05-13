@@ -54,25 +54,16 @@ tree-sitter, git, embedding index) and returns structured, compact results.
 
 Four pillars:
 
-### LSP Navigation (8 tools, 9 languages)
+### LSP Navigation (5 tools, 9 languages)
 
-The Language Server Protocol is how IDEs answer questions like "where is this
-defined?" and "who calls this?". codescout runs LSP servers on your behalf
-and exposes their answers as agent-friendly tools.
-
-- `symbols` — locate any symbol by name across the project
-- `symbols` — the outline of a file or directory: classes,
-  functions, structs, in tree form
+- `symbols` — the outline of a file or directory: classes, functions, structs, in tree form (also performs name-based search)
 - `references` — all callers/usages of a given symbol
-- `replace_symbol` — replace a function body by name, not by line number
-- `remove_symbol` — delete a named symbol entirely
-- `insert_code` — add code relative to a named symbol (`position: "before"` or `position: "after"`)
 - `symbol_at` — inspect a symbol at a position via LSP: definition location and/or hover (type signature + docs)
-- `rename_symbol` — rename across the entire codebase via LSP
+- `call_graph` — transitive caller/callee traversal for impact analysis
+- `edit_code` — mutate code by symbol name with `action: replace | insert | remove | rename` (consolidates the older `replace_symbol`, `insert_code`, `remove_symbol`, `rename_symbol` into one tool)
 
 Supported languages: Rust, Python, TypeScript/JavaScript, Go, Java, Kotlin,
 C/C++, C#, Ruby.
-
 ### Semantic Search (3 tools)
 
 Sometimes you know the concept but not the name. Semantic search finds code by

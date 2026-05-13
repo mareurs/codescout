@@ -114,7 +114,7 @@ Records are pruned after 30 days alongside normal usage records.
   incorrect.
 - `arg_keys` logs parameter names only, not values, to avoid capturing
   sensitive content in log files.
-- `project_sha` is captured once at `activate_project`. If HEAD moves mid-session
+- `project_sha` is captured once at `workspace(action: activate)`. If HEAD moves mid-session
   (e.g. a commit lands while the server is running), the stored SHA reflects the
   state at activation, not at call time — still a valid reproduction point.
 # or tail the most recent:

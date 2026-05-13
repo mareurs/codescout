@@ -445,7 +445,7 @@ async fn build_activation_response(
     let index = if has_index {
         json!({"status": "indexed"})
     } else {
-        json!({"status": "not_indexed", "hint": "Run index_project() to enable semantic_search."})
+        json!({"status": "not_indexed", "hint": "Run index(action='build') to enable semantic_search."})
     };
 
     let workspace = ctx.agent.workspace_summary().await;
