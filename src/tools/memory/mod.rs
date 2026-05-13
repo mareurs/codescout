@@ -768,7 +768,7 @@ impl Tool for Memory {
                 let limit = super::optional_u64_param(&input, "limit").unwrap_or(5) as usize;
                 let bucket_filter = input["bucket"].as_str();
 
-                let (root, model) = {
+                let project_id = {
                     let inner = ctx.agent.inner.read().await;
                     let p = inner.active_project().ok_or_else(|| {
                         super::RecoverableError::with_hint(
@@ -776,35 +776,34 @@ impl Tool for Memory {
                             "Call workspace(action='activate') first.",
                         )
                     })?;
-                    (p.root.clone(), p.config.embeddings.model.clone())
+                    p.config.project.name.clone()
                 };
 
-                let embedder = ctx.agent.get_or_create_embedder(&model).await?;
-                let query_embedding =
-                    codescout_embed::embed_one(embedder.as_ref(), query).await?;
+                // Embed via the shared HTTP embedder so the query vector lives in
+                // the same space as the memories collection's stored vectors.
+                let client = crate::retrieval::client::RetrievalClient::from_env()
+                    .await
+                    .map_err(|e| {
+                        super::RecoverableError::with_hint(
+                            format!("retrieval stack offline: {e}"),
+                            "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack.",
+                        )
+                    })?;
+                let query_vec = client.embedder.embed(query).await?.dense;
 
-                let bucket = bucket_filter.map(|s| s.to_string());
-                let results = tokio::task::spawn_blocking(move || {
-                    let conn = crate::embed::index::open_db(&root)?;
-                    crate::embed::index::ensure_vec_memories(&conn)?;
-                    crate::embed::index::search_memories(
-                        &conn,
-                        &query_embedding,
-                        bucket.as_deref(),
-                        limit,
-                    )
-                })
-                .await??;
+                let store = ctx.agent.semantic_memory_store().await?;
+                let hits = store
+                    .search(&project_id, &query_vec, limit, bucket_filter)
+                    .await?;
 
                 let guard = super::output::OutputGuard::from_input(&input);
-                let items: Vec<serde_json::Value> = results
+                let items: Vec<serde_json::Value> = hits
                     .iter()
-                    .map(|r| {
+                    .map(|h| {
                         let content = if guard.should_include_body() {
-                            r.content.clone()
+                            h.memory.content.clone()
                         } else {
-                            // Exploring mode: first line only, max 50 chars
-                            let first_line = r.content.lines().next().unwrap_or("").trim();
+                            let first_line = h.memory.content.lines().next().unwrap_or("").trim();
                             if first_line.chars().count() > 50 {
                                 let mut end = 47.min(first_line.len());
                                 while !first_line.is_char_boundary(end) {
@@ -816,12 +815,12 @@ impl Tool for Memory {
                             }
                         };
                         json!({
-                            "id": r.id,
-                            "bucket": r.bucket,
-                            "title": r.title,
+                            "id": h.id.to_string(),
+                            "bucket": h.memory.bucket,
+                            "title": h.memory.title,
                             "content": content,
-                            "similarity": format!("{:.2}", r.similarity),
-                            "created_at": r.created_at,
+                            "similarity": h.score.map(|s| format!("{s:.2}")).unwrap_or_default(),
+                            "created_at": h.memory.created_at,
                         })
                     })
                     .collect();
