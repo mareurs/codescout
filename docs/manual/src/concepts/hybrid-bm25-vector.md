@@ -1,28 +1,51 @@
-# Hybrid BM25 + Vector Retrieval
+# Hybrid Dense + Sparse Retrieval
 
-`semantic_search` now uses a hybrid retrieval pipeline combining dense vector search with sparse BM25 keyword search, fused via Reciprocal Rank Fusion (RRF).
+`semantic_search` uses a hybrid retrieval pipeline combining dense vector
+search with sparse SPLADE keyword search, fused via Reciprocal Rank Fusion
+(RRF) inside Qdrant.
+
+> **History:** Prior to v0.12 the sparse leg was a local Tantivy BM25 index.
+> Since v0.12 it is a SPLADE service in the retrieval stack — same conceptual
+> shape (lexical complement to dense), different implementation. The Tantivy
+> code and `bm25.rs` module have been deleted.
 
 ## How it works
 
-1. **Vector leg** — dense embedding search (unchanged behavior)
-2. **BM25 leg** — keyword search over a Tantivy full-text index, built alongside the vector index during `index(action="build")`
-3. **RRF fusion** — results from both legs are re-ranked using Reciprocal Rank Fusion (k=60)
-
-The BM25 index uses a code-aware tokenizer that splits on camelCase, snake_case, file paths, and punctuation.
+1. **Dense leg** — query embedded by the dense embedder service (default
+   `localhost:48081`, TEI or OpenAI protocol) and matched against the
+   `code_chunks` collection's dense vector field.
+2. **Sparse leg** — query embedded by the SPLADE service (default
+   `localhost:48084`, TEI protocol) and matched against the same collection's
+   sparse vector field.
+3. **RRF fusion** — Qdrant fuses the two ranked lists server-side using
+   `1/(1+rank)` (note: rank-1 = 0.500, rank-9 ≈ 0.100 — this is Qdrant's
+   constant, not the academic `k=60` formula).
+4. **Cross-encoder rerank** — top fused candidates are POSTed to the
+   reranker service (default `localhost:48083`, `bge-reranker-v2-m3`) for
+   pairwise scoring. Final results are sorted by rerank score.
 
 ## Behavior
 
-- Hybrid search activates automatically for project-scope queries when a BM25 index exists
-- Other scopes (libraries, all) use pure vector search unchanged
-- If the BM25 index is absent or corrupted, the tool falls back to pure vector search with a warning
+- Hybrid search is always on for project-scope queries — both legs run
+  unconditionally when the retrieval stack is reachable.
+- Library scope (`scope: "libraries"`) follows the same pipeline against the
+  `lib:NAME` project_id namespace.
+- If the retrieval stack is unreachable, `semantic_search` returns a
+  structured error with stack-inspection hints (see
+  `src/tools/semantic/search.rs` error classification).
 
-## Building the BM25 index
+## Configuration
 
-The BM25 index is rebuilt automatically at the end of every `index(action="build")` call. No extra steps needed.
+| Env | Default | Effect |
+|---|---|---|
+| `CODESCOUT_EMBEDDER_PROTOCOL` | `tei` | `tei` or `openai` (e.g. for Ollama) |
+| `CODESCOUT_EMBEDDER_MODEL_NAME` | (empty) | Model id sent in OpenAI-protocol payloads |
+| `CODESCOUT_QUERY_PREFIX` | (empty) | Prepended to query text only — for asymmetric models like Nomic |
+| `CODESCOUT_RERANKER_PROTOCOL` | `tei` | `tei` or `infinity` |
+| `CODESCOUT_RERANKER_MODEL` | (unset) | Override the reranker model id |
 
-## Tokenizer
+## Rebuilding the indexes
 
-The `CodeTokenizer` splits text by:
-- Non-alphanumeric separators (spaces, punctuation, path separators)
-- Underscores (`snake_case` → `["snake", "case"]`)
-- CamelCase boundaries (`parseModel` → `["parse", "model"]`)
+The hybrid indexes are rebuilt automatically at the end of every
+`index(action="build")` call — no separate "build the sparse index" step.
+Both legs share the same chunk set and are upserted into Qdrant atomically.

@@ -174,40 +174,48 @@ matrix.
 
 ### Embedding Pipeline
 
-**Source:** `src/embed/`
+**Source:** `src/retrieval/`, `src/embed/ast_chunker.rs`, `crates/codescout-embed/`
 
-The embedding pipeline enables semantic search -- finding code by meaning
-rather than by name. It has four stages:
+The embedding pipeline enables semantic search — finding code by meaning rather
+than by name. As of v0.12 it is a network-attached retrieval stack, not a
+local-database backend. Four stages, each running in a separate process:
 
-1. **Chunking** (`src/embed/chunker.rs`, `src/embed/ast_chunker.rs`) -- Source
-   files are split into overlapping text chunks. For languages with tree-sitter
-   support, the chunker uses AST boundaries (functions, classes, blocks) to
-   create semantically coherent chunks. For other files, it falls back to
-   line-based splitting with configurable `chunk_size` and `chunk_overlap`.
+1. **Chunking** (`src/embed/ast_chunker.rs`, `crates/codescout-embed/src/chunker.rs`)
+   — Source files are split into overlapping text chunks. For languages with
+   tree-sitter support, the chunker uses AST boundaries (functions, classes,
+   blocks) to create semantically coherent chunks. For other files, it falls
+   back to line-based splitting with configurable `chunk_size` and
+   `chunk_overlap`.
 
-2. **Embedding** (`src/embed/remote.rs`, `src/embed/local.rs`) -- Each chunk
-   is sent to an embedding backend that returns a vector representation. Two
-   backends are available:
-   - **Remote** (default) -- HTTP client that talks to Ollama, OpenAI, or any
-     OpenAI-compatible endpoint.
-   - **Local** -- CPU-based embeddings via fastembed-rs and ONNX Runtime. No
-     external service needed.
+2. **Dense embedding** (`src/retrieval/embedder.rs::EmbedderHttp`) — Each chunk
+   is POSTed to a dense embedding service over HTTP. The default stack ships
+   a TEI-compatible embedder on `localhost:48081`; the same client also speaks
+   the OpenAI-compatible protocol when `CODESCOUT_EMBEDDER_PROTOCOL=openai`
+   is set, so Ollama, OpenAI, and Anthropic-compatible endpoints all work.
 
-3. **Storage** (`src/embed/index.rs`) -- Vectors and chunk metadata are stored
-   in a SQLite database at `.codescout/embeddings.db`. On first use the table
-   is transparently migrated to a `vec0` virtual table (sqlite-vec), enabling
-   ANN-indexed KNN search. Existing databases are migrated automatically.
+3. **Sparse embedding** (`src/retrieval/embedder.rs`, SPLADE) — In parallel,
+   chunks are sent to a sparse SPLADE service on `localhost:48084`. The sparse
+   vector captures lexical matches the dense vector misses (rare tokens, exact
+   identifiers).
 
-4. **Search** (`src/embed/index.rs`) -- Query text is embedded using the same
-   model. When the `vec0` table is active, search uses sqlite-vec's KNN index
-   (`ORDER BY + LIMIT` inside the subquery, as required by vec0). Pre-migration
-   databases fall back to a pure-Rust cosine scan. Results are ranked by
-   similarity score and returned with file paths, line ranges, and content
-   previews.
+4. **Storage and search** (`src/retrieval/qdrant.rs`) — Both vectors plus chunk
+   metadata are upserted into Qdrant's `code_chunks` collection over gRPC
+   (`localhost:6334`). Query-time, the same dense + sparse embeddings are
+   computed for the query text and Qdrant performs hybrid search with
+   Reciprocal Rank Fusion (`1/(1+rank)`) across both legs. Top results are
+   then re-ranked by a cross-encoder service on `localhost:48083`
+   (TEI-compatible, `bge-reranker-v2-m3` by default; protocol switchable to
+   Infinity via `CODESCOUT_RERANKER_PROTOCOL=infinity`).
 
 The index tracks file content hashes. On incremental re-indexing, only files
 that changed since the last index build are re-chunked and re-embedded.
+Memories live in a sibling Qdrant collection (`memories`) with the same
+substrate but a separate schema and lifecycle.
 
+The full stack is provided as `docker-compose.yml` at the repo root with `cpu`
+and `gpu` profiles. Users migrating from pre-v0.12 installs run
+`codescout migrate-memories` to re-embed legacy `.codescout/embeddings/project.db`
+content into Qdrant.
 ### Memory Store
 
 **Source:** `src/memory/`
@@ -266,13 +274,16 @@ multiple clients need to share a single server.
 
 ## Storage
 
-All persistent data lives in `.codescout/` within the project root:
+All persistent state is split between **per-project local files** and a
+**shared retrieval stack** running as containers.
+
+### Per-project (`.codescout/` in the project root)
 
 ```
 <project-root>/
 └── .codescout/
     ├── project.toml      # Configuration
-    ├── embeddings.db      # SQLite vector index
+    ├── call_edges.db      # Cross-file call graph cache (SQLite)
     └── memories/          # Markdown knowledge files
         ├── topic-a.md
         └── debugging/
@@ -280,15 +291,31 @@ All persistent data lives in `.codescout/` within the project root:
 ```
 
 This directory is created automatically when a project is first activated.
-Add `.codescout/` to your `.gitignore` -- it contains machine-local state
-(embedding vectors, memory notes) that should not be committed.
+Add `.codescout/` to your `.gitignore` — it contains machine-local state
+(call-graph cache, memory notes) that should not be committed.
 
 The `project.toml` file is an exception: you may want to commit it so that
 team members share the same configuration. See
 [Project Configuration](configuration/project-toml.md) for details.
 
----
+> **Note:** Pre-v0.12 installs had `.codescout/embeddings/project.db` (a
+> sqlite-vec store). That file is no longer created or read. To migrate its
+> contents into Qdrant, run `codescout migrate-memories` once; you can then
+> delete the legacy file. The active-project banner surfaces a "⚠ LEGACY
+> INDEX" hint when it detects one.
 
+### Shared retrieval stack (Qdrant + embedding services)
+
+| Service | Default port | Role |
+|---|---|---|
+| Qdrant | `:6334` (gRPC) | Vector storage for `code_chunks` and `memories` collections |
+| Dense embedder | `:48081` (HTTP) | TEI- or OpenAI-protocol text → dense vector |
+| Cross-encoder reranker | `:48083` (HTTP) | TEI or Infinity-protocol pairwise reranking |
+| Sparse SPLADE | `:48084` (HTTP) | TEI-protocol text → sparse vector |
+
+The repo ships a `docker-compose.yml` with `cpu` and `gpu` profiles that
+brings up all four. The stack is shared across projects on a machine — there
+is no per-project Qdrant instance.
 ## Tech Stack
 
 | Crate | Purpose |
@@ -297,17 +324,16 @@ team members share the same configuration. See
 | `lsp-types` | LSP type definitions |
 | `tree-sitter` + language grammars | Offline AST parsing |
 | `git2` | Git operations (blame, log, diff) |
-| `rusqlite` | SQLite for embedding storage |
-| `reqwest` | HTTP client for remote embedding backends |
-| `fastembed` | Local CPU embeddings (optional, `local-embed` feature) |
+| `qdrant-client` | gRPC client for Qdrant vector storage |
+| `rusqlite` | SQLite — `call_edges.db` cache + legacy memory migration reader |
+| `reqwest` (rustls + ring) | HTTP client for embedder / reranker / sparse services |
+| `rustls` | TLS via the `ring` crypto provider (small binary footprint) |
+| `fastembed` | Local CPU embeddings (optional, `local-embed` feature — not the default substrate) |
 | `tokio` | Async runtime |
 | `clap` | CLI argument parsing |
 | `serde` / `serde_json` | JSON serialization |
 | `tracing` | Structured logging |
 | `libc` | POSIX signals for LSP process cleanup |
-
----
-
 ## Further Reading
 
 - [Progressive Disclosure](concepts/progressive-disclosure.md) -- how output

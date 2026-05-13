@@ -31,7 +31,7 @@
   - [Metadata-Enriched Chunks](concepts/metadata-enriched-chunks.md)
   - [Index Scope Guard](concepts/index-scope-guard.md)
   - [Auto-Reindex on Edit](concepts/auto-reindex-on-edit.md)
-  - [Hybrid BM25 + Vector Retrieval](concepts/hybrid-bm25-vector.md)
+  - [Hybrid Dense + Sparse Retrieval](concepts/hybrid-bm25-vector.md)
 
 - [Library Navigation](concepts/library-navigation.md)
   - [Auto-Registration](concepts/multi-ecosystem-auto-registration.md)

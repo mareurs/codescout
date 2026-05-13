@@ -173,10 +173,9 @@ These work with the `local:` prefix (no server needed):
 
 2. **Chunk size auto-derived** — codescout calculates chunk size from the model's context window. No manual tuning needed.
 
-3. **Vector storage** — embeddings are stored in sqlite-vec (`vec0` virtual tables) for fast KNN search.
+3. **Vector storage** — embeddings are upserted into Qdrant's `code_chunks` collection over gRPC (default `localhost:6334`). Both a dense and a sparse vector are stored per chunk; query-time hybrid search fuses them via RRF inside Qdrant. See [Hybrid Dense + Sparse Retrieval](../concepts/hybrid-bm25-vector.md) for the topology.
 
-4. **Bundled model lifecycle** — the ONNX model is loaded lazily on first `semantic_search` or `index_project`, cached for 5 minutes, then unloaded to free memory.
-
+4. **Bundled model lifecycle** — when using the `local:` prefix (compile-time `local-embed` feature), the ONNX model is loaded lazily on first `semantic_search` or `index(action="build")`, cached for 5 minutes, then unloaded to free memory. The default substrate is the HTTP dense embedder service, not the bundled ONNX path.
 ## Choosing a Model
 
 Not sure which model to use? See the [Embedding Model Comparison](embedding-model-comparison.md)

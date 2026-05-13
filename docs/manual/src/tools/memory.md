@@ -223,32 +223,35 @@ Search semantic memories by meaning.
 
 In compact mode (default), `content` is truncated to the first line (~50 chars). Use `detail_level: "full"` to get the complete text.
 
-**Tips:** Use `recall` at the start of a session to find relevant past decisions before starting work. The `id` field is needed for `forget`.
+**Tips:** Use `recall` at the start of a session to find relevant past decisions before starting work. The returned `id` field is a UUID string — pass it to `forget` to delete the entry.
 
 ---
 
 ### `action: "forget"`
 
-Delete a semantic memory by its numeric ID.
+Delete a semantic memory by its ID.
 
 **Parameters:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `id` | integer | **yes** | The memory ID from a `recall` result |
+| `id` | string (UUID) | **yes** | The memory ID from a `recall` result |
 
 **Example:**
 
 ```json
-{ "action": "forget", "id": 42 }
+{ "action": "forget", "id": "aa83d87b-8268-5dc5-9039-4e7447cabecd" }
 ```
 
 **Output:** `"ok"`
 
-**Tips:** Use `recall` first to find the ID of the entry to remove. Forgetting an ID that does not exist is a no-op.
+**Tips:** Use `recall` first to find the ID of the entry to remove. The ID is
+a UUIDv5 derived from `(project_id, bucket, title)` — re-`remember`ing the
+same title under the same bucket produces the same ID, so an update overwrites
+in place rather than creating a duplicate. Forgetting an ID that does not
+exist is a no-op.
 
 ---
-
 ### `action: "refresh_anchors"`
 
 Re-hash the path anchors for a topic to clear a staleness warning without rewriting the memory content.
