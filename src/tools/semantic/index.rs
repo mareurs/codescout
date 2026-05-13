@@ -120,9 +120,21 @@ impl Tool for IndexProject {
             };
 
             let source = format!("lib:{}", lib_name);
-            crate::embed::index::build_library_index(&root, &lib_path, &source, force).await?;
+            let lib_project_id = source.clone();
 
-            // Read current version from lockfile and write back
+            // Sync the library directory into Qdrant under its own
+            // project_id namespace (`lib:<name>`). The retrieval stack
+            // handles chunking, embedding, and incremental upsert/delete.
+            let client = crate::retrieval::client::RetrievalClient::from_env().await?;
+            let opts = crate::retrieval::sync::SyncOpts {
+                force_reindex: force,
+                ..Default::default()
+            };
+            client
+                .sync_project(&lib_project_id, &lib_path, opts)
+                .await?;
+
+            // Read current version from lockfile and update the registry.
             let versions = crate::library::versions::resolve_dependency_versions(&root);
             let current_version = crate::library::versions::find_version(&versions, lib_name);
             if current_version.is_none() {
@@ -152,35 +164,15 @@ impl Tool for IndexProject {
                 project.library_registry.save(&registry_path)?;
             }
 
-            // Write version_indexed to lib_meta table
-            if let Some(ver) = &current_version {
-                let ver2 = ver.clone();
-                let root2 = root.clone();
-                let lib_name2 = lib_name.to_string();
-                tokio::task::spawn_blocking(move || {
-                    let lib_conn =
-                        crate::embed::index::open_lib_db(&root2, &lib_name2)?;
-                    lib_conn.execute(
-                        "INSERT OR REPLACE INTO lib_meta (key, value) VALUES ('version_indexed', ?)",
-                        rusqlite::params![ver2],
-                    )?;
-                    anyhow::Ok(())
-                })
-                .await??;
-            }
-
-            let source2 = source.clone();
-            let root2 = root.clone();
-            let (file_count, chunk_count) = tokio::task::spawn_blocking(move || {
-                let conn = crate::embed::index::open_db(&root2)?;
-                let by_source = crate::embed::index::index_stats_by_source(&conn)?;
-                let lib_stats = by_source.get(&source2);
-                anyhow::Ok((
-                    lib_stats.map_or(0, |s| s.file_count),
-                    lib_stats.map_or(0, |s| s.chunk_count),
-                ))
-            })
-            .await??;
+            // Read counts back from Qdrant for the response. We re-scroll
+            // here rather than threading them through sync_project's return
+            // type so the same shape works for force / non-force reruns.
+            let collection = client.config.collection("code_chunks");
+            let (chunk_count, file_count) = client
+                .qdrant
+                .project_index_stats(&collection, &lib_project_id)
+                .await
+                .unwrap_or((0, 0));
 
             return Ok(json!({
                 "status": "ok",
