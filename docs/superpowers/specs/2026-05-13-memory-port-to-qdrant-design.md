@@ -135,24 +135,28 @@ uses for path-hashing.
 ## Trait + module sketch
 
 ```rust
-// src/memory/store.rs
+// src/memory/semantic_store.rs
+// Note: src/memory/mod.rs already has a MemoryStore for topic-based file
+// memories (markdown in .codescout/memories/). The trait is named distinctly
+// to avoid collision.
 #[async_trait]
-pub trait MemoryStore: Send + Sync {
-    async fn upsert(&self, m: &Memory) -> Result<()>;
+pub trait SemanticMemoryStore: Send + Sync {
+    async fn upsert(&self, m: &SemanticMemory) -> Result<()>;
     async fn search(&self, project_id: &str, query: &[f32], top_n: usize,
-                    bucket: Option<&str>) -> Result<Vec<Memory>>;
+                    bucket: Option<&str>) -> Result<Vec<SemanticMemory>>;
     async fn delete(&self, project_id: &str, id: Uuid) -> Result<()>;
-    async fn list(&self, project_id: &str) -> Result<Vec<Memory>>;
-    async fn by_anchor(&self, project_id: &str, path: &str) -> Result<Vec<Memory>>;
+    async fn list(&self, project_id: &str) -> Result<Vec<SemanticMemory>>;
+    async fn by_anchor(&self, project_id: &str, path: &str) -> Result<Vec<SemanticMemory>>;
 }
 
-// src/memory/store_qdrant.rs — production impl using RetrievalClient
-// src/memory/store_sqlite.rs — legacy impl, feature-gated `legacy-vec`
+// src/memory/semantic_store_qdrant.rs — production impl using RetrievalClient
+// src/memory/semantic_store_sqlite.rs — legacy impl, feature-gated `legacy-vec`
 ```
 
-`memory/mod.rs` switches from `crate::embed::index::*` to
-`ctx.agent.memory_store()` which returns the configured impl. Default impl
-is Qdrant; users on `--features legacy-vec` can keep sqlite while migrating.
+`src/tools/memory/mod.rs` (the tool implementation — 9 sites) switches from
+`crate::embed::index::*` to `ctx.agent.semantic_memory_store()` which returns
+the configured impl. Default impl is Qdrant; users on `--features legacy-vec`
+can keep sqlite while migrating.
 
 ## Implementation order
 
