@@ -22,7 +22,6 @@ const MEMORY_NS: Uuid = Uuid::from_bytes([
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MemoryAnchor {
     pub path: String,
-    pub hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,7 +70,6 @@ pub fn memory_to_payload(m: &SemanticMemory) -> HashMap<String, Value> {
         .map(|a| {
             let mut inner: HashMap<String, Value> = HashMap::new();
             inner.insert("path".into(), Value::from(a.path.clone()));
-            inner.insert("hash".into(), Value::from(a.hash.clone()));
             Value::from(Payload::from(inner))
         })
         .collect();
@@ -116,7 +114,6 @@ fn get_anchors(m: &HashMap<String, Value>) -> Result<Vec<MemoryAnchor>> {
                 .clone();
             Ok(MemoryAnchor {
                 path: get_str(&inner, "path").context("anchor.path")?,
-                hash: get_str(&inner, "hash").context("anchor.hash")?,
             })
         })
         .collect()
@@ -134,7 +131,6 @@ mod tests {
             content: "Never dispatch parallel write tool calls...".into(),
             anchors: vec![MemoryAnchor {
                 path: "src/tools/memory/mod.rs".into(),
-                hash: "ab12cd34".into(),
             }],
             created_at: "2026-03-03T12:00:00Z".into(),
             updated_at: "2026-05-13T05:00:00Z".into(),

@@ -238,7 +238,6 @@ mod tests {
             content: "test content".into(),
             anchors: vec![MemoryAnchor {
                 path: "src/foo.rs".into(),
-                hash: "deadbeef".into(),
             }],
             created_at: "2026-05-13T00:00:00Z".into(),
             updated_at: "2026-05-13T00:00:00Z".into(),
@@ -320,7 +319,6 @@ mod tests {
                 content: format!("content for {title}"),
                 anchors: vec![MemoryAnchor {
                     path: anchor.into(),
-                    hash: "h".into(),
                 }],
                 created_at: "2026-05-13T00:00:00Z".into(),
                 updated_at: "2026-05-13T00:00:00Z".into(),

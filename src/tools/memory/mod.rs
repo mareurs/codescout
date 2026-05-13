@@ -295,75 +295,84 @@ async fn cross_embed_memory(ctx: &ToolContext, topic: &str, content: &str) -> an
     Ok(())
 }
 
-/// Create semantic anchors for a markdown memory by embedding it and finding
-/// similar code chunks. Excludes files already covered by path anchors.
+/// Create semantic anchors for a markdown memory by embedding it, asking the
+/// retrieval stack for similar code chunks, and re-upserting the memory with
+/// `anchors` populated. Excludes files already covered by path anchors.
+///
+/// The re-upsert overwrites `cross_embed_memory`'s prior point (same
+/// deterministic id) but preserves the content the caller passed in here, so
+/// callers don't need to coordinate the two writes.
+///
+/// Best-effort: failures are returned to the caller (which logs and ignores).
 async fn create_semantic_anchors(
     ctx: &ToolContext,
     topic: &str,
     content: &str,
     path_anchor_files: &HashSet<String>,
 ) -> anyhow::Result<()> {
-    let (root, model, min_sim, top_n) = {
+    let (project_id, min_sim, top_n) = {
         let inner = ctx.agent.inner.read().await;
         let p = inner
             .active_project()
             .ok_or_else(|| anyhow::anyhow!("no project"))?;
         (
-            p.root.clone(),
-            p.config.embeddings.model.clone(),
+            p.config.project.name.clone(),
             p.config.memory.semantic_anchor_min_similarity,
             p.config.memory.semantic_anchor_top_n,
         )
     };
 
-    let embedder = ctx.agent.get_or_create_embedder(&model).await?;
-    let embedding = codescout_embed::embed_one(embedder.as_ref(), content).await?;
+    let client = crate::retrieval::client::RetrievalClient::from_env().await?;
+    let dense = client.embedder.embed(content).await?.dense;
 
-    let path_anchors = path_anchor_files.clone();
-    let topic_owned = topic.to_string();
-    tokio::task::spawn_blocking(move || {
-        let conn = crate::embed::index::open_db(&root)?;
-        crate::embed::index::ensure_memory_anchors(&conn)?;
+    // Code chunk search via the retrieval stack. Overfetch so dedupe-by-file
+    // has room to pick the best chunk per file.
+    let opts = crate::retrieval::search::SearchOpts {
+        limit: top_n,
+        overfetch: top_n * 4,
+        rerank: false, // anchors don't need cross-encoder rescoring
+        exclude_languages: vec!["markdown".to_string()],
+    };
+    let hits = client.search_code(&project_id, content, opts).await?;
 
-        // Delete old semantic anchors for this memory
-        crate::embed::index::delete_semantic_anchors(&conn, "markdown", &topic_owned)?;
-
-        // Search for similar code chunks
-        let results = crate::embed::index::search(&conn, &embedding, top_n)?;
-
-        // Deduplicate by file, keep highest similarity
-        let mut best_per_file: HashMap<String, (f32, String)> = HashMap::new();
-        for r in &results {
-            if r.score < min_sim {
-                continue;
-            }
-            if path_anchors.contains(&r.file_path) {
-                continue;
-            }
-            let hash = crate::embed::index::get_file_hash(&conn, &r.file_path)?.unwrap_or_default();
-            best_per_file
-                .entry(r.file_path.clone())
-                .and_modify(|(old_sim, _)| {
-                    if r.score > *old_sim {
-                        *old_sim = r.score;
-                    }
-                })
-                .or_insert((r.score, hash));
+    // Dedupe by file path, keep highest score, apply min_sim + path-anchor exclusions.
+    let mut best_per_file: HashMap<String, f32> = HashMap::new();
+    for h in &hits {
+        if h.score < min_sim {
+            continue;
         }
-
-        for (file_path, (sim, hash)) in &best_per_file {
-            crate::embed::index::insert_semantic_anchor(
-                &conn,
-                "markdown",
-                &topic_owned,
-                file_path,
-                hash,
-                *sim,
-            )?;
+        if path_anchor_files.contains(&h.file_path) {
+            continue;
         }
-        anyhow::Ok(())
-    })
-    .await??;
+        best_per_file
+            .entry(h.file_path.clone())
+            .and_modify(|s| {
+                if h.score > *s {
+                    *s = h.score;
+                }
+            })
+            .or_insert(h.score);
+    }
+
+    let mut anchors: Vec<crate::retrieval::memory_payload::MemoryAnchor> = best_per_file
+        .into_keys()
+        .map(|path| crate::retrieval::memory_payload::MemoryAnchor { path })
+        .collect();
+    anchors.sort_by(|a, b| a.path.cmp(&b.path)); // deterministic ordering
+
+    let now = now_epoch_string();
+    let memory = crate::retrieval::memory_payload::SemanticMemory {
+        project_id,
+        bucket: "structured".into(),
+        title: topic.to_string(),
+        content: content.to_string(),
+        anchors,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+
+    let store = ctx.agent.semantic_memory_store().await?;
+    store.upsert(&memory, &dense).await?;
     Ok(())
 }
 

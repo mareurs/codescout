@@ -168,7 +168,6 @@ mod tests {
             content: format!("content for {title}"),
             anchors: vec![MemoryAnchor {
                 path: anchor_path.into(),
-                hash: "h".into(),
             }],
             created_at: "2026-05-13T00:00:00Z".into(),
             updated_at: "2026-05-13T00:00:00Z".into(),
