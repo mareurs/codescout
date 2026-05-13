@@ -1,5 +1,21 @@
 name: codescout-retrieval
 
+# Two-profile retrieval stack: cpu / gpu.
+#
+#   docker compose --profile cpu up -d
+#   docker compose --profile gpu up -d
+#
+# Dense embedder is llama-server (gguf) on both profiles — CodeRankEmbed-Q4_K_M
+# scored highest on the legacy-natural bench (30/60) and runs ≤1GB VRAM.
+# Sparse is splade-pp via TEI. Rerank is bge-reranker-base on CPU (smaller, ~250ms p95)
+# and bge-reranker-v2-m3 on GPU (full quality, ~80ms p95).
+#
+# First run: place CodeRankEmbed-Q4_K_M.gguf in ${CODESCOUT_MODEL_DIR:-./models}.
+# Pull it from https://huggingface.co/nomic-ai/CodeRankEmbed-GGUF — Q4_K_M is ~90MB.
+#
+# Pinned image tags below are what we tested. Replace tags with sha256 digests
+# before treating any profile as production-stable.
+
 services:
   qdrant:
     image: qdrant/qdrant:v1.17.0
@@ -19,41 +35,84 @@ services:
       retries: 5
     networks: [retrieval_net]
 
-  embedder-cpu:
+  # ------------------------------------------------------------------ DENSE
+  # llama-server serving CodeRankEmbed Q4_K_M (137M params, dim 768).
+  # The query prefix "Represent this query for searching relevant code: " is
+  # required — see CODESCOUT_QUERY_PREFIX in .env.{cpu,gpu}.
+  dense-cpu:
     profiles: [cpu]
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
-    container_name: codescout-embedder-cpu
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: codescout-dense-cpu
     restart: unless-stopped
-    command: ["--model-id", "BAAI/bge-m3", "--dtype", "float32"]
+    command:
+      - --model
+      - /models/CodeRankEmbed-Q4_K_M.gguf
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --embedding
+      - --pooling
+      - mean
+      - --ctx-size
+      - "8192"
+      - --batch-size
+      - "4096"
+      - --ubatch-size
+      - "4096"
+      - --parallel
+      - "8"
+      - --threads
+      - "4"
     ports:
-      - "127.0.0.1:48081:80"
+      - "127.0.0.1:48081:8080"
     volumes:
-      - model_cache:/data
+      - ${CODESCOUT_MODEL_DIR:-./models}:/models:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     networks: [retrieval_net]
 
-  embedder-sparse-cpu:
-    profiles: [cpu]
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
-    container_name: codescout-embedder-sparse-cpu
-    restart: unless-stopped
-    command: ["--model-id", "naver/splade-cocondenser-ensembledistil", "--pooling", "splade", "--dtype", "float32", "--auto-truncate"]
-    ports:
-      - "127.0.0.1:48084:80"
-    volumes:
-      - model_cache:/data
-    networks: [retrieval_net]
-
-  embedder-gpu:
+  dense-gpu:
     profiles: [gpu]
-    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8
-    container_name: codescout-embedder-gpu
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    container_name: codescout-dense-gpu
     restart: unless-stopped
-    command: ["--model-id", "jinaai/jina-embeddings-v2-base-code", "--dtype", "float16", "--auto-truncate"]
+    command:
+      - --model
+      - /models/CodeRankEmbed-Q4_K_M.gguf
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --embedding
+      - --pooling
+      - mean
+      - --ctx-size
+      - "65536"
+      - --batch-size
+      - "4096"
+      - --ubatch-size
+      - "4096"
+      - --parallel
+      - "16"
+      - --n-gpu-layers
+      - "999"
+      - --flash-attn
+      - "on"
     ports:
-      - "127.0.0.1:48081:80"
-    shm_size: 2g
+      - "127.0.0.1:48081:8080"
     volumes:
-      - model_cache:/data
+      - ${CODESCOUT_MODEL_DIR:-./models}:/models:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
     deploy:
       resources:
         reservations:
@@ -63,16 +122,43 @@ services:
               capabilities: [gpu]
     networks: [retrieval_net]
 
-  embedder-sparse-gpu:
-    profiles: [gpu]
-    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8
-    container_name: codescout-embedder-sparse-gpu
+  # ------------------------------------------------------------------ SPARSE
+  # Splade_PP_en_v1 on TEI. Identical model across profiles; CPU latency
+  # ~80ms is acceptable for the suite.
+  sparse-cpu:
+    profiles: [cpu]
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    container_name: codescout-sparse-cpu
     restart: unless-stopped
-    command: ["--model-id", "naver/splade-cocondenser-ensembledistil", "--pooling", "splade", "--dtype", "float16", "--auto-truncate"]
+    command: ["--model-id", "prithivida/Splade_PP_en_v1", "--pooling", "splade", "--dtype", "float32", "--auto-truncate"]
     ports:
       - "127.0.0.1:48084:80"
     volumes:
       - model_cache:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [retrieval_net]
+
+  sparse-gpu:
+    profiles: [gpu]
+    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8
+    container_name: codescout-sparse-gpu
+    restart: unless-stopped
+    command: ["--model-id", "prithivida/Splade_PP_en_v1", "--pooling", "splade", "--dtype", "float16", "--auto-truncate"]
+    ports:
+      - "127.0.0.1:48084:80"
+    volumes:
+      - model_cache:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     deploy:
       resources:
         reservations:
@@ -82,16 +168,25 @@ services:
               capabilities: [gpu]
     networks: [retrieval_net]
 
+  # ------------------------------------------------------------------ RERANK
+  # CPU: bge-reranker-base (smaller, ~280MB, ~250ms p95 — usable on CPU).
+  # GPU: bge-reranker-v2-m3 (568MB, ~80ms p95 — full quality).
   reranker-cpu:
     profiles: [cpu]
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
     container_name: codescout-reranker-cpu
     restart: unless-stopped
-    command: ["--model-id", "BAAI/bge-reranker-v2-m3", "--dtype", "float32"]
+    command: ["--model-id", "BAAI/bge-reranker-base", "--dtype", "float32", "--auto-truncate"]
     ports:
       - "127.0.0.1:48083:80"
     volumes:
       - model_cache:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     networks: [retrieval_net]
 
   reranker-gpu:
@@ -104,6 +199,12 @@ services:
       - "127.0.0.1:48083:80"
     volumes:
       - model_cache:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     deploy:
       resources:
         reservations:

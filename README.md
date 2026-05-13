@@ -53,58 +53,46 @@ Then use in Claude Code — it will route all file/symbol/search operations thro
 > **Tip:** Install the [codescout-companion plugin](docs/manual/src/getting-started/companion-plugin.md) to automatically steer Claude toward codescout tools in every session — including subagents.
 ## Retrieval Stack
 
-codescout uses an external Docker Compose stack (Qdrant + TEI) for semantic embedding
-and hybrid retrieval. **Required for `semantic_search`** — start it once per machine:
+codescout uses an external Docker Compose stack (Qdrant + llama-server + TEI) for
+semantic embedding and hybrid retrieval. **Required for `semantic_search`.**
+
+Two profiles: `cpu` (laptop / no-GPU dev) and `gpu` (single CUDA card).
 
 ```bash
-cp .env.example .env
-# Edit .env to choose embedder/profile (default: cpu, bge-small-en-v1.5)
-./scripts/retrieval-stack.sh up
-cargo run --release --bin sync_project -- . codescout   # build the per-project index
+# 1. download the dense embedding model (~90MB, once)
+mkdir -p ./models
+curl -L -o ./models/CodeRankEmbed-Q4_K_M.gguf \
+  https://huggingface.co/nomic-ai/CodeRankEmbed-GGUF/resolve/main/CodeRankEmbed-Q4_K_M.gguf
+
+# 2. start the stack — pick one profile
+docker compose --profile cpu --env-file .env.cpu up -d   # ~3GB RAM, no GPU
+# OR
+docker compose --profile gpu --env-file .env.gpu up -d   # ~6GB RAM, 1.5GB VRAM
+
+# 3. wait for sparse + rerank to warm up (~30-60s first run, downloads from HF)
+docker compose ps
+
+# 4. source env, build the per-project index
+set -a; source .env.cpu; set +a    # or .env.gpu
+cargo run --release --bin sync_project -- . codescout
 ```
 
-Wait ~2 min on first run for models to download. Subsequent starts are instant.
+| Service | Profile | Image | Default URL |
+|---|---|---|---|
+| qdrant | both | `qdrant/qdrant:v1.17.0` | http://127.0.0.1:6333 (HTTP), :6334 (gRPC) |
+| dense (CodeRankEmbed-Q4) | cpu | `ghcr.io/ggml-org/llama.cpp:server` | http://127.0.0.1:48081 |
+| dense (CodeRankEmbed-Q4) | gpu | `ghcr.io/ggml-org/llama.cpp:server-cuda` | http://127.0.0.1:48081 |
+| sparse (Splade_PP_en_v1) | both | `ghcr.io/huggingface/text-embeddings-inference` | http://127.0.0.1:48084 |
+| rerank (bge-reranker-base) | cpu | `text-embeddings-inference:cpu-1.6` | http://127.0.0.1:48083 |
+| rerank (bge-reranker-v2-m3) | gpu | `text-embeddings-inference:86-1.8` | http://127.0.0.1:48083 |
 
-| Service | Default URL | Purpose |
-|---|---|---|
-| Qdrant | http://127.0.0.1:6333 (HTTP), :6334 (gRPC) | Vector store |
-| Dense embedder | http://127.0.0.1:8081 | Code embeddings (CodeRankEmbed / bge-small / jina) |
-| Sparse embedder | http://127.0.0.1:8084 | SPLADE BM25-style sparse vectors |
-| Reranker | http://127.0.0.1:8083 | Cross-encoder reranking (optional) |
-
-Tuned defaults (Phase 5.5 chunk×model matrix) live in `.env.example`. Empirical record:
-[`docs/research/2026-05-06-retrieval-stack-benchmark.md`](docs/research/2026-05-06-retrieval-stack-benchmark.md).
+CodeRankEmbed is asymmetric — `CODESCOUT_QUERY_PREFIX` in `.env.{cpu,gpu}` is required.
+Empirical scores on this stack: 30/60 on the legacy-natural bench (see
+[`docs/trackers/retrieval-benchmark.md`](docs/trackers/retrieval-benchmark.md)).
 
 **Stop the stack:**
 ```bash
-./scripts/retrieval-stack.sh down
-```
-
-codescout uses an external Docker Compose stack (Qdrant + TEI) for semantic embedding
-and hybrid retrieval. **Required for `semantic_search`** — start it once per machine:
-
-```bash
-cp .env.example .env
-# Edit .env to choose embedder/profile (default: cpu, bge-small-en-v1.5)
-./scripts/retrieval-stack.sh up
-cargo run --release --bin sync_project -- . codescout   # build the per-project index
-```
-
-Wait ~2 min on first run for models to download. Subsequent starts are instant.
-
-| Service | Default URL | Purpose |
-|---|---|---|
-| Qdrant | http://127.0.0.1:6333 (HTTP), :6334 (gRPC) | Vector store |
-| Dense embedder | http://127.0.0.1:8081 | Code embeddings (CodeRankEmbed / bge-small / jina) |
-| Sparse embedder | http://127.0.0.1:8084 | SPLADE BM25-style sparse vectors |
-| Reranker | http://127.0.0.1:8083 | Cross-encoder reranking (optional) |
-
-Tuned defaults (Phase 5.5 chunk×model matrix) live in `.env.example`. Empirical record:
-[`docs/research/2026-05-06-retrieval-stack-benchmark.md`](docs/research/2026-05-06-retrieval-stack-benchmark.md).
-
-**Stop the stack:**
-```bash
-./scripts/retrieval-stack.sh down
+docker compose --profile cpu down   # or --profile gpu
 ```
 ## Agent integrations
 
