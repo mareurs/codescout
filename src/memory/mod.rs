@@ -8,6 +8,7 @@ pub mod anchors;
 pub mod classify;
 pub mod filter;
 pub mod hash;
+pub mod semantic_store;
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};
