@@ -255,6 +255,16 @@ fn extract_title(content: &str) -> String {
     }
     title
 }
+/// Epoch-seconds as a zero-padded 10-digit string. Lexicographic compare ==
+/// numeric compare until year 2286. Used as `created_at` / `updated_at` for
+/// new semantic memories so `MemoryOrder::UpdatedAtDesc` sorts correctly.
+fn now_epoch_string() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    format!("{secs:010}")
+}
 
 /// Best-effort cross-embed a markdown memory into the semantic store.
 /// Called on `write` so that structured memories are also discoverable via `recall`.
@@ -528,7 +538,7 @@ impl Tool for Memory {
                 },
                 "query": { "type": "string", "description": "For recall. Search query." },
                 "limit": { "type": "integer", "description": "For recall. Max results (default 5)." },
-                "id": { "type": "integer", "description": "For forget. Memory ID to delete." },
+                "id": { "type": "string", "description": "For forget. UUID string from a recall result." },
                 "project_id": { "type": "string", "description": "Scope to a workspace project ID. Default: focused project." }
             }
         })
@@ -734,7 +744,7 @@ impl Tool for Memory {
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| "unstructured".to_string());
 
-                let (root, model) = {
+                let project_id = {
                     let inner = ctx.agent.inner.read().await;
                     let p = inner.active_project().ok_or_else(|| {
                         super::RecoverableError::with_hint(
@@ -742,24 +752,31 @@ impl Tool for Memory {
                             "Call workspace(action='activate') first.",
                         )
                     })?;
-                    (p.root.clone(), p.config.embeddings.model.clone())
+                    p.config.project.name.clone()
                 };
 
-                let embedder = ctx.agent.get_or_create_embedder(&model).await?;
-                let embedding = codescout_embed::embed_one(embedder.as_ref(), content).await?;
+                let client = crate::retrieval::client::RetrievalClient::from_env()
+                    .await
+                    .map_err(|e| {
+                        super::RecoverableError::with_hint(
+                            format!("retrieval stack offline: {e}"),
+                            "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack.",
+                        )
+                    })?;
+                let dense = client.embedder.embed(content).await?.dense;
 
-                let bucket2 = bucket.clone();
-                let title2 = title.clone();
-                let content2 = content.to_string();
-                tokio::task::spawn_blocking(move || {
-                    let conn = crate::embed::index::open_db(&root)?;
-                    crate::embed::index::ensure_vec_memories(&conn)?;
-                    crate::embed::index::insert_memory(
-                        &conn, &bucket2, &title2, &content2, &embedding,
-                    )?;
-                    anyhow::Ok(())
-                })
-                .await??;
+                let now = now_epoch_string();
+                let memory = crate::retrieval::memory_payload::SemanticMemory {
+                    project_id,
+                    bucket: bucket.clone(),
+                    title: title.clone(),
+                    content: content.to_string(),
+                    anchors: Vec::new(),
+                    created_at: now.clone(),
+                    updated_at: now,
+                };
+                let store = ctx.agent.semantic_memory_store().await?;
+                store.upsert(&memory, &dense).await?;
 
                 Ok(json!("ok"))
             }
@@ -828,14 +845,20 @@ impl Tool for Memory {
                 Ok(json!({ "results": items }))
             }
             "forget" => {
-                let id = super::optional_i64_param(&input, "id").ok_or_else(|| {
+                let id_str = input["id"].as_str().ok_or_else(|| {
                     super::RecoverableError::with_hint(
                         "Missing required parameter 'id'",
-                        "Pass the numeric id from a recall result",
+                        "Pass the UUID string id from a recall result",
+                    )
+                })?;
+                let id = uuid::Uuid::parse_str(id_str).map_err(|_| {
+                    super::RecoverableError::with_hint(
+                        format!("invalid memory id '{id_str}': not a UUID"),
+                        "Pass the UUID string id from a recall result, e.g. \"3f2a...\"",
                     )
                 })?;
 
-                let root = {
+                let project_id = {
                     let inner = ctx.agent.inner.read().await;
                     let p = inner.active_project().ok_or_else(|| {
                         super::RecoverableError::with_hint(
@@ -843,15 +866,11 @@ impl Tool for Memory {
                             "Call workspace(action='activate') first.",
                         )
                     })?;
-                    p.root.clone()
+                    p.config.project.name.clone()
                 };
 
-                tokio::task::spawn_blocking(move || {
-                    let conn = crate::embed::index::open_db(&root)?;
-                    crate::embed::index::delete_memory(&conn, id)?;
-                    anyhow::Ok(())
-                })
-                .await??;
+                let store = ctx.agent.semantic_memory_store().await?;
+                store.delete(&project_id, id).await?;
 
                 Ok(json!("ok"))
             }
