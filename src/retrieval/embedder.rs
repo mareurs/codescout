@@ -75,6 +75,7 @@ impl EmbedderHttp {
         sparse_base: impl Into<String>,
         expected_dim: usize,
     ) -> Self {
+        crate::install_default_crypto_provider();
         let dense_protocol = match std::env::var("CODESCOUT_EMBEDDER_PROTOCOL")
             .unwrap_or_default()
             .to_ascii_lowercase()

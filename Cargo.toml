@@ -37,7 +37,6 @@ path = "src/main.rs"
 
 [dependencies]
 tikv-jemallocator = "0.6"
-fs2 = "0.4"
 fs4 = "0.12"
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -76,9 +75,14 @@ git2 = "0.20"
 # alongside the legacy embed::index module.
 rusqlite = { version = "0.39" }
 
-# Retrieval stack client (Qdrant gRPC)
-qdrant-client = "1.13"
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+# Retrieval stack client (Qdrant gRPC). Default features drop:
+#  - download_snapshots (pulls reqwest, snapshot API unused)
+#  - generate-snippets  (codegen helper, unused)
+qdrant-client = { version = "1.13", default-features = false, features = ["serde"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "http2", "charset", "rustls-no-provider"] }
+# rustls with ring provider (smaller than default aws-lc-rs ~1.3 MiB). Provider
+# is installed once at process start via rustls::crypto::ring::default_provider().
+rustls = { version = "0.23", default-features = false, features = ["ring", "tls12", "std", "logging"] }
 
 # File system traversal (respects .gitignore)
 walkdir = "2"
@@ -97,7 +101,6 @@ lsp-types = "0.97"
 
 # URI handling (file:// ↔ path conversion, handles Windows drive letters + percent-encoding)
 url = "2"
-percent-encoding = "2"
 
 # AST parsing (tree-sitter)
 tree-sitter = "0.26"
@@ -129,7 +132,7 @@ uuid = { version = "1.20.0", features = ["v4", "v5"] }
 parking_lot = "0.12"
 
 [features]
-default = ["remote-embed", "local-embed", "http", "librarian"]
+default = ["remote-embed", "http", "librarian"]
 # Embedded librarian-mcp (workspace doc/spec/plan index). Compiled in by
 # default for dev; turn off for production publishes via `--no-default-features`.
 # Runtime registration is **disabled by default** even when compiled in

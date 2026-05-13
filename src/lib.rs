@@ -2,6 +2,18 @@
 //!
 //! Provides IDE-grade code intelligence to LLMs via the Model Context Protocol.
 
+/// Install rustls' ring crypto provider as the default. Idempotent — safe to
+/// call from multiple entry points (binary `main`, integration tests, library
+/// users). Required because reqwest uses `rustls-no-provider` feature: callers
+/// must install a provider before the first TLS handshake.
+pub fn install_default_crypto_provider() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
 pub mod agent;
 pub mod ast;
 pub mod config;

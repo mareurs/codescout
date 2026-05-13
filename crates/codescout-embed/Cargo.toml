@@ -19,10 +19,8 @@ async-trait = "0.1"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
-tracing = { workspace = true }
-thiserror = { workspace = true }
 
 # HTTP client (remote embeddings — OpenAI-compatible APIs, Ollama, etc.)
-reqwest = { version = "0.13", features = ["json"], optional = true }
+reqwest = { version = "0.13", default-features = false, features = ["json", "http2", "charset", "rustls-no-provider"], optional = true }
 # Local CPU embeddings via ONNX Runtime (fastembed model hub)
 fastembed = { version = "5", optional = true }

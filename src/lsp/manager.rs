@@ -414,7 +414,7 @@ impl LspManager {
         config: LspServerConfig,
     ) -> Result<Arc<LspClient>> {
         use anyhow::Context;
-        use fs2::FileExt;
+        use fs4::fs_std::FileExt;
 
         let socket_path = crate::lsp::mux::socket_path_for_workspace(language, workspace_root);
         let lock_path = crate::lsp::mux::lock_path_for_workspace(language, workspace_root);

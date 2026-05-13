@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use fs2::FileExt;
+use fs4::fs_std::FileExt;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;

@@ -206,6 +206,11 @@ fn probe_has_git_remote(root: &Path) -> bool {
 // ---------------------------------------------------------------------------
 impl Agent {
     pub async fn new(project: Option<PathBuf>) -> Result<Self> {
+        // Tests and library users that bypass main() reach here without the
+        // crypto provider installed — install it idempotently before any TLS
+        // (Qdrant gRPC, dense embedder HTTP) is touched.
+        crate::install_default_crypto_provider();
+
         let (workspace, home_root) = if let Some(raw) = project {
             // Canonicalize so home_root is always an absolute path.  This prevents
             // path-form drift when activate_project(".") later canonicalizes its

@@ -148,6 +148,10 @@ async fn main() -> Result<()> {
     let log_state = codescout::logging::init(debug_mode);
     let _log_guards = log_state.guards;
 
+    // Install rustls' ring crypto provider for all TLS connections (smaller
+    // than aws-lc-rs). Must happen before any rustls config is built — idempotent.
+    codescout::install_default_crypto_provider();
+
     let cli = Cli::parse();
 
     match cli.command {

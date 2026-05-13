@@ -6,15 +6,13 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
-codescout-embed = { path = "../codescout-embed", features = ["remote-embed", "local-embed"] }
+codescout-embed = { path = "../codescout-embed", features = ["remote-embed"] }
 anyhow = { workspace = true }
-thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yml = "0.0.12"
 tokio = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 rusqlite = { workspace = true }
 sqlite-vec = { workspace = true }
 rmcp = { version = "1.3", features = ["server", "macros", "transport-io", "schemars"] }
@@ -31,7 +29,6 @@ pulldown-cmark = "0.13"
 async-trait = "0.1"
 futures = "0.3"
 parking_lot = "0.12"
-clap = { version = "4", features = ["derive"] }
 ulid = "1"
 git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }
 minijinja = { version = "2", default-features = false, features = ["builtins", "serde"] }

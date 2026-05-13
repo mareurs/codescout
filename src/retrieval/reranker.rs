@@ -62,6 +62,7 @@ struct InfinityRerankItem {
 impl RerankerHttp {
     pub fn new(base: impl Into<String>) -> Self {
         let protocol = Protocol::from_env();
+        crate::install_default_crypto_provider();
         let model_id = std::env::var("CODESCOUT_RERANKER_MODEL").ok();
         Self {
             base: base.into(),
