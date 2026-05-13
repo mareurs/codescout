@@ -26,6 +26,34 @@ pub fn apply_schema(conn: &Connection) {
     .expect("apply_schema: DDL failed");
 }
 
+/// Open (and create if missing) the call_edges sqlite database at
+/// `.codescout/call_edges.db` under the given project root. Idempotent:
+/// applies the schema on every open so older dbs auto-migrate when new
+/// indexes are added.
+///
+/// This used to share `.codescout/embeddings/project.db` with the legacy
+/// `embed::index` storage, but the two concerns were structurally
+/// unrelated — call_edges is an LSP cache, not a semantic index — so the
+/// L-01 retrieval-stack migration split them into separate files.
+pub fn open_db(project_root: &std::path::Path) -> rusqlite::Result<Connection> {
+    let dir = project_root.join(".codescout");
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
+            Some(format!("create_dir_all({}): {e}", dir.display())),
+        )
+    })?;
+    let db_path = dir.join("call_edges.db");
+    let conn = Connection::open(&db_path)?;
+    // WAL improves concurrent readers (LSP background traversals + foreground
+    // tool calls). Busy timeout prevents transient SQLITE_BUSY when two
+    // processes touch the cache (e.g. dashboard + MCP server).
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "busy_timeout", 5000)?;
+    apply_schema(&conn);
+    Ok(conn)
+}
+
 pub struct EdgeCache<'a> {
     conn: &'a Connection,
     project_id: &'a str,

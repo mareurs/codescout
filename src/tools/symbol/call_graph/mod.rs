@@ -242,9 +242,11 @@ impl Tool for CallGraph {
         // async executor.
         let conn = {
             let root = root.clone();
-            tokio::task::spawn_blocking(move || crate::embed::index::open_db(&root))
-                .await
-                .map_err(|e| anyhow::anyhow!("spawn_blocking panicked: {e}"))??
+            tokio::task::spawn_blocking(move || {
+                crate::tools::symbol::call_edges::cache::open_db(&root)
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking panicked: {e}"))??
         };
         let conn = Arc::new(Mutex::new(conn));
 
