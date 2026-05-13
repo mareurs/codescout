@@ -162,26 +162,26 @@ impl QdrantWrap {
             .collect())
     }
 
-    /// Scroll all memories for a project, paginated. Returns them in Qdrant's
-    /// internal order — caller sorts as needed.
-    pub async fn memory_list(&self, collection: &str, project_id: &str) -> Result<Vec<MemoryHit>> {
-        self.scroll_memories(collection, Self::memory_project_filter(project_id))
-            .await
-    }
-
-    /// Scroll memories whose `anchors` array contains a `path` match.
-    /// Used by callers asking "what memories anchor to file X?".
-    pub async fn memory_by_anchor(
+    /// Scroll memories for a project with optional bucket / anchor-path
+    /// filters. Results are returned in Qdrant's internal order — caller
+    /// applies ordering and limit (kept out of this layer to avoid pulling
+    /// `MemoryFilter` into the retrieval module and creating a dep cycle
+    /// with `crate::memory::semantic_store`).
+    pub async fn memory_list_filtered(
         &self,
         collection: &str,
         project_id: &str,
-        path: &str,
+        bucket: Option<&str>,
+        anchor_path: Option<&str>,
     ) -> Result<Vec<MemoryHit>> {
-        let filter = Filter::must([
-            Condition::matches("project_id", project_id.to_string()),
-            Condition::matches("anchors[].path", path.to_string()),
-        ]);
-        self.scroll_memories(collection, filter).await
+        let mut conds = vec![Condition::matches("project_id", project_id.to_string())];
+        if let Some(b) = bucket {
+            conds.push(Condition::matches("bucket", b.to_string()));
+        }
+        if let Some(p) = anchor_path {
+            conds.push(Condition::matches("anchors[].path", p.to_string()));
+        }
+        self.scroll_memories(collection, Filter::must(conds)).await
     }
 
     /// Shared scroll body — paginates until exhausted, decodes payload.
@@ -222,11 +222,6 @@ impl QdrantWrap {
             }
         }
         Ok(out)
-    }
-
-    /// Convenience: a project-id filter used by list / search composition.
-    pub(crate) fn memory_project_filter(project_id: &str) -> Filter {
-        Filter::must([Condition::matches("project_id", project_id.to_string())])
     }
 }
 
@@ -369,19 +364,30 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].memory.title, "beta-pref");
 
-        // List
-        let all = wrap.memory_list(coll, "test-proj").await.expect("list");
+        // List (no filter)
+        let all = wrap
+            .memory_list_filtered(coll, "test-proj", None, None)
+            .await
+            .expect("list");
         assert_eq!(all.len(), 3);
 
-        // By anchor
+        // By anchor (anchor_path filter)
         let by_a = wrap
-            .memory_by_anchor(coll, "test-proj", "src/a.rs")
+            .memory_list_filtered(coll, "test-proj", None, Some("src/a.rs"))
             .await
             .expect("by_anchor");
         assert_eq!(by_a.len(), 2);
         let titles: Vec<_> = by_a.iter().map(|h| h.memory.title.as_str()).collect();
         assert!(titles.contains(&"alpha-system"));
         assert!(titles.contains(&"gamma-system"));
+
+        // Bucket filter via list
+        let prefs = wrap
+            .memory_list_filtered(coll, "test-proj", Some("preferences"), None)
+            .await
+            .expect("list bucket");
+        assert_eq!(prefs.len(), 1);
+        assert_eq!(prefs[0].memory.title, "beta-pref");
 
         wrap.client.delete_collection(coll).await.unwrap();
     }

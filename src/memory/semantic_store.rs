@@ -19,6 +19,30 @@ use crate::retrieval::memory::MemoryHit;
 use crate::retrieval::memory_payload::SemanticMemory;
 use crate::retrieval::qdrant::QdrantWrap;
 
+/// Sort order for list results.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MemoryOrder {
+    /// Qdrant's internal scroll order — no specific guarantee.
+    #[default]
+    Unordered,
+    /// Most-recently-updated first. Requires `updated_at` in payload.
+    UpdatedAtDesc,
+}
+
+/// Filter + ordering for `SemanticMemoryStore::list`. All fields default to
+/// "no filter / no sort / no limit" so callers can supply only what they need.
+#[derive(Debug, Clone, Default)]
+pub struct MemoryFilter {
+    /// Restrict to a single bucket (e.g. `"preferences"`, `"structured"`).
+    pub bucket: Option<String>,
+    /// Restrict to memories whose `anchors[].path` includes this path.
+    pub anchor_path: Option<String>,
+    /// Sort order applied client-side after scroll.
+    pub order_by: MemoryOrder,
+    /// Cap on results returned. `None` = unlimited.
+    pub limit: Option<usize>,
+}
+
 /// Backend-agnostic semantic memory storage. Implementations:
 /// - [`QdrantSemanticMemoryStore`] — production, this file.
 /// - sqlite-vec impl behind `legacy-vec` feature (step 8 mechanical work).
@@ -41,11 +65,12 @@ pub trait SemanticMemoryStore: Send + Sync {
     /// Delete by point id. Idempotent — missing ids are no-ops.
     async fn delete(&self, project_id: &str, id: Uuid) -> Result<()>;
 
-    /// All memories for a project, in Qdrant's internal scroll order.
-    async fn list(&self, project_id: &str) -> Result<Vec<MemoryHit>>;
-
-    /// Memories anchored to a given file path.
-    async fn by_anchor(&self, project_id: &str, path: &str) -> Result<Vec<MemoryHit>>;
+    /// List memories with optional bucket/anchor-path filters and ordering.
+    ///
+    /// Pass `MemoryFilter::default()` for "all memories in this project,
+    /// unordered, unlimited" — equivalent to the old `list(project_id)`.
+    /// Set `anchor_path` to filter to memories anchored to a file.
+    async fn list(&self, project_id: &str, filter: MemoryFilter) -> Result<Vec<MemoryHit>>;
 }
 
 /// Qdrant-backed implementation. Owns a [`QdrantWrap`] and the collection
@@ -105,14 +130,23 @@ impl SemanticMemoryStore for QdrantSemanticMemoryStore {
         self.qdrant.memory_delete(&self.collection, id).await
     }
 
-    async fn list(&self, project_id: &str) -> Result<Vec<MemoryHit>> {
-        self.qdrant.memory_list(&self.collection, project_id).await
-    }
-
-    async fn by_anchor(&self, project_id: &str, path: &str) -> Result<Vec<MemoryHit>> {
-        self.qdrant
-            .memory_by_anchor(&self.collection, project_id, path)
-            .await
+    async fn list(&self, project_id: &str, filter: MemoryFilter) -> Result<Vec<MemoryHit>> {
+        let mut hits = self
+            .qdrant
+            .memory_list_filtered(
+                &self.collection,
+                project_id,
+                filter.bucket.as_deref(),
+                filter.anchor_path.as_deref(),
+            )
+            .await?;
+        if filter.order_by == MemoryOrder::UpdatedAtDesc {
+            hits.sort_by(|a, b| b.memory.updated_at.cmp(&a.memory.updated_at));
+        }
+        if let Some(n) = filter.limit {
+            hits.truncate(n);
+        }
+        Ok(hits)
     }
 }
 
@@ -170,7 +204,7 @@ mod tests {
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].memory.title, "alpha-system");
 
-        // Bucket filter
+        // Bucket filter on search
         let hits = store
             .search("test-proj", &q, 5, Some("preferences"))
             .await
@@ -178,17 +212,51 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].memory.title, "beta-pref");
 
-        // List
-        assert_eq!(store.list("test-proj").await.unwrap().len(), 2);
+        // List default (no filter) returns both
+        assert_eq!(
+            store
+                .list("test-proj", MemoryFilter::default())
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
 
-        // by_anchor
-        let by = store.by_anchor("test-proj", "src/a.rs").await.unwrap();
+        // List filtered by anchor_path
+        let by = store
+            .list(
+                "test-proj",
+                MemoryFilter {
+                    anchor_path: Some("src/a.rs".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
         assert_eq!(by.len(), 1);
         assert_eq!(by[0].memory.title, "alpha-system");
 
+        // List filtered by bucket + limit
+        let prefs = store
+            .list(
+                "test-proj",
+                MemoryFilter {
+                    bucket: Some("preferences".into()),
+                    limit: Some(10),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(prefs.len(), 1);
+        assert_eq!(prefs[0].memory.title, "beta-pref");
+
         // Delete alpha
         store.delete("test-proj", alpha.point_id()).await.unwrap();
-        let remaining = store.list("test-proj").await.unwrap();
+        let remaining = store
+            .list("test-proj", MemoryFilter::default())
+            .await
+            .unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].memory.title, "beta-pref");
 
