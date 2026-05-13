@@ -16,11 +16,6 @@ use crate::memory::semantic_store::SemanticMemoryStore;
 use crate::memory::MemoryStore;
 use crate::workspace::{discover_projects, DiscoveredProject, Project, ProjectState, Workspace};
 
-/// Shared agent state — cloned into each tool invocation.
-/// Cached embedder: `(model_name, embedder)` — invalidated on model change.
-/// `Arc<dyn Embedder>`: concrete type selected at runtime from a config string (e.g. `"openai"`, `"ollama"`); generics cannot express this.
-type CachedEmbedder = Arc<tokio::sync::Mutex<Option<(String, Arc<dyn codescout_embed::Embedder>)>>>;
-
 /// State of the background index-build task spawned by `index_project`.
 #[derive(Default, Clone)]
 pub enum IndexingState {
@@ -54,9 +49,6 @@ pub enum LibraryIndexState {
 #[derive(Clone)]
 pub struct Agent {
     pub inner: Arc<RwLock<AgentInner>>,
-    /// Stored outside the RwLock so creation doesn't block agent reads.
-    /// Mutex deduplicates concurrent creation: second caller waits and reuses.
-    cached_embedder: CachedEmbedder,
     /// Tracks the background index-build task. Stored outside AgentInner
     /// so callers only need a brief std::sync lock, not an async RwLock.
     pub indexing: Arc<std::sync::Mutex<IndexingState>>,
@@ -298,7 +290,6 @@ impl Agent {
                 project_explicitly_activated,
                 home_root,
             })),
-            cached_embedder: Arc::new(tokio::sync::Mutex::new(None)),
             indexing: Arc::new(std::sync::Mutex::new(IndexingState::Idle)),
             nudged_libraries: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
             embedding_semaphore: Arc::new(tokio::sync::Semaphore::new(2)),
@@ -433,9 +424,6 @@ impl Agent {
             inner.workspace = Some(ws);
             inner.project_explicitly_activated = true;
         }
-        // Clear cached embedder — new project may use a different model.
-        // Done after dropping inner write guard to avoid nested lock acquisition.
-        *self.cached_embedder.lock().await = None;
         Ok(())
     }
 
@@ -1003,46 +991,6 @@ impl Agent {
 // Embedding & library indexing
 // ---------------------------------------------------------------------------
 impl Agent {
-    /// Get or create a cached embedder for the given model.
-    /// If the cached model+url matches, returns the existing embedder.
-    /// The Mutex deduplicates concurrent creation — second caller waits and reuses.
-    pub async fn get_or_create_embedder(
-        &self,
-        model: &str,
-    ) -> anyhow::Result<Arc<dyn codescout_embed::Embedder>> {
-        // Read url and api_key from project config
-        let (url, api_key) = self
-            .with_project(|p| {
-                Ok((
-                    p.config.embeddings.url.clone(),
-                    p.config
-                        .embeddings
-                        .api_key
-                        .as_ref()
-                        .map(|k| k.as_str().to_string()),
-                ))
-            })
-            .await
-            .unwrap_or((None, None));
-
-        let cache_key = match &url {
-            Some(u) => format!("{}@{}", model, u),
-            None => model.to_string(),
-        };
-
-        let mut guard = self.cached_embedder.lock().await;
-        if let Some((cached_key, embedder)) = guard.as_ref() {
-            if *cached_key == cache_key {
-                return Ok(Arc::clone(embedder));
-            }
-        }
-        let embedder: Arc<dyn codescout_embed::Embedder> = Arc::from(
-            codescout_embed::create_embedder_with_config(model, url.as_deref(), api_key).await?,
-        );
-        *guard = Some((cache_key, Arc::clone(&embedder)));
-        Ok(embedder)
-    }
-
     /// Check if we should nudge about a library. Returns true at most once per
     /// session per library, and respects the persistent `nudge_dismissed` flag.
     pub async fn should_nudge(&self, lib_name: &str) -> bool {
