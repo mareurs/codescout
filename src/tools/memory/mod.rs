@@ -330,15 +330,20 @@ async fn create_semantic_anchors(
     let opts = crate::retrieval::search::SearchOpts {
         limit: top_n,
         overfetch: top_n * 4,
-        rerank: false, // anchors don't need cross-encoder rescoring
+        // Cross-encoder reranking gives higher-quality anchor selection than
+        // raw RRF. Falls back to RRF score automatically if the reranker is
+        // unavailable.
+        rerank: true,
         exclude_languages: vec!["markdown".to_string()],
     };
     let hits = client.search_code(&project_id, content, opts).await?;
 
     // Dedupe by file path, keep highest score, apply min_sim + path-anchor exclusions.
+    // Prefer rerank_score when the reranker ran; fall back to RRF score otherwise.
     let mut best_per_file: HashMap<String, f32> = HashMap::new();
     for h in &hits {
-        if h.score < min_sim {
+        let score = h.rerank_score.unwrap_or(h.score);
+        if score < min_sim {
             continue;
         }
         if path_anchor_files.contains(&h.file_path) {
@@ -347,11 +352,11 @@ async fn create_semantic_anchors(
         best_per_file
             .entry(h.file_path.clone())
             .and_modify(|s| {
-                if h.score > *s {
-                    *s = h.score;
+                if score > *s {
+                    *s = score;
                 }
             })
-            .or_insert(h.score);
+            .or_insert(score);
     }
 
     let mut anchors: Vec<crate::retrieval::memory_payload::MemoryAnchor> = best_per_file
