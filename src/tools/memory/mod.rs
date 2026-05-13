@@ -269,32 +269,29 @@ fn now_epoch_string() -> String {
 /// Best-effort cross-embed a markdown memory into the semantic store.
 /// Called on `write` so that structured memories are also discoverable via `recall`.
 async fn cross_embed_memory(ctx: &ToolContext, topic: &str, content: &str) -> anyhow::Result<()> {
-    let (root, model) = {
+    let project_id = {
         let inner = ctx.agent.inner.read().await;
         let p = inner
             .active_project()
             .ok_or_else(|| anyhow::anyhow!("no project"))?;
-        (p.root.clone(), p.config.embeddings.model.clone())
+        p.config.project.name.clone()
     };
 
-    let embedder = ctx.agent.get_or_create_embedder(&model).await?;
-    let embedding = codescout_embed::embed_one(embedder.as_ref(), content).await?;
+    let client = crate::retrieval::client::RetrievalClient::from_env().await?;
+    let dense = client.embedder.embed(content).await?.dense;
 
-    let topic_owned = topic.to_string();
-    let content_owned = content.to_string();
-    tokio::task::spawn_blocking(move || {
-        let conn = crate::embed::index::open_db(&root)?;
-        crate::embed::index::ensure_vec_memories(&conn)?;
-        crate::embed::index::upsert_memory_by_title(
-            &conn,
-            "structured",
-            &topic_owned,
-            &content_owned,
-            &embedding,
-        )?;
-        anyhow::Ok(())
-    })
-    .await??;
+    let now = now_epoch_string();
+    let memory = crate::retrieval::memory_payload::SemanticMemory {
+        project_id,
+        bucket: "structured".into(),
+        title: topic.to_string(),
+        content: content.to_string(),
+        anchors: Vec::new(),
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    let store = ctx.agent.semantic_memory_store().await?;
+    store.upsert(&memory, &dense).await?;
     Ok(())
 }
 
@@ -704,30 +701,25 @@ impl Tool for Memory {
                     crate::memory::MemoryStore::from_dir(memories_dir)?.delete(topic)?;
                 }
 
-                // Remove cross-embedded entry (best-effort, non-fatal)
+                // Remove cross-embedded entry (best-effort, non-fatal).
+                // The point id is derived from (project_id, "structured", topic),
+                // so we can delete without looking it up first.
                 if !private {
-                    let root = {
+                    let project_id = {
                         let inner = ctx.agent.inner.read().await;
-                        inner.active_project().map(|p| p.root.clone())
+                        inner
+                            .active_project()
+                            .map(|p| p.config.project.name.clone())
                     };
-                    if let Some(root) = root {
-                        let topic_owned = topic.to_string();
-                        let _ = tokio::task::spawn_blocking(move || {
-                            use rusqlite::OptionalExtension;
-                            let conn = crate::embed::index::open_db(&root)?;
-                            let id: Option<i64> = conn
-                                .query_row(
-                                    "SELECT id FROM memories WHERE title = ?1 AND bucket = 'structured'",
-                                    rusqlite::params![topic_owned],
-                                    |r| r.get(0),
-                                )
-                                .optional()?;
-                            if let Some(id) = id {
-                                crate::embed::index::delete_memory(&conn, id)?;
-                            }
-                            anyhow::Ok(())
-                        })
-                        .await;
+                    if let Some(project_id) = project_id {
+                        let id = crate::retrieval::memory_payload::point_id_for(
+                            &project_id,
+                            "structured",
+                            topic,
+                        );
+                        if let Ok(store) = ctx.agent.semantic_memory_store().await {
+                            let _ = store.delete(&project_id, id).await;
+                        }
                     }
                 }
 

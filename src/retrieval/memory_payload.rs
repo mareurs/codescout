@@ -41,9 +41,16 @@ impl SemanticMemory {
     /// Deterministic point ID — UUIDv5 over `(project_id, bucket, title)`.
     /// Same inputs → same id, so re-titling content moves it to a new point.
     pub fn point_id(&self) -> Uuid {
-        let key = format!("{}\x1f{}\x1f{}", self.project_id, self.bucket, self.title);
-        Uuid::new_v5(&MEMORY_NS, key.as_bytes())
+        point_id_for(&self.project_id, &self.bucket, &self.title)
     }
+}
+/// Compute the deterministic point ID for a memory's `(project_id, bucket,
+/// title)` tuple without constructing a full `SemanticMemory`. Used by
+/// callers that need to derive an id for delete-by-name (the cross-embed
+/// delete sidecar in `memory(action="delete")`).
+pub fn point_id_for(project_id: &str, bucket: &str, title: &str) -> Uuid {
+    let key = format!("{project_id}\x1f{bucket}\x1f{title}");
+    Uuid::new_v5(&MEMORY_NS, key.as_bytes())
 }
 
 /// Serialize a memory into the Qdrant payload map. The `anchors` array
