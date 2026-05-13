@@ -90,6 +90,21 @@ CodeRankEmbed is asymmetric — `CODESCOUT_QUERY_PREFIX` in `.env.{cpu,gpu}` is 
 Empirical scores on this stack: 30/60 on the legacy-natural bench (see
 [`docs/trackers/retrieval-benchmark.md`](docs/trackers/retrieval-benchmark.md)).
 
+### Indexing speed
+
+Measured against this codebase (~18k chunks, dense embedder is the only
+meaningful bottleneck; sparse/rerank are not used during sync):
+
+| Profile | Single-chunk p50 | Sustained throughput | Initial sync (~18k chunks) |
+|---|---:|---:|---:|
+| cpu (llama-server, 4 threads) | 600ms | 2.4 chunks/s | **~125 min** |
+| gpu (llama-server-cuda, RTX A5000) | 7.6ms | 117-132 chunks/s | **~2.6 min** |
+
+The ~50× gap matches typical CPU↔GPU ratios for a quantized 137M embedder.
+Incremental syncs after the initial index are fine on both profiles — only
+changed chunks re-embed. If you're on CPU and your project is larger than
+~2k chunks, expect to leave the first sync running.
+
 **Stop the stack:**
 ```bash
 docker compose --profile cpu down   # or --profile gpu
