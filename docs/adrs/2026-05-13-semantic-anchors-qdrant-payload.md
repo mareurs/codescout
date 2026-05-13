@@ -88,21 +88,40 @@ project, but the failure was silent rather than network-shaped.
 ### Score range shift
 
 `embed::index::search` returned cosine similarity from the fastembed
-embedder. `RetrievalClient::search_code` returns RRF (Reciprocal Rank Fusion)
-scores from Qdrant, optionally with a cross-encoder rerank score on top.
-The numeric range and meaning of `min_similarity` changes:
+embedder. `RetrievalClient::search_code` returns scores from Qdrant's RRF
+fusion (Reciprocal Rank Fusion across the dense and sparse legs of
+`hybrid_query`).
 
-- Old: cosine in [0, 1], project config `semantic_anchor_min_similarity`
-  defaulted to ~0.7.
-- New: RRF score is typically [0, 1/k] where k≈60 — values are much smaller.
-  If `min_similarity` threshold is left at 0.7, no anchors will ever pass.
+Qdrant's RRF formula is `score = sum_legs(1 / (1 + rank))` — **not** the
+academic `1 / (60 + rank)` from the original RRF paper. Concrete ranges:
 
-**Mitigation**: in this commit we apply the threshold against `score`
-unchanged. Users may need to lower their `semantic_anchor_min_similarity`
-config. A follow-up could normalize the score on the codescout side, or use
-`rerank_score` (which IS in a comparable [0, 1] range via the cross encoder)
-when available.
+- Single-leg fusion (when sparse leg returns empty or matches nothing):
+  rank-1 = 0.500, rank-2 = 0.333, rank-3 = 0.250, rank-4 = 0.200, …
+- Two-leg fusion (dense + sparse both contribute): scores can stack up to
+  ~1.0 when both legs rank the same point at #1.
 
+Default `semantic_anchor_min_similarity = 0.3` therefore admits roughly the
+top 1-2 results per leg and filters the long tail. This is narrower than
+the legacy cosine-based filter (cosine ~0.7 default admitted hits in the
+0.7-1.0 range), so users will see *fewer* anchors per memory, biased
+toward the highest-confidence matches.
+
+**Tuning guidance for users**: lower `semantic_anchor_min_similarity` to
+~0.1 to admit the top 5-10 ranks. Setting it above ~0.5 effectively
+disables semantic anchors entirely (only rank-1 single-leg or perfect
+two-leg agreement passes).
+
+**Verification (2026-05-13 smoke test)**: a memory mentioning
+`SemanticMemoryStore`, `QdrantWrap`, and `create_semantic_anchors` produced
+exactly one anchor: `src/embed/index.rs` at single-leg rank-2 (~0.33), all
+other candidates filtered by `exclude_languages: ["markdown"]` or below
+0.3. Behavior matches the math; no normalization or score shift in code.
+
+**Original ADR note (incorrect — kept for historical accuracy)**: a prior
+revision of this section predicted RRF scores in [0, 0.016] based on the
+academic k=60 formula. Qdrant uses k=1; the prediction was an
+order-of-magnitude off and the migration is more usable than originally
+feared.
 ### `MemoryAnchor` schema
 
 Drop `hash: String` field. Existing memories in Qdrant deserialize cleanly
