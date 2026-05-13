@@ -307,7 +307,10 @@ fn default_staleness_drift_threshold() -> f32 {
     0.3
 }
 fn default_semantic_anchor_min_similarity() -> f32 {
-    0.3
+    // Qdrant RRF uses 1/(1+rank): rank-1=0.500, rank-2=0.333, ..., rank-9≈0.100.
+    // 0.1 admits roughly the top 9 ranks, which after per-file dedupe yields a
+    // sensible anchor budget for typical memory writes.
+    0.1
 }
 fn default_semantic_anchor_top_n() -> usize {
     10
@@ -663,7 +666,7 @@ mod tests {
         let toml = "[project]\nname = \"test\"";
         let config: ProjectConfig = toml::from_str(toml).unwrap();
         assert!((config.memory.staleness_drift_threshold - 0.3).abs() < 0.01);
-        assert!((config.memory.semantic_anchor_min_similarity - 0.3).abs() < 0.01);
+        assert!((config.memory.semantic_anchor_min_similarity - 0.1).abs() < 0.01);
         assert_eq!(config.memory.semantic_anchor_top_n, 10);
     }
 
