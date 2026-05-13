@@ -12,6 +12,7 @@ use tokio::sync::RwLock;
 
 use crate::config::project::ProjectConfig;
 use crate::library::registry::LibraryRegistry;
+use crate::memory::semantic_store::SemanticMemoryStore;
 use crate::memory::MemoryStore;
 use crate::workspace::{discover_projects, DiscoveredProject, Project, ProjectState, Workspace};
 
@@ -66,6 +67,10 @@ pub struct Agent {
     pub embedding_semaphore: Arc<tokio::sync::Semaphore>,
     /// Per-library indexing state (Idle / FetchingSources / Indexing / Done / Failed).
     pub library_index_states: Arc<std::sync::Mutex<HashMap<String, LibraryIndexState>>>,
+    /// Lazily-constructed semantic memory store (Qdrant-backed).
+    /// `OnceCell` so the first caller wins; later callers share the Arc.
+    /// Wrapped in `Arc` so `Agent` remains `Clone`.
+    pub(crate) semantic_memory: Arc<tokio::sync::OnceCell<Arc<dyn SemanticMemoryStore>>>,
 }
 
 pub struct AgentInner {
@@ -284,6 +289,7 @@ impl Agent {
             nudged_libraries: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
             embedding_semaphore: Arc::new(tokio::sync::Semaphore::new(2)),
             library_index_states: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            semantic_memory: Arc::new(tokio::sync::OnceCell::new()),
         })
     }
 
@@ -1130,6 +1136,48 @@ impl Agent {
                 (k.clone(), status)
             })
             .collect()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Semantic memory store (Qdrant)
+// ---------------------------------------------------------------------------
+impl Agent {
+    /// Lazily construct (or return cached) the Qdrant-backed semantic memory store.
+    ///
+    /// First call performs `RetrievalClient::from_env()` (one network probe to the
+    /// embedder) and bootstraps the `memories` collection. Subsequent calls return
+    /// the cached `Arc` without further I/O.
+    ///
+    /// In tests, pre-populate via `set_semantic_memory_store_for_test` to bypass
+    /// the env-driven construction path.
+    pub async fn semantic_memory_store(&self) -> anyhow::Result<Arc<dyn SemanticMemoryStore>> {
+        self.semantic_memory
+            .get_or_try_init(|| async {
+                let client = crate::retrieval::client::RetrievalClient::from_env().await?;
+                let collection = client.config.collection("memories");
+                let dim = client.config.model_dim as u64;
+                let store = crate::memory::semantic_store::QdrantSemanticMemoryStore::new(
+                    client.qdrant,
+                    collection,
+                    dim,
+                )
+                .await?;
+                anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
+            })
+            .await
+            .cloned()
+    }
+
+    /// Test seam: pre-populate the OnceCell with a stub store so tests don't
+    /// hit the network. Fails (silently) if already initialized — call before
+    /// any production code path triggers `semantic_memory_store()`.
+    #[cfg(test)]
+    pub fn set_semantic_memory_store_for_test(
+        &self,
+        store: Arc<dyn SemanticMemoryStore>,
+    ) -> std::result::Result<(), tokio::sync::SetError<Arc<dyn SemanticMemoryStore>>> {
+        self.semantic_memory.set(store)
     }
 }
 
