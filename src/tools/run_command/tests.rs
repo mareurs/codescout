@@ -2945,7 +2945,7 @@ async fn onboarding_protected_memory_stale_anchors() {
     // Write a source file and compute its hash
     let src_file = dir.path().join("main.rs");
     std::fs::write(&src_file, "fn main() {}").unwrap();
-    let original_hash = crate::embed::index::hash_file(&src_file).unwrap();
+    let original_hash = crate::memory::hash::hash_file(&src_file).unwrap();
 
     // Create a protected memory referencing that file
     let memories_dir = dir.path().join(".codescout").join("memories");
@@ -2999,7 +2999,7 @@ async fn onboarding_protected_memory_fresh_anchors() {
     // Write a source file and compute its hash
     let src_file = dir.path().join("main.rs");
     std::fs::write(&src_file, "fn main() {}").unwrap();
-    let current_hash = crate::embed::index::hash_file(&src_file).unwrap();
+    let current_hash = crate::memory::hash::hash_file(&src_file).unwrap();
 
     // Create a protected memory referencing that file
     let memories_dir = dir.path().join(".codescout").join("memories");

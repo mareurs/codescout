@@ -277,42 +277,39 @@ impl Tool for ProjectStatus {
                 "hint": "Call index_status() for detailed breakdown.",
             });
         } else {
-            let db_path = crate::embed::index::project_db_path(&root);
-            if !db_path.exists() {
-                result["index"] = json!({
-                    "status": "not_indexed",
-                    "hint": "Run index_project() to build the index.",
-                });
-            } else {
-                let root2 = root.clone();
-                let index_result = tokio::task::spawn_blocking(move || {
-                    let conn = crate::embed::index::open_db(&root2)?;
-                    let stats = crate::embed::index::index_stats(&conn)?;
-                    let staleness = crate::embed::index::check_index_staleness(&conn, &root2).ok();
-                    anyhow::Ok((stats, staleness))
-                })
-                .await;
-
-                match index_result {
-                    Ok(Ok((stats, staleness))) => {
-                        let status = match staleness.as_ref() {
-                            Some(s) if s.stale => "behind",
-                            _ => "up_to_date",
-                        };
-                        result["index"] = json!({
-                            "status": status,
-                            "files": stats.file_count,
-                            "chunks": stats.chunk_count,
-                            "last_updated": stats.indexed_at,
-                            "hint": "Call index_status() for model info, by_source breakdown, drift, and progress details.",
-                        });
-                    }
-                    _ => {
-                        result["index"] = json!({
-                            "status": "not_indexed",
-                            "hint": "Run index_project() to build the index.",
-                        });
-                    }
+            // Resolve project_id + ask Qdrant for stats. When the retrieval
+            // stack is offline or the project has no chunks indexed, fall
+            // through to the same "not_indexed" envelope the legacy sqlite
+            // path returned.
+            let project_id = ctx
+                .agent
+                .with_project(|p| Ok(p.project_id().to_string()))
+                .await?;
+            let qdrant_stats = match crate::retrieval::client::RetrievalClient::from_env().await {
+                Ok(client) => {
+                    let coll = client.config.collection("code_chunks");
+                    client
+                        .qdrant
+                        .project_index_stats(&coll, &project_id)
+                        .await
+                        .ok()
+                }
+                Err(_) => None,
+            };
+            match qdrant_stats {
+                Some((chunks, files)) if chunks > 0 => {
+                    result["index"] = json!({
+                        "status": "up_to_date",
+                        "files": files,
+                        "chunks": chunks,
+                        "hint": "Call index(action='status') for full Qdrant collection details.",
+                    });
+                }
+                _ => {
+                    result["index"] = json!({
+                        "status": "not_indexed",
+                        "hint": "Run index(action='build') to build the index.",
+                    });
                 }
             }
         }
@@ -378,6 +375,29 @@ enum HintScenario {
     SwitchAway,
 }
 
+/// Best-effort Qdrant probe: does this project have any chunks indexed?
+///
+/// Returns `false` when the retrieval stack is offline or the scroll fails.
+/// Used by `build_activation_response` to populate the `index.status` field —
+/// callers treat `false` as "not indexed" and surface a build hint.
+///
+/// `_project_root` is accepted for forward-compat in case future probes need
+/// to consult on-disk artefacts alongside Qdrant.
+async fn check_has_index(project_id: &str, _project_root: &std::path::Path) -> bool {
+    match crate::retrieval::client::RetrievalClient::from_env().await {
+        Ok(client) => {
+            let coll = client.config.collection("code_chunks");
+            client
+                .qdrant
+                .project_index_stats(&coll, project_id)
+                .await
+                .map(|(chunks, _files)| chunks > 0)
+                .unwrap_or(false)
+        }
+        Err(_) => false,
+    }
+}
+
 /// Build the activation response JSON for both full-activation and focus-switch paths.
 async fn build_activation_response(
     ctx: &ToolContext,
@@ -391,14 +411,12 @@ async fn build_activation_response(
         languages,
         read_only,
         memories,
-        has_index,
         security,
         stored_onboarding_version,
     ) = ctx
         .agent
         .with_project(|p| {
             let memories = p.memory.list().unwrap_or_default();
-            let has_index = crate::embed::index::project_db_path(&p.root).exists();
             let security = if !p.read_only {
                 Some((p.config.security.profile, p.config.security.shell_enabled))
             } else {
@@ -411,12 +429,16 @@ async fn build_activation_response(
                 p.config.project.languages.clone(),
                 p.read_only,
                 memories,
-                has_index,
                 security,
                 p.config.project.onboarding_version,
             ))
         })
         .await?;
+
+    // has_index probe via Qdrant — best-effort. When the retrieval stack is
+    // offline (common in tests), report false rather than erroring out the
+    // activation response.
+    let has_index = check_has_index(&project_name, &project_root_path).await;
 
     let version_stale = onboarding_version_stale(stored_onboarding_version);
 

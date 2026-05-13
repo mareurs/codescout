@@ -715,7 +715,11 @@ impl Agent {
             let inner = self.inner.read().await;
             let project = inner.active_project()?;
             let prompt_file = project.root.join(".codescout").join("system-prompt.md");
-            let db_path = crate::embed::index::project_db_path(&project.root);
+            // Inline path — replaces embed::index::project_db_path during L-01
+            // step 8a. The legacy sqlite db at this location indicates the user
+            // has not yet migrated to the retrieval stack; activate_project
+            // surfaces a separate `legacy_semantic_index` hint when present.
+            let db_path = project.root.join(".codescout/embeddings/project.db");
             Some((
                 project.config.project.name.clone(),
                 project.root.display().to_string(),
@@ -846,8 +850,10 @@ impl Agent {
         };
         let Some(root) = root else { return };
 
-        let db_path = crate::embed::index::project_db_path(&root);
-        if !db_path.exists() {
+        // Skip invalidation if the call_edges cache file doesn't exist yet —
+        // first-time invalidations are no-ops, not errors.
+        let cache_db = root.join(".codescout/call_edges.db");
+        if !cache_db.exists() {
             return;
         }
 
@@ -857,7 +863,7 @@ impl Agent {
         // Spawn blocking so we don't hold the async executor on a sqlite open.
         let path = path.to_path_buf();
         let _ = tokio::task::spawn_blocking(move || {
-            let conn = match crate::embed::index::open_db(&root) {
+            let conn = match crate::tools::symbol::call_edges::cache::open_db(&root) {
                 Ok(c) => c,
                 Err(_) => return,
             };
@@ -1070,7 +1076,7 @@ impl Agent {
 
     /// Spawn a background library indexing task if auto_index is enabled and library is not yet indexed.
     pub async fn maybe_auto_index_library(&self, lib_name: &str) {
-        let (should_index, root, entry_path) = {
+        let (should_index, _root, entry_path) = {
             let inner = self.inner.read().await;
             let Some(p) = inner.active_project() else {
                 return;
@@ -1091,16 +1097,22 @@ impl Agent {
         }
 
         let name = lib_name.to_string();
-        let source = format!("lib:{}", name);
+        let lib_project_id = format!("lib:{}", name);
         self.set_library_state(&name, LibraryIndexState::Indexing { done: 0, total: 0 });
 
         let self_clone = self.clone();
         tokio::spawn(async move {
             tracing::info!("Auto-indexing library '{}' in background...", name);
-            let result =
-                crate::embed::index::build_library_index(&root, &entry_path, &source, false).await;
+            let result = async {
+                let client = crate::retrieval::client::RetrievalClient::from_env().await?;
+                let opts = crate::retrieval::sync::SyncOpts::default();
+                client
+                    .sync_project(&lib_project_id, &entry_path, opts)
+                    .await
+            }
+            .await;
             match result {
-                Ok(()) => {
+                Ok(_report) => {
                     let mut inner = self_clone.inner.write().await;
                     if let Some(p) = inner.active_project_mut() {
                         if let Some(entry) = p.library_registry.lookup_mut(&name) {

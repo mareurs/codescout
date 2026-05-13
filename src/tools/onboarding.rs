@@ -759,22 +759,32 @@ async fn perform_full_onboarding(
         std::fs::write(&workspace_config_path, &toml_str)?;
     }
 
-    // Probe embedding index status (only opens existing DB, no network)
+    // Probe semantic index status. Best-effort Qdrant scroll; on failure
+    // (retrieval stack offline) report a `ready: false` envelope. The
+    // sqlite-based legacy path was removed in L-01 step 8.
     let index_status = {
-        let db_path = crate::embed::index::project_db_path(&root);
-        if db_path.exists() {
-            match crate::embed::index::open_db(&root)
-                .and_then(|conn| crate::embed::index::index_stats(&conn))
-            {
-                Ok(stats) => json!({
-                    "ready": stats.chunk_count > 0,
-                    "files": stats.file_count,
-                    "chunks": stats.chunk_count,
-                }),
+        let project_id = ctx
+            .agent
+            .with_project(|p| Ok(p.project_id().to_string()))
+            .await
+            .unwrap_or_else(|_| String::new());
+        if project_id.is_empty() {
+            json!({ "ready": false, "files": 0, "chunks": 0 })
+        } else {
+            match crate::retrieval::client::RetrievalClient::from_env().await {
+                Ok(client) => {
+                    let coll = client.config.collection("code_chunks");
+                    match client.qdrant.project_index_stats(&coll, &project_id).await {
+                        Ok((chunks, files)) => json!({
+                            "ready": chunks > 0,
+                            "files": files,
+                            "chunks": chunks,
+                        }),
+                        Err(_) => json!({ "ready": false, "files": 0, "chunks": 0 }),
+                    }
+                }
                 Err(_) => json!({ "ready": false, "files": 0, "chunks": 0 }),
             }
-        } else {
-            json!({ "ready": false, "files": 0, "chunks": 0 })
         }
     };
 

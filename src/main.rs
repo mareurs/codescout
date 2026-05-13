@@ -178,7 +178,21 @@ async fn main() -> Result<()> {
                 .or_else(|| std::env::current_dir().ok())
                 .unwrap_or_else(|| std::path::PathBuf::from("."));
             tracing::info!("Indexing project at {}", root.display());
-            codescout::embed::index::build_index(&root, force, None).await?;
+
+            // Resolve project_id via Agent activation, then drive the
+            // retrieval-stack sync directly. Mirrors the MCP `index(action='build')`
+            // path (src/tools/semantic/index.rs), minus the background spawn.
+            let agent = codescout::agent::Agent::new(Some(root.clone())).await?;
+            let project_id = agent
+                .with_project(|p| Ok(p.project_id().to_string()))
+                .await?;
+            let client = codescout::retrieval::client::RetrievalClient::from_env().await?;
+            let opts = codescout::retrieval::sync::SyncOpts {
+                force_reindex: force,
+                ..Default::default()
+            };
+            let report = client.sync_project(&project_id, &root, opts).await?;
+            println!("{report}");
         }
         Commands::MigrateMemories {
             project,

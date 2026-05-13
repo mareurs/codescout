@@ -4,7 +4,6 @@ use super::semantic_search::{
 };
 use super::*;
 use crate::agent::Agent;
-use crate::embed::index;
 use crate::lsp::LspManager;
 use crate::tools::{Tool, ToolContext};
 use serde_json::json;
@@ -189,16 +188,6 @@ async fn tools_error_without_project() {
         .is_err());
     assert!(IndexProject.call(json!({}), &ctx).await.is_err());
     assert!(IndexStatus.call(json!({}), &ctx).await.is_err());
-}
-
-#[tokio::test]
-async fn index_stats_function() {
-    let dir = tempdir().unwrap();
-    let conn = index::open_db(dir.path()).unwrap();
-    let stats = index::index_stats(&conn).unwrap();
-    assert_eq!(stats.file_count, 0);
-    assert_eq!(stats.chunk_count, 0);
-    assert_eq!(stats.embedding_count, 0);
 }
 
 #[tokio::test]
