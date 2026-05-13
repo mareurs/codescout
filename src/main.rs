@@ -109,7 +109,6 @@ enum Commands {
     /// Print the codescout git SHA, full SHA, and dirty status baked into this
     /// binary at build time. JSON output for use by the bench harness.
     Version,
-
 }
 
 fn parse_env_kv(s: &str) -> Result<(String, String), String> {

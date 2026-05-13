@@ -164,11 +164,7 @@ impl QdrantWrap {
 
     /// Scroll all memories for a project, paginated. Returns them in Qdrant's
     /// internal order — caller sorts as needed.
-    pub async fn memory_list(
-        &self,
-        collection: &str,
-        project_id: &str,
-    ) -> Result<Vec<MemoryHit>> {
+    pub async fn memory_list(&self, collection: &str, project_id: &str) -> Result<Vec<MemoryHit>> {
         self.scroll_memories(collection, Self::memory_project_filter(project_id))
             .await
     }
@@ -190,11 +186,7 @@ impl QdrantWrap {
 
     /// Shared scroll body — paginates until exhausted, decodes payload.
     /// Skips points whose payload doesn't parse (defensive, shouldn't happen).
-    async fn scroll_memories(
-        &self,
-        collection: &str,
-        filter: Filter,
-    ) -> Result<Vec<MemoryHit>> {
+    async fn scroll_memories(&self, collection: &str, filter: Filter) -> Result<Vec<MemoryHit>> {
         let mut out = Vec::new();
         let mut offset: Option<PointId> = None;
         loop {
@@ -296,7 +288,9 @@ mod tests {
             .expect("re-upsert");
 
         // Delete
-        wrap.memory_delete(coll, m.point_id()).await.expect("delete");
+        wrap.memory_delete(coll, m.point_id())
+            .await
+            .expect("delete");
 
         wrap.client.delete_collection(coll).await.unwrap();
     }
@@ -338,9 +332,21 @@ mod tests {
             };
             (m, vec)
         };
-        let (m_a, v_a) = mk("alpha-system", vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "src/a.rs");
-        let (m_b, v_b) = mk("beta-pref", vec![0.7, 0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "src/b.rs");
-        let (m_c, v_c) = mk("gamma-system", vec![0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0], "src/a.rs");
+        let (m_a, v_a) = mk(
+            "alpha-system",
+            vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            "src/a.rs",
+        );
+        let (m_b, v_b) = mk(
+            "beta-pref",
+            vec![0.7, 0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            "src/b.rs",
+        );
+        let (m_c, v_c) = mk(
+            "gamma-system",
+            vec![0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            "src/a.rs",
+        );
         wrap.memory_upsert(coll, &m_a, v_a).await.unwrap();
         wrap.memory_upsert(coll, &m_b, v_b).await.unwrap();
         wrap.memory_upsert(coll, &m_c, v_c).await.unwrap();
