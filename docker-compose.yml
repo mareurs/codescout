@@ -18,7 +18,7 @@ name: codescout-retrieval
 
 services:
   qdrant:
-    image: qdrant/qdrant:v1.17.0
+    image: qdrant/qdrant:v1.17.0@sha256:f1c7272cdac52b38c1a0e89313922d940ba50afd90d593a1605dbbc214e66ffb
     container_name: codescout-qdrant
     restart: unless-stopped
     ports:
@@ -41,7 +41,7 @@ services:
   # required — see CODESCOUT_QUERY_PREFIX in .env.{cpu,gpu}.
   dense-cpu:
     profiles: [cpu]
-    image: ghcr.io/ggml-org/llama.cpp:server
+    image: ghcr.io/ggml-org/llama.cpp:server@sha256:6b0a9b4fd7e3a9a55e959e5a74d47e11f8ccd4dfbc2556b7382a6516255dcc73
     container_name: codescout-dense-cpu
     restart: unless-stopped
     command:
@@ -78,7 +78,7 @@ services:
 
   dense-gpu:
     profiles: [gpu]
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda@sha256:a04923d31b4ca0d95bd772a4b80c9112f29121014df64d3d80a16a136ca19672
     container_name: codescout-dense-gpu
     restart: unless-stopped
     command:
@@ -127,7 +127,7 @@ services:
   # ~80ms is acceptable for the suite.
   sparse-cpu:
     profiles: [cpu]
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6@sha256:66db77d7856c9319bbfaf2c5b80a6d0e0ac9ff128ade09eaca1d9c20213617a4
     container_name: codescout-sparse-cpu
     restart: unless-stopped
     command: ["--model-id", "prithivida/Splade_PP_en_v1", "--pooling", "splade", "--dtype", "float32", "--auto-truncate"]
@@ -145,7 +145,7 @@ services:
 
   sparse-gpu:
     profiles: [gpu]
-    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8
+    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8@sha256:65f792e790f976713a5d2ab2586d93d074203d1f0ec2045e87e60113fbd0e256
     container_name: codescout-sparse-gpu
     restart: unless-stopped
     command: ["--model-id", "prithivida/Splade_PP_en_v1", "--pooling", "splade", "--dtype", "float16", "--auto-truncate"]
@@ -173,7 +173,7 @@ services:
   # GPU: bge-reranker-v2-m3 (568MB, ~80ms p95 — full quality).
   reranker-cpu:
     profiles: [cpu]
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6@sha256:66db77d7856c9319bbfaf2c5b80a6d0e0ac9ff128ade09eaca1d9c20213617a4
     container_name: codescout-reranker-cpu
     restart: unless-stopped
     command: ["--model-id", "BAAI/bge-reranker-base", "--dtype", "float32", "--auto-truncate"]
@@ -191,7 +191,7 @@ services:
 
   reranker-gpu:
     profiles: [gpu]
-    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8
+    image: ghcr.io/huggingface/text-embeddings-inference:86-1.8@sha256:65f792e790f976713a5d2ab2586d93d074203d1f0ec2045e87e60113fbd0e256
     container_name: codescout-reranker-gpu
     restart: unless-stopped
     command: ["--model-id", "BAAI/bge-reranker-v2-m3", "--dtype", "float16", "--auto-truncate"]

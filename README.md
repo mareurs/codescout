@@ -62,7 +62,7 @@ Two profiles: `cpu` (laptop / no-GPU dev) and `gpu` (single CUDA card).
 # 1. download the dense embedding model (~90MB, once)
 mkdir -p ./models
 curl -L -o ./models/CodeRankEmbed-Q4_K_M.gguf \
-  https://huggingface.co/nomic-ai/CodeRankEmbed-GGUF/resolve/main/CodeRankEmbed-Q4_K_M.gguf
+  https://huggingface.co/brandtcormorant/CodeRankEmbed-Q4_K_M-GGUF/resolve/main/coderankembed-q4_k_m.gguf
 
 # 2. start the stack — pick one profile
 docker compose --profile cpu --env-file .env.cpu up -d   # ~3GB RAM, no GPU
