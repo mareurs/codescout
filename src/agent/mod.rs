@@ -63,6 +63,13 @@ pub struct Agent {
     /// `OnceCell` so the first caller wins; later callers share the Arc.
     /// Wrapped in `Arc` so `Agent` remains `Clone`.
     pub(crate) semantic_memory: Arc<tokio::sync::OnceCell<Arc<dyn SemanticMemoryStore>>>,
+    /// Lazily-constructed dense embedder for memory operations.
+    /// Parallel design to `semantic_memory` — first caller builds, others
+    /// share the Arc. Swappable in tests via `set_memory_embedder_for_test`
+    /// so remember/recall paths can be exercised end-to-end without a live
+    /// retrieval stack.
+    pub(crate) memory_embedder:
+        Arc<tokio::sync::OnceCell<Arc<dyn crate::retrieval::embedder::DenseEmbedder>>>,
 }
 
 pub struct AgentInner {
@@ -295,6 +302,7 @@ impl Agent {
             embedding_semaphore: Arc::new(tokio::sync::Semaphore::new(2)),
             library_index_states: Arc::new(std::sync::Mutex::new(HashMap::new())),
             semantic_memory: Arc::new(tokio::sync::OnceCell::new()),
+            memory_embedder: Arc::new(tokio::sync::OnceCell::new()),
         })
     }
 
@@ -1152,6 +1160,41 @@ impl Agent {
         store: Arc<dyn SemanticMemoryStore>,
     ) -> std::result::Result<(), tokio::sync::SetError<Arc<dyn SemanticMemoryStore>>> {
         self.semantic_memory.set(store)
+    }
+
+    /// Lazily construct (or return cached) the dense embedder for memory ops.
+    ///
+    /// First call performs `RetrievalClient::from_env()` (one network probe)
+    /// and wraps the resulting `EmbedderHttp` in [`HttpDenseEmbedder`].
+    /// Subsequent calls share the cached `Arc`.
+    ///
+    /// In tests, pre-populate via [`Agent::set_memory_embedder_for_test`] to
+    /// bypass the env-driven construction path.
+    pub async fn memory_embedder(
+        &self,
+    ) -> anyhow::Result<Arc<dyn crate::retrieval::embedder::DenseEmbedder>> {
+        self.memory_embedder
+            .get_or_try_init(|| async {
+                let client = crate::retrieval::client::RetrievalClient::from_env().await?;
+                let emb = crate::retrieval::embedder::HttpDenseEmbedder::new(client.embedder);
+                anyhow::Ok(Arc::new(emb) as Arc<dyn crate::retrieval::embedder::DenseEmbedder>)
+            })
+            .await
+            .cloned()
+    }
+
+    /// Test seam: pre-populate the embedder cell so tool calls bypass
+    /// `RetrievalClient::from_env`. Must be called before the first
+    /// `memory_embedder()` invocation; later calls return [`SetError`].
+    #[cfg(test)]
+    pub fn set_memory_embedder_for_test(
+        &self,
+        embedder: Arc<dyn crate::retrieval::embedder::DenseEmbedder>,
+    ) -> std::result::Result<
+        (),
+        tokio::sync::SetError<Arc<dyn crate::retrieval::embedder::DenseEmbedder>>,
+    > {
+        self.memory_embedder.set(embedder)
     }
 }
 

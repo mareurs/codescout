@@ -231,3 +231,40 @@ impl EmbedderHttp {
         Ok(out)
     }
 }
+
+/// Storage-agnostic embedding contract.
+///
+/// Distinct from [`EmbedderHttp`] (which returns dense + sparse) — many
+/// downstream paths (memory tool, migration, semantic-anchor creation)
+/// only consume the dense vector. The trait isolates that subset so:
+///
+/// 1. Tests can swap in a deterministic fake without standing up the HTTP
+///    retrieval stack (see [`Agent::set_memory_embedder_for_test`]).
+/// 2. Production callers depend on a small, stable surface — the broader
+///    `EmbedderHttp` API can grow without affecting them.
+///
+/// All implementations must be `Send + Sync` because the Agent stashes
+/// them in a [`tokio::sync::OnceCell`] shared across tool calls.
+#[async_trait::async_trait]
+pub trait DenseEmbedder: Send + Sync {
+    async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>>;
+}
+
+/// Production [`DenseEmbedder`] backed by the HTTP retrieval stack.
+/// Drops the sparse vector and surfaces only the dense one.
+pub struct HttpDenseEmbedder {
+    inner: EmbedderHttp,
+}
+
+impl HttpDenseEmbedder {
+    pub fn new(inner: EmbedderHttp) -> Self {
+        Self { inner }
+    }
+}
+
+#[async_trait::async_trait]
+impl DenseEmbedder for HttpDenseEmbedder {
+    async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+        Ok(self.inner.embed(text).await?.dense)
+    }
+}

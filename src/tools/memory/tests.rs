@@ -240,6 +240,78 @@ async fn memory_forget_delegates_to_store() {
 }
 
 #[tokio::test]
+async fn memory_remember_then_recall_e2e_via_test_seams() {
+    use crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore;
+    use crate::memory::semantic_store::SemanticMemoryStore;
+    use crate::retrieval::embedder::DenseEmbedder;
+    use std::sync::Arc;
+
+    let (_dir, ctx) = test_ctx_with_project().await;
+
+    // Stub the dense embedder so memory ops don't need a live retrieval
+    // stack. A constant vector makes every recall match every memory at
+    // cosine 1.0, which is enough to exercise the round-trip without
+    // requiring real semantic similarity.
+    struct FixedEmbedder;
+    #[async_trait::async_trait]
+    impl DenseEmbedder for FixedEmbedder {
+        async fn embed(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
+            Ok(vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        }
+    }
+    ctx.agent
+        .set_memory_embedder_for_test(Arc::new(FixedEmbedder) as Arc<dyn DenseEmbedder>)
+        .map_err(|_| ())
+        .expect("set embedder");
+
+    // Stub the semantic memory store too — same seam pattern as 4g.
+    let stub: Arc<InMemorySemanticMemoryStore> = Arc::new(InMemorySemanticMemoryStore::new());
+    ctx.agent
+        .set_semantic_memory_store_for_test(stub.clone() as Arc<dyn SemanticMemoryStore>)
+        .map_err(|_| ())
+        .expect("set store");
+
+    // remember — exercises the full tool path: project_id resolution,
+    // dense embedding via the seam, point_id derivation, upsert.
+    Memory
+        .call(
+            json!({
+                "action": "remember",
+                "content": "shipped fix for migration default path",
+                "title": "step-7-cli-fix",
+                "bucket": "unstructured",
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    // recall — same path in reverse: embed query, dense KNN, payload decode.
+    let result = Memory
+        .call(
+            json!({
+                "action": "recall",
+                "query": "migration default path",
+                "limit": 3,
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let hits = result["results"]
+        .as_array()
+        .unwrap_or_else(|| panic!("expected `results` array, got: {result}"));
+    assert_eq!(hits.len(), 1, "expected exactly one hit; got: {result}");
+    assert_eq!(hits[0]["title"], "step-7-cli-fix");
+    assert_eq!(hits[0]["bucket"], "unstructured");
+    assert!(hits[0]["content"]
+        .as_str()
+        .unwrap()
+        .contains("migration default path"));
+}
+
+#[tokio::test]
 async fn tools_error_without_active_project() {
     let ctx = test_ctx_no_project().await;
     assert!(WriteMemory

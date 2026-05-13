@@ -277,8 +277,7 @@ async fn cross_embed_memory(ctx: &ToolContext, topic: &str, content: &str) -> an
         p.config.project.name.clone()
     };
 
-    let client = crate::retrieval::client::RetrievalClient::from_env().await?;
-    let dense = client.embedder.embed(content).await?.dense;
+    let dense = ctx.agent.memory_embedder().await?.embed(content).await?;
 
     let now = now_epoch_string();
     let memory = crate::retrieval::memory_payload::SemanticMemory {
@@ -322,8 +321,13 @@ async fn create_semantic_anchors(
         )
     };
 
+    let dense = ctx.agent.memory_embedder().await?.embed(content).await?;
+
+    // Code chunk search still goes through the full RetrievalClient — the
+    // embedder seam only covers the dense vector path. When the retrieval
+    // stack is offline, search_code errors and the anchor-creation step is
+    // skipped by the caller (logged at warn).
     let client = crate::retrieval::client::RetrievalClient::from_env().await?;
-    let dense = client.embedder.embed(content).await?.dense;
 
     // Code chunk search via the retrieval stack. Overfetch so dedupe-by-file
     // has room to pick the best chunk per file.
@@ -777,15 +781,12 @@ impl Tool for Memory {
                     p.config.project.name.clone()
                 };
 
-                let client = crate::retrieval::client::RetrievalClient::from_env()
-                    .await
-                    .map_err(|e| {
-                        super::RecoverableError::with_hint(
-                            format!("retrieval stack offline: {e}"),
-                            "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack.",
-                        )
-                    })?;
-                let dense = client.embedder.embed(content).await?.dense;
+                let dense = ctx.agent.memory_embedder().await.map_err(|e| {
+                    super::RecoverableError::with_hint(
+                        format!("embedder unavailable: {e}"),
+                        "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack.",
+                    )
+                })?.embed(content).await?;
 
                 let now = now_epoch_string();
                 let memory = crate::retrieval::memory_payload::SemanticMemory {
@@ -818,17 +819,16 @@ impl Tool for Memory {
                     p.config.project.name.clone()
                 };
 
-                // Embed via the shared HTTP embedder so the query vector lives in
-                // the same space as the memories collection's stored vectors.
-                let client = crate::retrieval::client::RetrievalClient::from_env()
-                    .await
-                    .map_err(|e| {
-                        super::RecoverableError::with_hint(
-                            format!("retrieval stack offline: {e}"),
-                            "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack.",
-                        )
-                    })?;
-                let query_vec = client.embedder.embed(query).await?.dense;
+                // Embed via the shared dense-embedder seam so the query vector
+                // lives in the same space as the memories collection's stored
+                // vectors. Tests can swap the embedder via
+                // `Agent::set_memory_embedder_for_test`.
+                let query_vec = ctx.agent.memory_embedder().await.map_err(|e| {
+                    super::RecoverableError::with_hint(
+                        format!("embedder unavailable: {e}"),
+                        "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack.",
+                    )
+                })?.embed(query).await?;
 
                 let store = ctx.agent.semantic_memory_store().await?;
                 let hits = store
