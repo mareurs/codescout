@@ -480,6 +480,14 @@ async fn build_activation_response(
     let hints =
         crate::mcp_resources::project_hints::probe_project_hints(&project_root_path, &memories);
 
+    // Legacy sqlite memory db detection — surfaces a one-line migration hint
+    // when `.codescout/embeddings/project.db` exists on disk. This file is
+    // produced by the pre-Qdrant codescout (`embed::index`); after a
+    // successful `codescout migrate-memories` run + manual delete the field
+    // drops out of subsequent activations.
+    let legacy_db_path = project_root_path.join(".codescout/embeddings/project.db");
+    let legacy_db_present = legacy_db_path.exists();
+
     let mut result = json!({
         "status": "ok",
         "project": project_name,
@@ -491,6 +499,13 @@ async fn build_activation_response(
         "project_hints": hints,
         "hint": hint,
     });
+
+    if legacy_db_present {
+        result["legacy_semantic_index"] = json!({
+            "path": legacy_db_path.display().to_string(),
+            "hint": "Run `codescout migrate-memories` to port memories to Qdrant, then delete this file.",
+        });
+    }
 
     if let Some(ws) = workspace_json {
         result["workspace"] = json!(ws);
@@ -557,6 +572,14 @@ fn format_activate_project(result: &Value) -> String {
 
     let body = parts.join(" · ");
 
+    // Prepend severity-ordered banners. System prompt staleness is higher
+    // priority than the legacy-index hint — show both when both fire.
+    let legacy_banner = if result["legacy_semantic_index"].is_object() {
+        Some("⚠ LEGACY INDEX: run `codescout migrate-memories` to port memories to Qdrant.")
+    } else {
+        None
+    };
+
     if let Some(stale) = result["system_prompt_stale"].as_object() {
         let stored_label = match stale.get("stored_version").and_then(|v| v.as_u64()) {
             Some(v) => format!("v{v}"),
@@ -566,9 +589,18 @@ fn format_activate_project(result: &Value) -> String {
             .get("current_version")
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
-        format!(
-            "⚠ SYSTEM PROMPT STALE ({stored_label} → v{current}): run onboarding(action=\"refresh_prompt\") now.\n{body}"
-        )
+        let mut out = format!(
+            "⚠ SYSTEM PROMPT STALE ({stored_label} → v{current}): run onboarding(action=\"refresh_prompt\") now."
+        );
+        if let Some(b) = legacy_banner {
+            out.push('\n');
+            out.push_str(b);
+        }
+        out.push('\n');
+        out.push_str(&body);
+        out
+    } else if let Some(b) = legacy_banner {
+        format!("{b}\n{body}")
     } else {
         body
     }

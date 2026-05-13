@@ -588,6 +588,68 @@ fn format_activate_project_rw_compact() {
 }
 
 #[test]
+fn format_activate_project_prepends_legacy_index_banner() {
+    let result = json!({
+        "status": "ok",
+        "project": "my-project",
+        "project_root": "/home/user/my-project",
+        "read_only": false,
+        "memories": [],
+        "index": {"status": "indexed"},
+        "legacy_semantic_index": {
+            "path": "/home/user/my-project/.codescout/embeddings/project.db",
+            "hint": "Run `codescout migrate-memories` to port memories to Qdrant, then delete this file.",
+        },
+        "hint": "CWD: /home/user/my-project"
+    });
+    let compact = format_activate_project(&result);
+    assert!(
+        compact.starts_with("⚠ LEGACY INDEX: run `codescout migrate-memories`"),
+        "expected legacy-index banner prepended, got:\n{compact}"
+    );
+    assert!(compact.contains("activated · my-project (rw)"));
+}
+
+#[test]
+fn format_activate_project_no_legacy_banner_when_absent() {
+    let result = json!({
+        "status": "ok",
+        "project": "my-project",
+        "project_root": "/home/user/my-project",
+        "read_only": false,
+        "memories": [],
+        "index": {"status": "indexed"},
+        "hint": "CWD: /home/user/my-project"
+    });
+    let compact = format_activate_project(&result);
+    assert!(!compact.contains("LEGACY INDEX"));
+}
+
+#[test]
+fn format_activate_project_stacks_legacy_under_stale_warning() {
+    let result = json!({
+        "status": "ok",
+        "project": "my-project",
+        "project_root": "/home/user/my-project",
+        "read_only": false,
+        "memories": [],
+        "index": {"status": "indexed"},
+        "legacy_semantic_index": { "path": "/x/y", "hint": "..." },
+        "system_prompt_stale": {
+            "stored_version": 1,
+            "current_version": 5,
+        },
+        "hint": "CWD: /home/user/my-project"
+    });
+    let compact = format_activate_project(&result);
+    let lines: Vec<&str> = compact.lines().collect();
+    assert_eq!(lines.len(), 3, "expected 3 lines, got:\n{compact}");
+    assert!(lines[0].contains("SYSTEM PROMPT STALE"));
+    assert!(lines[1].contains("LEGACY INDEX"));
+    assert!(lines[2].starts_with("activated · "));
+}
+
+#[test]
 fn format_activate_project_ro_with_workspace() {
     let result = json!({
         "status": "ok",
@@ -1107,6 +1169,65 @@ async fn activation_response_includes_stale_warning_when_no_stored_version() {
     assert!(
         stale["action"].as_str().unwrap().contains("refresh_prompt"),
         "action should mention refresh_prompt"
+    );
+}
+
+#[tokio::test]
+async fn activation_response_emits_legacy_index_when_db_present() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout/embeddings")).unwrap();
+    let legacy_db = dir.path().join(".codescout/embeddings/project.db");
+    std::fs::write(&legacy_db, b"-- sqlite placeholder").unwrap();
+    let ctx = ToolContext {
+        agent: Agent::new(None).await.unwrap(),
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+    };
+    let result = ActivateProject
+        .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
+        .await
+        .unwrap();
+    let legacy = &result["legacy_semantic_index"];
+    assert!(
+        legacy.is_object(),
+        "expected legacy_semantic_index field; got: {result}"
+    );
+    assert_eq!(
+        legacy["path"].as_str().unwrap(),
+        legacy_db.display().to_string()
+    );
+    assert!(legacy["hint"]
+        .as_str()
+        .unwrap()
+        .contains("migrate-memories"));
+}
+
+#[tokio::test]
+async fn activation_response_omits_legacy_index_when_db_absent() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let ctx = ToolContext {
+        agent: Agent::new(None).await.unwrap(),
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+    };
+    let result = ActivateProject
+        .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
+        .await
+        .unwrap();
+    assert!(
+        result["legacy_semantic_index"].is_null(),
+        "expected no legacy_semantic_index when db absent; got: {result}"
     );
 }
 

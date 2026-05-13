@@ -14,6 +14,12 @@
 //!   anchor rows are skipped, never fatal.
 //! - **Best-effort per memory.** A single memory's embed/upsert failure logs
 //!   and increments `skipped`, but does not abort the run.
+//!
+//! ## On-disk layout
+//!
+//! The legacy database lives at `.codescout/embeddings/project.db` relative
+//! to the project root (see `embed::index::project_db_path`). The CLI default
+//! resolves this path; callers can override with `--db-path`.
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;

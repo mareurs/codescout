@@ -188,7 +188,7 @@ async fn main() -> Result<()> {
             let root = project
                 .or_else(|| std::env::current_dir().ok())
                 .unwrap_or_else(|| std::path::PathBuf::from("."));
-            let db_path = db_path.unwrap_or_else(|| root.join(".codescout/embeddings.db"));
+            let db_path = db_path.unwrap_or_else(|| root.join(".codescout/embeddings/project.db"));
 
             // Activate the project to resolve project_id + bring up the
             // semantic memory store via the same path the MCP server uses.
