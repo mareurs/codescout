@@ -285,82 +285,57 @@ impl Tool for IndexProject {
         //     p.report_text("indexing project").await;
         // }
 
-        // Separate clone: progress_cb captures this; state_arc is used after build_index returns.
-        let state_arc_cb = ctx.agent.indexing.clone();
-        let progress_cb_progress = progress.clone();
-        let progress_cb: Option<crate::embed::index::ProgressCb> =
-            Some(Box::new(move |done, total, eta_secs| {
-                {
-                    let mut s = state_arc_cb.lock().unwrap_or_else(|e| e.into_inner());
-                    *s = IndexingState::Running {
-                        done,
-                        total,
-                        eta_secs,
-                    };
-                }
-                // Fire MCP progress notification from within this sync callback.
-                if let Some(p) = progress_cb_progress.clone() {
-                    tokio::spawn(async move {
-                        p.report(
-                            done as u32,
-                            if total > 0 { Some(total as u32) } else { None },
-                        )
-                        .await;
-                    });
-                }
-            }));
+        // Resolve project_id up front — sync_project needs it as the
+        // multi-tenant namespace inside the shared Qdrant collection.
+        let project_id = ctx
+            .agent
+            .with_project(|p| Ok(p.project_id().to_string()))
+            .await?;
 
         // Capture the dirty-files Arc before spawning so the task can clear it on success.
         let dirty_files_arc = ctx.agent.dirty_files_arc().await;
 
         tokio::spawn(async move {
-            // Progress callback disabled — see comment above re: Claude Code crash.
-            let _progress_cb = progress_cb;
-            let result = crate::embed::index::build_index(&root, force, None).await;
+            // Progress notifications are intentionally not wired through
+            // sync_project yet (BUG-038 — Claude Code 2.x crashes on
+            // unsolicited progress; tracked separately). IndexingState stays
+            // at Running{done:0, total:0} until completion sets Done/Failed.
+            let _progress = progress;
 
-            // Gather post-index stats *before* locking the mutex so that a
-            // MutexGuard (which is !Send) is never held across an await point.
-            let stats = if result.is_ok() {
-                tokio::task::spawn_blocking({
-                    let root = root.clone();
-                    move || {
-                        crate::embed::index::open_db(&root)
-                            .and_then(|conn| crate::embed::index::index_stats(&conn))
-                            .map(|s| (s.file_count, s.chunk_count))
-                            .unwrap_or((0, 0))
-                    }
-                })
-                .await
-                .unwrap_or((0, 0))
-            } else {
-                (0, 0)
-            };
+            let sync_result = async {
+                let client = crate::retrieval::client::RetrievalClient::from_env().await?;
+                let opts = crate::retrieval::sync::SyncOpts {
+                    force_reindex: force,
+                    ..Default::default()
+                };
+                client.sync_project(&project_id, &root, opts).await
+            }
+            .await;
 
+            // Drop the MutexGuard before any `.await` — MutexGuard is !Send.
             {
-                // Drop the MutexGuard before any `.await` — MutexGuard is !Send.
                 let mut state = state_arc.lock().unwrap_or_else(|e| e.into_inner());
-                *state = match result {
+                *state = match sync_result {
                     Ok(report) => {
                         // Indexing succeeded — files are now fresh, clear the dirty set.
                         if let Some(ref arc) = dirty_files_arc {
                             arc.lock().unwrap_or_else(|e| e.into_inner()).clear();
                         }
                         IndexingState::Done {
-                            files_indexed: report.indexed,
+                            files_indexed: report.added + report.updated,
                             files_deleted: report.deleted,
-                            detail: report.skipped_msg,
-                            total_files: stats.0,
-                            total_chunks: stats.1,
+                            detail: format!("elapsed_ms={}", report.elapsed_ms),
+                            // Total counts now live in Qdrant — IndexStatus
+                            // re-route (task #91) will scroll the collection
+                            // for these. For now leave 0 to avoid a sqlite
+                            // round-trip that step 8 will delete anyway.
+                            total_files: 0,
+                            total_chunks: 0,
                         }
                     }
                     Err(e) => IndexingState::Failed(e.to_string()),
                 };
             }
-            // Completion progress disabled — see BUG-038.
-            // if let Some(p) = &progress {
-            //     p.report_text("indexing complete").await;
-            //     p.report(1, Some(1)).await;
-            // }
         });
 
         Ok(json!({
