@@ -124,6 +124,53 @@ async fn delete_removes_entry() {
 }
 
 #[tokio::test]
+async fn memory_delete_removes_anchor_sidecar() {
+    use crate::memory::anchors::anchor_path_for_topic;
+
+    let (dir, ctx) = test_ctx_with_project().await;
+
+    // Write a memory; this also creates the path-anchor sidecar
+    // (see write_creates_anchor_sidecar).
+    Memory
+        .call(
+            json!({
+                "action": "write",
+                "topic": "anchor-leak-fixture",
+                "content": "anchors should not leak on delete"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let memories_dir = dir.path().join(".codescout/memories");
+    let sidecar = anchor_path_for_topic(&memories_dir, "anchor-leak-fixture");
+
+    // Sidecar may or may not exist depending on whether path-anchor
+    // computation found matching files in the empty fixture project.
+    // Pre-create one so the test is deterministic.
+    std::fs::create_dir_all(&memories_dir).unwrap();
+    std::fs::write(&sidecar, "anchors = []\n").unwrap();
+    assert!(sidecar.exists(), "fixture sidecar must exist pre-delete");
+
+    Memory
+        .call(
+            json!({
+                "action": "delete",
+                "topic": "anchor-leak-fixture"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        !sidecar.exists(),
+        "anchor sidecar should be removed when its memory is deleted"
+    );
+}
+
+#[tokio::test]
 async fn tools_error_without_active_project() {
     let ctx = test_ctx_no_project().await;
     assert!(WriteMemory

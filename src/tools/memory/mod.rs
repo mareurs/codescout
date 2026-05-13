@@ -712,7 +712,23 @@ impl Tool for Memory {
                         .await?;
                 } else {
                     let memories_dir = resolve_memory_dir(&input, ctx).await?;
-                    crate::memory::MemoryStore::from_dir(memories_dir)?.delete(topic)?;
+                    crate::memory::MemoryStore::from_dir(memories_dir.clone())?.delete(topic)?;
+
+                    // Remove the path-anchor sidecar so it does not orphan and
+                    // continue surfacing in staleness scans (review I4,
+                    // docs/reviews/2026-04-24/phase-5-embed-memory-library.md).
+                    let sidecar =
+                        crate::memory::anchors::anchor_path_for_topic(&memories_dir, topic);
+                    match std::fs::remove_file(&sidecar) {
+                        Ok(()) => {}
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(e) => {
+                            tracing::warn!(
+                                "failed to remove anchor sidecar {}: {e}",
+                                sidecar.display()
+                            );
+                        }
+                    }
                 }
 
                 // Remove cross-embedded entry (best-effort, non-fatal).
