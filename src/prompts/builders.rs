@@ -423,40 +423,55 @@ pub(crate) fn build_system_prompt_draft(
         );
     }
 
-    // Auto-inject preferences from semantic memory (best-effort)
-    if let Some(root) = project_root {
-        if let Ok(conn) = crate::embed::index::open_db(root) {
-            if crate::embed::index::ensure_vec_memories(&conn).is_ok() {
-                let mut prefs = Vec::new();
-                if let Ok(mut stmt) = conn.prepare(
-                    "SELECT title, content FROM memories WHERE bucket = 'preferences' \
-                     ORDER BY updated_at DESC LIMIT 10",
-                ) {
-                    if let Ok(rows) = stmt.query_map([], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                    }) {
-                        for row in rows.flatten() {
-                            prefs.push(row);
-                        }
-                    }
-                }
-                if !prefs.is_empty() {
-                    draft.push_str("\n## User Preferences\n\n");
-                    for (title, content) in &prefs {
-                        let summary = if content.len() > 200 {
-                            let end = crate::tools::floor_char_boundary(content, 200);
-                            format!("{}...", &content[..end])
-                        } else {
-                            content.clone()
-                        };
-                        draft.push_str(&format!("- **{}:** {}\n", title, summary));
-                    }
-                }
-            }
-        }
-    }
+    // Preferences auto-inject moved out of this sync builder — see
+    // `append_preferences_section()` and its caller in onboarding.rs.
+    let _ = project_root;
 
     draft
+}
+/// Append a `## User Preferences` section to a system-prompt draft using the
+/// top-10 most-recently-updated memories in the `preferences` bucket.
+///
+/// Lives outside `build_system_prompt_draft` because the storage layer is
+/// async (Qdrant) and the draft builder must stay sync to keep its 16+ test
+/// call sites simple. Best-effort: any failure (store unavailable, empty,
+/// network error) leaves `draft` untouched.
+pub(crate) async fn append_preferences_section(agent: &crate::agent::Agent, draft: &mut String) {
+    let project_id = {
+        let inner = agent.inner.read().await;
+        match inner.active_project() {
+            Some(p) => p.config.project.name.clone(),
+            None => return,
+        }
+    };
+    let store = match agent.semantic_memory_store().await {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let filter = crate::memory::semantic_store::MemoryFilter {
+        bucket: Some("preferences".into()),
+        order_by: crate::memory::semantic_store::MemoryOrder::UpdatedAtDesc,
+        limit: Some(10),
+        ..Default::default()
+    };
+    let hits = match store.list(&project_id, filter).await {
+        Ok(h) => h,
+        Err(_) => return,
+    };
+    if hits.is_empty() {
+        return;
+    }
+    draft.push_str("\n## User Preferences\n\n");
+    for hit in &hits {
+        let m = &hit.memory;
+        let summary = if m.content.len() > 200 {
+            let end = crate::tools::floor_char_boundary(&m.content, 200);
+            format!("{}...", &m.content[..end])
+        } else {
+            m.content.clone()
+        };
+        draft.push_str(&format!("- **{}:** {}\n", m.title, summary));
+    }
 }
 
 /// Build the preamble prepended to the onboarding prompt for the subagent.

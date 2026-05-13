@@ -886,13 +886,15 @@ async fn perform_full_onboarding(
         .await
         .map(|r| r.all().to_vec())
         .unwrap_or_default();
-    let system_prompt_draft = build_system_prompt_draft(
+    let mut system_prompt_draft = build_system_prompt_draft(
         &lang_list,
         &gathered.entry_points,
         Some(&root),
         Some(&gathered.projects),
         &libraries,
     );
+    crate::prompts::builders::append_preferences_section(&ctx.agent, &mut system_prompt_draft)
+        .await;
 
     let discovered_projects: Vec<serde_json::Value> = gathered
         .projects
