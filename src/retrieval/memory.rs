@@ -8,18 +8,38 @@
 use anyhow::{Context, Result};
 use qdrant_client::qdrant::{
     Condition, CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, DeletePointsBuilder,
-    Distance, FieldType, Filter, PointId, PointStruct, PointsIdsList, UpsertPointsBuilder,
-    VectorParamsBuilder, VectorsConfigBuilder,
+    Distance, FieldType, Filter, PointId, PointStruct, PointsIdsList, Query, QueryPointsBuilder,
+    ScrollPointsBuilder, UpsertPointsBuilder, VectorInput, VectorParamsBuilder,
+    VectorsConfigBuilder,
 };
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::retrieval::memory_payload::{memory_to_payload, SemanticMemory};
+use crate::retrieval::memory_payload::{memory_to_payload, payload_to_memory, SemanticMemory};
 use crate::retrieval::qdrant::QdrantWrap;
+
+/// One memory result from a search or scroll — payload decoded, point id
+/// extracted, and (for search) the dense similarity score.
+#[derive(Debug, Clone)]
+pub struct MemoryHit {
+    pub id: Uuid,
+    pub memory: SemanticMemory,
+    /// Cosine similarity for KNN results; `None` for plain scrolls.
+    pub score: Option<f32>,
+}
 
 /// Qdrant point ID for a memory — UUIDv5 over (project_id, bucket, title).
 fn memory_point_id(uuid: Uuid) -> PointId {
     PointId::from(uuid.to_string())
+}
+
+fn parse_uuid(id: &PointId) -> Option<Uuid> {
+    let kind = id.point_id_options.as_ref()?;
+    use qdrant_client::qdrant::point_id::PointIdOptions;
+    match kind {
+        PointIdOptions::Uuid(s) => Uuid::parse_str(s).ok(),
+        PointIdOptions::Num(_) => None,
+    }
 }
 
 impl QdrantWrap {
@@ -74,9 +94,7 @@ impl QdrantWrap {
         let point = PointStruct::new(memory_point_id(m.point_id()), named, payload);
 
         self.client
-            .upsert_points(
-                UpsertPointsBuilder::new(collection, vec![point]).wait(true),
-            )
+            .upsert_points(UpsertPointsBuilder::new(collection, vec![point]).wait(true))
             .await
             .context("upsert_points(memory)")?;
         Ok(())
@@ -98,15 +116,125 @@ impl QdrantWrap {
         Ok(())
     }
 
-    /// Convenience: a project-id filter used by every memory read.
-    /// Used in step 2c by search/list/by_anchor; kept here so callers can
-    /// reuse the exact filter when iterating themselves.
-    #[allow(dead_code)]
+    /// Dense KNN search over memories for a project. Optional `bucket`
+    /// narrows to a single bucket; `None` searches across all buckets.
+    /// No reranker — memory results are short and the dense leg is enough.
+    pub async fn memory_search_dense(
+        &self,
+        collection: &str,
+        project_id: &str,
+        dense: Vec<f32>,
+        top_n: usize,
+        bucket: Option<&str>,
+    ) -> Result<Vec<MemoryHit>> {
+        let mut conds = vec![Condition::matches("project_id", project_id.to_string())];
+        if let Some(b) = bucket {
+            conds.push(Condition::matches("bucket", b.to_string()));
+        }
+        let filter = Filter::must(conds);
+
+        let req = QueryPointsBuilder::new(collection)
+            .query(Query::new_nearest(VectorInput::new_dense(dense)))
+            .using("dense")
+            .filter(filter)
+            .limit(top_n as u64)
+            .with_payload(true)
+            .build();
+
+        let resp = self
+            .client
+            .query(req)
+            .await
+            .context("memory_search_dense")?;
+
+        Ok(resp
+            .result
+            .into_iter()
+            .filter_map(|pt| {
+                let id = pt.id.as_ref().and_then(parse_uuid)?;
+                let memory = payload_to_memory(&pt.payload).ok()?;
+                Some(MemoryHit {
+                    id,
+                    memory,
+                    score: Some(pt.score),
+                })
+            })
+            .collect())
+    }
+
+    /// Scroll all memories for a project, paginated. Returns them in Qdrant's
+    /// internal order — caller sorts as needed.
+    pub async fn memory_list(
+        &self,
+        collection: &str,
+        project_id: &str,
+    ) -> Result<Vec<MemoryHit>> {
+        self.scroll_memories(collection, Self::memory_project_filter(project_id))
+            .await
+    }
+
+    /// Scroll memories whose `anchors` array contains a `path` match.
+    /// Used by callers asking "what memories anchor to file X?".
+    pub async fn memory_by_anchor(
+        &self,
+        collection: &str,
+        project_id: &str,
+        path: &str,
+    ) -> Result<Vec<MemoryHit>> {
+        let filter = Filter::must([
+            Condition::matches("project_id", project_id.to_string()),
+            Condition::matches("anchors[].path", path.to_string()),
+        ]);
+        self.scroll_memories(collection, filter).await
+    }
+
+    /// Shared scroll body — paginates until exhausted, decodes payload.
+    /// Skips points whose payload doesn't parse (defensive, shouldn't happen).
+    async fn scroll_memories(
+        &self,
+        collection: &str,
+        filter: Filter,
+    ) -> Result<Vec<MemoryHit>> {
+        let mut out = Vec::new();
+        let mut offset: Option<PointId> = None;
+        loop {
+            let mut builder = ScrollPointsBuilder::new(collection)
+                .filter(filter.clone())
+                .with_payload(true)
+                .with_vectors(false)
+                .limit(1000u32);
+            if let Some(off) = offset.take() {
+                builder = builder.offset(off);
+            }
+            let resp = self
+                .client
+                .scroll(builder)
+                .await
+                .context("scroll_memories")?;
+            for pt in resp.result {
+                let Some(id) = pt.id.as_ref().and_then(parse_uuid) else {
+                    continue;
+                };
+                let Ok(memory) = payload_to_memory(&pt.payload) else {
+                    continue;
+                };
+                out.push(MemoryHit {
+                    id,
+                    memory,
+                    score: None,
+                });
+            }
+            match resp.next_page_offset {
+                None => break,
+                Some(next) => offset = Some(next),
+            }
+        }
+        Ok(out)
+    }
+
+    /// Convenience: a project-id filter used by list / search composition.
     pub(crate) fn memory_project_filter(project_id: &str) -> Filter {
-        Filter::must([Condition::matches(
-            "project_id",
-            project_id.to_string(),
-        )])
+        Filter::must([Condition::matches("project_id", project_id.to_string())])
     }
 }
 
@@ -169,6 +297,85 @@ mod tests {
 
         // Delete
         wrap.memory_delete(coll, m.point_id()).await.expect("delete");
+
+        wrap.client.delete_collection(coll).await.unwrap();
+    }
+
+    /// E2E search/list/by_anchor — requires a running Qdrant at localhost:6334.
+    /// Run with: cargo test -- --ignored memory_search_list_by_anchor
+    #[tokio::test]
+    #[ignore]
+    async fn memory_search_list_by_anchor() {
+        let wrap = QdrantWrap::connect("http://localhost:6334")
+            .await
+            .expect("connect");
+
+        let coll = "test_memories_search";
+        let _ = wrap.client.delete_collection(coll).await;
+        wrap.ensure_memories_collection(coll, 8)
+            .await
+            .expect("ensure");
+
+        // Three memories with hand-crafted vectors so KNN is predictable.
+        // alpha closest to query [1,0,...]; beta mid; gamma far.
+        let mk = |title: &str, vec: Vec<f32>, anchor: &str| {
+            let m = SemanticMemory {
+                project_id: "test-proj".into(),
+                bucket: if title.contains("pref") {
+                    "preferences"
+                } else {
+                    "system"
+                }
+                .into(),
+                title: title.into(),
+                content: format!("content for {title}"),
+                anchors: vec![MemoryAnchor {
+                    path: anchor.into(),
+                    hash: "h".into(),
+                }],
+                created_at: "2026-05-13T00:00:00Z".into(),
+                updated_at: "2026-05-13T00:00:00Z".into(),
+            };
+            (m, vec)
+        };
+        let (m_a, v_a) = mk("alpha-system", vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "src/a.rs");
+        let (m_b, v_b) = mk("beta-pref", vec![0.7, 0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "src/b.rs");
+        let (m_c, v_c) = mk("gamma-system", vec![0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0], "src/a.rs");
+        wrap.memory_upsert(coll, &m_a, v_a).await.unwrap();
+        wrap.memory_upsert(coll, &m_b, v_b).await.unwrap();
+        wrap.memory_upsert(coll, &m_c, v_c).await.unwrap();
+
+        // KNN: query close to alpha
+        let q = vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let hits = wrap
+            .memory_search_dense(coll, "test-proj", q.clone(), 3, None)
+            .await
+            .expect("search");
+        assert_eq!(hits.len(), 3);
+        assert_eq!(hits[0].memory.title, "alpha-system");
+        assert!(hits[0].score.unwrap() > hits[2].score.unwrap());
+
+        // Bucket filter
+        let hits = wrap
+            .memory_search_dense(coll, "test-proj", q, 5, Some("preferences"))
+            .await
+            .expect("search bucket");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].memory.title, "beta-pref");
+
+        // List
+        let all = wrap.memory_list(coll, "test-proj").await.expect("list");
+        assert_eq!(all.len(), 3);
+
+        // By anchor
+        let by_a = wrap
+            .memory_by_anchor(coll, "test-proj", "src/a.rs")
+            .await
+            .expect("by_anchor");
+        assert_eq!(by_a.len(), 2);
+        let titles: Vec<_> = by_a.iter().map(|h| h.memory.title.as_str()).collect();
+        assert!(titles.contains(&"alpha-system"));
+        assert!(titles.contains(&"gamma-system"));
 
         wrap.client.delete_collection(coll).await.unwrap();
     }
