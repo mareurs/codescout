@@ -128,33 +128,6 @@ async fn project_ctx() -> (tempfile::TempDir, ToolContext) {
     )
 }
 
-async fn drift_enabled_ctx() -> (tempfile::TempDir, ToolContext) {
-    let dir = tempdir().unwrap();
-    let ce_dir = dir.path().join(".codescout");
-    std::fs::create_dir_all(&ce_dir).unwrap();
-    std::fs::write(
-        ce_dir.join("project.toml"),
-        "[project]\nname = \"test\"\n\n[embeddings]\ndrift_detection_enabled = true\n",
-    )
-    .unwrap();
-    // Create an empty DB so index_status doesn't early-return "no index"
-    let _conn = index::open_db(dir.path()).unwrap();
-    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
-    (
-        dir,
-        ToolContext {
-            agent,
-            lsp: LspManager::new_arc(),
-            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
-            progress: None,
-            peer: None,
-            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
-                crate::tools::section_coverage::SectionCoverage::new(),
-            )),
-        },
-    )
-}
-
 #[tokio::test]
 async fn index_status_no_index() {
     let (_dir, ctx) = project_ctx().await;
@@ -163,42 +136,12 @@ async fn index_status_no_index() {
 }
 
 #[tokio::test]
-async fn index_status_with_data() {
-    let (dir, ctx) = project_ctx().await;
-    // Create the DB and insert some data
-    let conn = index::open_db(dir.path()).unwrap();
-    let chunk = crate::embed::schema::CodeChunk {
-        id: None,
-        file_path: "test.rs".to_string(),
-        language: "rust".to_string(),
-        content: "fn test() {}".to_string(),
-        start_line: 1,
-        end_line: 1,
-        file_hash: "abc".to_string(),
-        source: "project".to_string(),
-        project_id: "root".to_string(),
-        metadata: None,
-    };
-    index::insert_chunk(&conn, &chunk, &[0.1, 0.2, 0.3]).unwrap();
-    index::upsert_file_hash(&conn, "test.rs", "abc", None).unwrap();
-    drop(conn);
-
-    let result = IndexStatus.call(json!({}), &ctx).await.unwrap();
-    assert_eq!(result["indexed"], true);
-    assert_eq!(result["file_count"], 1);
-    assert_eq!(result["chunk_count"], 1);
-    assert_eq!(result["embedding_count"], 1);
-}
-
-#[tokio::test]
 async fn index_status_shows_running_progress() {
     use crate::agent::IndexingState;
-    let (dir, ctx) = project_ctx().await;
-    // Create the DB so index_status doesn't early-return "no index"
-    let conn = crate::embed::index::open_db(dir.path()).unwrap();
-    drop(conn);
+    let (_dir, ctx) = project_ctx().await;
 
-    // Simulate mid-run state
+    // Simulate mid-run state — IndexStatus appends the indexing block
+    // regardless of whether Qdrant is reachable.
     {
         let mut state = ctx.agent.indexing.lock().unwrap();
         *state = IndexingState::Running {
@@ -215,7 +158,7 @@ async fn index_status_shows_running_progress() {
     assert_eq!(indexing["total"], 50);
     assert_eq!(indexing["eta_secs"], 20);
 
-    // Verify eta_secs: None renders as JSON null (e.g. on last file or initial state)
+    // eta_secs: None renders as JSON null
     {
         let mut state = ctx.agent.indexing.lock().unwrap();
         *state = IndexingState::Running {
@@ -334,190 +277,6 @@ fn semantic_search_schema_has_project() {
         props.contains_key("project_id"),
         "schema should have project_id param"
     );
-}
-
-#[tokio::test]
-async fn index_status_includes_by_source() {
-    let (dir, ctx) = project_ctx().await;
-    // Create the DB and insert some data with different sources
-    let conn = index::open_db(dir.path()).unwrap();
-    let chunk = crate::embed::schema::CodeChunk {
-        id: None,
-        file_path: "test.rs".to_string(),
-        language: "rust".to_string(),
-        content: "fn test() {}".to_string(),
-        start_line: 1,
-        end_line: 1,
-        file_hash: "abc".to_string(),
-        source: "project".to_string(),
-        project_id: "root".to_string(),
-        metadata: None,
-    };
-    index::insert_chunk(&conn, &chunk, &[0.1, 0.2, 0.3]).unwrap();
-    index::upsert_file_hash(&conn, "test.rs", "abc", None).unwrap();
-    drop(conn);
-
-    let result = IndexStatus.call(json!({}), &ctx).await.unwrap();
-    assert_eq!(result["indexed"], true);
-    assert!(
-        result["by_source"].is_object(),
-        "should include by_source breakdown"
-    );
-    assert!(
-        result["by_source"]["project"].is_object(),
-        "should have project source entry"
-    );
-}
-
-#[tokio::test]
-async fn semantic_search_staleness_detection() {
-    let (dir, _ctx) = project_ctx().await;
-
-    // Init git repo with a commit
-    let repo = git2::Repository::init(dir.path()).unwrap();
-    let mut config = repo.config().unwrap();
-    config.set_str("user.name", "Test").unwrap();
-    config.set_str("user.email", "test@test.com").unwrap();
-    let mut git_index = repo.index().unwrap();
-    let tree_oid = git_index.write_tree().unwrap();
-    let tree = repo.find_tree(tree_oid).unwrap();
-    let sig = repo.signature().unwrap();
-    repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-        .unwrap();
-
-    // Create DB without last_indexed_commit → should be stale
-    let conn = crate::embed::index::open_db(dir.path()).unwrap();
-    let staleness = crate::embed::index::check_index_staleness(&conn, dir.path()).unwrap();
-    assert!(staleness.stale);
-}
-
-#[tokio::test]
-async fn index_status_shows_staleness() {
-    let (dir, ctx) = project_ctx().await;
-
-    // Init git repo with a commit
-    let repo = git2::Repository::init(dir.path()).unwrap();
-    let mut config = repo.config().unwrap();
-    config.set_str("user.name", "Test").unwrap();
-    config.set_str("user.email", "test@test.com").unwrap();
-    let mut git_index = repo.index().unwrap();
-    let tree_oid = git_index.write_tree().unwrap();
-    let tree = repo.find_tree(tree_oid).unwrap();
-    let sig = repo.signature().unwrap();
-    repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-        .unwrap();
-
-    // Create DB without last_indexed_commit
-    let conn = crate::embed::index::open_db(dir.path()).unwrap();
-    crate::embed::index::upsert_file_hash(&conn, "a.rs", "abc", None).unwrap();
-    drop(conn);
-
-    let result = IndexStatus.call(json!({}), &ctx).await.unwrap();
-    assert_eq!(result["indexed"], true);
-    assert_eq!(result["git_sync"]["status"], "behind");
-}
-
-#[tokio::test]
-async fn drift_enabled_by_default() {
-    // drift_detection_enabled defaults to true — drift query should NOT
-    // return the "disabled" status when no explicit config is present.
-    let (_dir, ctx) = project_ctx().await;
-    let result = IndexStatus
-        .call(json!({"threshold": 0.1}), &ctx)
-        .await
-        .unwrap();
-    assert_ne!(
-        result["drift"]["status"], "disabled",
-        "drift should be enabled by default, got: {:?}",
-        result["drift"]
-    );
-}
-
-#[tokio::test]
-async fn drift_disabled_when_opted_out() {
-    // Explicit opt-out via project.toml should return "disabled" in drift key.
-    let dir = tempdir().unwrap();
-    let ce_dir = dir.path().join(".codescout");
-    std::fs::create_dir_all(&ce_dir).unwrap();
-    std::fs::write(
-        ce_dir.join("project.toml"),
-        "[project]\nname = \"test\"\n\n[embeddings]\ndrift_detection_enabled = false\n",
-    )
-    .unwrap();
-    // Create an empty DB so index_status doesn't early-return "no index"
-    let _conn = index::open_db(dir.path()).unwrap();
-    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
-    let ctx = ToolContext {
-        agent,
-        lsp: LspManager::new_arc(),
-        output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
-        progress: None,
-        peer: None,
-        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
-            crate::tools::section_coverage::SectionCoverage::new(),
-        )),
-    };
-    let result = IndexStatus
-        .call(json!({"threshold": 0.1}), &ctx)
-        .await
-        .unwrap();
-    assert_eq!(result["drift"]["status"], "disabled");
-    assert!(result["drift"]["hint"]
-        .as_str()
-        .unwrap()
-        .contains("drift_detection_enabled"));
-}
-
-#[tokio::test]
-async fn drift_returns_empty_without_data() {
-    let (_dir, ctx) = drift_enabled_ctx().await;
-    let result = IndexStatus
-        .call(json!({"threshold": 0.1}), &ctx)
-        .await
-        .unwrap();
-    assert_eq!(result["drift"]["results"], json!([]));
-}
-
-#[tokio::test]
-async fn drift_returns_rows() {
-    let (_dir, ctx) = drift_enabled_ctx().await;
-    let root = {
-        let inner = ctx.agent.inner.read().await;
-        inner.active_project().unwrap().root.clone()
-    };
-    let conn = crate::embed::index::open_db(&root).unwrap();
-    crate::embed::index::upsert_drift_report(&conn, "a.rs", 0.5, 0.8, Some("fn x()"), 1, 0)
-        .unwrap();
-    crate::embed::index::upsert_drift_report(&conn, "b.rs", 0.02, 0.05, None, 0, 0).unwrap();
-    drop(conn);
-
-    // Default threshold 0.1 should filter out b.rs
-    let result = IndexStatus
-        .call(json!({"threshold": 0.1}), &ctx)
-        .await
-        .unwrap();
-    let results = result["drift"]["results"].as_array().unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0]["file_path"], "a.rs");
-}
-
-#[tokio::test]
-async fn drift_respects_threshold() {
-    let (_dir, ctx) = drift_enabled_ctx().await;
-    let root = {
-        let inner = ctx.agent.inner.read().await;
-        inner.active_project().unwrap().root.clone()
-    };
-    let conn = crate::embed::index::open_db(&root).unwrap();
-    crate::embed::index::upsert_drift_report(&conn, "a.rs", 0.5, 0.8, None, 1, 0).unwrap();
-    drop(conn);
-
-    let result = IndexStatus
-        .call(json!({"threshold": 0.6}), &ctx)
-        .await
-        .unwrap();
-    let results = result["drift"]["results"].as_array().unwrap();
-    assert!(results.is_empty()); // avg_drift 0.5 < threshold 0.6
 }
 
 #[tokio::test]

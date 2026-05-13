@@ -1,6 +1,6 @@
 //! Indexing tools: IndexProject, IndexStatus, Index.
 
-use super::super::{optional_f64_param, parse_bool_param, Tool, ToolContext};
+use super::super::{parse_bool_param, Tool, ToolContext};
 use serde_json::{json, Value};
 
 pub struct IndexProject;
@@ -382,149 +382,58 @@ impl Tool for IndexStatus {
             }
         })
     }
-    async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let (root, model, drift_enabled) = {
-            let inner = ctx.agent.inner.read().await;
-            let p = inner.active_project().ok_or_else(|| {
-                crate::tools::RecoverableError::with_hint(
-                    "No active project. Use workspace(action='activate') first.",
-                    "Call workspace(action='activate', path=\"/path/to/project\") to set the active project.",
-                )
-            })?;
-            (
-                p.root.clone(),
-                p.config.embeddings.model.clone(),
-                p.config.embeddings.drift_detection_enabled,
-            )
+    async fn call(&self, _input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
+        let project_id = ctx
+            .agent
+            .with_project(|p| Ok(p.project_id().to_string()))
+            .await?;
+
+        // Try the Qdrant-backed status. If the retrieval stack is offline or
+        // the project has no chunks indexed, return a "not indexed" envelope
+        // that callers can branch on the same way they did against the
+        // legacy sqlite "no db" path.
+        let mut result = match crate::retrieval::client::RetrievalClient::from_env().await {
+            Ok(client) => {
+                let collection = client.config.collection("code_chunks");
+                match client
+                    .qdrant
+                    .project_index_stats(&collection, &project_id)
+                    .await
+                {
+                    Ok((0, 0)) => json!({
+                        "indexed": false,
+                        "project_id": project_id,
+                        "message": format!(
+                            "No chunks indexed for project '{project_id}' in collection '{collection}'. Run index(action='build')."
+                        ),
+                    }),
+                    Ok((chunk_count, file_count)) => json!({
+                        "indexed": true,
+                        "queryable": true,
+                        "project_id": project_id,
+                        "collection": collection,
+                        "file_count": file_count,
+                        "chunk_count": chunk_count,
+                    }),
+                    Err(e) => json!({
+                        "indexed": false,
+                        "project_id": project_id,
+                        "message": format!("Qdrant scroll failed: {e}"),
+                    }),
+                }
+            }
+            Err(e) => json!({
+                "indexed": false,
+                "project_id": project_id,
+                "message": format!(
+                    "Retrieval stack offline: {e}. Run scripts/retrieval-stack.sh up."
+                ),
+            }),
         };
 
-        let db_path = crate::embed::index::project_db_path(&root);
-        if !db_path.exists() {
-            return Ok(json!({
-                "indexed": false,
-                "message": "No index found. Run index(action='build') first.",
-            }));
-        }
-
-        // Sync SQLite off async runtime
-        let db_path_str = db_path.display().to_string();
-        let root2 = root.clone();
-        let (stats, by_source, staleness, last_commit) = tokio::task::spawn_blocking(move || {
-            let conn = crate::embed::index::open_db(&root2)?;
-            let stats = crate::embed::index::index_stats(&conn)?;
-            let by_source = crate::embed::index::index_stats_by_source(&conn)?;
-            let staleness = crate::embed::index::check_index_staleness(&conn, &root2).ok();
-            let last_commit = crate::embed::index::get_last_indexed_commit(&conn)
-                .ok()
-                .flatten();
-            anyhow::Ok((stats, by_source, staleness, last_commit))
-        })
-        .await??;
-
-        let by_source_json: serde_json::Map<String, Value> = by_source
-            .iter()
-            .map(|(source, ss)| {
-                (
-                    source.clone(),
-                    json!({ "files": ss.file_count, "chunks": ss.chunk_count }),
-                )
-            })
-            .collect();
-
-        // Build base response
-        let mut result = json!({
-            "indexed": true,
-            "queryable": true,
-            "configured_model": model,
-            "indexed_with_model": stats.model,
-            "indexed_at": stats.indexed_at,
-            "file_count": stats.file_count,
-            "chunk_count": stats.chunk_count,
-            "embedding_count": stats.embedding_count,
-            "db_path": db_path_str,
-            "by_source": by_source_json,
-        });
-
-        // Git-sync info — framed as informational, not a quality signal
-        if let Some(staleness) = staleness {
-            result["git_sync"] = if staleness.stale {
-                json!({
-                    "status": "behind",
-                    "behind_commits": staleness.behind_commits,
-                    "note": "Recent commits are not yet indexed. All previously indexed code is still queryable — run index(action='build') to include new code."
-                })
-            } else {
-                json!({ "status": "up_to_date" })
-            };
-            if let Some(commit) = last_commit {
-                result["last_indexed_commit"] = json!(commit);
-            }
-        }
-
-        // Include drift data when threshold or path is provided
-        let wants_drift = input.get("threshold").is_some() || input.get("path").is_some();
-        if wants_drift {
-            use crate::tools::output::OutputGuard;
-
-            if !drift_enabled {
-                result["drift"] = json!({
-                    "status": "disabled",
-                    "hint": "Drift detection is opted out. Re-enable it in .codescout/project.toml:\n[embeddings]\ndrift_detection_enabled = true"
-                });
-            } else {
-                let threshold = optional_f64_param(&input, "threshold")
-                    .map(|v| v as f32)
-                    .unwrap_or(0.1);
-                let path_filter = input["path"].as_str().map(|s| s.to_string());
-                let guard = OutputGuard::from_input(&input);
-
-                // Sync SQLite off async runtime
-                let root3 = root.clone();
-                let rows = tokio::task::spawn_blocking(move || {
-                    let conn = crate::embed::index::open_db(&root3)?;
-                    crate::embed::index::query_drift_report(
-                        &conn,
-                        Some(threshold),
-                        path_filter.as_deref(),
-                    )
-                })
-                .await??;
-
-                let items: Vec<Value> = rows
-                    .iter()
-                    .map(|r| {
-                        let mut obj = json!({
-                            "file_path": r.file_path,
-                            "avg_drift": r.avg_drift,
-                            "max_drift": r.max_drift,
-                            "chunks_added": r.chunks_added,
-                            "chunks_removed": r.chunks_removed,
-                        });
-                        if guard.should_include_body() {
-                            if let Some(chunk) = &r.max_drift_chunk {
-                                obj["max_drift_chunk"] = json!(chunk);
-                            }
-                        }
-                        obj
-                    })
-                    .collect();
-
-                let (items, overflow) =
-                    guard.cap_items(items, "Use detail_level='full' with offset for pagination");
-                let total = overflow.as_ref().map_or(items.len(), |o| o.total);
-                let mut drift_result = json!({
-                    "note": "Drift scores are informational — they do not affect query results. High drift means code has changed since indexing; run index(action='build') to update.",
-                    "results": items,
-                    "total": total,
-                });
-                if let Some(ov) = overflow {
-                    drift_result["overflow"] = OutputGuard::overflow_json(&ov);
-                }
-                result["drift"] = drift_result;
-            }
-        }
-
-        // Append background indexing state if not idle.
+        // Append background indexing state (agent-tracked, independent of
+        // the Qdrant collection state — surfaces in-flight `index(build)`
+        // progress and the completion summary).
         {
             use crate::agent::IndexingState;
             let state = ctx.agent.indexing.lock().unwrap_or_else(|e| e.into_inner());
@@ -564,7 +473,7 @@ impl Tool for IndexStatus {
             }
         }
 
-        // Append per-library indexing states (non-idle only)
+        // Per-library indexing states (agent-tracked, non-idle only).
         let lib_states = ctx.agent.library_states_summary();
         if !lib_states.is_empty() {
             result["libraries"] = serde_json::to_value(&lib_states)?;

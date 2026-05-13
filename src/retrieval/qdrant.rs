@@ -121,6 +121,56 @@ impl QdrantWrap {
         Ok(refs)
     }
 
+    /// Scroll all chunks for a project and return summary stats:
+    /// `(chunk_count, file_count)` where `file_count` is distinct `file_path`
+    /// values in the payload. Used by IndexStatus to surface the same numbers
+    /// the legacy sqlite stats used to report.
+    pub async fn project_index_stats(
+        &self,
+        collection: &str,
+        project_id: &str,
+    ) -> Result<(usize, usize)> {
+        use qdrant_client::qdrant::{Condition, Filter, ScrollPointsBuilder};
+
+        let filter = Filter::must([Condition::matches("project_id", project_id.to_string())]);
+
+        let mut chunk_count: usize = 0;
+        let mut files: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut offset: Option<qdrant_client::qdrant::PointId> = None;
+
+        loop {
+            let mut builder = ScrollPointsBuilder::new(collection)
+                .filter(filter.clone())
+                .with_payload(true)
+                .with_vectors(false)
+                .limit(1000u32);
+
+            if let Some(off) = offset.take() {
+                builder = builder.offset(off);
+            }
+
+            let resp = self
+                .client
+                .scroll(builder)
+                .await
+                .context("project_index_stats")?;
+
+            for pt in &resp.result {
+                chunk_count += 1;
+                if let Some(s) = pt.get("file_path").as_str() {
+                    files.insert(s.as_str().to_string());
+                }
+            }
+
+            match resp.next_page_offset {
+                None => break,
+                Some(next) => offset = Some(next),
+            }
+        }
+
+        Ok((chunk_count, files.len()))
+    }
+
     pub async fn upsert_points(
         &self,
         collection: &str,
