@@ -9,7 +9,7 @@ use std::path::Path;
 
 use tree_sitter::{Node, Parser};
 
-use super::chunker::RawChunk;
+use codescout_embed::chunker::RawChunk;
 
 /// Language-specific metadata for AST-aware chunking.
 /// Language-specific metadata for AST-aware chunking.
@@ -568,7 +568,7 @@ fn nodes_to_chunks(
             let gap_content = lines[prev_end..expanded_start].join("\n");
             if !gap_content.trim().is_empty() {
                 if gap_content.len() > chunk_size {
-                    let sub = super::chunker::split(&gap_content, chunk_size, 0);
+                    let sub = codescout_embed::chunker::split(&gap_content, chunk_size, 0);
                     for mut sc in sub {
                         // chunker::split returns 1-indexed lines relative to gap_content.
                         // prev_end is 0-indexed, so adding gives correct 1-indexed file lines.
@@ -699,7 +699,7 @@ fn nodes_to_chunks(
         let gap_content = lines[prev_end..].join("\n");
         if !gap_content.trim().is_empty() {
             if gap_content.len() > chunk_size {
-                let sub = super::chunker::split(&gap_content, chunk_size, 0);
+                let sub = codescout_embed::chunker::split(&gap_content, chunk_size, 0);
                 for mut sc in sub {
                     sc.start_line += prev_end;
                     sc.end_line += prev_end;
@@ -782,7 +782,7 @@ fn sub_split_node(
 
     let body_text = body_lines.join("\n");
     // Overlap is 0 — AST chunks have clean boundaries; no fragments should repeat.
-    let sub_chunks = super::chunker::split(&body_text, body_chunk_size, 0);
+    let sub_chunks = codescout_embed::chunker::split(&body_text, body_chunk_size, 0);
 
     // --- Step 3: Prepend prefix to each sub-chunk ---
     sub_chunks
@@ -854,7 +854,7 @@ pub fn split_file(source: &str, lang: &str, path: &Path, chunk_size: usize) -> V
     let container_path: Vec<String> = Vec::new();
 
     let chunks = if is_markdown(path) {
-        super::chunker::split_markdown(source, target, 0)
+        codescout_embed::chunker::split_markdown(source, target, 0)
     } else if let Some(ts_lang) = crate::ast::get_ts_language(lang) {
         let spec = get_language_spec(lang);
         if let Ok(nodes) = extract_ast_nodes(source, &ts_lang, spec) {
@@ -872,14 +872,14 @@ pub fn split_file(source: &str, lang: &str, path: &Path, chunk_size: usize) -> V
                     &container_path,
                 )
             } else {
-                super::chunker::split(source, target, 0)
+                codescout_embed::chunker::split(source, target, 0)
             }
         } else {
-            super::chunker::split(source, target, 0)
+            codescout_embed::chunker::split(source, target, 0)
         }
     } else {
         // Fallback to line-based splitting
-        super::chunker::split(source, target, 0)
+        codescout_embed::chunker::split(source, target, 0)
     };
 
     enforce_max_chunk_size(chunks, target)
@@ -910,7 +910,7 @@ fn enforce_max_chunk_size(chunks: Vec<RawChunk>, target: usize) -> Vec<RawChunk>
             continue;
         }
         let parent_offset = chunk.start_line.saturating_sub(1);
-        for sub in super::chunker::split(&chunk.content, target, 0) {
+        for sub in codescout_embed::chunker::split(&chunk.content, target, 0) {
             if sub.content.len() <= target {
                 out.push(RawChunk {
                     content: sub.content,

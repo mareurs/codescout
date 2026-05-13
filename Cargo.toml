@@ -71,11 +71,10 @@ clap = { version = "4", features = ["derive"] }
 # Git integration
 git2 = "0.20"
 
-# Database — SQLite with bundled libsqlite3
-# sqlite-vec provides vec_distance_cosine for in-SQL similarity computation
+# Database — SQLite with bundled libsqlite3 (used by call_edges cache +
+# migrate-memories legacy reader). sqlite-vec was dropped in L-01 step 8b
+# alongside the legacy embed::index module.
 rusqlite = { version = "0.39" }
-sqlite-vec = "0.1"
-tantivy = "0.22"
 
 # Retrieval stack client (Qdrant gRPC)
 qdrant-client = "1.13"
