@@ -153,6 +153,20 @@ pub struct ActiveProject {
     pub(crate) session_write_roots: Arc<std::sync::Mutex<Vec<PathBuf>>>,
 }
 
+impl ActiveProject {
+    /// Project name used as the namespace across stores (Qdrant `project_id`
+    /// payload, sqlite-vec scoping, etc.). Comes from `project.toml`'s
+    /// `[project] name = ...` field.
+    pub fn project_id(&self) -> &str {
+        &self.config.project.name
+    }
+
+    /// Absolute path to the project root on disk.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+}
+
 /// Read `workspace.toml` (if present) and return the discovery depth and exclude list.
 /// Falls back to defaults (depth=3, no excludes) when the file is missing or unparseable.
 fn load_discover_settings(root: &std::path::Path) -> (usize, Vec<String>) {

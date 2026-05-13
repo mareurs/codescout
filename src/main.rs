@@ -106,6 +106,25 @@ enum Commands {
         server_cmd: Vec<String>,
     },
 
+    /// Migrate legacy sqlite-vec memories at .codescout/embeddings.db into the
+    /// Qdrant `memories` collection. Idempotent — re-running overwrites by
+    /// deterministic point id rather than duplicating.
+    MigrateMemories {
+        /// Project root path (defaults to CWD). Used both to locate the legacy
+        /// db and to derive the project_id namespace in Qdrant.
+        #[arg(short, long)]
+        project: Option<std::path::PathBuf>,
+
+        /// Explicit path to the legacy embeddings db. Defaults to
+        /// `<project>/.codescout/embeddings.db`.
+        #[arg(long)]
+        db_path: Option<std::path::PathBuf>,
+
+        /// Read + count without embedding or writing to Qdrant.
+        #[arg(long)]
+        dry_run: bool,
+    },
+
     /// Print the codescout git SHA, full SHA, and dirty status baked into this
     /// binary at build time. JSON output for use by the bench harness.
     Version,
@@ -160,6 +179,61 @@ async fn main() -> Result<()> {
                 .unwrap_or_else(|| std::path::PathBuf::from("."));
             tracing::info!("Indexing project at {}", root.display());
             codescout::embed::index::build_index(&root, force, None).await?;
+        }
+        Commands::MigrateMemories {
+            project,
+            db_path,
+            dry_run,
+        } => {
+            let root = project
+                .or_else(|| std::env::current_dir().ok())
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            let db_path = db_path.unwrap_or_else(|| root.join(".codescout/embeddings.db"));
+
+            // Activate the project to resolve project_id + bring up the
+            // semantic memory store via the same path the MCP server uses.
+            let agent = codescout::agent::Agent::new(Some(root.clone())).await?;
+            let project_id = agent
+                .with_project(|p| Ok(p.project_id().to_string()))
+                .await?;
+            let store = agent.semantic_memory_store().await?;
+
+            // Build the embedder once — re-embedding happens per-row inside
+            // migrate_memories. Uses the same env-driven config as the server.
+            let client = codescout::retrieval::client::RetrievalClient::from_env().await?;
+            let embedder =
+                codescout::migrate::memories::HttpMigrationEmbedder::new(client.embedder);
+
+            tracing::info!(
+                "migrate-memories: src={} project_id={} dry_run={}",
+                db_path.display(),
+                project_id,
+                dry_run,
+            );
+            let report = codescout::migrate::memories::migrate_memories(
+                &db_path,
+                store.as_ref(),
+                &embedder,
+                &project_id,
+                dry_run,
+            )
+            .await?;
+
+            println!(
+                "{}",
+                serde_json::json!({
+                    "read": report.read,
+                    "upserted": report.upserted,
+                    "skipped": report.skipped,
+                    "anchors_attached": report.anchors_attached,
+                    "dry_run": report.dry_run,
+                    "next_step": if report.dry_run {
+                        "Re-run without --dry-run to perform the upserts."
+                    } else {
+                        "Verify recall works against the new store, then delete .codescout/embeddings.db when satisfied."
+                    },
+                })
+            );
         }
         Commands::Version => {
             let info = serde_json::json!({

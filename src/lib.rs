@@ -19,6 +19,7 @@ pub mod logging;
 pub mod lsp;
 pub mod mcp_resources;
 pub mod memory;
+pub mod migrate;
 pub mod platform;
 pub mod prompts;
 pub mod retrieval;
