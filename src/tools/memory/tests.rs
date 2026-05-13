@@ -171,6 +171,75 @@ async fn memory_delete_removes_anchor_sidecar() {
 }
 
 #[tokio::test]
+async fn memory_forget_delegates_to_store() {
+    use crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore;
+    use crate::memory::semantic_store::{MemoryFilter, SemanticMemoryStore};
+    use crate::retrieval::memory_payload::{point_id_for, SemanticMemory};
+    use std::sync::Arc;
+
+    let (_dir, ctx) = test_ctx_with_project().await;
+
+    // Swap in the in-memory stub before any tool call — once Agent caches a
+    // store via semantic_memory_store(), set_semantic_memory_store_for_test
+    // would fail with SetError.
+    let stub: Arc<InMemorySemanticMemoryStore> = Arc::new(InMemorySemanticMemoryStore::new());
+    ctx.agent
+        .set_semantic_memory_store_for_test(stub.clone() as Arc<dyn SemanticMemoryStore>)
+        .map_err(|_| ())
+        .expect("set stub");
+
+    // Resolve the active project_id (matches what the tool will look up).
+    let project_id = ctx
+        .agent
+        .with_project(|p| Ok(p.config.project.name.clone()))
+        .await
+        .unwrap();
+
+    // Pre-seed a memory with a known id.
+    let id = point_id_for(&project_id, "unstructured", "to-forget");
+    let mem = SemanticMemory {
+        project_id: project_id.clone(),
+        bucket: "unstructured".into(),
+        title: "to-forget".into(),
+        content: "doomed".into(),
+        anchors: vec![],
+        created_at: "2026-05-13T00:00:00Z".into(),
+        updated_at: "2026-05-13T00:00:00Z".into(),
+    };
+    stub.upsert(&mem, &[0.0_f32; 8]).await.unwrap();
+    assert_eq!(
+        stub.list(&project_id, MemoryFilter::default())
+            .await
+            .unwrap()
+            .len(),
+        1,
+        "fixture must seed exactly one memory"
+    );
+
+    // Forget via the unified tool — exercises the
+    // set_semantic_memory_store_for_test seam end-to-end.
+    Memory
+        .call(json!({ "action": "forget", "id": id.to_string() }), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stub.list(&project_id, MemoryFilter::default())
+            .await
+            .unwrap()
+            .len(),
+        0,
+        "forget must remove the memory from the stub"
+    );
+
+    // Idempotency: a second forget on the same id must not error.
+    Memory
+        .call(json!({ "action": "forget", "id": id.to_string() }), &ctx)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn tools_error_without_active_project() {
     let ctx = test_ctx_no_project().await;
     assert!(WriteMemory
