@@ -3,6 +3,28 @@
 codescout uses embeddings for semantic search — finding code by meaning rather than
 exact text matches. This guide covers how to configure the embedding backend.
 
+> **⚠ This page describes the pre-v0.12 single-service embedding model and is
+> being phased out.** As of v0.12 the default substrate is the
+> [Retrieval Stack](../concepts/retrieval-stack.md) (Qdrant + dense embedder +
+> sparse SPLADE + cross-encoder reranker, configured via `CODESCOUT_*`
+> environment variables, not `[embeddings]` in `project.toml`). The
+> `[embeddings]` config block still loads but only the `model = "local:..."`
+> path is honoured — and only when the binary was built with the
+> `local-embed` Cargo feature.
+>
+> **If you are setting up a fresh install:** read
+> [Retrieval Stack](../concepts/retrieval-stack.md) instead. It covers the
+> docker-compose stack, Ollama / llama.cpp / OpenAI integration, and the
+> benchmark we used to pick defaults.
+>
+> **If you are upgrading from <v0.12:** the `model` / `url` / `api_key`
+> fields in `project.toml` no longer drive search. Run
+> `codescout migrate-memories` to move legacy memory data into Qdrant, then
+> bring up the stack.
+>
+> The remainder of this page is kept as a reference for the legacy code
+> path; treat it as historical.
+
 ## Quick Start
 
 codescout works out of the box with a bundled embedding model. No setup needed.

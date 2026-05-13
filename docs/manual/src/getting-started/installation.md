@@ -139,21 +139,38 @@ Re-run with `force: true` to rebuild from scratch: ask your agent `"Run codescou
 
 ## Feature Flags
 
-codescout has two embedding modes, controlled at compile time via Cargo features:
+> **As of v0.12 the default substrate is the [Retrieval Stack](../concepts/retrieval-stack.md)**
+> (Qdrant + dense embedder + sparse SPLADE + cross-encoder reranker, all
+> running as docker containers). The `local-embed` Cargo feature still exists
+> for air-gapped use but is no longer the default and is no longer the path
+> the team benchmarks against — `local-embed` skips sparse fusion and rerank,
+> which the benchmark shows costs ~9 points out of 75 (28 vs 37 on the
+> champion config). See [Migration from local-embed](../concepts/retrieval-stack.md#migration-from-local-embed)
+> if you are upgrading from <0.12.
 
-> **See also:** [Embedding Backends](../configuration/embedding-backends.md) —
-> full backend comparison, recommended models, and per-backend configuration.
+The Cargo features below control the codescout binary's compile-time
+capabilities. They are independent of whether you run the retrieval stack —
+even without `local-embed`, the binary always speaks HTTP to the stack via
+`remote-embed`.
 
 | Feature | What it does | When to use it |
 |---|---|---|
-| `remote-embed` (default) | HTTP client for OpenAI-compatible embedding APIs | You have Ollama, OpenAI, or a compatible server running |
-| `local-embed` | CPU embeddings via fastembed-rs and ONNX Runtime | Air-gapped machines; **requires building from source** |
+| `remote-embed` (default) | HTTP client for the dense embedder service (TEI or OpenAI protocol) | Always — required for the retrieval stack and for Ollama / OpenAI / llama.cpp endpoints |
+| `local-embed` | In-process CPU embeddings via fastembed-rs + ONNX Runtime | Air-gapped machines; **requires building from source** and skips the network rerank/sparse pipeline |
+| `http` (default) | HTTP/SSE MCP transport (vs stdio-only) | Always — used by `codescout dashboard` and remote MCP clients |
+| `librarian` (default) | Embeds the librarian-mcp doc/spec/plan indexer | Always — runtime-disabled by default, opt in per project |
 
-> **Want free, local embeddings without building from source?** Use
-> [Ollama](https://ollama.com/) — it is the recommended path. Install Ollama,
-> pull a model (`ollama pull nomic-embed-text`), and codescout will use it
-> automatically. The published `cargo install codescout` binary supports Ollama
-> out of the box with no extra flags.
+> **Want free, local embeddings without running docker?** Two options:
+>
+> 1. **Ollama as the dense embedder.** Install Ollama, pull a model
+>    (`ollama pull nomic-embed-text`), and set
+>    `CODESCOUT_EMBEDDER_URL=http://127.0.0.1:11434`,
+>    `CODESCOUT_EMBEDDER_PROTOCOL=openai`. You still need Qdrant + the
+>    reranker + the sparse service running from the docker stack — Ollama
+>    only replaces the dense leg. See [Retrieval Stack > Using Ollama / llama.cpp / OpenAI](../concepts/retrieval-stack.md#using-ollama--llamacpp--openai-as-the-dense-embedder).
+> 2. **Build with `local-embed`** for the pure in-process path. Accept the
+>    benchmark penalty (no rerank, no sparse fusion) in exchange for zero
+>    network dependencies.
 
 ### Local Embeddings via fastembed (`local-embed`)
 
@@ -164,11 +181,15 @@ To use it you must build from source:
 ```bash
 git clone https://github.com/mareurs/codescout.git
 cd codescout
-cargo install --path . --features local-embed
+cargo install --path . --no-default-features --features local-embed,http,librarian
 ```
 
 The first time you build a semantic search index, the local backend model downloads
 automatically to `~/.cache/huggingface/hub/`. Subsequent uses are fully offline.
+
+In this mode `semantic_search` falls back to pure dense vector scoring — no
+SPLADE sparse leg, no cross-encoder rerank. The retrieval-stack configuration
+in this manual does not apply to `local-embed` mode.
 
 ### Minimal Install (No Embeddings)
 
@@ -176,12 +197,11 @@ If you only want LSP-backed symbol navigation and git tools and do not need sema
 can build without any embedding feature:
 
 ```bash
-cargo install codescout --no-default-features
+cargo install codescout --no-default-features --features http,librarian
 ```
 
 Semantic search tools (`semantic_search`, `index`) will return a clear error if called
 without an embedding backend compiled in.
-
 ## Next Steps
 
 - [Your First Project](first-project.md) — open a project, run onboarding, and try the basic tools

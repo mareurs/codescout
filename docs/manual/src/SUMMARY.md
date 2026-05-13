@@ -26,6 +26,7 @@
   - [Interactive Sessions](concepts/elicitation-interactive-sessions.md)
 
 - [Semantic Search](concepts/semantic-search.md)
+  - [Retrieval Stack](concepts/retrieval-stack.md)
   - [Setup Guide](semantic-search-guide.md)
   - [Asymmetric Query Prefix](concepts/asymmetric-query-prefix.md)
   - [Metadata-Enriched Chunks](concepts/metadata-enriched-chunks.md)
