@@ -31,6 +31,14 @@ All notable changes to codescout are documented here.
   - Runner grades transient LSP `-32801 / content modified` errors as SilentWrong (retryable) instead of Panic; the existing retry-on-warmup loop now absorbs LSP reindex races.
   - LIMIT-001 widened to document the depth-≥2 ceiling for `call_graph` callees BFS.
   - Round 4 verdict (14 cases — Correct: 13, Partial: 0, CleanError: 0, SilentWrong: 1, Hung: 0, Panic: 0): `docs/superpowers/specs/2026-05-15-nav-eval-round-4.md`.
+### Fixed
+
+- `edit_code(replace)` no longer strips preceding `///` doc comments or `#[...]` attributes when the new body omits them. The walk-back extension introduced for BUG-031 was unconditional; it now narrows back forward past decorator lines when `new_body` does not lead with one. Regression: `tests/symbol_lsp.rs::replace_symbol_preserves_doc_when_new_body_has_no_doc_comment` and edit-eval R-08.
+
+### Testing
+
+- Adversarial library-level eval for `edit_code` — 14 cases across replace/insert/remove/rename, graded via composite (return + on-disk content + cargo check exit). Shared eval_common module factored out of nav-eval. Surfaced and fixed BUG-055 (`edit_code` replace stripped preceding doc comments when new body omitted decorators).
+
 ## [0.12.0] — 2026-05-13
 
 ### Breaking changes
