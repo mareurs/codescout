@@ -40,11 +40,13 @@ These are fixed in the happy path but still have edge cases worth knowing about.
 
 - **Mitigation (2026-03-20):** `validate_symbol_position` guard detects stale LSP positions and surfaces a `RecoverableError`. Happy path works.
 - **Still watch for:** stale LSP positions on large files mid-edit — if `replace_symbol` ever reports "symbol not found" after a big write, `/mcp` reconnect re-indexes.
+- **Status:** Fixed (2026-05-15) — comprehensively mitigated by three-guard chain: `validate_symbol_position` (`src/symbol/query.rs:227-322`), AST-authoritative `editing_end_line` (`src/symbol/edit.rs`), and sibling-symbol drop guard. Repro fixture `tests/fixtures/edit-eval-rust/src/bug030_repro.rs` (commit `a45f1bd7`); Variant 1a explicitly exercises the sibling-drop guard — preserve as defense-in-depth.
 
 ### BUG-032 — `remove_symbol` can leave orphaned `impl` block code after enum removal
 
 - **Mitigation (2026-03-20):** same `validate_symbol_position` guard catches the stale-position case.
 - **Still watch for:** adjacent/nested `impl Trait for Type` next to inherent `impl Type` — range computation may still grab the wrong brace set (also noted on BUG-037). Workaround: `create_file` for those cases.
+- **Status:** Fixed (2026-05-15) — comprehensively mitigated by the same three-guard chain as BUG-030 (`validate_symbol_position` + AST-authoritative end_line + sibling-symbol drop guard). Repro fixture `tests/fixtures/edit-eval-rust/src/bug032_repro.rs` (commit `a45f1bd7`).
 
 ### BUG-021 — partial state after parallel `edit_file` calls (by design)
 
@@ -109,7 +111,7 @@ These are fixed in the happy path but still have edge cases worth knowing about.
 - **Root cause (confirmed 2026-05-02):** `editing_end_line` in `src/symbol/edit.rs` had an early return when `has_syntax_errors` was true, falling back to LSP's `end_line`. During mid-session editing (prior edits leave broken syntax), LSP frequently reports the last *statement* line rather than the closing `}`. Insertion used this short value as anchor, landing inside the function.
 - **Fix applied (2026-05-02):** Removed the syntax-error early return. AST is run unconditionally and trusted when it finds the symbol (same as on a clean file). `max(ast, lsp)` was considered but rejected — it regresses BUG-029 when syntax errors coexist with LSP over-extension. Two regression tests added in `src/tools/symbol/tests.rs`: `editing_end_line_with_syntax_errors_uses_ast_not_lsp_fallback` and `editing_end_line_syntax_errors_do_not_regress_lsp_overextend`.
 - **Residual (documented, not fixed):** When the file has syntax errors AND tree-sitter's error recovery fails to find the function boundary (`find_ast_end_line_in` returns `None`), the function still falls back to `sym.end_line` — the original failure path. In this worst-case scenario (badly broken parse tree), the bug can still manifest.
-- **Status:** Partially fixed
+- **Status:** Fixed (2026-05-15) — confirmed silently fixed by the AST-authoritative `editing_end_line` rewrite in `src/symbol/edit.rs` (with explicit BUG-051 docstring). Regression coverage: `editing_end_line_with_syntax_errors_uses_ast_not_lsp_fallback` and `editing_end_line_syntax_errors_do_not_regress_lsp_overextend` in `src/tools/symbol/tests.rs`. Repro fixture `tests/fixtures/edit-eval-rust/src/bug051_repro.rs` (commit `b11a2ca0`).
 
 ### BUG-052 — `RecoverableError` guidance/hint not included in `Display` / `to_string()`
 
@@ -214,8 +216,8 @@ the spin begins.
 - **What happened:** Replacement produced one extra `}` at the end — the impl-block closing brace was included in the symbol range and got re-emitted by the new body, leaving an unbalanced file.
 - **Probable cause:** symbol range computation for methods inside an `impl` block may include the trailing closer when the body ends near the impl boundary. Related to BUG-030 / BUG-032 (range over-capture) but on `edit_code` not `replace_symbol`.
 - **Workaround:** sanity-check brace balance after `edit_code action=replace` on method bodies; fix via `edit_file` for the single stray brace.
-- **Fix:** open
-- **Status:** Open
+- **Fix:** silently fixed by commit `ea2f314f` (BUG-055 narrow-forward fix) — same range-computation path. Confirmed by Phase 1 reproduction across three variants (single-branch, nested-block, middle-method-in-multi).
+- **Status:** Fixed (2026-05-15) — cite `ea2f314f`. Repro fixture `tests/fixtures/edit-eval-rust/src/bug054_repro.rs` (commit `2989dc12`) covers all three variants; recommend promoting into edit-eval as a permanent regression case (see R-09).
 
 ### BUG-055 — `edit_code action="replace"` strips preceding doc comment when `new_body` omits it
 

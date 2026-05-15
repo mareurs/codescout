@@ -177,6 +177,29 @@ pub fn all() -> &'static [EditCase] {
             h1_exempt: None,
         },
         EditCase {
+            id: "R-09",
+            action: EditAction::Replace,
+            input: json!({
+                "action": "replace",
+                "symbol": "impl Tool for ReadMarkdown/format_compact",
+                "path": "src/bug054_repro.rs",
+                "body": "    fn format_compact(&self, n: u32) -> Option<String> {\n        if n > 10 {\n            return Some(String::from(\"big\"));\n        }\n        Some(String::from(\"small\"))\n    }",
+            }),
+            target_file: "bug054_repro.rs",
+            expected: Expected {
+                return_: ReturnExpected::Ok,
+                disk: vec![
+                    ContentInvariant::Contains { file: "bug054_repro.rs", needle: "String::from(\"big\")", count: 1 },
+                    ContentInvariant::Contains { file: "bug054_repro.rs", needle: "String::from(\"small\")", count: 1 },
+                    // BUG-054 watchdog: no triple-stacked closing braces near EOF.
+                    ContentInvariant::NotContains { file: "bug054_repro.rs", needle: "}\n}\n}" },
+                ],
+                compiler: CompilerExpected::Builds,
+            },
+            rationale: "BUG-054 regression — multi-branch trait-method body must not append stray }",
+            h1_exempt: None,
+        },
+        EditCase {
             id: "I-01",
             action: EditAction::Insert,
             input: json!({
