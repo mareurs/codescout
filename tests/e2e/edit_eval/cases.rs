@@ -176,5 +176,70 @@ pub fn all() -> &'static [EditCase] {
             rationale: "doc-comment-adjacent function — doc must survive replace",
             h1_exempt: None,
         },
+        EditCase {
+            id: "I-01",
+            action: EditAction::Insert,
+            input: json!({
+                "action": "insert",
+                "symbol": "impl Foo/method_a",
+                "path": "src/insert_before_first.rs",
+                "position": "before",
+                "body": "    pub fn method_zero(&self) -> u32 { 0 }",
+            }),
+            target_file: "insert_before_first.rs",
+            expected: Expected {
+                return_: ReturnExpected::Ok,
+                disk: vec![
+                    ContentInvariant::Contains { file: "insert_before_first.rs", needle: "pub fn method_zero", count: 1 },
+                    ContentInvariant::Contains { file: "insert_before_first.rs", needle: "pub fn method_a(&self) -> u32 { 1 }", count: 1 },
+                ],
+                compiler: CompilerExpected::Builds,
+            },
+            rationale: "insert before first method of impl — sibling method_a intact",
+            h1_exempt: None,
+        },
+        EditCase {
+            id: "I-02",
+            action: EditAction::Insert,
+            input: json!({
+                "action": "insert",
+                "symbol": "impl Bar/method_z",
+                "path": "src/insert_after_last.rs",
+                "position": "after",
+                "body": "    pub fn method_zz(&self) -> u32 { 26 }",
+            }),
+            target_file: "insert_after_last.rs",
+            expected: Expected {
+                return_: ReturnExpected::Ok,
+                disk: vec![
+                    ContentInvariant::Contains { file: "insert_after_last.rs", needle: "method_zz", count: 1 },
+                    ContentInvariant::Contains { file: "insert_after_last.rs", needle: "}\n", count: 3 },
+                ],
+                compiler: CompilerExpected::Builds,
+            },
+            rationale: "insert after last method at EOF — impl close brace preserved",
+            h1_exempt: None,
+        },
+        EditCase {
+            id: "I-03",
+            action: EditAction::Insert,
+            input: json!({
+                "action": "insert",
+                "symbol": "target",
+                "path": "src/insert_bad_syntax.rs",
+                "position": "after",
+                "body": "this is not rust",
+            }),
+            target_file: "insert_bad_syntax.rs",
+            expected: Expected {
+                return_: ReturnExpected::Ok,
+                disk: vec![
+                    ContentInvariant::Contains { file: "insert_bad_syntax.rs", needle: "this is not rust", count: 1 },
+                ],
+                compiler: CompilerExpected::Breaks,
+            },
+            rationale: "tool-faithful contract — disk gets exactly what was asked; compiler legitimately breaks",
+            h1_exempt: None,
+        },
     ])
 }
