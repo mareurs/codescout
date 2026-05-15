@@ -10,6 +10,8 @@ use crate::lsp::LspManager;
 use serde_json::json;
 use tempfile::tempdir;
 
+// TODO: migrate these tests to assert on file_groups[] directly, then drop this helper.
+
 /// Flatten `file_groups[]` from a grep result back to a `Vec<Value>` with `file`
 /// re-attached to each item. Mirrors the old `result["matches"]` shape so
 /// integration tests can keep asserting on individual match fields.

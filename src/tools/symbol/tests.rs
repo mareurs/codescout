@@ -3,8 +3,7 @@
 //! Moved wholesale during Phase 1b.4; imports made explicit in Phase 1b.5.
 
 use super::display::{
-    format_find_references, format_goto_definition, format_hover, format_overview_symbols,
-    format_search_symbols,
+    format_goto_definition, format_hover, format_overview_symbols, format_search_symbols,
 };
 use super::list_overview::{
     ast_class_names_for_dir, count_files_by_subdir, find_split_point, flat_symbol_count,
@@ -4643,10 +4642,13 @@ fn symbols_overview_singular_symbol_word() {
     assert!(!result.contains("1 symbols"));
 }
 
-// --- format_find_references tests ---
+// --- references format_compact tests ---
 
 #[test]
 fn find_references_basic() {
+    use crate::tools::symbol::references::References;
+    use crate::tools::Tool;
+    let tool = References;
     let result = serde_json::json!({
         "file_groups": [
             {"file": "src/foo.rs", "count": 2, "items": [
@@ -4660,27 +4662,29 @@ fn find_references_basic() {
         "total": 3,
         "files": 2
     });
-    let text = format_find_references(&result);
+    let text = tool.format_compact(&result).unwrap();
     assert!(text.contains("3"), "should mention count");
     assert!(
-        text.contains("refs") || text.contains("reference"),
+        text.contains("references") || text.contains("refs"),
         "should say refs or reference(s)"
     );
 }
 
 #[test]
 fn find_references_empty() {
+    use crate::tools::symbol::references::References;
+    use crate::tools::Tool;
+    let tool = References;
     let result = serde_json::json!({ "file_groups": [], "total": 0, "files": 0 });
-    let text = format_find_references(&result);
-    assert!(
-        text.contains("No"),
-        "should say 'No references found.', got: {}",
-        text
-    );
+    let text = tool.format_compact(&result).unwrap();
+    assert!(text.contains("0"), "should mention zero, got: {}", text);
 }
 
 #[test]
 fn format_find_references_shows_locations() {
+    use crate::tools::symbol::references::References;
+    use crate::tools::Tool;
+    let tool = References;
     let result = serde_json::json!({
         "total": 8,
         "files": 5,
@@ -4703,19 +4707,24 @@ fn format_find_references_shows_locations() {
             ]}
         ]
     });
-    let out = format_find_references(&result);
-    assert!(out.contains("8 refs"), "should show total");
+    let out = tool.format_compact(&result).unwrap();
+    // render_grouped emits "N references in F files\n\nfile (count)\n  line  context"
+    assert!(out.contains("8"), "should show total");
+    assert!(out.contains("references"), "should use references noun");
+    assert!(out.contains("src/tools/symbol.rs"), "should show file");
+    assert!(out.contains("142"), "should show line numbers");
+    assert!(out.contains("src/server.rs"), "should show other files");
     assert!(
-        out.contains("src/tools/symbol.rs:142"),
-        "should show locations"
+        out.contains("src/config.rs"),
+        "format_compact shows all refs, no cap"
     );
-    assert!(out.contains("src/server.rs:87"), "should show locations");
-    assert!(out.contains("more"), "should show trailer for hidden refs");
-    assert!(!out.contains("src/config.rs"), "should cap at 5");
 }
 
 #[test]
 fn format_find_references_five_or_fewer_no_trailer() {
+    use crate::tools::symbol::references::References;
+    use crate::tools::Tool;
+    let tool = References;
     let result = serde_json::json!({
         "total": 3,
         "files": 3,
@@ -4725,9 +4734,12 @@ fn format_find_references_five_or_fewer_no_trailer() {
             {"file": "src/c.rs", "count": 1, "items": [{"line": 3, "column": 0, "context": ""}]}
         ]
     });
-    let out = format_find_references(&result);
-    assert!(out.contains("src/a.rs:1"));
-    assert!(!out.contains("more"), "no trailer when all fit");
+    let out = tool.format_compact(&result).unwrap();
+    // render_grouped emits file headers; all files shown, no truncation trailer
+    assert!(out.contains("src/a.rs"), "should show first file");
+    assert!(out.contains("src/b.rs"), "should show second file");
+    assert!(out.contains("src/c.rs"), "should show third file");
+    assert!(!out.contains("more"), "no trailer when all refs fit");
 }
 
 #[tokio::test]

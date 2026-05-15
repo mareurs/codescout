@@ -358,47 +358,6 @@ fn format_symbol_tree(out: &mut String, symbols: &[Value], indent: usize) {
     }
 }
 
-#[cfg(test)]
-pub(super) fn format_find_references(result: &Value) -> String {
-    let total = result["total"].as_u64().unwrap_or_else(|| {
-        result["file_groups"]
-            .as_array()
-            .map(|a| a.iter().map(|g| g["count"].as_u64().unwrap_or(0)).sum())
-            .unwrap_or(0)
-    });
-
-    if total == 0 {
-        return "No references found.".to_string();
-    }
-
-    let file_groups = match result["file_groups"].as_array() {
-        Some(g) => g,
-        None => return format!("{total} refs"),
-    };
-
-    const MAX_SHOW: usize = 5;
-    let mut out = format!("{total} refs");
-    let mut shown = 0;
-    'outer: for group in file_groups {
-        let file = group["file"].as_str().unwrap_or("?");
-        if let Some(items) = group["items"].as_array() {
-            for item in items {
-                if shown >= MAX_SHOW {
-                    break 'outer;
-                }
-                let line = item["line"].as_u64().unwrap_or(0);
-                out.push_str(&format!("\n  {file}:{line}"));
-                shown += 1;
-            }
-        }
-    }
-    let hidden = (total as usize).saturating_sub(shown);
-    if hidden > 0 {
-        out.push_str(&format!("\n  … +{hidden} more"));
-    }
-    out
-}
-
 pub(super) fn format_replace_symbol(result: &Value) -> String {
     let lines = result["replaced_lines"].as_str().unwrap_or("?");
     format!("replaced · L{lines}")
