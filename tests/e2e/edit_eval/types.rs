@@ -1,5 +1,7 @@
 use serde_json::Value;
 
+// Consumed by case modules in T10-T12; matchers only reads via EditCase.action.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditAction {
     Replace,
@@ -14,6 +16,8 @@ pub enum ReturnExpected {
     CleanError, // RecoverableError downcast
 }
 
+// DontCare constructed by future R-cluster cases.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum CompilerExpected {
     Builds,
@@ -23,6 +27,8 @@ pub enum CompilerExpected {
 
 /// A content invariant the post-edit fixture file must satisfy.
 /// Multiple invariants are AND-ed.
+// Variants constructed by case modules in T10-T12.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum ContentInvariant {
     /// The post-edit content of `file` must contain `needle` exactly `count` times.
@@ -52,6 +58,8 @@ pub struct Expected {
     pub compiler: CompilerExpected,
 }
 
+// Fields id/action/input/rationale read by runner/report in T8-T9.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct EditCase {
     pub id: &'static str,
