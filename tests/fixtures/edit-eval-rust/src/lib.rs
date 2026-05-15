@@ -19,3 +19,5 @@ pub mod replace_wrong_sig;
 pub mod bug054_repro;
 pub mod bug051_repro;
 pub mod bug050_repro;
+pub mod bug030_repro;
+pub mod bug032_repro;
