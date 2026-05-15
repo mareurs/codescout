@@ -2,6 +2,17 @@
 
 All notable changes to codescout are documented here.
 
+## Unreleased
+
+### Added
+
+- Nav-tool eval harness (`tests/e2e/nav_eval_harness.rs`, `tests/fixtures/nav-eval-rust/`).
+  Library-level adversarial eval grading action-correctness of `symbols`,
+  `symbol_at`, `references`, and `call_graph` on hand-authored Rust ambiguity
+  traps. Run via `cargo test --test e2e_tests -- --ignored run_nav_eval`. First
+  round verdict committed at `docs/superpowers/specs/2026-05-15-nav-eval-round-1.md`.
+  See spec at `docs/superpowers/specs/2026-05-15-nav-tool-eval-design.md`.
+
 ## [0.12.0] — 2026-05-13
 
 ### Breaking changes
@@ -42,6 +53,22 @@ All notable changes to codescout are documented here.
 
 ### Changed
 
+- **AMD ROCm profile in `docker-compose.yml`.** New `amd` profile alongside
+  `cpu` and `gpu`. Dense embedder and cross-encoder reranker run as
+  `rocm/llama.cpp:b6652_rocm7.0.0_ubuntu24.04_server` containers with
+  `/dev/kfd` + `/dev/dri` passthrough; sparse SPLADE stays on CPU (no llama.cpp
+  MLM path). Ports `48081`/`48083`/`48084`/`6334` are profile-agnostic — only
+  the underlying container changes. Codescout ships `.env.amd` setting
+  `CODESCOUT_EMBEDDER_PROTOCOL=llama-server` and
+  `CODESCOUT_RERANKER_PROTOCOL=llama-server`. See
+  [`docs/manual/src/concepts/retrieval-stack.md`](docs/manual/src/concepts/retrieval-stack.md)
+  → "AMD ROCm profile".
+- **Protocol aliases.** `CODESCOUT_EMBEDDER_PROTOCOL` and
+  `CODESCOUT_RERANKER_PROTOCOL` now accept `llama-server` (and `llamacpp`,
+  `llama_server`) as aliases for the OpenAI/Cohere-compatible shapes, so users
+  configuring against llama-server's `/v1/embeddings` and `--reranking`
+  endpoints can use the mental model of the backend rather than its wire
+  protocol.
 - **Binary size 54 MiB → 30 MiB (–44%).** Dropped `ort_sys`, `tokenizers`,
   `hf-hub`, `image`/`ravif` (~22 MiB) by moving `local-embed` out of defaults.
   Dropped `aws_lc_sys` (~2 MiB) by switching `rustls` to the `ring` crypto

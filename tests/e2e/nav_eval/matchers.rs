@@ -1,4 +1,4 @@
-use crate::e2e::nav_eval::types::{Expected, RefLoc, SymbolRef, Verdict};
+use crate::e2e::nav_eval::types::{RefLoc, SymbolRef, Verdict};
 use serde_json::Value;
 
 /// Outcome of comparing a tool response to an `Expected`.
@@ -67,13 +67,12 @@ pub fn match_symbols(
 /// Extracts the first `def.location` from a symbol_at response and compares
 /// against the expected file + line. File comparison uses `ends_with` to be
 /// independent of absolute path prefixes.
-pub fn match_symbol_at_def(
-    value: &Value,
-    expected_file: &str,
-    expected_line: u32,
-) -> MatchResult {
+pub fn match_symbol_at_def(value: &Value, expected_file: &str, expected_line: u32) -> MatchResult {
     let def = value.get("def");
-    let first = def.and_then(|d| d.get("locations")).and_then(|l| l.as_array()).and_then(|a| a.first());
+    let first = def
+        .and_then(|d| d.get("locations"))
+        .and_then(|l| l.as_array())
+        .and_then(|a| a.first());
     let Some(loc) = first else {
         return MatchResult {
             verdict: Verdict::SilentWrong,
@@ -85,7 +84,10 @@ pub fn match_symbol_at_def(
 
     let evidence = format!("def={file}:{line}");
     if file.ends_with(expected_file) && line == expected_line {
-        MatchResult { verdict: Verdict::Correct, evidence }
+        MatchResult {
+            verdict: Verdict::Correct,
+            evidence,
+        }
     } else {
         MatchResult {
             verdict: Verdict::SilentWrong,
@@ -93,7 +95,6 @@ pub fn match_symbol_at_def(
         }
     }
 }
-
 
 pub fn match_references(
     value: &Value,
@@ -138,7 +139,10 @@ pub fn match_references(
             evidence: format!("{evidence} — forbidden present {forbidden_hit:?}"),
         };
     }
-    MatchResult { verdict: Verdict::Correct, evidence }
+    MatchResult {
+        verdict: Verdict::Correct,
+        evidence,
+    }
 }
 
 pub fn match_call_graph(
@@ -155,8 +159,16 @@ pub fn match_call_graph(
     let edge_pairs: Vec<(String, String)> = edges
         .iter()
         .map(|e| {
-            let src = e.get("from").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let dst = e.get("to").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let src = e
+                .get("from")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let dst = e
+                .get("to")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             (src, dst)
         })
         .collect();
@@ -184,7 +196,10 @@ pub fn match_call_graph(
             evidence: format!("{evidence} — forbidden present {forbidden_hit:?}"),
         };
     }
-    MatchResult { verdict: Verdict::Correct, evidence }
+    MatchResult {
+        verdict: Verdict::Correct,
+        evidence,
+    }
 }
 
 #[cfg(test)]
@@ -252,7 +267,6 @@ mod tests {
         assert_eq!(r.verdict, Verdict::SilentWrong);
     }
 
-
     fn rloc(file: &'static str, line: u32) -> RefLoc {
         RefLoc { file, line }
     }
@@ -270,12 +284,7 @@ mod tests {
             {"file": "src/a.rs", "line": 10},
             {"file": "src/b.rs", "line": 20},
         ]});
-        let r = match_references(
-            &v,
-            &[rloc("a.rs", 10), rloc("b.rs", 20)],
-            &[],
-            2,
-        );
+        let r = match_references(&v, &[rloc("a.rs", 10), rloc("b.rs", 20)], &[], 2);
         assert_eq!(r.verdict, Verdict::Correct);
     }
 
@@ -285,12 +294,7 @@ mod tests {
             {"file": "src/a.rs", "line": 10},
             {"file": "src/tests.rs", "line": 99},
         ]});
-        let r = match_references(
-            &v,
-            &[rloc("a.rs", 10)],
-            &[rloc("tests.rs", 99)],
-            1,
-        );
+        let r = match_references(&v, &[rloc("a.rs", 10)], &[rloc("tests.rs", 99)], 1);
         assert_eq!(r.verdict, Verdict::Partial);
     }
 
@@ -300,23 +304,14 @@ mod tests {
             {"from": "a", "to": "b"},
             {"from": "b", "to": "c"},
         ]});
-        let r = match_call_graph(
-            &v,
-            &[("a".to_string(), "b".to_string())],
-            &[],
-        );
+        let r = match_call_graph(&v, &[("a".to_string(), "b".to_string())], &[]);
         assert_eq!(r.verdict, Verdict::Correct);
     }
 
     #[test]
     fn cg_silent_wrong_missing_edge() {
         let v = json!({"edges": []});
-        let r = match_call_graph(
-            &v,
-            &[("a".to_string(), "b".to_string())],
-            &[],
-        );
+        let r = match_call_graph(&v, &[("a".to_string(), "b".to_string())], &[]);
         assert_eq!(r.verdict, Verdict::SilentWrong);
     }
-
 }

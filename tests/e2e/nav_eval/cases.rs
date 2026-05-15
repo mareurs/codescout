@@ -1,11 +1,10 @@
 use crate::e2e::nav_eval::types::Case;
 
+use crate::e2e::nav_eval::types::{Expected, SymbolRef, ToolUnderTest};
 use serde_json::json;
 use std::sync::OnceLock;
-use crate::e2e::nav_eval::types::{Expected, SymbolRef, ToolUnderTest};
 
 static CASES: OnceLock<Vec<Case>> = OnceLock::new();
-
 
 pub fn all() -> &'static [Case] {
     CASES.get_or_init(|| vec![
