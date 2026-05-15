@@ -99,9 +99,17 @@ fn grade(case: &Case, result: anyhow::Result<serde_json::Value>) -> MatchResult 
                     evidence: format!("RecoverableError: {e}"),
                 }
             } else {
-                MatchResult {
-                    verdict: Verdict::Panic,
-                    evidence: format!("fatal: {e}"),
+                let msg = format!("{e}");
+                if msg.contains("content modified") || msg.contains("-32801") {
+                    MatchResult {
+                        verdict: Verdict::SilentWrong,
+                        evidence: format!("transient LSP race (retryable): {msg}"),
+                    }
+                } else {
+                    MatchResult {
+                        verdict: Verdict::Panic,
+                        evidence: format!("fatal: {msg}"),
+                    }
                 }
             }
         }

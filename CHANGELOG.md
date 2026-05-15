@@ -27,6 +27,10 @@ All notable changes to codescout are documented here.
   - Round 3 verdict (14 cases — Correct: 12, Partial: 0, CleanError: 0,
     SilentWrong: 1, Hung: 0, Panic: 1):
     `docs/superpowers/specs/2026-05-15-nav-eval-round-3.md`.
+- Nav-tool eval round 4:
+  - Runner grades transient LSP `-32801 / content modified` errors as SilentWrong (retryable) instead of Panic; the existing retry-on-warmup loop now absorbs LSP reindex races.
+  - LIMIT-001 widened to document the depth-≥2 ceiling for `call_graph` callees BFS.
+  - Round 4 verdict (14 cases — Correct: 13, Partial: 0, CleanError: 0, SilentWrong: 1, Hung: 0, Panic: 0): `docs/superpowers/specs/2026-05-15-nav-eval-round-4.md`.
 ## [0.12.0] — 2026-05-13
 
 ### Breaking changes

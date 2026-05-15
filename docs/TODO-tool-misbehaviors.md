@@ -26,6 +26,18 @@ Use the template at the bottom. Keep it one entry per observation, even if you t
 - **Workaround:** activate a language server for the file. `direction=callers` has a full tree-sitter fallback.
 - **Status:** By design. Revisit if a "find callees via AST body walk" helper is added in a future task.
 
+**Depth-≥2 corollary (observed 2026-05-15 via nav-eval round 2/3):** Because the
+tree-sitter fallback for callees returns an empty edge list (rather than tracing
+calls in the source), BFS at `max_depth ≥ 2` only yields edges from the seed
+node. Non-seed nodes hit `prepareCallHierarchy = None` (rust-analyzer does not
+serve call-hierarchy at a function's *definition* position for fixtures whose
+manifest isn't a workspace member), the resolver returns `RecoverableError`,
+and (since round-3 fix in `src/tools/symbol/call_graph/mod.rs::one_hop`) BFS
+silently skips that hop and continues with whatever else is queued. The
+nav-eval case `C-11` (`a → b → c → a` cycle, depth=5) is the canonical
+regression watchdog for this gap — it stays `SILENT_WRONG` until a real
+tree-sitter fallback for callees ships.
+
 ## Mitigated quirks (live caveats)
 
 These are fixed in the happy path but still have edge cases worth knowing about. Full write-ups in `docs/archive/bug-reports/2026-03-to-2026-04-tool-misbehaviors.md`.
