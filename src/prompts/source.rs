@@ -63,7 +63,7 @@ mod tests {
             .expect("onboarding_prompt surface present in source.md");
         assert_eq!(
             extracted,
-            crate::prompts::ONBOARDING_PROMPT,
+            crate::prompts::RAW_ONBOARDING_PROMPT,
             "source.md must reproduce onboarding_prompt.md byte-for-byte; \
              diff between extract and constant means source.md drifted from the file"
         );
