@@ -81,7 +81,7 @@ impl EmbedderHttp {
             .to_ascii_lowercase()
             .as_str()
         {
-            "openai" => DenseProtocol::OpenAi,
+            "openai" | "llama-server" | "llama_server" | "llamacpp" => DenseProtocol::OpenAi,
             _ => DenseProtocol::Tei,
         };
         let dense_model_name = std::env::var("CODESCOUT_EMBEDDER_MODEL_NAME").unwrap_or_default();

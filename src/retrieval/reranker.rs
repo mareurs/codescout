@@ -21,7 +21,7 @@ impl Protocol {
             .to_ascii_lowercase()
             .as_str()
         {
-            "infinity" | "cohere" => Self::Infinity,
+            "infinity" | "cohere" | "llama-server" | "llama_server" | "llamacpp" => Self::Infinity,
             _ => Self::Tei,
         }
     }
