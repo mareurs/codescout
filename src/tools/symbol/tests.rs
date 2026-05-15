@@ -5484,7 +5484,10 @@ async fn symbols_scope_libraries_searches_library_dirs() {
 
     let symbols = result["symbols"].as_array().unwrap();
     assert!(!symbols.is_empty(), "should find symbol in library");
-    let file = symbols[0]["file"].as_str().unwrap();
+    let file = symbols[0]["file"]
+        .as_str()
+        .or_else(|| result["file"].as_str())
+        .unwrap();
     assert!(
         file.starts_with("lib:testlib/"),
         "file path should have lib: prefix: {}",
@@ -5579,8 +5582,9 @@ async fn symbols_scope_project_default_excludes_libraries() {
         .unwrap();
 
     let symbols = result["symbols"].as_array().unwrap();
+    let top_file = result["file"].as_str();
     for s in symbols {
-        let file = s["file"].as_str().unwrap();
+        let file = s["file"].as_str().or(top_file).unwrap();
         assert!(
             !file.starts_with("lib:"),
             "project scope should not include library: {}",
@@ -6001,4 +6005,113 @@ async fn edit_code_replace_appends_caller_hint() {
         hint.contains("src/lib.rs"),
         "hint should include file path: {hint}"
     );
+}
+
+#[test]
+fn collect_matching_skips_function_children_when_pushed() {
+    // Regression: a function whose Variable children's name_path starts with
+    // the function name (e.g. Python parameters) must not be returned as
+    // separate hits. Even when the predicate matches both, the parent's body
+    // already contains the children verbatim, so emitting them is duplication.
+    use crate::lsp::SymbolKind;
+    let symbols = vec![SymbolInfo {
+        name: "complete_text".into(),
+        name_path: "complete_text".into(),
+        kind: SymbolKind::Function,
+        file: PathBuf::from("gemini.py"),
+        start_line: 130,
+        end_line: 169,
+        start_col: 0,
+        children: vec![
+            SymbolInfo {
+                name: "prompt".into(),
+                name_path: "complete_text/prompt".into(),
+                kind: SymbolKind::Variable,
+                file: PathBuf::from("gemini.py"),
+                start_line: 131,
+                end_line: 131,
+                start_col: 4,
+                children: vec![],
+                range_start_line: None,
+                detail: None,
+            },
+            SymbolInfo {
+                name: "model".into(),
+                name_path: "complete_text/model".into(),
+                kind: SymbolKind::Variable,
+                file: PathBuf::from("gemini.py"),
+                start_line: 132,
+                end_line: 132,
+                start_col: 4,
+                children: vec![],
+                range_start_line: None,
+                detail: None,
+            },
+        ],
+        range_start_line: None,
+        detail: None,
+    }];
+
+    // Use the legacy buggy-style predicate (matches name OR name_path) to prove
+    // the suppression works regardless of predicate width.
+    let mut out = vec![];
+    collect_matching(
+        &symbols,
+        &substr_pred("complete_text"),
+        true,
+        None,
+        0,
+        true,
+        &mut out,
+        None,
+    );
+    assert_eq!(
+        out.len(),
+        1,
+        "function parent should suppress its parameter children"
+    );
+    assert_eq!(out[0]["name"], "complete_text");
+}
+
+#[test]
+fn collect_matching_keeps_class_method_descendants() {
+    // Counterexample: Class/Struct/Module/Interface keep recursing — their
+    // methods are independent navigation targets, not sub-locations.
+    use crate::lsp::SymbolKind;
+    let symbols = vec![SymbolInfo {
+        name: "Foo".into(),
+        name_path: "Foo".into(),
+        kind: SymbolKind::Class,
+        file: PathBuf::from("a.py"),
+        start_line: 0,
+        end_line: 20,
+        start_col: 0,
+        children: vec![SymbolInfo {
+            name: "Foo_helper".into(),
+            name_path: "Foo/Foo_helper".into(),
+            kind: SymbolKind::Method,
+            file: PathBuf::from("a.py"),
+            start_line: 2,
+            end_line: 5,
+            start_col: 4,
+            children: vec![],
+            range_start_line: None,
+            detail: None,
+        }],
+        range_start_line: None,
+        detail: None,
+    }];
+
+    let mut out = vec![];
+    collect_matching(
+        &symbols,
+        &substr_pred("foo"),
+        true,
+        None,
+        0,
+        true,
+        &mut out,
+        None,
+    );
+    assert_eq!(out.len(), 2, "class should not suppress method descendants");
 }

@@ -62,7 +62,8 @@ pub fn collect_matching(
 ) {
     for sym in symbols {
         let kind_ok = kind_filter.map_or(true, |f| matches_kind_filter(&sym.kind, f));
-        if name_ok(sym) && kind_ok {
+        let pushed = name_ok(sym) && kind_ok;
+        if pushed {
             out.push(symbol_to_json(
                 sym,
                 include_body,
@@ -71,17 +72,30 @@ pub fn collect_matching(
                 show_file,
             ));
         }
-        // Always recurse so nested matches inside filtered-out parents are still found.
-        collect_matching(
-            &sym.children,
-            name_ok,
-            include_body,
-            source_code,
-            depth,
-            show_file,
-            out,
-            kind_filter,
-        );
+        // Skip recursion into a matched functional unit: its children are
+        // parameters / locals already textually present in the parent body.
+        // Class/Struct/Module/Interface still recurse — their methods are
+        // independent navigation targets.
+        let suppress = pushed
+            && matches!(
+                sym.kind,
+                crate::lsp::SymbolKind::Function
+                    | crate::lsp::SymbolKind::Method
+                    | crate::lsp::SymbolKind::Constructor
+            );
+        if !suppress {
+            // Always recurse so nested matches inside filtered-out parents are still found.
+            collect_matching(
+                &sym.children,
+                name_ok,
+                include_body,
+                source_code,
+                depth,
+                show_file,
+                out,
+                kind_filter,
+            );
+        }
     }
 }
 

@@ -219,8 +219,14 @@ impl Tool for Symbols {
             Box::new(move |sym: &SymbolInfo| symbol_name_matches(sym, &p))
         } else {
             let p = pattern_lower.clone();
+            // Only consult name_path when the pattern itself looks hierarchical
+            // (contains '/'). Otherwise plain substring against name_path bleeds
+            // into every descendant of any matched container (e.g. "foo" matches
+            // every parameter of a function `foo` via name_path "foo/<param>").
+            let consult_name_path = p.contains('/');
             Box::new(move |sym: &SymbolInfo| {
-                sym.name.to_lowercase().contains(&p) || sym.name_path.to_lowercase().contains(&p)
+                sym.name.to_lowercase().contains(&p)
+                    || (consult_name_path && sym.name_path.to_lowercase().contains(&p))
             })
         };
         let mut matches = vec![];
@@ -337,8 +343,11 @@ impl Tool for Symbols {
                     };
                     for sym in symbols {
                         // LSP servers may use fuzzy/prefix matching — enforce substring.
-                        let name_ok = sym.name.to_lowercase().contains(&pattern_lower)
-                            || sym.name_path.to_lowercase().contains(&pattern_lower);
+                        // Mirror the predicate above: only consult name_path for '/' patterns.
+                        let n = sym.name.to_lowercase();
+                        let name_ok = n.contains(&pattern_lower)
+                            || (pattern_lower.contains('/')
+                                && sym.name_path.to_lowercase().contains(&pattern_lower));
                         let kind_ok =
                             kind_filter.map_or(true, |f| matches_kind_filter(&sym.kind, f));
                         if name_ok && kind_ok {
@@ -521,8 +530,30 @@ impl Tool for Symbols {
             }
         }
 
+        // Per-file presentation: when every match shares the same `file`,
+        // hoist it to the top level and strip the per-symbol field. Cuts
+        // redundant repetition when the caller scoped to one file.
+        let shared_file: Option<String> = matches
+            .first()
+            .and_then(|m| m.get("file").and_then(|v| v.as_str()).map(str::to_string))
+            .filter(|first| {
+                matches
+                    .iter()
+                    .all(|m| m.get("file").and_then(|v| v.as_str()) == Some(first.as_str()))
+            });
+        if shared_file.is_some() {
+            for item in matches.iter_mut() {
+                if let Some(obj) = item.as_object_mut() {
+                    obj.remove("file");
+                }
+            }
+        }
+
         let total = overflow.as_ref().map_or(matches.len(), |o| o.total);
         let mut result = json!({ "symbols": matches, "total": total });
+        if let Some(file) = shared_file {
+            result["file"] = json!(file);
+        }
         if let Some(ov) = overflow {
             result["overflow"] = OutputGuard::overflow_json(&ov);
         }
