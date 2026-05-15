@@ -31,6 +31,7 @@ mod test_kotlin;
 #[cfg(feature = "e2e-java")]
 mod test_java;
 
+pub mod edit_eval;
 pub mod eval_common;
 pub mod nav_eval;
 pub mod nav_eval_harness;
