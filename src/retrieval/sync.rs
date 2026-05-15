@@ -155,7 +155,7 @@ impl crate::retrieval::client::RetrievalClient {
             action.to_upsert.iter().map(String::as_str).collect();
         let to_upsert: Vec<&(CodePayload, String)> = local
             .iter()
-            .filter(|(p, _)| upsert_set.contains(p.chunk_id.as_str()))
+            .filter(|(p, c)| upsert_set.contains(p.chunk_id.as_str()) && !c.trim().is_empty())
             .collect();
         let texts: Vec<String> = to_upsert.iter().map(|(_, c)| c.clone()).collect();
         let embeds = if !texts.is_empty() {
