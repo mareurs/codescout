@@ -18,3 +18,4 @@ pub mod replace_trait_impl;
 pub mod replace_wrong_sig;
 pub mod bug054_repro;
 pub mod bug051_repro;
+pub mod bug050_repro;
