@@ -1213,3 +1213,48 @@ async fn tier3_map_shape_fields_are_canonical() {
         "expected old fields absent, got: {first}"
     );
 }
+
+// ── format_compact CONTENT shape ─────────────────────────────────────────────
+
+#[test]
+fn format_compact_content_passthrough_with_hint_footer() {
+    use crate::tools::Tool;
+    let response = serde_json::json!({
+        "content": "# Hi\n\nbody\n",
+        "lines": 3,
+        "hint": "3 lines, 2 sections — read_markdown(path, heading=\"## Section\") to focus",
+    });
+    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
+    let out = tool.format_compact(&response).unwrap_or_default();
+    assert!(out.contains("# Hi"), "missing body, got: {out}");
+    assert!(out.contains("body"), "missing body, got: {out}");
+    assert!(out.contains("2 sections"), "missing hint, got: {out}");
+}
+
+#[test]
+fn format_compact_content_no_hint_when_absent() {
+    use crate::tools::Tool;
+    let response = serde_json::json!({"content": "# Hi\n", "lines": 1});
+    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
+    let out = tool.format_compact(&response).unwrap_or_default();
+    assert_eq!(out.trim(), "# Hi");
+}
+
+#[test]
+fn format_compact_content_with_breadcrumb_renders_section_header() {
+    use crate::tools::Tool;
+    let response = serde_json::json!({
+        "content": "## Mid\n\nbody\n",
+        "lines": 3,
+        "breadcrumb": ["# Top", "## Mid"],
+        "line_range": [10, 20],
+    });
+    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
+    let out = tool.format_compact(&response).unwrap_or_default();
+    assert!(
+        out.contains("§ ## Mid"),
+        "missing section header, got: {out}"
+    );
+    assert!(out.contains("L10-L20"), "missing line range, got: {out}");
+    assert!(out.contains("body"), "missing body, got: {out}");
+}

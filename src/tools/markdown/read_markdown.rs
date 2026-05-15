@@ -477,6 +477,36 @@ impl Tool for ReadMarkdown {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(crate::tools::read_file::format_read_file(result))
+        // ERROR branch added in Task 9.
+        // MAP branch added in Task 8.
+
+        // CONTENT branch — pass content through, with optional headers/footers.
+        if let Some(content) = result.get("content").and_then(|v| v.as_str()) {
+            let mut out = String::new();
+            if let (Some(breadcrumb), Some(line_range)) = (
+                result.get("breadcrumb").and_then(|v| v.as_array()),
+                result.get("line_range").and_then(|v| v.as_array()),
+            ) {
+                if let (Some(last), Some(start), Some(end)) = (
+                    breadcrumb.last().and_then(|v| v.as_str()),
+                    line_range.first().and_then(|v| v.as_u64()),
+                    line_range.get(1).and_then(|v| v.as_u64()),
+                ) {
+                    out.push_str(&format!("§ {last}  L{start}-L{end}\n\n"));
+                }
+            }
+            out.push_str(content);
+            if let Some(hint) = result.get("hint").and_then(|v| v.as_str()) {
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
+                out.push('\n');
+                out.push_str(hint);
+            }
+            return Some(out);
+        }
+
+        // Fallback for shapes added later: serialize JSON.
+        Some(result.to_string())
     }
 }
