@@ -6,7 +6,6 @@ use crate::ast;
 use crate::tools::output::OutputGuard;
 use crate::tools::{require_str_param, Tool, ToolContext};
 
-use super::display::format_find_references;
 use crate::fs::{
     classify_reference_path, get_lsp_client, path_in_excluded_dir, require_path_param,
     resolve_library_roots, resolve_read_path, uri_to_path, LspTimer,
@@ -126,20 +125,71 @@ impl Tool for References {
             .collect();
 
         let guard = OutputGuard::from_input(&input);
-        let total = locations.len();
-        let (locations, overflow) = guard.cap_items(locations, "This symbol has many references. Use detail_level='full' with offset/limit to paginate");
-        let mut result = json!({ "references": locations, "total": total });
+        let budget = guard.max_results;
+
+        use crate::tools::file_group::{cap_grouped, group_by_file, groups_to_json};
+        let (visible, total, files) = cap_grouped(locations, budget);
+        let truncated = total > visible.len();
+        let groups = group_by_file(&visible);
+        let file_groups = groups_to_json(&groups);
+
+        let mut result = json!({
+            "file_groups": file_groups,
+            "total": total,
+            "files": files,
+        });
         if excluded > 0 {
             result["excluded_from_build_dirs"] = json!(excluded);
         }
-        if let Some(ov) = overflow {
-            result["overflow"] = OutputGuard::overflow_json(&ov);
+        if truncated {
+            let overflow = json!({
+                "shown": visible.len(),
+                "total": total,
+                "hint": "This symbol has many references. Use detail_level='full' with offset/limit to paginate",
+            });
+            result["overflow"] = overflow;
         }
         Ok(result)
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        Some(format_find_references(result))
+        use crate::tools::file_group::{group_by_file, render_grouped};
+        use serde_json::Value;
+
+        let file_groups = result["file_groups"].as_array()?;
+        if file_groups.is_empty() {
+            return Some("0 references".to_string());
+        }
+
+        let mut flat: Vec<Value> = vec![];
+        for group in file_groups {
+            let file = group["file"].as_str().unwrap_or("?");
+            if let Some(items) = group["items"].as_array() {
+                for item in items {
+                    let mut clone = item.clone();
+                    if let Some(obj) = clone.as_object_mut() {
+                        obj.insert("file".to_string(), Value::String(file.to_string()));
+                    }
+                    flat.push(clone);
+                }
+            }
+        }
+        let groups = group_by_file(&flat);
+        let total = result["total"].as_u64().unwrap_or(flat.len() as u64) as usize;
+        let files = result["files"].as_u64().unwrap_or(groups.len() as u64) as usize;
+        let noun = if total == 1 {
+            "reference"
+        } else {
+            "references"
+        };
+
+        let render_item = |item: &Value| -> String {
+            let line = item["line"].as_u64().unwrap_or(0);
+            let context = item["context"].as_str().unwrap_or("").trim();
+            format!("  {line:>5}  {context}")
+        };
+
+        Some(render_grouped(&groups, total, files, noun, render_item))
     }
 
     fn availability(&self, _caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {

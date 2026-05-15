@@ -358,11 +358,12 @@ fn format_symbol_tree(out: &mut String, symbols: &[Value], indent: usize) {
     }
 }
 
+#[cfg(test)]
 pub(super) fn format_find_references(result: &Value) -> String {
     let total = result["total"].as_u64().unwrap_or_else(|| {
-        result["references"]
+        result["file_groups"]
             .as_array()
-            .map(|a| a.len() as u64)
+            .map(|a| a.iter().map(|g| g["count"].as_u64().unwrap_or(0)).sum())
             .unwrap_or(0)
     });
 
@@ -370,19 +371,27 @@ pub(super) fn format_find_references(result: &Value) -> String {
         return "No references found.".to_string();
     }
 
-    let refs = match result["references"].as_array() {
-        Some(r) => r,
+    let file_groups = match result["file_groups"].as_array() {
+        Some(g) => g,
         None => return format!("{total} refs"),
     };
 
     const MAX_SHOW: usize = 5;
     let mut out = format!("{total} refs");
-    for r in refs.iter().take(MAX_SHOW) {
-        let file = r["file"].as_str().unwrap_or("?");
-        let line = r["line"].as_u64().unwrap_or(0);
-        out.push_str(&format!("\n  {file}:{line}"));
+    let mut shown = 0;
+    'outer: for group in file_groups {
+        let file = group["file"].as_str().unwrap_or("?");
+        if let Some(items) = group["items"].as_array() {
+            for item in items {
+                if shown >= MAX_SHOW {
+                    break 'outer;
+                }
+                let line = item["line"].as_u64().unwrap_or(0);
+                out.push_str(&format!("\n  {file}:{line}"));
+                shown += 1;
+            }
+        }
     }
-    let shown = refs.len().min(MAX_SHOW);
     let hidden = (total as usize).saturating_sub(shown);
     if hidden > 0 {
         out.push_str(&format!("\n  … +{hidden} more"));

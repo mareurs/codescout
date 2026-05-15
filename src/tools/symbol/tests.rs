@@ -1381,28 +1381,30 @@ println!("{} {}", x, y);
         }
     };
 
-    let refs = result["references"].as_array().unwrap();
+    let file_groups = result["file_groups"].as_array().unwrap();
     let total = result["total"].as_u64().unwrap();
 
     // Should find at least 3 references: definition + 2 call sites
     assert!(
         total >= 3,
-        "Expected >= 3 references (def + 2 calls), got {}. refs: {:?}",
+        "Expected >= 3 references (def + 2 calls), got {}. groups: {:?}",
         total,
-        refs
+        file_groups
     );
 
-    // All references should be in src/main.rs
-    for r in refs {
-        let file = r["file"].as_str().unwrap();
+    // All references should be in src/main.rs — the single group's file should match
+    for group in file_groups {
+        let file = group["file"].as_str().unwrap();
         assert!(
             file.contains("main.rs"),
-            "Reference in unexpected file: {}",
+            "Reference group in unexpected file: {}",
             file
         );
-        // context should contain meaningful text
-        let ctx_line = r["context"].as_str().unwrap();
-        assert!(!ctx_line.is_empty(), "Context line should not be empty");
+        // Each item should have context
+        for r in group["items"].as_array().unwrap() {
+            let ctx_line = r["context"].as_str().unwrap();
+            assert!(!ctx_line.is_empty(), "Context line should not be empty");
+        }
     }
 }
 
@@ -3932,9 +3934,103 @@ fn find_insert_before_line_walks_past_python_multiline_decorator() {
 fn find_references_format_compact_shows_count() {
     use serde_json::json;
     let tool = References;
-    let result = json!({ "references": [{"file":"a.rs","line":10}], "total": 1 });
+    let result = json!({
+        "file_groups": [{"file": "a.rs", "count": 1, "items": [{"line": 10, "column": 0, "context": "foo()"}]}],
+        "total": 1,
+        "files": 1
+    });
     let text = tool.format_compact(&result).unwrap();
-    assert!(text.contains("1 ref"), "got: {text}");
+    // Single-file result: render_grouped emits "file (count)\n  line  context"
+    // The global "N references" header is suppressed for single-file results.
+    assert!(text.contains("a.rs"), "got: {text}");
+    assert!(text.contains("10"), "got: {text}");
+}
+
+#[tokio::test]
+async fn references_returns_grouped_shape() {
+    if !std::process::Command::new("rust-analyzer")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        eprintln!("Skipping: rust-analyzer not installed");
+        return;
+    }
+
+    let dir = tempdir().unwrap();
+    let lib_rs = dir.path().join("src").join("lib.rs");
+    std::fs::create_dir_all(lib_rs.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::write(
+        &lib_rs,
+        "pub fn greet() {}\nfn main() { greet(); greet(); }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        "[package]\nname = \"t\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+    };
+
+    let tool = crate::tools::symbol::references::References;
+    let mut result_value: Option<Value> = None;
+    for attempt in 0..10 {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(500 * attempt)).await;
+        }
+        let value = match tool
+            .call(json!({ "symbol": "greet", "path": "src/lib.rs" }), &ctx)
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Skipping: LSP error: {}", e);
+                return;
+            }
+        };
+        if value["total"].as_u64().unwrap_or(0) >= 1 {
+            result_value = Some(value);
+            break;
+        }
+    }
+
+    let result = match result_value {
+        Some(v) => v,
+        None => {
+            eprintln!("Skipping: rust-analyzer did not index in time");
+            return;
+        }
+    };
+
+    let groups = result["file_groups"].as_array().unwrap();
+    assert!(!groups.is_empty());
+    for group in groups {
+        assert!(group["file"].is_string());
+        assert!(group["count"].is_u64());
+        let items = group["items"].as_array().unwrap();
+        for item in items {
+            assert!(
+                item.get("file").is_none(),
+                "per-item file should be stripped: {item}"
+            );
+            assert!(item.get("line").is_some());
+        }
+    }
+    assert!(result["total"].is_u64());
+    assert!(result["files"].is_u64());
 }
 
 #[test]
@@ -4552,12 +4648,17 @@ fn symbols_overview_singular_symbol_word() {
 #[test]
 fn find_references_basic() {
     let result = serde_json::json!({
-        "references": [
-            {"file": "src/foo.rs", "line": 10, "kind": "usage"},
-            {"file": "src/bar.rs", "line": 20, "kind": "usage"},
-            {"file": "src/foo.rs", "line": 30, "kind": "usage"}
+        "file_groups": [
+            {"file": "src/foo.rs", "count": 2, "items": [
+                {"line": 10, "column": 0, "context": ""},
+                {"line": 30, "column": 0, "context": ""}
+            ]},
+            {"file": "src/bar.rs", "count": 1, "items": [
+                {"line": 20, "column": 0, "context": ""}
+            ]}
         ],
-        "total": 3
+        "total": 3,
+        "files": 2
     });
     let text = format_find_references(&result);
     assert!(text.contains("3"), "should mention count");
@@ -4569,7 +4670,7 @@ fn find_references_basic() {
 
 #[test]
 fn find_references_empty() {
-    let result = serde_json::json!({ "references": [], "total": 0 });
+    let result = serde_json::json!({ "file_groups": [], "total": 0, "files": 0 });
     let text = format_find_references(&result);
     assert!(
         text.contains("No"),
@@ -4582,13 +4683,24 @@ fn find_references_empty() {
 fn format_find_references_shows_locations() {
     let result = serde_json::json!({
         "total": 8,
-        "references": [
-            {"file": "src/tools/symbol.rs", "line": 142},
-            {"file": "src/tools/symbol.rs", "line": 198},
-            {"file": "src/server.rs", "line": 87},
-            {"file": "src/agent.rs", "line": 210},
-            {"file": "src/main.rs", "line": 45},
-            {"file": "src/config.rs", "line": 12}
+        "files": 5,
+        "file_groups": [
+            {"file": "src/tools/symbol.rs", "count": 2, "items": [
+                {"line": 142, "column": 0, "context": ""},
+                {"line": 198, "column": 0, "context": ""}
+            ]},
+            {"file": "src/server.rs", "count": 1, "items": [
+                {"line": 87, "column": 0, "context": ""}
+            ]},
+            {"file": "src/agent.rs", "count": 1, "items": [
+                {"line": 210, "column": 0, "context": ""}
+            ]},
+            {"file": "src/main.rs", "count": 1, "items": [
+                {"line": 45, "column": 0, "context": ""}
+            ]},
+            {"file": "src/config.rs", "count": 1, "items": [
+                {"line": 12, "column": 0, "context": ""}
+            ]}
         ]
     });
     let out = format_find_references(&result);
@@ -4606,10 +4718,11 @@ fn format_find_references_shows_locations() {
 fn format_find_references_five_or_fewer_no_trailer() {
     let result = serde_json::json!({
         "total": 3,
-        "references": [
-            {"file": "src/a.rs", "line": 1},
-            {"file": "src/b.rs", "line": 2},
-            {"file": "src/c.rs", "line": 3}
+        "files": 3,
+        "file_groups": [
+            {"file": "src/a.rs", "count": 1, "items": [{"line": 1, "column": 0, "context": ""}]},
+            {"file": "src/b.rs", "count": 1, "items": [{"line": 2, "column": 0, "context": ""}]},
+            {"file": "src/c.rs", "count": 1, "items": [{"line": 3, "column": 0, "context": ""}]}
         ]
     });
     let out = format_find_references(&result);
