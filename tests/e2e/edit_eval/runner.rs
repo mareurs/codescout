@@ -13,14 +13,12 @@ use std::time::Duration;
 
 const CASE_TIMEOUT: Duration = Duration::from_secs(45);
 
-#[allow(dead_code)]
 pub struct EditEvalCtx {
     pub tool_ctx: Arc<ToolContext>,
     pub fixture_root: PathBuf,
     pub fixture_src: PathBuf,
 }
 
-#[allow(dead_code)]
 pub async fn edit_eval_context() -> EditEvalCtx {
     let fixture_root: PathBuf = std::env::current_dir()
         .expect("cwd")
@@ -56,7 +54,6 @@ pub async fn edit_eval_context() -> EditEvalCtx {
     }
 }
 
-#[allow(dead_code)]
 pub async fn run_one(ctx: &EditEvalCtx, case: &EditCase) -> MatchResult {
     let mut last = MatchResult {
         verdict: Verdict::SilentWrong,

@@ -5,7 +5,6 @@ use std::process::{Command, Output};
 ///
 /// The user's working tree may carry unrelated in-progress edits elsewhere;
 /// a bare `git restore --` would clobber them.
-#[allow(dead_code)]
 pub fn git_restore<P: AsRef<Path>>(fixture_src: P) -> std::io::Result<Output> {
     Command::new("git")
         .arg("restore")
@@ -17,7 +16,6 @@ pub fn git_restore<P: AsRef<Path>>(fixture_src: P) -> std::io::Result<Output> {
 /// Run `cargo check` on a fixture crate. Returns Ok(()) on exit 0,
 /// Err with stderr-summary on non-zero. Inherits the calling process's
 /// stdout/stderr environment but does not propagate them.
-#[allow(dead_code)]
 pub fn cargo_check<P: AsRef<Path>>(fixture_root: P) -> Result<(), String> {
     let manifest = fixture_root.as_ref().join("Cargo.toml");
     let out = Command::new("cargo")
@@ -45,7 +43,6 @@ pub fn cargo_check<P: AsRef<Path>>(fixture_root: P) -> Result<(), String> {
 
 /// Read a file relative to a fixture root. Returns None on I/O error
 /// so the grader can report "disk read failed" rather than panicking.
-#[allow(dead_code)]
 pub fn read_fixture_file<P: AsRef<Path>>(fixture_root: P, rel: &str) -> Option<String> {
     std::fs::read_to_string(fixture_root.as_ref().join(rel)).ok()
 }

@@ -61,7 +61,6 @@ impl Report {
         out
     }
 
-    #[allow(dead_code)]
     pub fn rows_by_verdict(&self, v: &Verdict) -> Vec<&'static str> {
         self.rows
             .iter()
@@ -70,7 +69,6 @@ impl Report {
             .collect()
     }
 
-    #[allow(dead_code)]
     pub fn write_to<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
         if let Some(parent) = path.as_ref().parent() {
             std::fs::create_dir_all(parent)?;

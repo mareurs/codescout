@@ -1,8 +1,6 @@
 use crate::e2e::edit_eval::types::{CompilerExpected, ContentInvariant, EditCase, ReturnExpected};
 use crate::e2e::eval_common::Verdict;
 
-// `evidence` is surfaced by the runner's report writer in T8.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct MatchResult {
     pub verdict: Verdict,

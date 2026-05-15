@@ -32,6 +32,7 @@ mod test_kotlin;
 mod test_java;
 
 pub mod edit_eval;
+pub mod edit_eval_harness;
 pub mod eval_common;
 pub mod nav_eval;
 pub mod nav_eval_harness;
