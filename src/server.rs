@@ -1469,11 +1469,9 @@ mod tests {
             "gotchas",
             "hardware",
             "json_path",
-            "kind",
             "limit",
             "model",
             "model_options",
-            "name_path",
             "next",
             "offset",
             "output_id",
@@ -1499,7 +1497,7 @@ mod tests {
                 "server_instructions.md",
                 crate::prompts::SERVER_INSTRUCTIONS,
             ),
-            ("onboarding_prompt.md", crate::prompts::ONBOARDING_PROMPT),
+            ("onboarding_prompt.md", crate::prompts::RAW_ONBOARDING_PROMPT),
             ("build_system_prompt_draft", draft.as_str()),
         ];
 

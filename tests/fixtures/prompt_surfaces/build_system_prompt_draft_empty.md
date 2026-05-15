@@ -23,6 +23,9 @@
 
 7. `read_markdown("path/to/file.md")` — returns heading map + `@file_ref` for large files. **IRON LAW #6:** subsequent reads MUST use `@file_ref` (not the original path): `read_markdown("@file_ref", heading="## Section")` or `start_line=/end_line=`.
 
+## Retrieval Stack
+`semantic_search` runs through the Qdrant + TEI hybrid stack. Start it once per machine with `./scripts/retrieval-stack.sh up`, then index this project with `cargo run --release --bin sync_project -- <path> <project_id>`. If a call returns `retrieval stack offline`, the stack isn't running.
+
 ## MCP Resources
 Extended docs and project context are available via MCP resources (`resources/read <uri>`):
 - `doc://codescout-tool-guide` — long-form usage notes for every tool (examples, tradeoffs)

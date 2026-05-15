@@ -100,36 +100,7 @@ covers only cross-tool routing and non-obvious behaviors.
 
 ### Symbol Navigation Patterns
 
-- **Hierarchical nav** — impl/class methods, all languages:
-  `symbols(name_path="MyStruct/my_method", include_body=true)`
-- **Kind filter + path scope:**
-  `symbols(path="src/tools/", kind="struct")`
-- **Find across project then read body:**
-  `symbols(name="edit_code")` → `symbols(name_path="ToolName/edit_code", include_body=true)`
-
-- **Before editing X** → `call_graph(symbol, path, direction="callers")` — size blast radius before any structural change; `direction="callees"` for flow tracing
-
-**`name_path` examples by language:**
-
-| Language | Source construct | `name_path` |
-|---|---|---|
-| Rust — struct method | `impl MyStruct { fn call() }` | `"MyStruct/call"` |
-| Rust — trait impl method | `impl Tool for EditCode { fn call() }` | `"impl Tool for EditCode/call"` |
-| Python | `class Agent: def run(self)` | `"Agent/run"` |
-| TypeScript / JS | `class Router { handle() }` | `"Router/handle"` |
-| Kotlin / Java | `class Service { fun process() }` | `"Service/process"` |
-
-Language `kind` quirks:
-
-| Language      | `kind=`       | Note                                        |
-|---------------|---------------|---------------------------------------------|
-| Rust          | `"interface"` | traits — rust-analyzer emits Interface kind |
-| Rust          | `"struct"`    | structs; impl methods via `name_path`        |
-| TypeScript    | `"interface"` | TS interfaces                               |
-| TypeScript    | `"type"`      | type aliases                                |
-| Kotlin / Java | `"class"`     | classes, objects, annotations               |
-| Python        | `"class"`     | classes; methods via `name_path`            |
-
+{{symbol_navigation_block}}
 ### LSP Workflow — Standard Sequence
 
 For any symbol change, in order:
@@ -149,6 +120,9 @@ For any symbol change, in order:
 - **All callers of X** → `references(symbol, path)` (not `grep`)
 - **Transitive call graphs** → `call_graph(symbol, direction, max_depth)` — `direction="callers"` for blast-radius sizing; `direction="callees"` for flow tracing. `call_graph(depth=1, direction="callers")` also filters refs to call sites only.
 
+**Retrieval stack required.** `semantic_search` runs through the Qdrant + TEI hybrid stack. If a call returns `retrieval stack offline`, the user must run `./scripts/retrieval-stack.sh up` once per machine. There is no in-process fallback — the legacy sqlite-vec code-search path was removed in Phase 7.
+
+**Modes.** `semantic_search(mode="code")` (default) excludes markdown chunks so implementations rank ahead of plans/specs/trackers. Pass `mode="full"` only when you actually want docs in the results (e.g. searching for a tracker entry by concept).
 ### Gotchas
 
 - **MUST FOLLOW:** `edit_code(action="rename")` may corrupt string literals containing the
@@ -181,6 +155,11 @@ the project root. All read-only tools work on libraries; write tools are project
 symbol+embedding index. `library(action="list")` enumerates registered libraries.
 You rarely need `library(action="register")` manually — symbol_at registers
 external dependencies on the fly.
+
+**Cancelling a reindex:** `index(action='cancel')` aborts an in-flight
+`index(action='build')`. A force-reindex on a large project can run for tens of
+minutes (sparse embedder is often the bottleneck); use cancel rather than killing
+the server. Returns `{"status": "cancelled"}` or `{"status": "no_active_sync"}`.
 ### Artifact & Tracker Routing
 
 **When to use artifact tools** — tracking decisions, issues, plans, experiments, or anything with evolving state. Prefer artifacts over plain markdown for anything you'd want to query by meaning, link to other artifacts, or time-travel through.

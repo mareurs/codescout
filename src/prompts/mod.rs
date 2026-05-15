@@ -142,7 +142,7 @@ pub struct ProjectStatus {
 pub const INCLUDE_MARKER: &str = "{{include: memory-templates.md}}";
 pub const SYMBOL_NAV_TOKEN: &str = "{{symbol_navigation_block}}";
 
-const RAW_ONBOARDING_PROMPT: &str =
+pub(crate) const RAW_ONBOARDING_PROMPT: &str =
     include_str!(concat!(env!("OUT_DIR"), "/onboarding_prompt.md"));
 const RAW_WORKSPACE_ONBOARDING_PROMPT: &str = include_str!("workspace_onboarding_prompt.md");
 const MEMORY_TEMPLATES: &str = include_str!("memory-templates.md");
