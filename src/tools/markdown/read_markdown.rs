@@ -222,7 +222,26 @@ impl Tool for ReadMarkdown {
         // ── Single-heading navigation ────────────────────────────────────
         if let Some(heading_query) = heading {
             let section_result =
-                crate::tools::file_summary::extract_markdown_section(&text, heading_query)?;
+                match crate::tools::file_summary::extract_markdown_section(&text, heading_query) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        let msg = e.message.clone();
+                        if msg.contains("not found") {
+                            let headings_json: Vec<serde_json::Value> =
+                                crate::tools::file_summary::parse_all_headings(&text)
+                                    .iter()
+                                    .map(|h| serde_json::json!({"h": h.text, "l": h.line}))
+                                    .collect();
+                            return Err(RecoverableError::with_hint(
+                                format!("heading {:?} not found", heading_query),
+                                "pick a heading from `headings` array or use start_line/end_line",
+                            )
+                            .with_extra("headings", serde_json::json!(headings_json))
+                            .into());
+                        }
+                        return Err(e.into());
+                    }
+                };
             let cov = crate::tools::read_file::markdown_coverage(
                 &text, &resolved, ctx, heading, None, None,
             );

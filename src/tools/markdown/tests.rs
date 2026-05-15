@@ -1101,3 +1101,37 @@ async fn line_range_past_eof_returns_recoverable_error() {
         rec.extra
     );
 }
+
+#[tokio::test]
+async fn bogus_heading_error_carries_headings_array() {
+    let body = "# A\n\n## B\n\n## C\n";
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("h.md");
+    std::fs::write(&path, body).unwrap();
+
+    let ctx = test_ctx().await;
+    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
+    let result = tool
+        .call(
+            serde_json::json!({
+                "path": path.to_str().unwrap(),
+                "heading": "## Nonexistent",
+            }),
+            &ctx,
+        )
+        .await;
+
+    let err = result.expect_err("expected RecoverableError");
+    let rec = err
+        .downcast_ref::<crate::tools::RecoverableError>()
+        .expect("expected RecoverableError");
+    let headings = rec
+        .extra
+        .get("headings")
+        .and_then(|v| v.as_array())
+        .expect("expected `headings` array in extra");
+    assert_eq!(headings.len(), 3, "expected 3 headings, got: {headings:?}");
+    let first = &headings[0];
+    assert_eq!(first.get("h").and_then(|v| v.as_str()), Some("# A"));
+    assert_eq!(first.get("l").and_then(|v| v.as_u64()), Some(1));
+}
