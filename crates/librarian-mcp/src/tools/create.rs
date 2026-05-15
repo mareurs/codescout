@@ -154,7 +154,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }
     // Disk write last — the file is the user-visible side effect; the DB row
     // is the durable record. If a catalog upsert above fails, no orphan file
-    // is left on disk to block a retry (BUG-055).
+    // is left on disk to block a retry (BUG-058).
     std::fs::write(&full, &content)?;
     let mut result = json!({"id": id, "abs_path": row.abs_path.display().to_string()});
     if a.kind == "tracker" && a.augment.is_none() {
@@ -236,7 +236,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_does_not_leave_orphan_file_when_upsert_fails() {
-        // BUG-055: if the artifact upsert fails after the file has been
+        // BUG-058: if the artifact upsert fails after the file has been
         // written, future create calls bail with "path exists" even though
         // the artifact is not in the DB. Disk write must come AFTER all
         // catalog writes so a DB error leaves the disk untouched.
@@ -244,7 +244,7 @@ mod tests {
         let ctx = mk_ctx(tmp.path().to_path_buf());
 
         // Force every artifact INSERT to abort, simulating the constraint
-        // violation that BUG-055 reported under partial v6 migration state.
+        // violation that BUG-058 reported under partial v6 migration state.
         ctx.catalog
             .lock()
             .conn
