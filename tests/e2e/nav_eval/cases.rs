@@ -137,5 +137,69 @@ pub fn all() -> &'static [Case] {
             },
             rationale: "top-level add must be discoverable; mod tests helper drift recorded in report",
         },
+        Case {
+            id: "C-11",
+            tool: ToolUnderTest::CallGraph,
+            input: serde_json::json!({
+                "symbol": "a",
+                "path": "src/call_graph_cycle.rs",
+                "direction": "callees",
+                "max_depth": 5,
+            }),
+            expected: Expected::CallGraph {
+                must_include_edges: vec![
+                    ("a".to_string(), "b".to_string()),
+                    ("b".to_string(), "c".to_string()),
+                ],
+                must_not_include_edges: vec![],
+            },
+            rationale: "cycle must terminate; deduped edges only",
+        },
+        Case {
+            id: "C-12",
+            tool: ToolUnderTest::CallGraph,
+            input: serde_json::json!({
+                "symbol": "impl Worker for Alpha/run",
+                "path": "src/call_graph_trait.rs",
+                "direction": "callees",
+                "max_depth": 3,
+            }),
+            expected: Expected::CallGraph {
+                must_include_edges: vec![],
+                must_not_include_edges: vec![],
+            },
+            rationale: "dynamic dispatch crossing trait — current behavior recorded, not asserted",
+        },
+        Case {
+            id: "C-13",
+            tool: ToolUnderTest::References,
+            input: serde_json::json!({
+                "symbol": "cold",
+                "path": "src/cold_path.rs",
+            }),
+            expected: Expected::References {
+                must_include: vec![],
+                must_not_include: vec![],
+                min_count: 2,
+            },
+            rationale: "cfg(test)-only caller must be reachable from references",
+        },
+        Case {
+            id: "C-14",
+            tool: ToolUnderTest::CallGraph,
+            input: serde_json::json!({
+                "symbol": "a",
+                "path": "src/call_graph_cycle.rs",
+                "direction": "callees",
+                "max_depth": 1,
+            }),
+            expected: Expected::CallGraph {
+                must_include_edges: vec![
+                    ("a".to_string(), "b".to_string()),
+                ],
+                must_not_include_edges: vec![],
+            },
+            rationale: "smoke for callees one-hop — if LSP callHierarchy is unavailable, clean-error is acceptable",
+        },
     ])
 }
