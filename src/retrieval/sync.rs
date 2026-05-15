@@ -37,7 +37,7 @@ impl crate::retrieval::client::RetrievalClient {
         &self,
         project_id: &str,
         root: &Path,
-        _opts: SyncOpts,
+        opts: SyncOpts,
     ) -> Result<SyncReport> {
         use crate::embed::ast_chunker::split_file;
         use crate::retrieval::drift::{diff_chunks, ChunkRef};
@@ -51,7 +51,11 @@ impl crate::retrieval::client::RetrievalClient {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(STACK_CHUNK_TARGET);
-        tracing::info!(chunk_target, "retrieval sync starting");
+        tracing::info!(
+            chunk_target,
+            force_reindex = opts.force_reindex,
+            "retrieval sync starting"
+        );
 
         let started = std::time::Instant::now();
         self.qdrant
@@ -133,7 +137,18 @@ impl crate::retrieval::client::RetrievalClient {
                 content_hash: p.content_hash.clone(),
             })
             .collect();
-        let action = diff_chunks(&server, &local_refs);
+        // With force_reindex, ignore server state for the upsert set — re-embed every
+        // local chunk. Delete set is still derived from diff so obsolete chunks are
+        // pruned.
+        let action = if opts.force_reindex {
+            let diff = diff_chunks(&server, &local_refs);
+            crate::retrieval::drift::DriftAction {
+                to_upsert: local_refs.iter().map(|r| r.chunk_id.clone()).collect(),
+                to_delete: diff.to_delete,
+            }
+        } else {
+            diff_chunks(&server, &local_refs)
+        };
 
         // 3. Embed + upsert new/changed chunks
         let upsert_set: std::collections::HashSet<&str> =
@@ -172,11 +187,13 @@ impl crate::retrieval::client::RetrievalClient {
                 .await?;
         }
 
+        let elapsed_ms = started.elapsed().as_millis();
+        tracing::info!(added, deleted, elapsed_ms, "retrieval sync finished");
         Ok(SyncReport {
             added,
             deleted,
             updated: 0,
-            elapsed_ms: started.elapsed().as_millis(),
+            elapsed_ms,
         })
     }
 }
