@@ -158,6 +158,36 @@ pub fn render_grouped(
     out
 }
 
+/// Build the JSON `file_groups[]` shape used by `references` and `grep`.
+///
+/// Each group becomes `{ file, count, items }` where `items` is the group's
+/// items with the per-item `file` field stripped.
+pub fn groups_to_json(groups: &[FileGroup<'_>]) -> Value {
+    use serde_json::json;
+    let arr: Vec<Value> = groups
+        .iter()
+        .map(|g| {
+            let items: Vec<Value> = g
+                .items
+                .iter()
+                .map(|item| {
+                    let mut clone = (*item).clone();
+                    if let Some(obj) = clone.as_object_mut() {
+                        obj.remove("file");
+                    }
+                    clone
+                })
+                .collect();
+            json!({
+                "file": g.file,
+                "count": g.items.len(),
+                "items": items,
+            })
+        })
+        .collect();
+    Value::Array(arr)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,5 +346,26 @@ mod tests {
         assert_eq!(visible.len(), 0);
         assert_eq!(total, 2);
         assert_eq!(files, 2);
+    }
+
+    #[test]
+    fn groups_to_json_shape() {
+        let items = vec![
+            json!({ "file": "a.rs", "line": 1 }),
+            json!({ "file": "a.rs", "line": 2 }),
+            json!({ "file": "b.rs", "line": 5 }),
+        ];
+        let groups = group_by_file(&items);
+        let value = groups_to_json(&groups);
+        let arr = value.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["file"], "a.rs");
+        assert_eq!(arr[0]["count"], 2);
+        let items_a = arr[0]["items"].as_array().unwrap();
+        assert_eq!(items_a.len(), 2);
+        assert!(items_a[0].get("file").is_none());
+        assert_eq!(items_a[0]["line"], 1);
+        assert_eq!(arr[1]["file"], "b.rs");
+        assert_eq!(arr[1]["count"], 1);
     }
 }
