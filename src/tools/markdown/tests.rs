@@ -111,7 +111,10 @@ async fn read_markdown_small_returns_full_content_no_hint() {
     let ctx = test_ctx().await;
     let dir = tempdir().unwrap();
     let file = dir.path().join("small.md");
-    std::fs::write(&file, synth_md(30, 2)).unwrap();
+    // synth_md(30, 0) → only a "# Title" heading (1 heading total) → below the ≥2
+    // threshold, so no nav hint is emitted.  The 2-section variant is covered by
+    // `small_file_with_multiple_sections_gets_nav_hint`.
+    std::fs::write(&file, synth_md(30, 0)).unwrap();
 
     let out = super::ReadMarkdown
         .call(json!({ "path": file.to_str().unwrap() }), &ctx)
@@ -124,7 +127,7 @@ async fn read_markdown_small_returns_full_content_no_hint() {
     );
     assert!(
         out.get("hint").is_none(),
-        "small tier must not include hint"
+        "small tier must not include hint when fewer than 2 sections"
     );
     assert!(out.get("file_id").is_none(), "small tier must not buffer");
     assert!(
@@ -1134,4 +1137,52 @@ async fn bogus_heading_error_carries_headings_array() {
     let first = &headings[0];
     assert_eq!(first.get("h").and_then(|v| v.as_str()), Some("# A"));
     assert_eq!(first.get("l").and_then(|v| v.as_u64()), Some(1));
+}
+
+#[tokio::test]
+async fn small_file_with_multiple_sections_gets_nav_hint() {
+    let body = "# A\n\nbody\n\n## B\n\nmore\n\n## C\n\nend\n";
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("h.md");
+    std::fs::write(&path, body).unwrap();
+
+    let ctx = test_ctx().await;
+    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
+    let result = tool
+        .call(serde_json::json!({"path": path.to_str().unwrap()}), &ctx)
+        .await
+        .unwrap();
+
+    let hint = result
+        .get("hint")
+        .and_then(|v| v.as_str())
+        .expect("expected nav hint for small file with ≥2 sections");
+    assert!(
+        hint.contains("heading"),
+        "hint should mention heading argument, got: {hint}"
+    );
+    assert!(
+        hint.contains("3 sections"),
+        "hint should mention section count, got: {hint}"
+    );
+}
+
+#[tokio::test]
+async fn small_file_with_no_sections_has_no_nav_hint() {
+    let body = "plain text\nno headings\n";
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("flat.md");
+    std::fs::write(&path, body).unwrap();
+
+    let ctx = test_ctx().await;
+    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
+    let result = tool
+        .call(serde_json::json!({"path": path.to_str().unwrap()}), &ctx)
+        .await
+        .unwrap();
+
+    assert!(
+        result.get("hint").is_none(),
+        "expected no hint when no headings exist, got: {result}"
+    );
 }

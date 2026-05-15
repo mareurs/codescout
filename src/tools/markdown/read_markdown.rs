@@ -489,6 +489,13 @@ impl Tool for ReadMarkdown {
         if let Some(c) = md_cov {
             result["coverage"] = c;
         }
+        let heading_count = all_headings.len();
+        if heading_count >= 2 {
+            result["hint"] = serde_json::json!(format!(
+                "{} lines, {} sections — read_markdown(path, heading=\"## Section\") to focus",
+                total_lines, heading_count
+            ));
+        }
         Ok(result)
     }
 
