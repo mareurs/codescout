@@ -1,0 +1,13 @@
+[package]
+name = "edit-eval-rust"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Standalone — intentionally not a workspace member of code-explorer.
+# This crate is mutated in-place per eval case; isolation depends on
+# `git restore` between cases.
+[workspace]
+
+[lib]
+path = "src/lib.rs"
