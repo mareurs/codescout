@@ -477,7 +477,35 @@ impl Tool for ReadMarkdown {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        // ERROR branch added in Task 9.
+        // ERROR branch — must run first so {ok:false, headings:[...]} doesn't fall through to MAP.
+        let is_error = result
+            .get("ok")
+            .and_then(|v| v.as_bool())
+            .map(|ok| !ok)
+            .unwrap_or(false);
+        if is_error {
+            let mut out = String::from("error: ");
+            if let Some(msg) = result.get("error").and_then(|v| v.as_str()) {
+                out.push_str(msg);
+            }
+            out.push_str("\n\n");
+            if let Some(headings) = result.get("headings").and_then(|v| v.as_array()) {
+                out.push_str("available headings:\n");
+                for entry in headings {
+                    let h = entry.get("h").and_then(|v| v.as_str()).unwrap_or("");
+                    let l = entry.get("l").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let level = h.chars().take_while(|c| *c == '#').count().max(1);
+                    let indent = " ".repeat((level - 1) * 2);
+                    out.push_str(&format!("{indent}{h}  L{l}\n"));
+                }
+            }
+            if let Some(hint) = result.get("hint").and_then(|v| v.as_str()) {
+                out.push('\n');
+                out.push_str("next: ");
+                out.push_str(hint);
+            }
+            return Some(out);
+        }
 
         // CONTENT branch — pass content through, with optional headers/footers.
         if let Some(content) = result.get("content").and_then(|v| v.as_str()) {

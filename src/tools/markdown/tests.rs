@@ -1322,3 +1322,50 @@ fn format_compact_section_map_renders_same_as_headings() {
     );
     assert!(out.contains("@file_abc"));
 }
+
+#[test]
+fn format_compact_error_shape_renders_headings_with_error_prefix() {
+    use crate::tools::Tool;
+    let response = serde_json::json!({
+        "ok": false,
+        "error": "heading '## Foo' not found",
+        "headings": [
+            {"h": "# A", "l": 1},
+            {"h": "## B", "l": 5},
+        ],
+        "hint": "pick a heading from `headings` array or use start_line/end_line",
+    });
+    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
+    let out = tool.format_compact(&response).unwrap_or_default();
+
+    assert!(
+        out.starts_with("error:"),
+        "expected error prefix, got: {out}"
+    );
+    assert!(
+        out.contains("## Foo' not found"),
+        "missing error message, got: {out}"
+    );
+    assert!(
+        out.contains("# A  L1") && out.contains("## B  L5"),
+        "missing available headings, got: {out}"
+    );
+    assert!(out.contains("next: "), "missing next cue, got: {out}");
+}
+
+#[test]
+fn format_compact_error_without_headings_still_renders_error_prefix() {
+    use crate::tools::Tool;
+    let response = serde_json::json!({
+        "ok": false,
+        "error": "start_line 9000 exceeds file length 3",
+        "lines": 3,
+        "hint": "valid range is 1..=3; ...",
+    });
+    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
+    let out = tool.format_compact(&response).unwrap_or_default();
+
+    assert!(out.starts_with("error:"));
+    assert!(out.contains("exceeds file length"));
+    assert!(out.contains("next: valid range"));
+}
