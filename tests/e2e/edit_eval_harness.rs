@@ -5,6 +5,14 @@ use crate::e2e::eval_common::{git_restore, next_round_number, Report, Verdict};
 #[tokio::test]
 #[ignore]
 async fn edit_eval_harness() {
+    // Pre-flight: every case target must be tracked by git, otherwise
+    // git_restore between cases would be a silent no-op and mutations leak.
+    for case in cases::all() {
+        let path =
+            std::path::PathBuf::from("tests/fixtures/edit-eval-rust/src").join(case.target_file);
+        crate::e2e::eval_common::proc::assert_tracked(&path);
+    }
+
     let ctx = runner::edit_eval_context().await;
     let round = next_round_number("edit-eval");
     let mut report = Report::new("edit_eval", round);

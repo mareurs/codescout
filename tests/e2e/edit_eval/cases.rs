@@ -213,7 +213,7 @@ pub fn all() -> &'static [EditCase] {
                 return_: ReturnExpected::Ok,
                 disk: vec![
                     ContentInvariant::Contains { file: "insert_after_last.rs", needle: "method_zz", count: 1 },
-                    ContentInvariant::Contains { file: "insert_after_last.rs", needle: "}\n", count: 3 },
+                    ContentInvariant::Contains { file: "insert_after_last.rs", needle: "}\n", count: 4 },
                 ],
                 compiler: CompilerExpected::Builds,
             },

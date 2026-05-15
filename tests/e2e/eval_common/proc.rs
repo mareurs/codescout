@@ -13,6 +13,24 @@ pub fn git_restore<P: AsRef<Path>>(fixture_src: P) -> std::io::Result<Output> {
         .output()
 }
 
+/// Assert that `path` is tracked by git. Fails fast with a clear message
+/// if not — `git_restore` would silently be a no-op on untracked files,
+/// causing fixture mutations to persist across harness retries.
+pub fn assert_tracked<P: AsRef<Path>>(path: P) {
+    let p = path.as_ref();
+    let status = Command::new("git")
+        .arg("ls-files")
+        .arg("--error-unmatch")
+        .arg(p)
+        .output()
+        .expect("spawn git ls-files");
+    assert!(
+        status.status.success(),
+        "fixture {} is not tracked by git — git_restore will be a no-op; commit it first",
+        p.display()
+    );
+}
+
 /// Run `cargo check` on a fixture crate. Returns Ok(()) on exit 0,
 /// Err with stderr-summary on non-zero. Inherits the calling process's
 /// stdout/stderr environment but does not propagate them.
