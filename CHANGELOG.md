@@ -15,7 +15,18 @@ All notable changes to codescout are documented here.
 - Nav-tool eval round 2: matchers corrected to read real tool response field
   names (`symbols`/`definitions`/`file_groups.items`/`callers|callees`).
   Round 2 verdict at `docs/superpowers/specs/2026-05-15-nav-eval-round-2.md`.
-
+- Nav-tool eval round 3 + bug fixes:
+  - `symbols`: `scope="project"` now filters out stdlib/dependency matches whose
+    path is outside the project root (only when scope is strictly `Project`, not `All`).
+  - `call_graph`: BFS no longer aborts when a non-seed node's resolver returns
+    `RecoverableError` — skips that hop and continues, matching the existing
+    `lookup_pos` behavior.
+  - Nav-eval matcher: `match_symbols` now falls back to the hoisted top-level
+    `file` field when per-item `file` is absent (mirrors the shared-file hoisting
+    in `symbols.rs`). New unit test `correct_when_file_is_hoisted_to_top_level`.
+  - Round 3 verdict (14 cases — Correct: 12, Partial: 0, CleanError: 0,
+    SilentWrong: 1, Hung: 0, Panic: 1):
+    `docs/superpowers/specs/2026-05-15-nav-eval-round-3.md`.
 ## [0.12.0] — 2026-05-13
 
 ### Breaking changes

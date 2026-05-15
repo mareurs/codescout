@@ -28,7 +28,11 @@ pub fn match_symbols(
     let contains = |needle: &SymbolRef| -> bool {
         matches.iter().any(|m| {
             let name = m.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let file = m.get("file").and_then(|v| v.as_str()).unwrap_or("");
+            let file = m
+                .get("file")
+                .and_then(|v| v.as_str())
+                .or_else(|| value.get("file").and_then(|v| v.as_str()))
+                .unwrap_or("");
             name == needle.name && file.ends_with(needle.file)
         })
     };
@@ -40,7 +44,11 @@ pub fn match_symbols(
         .iter()
         .map(|m| {
             let name = m.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-            let file = m.get("file").and_then(|v| v.as_str()).unwrap_or("?");
+            let file = m
+                .get("file")
+                .and_then(|v| v.as_str())
+                .or_else(|| value.get("file").and_then(|v| v.as_str()))
+                .unwrap_or("?");
             format!("{name}@{file}")
         })
         .collect();
@@ -252,6 +260,21 @@ mod tests {
             &[sym("new", "tests_module.rs")],
         );
         assert_eq!(r.verdict, Verdict::Partial);
+    }
+
+    #[test]
+    fn correct_when_file_is_hoisted_to_top_level() {
+        // Mirrors the shared-file hoisting in src/tools/symbol/symbols.rs:
+        // when all matches share a file, the tool emits {"file": ..., "symbols": [{"name": ...}, ...]}.
+        let v = json!({
+            "file": "src/overload.rs",
+            "symbols": [
+                {"name": "new"},
+                {"name": "new"},
+            ],
+        });
+        let r = match_symbols(&v, &[sym("new", "overload.rs")], &[]);
+        assert_eq!(r.verdict, Verdict::Correct);
     }
 
     #[test]

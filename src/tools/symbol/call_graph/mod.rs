@@ -81,7 +81,7 @@ impl OneHopResolver for CachedResolver {
             }
         };
 
-        let edges = resolve_one_hop(
+        let edges = match resolve_one_hop(
             self.client.as_ref(),
             symbol,
             &path,
@@ -90,7 +90,17 @@ impl OneHopResolver for CachedResolver {
             &self.lang,
             direction,
         )
-        .await?;
+        .await
+        {
+            Ok(e) => e,
+            Err(e) if e.downcast_ref::<crate::tools::RecoverableError>().is_some() => {
+                // Non-seed node's resolver hit a recoverable limit (e.g. tree-sitter
+                // callee LIMIT-001). Skip this hop so BFS can continue for the rest
+                // of the graph, matching the existing lookup_pos behavior.
+                vec![]
+            }
+            Err(e) => return Err(e),
+        };
         {
             let conn = self.conn.lock().unwrap();
             let cache = EdgeCache::new(&conn, &self.project_id);

@@ -350,7 +350,11 @@ impl Tool for Symbols {
                                 && sym.name_path.to_lowercase().contains(&pattern_lower));
                         let kind_ok =
                             kind_filter.map_or(true, |f| matches_kind_filter(&sym.kind, f));
-                        if name_ok && kind_ok {
+                        // When scope is strictly Project (not All), filter out matches
+                        // from stdlib/dependency crates whose path lies outside the root.
+                        let in_root = scope != crate::library::scope::Scope::Project
+                            || sym.file.starts_with(&root);
+                        if name_ok && kind_ok && in_root {
                             // When include_body is requested, validate the range. If
                             // workspace/symbol returned a degenerate range, fall back to
                             // document_symbols for the file to get the correct range.
