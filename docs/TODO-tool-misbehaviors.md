@@ -197,6 +197,19 @@ Observed in practice: Claude Code's Node.js runtime briefly sets the stdin pipe
 the spin begins.
 
 **Observed at:** `mirela/deployment` project, 2026-04-22.
+### BUG-054 — `edit_code action="replace"` on trait-method body appended stray `}`
+
+- **Observed:** 2026-05-15
+- **Tool:** `edit_code` (action=replace, symbol=`impl Tool for ReadMarkdown/format_compact`)
+- **Severity:** Medium (compile-broken file after edit; not data loss)
+- **What I did:** Replaced the body of `format_compact` inside `impl Tool for ReadMarkdown` in `src/tools/markdown/read_markdown.rs`. New body was multi-branch (CONTENT/MAP) with internal `return` statements.
+- **Expected:** Method body swapped, surrounding `impl` block braces preserved.
+- **What happened:** Replacement produced one extra `}` at the end — the impl-block closing brace was included in the symbol range and got re-emitted by the new body, leaving an unbalanced file.
+- **Probable cause:** symbol range computation for methods inside an `impl` block may include the trailing closer when the body ends near the impl boundary. Related to BUG-030 / BUG-032 (range over-capture) but on `edit_code` not `replace_symbol`.
+- **Workaround:** sanity-check brace balance after `edit_code action=replace` on method bodies; fix via `edit_file` for the single stray brace.
+- **Fix:** open
+- **Status:** Open
+
 ## Template for new entries
 
 ```markdown
