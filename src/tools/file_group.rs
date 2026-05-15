@@ -187,6 +187,23 @@ pub fn groups_to_json(groups: &[FileGroup<'_>]) -> Value {
         .collect();
     Value::Array(arr)
 }
+/// Reconstruct `FileGroup`s from a previously-serialized `file_groups[]` JSON
+/// array (the shape produced by `groups_to_json`). Use this in `format_compact`
+/// paths to avoid re-flattening + re-grouping when the JSON is already grouped.
+///
+/// Groups missing `file` or `items` are silently skipped — callers should treat
+/// missing data as "nothing to render here", not an error.
+pub fn groups_from_json(file_groups: &[Value]) -> Vec<FileGroup<'_>> {
+    file_groups
+        .iter()
+        .filter_map(|group| {
+            let file = group.get("file")?.as_str()?;
+            let items = group.get("items")?.as_array()?;
+            let items: Vec<&Value> = items.iter().collect();
+            Some(FileGroup { file, items })
+        })
+        .collect()
+}
 
 #[cfg(test)]
 mod tests {
@@ -367,5 +384,34 @@ mod tests {
         assert_eq!(items_a[0]["line"], 1);
         assert_eq!(arr[1]["file"], "b.rs");
         assert_eq!(arr[1]["count"], 1);
+    }
+
+    #[test]
+    fn groups_from_json_reconstructs_filegroups() {
+        let json = json!([
+            { "file": "a.rs", "count": 2, "items": [{ "line": 1 }, { "line": 2 }] },
+            { "file": "b.rs", "count": 1, "items": [{ "line": 5 }] },
+        ]);
+        let arr = json.as_array().unwrap();
+        let groups = groups_from_json(arr);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].file, "a.rs");
+        assert_eq!(groups[0].items.len(), 2);
+        assert_eq!(groups[0].items[0]["line"], 1);
+        assert_eq!(groups[1].file, "b.rs");
+        assert_eq!(groups[1].items.len(), 1);
+    }
+
+    #[test]
+    fn groups_from_json_skips_malformed_groups() {
+        let json = json!([
+            { "file": "a.rs", "items": [{ "line": 1 }] },
+            { "no_file": true, "items": [] },
+            { "file": "b.rs", "no_items": true },
+        ]);
+        let arr = json.as_array().unwrap();
+        let groups = groups_from_json(arr);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].file, "a.rs");
     }
 }

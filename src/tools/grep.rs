@@ -270,31 +270,18 @@ pub(super) fn format_grep(val: &Value) -> String {
 }
 
 fn format_search_simple_mode(out: &mut String, file_groups: &[Value], total: usize, files: usize) {
-    use crate::tools::file_group::{group_by_file, render_grouped};
+    use crate::tools::file_group::{groups_from_json, render_grouped};
 
-    // Re-attach file to each item for group_by_file, then render grouped.
-    let mut flat: Vec<Value> = vec![];
-    for group in file_groups {
-        let file = group["file"].as_str().unwrap_or("?");
-        if let Some(items) = group["items"].as_array() {
-            for item in items {
-                let mut clone = item.clone();
-                if let Some(obj) = clone.as_object_mut() {
-                    obj.insert("file".to_string(), Value::String(file.to_string()));
-                }
-                flat.push(clone);
-            }
-        }
-    }
-    let groups = group_by_file(&flat);
+    let groups = groups_from_json(file_groups);
     let noun = if total == 1 { "match" } else { "matches" };
 
-    let rendered = render_grouped(&groups, total, files, noun, |item| {
+    let render_item = |item: &Value| -> String {
         let line = item["line"].as_u64().unwrap_or(0);
         let content = item["content"].as_str().unwrap_or("").trim();
         format!("  {line:>5}: {content}")
-    });
-    out.push_str(&rendered);
+    };
+
+    out.push_str(&render_grouped(&groups, total, files, noun, render_item));
 }
 
 fn format_search_context_mode(out: &mut String, matches: &[Value]) {

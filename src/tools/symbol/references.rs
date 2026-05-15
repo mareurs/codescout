@@ -153,29 +153,15 @@ impl Tool for References {
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        use crate::tools::file_group::{group_by_file, render_grouped};
-        use serde_json::Value;
+        use crate::tools::file_group::{groups_from_json, render_grouped};
 
-        let file_groups = result["file_groups"].as_array()?;
-        if file_groups.is_empty() {
+        let file_groups_arr = result["file_groups"].as_array()?;
+        if file_groups_arr.is_empty() {
             return Some("0 references".to_string());
         }
 
-        let mut flat: Vec<Value> = vec![];
-        for group in file_groups {
-            let file = group["file"].as_str().unwrap_or("?");
-            if let Some(items) = group["items"].as_array() {
-                for item in items {
-                    let mut clone = item.clone();
-                    if let Some(obj) = clone.as_object_mut() {
-                        obj.insert("file".to_string(), Value::String(file.to_string()));
-                    }
-                    flat.push(clone);
-                }
-            }
-        }
-        let groups = group_by_file(&flat);
-        let total = result["total"].as_u64().unwrap_or(flat.len() as u64) as usize;
+        let groups = groups_from_json(file_groups_arr);
+        let total = result["total"].as_u64().unwrap_or(0) as usize;
         let files = result["files"].as_u64().unwrap_or(groups.len() as u64) as usize;
         let noun = if total == 1 {
             "reference"
