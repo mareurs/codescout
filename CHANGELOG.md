@@ -12,6 +12,9 @@ All notable changes to codescout are documented here.
   traps. Run via `cargo test --test e2e_tests -- --ignored run_nav_eval`. First
   round verdict committed at `docs/superpowers/specs/2026-05-15-nav-eval-round-1.md`.
   See spec at `docs/superpowers/specs/2026-05-15-nav-tool-eval-design.md`.
+- Nav-tool eval round 2: matchers corrected to read real tool response field
+  names (`symbols`/`definitions`/`file_groups.items`/`callers|callees`).
+  Round 2 verdict at `docs/superpowers/specs/2026-05-15-nav-eval-round-2.md`.
 
 ## [0.12.0] — 2026-05-13
 

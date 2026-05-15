@@ -144,6 +144,7 @@ pub fn all() -> &'static [Case] {
                 "path": "src/call_graph_cycle.rs",
                 "direction": "callees",
                 "max_depth": 5,
+                "detail_level": "full",
             }),
             expected: Expected::CallGraph {
                 must_include_edges: vec![
@@ -162,6 +163,7 @@ pub fn all() -> &'static [Case] {
                 "path": "src/call_graph_trait.rs",
                 "direction": "callees",
                 "max_depth": 3,
+                "detail_level": "full",
             }),
             expected: Expected::CallGraph {
                 must_include_edges: vec![],
@@ -191,6 +193,7 @@ pub fn all() -> &'static [Case] {
                 "path": "src/call_graph_cycle.rs",
                 "direction": "callees",
                 "max_depth": 1,
+                "detail_level": "full",
             }),
             expected: Expected::CallGraph {
                 must_include_edges: vec![
