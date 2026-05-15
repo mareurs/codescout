@@ -464,6 +464,85 @@ impl EditCode {
             (start0, end0)
         };
 
+        // R-08 / BUG-031 reconciliation: editing_start_line walks back past
+        // preceding doc comments / attributes so that a new_body containing
+        // doc-comments+signature replaces them cleanly (no BUG-031 duplication).
+        // But when the LLM passes a new_body that intentionally omits decorators
+        // (e.g. only changing the body), that walk-back drops the existing doc
+        // comment. Detect this: if new_body does NOT lead with a decorator, narrow
+        // `start` forward past any leading decorator/attribute lines in the
+        // captured range so they are preserved.
+        let body_leads_with_decorator = new_body
+            .lines()
+            .find(|l| !l.trim().is_empty())
+            .map(|l| {
+                let t = l.trim_start();
+                t.starts_with("///")
+                    || t.starts_with("//!")
+                    || t.starts_with("//")
+                    || t.starts_with("#[")
+                    || t.starts_with("/**")
+                    || t.starts_with("/*")
+                    || t.starts_with('@')
+            })
+            .unwrap_or(false);
+
+        let start = if !body_leads_with_decorator {
+            // Walk forward from `start` skipping decorator lines (doc comments,
+            // attributes, decorators, and bracket continuations of multi-line
+            // attributes) up to `end`. Land on the first non-decorator line —
+            // typically the `fn`/`impl`/`struct` keyword line.
+            let mut s = start;
+            let mut pending_open_brackets: usize = 0;
+            while s < end {
+                let trimmed = lines[s].trim();
+                if pending_open_brackets > 0 {
+                    for ch in trimmed.chars() {
+                        match ch {
+                            '(' | '[' => pending_open_brackets += 1,
+                            ')' | ']' => {
+                                pending_open_brackets = pending_open_brackets.saturating_sub(1)
+                            }
+                            _ => {}
+                        }
+                    }
+                    s += 1;
+                    continue;
+                }
+                let is_decorator = trimmed.starts_with("///")
+                    || trimmed.starts_with("//!")
+                    || trimmed.starts_with("//")
+                    || trimmed.starts_with("/**")
+                    || trimmed.starts_with("/*")
+                    || trimmed.starts_with("* ")
+                    || trimmed == "*"
+                    || trimmed == "*/"
+                    || trimmed.starts_with('@')
+                    || trimmed.starts_with("#[");
+                if !is_decorator {
+                    break;
+                }
+                if trimmed.starts_with("#[") {
+                    // Track unclosed brackets in case of multi-line attribute.
+                    let mut depth: isize = 0;
+                    for ch in trimmed.chars() {
+                        match ch {
+                            '(' | '[' => depth += 1,
+                            ')' | ']' => depth -= 1,
+                            _ => {}
+                        }
+                    }
+                    if depth > 0 {
+                        pending_open_brackets = depth as usize;
+                    }
+                }
+                s += 1;
+            }
+            s
+        } else {
+            start
+        };
+
         if start >= lines.len() {
             return Err(RecoverableError::with_hint(
                 format!(

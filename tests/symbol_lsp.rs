@@ -976,8 +976,58 @@ async fn replace_symbol_round_trip_agent_changes_doc_comment() {
     );
 }
 
-/// insert_code(before) with range_start_line set — must insert ABOVE the attribute,
-/// not between attribute and fn.
+/// R-08 regression: When new_body does NOT contain the doc comment but the
+/// symbol has one immediately above, `edit_code(replace)` must preserve the
+/// existing doc comment rather than dropping it via the BUG-031 walk-back.
+///
+/// Surfaced by the edit_code eval (R-08, `replace_doc_adj.rs`). BUG-031's
+/// walk-back exists to prevent doc-comment DUPLICATION when the LLM passes
+/// a new_body that already contains the doc comment. But when the LLM passes
+/// a new_body that intentionally omits the doc comment (e.g. only changing the
+/// body), the walk-back dropped the original doc. Fix: detect whether new_body
+/// leads with decorators; if not, anchor the replace at the keyword line.
+#[tokio::test]
+async fn replace_symbol_preserves_doc_when_new_body_has_no_doc_comment() {
+    let src = "/// Doc that lives immediately above the target with no blank line.\npub fn documented() -> &'static str {\n    \"before\"\n}\n";
+
+    let (dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
+        let file = root.join("src/lib.rs");
+        // range_start_line=1 — rust-analyzer points at the `pub fn` line, skipping the doc.
+        MockLspClient::new().with_symbols(
+            file.clone(),
+            vec![sym_with_range("documented", 1, 3, 1, file)],
+        )
+    })
+    .await;
+
+    EditCode
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "symbol": "documented",
+                "action": "replace",
+                "body": "pub fn documented() -> &'static str {\n    \"after\"\n}",
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let result = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
+    assert!(
+        result.contains("/// Doc that lives immediately above"),
+        "doc comment must survive replace when new_body omits it; got:\n{result}"
+    );
+    assert!(
+        result.contains("\"after\""),
+        "new body must be applied; got:\n{result}"
+    );
+    assert!(
+        !result.contains("\"before\""),
+        "old body must be gone; got:\n{result}"
+    );
+}
+
 #[tokio::test]
 async fn insert_code_before_with_range_start_line_inserts_above_attribute() {
     // File layout (0-indexed):

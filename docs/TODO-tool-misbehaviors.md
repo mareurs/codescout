@@ -222,6 +222,19 @@ the spin begins.
 - **Fix:** open
 - **Status:** Open
 
+### BUG-055 — `edit_code action="replace"` strips preceding doc comment when `new_body` omits it
+
+- **Surfaced by:** edit_code eval R-08 (`tests/fixtures/edit-eval-rust/src/replace_doc_adj.rs`), rounds 1–6.
+- **Symptom:** `edit_code(action="replace", body="pub fn documented() -> &'static str {\n    \"after\"\n}")` against
+  ```rust
+  /// Doc that lives immediately above the target with no blank line.
+  pub fn documented() -> &'static str { "before" }
+  ```
+  removes the `///` doc comment. Post-state has only the new body, no doc.
+- **Root cause:** `editing_start_line` (BUG-031 fix) walks back past `///`/`#[...]` decorators above the keyword line so that a `new_body` containing the doc-comment+signature replaces them cleanly (no duplication). But when the LLM passes a `new_body` that intentionally omits decorators (e.g. only changing the body), the walk-back drops the original doc comment — it's inside the replace range but absent from the new body.
+- **Fix (2026-05-15):** In `EditCode::do_replace` (`src/tools/symbol/edit_code.rs`), after computing the walk-back `start`, inspect `new_body`'s first non-empty line. If it does NOT start with a decorator (`///`/`//!`/`//`/`#[`/`/**`/`/*`/`@`), narrow `start` forward past any decorator lines (with multi-line `#[...]` bracket tracking) inside the captured range. Result: doc comments / attributes that exist above the symbol but are absent from the new body are preserved; the BUG-031 duplication-prevention path still fires when `new_body` does lead with decorators.
+- **Regression sentinel:** `tests/symbol_lsp.rs::replace_symbol_preserves_doc_when_new_body_has_no_doc_comment` (mock-LSP unit) + edit_code eval R-08 (end-to-end via live rust-analyzer).
+
 ## Template for new entries
 
 ```markdown
