@@ -35,7 +35,7 @@ impl Report {
                 Verdict::Correct => 0,
                 Verdict::Partial => 1,
                 Verdict::CleanError => 2,
-                Verdict::SilentWrong => 3,
+                Verdict::SilentWrong | Verdict::Corrupt => 3,
                 Verdict::Hung => 4,
                 Verdict::Panic => 5,
             }] += 1;
@@ -104,7 +104,7 @@ impl Report {
                 Verdict::Correct => 0,
                 Verdict::Partial => 1,
                 Verdict::CleanError => 2,
-                Verdict::SilentWrong => 3,
+                Verdict::SilentWrong | Verdict::Corrupt => 3,
                 Verdict::Hung => 4,
                 Verdict::Panic => 5,
             }] += 1;
