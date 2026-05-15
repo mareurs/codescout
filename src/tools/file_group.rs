@@ -108,6 +108,56 @@ pub fn cap_grouped(items: Vec<Value>, budget: usize) -> (Vec<Value>, usize, usiz
     (visible, total, files)
 }
 
+/// Render groups to compact text.
+///
+/// Output shape:
+/// ```text
+/// <total> <noun> in <files> files
+///
+/// path/to/a.rs (3)
+///   <render_item(item0)>
+///   <render_item(item1)>
+/// path/to/b.rs (1)
+///   <render_item(item0)>
+/// ```
+///
+/// Single-file results (`files <= 1`) suppress the global header — the file
+/// header is signal enough.
+///
+/// `noun` is the plural form ("hits", "references", "matches"). The function
+/// does not pluralize for callers; pass the right word.
+pub fn render_grouped(
+    groups: &[FileGroup<'_>],
+    total: usize,
+    files: usize,
+    noun: &str,
+    render_item: impl Fn(&Value) -> String,
+) -> String {
+    if groups.is_empty() {
+        return format!("0 {noun}");
+    }
+
+    let mut out = String::new();
+    if files > 1 {
+        out.push_str(&format!("{total} {noun} in {files} files\n\n"));
+    }
+
+    for (gi, group) in groups.iter().enumerate() {
+        if gi > 0 {
+            out.push('\n');
+        }
+        out.push_str(&format!("{} ({})\n", group.file, group.items.len()));
+        for item in &group.items {
+            out.push_str(&render_item(item));
+            out.push('\n');
+        }
+    }
+    if out.ends_with('\n') {
+        out.pop();
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,6 +257,56 @@ mod tests {
         assert_eq!(visible.len(), 2);
         assert_eq!(total, 2);
         assert_eq!(files, 2);
+    }
+
+    #[test]
+    fn render_multi_file_header_and_groups() {
+        let items = vec![
+            json!({ "file": "a.rs", "marker": "x" }),
+            json!({ "file": "a.rs", "marker": "y" }),
+            json!({ "file": "b.rs", "marker": "z" }),
+        ];
+        let groups = group_by_file(&items);
+        let out = render_grouped(&groups, 3, 2, "matches", |v| {
+            format!("  m={}", v["marker"].as_str().unwrap())
+        });
+        assert!(out.starts_with("3 matches in 2 files\n"), "got:\n{out}");
+        assert!(out.contains("a.rs (2)"));
+        assert!(out.contains("b.rs (1)"));
+        assert!(out.contains("  m=x"));
+        assert!(out.contains("  m=z"));
+        let a_pos = out.find("a.rs").unwrap();
+        let b_pos = out.find("b.rs").unwrap();
+        assert!(a_pos < b_pos, "hotter file should appear first");
+    }
+
+    #[test]
+    fn render_single_file_omits_header_line() {
+        let items = vec![
+            json!({ "file": "a.rs", "marker": "x" }),
+            json!({ "file": "a.rs", "marker": "y" }),
+        ];
+        let groups = group_by_file(&items);
+        let out = render_grouped(&groups, 2, 1, "matches", |v| {
+            format!("  m={}", v["marker"].as_str().unwrap())
+        });
+        assert!(!out.contains(" in 1 files"), "got:\n{out}");
+        assert!(out.starts_with("a.rs (2)\n"), "got:\n{out}");
+    }
+
+    #[test]
+    fn render_empty_groups() {
+        let groups: Vec<FileGroup<'_>> = vec![];
+        let out = render_grouped(&groups, 0, 0, "matches", |_| String::new());
+        assert_eq!(out, "0 matches");
+    }
+
+    #[test]
+    fn render_singular_noun_when_total_one() {
+        let items = vec![json!({ "file": "a.rs" })];
+        let groups = group_by_file(&items);
+        let out = render_grouped(&groups, 1, 1, "match", |_| "  x".to_string());
+        assert!(out.starts_with("a.rs (1)"));
     }
 
     #[test]
