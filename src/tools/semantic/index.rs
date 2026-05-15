@@ -287,15 +287,21 @@ impl Tool for IndexProject {
         // Capture the dirty-files Arc before spawning so the task can clear it on success.
         let dirty_files_arc = ctx.agent.dirty_files_arc().await;
 
-        tokio::spawn(async move {
+        tracing::info!(force, "spawning sync task for project");
+        let sync_abort_for_task = ctx.agent.active_sync_abort.clone();
+        let sync_abort_for_store = ctx.agent.active_sync_abort.clone();
+        let task = tokio::spawn(async move {
             // Progress notifications are intentionally not wired through
             // sync_project yet (BUG-038 — Claude Code 2.x crashes on
             // unsolicited progress; tracked separately). IndexingState stays
             // at Running{done:0, total:0} until completion sets Done/Failed.
             let _progress = progress;
 
+            tracing::info!("sync task entered");
             let sync_result = async {
+                tracing::info!("constructing RetrievalClient::from_env");
                 let client = crate::retrieval::client::RetrievalClient::from_env().await?;
+                tracing::info!("RetrievalClient ready, calling sync_project");
                 let opts = crate::retrieval::sync::SyncOpts {
                     force_reindex: force,
                     ..Default::default()
@@ -309,6 +315,12 @@ impl Tool for IndexProject {
                 let mut state = state_arc.lock().unwrap_or_else(|e| e.into_inner());
                 *state = match sync_result {
                     Ok(report) => {
+                        tracing::info!(
+                            added = report.added,
+                            deleted = report.deleted,
+                            elapsed_ms = report.elapsed_ms,
+                            "sync task succeeded",
+                        );
                         // Indexing succeeded — files are now fresh, clear the dirty set.
                         if let Some(ref arc) = dirty_files_arc {
                             arc.lock().unwrap_or_else(|e| e.into_inner()).clear();
@@ -325,10 +337,21 @@ impl Tool for IndexProject {
                             total_chunks: 0,
                         }
                     }
-                    Err(e) => IndexingState::Failed(e.to_string()),
+                    Err(e) => {
+                        tracing::error!(error = %e, "sync task failed");
+                        IndexingState::Failed(e.to_string())
+                    }
                 };
             }
+
+            // Clear the abort handle slot — the task is done, nothing to cancel.
+            *sync_abort_for_task
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = None;
         });
+        *sync_abort_for_store
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(task.abort_handle());
 
         Ok(json!({
             "status": "started",
@@ -496,7 +519,8 @@ impl Tool for Index {
     fn description(&self) -> &str {
         "Semantic index operations. Actions: \
          `build` (build/update the project's semantic index; pass `scope='lib:<name>'` to index a registered library), \
-         `status` (show index stats and optional drift scores)."
+         `status` (show index stats and optional drift scores), \
+         `cancel` (abort an in-flight reindex — no-op if nothing is running)."
     }
 
     fn input_schema(&self) -> Value {
@@ -505,7 +529,7 @@ impl Tool for Index {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["build", "status"],
+                    "enum": ["build", "status", "cancel"],
                     "description": "Operation to perform."
                 },
                 "force": {
@@ -549,9 +573,29 @@ impl Tool for Index {
         match action {
             "build" => IndexProject.call(input, ctx).await,
             "status" => IndexStatus.call(input, ctx).await,
+            "cancel" => {
+                let handle = ctx
+                    .agent
+                    .active_sync_abort
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .take();
+                match handle {
+                    Some(h) => {
+                        h.abort();
+                        // Aborted future won't reach its terminal-state arm —
+                        // reset IndexingState here so status reflects reality.
+                        *ctx.agent.indexing.lock().unwrap_or_else(|e| e.into_inner()) =
+                            crate::agent::IndexingState::Failed("cancelled by user".into());
+                        tracing::info!("sync task cancelled by user");
+                        Ok(json!({"status": "cancelled"}))
+                    }
+                    None => Ok(json!({"status": "no_active_sync"})),
+                }
+            }
             other => Err(crate::tools::RecoverableError::with_hint(
                 format!("unknown index action: {}", other),
-                "Valid actions: 'build', 'status'.",
+                "Valid actions: 'build', 'status', 'cancel'.",
             )
             .into()),
         }

@@ -155,6 +155,11 @@ the project root. All read-only tools work on libraries; write tools are project
 symbol+embedding index. `library(action="list")` enumerates registered libraries.
 You rarely need `library(action="register")` manually — symbol_at registers
 external dependencies on the fly.
+
+**Cancelling a reindex:** `index(action='cancel')` aborts an in-flight
+`index(action='build')`. A force-reindex on a large project can run for tens of
+minutes (sparse embedder is often the bottleneck); use cancel rather than killing
+the server. Returns `{"status": "cancelled"}` or `{"status": "no_active_sync"}`.
 ### Artifact & Tracker Routing
 
 **When to use artifact tools** — tracking decisions, issues, plans, experiments, or anything with evolving state. Prefer artifacts over plain markdown for anything you'd want to query by meaning, link to other artifacts, or time-travel through.

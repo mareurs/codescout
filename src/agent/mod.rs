@@ -59,6 +59,13 @@ pub struct Agent {
     pub embedding_semaphore: Arc<tokio::sync::Semaphore>,
     /// Per-library indexing state (Idle / FetchingSources / Indexing / Done / Failed).
     pub library_index_states: Arc<std::sync::Mutex<HashMap<String, LibraryIndexState>>>,
+    /// Abort handle for the current in-flight sync task (project reindex or
+    /// library auto-index). `index(action='cancel')` takes this slot and calls
+    /// `.abort()` to stop a running reindex without restarting the MCP server.
+    /// Single slot — project and library sync rarely overlap; last-write-wins
+    /// if they do. Per researcher MCP finding: dropping a `JoinHandle` does
+    /// NOT cancel a task — only `.abort()` (or a `CancellationToken`) will.
+    pub active_sync_abort: Arc<std::sync::Mutex<Option<tokio::task::AbortHandle>>>,
     /// Lazily-constructed semantic memory store (Qdrant-backed).
     /// `OnceCell` so the first caller wins; later callers share the Arc.
     /// Wrapped in `Arc` so `Agent` remains `Clone`.
@@ -306,6 +313,7 @@ impl Agent {
             nudged_libraries: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
             embedding_semaphore: Arc::new(tokio::sync::Semaphore::new(2)),
             library_index_states: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            active_sync_abort: Arc::new(std::sync::Mutex::new(None)),
             semantic_memory: Arc::new(tokio::sync::OnceCell::new()),
             memory_embedder: Arc::new(tokio::sync::OnceCell::new()),
         })
@@ -1062,7 +1070,9 @@ impl Agent {
         self.set_library_state(&name, LibraryIndexState::Indexing { done: 0, total: 0 });
 
         let self_clone = self.clone();
-        tokio::spawn(async move {
+        let sync_abort_for_task = self.active_sync_abort.clone();
+        let sync_abort_for_store = self.active_sync_abort.clone();
+        let task = tokio::spawn(async move {
             tracing::info!("Auto-indexing library '{}' in background...", name);
             let result = async {
                 let client = crate::retrieval::client::RetrievalClient::from_env().await?;
@@ -1095,7 +1105,14 @@ impl Agent {
                     self_clone.set_library_state(&name, LibraryIndexState::Failed(e.to_string()));
                 }
             }
+            // Clear the abort handle slot — task is done, nothing to cancel.
+            *sync_abort_for_task
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = None;
         });
+        *sync_abort_for_store
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(task.abort_handle());
     }
 
     /// Return a human-readable summary string for each tracked library.
