@@ -104,103 +104,75 @@ pub(super) fn format_hover(val: &Value) -> String {
     out
 }
 
-pub(super) fn format_search_symbols(val: &Value) -> String {
+pub fn format_search_symbols(val: &Value) -> String {
+    use crate::tools::file_group::{group_by_file, render_grouped};
+
     let symbols = match val["symbols"].as_array() {
         Some(arr) => arr,
         None => return String::new(),
     };
 
-    let total = val["total"].as_u64().unwrap_or(symbols.len() as u64);
+    let total = val["total"].as_u64().unwrap_or(symbols.len() as u64) as usize;
 
     if symbols.is_empty() {
         return "0 matches".to_string();
     }
 
-    struct SymRow {
-        kind: String,
-        location: String,
-        name_path: String,
-        body: Option<String>,
-    }
-
-    let rows: Vec<SymRow> = symbols
+    // The symbols search JSON may hoist `file` to the top level (Fix C
+    // single-file path). Restore it per-symbol before grouping so the
+    // renderer has uniform shape.
+    let top_file = val.get("file").and_then(|v| v.as_str());
+    let normalized: Vec<Value> = symbols
         .iter()
         .map(|s| {
-            let kind = s["kind"].as_str().unwrap_or("?").to_string();
-            let file = s["file"].as_str().unwrap_or("?");
-            let start = s["start_line"].as_u64().unwrap_or(0);
-            let end = s["end_line"].as_u64().unwrap_or(0);
-            let location = if end > start {
-                format!("{file}:{start}-{end}")
-            } else {
-                format!("{file}:{start}")
-            };
-            let name_path = s["symbol"]
-                .as_str()
-                .or_else(|| s["name"].as_str())
-                .unwrap_or("?")
-                .to_string();
-            let body = s["body"].as_str().map(|b| b.to_string());
-            SymRow {
-                kind,
-                location,
-                name_path,
-                body,
+            let mut s = s.clone();
+            if s.get("file").is_none() {
+                if let Some(f) = top_file {
+                    if let Some(obj) = s.as_object_mut() {
+                        obj.insert("file".to_string(), Value::String(f.to_string()));
+                    }
+                }
             }
+            s
         })
         .collect();
 
-    let max_kind_len = rows.iter().map(|r| r.kind.len()).max().unwrap_or(0);
-    let max_loc_len = rows.iter().map(|r| r.location.len()).max().unwrap_or(0);
+    let groups = group_by_file(&normalized);
+    let files = groups.len();
+    let noun = if total == 1 { "match" } else { "matches" };
 
-    let match_word = if total == 1 { "match" } else { "matches" };
-    let header = if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
-        let shown = overflow["shown"].as_u64().unwrap_or(symbols.len() as u64);
-        format!("{shown} {match_word} ({total} total)")
-    } else {
-        format!("{total} {match_word}")
-    };
-    let mut out = format!("{header}\n");
-
-    for row in &rows {
-        let kind_pad = max_kind_len - row.kind.len();
-        let loc_pad = max_loc_len - row.location.len();
-        out.push_str("\n  ");
-        out.push_str(&row.kind);
-        for _ in 0..kind_pad {
-            out.push(' ');
-        }
-        out.push_str("  ");
-        out.push_str(&row.location);
-        for _ in 0..loc_pad {
-            out.push(' ');
-        }
-        out.push_str("   ");
-        out.push_str(&row.name_path);
-
-        if let Some(body) = &row.body {
-            // Short bodies are shown inline. Long bodies are replaced with a
-            // navigation hint — embedding a 300-line function in the compact
-            // summary only causes truncation mid-body, which misleads agents
-            // into thinking the body is incomplete rather than available via
-            // json_path. The threshold is intentionally well below the
-            // COMPACT_SUMMARY_MAX_BYTES (2000) so even a single long function
-            // leaves room for the rest of the summary.
+    let render_item = |item: &Value| -> String {
+        let kind = item["kind"].as_str().unwrap_or("?");
+        let start = item["start_line"].as_u64().unwrap_or(0);
+        let end = item["end_line"].as_u64().unwrap_or(0);
+        let range = if end > start {
+            format!("{start}-{end}")
+        } else {
+            format!("{start}")
+        };
+        let name_path = item["symbol"]
+            .as_str()
+            .or_else(|| item["name"].as_str())
+            .unwrap_or("?");
+        let mut row = format!("  {kind}  {range}  {name_path}");
+        if let Some(body) = item["body"].as_str() {
             const INLINE_BODY_LIMIT: usize = 500;
             if body.len() <= INLINE_BODY_LIMIT {
-                out.push('\n');
                 for line in body.lines() {
-                    out.push_str("\n      ");
-                    out.push_str(line);
+                    row.push_str("\n      ");
+                    row.push_str(line);
                 }
             } else {
                 let line_count = body.lines().count();
-                out.push_str(&format!(
+                row.push_str(&format!(
                     "\n      ({line_count}-line body — use json_path=\"$.symbols[0].body\" to extract)"
                 ));
             }
         }
-    }
+        row
+    };
+
+    let mut out = render_grouped(&groups, total, files, noun, render_item);
 
     if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
         out.push('\n');

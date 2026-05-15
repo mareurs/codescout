@@ -4186,13 +4186,19 @@ fn symbols_no_body() {
         "total": 2
     });
     let result = format_search_symbols(&val);
-    assert!(result.starts_with("2 matches\n"));
+    // Single-file: header is the file path, no global "N matches" line
+    assert!(result.starts_with("src/tools/output.rs (2)\n"));
     assert!(result.contains("Struct"));
     assert!(result.contains("Function"));
     assert!(result.contains("OutputGuard"));
     assert!(result.contains("OutputGuard/cap_items"));
-    assert!(result.contains("src/tools/output.rs:35-50"));
-    assert!(result.contains("src/tools/output.rs:55-80"));
+    // Rows show range only, not full path
+    assert!(result.contains("35-50"));
+    assert!(result.contains("55-80"));
+    assert!(
+        !result.contains("src/tools/output.rs:35-50"),
+        "file path must not repeat in rows"
+    );
 }
 
 #[test]
@@ -4209,7 +4215,8 @@ fn symbols_with_body() {
         "total": 1
     });
     let result = format_search_symbols(&val);
-    assert!(result.starts_with("1 match\n"));
+    // Single-file: header is the file path, no global "1 match" line
+    assert!(result.starts_with("src/tools/output.rs (1)\n"));
     assert!(result.contains("Function"));
     assert!(result.contains("OutputGuard/cap_items"));
     assert!(result.contains("      pub fn cap_items(&self) -> Option<OverflowInfo> {"));
@@ -4273,9 +4280,11 @@ fn symbols_with_overflow() {
         }
     });
     let result = format_search_symbols(&val);
-    assert!(result.contains("20 matches (100 total)"));
-    assert!(result.contains("20 of 100"));
-    assert!(result.contains("narrow with path="));
+    // Overflow hint line is appended regardless of single/multi-file layout
+    assert!(result.contains("20 of 100"), "got:\n{result}");
+    assert!(result.contains("narrow with path="), "got:\n{result}");
+    // Symbol itself is rendered
+    assert!(result.contains("foo"), "got:\n{result}");
 }
 
 #[test]
@@ -4311,10 +4320,26 @@ fn symbols_alignment() {
         "total": 2
     });
     let result = format_search_symbols(&val);
-    assert!(result.contains("Struct  "));
+    // Multi-file: file paths appear as group headers, not embedded in rows
+    assert!(result.contains("src/a.rs (1)"), "got:\n{result}");
+    assert!(
+        result.contains("src/very/long/path.rs (1)"),
+        "got:\n{result}"
+    );
+    assert!(result.contains("Struct"));
     assert!(result.contains("Function"));
-    assert!(result.contains("src/a.rs:1-5"));
-    assert!(result.contains("src/very/long/path.rs:100-200"));
+    // Ranges appear in the rows
+    assert!(result.contains("1-5"));
+    assert!(result.contains("100-200"));
+    // File paths must not repeat inside rows
+    assert!(
+        !result.contains("src/a.rs:1-5"),
+        "file path must not be in rows: {result}"
+    );
+    assert!(
+        !result.contains("src/very/long/path.rs:100-200"),
+        "file path must not be in rows: {result}"
+    );
 }
 
 #[test]
@@ -4330,7 +4355,10 @@ fn symbols_single_line_location() {
         "total": 1
     });
     let result = format_search_symbols(&val);
-    assert!(result.contains("src/lib.rs:42"));
+    // Single-file: file is in the group header
+    assert!(result.contains("src/lib.rs (1)"), "got:\n{result}");
+    // Row shows the single line number without a range
+    assert!(result.contains("42"));
     assert!(!result.contains("42-42"));
 }
 
@@ -6114,4 +6142,45 @@ fn collect_matching_keeps_class_method_descendants() {
         None,
     );
     assert_eq!(out.len(), 2, "class should not suppress method descendants");
+}
+
+#[test]
+fn format_search_symbols_groups_by_file() {
+    use crate::tools::symbol::display::format_search_symbols;
+    let val = json!({
+        "symbols": [
+            { "kind": "Function", "file": "a.rs", "start_line": 1, "end_line": 5, "name": "foo", "symbol": "foo" },
+            { "kind": "Function", "file": "a.rs", "start_line": 10, "end_line": 15, "name": "bar", "symbol": "bar" },
+            { "kind": "Function", "file": "b.rs", "start_line": 3, "end_line": 7, "name": "baz", "symbol": "baz" },
+        ],
+        "total": 3,
+    });
+    let out = format_search_symbols(&val);
+    assert!(out.starts_with("3 matches in 2 files\n"), "got:\n{out}");
+    assert!(out.contains("a.rs (2)"));
+    assert!(out.contains("b.rs (1)"));
+    assert!(
+        !out.contains("a.rs:1-5"),
+        "row should not repeat file path: {out}"
+    );
+    assert!(out.contains("foo"));
+    assert!(out.contains("bar"));
+    assert!(out.contains("baz"));
+}
+
+#[test]
+fn format_search_symbols_single_file_no_global_header() {
+    use crate::tools::symbol::display::format_search_symbols;
+    let val = json!({
+        "symbols": [
+            { "kind": "Function", "file": "a.rs", "start_line": 1, "end_line": 5, "name": "foo", "symbol": "foo" },
+        ],
+        "total": 1,
+    });
+    let out = format_search_symbols(&val);
+    assert!(
+        !out.contains(" in 1 files"),
+        "single-file output should omit global header: {out}"
+    );
+    assert!(out.starts_with("a.rs (1)\n"), "got:\n{out}");
 }
