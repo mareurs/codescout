@@ -478,7 +478,6 @@ impl Tool for ReadMarkdown {
 
     fn format_compact(&self, result: &Value) -> Option<String> {
         // ERROR branch added in Task 9.
-        // MAP branch added in Task 8.
 
         // CONTENT branch — pass content through, with optional headers/footers.
         if let Some(content) = result.get("content").and_then(|v| v.as_str()) {
@@ -501,6 +500,30 @@ impl Tool for ReadMarkdown {
                     out.push('\n');
                 }
                 out.push('\n');
+                out.push_str(hint);
+            }
+            return Some(out);
+        }
+
+        // MAP branch — indented heading tree + next cue.
+        let headings = result
+            .get("headings")
+            .or_else(|| result.get("section_map"))
+            .and_then(|v| v.as_array());
+        if let Some(headings) = headings {
+            let lines = result.get("lines").and_then(|v| v.as_u64()).unwrap_or(0);
+            let file_id = result.get("file_id").and_then(|v| v.as_str()).unwrap_or("");
+            let mut out = format!("{} lines  {}\n\n", lines, file_id);
+            for entry in headings {
+                let h = entry.get("h").and_then(|v| v.as_str()).unwrap_or("");
+                let l = entry.get("l").and_then(|v| v.as_u64()).unwrap_or(0);
+                let level = h.chars().take_while(|c| *c == '#').count().max(1);
+                let indent = " ".repeat((level - 1) * 2);
+                out.push_str(&format!("{indent}{h}  L{l}\n"));
+            }
+            if let Some(hint) = result.get("hint").and_then(|v| v.as_str()) {
+                out.push('\n');
+                out.push_str("next: ");
                 out.push_str(hint);
             }
             return Some(out);

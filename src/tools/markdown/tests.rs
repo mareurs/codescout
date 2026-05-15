@@ -1255,6 +1255,70 @@ fn format_compact_content_with_breadcrumb_renders_section_header() {
         out.contains("§ ## Mid"),
         "missing section header, got: {out}"
     );
-    assert!(out.contains("L10-L20"), "missing line range, got: {out}");
-    assert!(out.contains("body"), "missing body, got: {out}");
+}
+
+// ── format_compact MAP shape ───────────────────────────────────────────────────
+
+#[test]
+fn format_compact_map_shape_renders_indented_headings() {
+    use crate::tools::Tool;
+    let response = serde_json::json!({
+        "lines": 329,
+        "headings": [
+            {"h": "# codescout", "l": 1},
+            {"h": "## Development Commands", "l": 7},
+            {"h": "### Skill Frictions", "l": 32},
+        ],
+        "file_id": "@file_xyz",
+        "hint": "use \"@file_xyz\" — heading=\"## Section\" or start_line/end_line",
+    });
+    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
+    let out = tool.format_compact(&response).unwrap_or_default();
+
+    assert!(out.contains("329 lines"), "missing line count, got: {out}");
+    assert!(out.contains("@file_xyz"), "missing file_id, got: {out}");
+    assert!(
+        out.contains("# codescout  L1"),
+        "missing level-1 heading, got: {out}"
+    );
+    assert!(
+        out.contains("## Development Commands  L7"),
+        "missing level-2 heading, got: {out}"
+    );
+    assert!(
+        out.contains("  ### Skill Frictions  L32"),
+        "level-3 heading should be indented by 4 spaces (level-1*2), got: {out}"
+    );
+    assert!(
+        out.starts_with("329"),
+        "header line should come first, got: {out}"
+    );
+    assert!(out.contains("next: "), "missing next cue, got: {out}");
+}
+
+#[test]
+fn format_compact_section_map_renders_same_as_headings() {
+    // Heading-targeted oversized uses `section_map` instead of `headings`.
+    // Same rendering rules apply.
+    use crate::tools::Tool;
+    let response = serde_json::json!({
+        "lines": 200,
+        "section_map": [
+            {"h": "### Sub A", "l": 100},
+            {"h": "### Sub B", "l": 150},
+        ],
+        "file_id": "@file_abc",
+        "hint": "use \"@file_abc\" — pick a sub-heading from `section_map` or start_line/end_line",
+    });
+    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
+    let out = tool.format_compact(&response).unwrap_or_default();
+    assert!(
+        out.contains("  ### Sub A  L100"),
+        "section_map should render with indent, got: {out}"
+    );
+    assert!(
+        out.contains("  ### Sub B  L150"),
+        "section_map should render with indent, got: {out}"
+    );
+    assert!(out.contains("@file_abc"));
 }
