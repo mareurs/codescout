@@ -241,5 +241,65 @@ pub fn all() -> &'static [EditCase] {
             rationale: "tool-faithful contract — disk gets exactly what was asked; compiler legitimately breaks",
             h1_exempt: None,
         },
+        EditCase {
+            id: "M-01",
+            action: EditAction::Remove,
+            input: json!({
+                "action": "remove",
+                "symbol": "orphan",
+                "path": "src/remove_clean.rs",
+            }),
+            target_file: "remove_clean.rs",
+            expected: Expected {
+                return_: ReturnExpected::Ok,
+                disk: vec![
+                    ContentInvariant::NotContains { file: "remove_clean.rs", needle: "pub fn orphan" },
+                ],
+                compiler: CompilerExpected::Builds,
+            },
+            rationale: "remove function with no callers — clean removal",
+            h1_exempt: None,
+        },
+        EditCase {
+            id: "M-02",
+            action: EditAction::Remove,
+            input: json!({
+                "action": "remove",
+                "symbol": "referenced",
+                "path": "src/remove_referenced.rs",
+            }),
+            target_file: "remove_referenced.rs",
+            expected: Expected {
+                return_: ReturnExpected::Ok,
+                disk: vec![
+                    ContentInvariant::NotContains { file: "remove_referenced.rs", needle: "pub fn referenced" },
+                    ContentInvariant::Contains { file: "remove_referenced.rs", needle: "pub fn caller", count: 1 },
+                ],
+                compiler: CompilerExpected::Breaks,
+            },
+            rationale: "remove with same-file caller — tool faithful, compile legitimately breaks",
+            h1_exempt: None,
+        },
+        EditCase {
+            id: "N-01",
+            action: EditAction::Rename,
+            input: json!({
+                "action": "rename",
+                "symbol": "target_fn",
+                "path": "src/rename_target.rs",
+                "new_name": "renamed_fn",
+            }),
+            target_file: "rename_target.rs",
+            expected: Expected {
+                return_: ReturnExpected::Ok,
+                disk: vec![
+                    ContentInvariant::Contains { file: "rename_target.rs", needle: "pub fn renamed_fn", count: 1 },
+                    ContentInvariant::NotContains { file: "rename_target.rs", needle: "target_fn" },
+                ],
+                compiler: CompilerExpected::Builds,
+            },
+            rationale: "cross-file rename — LSP updates all callsites; project still builds",
+            h1_exempt: None,
+        },
     ])
 }
