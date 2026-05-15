@@ -113,5 +113,29 @@ pub fn all() -> &'static [Case] {
             },
             rationale: "top-level fn handle visible; closure binding is not a top-level symbol",
         },
+        Case {
+            id: "C-09",
+            tool: ToolUnderTest::Symbols,
+            input: serde_json::json!({ "name": "run", "scope": "project" }),
+            expected: Expected::Symbols {
+                must_include: vec![
+                    SymbolRef { name: "run", file: "macro_expansion.rs" },
+                ],
+                must_not_include: vec![],
+            },
+            rationale: "macro-generated fn coexists with hand-written fn",
+        },
+        Case {
+            id: "C-10",
+            tool: ToolUnderTest::Symbols,
+            input: serde_json::json!({ "name": "add", "scope": "project" }),
+            expected: Expected::Symbols {
+                must_include: vec![
+                    SymbolRef { name: "add", file: "tests_module.rs" },
+                ],
+                must_not_include: vec![],
+            },
+            rationale: "top-level add must be discoverable; mod tests helper drift recorded in report",
+        },
     ])
 }
