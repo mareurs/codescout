@@ -1040,3 +1040,39 @@ async fn many_headings_escalates_to_map_shape_even_when_bytes_fit() {
         "expected file_id for MAP shape, got: {result}"
     );
 }
+
+#[tokio::test]
+async fn line_range_past_eof_returns_recoverable_error() {
+    let body = "# Tiny\n\nbody\n";
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tiny.md");
+    std::fs::write(&path, body).unwrap();
+
+    let ctx = test_ctx().await;
+    let result = super::ReadMarkdown
+        .call(
+            serde_json::json!({
+                "path": path.to_str().unwrap(),
+                "start_line": 9000,
+                "end_line": 9999,
+            }),
+            &ctx,
+        )
+        .await;
+
+    let err = result.expect_err("expected RecoverableError for OOR slice");
+    let rec = err
+        .downcast_ref::<crate::tools::RecoverableError>()
+        .expect("expected RecoverableError");
+    assert!(
+        rec.message.contains("start_line"),
+        "expected start_line in message, got: {}",
+        rec.message
+    );
+    assert_eq!(
+        rec.extra.get("lines").and_then(|v| v.as_u64()),
+        Some(3),
+        "expected lines=3 in extra, got: {:?}",
+        rec.extra
+    );
+}

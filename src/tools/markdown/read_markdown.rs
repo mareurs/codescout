@@ -314,6 +314,21 @@ impl Tool for ReadMarkdown {
                 )
                 .into());
             }
+            let content_total = text.lines().count();
+            if (start as usize) > content_total {
+                return Err(RecoverableError::with_hint(
+                    format!(
+                        "start_line {} exceeds file length {}",
+                        start, content_total
+                    ),
+                    format!(
+                        "valid range is 1..={}; use read_markdown(path, start_line=N, end_line=M) within bounds",
+                        content_total
+                    ),
+                )
+                .with_extra("lines", serde_json::json!(content_total))
+                .into());
+            }
             let content = extract_lines(&text, start as usize, end as usize);
             let md_cov = crate::tools::read_file::markdown_coverage(
                 &text, &resolved, ctx, None, start_line, end_line,
