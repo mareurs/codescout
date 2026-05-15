@@ -1369,3 +1369,159 @@ fn format_compact_error_without_headings_still_renders_error_prefix() {
     assert!(out.contains("exceeds file length"));
     assert!(out.contains("next: valid range"));
 }
+
+// ── format_compact live-render verification ───────────────────────────────────
+
+#[tokio::test]
+async fn format_compact_live_renders_claude_md_as_map_shape() {
+    // Live verification: read the real CLAUDE.md from the repo root, then
+    // invoke format_compact on the response. This exercises the same rendering
+    // path call_content uses when the response is buffered. Round 1 round 2
+    // scored JSON only — this test closes the format_compact gap.
+    use crate::tools::Tool;
+
+    let claude_md = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("CLAUDE.md");
+    if !claude_md.exists() {
+        // Project's own CLAUDE.md is the fixture; skip if missing (e.g. CI checkout).
+        eprintln!("SKIP: CLAUDE.md not present at {}", claude_md.display());
+        return;
+    }
+
+    let ctx = test_ctx().await;
+    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
+    let result = tool
+        .call(
+            serde_json::json!({"path": claude_md.to_str().unwrap()}),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    // The response shape must be MAP (CLAUDE.md exceeds line cap).
+    assert!(
+        result.get("headings").is_some(),
+        "expected MAP shape, got: {result}"
+    );
+    assert!(result.get("file_id").is_some(), "MAP requires file_id");
+
+    let rendered = tool
+        .format_compact(&result)
+        .expect("format_compact must return Some for MAP shape");
+
+    // Structural invariants on the rendered text.
+    assert!(
+        rendered.contains("lines  @file_"),
+        "MAP header must show `<n> lines  <file_id>`, got first 200 chars: {}",
+        &rendered.chars().take(200).collect::<String>()
+    );
+    assert!(
+        rendered.contains("# codescout  L1"),
+        "MAP must render top heading with line number, got: {}",
+        &rendered.chars().take(500).collect::<String>()
+    );
+    assert!(
+        rendered.contains("  ### "),
+        "MAP must indent level-3 headings by 4 spaces (level-1*2)"
+    );
+    assert!(rendered.contains("next: "), "MAP must end with next-cue");
+    // The hint must carry the file_id verbatim so the agent can copy-paste it.
+    let file_id = result["file_id"].as_str().unwrap();
+    assert!(
+        rendered.contains(file_id),
+        "rendered text must include file_id `{}` verbatim",
+        file_id
+    );
+}
+
+#[tokio::test]
+async fn format_compact_live_renders_heading_not_found_as_error_with_headings() {
+    // Live verification of the ERROR branch: read a real file with a bogus
+    // heading, then render the error response. Validates F1 closure end-to-end.
+    use crate::tools::Tool;
+
+    let body = "# A\n\n## B\n\n## C\n";
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("h.md");
+    std::fs::write(&path, body).unwrap();
+
+    let ctx = test_ctx().await;
+    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
+    let err = tool
+        .call(
+            serde_json::json!({"path": path.to_str().unwrap(), "heading": "## Nonexistent"}),
+            &ctx,
+        )
+        .await
+        .expect_err("expected RecoverableError");
+
+    // Reconstruct the JSON envelope the MCP server would emit for this error.
+    let rec = err
+        .downcast_ref::<crate::tools::RecoverableError>()
+        .expect("expected RecoverableError");
+    let mut envelope = serde_json::json!({
+        "ok": false,
+        "error": rec.message.clone(),
+    });
+    if let Some(hint) = rec.hint() {
+        envelope["hint"] = serde_json::json!(hint);
+    }
+    for (k, v) in rec.extra.iter() {
+        envelope[k] = v.clone();
+    }
+
+    let rendered = tool
+        .format_compact(&envelope)
+        .expect("format_compact must return Some for ERROR shape");
+
+    assert!(
+        rendered.starts_with("error: "),
+        "ERROR must start with `error: `, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("Nonexistent"),
+        "error msg must reference the missing heading"
+    );
+    assert!(
+        rendered.contains("available headings:"),
+        "ERROR with headings must show the list"
+    );
+    assert!(
+        rendered.contains("# A  L1"),
+        "ERROR must indent headings same as MAP, got: {rendered}"
+    );
+    assert!(rendered.contains("## B  L3"), "ERROR list missing entry");
+    assert!(rendered.contains("next: "), "ERROR must end with next-cue");
+}
+
+// ── empty file + heading arg regression ──────────────────────────────────────
+
+#[tokio::test]
+async fn empty_file_with_heading_arg_returns_recoverable_error() {
+    // Spec F-R2-04: when caller asks for a heading on an empty file, return
+    // ERROR shape (not silent success with empty content).
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("empty.md");
+    std::fs::write(&path, "").unwrap();
+
+    let ctx = test_ctx().await;
+    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
+    let result = tool
+        .call(
+            serde_json::json!({"path": path.to_str().unwrap(), "heading": "## Anything"}),
+            &ctx,
+        )
+        .await;
+
+    let err = result.expect_err("expected RecoverableError for heading on empty file");
+    let rec = err
+        .downcast_ref::<crate::tools::RecoverableError>()
+        .expect("expected RecoverableError");
+    // The error must indicate the heading wasn't found OR that the file has no headings.
+    assert!(
+        rec.message.to_lowercase().contains("not found")
+            || rec.message.to_lowercase().contains("empty")
+            || rec.message.to_lowercase().contains("no headings"),
+        "error should mention not-found / empty / no-headings, got: {}",
+        rec.message
+    );
+}

@@ -215,7 +215,7 @@ Implementation is not complete until the round-2 eval passes the following:
 - T1 empty file: returns ≤ 30 bytes JSON, no `format` field
 - T6 bogus heading: response shape is the new ERROR shape with `headings[]` array, not a comma-joined string
 - T8 line range past EOF: returns ERROR shape with `lines` field set to actual file length
-- **B1 many-headings tier escalation:** `many-headings.md` (1002 lines, 251 sections) returns MAP shape (≤ 5 KB), not full content
+- **B1 many-headings tier escalation:** `many-headings.md` (1002 lines, 251 sections) returns MAP shape (no `content` field), not full content. Byte count is bounded by heading-text floor, not by a fixed cap — the invariant is "no body when sections exceed HEADINGS_HARD_CAP", not a byte target.
 
 **Signal-density gates:**
 - E3 (skill-frictions.md): R1 ≥ 0.65 (was 0.45)

@@ -39,7 +39,7 @@
 | T1 empty | ≤30 bytes JSON, no `format` | 23 bytes, no `format` | ✅ |
 | T6 bogus heading | ERROR shape with `headings[]` | `{ok:false, error, hint, headings:[22 entries]}` | ✅ |
 | T8 OOR slice | ERROR shape with `lines` field | `{ok:false, error, hint, lines:94}` | ✅ |
-| B1 many-headings | MAP shape, ≤5 KB | MAP shape (no content), ~12.5 KB | ⚠️ Functional pass, byte cap miss |
+| B1 many-headings | MAP shape, no content body | MAP shape (no content), ~12.5 KB | ✅ (spec gate corrected to invariant; see eval prose for original 5 KB number) |
 
 **On the B1 byte target.** The 5 KB cap was set in the spec without measuring what a 251-heading map actually weighs. Each `{h,l}` entry is ~40–60 bytes (mostly the heading text). 251 × ~50 = 12.5 KB is the floor for this fixture's information content. The functional goal — escalating to MAP so the caller doesn't pay for 30 KB of repetitive content — is achieved cleanly:
 
@@ -98,6 +98,6 @@ Ship. The single annotated miss (B1 byte target) is a spec-target issue, not an 
 
 ## Optional follow-ups (not blocking)
 
-- Update spec to drop the 5 KB B1 number; replace with the invariant.
+- ~~Update spec to drop the 5 KB B1 number; replace with the invariant.~~ Done in commit landing this update.
 - Empty-file + `heading` arg case — add a regression test if a real call surfaces it.
 - Consider a host-side `format_compact` capture harness for future render-shape eval rounds.
