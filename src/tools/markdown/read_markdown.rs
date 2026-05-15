@@ -157,16 +157,14 @@ impl Tool for ReadMarkdown {
 
             let content = sections.join("\n\n");
 
-            // Oversized multi-heading join — fall back to must_follow.
+            // Oversized multi-heading join — fall back to hint.
             if crate::tools::exceeds_inline_limit(&content) {
                 let file_id = ctx
                     .output_buffer
                     .store_file(resolved.to_string_lossy().to_string(), content.clone());
                 let lines = content.lines().count();
-                let must_follow = format!(
-                    "IRON LAW #6: The combined section content is too large to return inline. \
-                     Use {:?} for subsequent reads — NOT the original path. \
-                     Request one heading at a time, or slice with start_line/end_line.",
+                let hint = format!(
+                    "use {:?} — request one heading at a time, or slice with start_line/end_line",
                     file_id
                 );
                 let next_actions: Vec<String> = seen_headings
@@ -174,12 +172,12 @@ impl Tool for ReadMarkdown {
                     .take(3)
                     .map(|h| format!("read_markdown({:?}, heading={})", file_id, h))
                     .collect();
-                let err = crate::tools::RecoverableError::with_must_follow(
+                let err = crate::tools::RecoverableError::with_hint(
                     format!(
                         "combined headings span {} lines — exceeds inline threshold",
                         lines
                     ),
-                    must_follow,
+                    hint,
                 )
                 .with_extra("file_id", serde_json::json!(file_id))
                 .with_extra("requested_headings", serde_json::json!(seen_headings))
@@ -196,7 +194,6 @@ impl Tool for ReadMarkdown {
 
             let mut result = json!({
                 "content": content,
-                "sections_returned": heading_queries.len(),
             });
 
             // Coverage hint
@@ -246,7 +243,7 @@ impl Tool for ReadMarkdown {
                 &text, &resolved, ctx, heading, None, None,
             );
 
-            // Oversized match — return ok:false with must_follow + nested section_map
+            // Oversized match — return ok:false with hint + nested section_map
             // + next_actions. The agent must pick a sub-heading or a line range, not
             // retry against the original path.
             if crate::tools::exceeds_inline_limit(&section_result.content) {
@@ -261,7 +258,7 @@ impl Tool for ReadMarkdown {
                 let nested: Vec<serde_json::Value> = all_headings
                     .iter()
                     .filter(|h| h.line > start_ln && h.line <= end_ln)
-                    .map(|h| json!({"level": h.level, "text": h.text, "line": h.line}))
+                    .map(|h| json!({"h": h.text, "l": h.line}))
                     .collect();
 
                 let heading_label = section_result
@@ -270,16 +267,15 @@ impl Tool for ReadMarkdown {
                     .cloned()
                     .unwrap_or_else(|| heading_query.to_string());
 
-                let must_follow = format!(
-                    "IRON LAW #6: Use {:?} for subsequent reads — NOT the original path. \
-                     Pick a sub-heading from section_map OR use read_markdown({:?}, start_line=N, end_line=M).",
-                    file_id, file_id
+                let hint = format!(
+                    "use {:?} — pick a sub-heading from `section_map` or start_line/end_line",
+                    file_id
                 );
 
                 let next_actions: Vec<String> = {
                     let mut actions = Vec::new();
                     if let Some(first) = nested.first() {
-                        if let Some(h) = first.get("text").and_then(|v| v.as_str()) {
+                        if let Some(h) = first.get("h").and_then(|v| v.as_str()) {
                             actions.push(format!("read_markdown({:?}, heading={})", file_id, h));
                         }
                     }
@@ -292,12 +288,12 @@ impl Tool for ReadMarkdown {
                     actions
                 };
 
-                let err = crate::tools::RecoverableError::with_must_follow(
+                let err = crate::tools::RecoverableError::with_hint(
                     format!(
-                        "heading {:?} spans {} lines — exceeds inline threshold",
+                        "section {:?} spans {} lines — exceeds inline threshold",
                         heading_label, section_lines
                     ),
-                    must_follow,
+                    hint,
                 )
                 .with_extra("file_id", serde_json::json!(file_id))
                 .with_extra("section_map", serde_json::json!(nested))
@@ -309,10 +305,10 @@ impl Tool for ReadMarkdown {
 
             let mut val = json!({
                 "content": section_result.content,
+                "lines": section_result.content.lines().count(),
                 "line_range": [section_result.line_range.0, section_result.line_range.1],
                 "breadcrumb": section_result.breadcrumb,
                 "siblings": section_result.siblings,
-                "format": "markdown",
             });
             if let Some(c) = cov {
                 val["coverage"] = c;
@@ -396,7 +392,6 @@ impl Tool for ReadMarkdown {
         }
 
         // ── Default branch: adaptive tiers ────────────────────────────────────
-        let total_bytes = text.len();
         let total_lines = text.lines().count();
         let oversized = crate::tools::exceeds_inline_limit(&text);
         let all_headings = crate::tools::file_summary::parse_all_headings(&text);
@@ -405,47 +400,31 @@ impl Tool for ReadMarkdown {
         let md_cov =
             crate::tools::read_file::markdown_coverage(&text, &resolved, ctx, None, None, None);
 
-        // ── Tier 3: large — heading map + must_follow, no body ────────────
+        // ── Tier 3: large — heading map + hint, no body ──────────────────
         if oversized || oversized_by_headings {
-            let heading_count = all_headings.len();
-            let heading_map: Vec<Value> = all_headings
+            let headings_json: Vec<Value> = all_headings
                 .iter()
-                .map(|h| {
-                    json!({
-                        "level": h.level,
-                        "text": h.text,
-                        "line": h.line,
-                    })
-                })
+                .map(|h| json!({"h": h.text, "l": h.line}))
                 .collect();
 
             let file_id = ctx
                 .output_buffer
                 .store_file(resolved.to_string_lossy().to_string(), text.clone());
 
-            let must_follow = if heading_count == 0 {
-                format!(
-                    "IRON LAW #6: For subsequent reads, use {:?} (NOT the original path). \
-                     Slice with read_markdown({:?}, start_line=N, end_line=M).",
-                    file_id, file_id
-                )
+            let hint = if all_headings.is_empty() {
+                format!("use {:?} — start_line/end_line", file_id)
             } else {
                 format!(
-                    "IRON LAW #6: For subsequent reads, use {:?} (NOT the original path). \
-                     Pick a heading: read_markdown({:?}, heading=## Section). \
-                     Or slice: read_markdown({:?}, start_line=N, end_line=M).",
-                    file_id, file_id, file_id
+                    "use {:?} — heading=\"## Section\" or start_line/end_line",
+                    file_id
                 )
             };
 
             let mut result = json!({
-                "format": "markdown",
-                "total_lines": total_lines,
-                "total_bytes": total_bytes,
-                "heading_count": heading_count,
-                "heading_map": heading_map,
+                "lines": total_lines,
+                "headings": headings_json,
                 "file_id": file_id,
-                "must_follow": must_follow,
+                "hint": hint,
             });
             if let Some(c) = md_cov {
                 result["coverage"] = c;
@@ -458,21 +437,19 @@ impl Tool for ReadMarkdown {
             let heading_count = all_headings.len();
             let hint = if heading_count == 0 {
                 format!(
-                    "{} lines, no headings. For focused reads: read_markdown(path, start_line=N, end_line=M).",
+                    "{} lines, no headings — read_markdown(path, start_line=N, end_line=M) to focus",
                     total_lines
                 )
             } else {
                 format!(
-                    "{} lines, {} sections. For focused reads: read_markdown(path, heading=## Section).",
+                    "{} lines, {} sections — read_markdown(path, heading=\"## Section\") to focus",
                     total_lines, heading_count
                 )
             };
 
             let mut result = json!({
-                "format": "markdown",
                 "content": text,
-                "total_lines": total_lines,
-                "heading_count": heading_count,
+                "lines": total_lines,
                 "hint": hint,
             });
             if let Some(c) = md_cov {

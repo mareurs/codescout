@@ -44,7 +44,7 @@ async fn empty_file_returns_slim_shape() {
 }
 
 #[tokio::test]
-async fn read_markdown_large_no_headings_must_follow_pivots_to_line_ranges() {
+async fn read_markdown_large_no_headings_hint_pivots_to_line_ranges() {
     let ctx = test_ctx().await;
     let dir = tempdir().unwrap();
     let file = dir.path().join("flat.md");
@@ -58,16 +58,15 @@ async fn read_markdown_large_no_headings_must_follow_pivots_to_line_ranges() {
         .unwrap();
 
     assert!(out.get("file_id").is_some(), "still large tier");
-    assert_eq!(out["heading_count"].as_u64(), Some(0));
-    assert_eq!(out["heading_map"].as_array().map(|a| a.len()), Some(0));
-    let mf = out["must_follow"].as_str().unwrap();
+    assert_eq!(out["headings"].as_array().map(|a| a.len()), Some(0));
+    let hint = out["hint"].as_str().unwrap();
     assert!(
-        mf.contains("start_line"),
-        "must_follow must mention start_line; got: {mf}"
+        hint.contains("start_line"),
+        "hint must mention start_line; got: {hint}"
     );
     assert!(
-        !mf.contains("heading=\""),
-        "must_follow must not suggest heading nav when there are no headings; got: {mf}"
+        !hint.contains("heading=\""),
+        "hint must not suggest heading nav when there are no headings; got: {hint}"
     );
 }
 
@@ -155,19 +154,12 @@ async fn read_markdown_medium_returns_content_with_hint() {
 
     assert!(out.get("content").is_some(), "medium tier includes content");
     assert!(out.get("hint").is_some(), "medium tier includes hint");
-    assert!(
-        out.get("heading_count").is_some(),
-        "medium tier reports heading_count"
-    );
+    assert!(out.get("lines").is_some(), "medium tier reports line count");
     assert!(out.get("file_id").is_none(), "medium tier does not buffer");
     let hint = out["hint"].as_str().unwrap();
     assert!(
         hint.contains("heading="),
         "hint must reference heading-nav recipe"
-    );
-    assert!(
-        !hint.contains("heading=\""),
-        "hint must not wrap heading in quotes; got: {hint}"
     );
 }
 
@@ -194,31 +186,21 @@ async fn read_markdown_large_returns_summary_no_content() {
         "large tier buffers with file_id"
     );
     assert!(
-        out.get("heading_map").is_some(),
-        "large tier includes heading_map"
+        out.get("headings").is_some(),
+        "large tier includes headings"
     );
+    assert!(out.get("hint").is_some(), "large tier includes hint");
+    assert!(out.get("lines").is_some());
+    let hint = out["hint"].as_str().unwrap();
+    assert!(hint.contains("heading="), "hint mentions heading nav");
     assert!(
-        out.get("must_follow").is_some(),
-        "large tier includes must_follow citing IRON LAW #6"
-    );
-    assert!(
-        out.get("recipe").is_none(),
-        "large tier no longer uses the recipe field — must_follow supersedes it"
-    );
-    assert!(out.get("total_lines").is_some());
-    assert!(out.get("total_bytes").is_some());
-    assert!(out.get("heading_count").is_some());
-    let mf = out["must_follow"].as_str().unwrap();
-    assert!(mf.contains("IRON LAW #6"), "must_follow cites IRON LAW #6");
-    assert!(mf.contains("heading="), "must_follow mentions heading nav");
-    assert!(
-        !mf.contains("heading=\""),
-        "must_follow must not wrap heading in quotes; got: {mf}"
+        hint.contains("@file_"),
+        "hint references the file_id to steer reuse; got: {hint}"
     );
 }
 
 #[tokio::test]
-async fn read_markdown_large_includes_must_follow_citing_iron_law_6() {
+async fn read_markdown_large_includes_hint_referencing_file_id() {
     let ctx = test_ctx().await;
     let dir = tempdir().unwrap();
     let file = dir.path().join("big.md");
@@ -229,21 +211,17 @@ async fn read_markdown_large_includes_must_follow_citing_iron_law_6() {
         .await
         .unwrap();
 
-    let mf = out["must_follow"]
+    let hint = out["hint"]
         .as_str()
-        .expect("large-tier response must include must_follow");
+        .expect("large-tier response must include hint");
     assert!(
-        mf.contains("IRON LAW #6"),
-        "must_follow must cite IRON LAW #6, got: {mf}"
-    );
-    assert!(
-        mf.contains("@file_"),
-        "must_follow must reference the file_id to steer reuse, got: {mf}"
+        hint.contains("@file_"),
+        "hint must reference the file_id to steer reuse, got: {hint}"
     );
 }
 
 #[tokio::test]
-async fn heading_on_large_section_returns_ok_false_with_must_follow_and_section_map() {
+async fn heading_on_large_section_returns_ok_false_with_hint_and_section_map() {
     let ctx = test_ctx().await;
     let dir = tempdir().unwrap();
     let file = dir.path().join("big.md");
@@ -272,15 +250,11 @@ async fn heading_on_large_section_returns_ok_false_with_must_follow_and_section_
         "error message should explain oversize; got: {}",
         rec.message
     );
-    match &rec.guidance {
-        Some(crate::tools::Guidance::MustFollow(s)) => {
-            assert!(
-                s.contains("IRON LAW #6"),
-                "must_follow must cite IRON LAW #6; got: {s}"
-            );
-        }
-        other => panic!("expected MustFollow guidance, got {:?}", other),
-    }
+    let hint = rec.hint().expect("expected Hint guidance");
+    assert!(
+        hint.contains("@file_") || hint.contains("section_map") || hint.contains("start_line"),
+        "hint must steer to file_id/section_map/line-range; got: {hint}"
+    );
     assert!(
         rec.extra.get("file_id").is_some(),
         "extra must include file_id for subsequent buffer-ref reads"
@@ -293,6 +267,11 @@ async fn heading_on_large_section_returns_ok_false_with_must_follow_and_section_
     assert!(
         !arr.is_empty(),
         "section_map must list nested sub-headings (H2s under H1)"
+    );
+    let first = &arr[0];
+    assert!(
+        first.get("h").is_some() && first.get("l").is_some(),
+        "section_map entries must use {{h, l}} shape; got: {first}"
     );
     assert!(
         rec.extra.get("next_actions").is_some(),
@@ -1034,7 +1013,8 @@ async fn buffer_ref_accepts_multi_heading_nav() {
         )
         .await
         .unwrap();
-    assert_eq!(second["sections_returned"], 2);
+    let content = second["content"].as_str().expect("content present");
+    assert!(content.contains("## Section 3") && content.contains("## Section 5"));
 }
 
 #[tokio::test]
@@ -1184,5 +1164,52 @@ async fn small_file_with_no_sections_has_no_nav_hint() {
     assert!(
         result.get("hint").is_none(),
         "expected no hint when no headings exist, got: {result}"
+    );
+}
+
+#[tokio::test]
+async fn tier3_map_shape_fields_are_canonical() {
+    // Spec MAP shape: {lines, headings:[{h,l}], file_id, hint}
+    // Forbidden: format, total_lines, total_bytes, heading_count,
+    // heading_map, must_follow, sections_returned.
+    let body = synth_md(5000, 50); // forces Tier 3 via byte budget
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("big.md");
+    std::fs::write(&path, &body).unwrap();
+
+    let ctx = test_ctx().await;
+    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
+    let result = tool
+        .call(serde_json::json!({"path": path.to_str().unwrap()}), &ctx)
+        .await
+        .unwrap();
+
+    for forbidden in [
+        "format",
+        "total_lines",
+        "total_bytes",
+        "heading_count",
+        "heading_map",
+        "must_follow",
+        "sections_returned",
+    ] {
+        assert!(
+            result.get(forbidden).is_none(),
+            "forbidden field `{forbidden}` present in MAP response: {result}"
+        );
+    }
+    assert!(result.get("lines").is_some(), "expected `lines`");
+    assert!(result.get("headings").is_some(), "expected `headings`");
+    assert!(result.get("file_id").is_some(), "expected `file_id`");
+    assert!(result.get("hint").is_some(), "expected `hint`");
+
+    let first = &result["headings"][0];
+    assert!(
+        first.get("h").is_some() && first.get("l").is_some(),
+        "expected heading entry shape {{h, l}}, got: {first}"
+    );
+    assert!(
+        first.get("level").is_none() && first.get("text").is_none() && first.get("line").is_none(),
+        "expected old fields absent, got: {first}"
     );
 }
