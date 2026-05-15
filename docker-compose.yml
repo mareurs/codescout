@@ -1,17 +1,22 @@
 name: codescout-retrieval
 
-# Two-profile retrieval stack: cpu / gpu.
+# Three-profile retrieval stack: cpu / gpu / amd.
 #
-#   docker compose --profile cpu up -d
-#   docker compose --profile gpu up -d
+#   docker compose --profile cpu up -d     # CPU-only — any machine
+#   docker compose --profile gpu up -d     # NVIDIA CUDA
+#   docker compose --profile amd up -d     # AMD ROCm (RX 7xxx / MI series)
 #
-# Dense embedder is llama-server (gguf) on both profiles — CodeRankEmbed-Q4_K_M
+# Dense embedder is llama-server (gguf) on all three profiles — CodeRankEmbed-Q4_K_M
 # scored highest on the legacy-natural bench (30/60) and runs ≤1GB VRAM.
-# Sparse is splade-pp via TEI. Rerank is bge-reranker-base on CPU (smaller, ~250ms p95)
-# and bge-reranker-v2-m3 on GPU (full quality, ~80ms p95).
+# Sparse is splade-pp via TEI (CPU on all profiles — SPLADE has no llama.cpp path).
+# Rerank is bge-reranker-base on CPU (smaller, ~250ms p95) and bge-reranker-v2-m3
+# on GPU/AMD profiles (full quality, ~80ms p95).
 #
-# First run: place CodeRankEmbed-Q4_K_M.gguf in ${CODESCOUT_MODEL_DIR:-./models}.
-# Pull it from https://huggingface.co/nomic-ai/CodeRankEmbed-GGUF — Q4_K_M is ~90MB.
+# First run: place CodeRankEmbed-Q4_K_M.gguf and (for gpu/amd profiles)
+# bge-reranker-v2-m3-Q4_K_M.gguf in ${CODESCOUT_MODEL_DIR:-./models}.
+# Pull them from:
+#   https://huggingface.co/nomic-ai/CodeRankEmbed-GGUF (Q4_K_M ≈ 90MB)
+#   https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF (Q4_K_M ≈ 419MB)
 #
 # Pinned image tags below are what we tested. Replace tags with sha256 digests
 # before treating any profile as production-stable.
@@ -122,11 +127,56 @@ services:
               capabilities: [gpu]
     networks: [retrieval_net]
 
+  dense-amd:
+    profiles: [amd]
+    image: rocm/llama.cpp:llama.cpp-b6652.amd0_rocm7.0.0_ubuntu24.04_server
+    container_name: codescout-dense-amd
+    restart: unless-stopped
+    command:
+      - --model
+      - /models/CodeRankEmbed-Q4_K_M.gguf
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --embedding
+      - --pooling
+      - mean
+      - --ctx-size
+      - "65536"
+      - --batch-size
+      - "4096"
+      - --ubatch-size
+      - "4096"
+      - --parallel
+      - "16"
+      - --n-gpu-layers
+      - "999"
+      - --flash-attn
+      - "on"
+    ports:
+      - "127.0.0.1:48081:8080"
+    volumes:
+      - ${CODESCOUT_MODEL_DIR:-./models}:/models:ro
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+      - render
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks: [retrieval_net]
+
   # ------------------------------------------------------------------ SPARSE
   # Splade_PP_en_v1 on TEI. Identical model across profiles; CPU latency
   # ~80ms is acceptable for the suite.
   sparse-cpu:
-    profiles: [cpu]
+    profiles: [cpu, amd]
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6@sha256:66db77d7856c9319bbfaf2c5b80a6d0e0ac9ff128ade09eaca1d9c20213617a4
     container_name: codescout-sparse-cpu
     restart: unless-stopped
@@ -212,6 +262,51 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+    networks: [retrieval_net]
+
+  reranker-amd:
+    profiles: [amd]
+    image: rocm/llama.cpp:llama.cpp-b6652.amd0_rocm7.0.0_ubuntu24.04_server
+    container_name: codescout-reranker-amd
+    restart: unless-stopped
+    command:
+      - --model
+      - /models/bge-reranker-v2-m3-Q4_K_M.gguf
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --reranking
+      - --pooling
+      - rank
+      - --ctx-size
+      - "8192"
+      - --batch-size
+      - "2048"
+      - --ubatch-size
+      - "2048"
+      - --parallel
+      - "8"
+      - --n-gpu-layers
+      - "999"
+      - --flash-attn
+      - "on"
+    ports:
+      - "127.0.0.1:48083:8080"
+    volumes:
+      - ${CODESCOUT_MODEL_DIR:-./models}:/models:ro
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+      - render
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
     networks: [retrieval_net]
 
 volumes:
