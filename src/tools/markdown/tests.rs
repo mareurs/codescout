@@ -1008,3 +1008,35 @@ async fn buffer_ref_accepts_multi_heading_nav() {
         .unwrap();
     assert_eq!(second["sections_returned"], 2);
 }
+
+#[tokio::test]
+async fn many_headings_escalates_to_map_shape_even_when_bytes_fit() {
+    // Spec B1: a file with > HEADINGS_HARD_CAP (40) sections must not return
+    // full content even if byte budget is satisfied. We use 41 sections with
+    // minimal bodies so the file stays well under INLINE_BYTE_BUDGET (~9 KB)
+    // but exceeds the heading-count gate. Without the fix, this hits Tier 2
+    // and returns full content; with the fix it escalates to Tier 3 MAP shape.
+    let body = synth_md(205, 41); // ~41 sections, ~205 lines, ~1.8 KB
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("many.md");
+    std::fs::write(&path, &body).unwrap();
+
+    let ctx = test_ctx().await;
+    let result = super::ReadMarkdown
+        .call(serde_json::json!({"path": path.to_str().unwrap()}), &ctx)
+        .await
+        .unwrap();
+
+    assert!(
+        result.get("content").is_none(),
+        "expected MAP shape (no content), got: {result}"
+    );
+    assert!(
+        result.get("headings").is_some() || result.get("heading_map").is_some(),
+        "expected headings array, got: {result}"
+    );
+    assert!(
+        result.get("file_id").is_some(),
+        "expected file_id for MAP shape, got: {result}"
+    );
+}

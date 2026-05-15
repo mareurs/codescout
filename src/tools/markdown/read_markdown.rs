@@ -365,13 +365,14 @@ impl Tool for ReadMarkdown {
         let total_bytes = text.len();
         let total_lines = text.lines().count();
         let oversized = crate::tools::exceeds_inline_limit(&text);
+        let all_headings = crate::tools::file_summary::parse_all_headings(&text);
+        let oversized_by_headings = all_headings.len() > crate::tools::HEADINGS_HARD_CAP;
 
         let md_cov =
             crate::tools::read_file::markdown_coverage(&text, &resolved, ctx, None, None, None);
 
         // ── Tier 3: large — heading map + must_follow, no body ────────────
-        if oversized {
-            let all_headings = crate::tools::file_summary::parse_all_headings(&text);
+        if oversized || oversized_by_headings {
             let heading_count = all_headings.len();
             let heading_map: Vec<Value> = all_headings
                 .iter()
@@ -420,7 +421,6 @@ impl Tool for ReadMarkdown {
 
         // ── Tier 2: medium — full content + soft hint ─────────────────────
         if total_lines > crate::tools::LINE_SOFT_CAP {
-            let all_headings = crate::tools::file_summary::parse_all_headings(&text);
             let heading_count = all_headings.len();
             let hint = if heading_count == 0 {
                 format!(
@@ -448,7 +448,6 @@ impl Tool for ReadMarkdown {
         }
 
         // ── Tier 1: small — full content only ─────────────────────────────
-        let all_headings = crate::tools::file_summary::parse_all_headings(&text);
         let heading_count = all_headings.len();
         let mut result = json!({
             "format": "markdown",

@@ -33,6 +33,12 @@ pub(crate) const INLINE_BYTE_BUDGET: usize = TOOL_OUTPUT_BUFFER_THRESHOLD * 9 / 
 /// Files larger than `INLINE_BYTE_BUDGET` are buffered regardless of line count.
 pub(crate) const LINE_SOFT_CAP: usize = 150;
 
+/// Heading-count gate for escalation to MAP shape. A markdown file with more
+/// than this many headings is structurally a directory — content is skim-only
+/// and the caller wants to pivot. Escalates Tier 2 → Tier 3 regardless of
+/// byte/line budgets. Closes Hamsa eval B1 (many-headings.md, 251 sections).
+pub(crate) const HEADINGS_HARD_CAP: usize = 40;
+
 /// Check whether content should be buffered based on estimated token count.
 pub(crate) fn exceeds_inline_limit(text: &str) -> bool {
     text.len() / 4 > MAX_INLINE_TOKENS
