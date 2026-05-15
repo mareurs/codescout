@@ -77,8 +77,9 @@ These are fixed in the happy path but still have edge cases worth knowing about.
 - **What happened:** the tool accepted the edit (no error) but injected the replacement text **mid-function**, splicing into the body of an existing fn (`insert`) and corrupting it. Caller noticed via subsequent `cargo build` failure; recovered by re-issuing the edit with surrounding context.
 - **Probable cause:** the structural-edit guard fires only when `old_string` spans multiple lines containing `fn`. A single-line `old_string` with `fn ` in `new_string` slips through the gate.
 - **Workaround:** for any new-function injection, use a multi-line `old_string` with explicit anchor lines on both sides, or use `insert_code`/`replace_symbol` instead of `edit_file`.
-- **Fix:** open
-- **Status:** Open
+- **Fix:** `guard_structural_rewrite` now scans `new_string` for def-keywords when `old_string` is single-line but `new_string` is multi-line. Single-line→single-line literal substitutions remain unaffected.
+- **Regression:** `src/tools/edit_file/tests.rs::batch_edit_rejects_single_line_old_with_def_keyword_in_new_string` (plus existing `batch_edit_blocks_structural_rewrite` and the fixture `tests/fixtures/edit-eval-rust/src/bug050_repro.rs` at commit `43b7cb45`).
+- **Status:** Fixed (2026-05-15)
 ### BUG-051 — `edit_code insert after`: code injected mid-function body when symbol body is truncated in display
 
 - **Observed:** 2026-05-02

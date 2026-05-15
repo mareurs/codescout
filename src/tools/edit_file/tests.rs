@@ -3417,6 +3417,60 @@ async fn batch_edit_blocks_structural_rewrite() {
     assert!(after.contains("println!(\"old\")"));
 }
 
+#[tokio::test]
+async fn batch_edit_rejects_single_line_old_with_def_keyword_in_new_string() {
+    // BUG-050: a single-line old_string paired with a multi-line new_string
+    // that introduces a definition keyword (e.g. `pub fn ...`) is a structural
+    // edit hiding behind a textual one. The gate must reject it regardless of
+    // old_string shape.
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("src").join("lib.rs");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let original = "pub fn foo() {\n    let x = 1;\n    let y = 2;\n}\n";
+    std::fs::write(&path, original).unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": path.to_str().unwrap(),
+                "edits": [
+                    {
+                        "old_string": "    let x = 1;",
+                        "new_string": "    let x = 10;"
+                    },
+                    {
+                        "old_string": "    let y = 2;",
+                        "new_string": "    let y = 20;\n}\n\npub fn injected_helper() -> u32 {\n    42\n}\n\nfn _placeholder() {\n    let y = 2;"
+                    }
+                ]
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(
+        result.is_err(),
+        "batch must reject single-line→multi-line edit that introduces a def keyword"
+    );
+    let err = result.unwrap_err();
+    let recoverable = err
+        .downcast_ref::<RecoverableError>()
+        .expect("should be RecoverableError");
+    assert!(
+        err.to_string().contains("symbol definition"),
+        "error should mention symbol definition, got: {err}"
+    );
+    let hint = recoverable.hint().unwrap_or("");
+    assert!(
+        hint.contains("edit_code"),
+        "hint should mention edit_code, got: {hint}"
+    );
+
+    // Original content untouched.
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(after, original, "file must be unchanged when edit rejected");
+}
+
 // --- format_list_dir tests ---
 
 #[test]

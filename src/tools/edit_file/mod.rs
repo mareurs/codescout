@@ -68,7 +68,10 @@ fn guard_structural_rewrite(
     old_string: &str,
     new_string: &str,
 ) -> Result<(), super::RecoverableError> {
-    if !old_string.contains('\n') {
+    let old_has_newline = old_string.contains('\n');
+    let new_has_newline = new_string.contains('\n');
+    // Pure single-line literal substitution — always safe.
+    if !old_has_newline && !new_has_newline {
         return Ok(());
     }
     if !crate::util::path_security::is_source_path(path) {
@@ -77,7 +80,15 @@ fn guard_structural_rewrite(
     let Some(lang) = detect_lsp_language(path) else {
         return Ok(());
     };
-    let Some(keyword) = find_def_keyword(old_string, lang) else {
+    // BUG-050: even when old_string is single-line, a multi-line new_string
+    // that introduces a definition keyword is a structural edit smuggled in
+    // through a textual substitution. Reject regardless of old_string shape.
+    let scan_target = if old_has_newline {
+        old_string
+    } else {
+        new_string
+    };
+    let Some(keyword) = find_def_keyword(scan_target, lang) else {
         return Ok(());
     };
     let hint = infer_edit_hint(old_string, new_string);
