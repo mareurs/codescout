@@ -94,6 +94,99 @@ pub fn match_symbol_at_def(
     }
 }
 
+
+pub fn match_references(
+    value: &Value,
+    must_include: &[RefLoc],
+    must_not_include: &[RefLoc],
+    min_count: usize,
+) -> MatchResult {
+    let empty = vec![];
+    let refs: &Vec<Value> = value
+        .get("references")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&empty);
+
+    let contains = |needle: &RefLoc| -> bool {
+        refs.iter().any(|r| {
+            let file = r.get("file").and_then(|v| v.as_str()).unwrap_or("");
+            let line = r.get("line").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            file.ends_with(needle.file) && line == needle.line
+        })
+    };
+
+    let missing: Vec<&RefLoc> = must_include.iter().filter(|n| !contains(n)).collect();
+    let forbidden_hit: Vec<&RefLoc> = must_not_include.iter().filter(|n| contains(n)).collect();
+
+    let evidence = format!("references.len()={}, min_required={min_count}", refs.len());
+
+    if refs.len() < min_count {
+        return MatchResult {
+            verdict: Verdict::SilentWrong,
+            evidence: format!("{evidence} — below min_count"),
+        };
+    }
+    if !missing.is_empty() {
+        return MatchResult {
+            verdict: Verdict::SilentWrong,
+            evidence: format!("{evidence} — missing {missing:?}"),
+        };
+    }
+    if !forbidden_hit.is_empty() {
+        return MatchResult {
+            verdict: Verdict::Partial,
+            evidence: format!("{evidence} — forbidden present {forbidden_hit:?}"),
+        };
+    }
+    MatchResult { verdict: Verdict::Correct, evidence }
+}
+
+pub fn match_call_graph(
+    value: &Value,
+    must_include_edges: &[(String, String)],
+    must_not_include_edges: &[(String, String)],
+) -> MatchResult {
+    let empty = vec![];
+    let edges: &Vec<Value> = value
+        .get("edges")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&empty);
+
+    let edge_pairs: Vec<(String, String)> = edges
+        .iter()
+        .map(|e| {
+            let src = e.get("from").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let dst = e.get("to").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            (src, dst)
+        })
+        .collect();
+
+    let missing: Vec<&(String, String)> = must_include_edges
+        .iter()
+        .filter(|e| !edge_pairs.contains(e))
+        .collect();
+    let forbidden_hit: Vec<&(String, String)> = must_not_include_edges
+        .iter()
+        .filter(|e| edge_pairs.contains(e))
+        .collect();
+
+    let evidence = format!("edges={edge_pairs:?}");
+
+    if !missing.is_empty() {
+        return MatchResult {
+            verdict: Verdict::SilentWrong,
+            evidence: format!("{evidence} — missing {missing:?}"),
+        };
+    }
+    if !forbidden_hit.is_empty() {
+        return MatchResult {
+            verdict: Verdict::Partial,
+            evidence: format!("{evidence} — forbidden present {forbidden_hit:?}"),
+        };
+    }
+    MatchResult { verdict: Verdict::Correct, evidence }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,6 +249,73 @@ mod tests {
     fn def_silent_wrong_when_empty() {
         let v = json!({"def": {"locations": []}});
         let r = match_symbol_at_def(&v, "foo.rs", 42);
+        assert_eq!(r.verdict, Verdict::SilentWrong);
+    }
+
+
+    fn rloc(file: &'static str, line: u32) -> RefLoc {
+        RefLoc { file, line }
+    }
+
+    #[test]
+    fn refs_silent_wrong_below_min_count() {
+        let v = json!({"references": [{"file": "src/a.rs", "line": 1}]});
+        let r = match_references(&v, &[], &[], 3);
+        assert_eq!(r.verdict, Verdict::SilentWrong);
+    }
+
+    #[test]
+    fn refs_correct_with_required_and_no_forbidden() {
+        let v = json!({"references": [
+            {"file": "src/a.rs", "line": 10},
+            {"file": "src/b.rs", "line": 20},
+        ]});
+        let r = match_references(
+            &v,
+            &[rloc("a.rs", 10), rloc("b.rs", 20)],
+            &[],
+            2,
+        );
+        assert_eq!(r.verdict, Verdict::Correct);
+    }
+
+    #[test]
+    fn refs_partial_when_forbidden_present() {
+        let v = json!({"references": [
+            {"file": "src/a.rs", "line": 10},
+            {"file": "src/tests.rs", "line": 99},
+        ]});
+        let r = match_references(
+            &v,
+            &[rloc("a.rs", 10)],
+            &[rloc("tests.rs", 99)],
+            1,
+        );
+        assert_eq!(r.verdict, Verdict::Partial);
+    }
+
+    #[test]
+    fn cg_correct_with_required_edges() {
+        let v = json!({"edges": [
+            {"from": "a", "to": "b"},
+            {"from": "b", "to": "c"},
+        ]});
+        let r = match_call_graph(
+            &v,
+            &[("a".to_string(), "b".to_string())],
+            &[],
+        );
+        assert_eq!(r.verdict, Verdict::Correct);
+    }
+
+    #[test]
+    fn cg_silent_wrong_missing_edge() {
+        let v = json!({"edges": []});
+        let r = match_call_graph(
+            &v,
+            &[("a".to_string(), "b".to_string())],
+            &[],
+        );
         assert_eq!(r.verdict, Verdict::SilentWrong);
     }
 
