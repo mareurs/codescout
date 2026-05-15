@@ -54,6 +54,74 @@ curl -fsS http://127.0.0.1:48084/health   # sparse
 curl -fsS http://127.0.0.1:6333/healthz   # qdrant
 ```
 
+
+
+## AMD ROCm profile (`docker compose --profile amd`)
+
+The `amd` profile in `docker-compose.yml` runs every leg of the retrieval
+stack on the GPU: dense embedder, cross-encoder reranker, and sparse SPLADE
+all share the AMD device. Qdrant runs alongside on CPU as usual. This is the
+recommended path on any workstation with an AMD GPU and ROCm 7.x installed
+on the host.
+
+**Bring up:**
+
+```bash
+docker compose --profile amd up -d
+```
+
+**Topology when using the `amd` profile:**
+
+| Service | Port | Image | Notes |
+|---|---|---|---|
+| Qdrant | `6333` HTTP / `6334` gRPC | `qdrant/qdrant:v1.17.0` | Shared across all profiles. |
+| Dense (`dense-amd`) | `48081` | `rocm/llama.cpp:llama.cpp-b6652.amd0_rocm7.0.0_ubuntu24.04_server` | llama-server `--embedding --pooling mean`, `CodeRankEmbed-Q4_K_M.gguf`. |
+| Reranker (`reranker-amd`) | `48083` | same image | llama-server `--reranking --pooling rank`, `bge-reranker-v2-m3-Q4_K_M.gguf`. |
+| Sparse (`sparse-amd`) | `48084` | `codescout/sparse-amd:tei-1588129f93` (built locally) | TEI-on-ROCm running SPLADE-PP_en_v1. See [SPLADE on ROCm](../experimental/sparse-amd.md). |
+
+**Required model files** in `${CODESCOUT_MODEL_DIR:-./models}`:
+
+```bash
+huggingface-cli download nomic-ai/CodeRankEmbed-GGUF \
+    CodeRankEmbed-Q4_K_M.gguf --local-dir ./models      # ~90 MB
+huggingface-cli download gpustack/bge-reranker-v2-m3-GGUF \
+    bge-reranker-v2-m3-Q4_K_M.gguf --local-dir ./models # ~419 MB
+```
+
+The SPLADE model is pulled by the `sparse-amd` container at first launch
+into the `huggingface-cache` volume; no manual download needed.
+
+**Host requirements:**
+- AMD GPU (RX 7xxx / MI series), gfx1100+ recommended
+- ROCm 7.x installed on host (kernel driver + `/dev/kfd`, `/dev/dri`)
+- User in `video` and `render` groups
+
+The compose service declares `devices: [/dev/kfd, /dev/dri]` and
+`group_add: ["44", "992"]` (numeric video/render GIDs — the rocm/pytorch
+sparse image lacks a `render` group entry, so group names don't resolve).
+No NVIDIA-style runtime extension needed; AMD exposes the GPU via standard
+Linux character devices.
+
+**Wire codescout:** copy `.env.amd` (in the repo root) to `.env`. It sets the
+ports above plus the protocol selectors required to talk to llama-server's
+`/v1/embeddings` and `/v1/rerank`:
+
+```bash
+CODESCOUT_EMBEDDER_PROTOCOL=llama-server  # /v1/embeddings, not TEI's /embed
+CODESCOUT_RERANKER_PROTOCOL=llama-server  # Cohere-shape /rerank
+```
+
+**Why dense + reranker use llama.cpp instead of TEI:**
+- TEI's ROCm path is fragile and lags upstream; `rocm/llama.cpp` is AMD-built.
+- Same binary serves the dense embedder and the cross-encoder reranker
+  (`--reranking` mode), so one image covers two services.
+
+**Why sparse uses TEI:** SPLADE is an MLM-style model with no llama.cpp
+implementation, and CPU latency saturates 32 cores on a full reindex of a
+21k-chunk project. Building TEI from source against ROCm 7.1 + PyTorch 2.8
+(see [SPLADE on ROCm](../experimental/sparse-amd.md)) puts SPLADE on the
+GPU and drops a full reindex from "minutes of CPU melting" to ~6 m 36 s at
+121 % CPU.
 ## How codescout finds the stack
 
 codescout reads endpoints from environment variables and falls back to the
@@ -65,10 +133,10 @@ defaults above:
 | `CODESCOUT_EMBEDDER_URL` | `http://127.0.0.1:48081` | Dense embedder base URL |
 | `CODESCOUT_RERANKER_URL` | `http://127.0.0.1:48083` | Reranker base URL |
 | `CODESCOUT_SPARSE_URL` | `http://127.0.0.1:48084` | Sparse SPLADE base URL |
-| `CODESCOUT_EMBEDDER_PROTOCOL` | `tei` | `tei` (TEI/llama-server native) or `openai` (Ollama, OpenAI, Anthropic-compatible) |
+| `CODESCOUT_EMBEDDER_PROTOCOL` | `tei` | `tei` (TEI/llama-server native) or `openai`/`llama-server` (Ollama, OpenAI, Anthropic-compatible) |
 | `CODESCOUT_EMBEDDER_MODEL_NAME` | (empty) | Model id sent in OpenAI-protocol JSON payloads |
 | `CODESCOUT_QUERY_PREFIX` | (empty) | Prepended to query text only. Required by some asymmetric models (e.g. Nomic, BGE-large). |
-| `CODESCOUT_RERANKER_PROTOCOL` | `tei` | `tei` (HuggingFace TEI) or `infinity` (Cohere/Infinity-compatible) |
+| `CODESCOUT_RERANKER_PROTOCOL` | `tei` | `tei` (HuggingFace TEI) or `llama-server`/`infinity`/`cohere` (Cohere-shape `/rerank`, used by llama-server `--reranking`) |
 | `CODESCOUT_RERANKER_MODEL` | (unset) | Override the reranker model id (Infinity-protocol only) |
 
 ## Using Ollama / llama.cpp / OpenAI as the dense embedder

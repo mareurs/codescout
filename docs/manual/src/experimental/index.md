@@ -6,4 +6,5 @@
 
 ## Available Features
 
-*No features currently in experimental.*
+- [SPLADE on ROCm (`sparse-amd`)](sparse-amd.md) — TEI built from source for
+  AMD GPUs, completing the all-GPU AMD retrieval stack.

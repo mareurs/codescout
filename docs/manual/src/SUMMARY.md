@@ -112,7 +112,7 @@
 # Experimental
 
 - [Experimental Features](experimental/index.md)
-
+  - [SPLADE on ROCm](experimental/sparse-amd.md)
 # Development
 
 - [Architecture](architecture.md)
