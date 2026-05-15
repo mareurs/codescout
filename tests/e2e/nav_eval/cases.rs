@@ -59,5 +59,59 @@ pub fn all() -> &'static [Case] {
             },
             rationale: "two parse<T> in different submodules — both must appear",
         },
+        Case {
+            id: "C-05",
+            tool: ToolUnderTest::References,
+            input: serde_json::json!({
+                "symbol": "a/validate",
+                "path": "src/cross_module.rs",
+            }),
+            expected: Expected::References {
+                must_include: vec![],
+                must_not_include: vec![],
+                min_count: 2,
+            },
+            rationale: "validate-in-a is called once; min_count 2 covers def + call",
+        },
+        Case {
+            id: "C-06",
+            tool: ToolUnderTest::SymbolAt,
+            input: serde_json::json!({
+                "path": "src/shadowing.rs",
+                "line": 9,
+                "identifier": "parse",
+            }),
+            expected: Expected::SymbolAtDef {
+                file: "shadowing.rs",
+                line: 8,
+            },
+            rationale: "local binding must win over top-level fn",
+        },
+        Case {
+            id: "C-07",
+            tool: ToolUnderTest::References,
+            input: serde_json::json!({
+                "symbol": "Bar",
+                "path": "src/re_export.rs",
+            }),
+            expected: Expected::References {
+                must_include: vec![],
+                must_not_include: vec![],
+                min_count: 2,
+            },
+            rationale: "Bar referenced via direct path and via re-export Baz",
+        },
+        Case {
+            id: "C-08",
+            tool: ToolUnderTest::Symbols,
+            input: serde_json::json!({ "name": "handle", "scope": "project" }),
+            expected: Expected::Symbols {
+                must_include: vec![
+                    SymbolRef { name: "handle", file: "closure_vs_fn.rs" },
+                ],
+                must_not_include: vec![],
+            },
+            rationale: "top-level fn handle visible; closure binding is not a top-level symbol",
+        },
     ])
 }
