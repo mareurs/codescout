@@ -13,9 +13,34 @@ async fn read_markdown_empty_file_returns_small_tier() {
         .unwrap();
 
     assert_eq!(out["content"].as_str(), Some(""));
-    assert_eq!(out["total_lines"].as_u64(), Some(0));
+    assert_eq!(out["lines"].as_u64(), Some(0));
     assert!(out.get("hint").is_none());
     assert!(out.get("file_id").is_none());
+}
+
+#[tokio::test]
+async fn empty_file_returns_slim_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("empty.md");
+    std::fs::write(&path, "").unwrap();
+
+    let ctx = test_ctx().await;
+    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
+    let result = tool
+        .call(serde_json::json!({"path": path.to_str().unwrap()}), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(result.get("content").and_then(|v| v.as_str()), Some(""));
+    assert_eq!(result.get("lines").and_then(|v| v.as_u64()), Some(0));
+    assert!(
+        result.get("format").is_none(),
+        "expected no `format` field, got: {result}"
+    );
+    assert!(
+        result.get("heading_count").is_none(),
+        "expected no `heading_count` field, got: {result}"
+    );
 }
 
 #[tokio::test]
@@ -107,8 +132,8 @@ async fn read_markdown_small_returns_full_content_no_hint() {
         "small tier has no heading_map"
     );
     assert!(
-        out.get("heading_count").is_some(),
-        "small tier must report heading_count"
+        out.get("heading_count").is_none(),
+        "small tier must not report heading_count (dropped in B4)"
     );
 }
 

@@ -463,12 +463,9 @@ impl Tool for ReadMarkdown {
         }
 
         // ── Tier 1: small — full content only ─────────────────────────────
-        let heading_count = all_headings.len();
         let mut result = json!({
-            "format": "markdown",
             "content": text,
-            "total_lines": total_lines,
-            "heading_count": heading_count,
+            "lines": total_lines,
         });
         if let Some(c) = md_cov {
             result["coverage"] = c;
