@@ -21,23 +21,17 @@ Use the template at the bottom. Keep it one entry per observation, even if you t
 - **Observed:** 2026-05-01 (during Task 6 implementation)
 - **Component:** `src/tools/symbol/call_edges/resolver.rs` — `resolve_via_ts`
 - **Severity:** Low (expected limitation, clearly communicated to caller)
-- **What happens:** when `prepare_call_hierarchy` returns `None` (language server not running or language not supported) and the caller requests `direction=callees`, `resolve_one_hop` returns a `RecoverableError` instead of edges.
-- **Why:** `LspClientOps::references()` finds all locations that *reference* a symbol — i.e., calls *to* it. To find *callees* (calls made *from* the symbol's body) we would need to parse the symbol's body and enumerate every call expression inside it. That requires knowing the symbol's byte range in the file, which is only available via LSP document symbols or a full AST walk. Without LSP we have no reliable way to bound the symbol body.
-- **Workaround:** activate a language server for the file. `direction=callers` has a full tree-sitter fallback.
-- **Status:** By design. Revisit if a "find callees via AST body walk" helper is added in a future task.
+- **Status:** **RESOLVED 2026-05-15** for Rust, Python, TypeScript/JavaScript (incl. TSX/JSX), Kotlin, Java via `resolve_callees_via_ts`. Still pending for any language outside that set — those continue to return `RecoverableError` with the activate-an-LSP hint.
+- **What used to happen:** when `prepare_call_hierarchy` returned `None` and the caller requested `direction=callees`, `resolve_one_hop` returned a `RecoverableError` for every language.
+- **Fix:** `resolve_callees_via_ts` walks the AST descendants of the enclosing function node (found via `enclosing_function_node`), collects every call-kind node from `call_kinds_for(language_id)`, and extracts the callee identifier with per-grammar rules (`callee_identifier`). One `Edge` is emitted per call site with `EdgeSource::Ts`.
+- **Workaround for unsupported languages:** activate a language server for the file. `direction=callers` already had a tree-sitter fallback and is unchanged.
 
-**Depth-≥2 corollary (observed 2026-05-15 via nav-eval round 2/3):** Because the
-tree-sitter fallback for callees returns an empty edge list (rather than tracing
-calls in the source), BFS at `max_depth ≥ 2` only yields edges from the seed
-node. Non-seed nodes hit `prepareCallHierarchy = None` (rust-analyzer does not
-serve call-hierarchy at a function's *definition* position for fixtures whose
-manifest isn't a workspace member), the resolver returns `RecoverableError`,
-and (since round-3 fix in `src/tools/symbol/call_graph/mod.rs::one_hop`) BFS
-silently skips that hop and continues with whatever else is queued. The
-nav-eval case `C-11` (`a → b → c → a` cycle, depth=5) is the canonical
-regression watchdog for this gap — it stays `SILENT_WRONG` until a real
-tree-sitter fallback for callees ships.
-
+**Depth-≥2 corollary (originally observed 2026-05-15 via nav-eval round 2/3):** With the
+fix in place, BFS at `max_depth ≥ 2` now produces real edges from non-seed nodes for
+the supported language set, since each hop's TS fallback enumerates call expressions
+inside the symbol body. The nav-eval case `C-11` (`a → b → c → a` cycle, depth=5)
+flips from `SILENT_WRONG-by-design` to expected `CORRECT` — it remains the canonical
+regression watchdog and is updated to require the full `a→b`, `b→c`, `c→a` edge set.
 ## Mitigated quirks (live caveats)
 
 These are fixed in the happy path but still have edge cases worth knowing about. Full write-ups in `docs/archive/bug-reports/2026-03-to-2026-04-tool-misbehaviors.md`.

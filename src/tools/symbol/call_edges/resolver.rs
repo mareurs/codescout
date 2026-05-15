@@ -162,14 +162,9 @@ async fn resolve_via_ts(
 ) -> anyhow::Result<Vec<Edge>> {
     match direction {
         Direction::Callees => {
-            // Finding callees requires knowing which calls appear *inside* the symbol
-            // body.  `references()` finds refs *to* the symbol, not *from* it.
-            // Without LSP callHierarchy we have no reliable way to enumerate callees.
-            Err(RecoverableError::with_hint(
-                "call_graph direction=callees requires LSP callHierarchy support (not available for this language/file)",
-                "Activate a language server for this file, or use direction=callers which has a tree-sitter fallback.",
-            )
-            .into())
+            // LIMIT-001 fix: walk the AST descendants of the enclosing
+            // function and collect every direct call expression.
+            resolve_callees_via_ts(sym_name, sym_path, sym_line, sym_col, language_id)
         }
         Direction::Callers => {
             let refs = client
@@ -326,6 +321,258 @@ fn enclosing_function_name(
             None => return None,
         }
     }
+}
+
+/// Tree-sitter call-kind node names per language.
+///
+/// Mirrors the set used by `position_is_call`, but exposed as a slice so the
+/// callees fallback can pre-filter descendant nodes during the AST walk.
+/// Returns an empty slice for languages we don't classify.
+fn call_kinds_for(language_id: &str) -> &'static [&'static str] {
+    match language_id {
+        "rust" => &[
+            "call_expression",
+            "method_call_expression",
+            "macro_invocation",
+        ],
+        "python" => &["call"],
+        "typescript" | "javascript" | "tsx" | "jsx" => &["call_expression", "new_expression"],
+        "kotlin" => &["call_expression"],
+        "java" => &["method_invocation", "object_creation_expression"],
+        _ => &[],
+    }
+}
+
+/// Walk up the AST from `byte_offset` to find the innermost enclosing
+/// function/method node. Returns the node itself (rather than just its name
+/// like `enclosing_function_name`) so callers can recurse into its body.
+fn enclosing_function_node<'tree>(
+    tree: &'tree tree_sitter::Tree,
+    byte_offset: usize,
+    language_id: &str,
+) -> Option<tree_sitter::Node<'tree>> {
+    let fn_kinds: &[&str] = match language_id {
+        "rust" => &["function_item"],
+        "python" => &["function_definition"],
+        "typescript" | "javascript" | "tsx" | "jsx" => &[
+            "function_declaration",
+            "method_definition",
+            "arrow_function",
+        ],
+        "kotlin" => &["function_declaration"],
+        "java" => &["method_declaration"],
+        _ => return None,
+    };
+
+    let root = tree.root_node();
+    let mut node = root.descendant_for_byte_range(byte_offset, byte_offset)?;
+    loop {
+        if fn_kinds.contains(&node.kind()) {
+            return Some(node);
+        }
+        match node.parent() {
+            Some(p) => node = p,
+            None => return None,
+        }
+    }
+}
+
+/// Extract the callee identifier from a call-expression node.
+///
+/// Returns the rightmost / final segment of the call target:
+/// - Rust: `b()` → `b`; `obj.m()` → `m`; `d::e()` → `e`; `m!(...)` → `m`.
+/// - Python: `b()` → `b`; `o.c()` → `c`.
+/// - TS/JS/TSX/JSX: `b()` → `b`; `o.c()` → `c`; `new D(...)` → `D`.
+/// - Kotlin: `b()` → `b`; `o.c()` → `c`.
+/// - Java: `b()` → `b`; `o.c()` → `c`; `new D(...)` → `D`.
+fn callee_identifier(node: tree_sitter::Node<'_>, src: &str, language_id: &str) -> Option<String> {
+    let src_bytes = src.as_bytes();
+    let text = |n: tree_sitter::Node<'_>| n.utf8_text(src_bytes).ok().map(str::to_owned);
+
+    // Walk a "scoped"/"path"/"member"/"navigation" expression down to its
+    // rightmost identifier-like child.
+    fn rightmost_ident<'a>(mut n: tree_sitter::Node<'a>, src_bytes: &[u8]) -> Option<String> {
+        loop {
+            match n.kind() {
+                "identifier"
+                | "simple_identifier"
+                | "property_identifier"
+                | "type_identifier"
+                | "field_identifier"
+                | "shorthand_property_identifier" => {
+                    return n.utf8_text(src_bytes).ok().map(str::to_owned);
+                }
+                _ => {}
+            }
+            // Drop to the last non-trivial named child and keep descending.
+            let count = n.named_child_count() as u32;
+            if count == 0 {
+                return n.utf8_text(src_bytes).ok().map(str::to_owned);
+            }
+            let mut next: Option<tree_sitter::Node<'a>> = None;
+            for i in (0..count).rev() {
+                if let Some(c) = n.named_child(i) {
+                    next = Some(c);
+                    break;
+                }
+            }
+            match next {
+                Some(c) if c.id() != n.id() => n = c,
+                _ => return n.utf8_text(src_bytes).ok().map(str::to_owned),
+            }
+        }
+    }
+
+    match (language_id, node.kind()) {
+        // ── Rust ──────────────────────────────────────────────────────────
+        ("rust", "call_expression") => {
+            let f = node.child_by_field_name("function")?;
+            match f.kind() {
+                "identifier" => text(f),
+                _ => rightmost_ident(f, src_bytes),
+            }
+        }
+        ("rust", "method_call_expression") => {
+            let name = node.child_by_field_name("method")?;
+            text(name)
+        }
+        ("rust", "macro_invocation") => {
+            let name = node.child_by_field_name("macro")?;
+            // `macro` can be `identifier` or `scoped_identifier`.
+            match name.kind() {
+                "identifier" => text(name),
+                _ => rightmost_ident(name, src_bytes),
+            }
+        }
+        // ── Python ────────────────────────────────────────────────────────
+        ("python", "call") => {
+            let f = node.child_by_field_name("function")?;
+            match f.kind() {
+                "identifier" => text(f),
+                "attribute" => {
+                    let attr = f.child_by_field_name("attribute")?;
+                    text(attr)
+                }
+                _ => rightmost_ident(f, src_bytes),
+            }
+        }
+        // ── TS / JS / TSX / JSX ──────────────────────────────────────────
+        ("typescript" | "javascript" | "tsx" | "jsx", "call_expression") => {
+            let f = node.child_by_field_name("function")?;
+            match f.kind() {
+                "identifier" => text(f),
+                "member_expression" => {
+                    let p = f.child_by_field_name("property")?;
+                    text(p)
+                }
+                _ => rightmost_ident(f, src_bytes),
+            }
+        }
+        ("typescript" | "javascript" | "tsx" | "jsx", "new_expression") => {
+            let c = node.child_by_field_name("constructor")?;
+            match c.kind() {
+                "identifier" => text(c),
+                _ => rightmost_ident(c, src_bytes),
+            }
+        }
+        // ── Kotlin ────────────────────────────────────────────────────────
+        ("kotlin", "call_expression") => {
+            // Kotlin grammar: the callee is the first named child; for
+            // `obj.foo()` the call_expression is wrapped in a
+            // navigation_expression where the rightmost simple_identifier is
+            // the method name. For bare `foo()` the first child is the
+            // simple_identifier directly.
+            let first = node.named_child(0)?;
+            rightmost_ident(first, src_bytes)
+        }
+        // ── Java ──────────────────────────────────────────────────────────
+        ("java", "method_invocation") => {
+            let name = node.child_by_field_name("name")?;
+            text(name)
+        }
+        ("java", "object_creation_expression") => {
+            let typ = node.child_by_field_name("type")?;
+            match typ.kind() {
+                "type_identifier" => text(typ),
+                _ => rightmost_ident(typ, src_bytes),
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Tree-sitter fallback for `Direction::Callees` — used when LSP
+/// `callHierarchy` is unavailable for the language/file.
+///
+/// Strategy: parse the source, locate the function node enclosing the symbol
+/// at `(sym_line, sym_col)`, then walk its descendants collecting every
+/// call-expression node. For each call we extract the callee identifier with
+/// per-language rules (see [`callee_identifier`]) and emit one [`Edge`].
+///
+/// Returns `RecoverableError` if the language is not in the supported set
+/// (Rust, Python, TS/JS/TSX/JSX, Kotlin, Java), if the source can't be read,
+/// or if no enclosing function can be located.
+fn resolve_callees_via_ts(
+    sym_name: &str,
+    sym_path: &std::path::Path,
+    sym_line: u32,
+    sym_col: u32,
+    language_id: &str,
+) -> anyhow::Result<Vec<Edge>> {
+    let kinds = call_kinds_for(language_id);
+    if kinds.is_empty() {
+        return Err(RecoverableError::with_hint(
+            "call_graph direction=callees requires LSP callHierarchy support (not available for this language/file)",
+            "Activate a language server for this file, or use direction=callers which has a tree-sitter fallback.",
+        )
+        .into());
+    }
+
+    let src = std::fs::read_to_string(sym_path).map_err(|e| {
+        RecoverableError::with_hint(
+            format!("could not read source for callees fallback: {e}"),
+            "Verify the file path resolves to a readable file.",
+        )
+    })?;
+
+    let tree = parse_ts_tree(&src, language_id).ok_or_else(|| {
+        RecoverableError::with_hint(
+            "tree-sitter parse failed for callees fallback",
+            "The grammar may not be registered for this language; activate an LSP if available.",
+        )
+    })?;
+
+    let byte = position_to_byte(&src, sym_line, sym_col);
+    let fn_node = enclosing_function_node(&tree, byte, language_id).ok_or_else(|| {
+        RecoverableError::with_hint(
+            "could not locate enclosing function for callees fallback",
+            "Ensure (sym_line, sym_col) points inside a function/method body.",
+        )
+    })?;
+
+    let mut edges = Vec::new();
+    let mut cursor = fn_node.walk();
+    let mut stack: Vec<tree_sitter::Node<'_>> = vec![fn_node];
+    while let Some(n) = stack.pop() {
+        if kinds.contains(&n.kind()) {
+            if let Some(callee) = callee_identifier(n, &src, language_id) {
+                let start = n.start_position();
+                edges.push(Edge {
+                    caller_sym: sym_name.to_owned(),
+                    callee_sym: callee,
+                    file: sym_path.to_path_buf(),
+                    line: start.row as u32,
+                    col: start.column as u32,
+                    source: EdgeSource::Ts,
+                });
+            }
+        }
+        for child in n.children(&mut cursor) {
+            stack.push(child);
+        }
+    }
+
+    Ok(edges)
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -494,16 +741,18 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_one_hop_callees_without_lsp_returns_recoverable_error() {
-        // Mock returns None from prepare_call_hierarchy (map is empty)
+        // Mock returns None from prepare_call_hierarchy (map is empty).
+        // Use an unsupported language ("go") so the TS callees fallback is not
+        // available either, exercising the RecoverableError branch.
         let mock = MockLspClient::new();
 
         let result = resolve_one_hop(
             &mock,
             "foo",
-            std::path::Path::new("/a.rs"),
+            std::path::Path::new("/a.go"),
             0,
             0,
-            "rust",
+            "go",
             Direction::Callees,
         )
         .await;
@@ -513,6 +762,143 @@ mod tests {
             err.downcast_ref::<RecoverableError>().is_some(),
             "expected RecoverableError, got: {err}"
         );
+    }
+
+    // ── Test 4: TS fallback — Callees (LIMIT-001 fix) ────────────────────────
+
+    #[tokio::test]
+    async fn resolve_callees_via_ts_rust_finds_direct_calls() {
+        let src = "fn a() {\n    b();\n    c();\n    d::e();\n}\nfn b() {}\nfn c() {}\nmod d { pub fn e() {} }\n";
+
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = dir.path().join("fixture.rs");
+        std::fs::write(&fixture, src).unwrap();
+
+        // Mock: prepare_call_hierarchy returns None → forces TS fallback.
+        let mock = MockLspClient::new();
+
+        let edges = resolve_one_hop(
+            &mock,
+            "a",
+            &fixture,
+            0, // sym_line — start of `fn a`
+            3, // sym_col — inside the identifier `a`
+            "rust",
+            Direction::Callees,
+        )
+        .await
+        .unwrap();
+
+        let callees: Vec<&str> = edges.iter().map(|e| e.callee_sym.as_str()).collect();
+        assert!(callees.contains(&"b"), "missing b in {:?}", callees);
+        assert!(callees.contains(&"c"), "missing c in {:?}", callees);
+        assert!(callees.contains(&"e"), "missing e in {:?}", callees);
+        for e in &edges {
+            assert_eq!(e.caller_sym, "a", "wrong caller in {:?}", e);
+            assert_eq!(e.source, EdgeSource::Ts);
+        }
+        assert_eq!(edges.len(), 3, "unexpected edges: {:?}", edges);
+    }
+
+    #[tokio::test]
+    async fn resolve_callees_via_ts_python_finds_direct_calls() {
+        let src = "def a():\n    b()\n    obj.c()\n\ndef b():\n    pass\n";
+
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = dir.path().join("fixture.py");
+        std::fs::write(&fixture, src).unwrap();
+
+        let mock = MockLspClient::new();
+
+        let edges = resolve_one_hop(
+            &mock,
+            "a",
+            &fixture,
+            0,
+            4, // sym_col inside `a`
+            "python",
+            Direction::Callees,
+        )
+        .await
+        .unwrap();
+
+        let callees: Vec<&str> = edges.iter().map(|e| e.callee_sym.as_str()).collect();
+        assert!(callees.contains(&"b"), "missing b in {:?}", callees);
+        assert!(callees.contains(&"c"), "missing c in {:?}", callees);
+    }
+
+    #[tokio::test]
+    async fn resolve_callees_via_ts_typescript_finds_direct_calls() {
+        let src = "function a() {\n    b();\n    obj.c();\n    new D();\n}\nfunction b() {}\n";
+
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = dir.path().join("fixture.ts");
+        std::fs::write(&fixture, src).unwrap();
+
+        let mock = MockLspClient::new();
+
+        let edges = resolve_one_hop(
+            &mock,
+            "a",
+            &fixture,
+            0,
+            9, // sym_col inside `a`
+            "typescript",
+            Direction::Callees,
+        )
+        .await
+        .unwrap();
+
+        let callees: Vec<&str> = edges.iter().map(|e| e.callee_sym.as_str()).collect();
+        assert!(callees.contains(&"b"), "missing b in {:?}", callees);
+        assert!(callees.contains(&"c"), "missing c in {:?}", callees);
+        assert!(callees.contains(&"D"), "missing D in {:?}", callees);
+    }
+
+    #[tokio::test]
+    async fn resolve_callees_via_ts_kotlin_finds_direct_calls() {
+        let src = "fun a() {\n    b()\n    obj.c()\n}\nfun b() {}\n";
+
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = dir.path().join("fixture.kt");
+        std::fs::write(&fixture, src).unwrap();
+
+        let mock = MockLspClient::new();
+
+        let edges = resolve_one_hop(&mock, "a", &fixture, 0, 4, "kotlin", Direction::Callees)
+            .await
+            .unwrap();
+
+        let callees: Vec<&str> = edges.iter().map(|e| e.callee_sym.as_str()).collect();
+        assert!(callees.contains(&"b"), "missing b in {:?}", callees);
+        assert!(callees.contains(&"c"), "missing c in {:?}", callees);
+    }
+
+    #[tokio::test]
+    async fn resolve_callees_via_ts_java_finds_direct_calls() {
+        let src = "class X {\n    void a() {\n        b();\n        obj.c();\n    }\n    void b() {}\n}\n";
+
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = dir.path().join("Fixture.java");
+        std::fs::write(&fixture, src).unwrap();
+
+        let mock = MockLspClient::new();
+
+        let edges = resolve_one_hop(
+            &mock,
+            "a",
+            &fixture,
+            1,
+            9, // sym_col inside `a`
+            "java",
+            Direction::Callees,
+        )
+        .await
+        .unwrap();
+
+        let callees: Vec<&str> = edges.iter().map(|e| e.callee_sym.as_str()).collect();
+        assert!(callees.contains(&"b"), "missing b in {:?}", callees);
+        assert!(callees.contains(&"c"), "missing c in {:?}", callees);
     }
 
     // ── Helper unit tests ────────────────────────────────────────────────────

@@ -150,10 +150,11 @@ pub fn all() -> &'static [Case] {
                 must_include_edges: vec![
                     ("a".to_string(), "b".to_string()),
                     ("b".to_string(), "c".to_string()),
+                    ("c".to_string(), "a".to_string()),
                 ],
                 must_not_include_edges: vec![],
             },
-            rationale: "cycle must terminate; deduped edges only",
+            rationale: "LIMIT-001 fix: TS callees fallback emits the a→b→c→a cycle; cycle must terminate; deduped edges only",
         },
         Case {
             id: "C-12",
