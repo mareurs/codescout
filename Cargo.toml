@@ -178,6 +178,7 @@ strip = true
 panic = "abort"
 
 [dev-dependencies]
+chrono = "0.4"
 tempfile = "3"
 tower = "0.5"
 filetime = "0.2"
