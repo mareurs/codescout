@@ -77,7 +77,7 @@ impl Tool for Grep {
                 (re, true)
             }
         };
-        let mut matches = vec![];
+        let mut matches: Vec<Value> = vec![];
         let mut total_match_count = 0usize;
         let mut hit_cap = false;
 
@@ -177,16 +177,44 @@ impl Tool for Grep {
         } else {
             total_match_count
         };
-        let mut result = json!({ "matches": matches, "total": shown_count });
-        if hit_cap {
-            result["overflow"] = json!({
-                "shown": shown_count,
-                "hint": format!(
-                    "Showing first {} matches (cap hit). Narrow with a more specific pattern or path=<file>.",
-                    shown_count
-                )
+
+        // Build grouped output (simple mode) or keep flat (context mode).
+        let mut result = if context_lines == 0 {
+            use crate::tools::file_group::{cap_grouped, group_by_file, groups_to_json};
+            let budget = max;
+            let (visible, total, files) = cap_grouped(matches, budget);
+            let truncated = hit_cap || total > visible.len();
+            let groups = group_by_file(&visible);
+            let file_groups = groups_to_json(&groups);
+            let mut r = json!({
+                "file_groups": file_groups,
+                "total": total,
+                "files": files,
             });
-        }
+            if truncated {
+                r["overflow"] = json!({
+                    "shown": visible.len(),
+                    "total": total,
+                    "hint": "Many matches. Narrow the pattern or use a more specific path.",
+                });
+            }
+            r
+        } else {
+            // Context mode: keep flat matches[], preserve legacy shape for format_grep
+            let mut r =
+                json!({ "matches": matches, "total": shown_count, "context_lines": context_lines });
+            if hit_cap {
+                r["overflow"] = json!({
+                    "shown": shown_count,
+                    "hint": format!(
+                        "Showing first {} matches (cap hit). Narrow with a more specific pattern or path=<file>.",
+                        shown_count
+                    )
+                });
+            }
+            r
+        };
+
         if is_literal_fallback {
             result["mode"] = json!("literal_fallback");
             result["reason"] = json!("pattern was not valid regex — searched as literal text");
@@ -211,65 +239,62 @@ impl Tool for Grep {
 // ── format helpers ──────────────────────────────────────────────────────
 
 pub(super) fn format_grep(val: &Value) -> String {
-    let matches = match val["matches"].as_array() {
-        Some(arr) => arr,
-        None => return String::new(),
-    };
+    let total = val["total"].as_u64().unwrap_or(0) as usize;
 
-    let total = val["total"].as_u64().unwrap_or(matches.len() as u64);
-
-    if matches.is_empty() {
+    if total == 0 {
         return "0 matches".to_string();
     }
 
-    let is_context_mode = matches[0].get("start_line").is_some();
-
-    let match_word = if total == 1 { "match" } else { "matches" };
-    let mut out = format!("{total} {match_word}\n");
+    let mut out = String::new();
 
     if val.get("mode").and_then(|m| m.as_str()) == Some("literal_fallback") {
-        out.insert_str(0, "[literal fallback] ");
+        out.push_str("[literal fallback] ");
     }
 
-    if is_context_mode {
-        format_search_context_mode(&mut out, matches);
-    } else {
-        format_search_simple_mode(&mut out, matches);
+    // Dispatch: file_groups[] → simple mode (new shape).
+    //           matches[]    → context mode (legacy shape with start_line items).
+    if let Some(groups) = val["file_groups"].as_array() {
+        let files = val["files"].as_u64().unwrap_or(0) as usize;
+        format_search_simple_mode(&mut out, groups, total, files);
+    } else if let Some(flat) = val["matches"].as_array() {
+        let match_word = if total == 1 { "match" } else { "matches" };
+        out.push_str(&format!("{total} {match_word}\n"));
+        format_search_context_mode(&mut out, flat);
     }
 
-    if let Some(overflow) = val.get("overflow") {
-        if overflow.is_object() {
-            out.push('\n');
-            out.push_str(&format_overflow(overflow));
-        }
+    if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
+        out.push('\n');
+        out.push_str(&format_overflow(overflow));
     }
-
     out
 }
 
-fn format_search_simple_mode(out: &mut String, matches: &[Value]) {
-    let locations: Vec<String> = matches
-        .iter()
-        .map(|m| {
-            let file = m["file"].as_str().unwrap_or("?");
-            let line = m["line"].as_u64().unwrap_or(0);
-            format!("{file}:{line}")
-        })
-        .collect();
+fn format_search_simple_mode(out: &mut String, file_groups: &[Value], total: usize, files: usize) {
+    use crate::tools::file_group::{group_by_file, render_grouped};
 
-    let max_loc_len = locations.iter().map(|l| l.len()).max().unwrap_or(0);
-
-    for (i, m) in matches.iter().enumerate() {
-        let content = m["content"].as_str().unwrap_or("");
-        let padding = max_loc_len - locations[i].len();
-        out.push_str("\n  ");
-        out.push_str(&locations[i]);
-        for _ in 0..padding {
-            out.push(' ');
+    // Re-attach file to each item for group_by_file, then render grouped.
+    let mut flat: Vec<Value> = vec![];
+    for group in file_groups {
+        let file = group["file"].as_str().unwrap_or("?");
+        if let Some(items) = group["items"].as_array() {
+            for item in items {
+                let mut clone = item.clone();
+                if let Some(obj) = clone.as_object_mut() {
+                    obj.insert("file".to_string(), Value::String(file.to_string()));
+                }
+                flat.push(clone);
+            }
         }
-        out.push_str("   ");
-        out.push_str(content.trim());
     }
+    let groups = group_by_file(&flat);
+    let noun = if total == 1 { "match" } else { "matches" };
+
+    let rendered = render_grouped(&groups, total, files, noun, |item| {
+        let line = item["line"].as_u64().unwrap_or(0);
+        let content = item["content"].as_str().unwrap_or("").trim();
+        format!("  {line:>5}: {content}")
+    });
+    out.push_str(&rendered);
 }
 
 fn format_search_context_mode(out: &mut String, matches: &[Value]) {
@@ -295,5 +320,70 @@ fn format_search_context_mode(out: &mut String, matches: &[Value]) {
 
     if out.ends_with('\n') {
         out.pop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::Agent;
+    use crate::lsp::LspManager;
+    use crate::tools::ToolContext;
+    use tempfile::tempdir;
+
+    async fn test_ctx() -> ToolContext {
+        ToolContext {
+            agent: Agent::new(None).await.unwrap(),
+            lsp: LspManager::new_arc(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+        }
+    }
+
+    #[tokio::test]
+    async fn grep_returns_grouped_shape_simple_mode() {
+        use serde_json::json;
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn foo() {}\nfn foo_bar() {}\n").unwrap();
+        std::fs::write(dir.path().join("b.rs"), "fn foo_baz() {}\n").unwrap();
+
+        let ctx = test_ctx().await;
+        let tool = Grep;
+        let result = tool
+            .call(
+                json!({ "pattern": "foo", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let groups = result["file_groups"].as_array().unwrap();
+        assert!(!groups.is_empty(), "file_groups must be non-empty");
+        for group in groups {
+            assert!(group.get("file").is_some(), "group must have file");
+            let items = group["items"].as_array().unwrap();
+            for item in items {
+                assert!(
+                    item.get("file").is_none(),
+                    "per-item file should be stripped, got: {item}"
+                );
+                assert!(item.get("line").is_some(), "item must have line");
+                assert!(item.get("content").is_some(), "item must have content");
+            }
+        }
+        assert!(
+            result["total"].as_u64().unwrap() >= 3,
+            "total must be >= 3, got {}",
+            result["total"]
+        );
+        assert!(
+            result["files"].as_u64().unwrap() >= 2,
+            "files must be >= 2, got {}",
+            result["files"]
+        );
     }
 }

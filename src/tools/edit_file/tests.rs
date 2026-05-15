@@ -10,6 +10,31 @@ use crate::lsp::LspManager;
 use serde_json::json;
 use tempfile::tempdir;
 
+/// Flatten `file_groups[]` from a grep result back to a `Vec<Value>` with `file`
+/// re-attached to each item. Mirrors the old `result["matches"]` shape so
+/// integration tests can keep asserting on individual match fields.
+fn flat_matches(result: &serde_json::Value) -> Vec<serde_json::Value> {
+    let mut out = vec![];
+    if let Some(groups) = result["file_groups"].as_array() {
+        for group in groups {
+            let file = group["file"].as_str().unwrap_or("?");
+            if let Some(items) = group["items"].as_array() {
+                for item in items {
+                    let mut clone = item.clone();
+                    if let Some(obj) = clone.as_object_mut() {
+                        obj.insert(
+                            "file".to_string(),
+                            serde_json::Value::String(file.to_string()),
+                        );
+                    }
+                    out.push(clone);
+                }
+            }
+        }
+    }
+    out
+}
+
 async fn test_ctx() -> ToolContext {
     ToolContext {
         agent: Agent::new(None).await.unwrap(),
@@ -898,7 +923,7 @@ async fn search_finds_matching_line() {
         .await
         .unwrap();
 
-    let matches = result["matches"].as_array().unwrap();
+    let matches = flat_matches(&result);
     assert_eq!(matches.len(), 1);
     assert_eq!(matches[0]["line"], 1);
     assert!(matches[0]["content"].as_str().unwrap().contains("fn main"));
@@ -918,7 +943,7 @@ async fn search_returns_no_matches_when_absent() {
         .await
         .unwrap();
 
-    assert_eq!(result["matches"].as_array().unwrap().len(), 0);
+    assert_eq!(flat_matches(&result).len(), 0);
 }
 
 #[tokio::test]
@@ -943,7 +968,7 @@ async fn search_respects_limit() {
         .await
         .unwrap();
 
-    assert_eq!(result["matches"].as_array().unwrap().len(), 5);
+    assert_eq!(flat_matches(&result).len(), 5);
 }
 
 #[tokio::test]
@@ -1238,21 +1263,20 @@ async fn search_for_pattern_skips_hidden_dirs() {
         .await
         .unwrap();
 
-    let matches: Vec<&str> = result["matches"]
-        .as_array()
-        .unwrap()
+    let matches = flat_matches(&result);
+    let files: Vec<&str> = matches
         .iter()
         .map(|v| v["file"].as_str().unwrap())
         .collect();
 
     assert!(
-        matches.iter().any(|f| f.ends_with("main.rs")),
+        files.iter().any(|f| f.ends_with("main.rs")),
         "should find match in main.rs"
     );
     assert!(
-        !matches.iter().any(|f| f.contains(".worktrees")),
+        !files.iter().any(|f| f.contains(".worktrees")),
         ".worktrees/ should be excluded, got: {:?}",
-        matches
+        files
     );
 }
 
@@ -1470,7 +1494,7 @@ async fn search_for_pattern_limit_respected() {
         )
         .await
         .unwrap();
-    let matches = result["matches"].as_array().unwrap();
+    let matches = flat_matches(&result);
     assert_eq!(matches.len(), 5, "limit should be respected");
 }
 
@@ -1497,7 +1521,7 @@ async fn search_for_pattern_single_file_path() {
         )
         .await
         .unwrap();
-    let matches = result["matches"].as_array().unwrap();
+    let matches = flat_matches(&result);
     assert!(
         !matches.is_empty(),
         "search_for_pattern should work with a single file path"
@@ -1881,7 +1905,7 @@ async fn search_pattern_regex_character_class_matches() {
         .await
         .unwrap();
 
-    let matches = result["matches"].as_array().unwrap();
+    let matches = flat_matches(&result);
     assert_eq!(
         matches.len(),
         2,
@@ -1918,7 +1942,7 @@ async fn search_pattern_escaped_paren_matches_literal_paren() {
         .await
         .unwrap();
 
-    let matches = result["matches"].as_array().unwrap();
+    let matches = flat_matches(&result);
     assert_eq!(matches.len(), 1, "escaped paren should match literal (");
     assert!(matches[0]["content"].as_str().unwrap().contains("if (name"));
 }
@@ -1949,7 +1973,7 @@ async fn search_pattern_unescaped_paren_literal_fallback() {
         "non-regex-looking invalid regex should use literal fallback"
     );
     assert!(
-        !result["matches"].as_array().unwrap().is_empty(),
+        !flat_matches(&result).is_empty(),
         "literal fallback should find the text"
     );
 }
@@ -1975,7 +1999,7 @@ async fn search_pattern_dot_matches_any_char_not_literal_dot() {
         .unwrap();
 
     // `.` matches `_` in `fn_main_alt` AND ` ` in `fn main()` — both lines match
-    let matches = result["matches"].as_array().unwrap();
+    let matches = flat_matches(&result);
     assert_eq!(
         matches.len(),
         2,
@@ -1999,7 +2023,7 @@ async fn search_pattern_literal_fallback_on_plain_text() {
         .unwrap();
     assert_eq!(result["mode"].as_str().unwrap(), "literal_fallback");
     assert!(result["reason"].as_str().unwrap().contains("literal"));
-    assert!(!result["matches"].as_array().unwrap().is_empty());
+    assert!(!flat_matches(&result).is_empty());
 }
 
 #[tokio::test]
@@ -2013,7 +2037,7 @@ async fn search_pattern_literal_fallback_zero_matches() {
         .await
         .unwrap();
     assert_eq!(result["mode"].as_str().unwrap(), "literal_fallback");
-    assert!(result["matches"].as_array().unwrap().is_empty());
+    assert!(flat_matches(&result).is_empty());
     assert_eq!(result["total"].as_u64().unwrap(), 0);
 }
 
@@ -2060,7 +2084,7 @@ async fn search_pattern_multi_file_returns_all_matches() {
         .await
         .unwrap();
 
-    let matches = result["matches"].as_array().unwrap();
+    let matches = flat_matches(&result);
     assert_eq!(
         matches.len(),
         2,
@@ -2092,7 +2116,7 @@ async fn search_pattern_case_sensitive_by_default() {
         .await
         .unwrap();
 
-    let matches = result["matches"].as_array().unwrap();
+    let matches = flat_matches(&result);
     assert_eq!(
         matches.len(),
         1,
@@ -2156,7 +2180,7 @@ async fn read_file_source_without_range_now_works() {
 
 #[tokio::test]
 async fn search_pattern_context_lines_zero_backward_compat() {
-    // context_lines absent → old format (line + content keys)
+    // context_lines absent → new grouped shape (file_groups + line + content keys)
     let ctx = test_ctx().await;
     let dir = tempdir().unwrap();
     std::fs::write(dir.path().join("code.rs"), "fn main() {}\nlet x = 42;\n").unwrap();
@@ -2169,7 +2193,7 @@ async fn search_pattern_context_lines_zero_backward_compat() {
         .await
         .unwrap();
 
-    let matches = result["matches"].as_array().unwrap();
+    let matches = flat_matches(&result);
     assert_eq!(matches.len(), 1);
     assert_eq!(matches[0]["line"], 1);
     assert!(matches[0]["content"].as_str().unwrap().contains("fn main"));
@@ -2278,7 +2302,6 @@ async fn search_pattern_context_mode_total_equals_block_count_not_line_count() {
     let path = dir.path().to_str().unwrap();
 
     // Baseline: without context_lines, total equals the raw number of matching lines (2).
-    // This is what the old context-mode code also used — the line count — which was wrong.
     let no_ctx = Grep
         .call(json!({ "pattern": "MATCH_", "path": path }), &ctx)
         .await
@@ -2288,7 +2311,7 @@ async fn search_pattern_context_mode_total_equals_block_count_not_line_count() {
         2,
         "without context, total must equal the number of matching lines"
     );
-    assert_eq!(no_ctx["matches"].as_array().unwrap().len(), 2);
+    assert_eq!(flat_matches(&no_ctx).len(), 2);
 
     // Stale (the bug): with context_lines=2 the two matches merge into 1 block,
     // but old code still set total=2 (line count) — inconsistent with matches.len()=1.
@@ -2456,7 +2479,7 @@ async fn search_pattern_accepts_library_path() {
         .await
         .unwrap();
 
-    let matches = result["matches"].as_array().unwrap();
+    let matches = flat_matches(&result);
     assert_eq!(
         matches.len(),
         1,
@@ -3576,18 +3599,34 @@ fn prefix_partial_name_not_included() {
 #[test]
 fn search_simple_mode() {
     let val = serde_json::json!({
-        "matches": [
-            { "file": "src/tools/mod.rs", "line": 54, "content": "pub struct RecoverableError {" },
-            { "file": "src/tools/mod.rs", "line": 60, "content": "    RecoverableError { error, hint }" },
-            { "file": "src/server.rs", "line": 230, "content": "RecoverableError => {" }
+        "file_groups": [
+            {
+                "file": "src/tools/mod.rs",
+                "count": 2,
+                "items": [
+                    { "line": 54, "content": "pub struct RecoverableError {" },
+                    { "line": 60, "content": "    RecoverableError { error, hint }" }
+                ]
+            },
+            {
+                "file": "src/server.rs",
+                "count": 1,
+                "items": [
+                    { "line": 230, "content": "RecoverableError => {" }
+                ]
+            }
         ],
-        "total": 3
+        "total": 3,
+        "files": 2
     });
     let result = format_grep(&val);
-    assert!(result.starts_with("3 matches"));
-    assert!(result.contains("src/tools/mod.rs:54"));
-    assert!(result.contains("src/server.rs:230"));
-    assert!(result.contains("pub struct RecoverableError {"));
+    assert!(result.contains("3 matches"), "got: {result}");
+    assert!(result.contains("src/tools/mod.rs"), "got: {result}");
+    assert!(result.contains("src/server.rs"), "got: {result}");
+    assert!(
+        result.contains("pub struct RecoverableError {"),
+        "got: {result}"
+    );
 }
 
 #[test]
@@ -3637,14 +3676,23 @@ fn search_empty_matches() {
 #[test]
 fn search_single_match_singular() {
     let val = serde_json::json!({
-        "matches": [
-            { "file": "src/main.rs", "line": 1, "content": "fn main() {" }
+        "file_groups": [
+            {
+                "file": "src/main.rs",
+                "count": 1,
+                "items": [
+                    { "line": 1, "content": "fn main() {" }
+                ]
+            }
         ],
-        "total": 1
+        "total": 1,
+        "files": 1
     });
     let result = format_grep(&val);
-    assert!(result.starts_with("1 match\n"));
-    assert!(!result.starts_with("1 matches"));
+    // Single-file: render_grouped emits the file header only, no global summary line.
+    assert!(result.contains("src/main.rs"), "got: {result}");
+    assert!(result.contains("fn main() {"), "got: {result}");
+    assert!(!result.contains("matches"), "got: {result}");
 }
 
 #[test]
@@ -3679,21 +3727,30 @@ fn search_context_mode_multiple_files() {
 #[test]
 fn search_simple_alignment() {
     let val = serde_json::json!({
-        "matches": [
-            { "file": "a.rs", "line": 1, "content": "short" },
-            { "file": "very/long/path.rs", "line": 100, "content": "long" }
+        "file_groups": [
+            {
+                "file": "a.rs",
+                "count": 1,
+                "items": [ { "line": 1, "content": "short" } ]
+            },
+            {
+                "file": "very/long/path.rs",
+                "count": 1,
+                "items": [ { "line": 100, "content": "long" } ]
+            }
         ],
-        "total": 2
+        "total": 2,
+        "files": 2
     });
     let result = format_grep(&val);
-    assert!(result.contains("a.rs:1"));
-    assert!(result.contains("very/long/path.rs:100"));
+    assert!(result.contains("a.rs"), "got: {result}");
+    assert!(result.contains("very/long/path.rs"), "got: {result}");
 }
 
 #[test]
 fn search_missing_matches_key() {
     let val = serde_json::json!({});
-    assert_eq!(format_grep(&val), "");
+    assert_eq!(format_grep(&val), "0 matches");
 }
 
 #[tokio::test]
