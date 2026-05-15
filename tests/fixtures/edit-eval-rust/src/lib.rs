@@ -16,3 +16,4 @@ pub mod replace_plain;
 pub mod replace_tight_impl;
 pub mod replace_trait_impl;
 pub mod replace_wrong_sig;
+pub mod bug054_repro;
