@@ -50,6 +50,7 @@
   - [doc://librarian-guide Resource](concepts/librarian-guide-resource.md)
   - [artifact_refresh (list_stale)](concepts/artifact-refresh-stale.md)
   - [artifact (action="move")](concepts/artifact-move.md)
+  - [Audit Doc Refs](concepts/audit-doc-refs.md)
   - [tracker_design](concepts/tracker-design.md)
   - [workspace_state_at](concepts/workspace-state-at.md)
   - [Augmentation: Templates & Schemas](concepts/augmentation-render-template.md)
