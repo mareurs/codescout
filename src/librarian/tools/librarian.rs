@@ -12,7 +12,7 @@ impl Tool for Librarian {
         "librarian"
     }
 
-fn description(&self) -> &'static str {
+    fn description(&self) -> &'static str {
         "Workspace-level librarian operations. \
          action: context | reindex | tracker_design | workspace_state_at | audit_doc_refs. \
          context: pack topic/anchor neighbourhood into a markdown bundle. \
@@ -26,7 +26,7 @@ fn description(&self) -> &'static str {
          Output is an `audit_issues` tracker."
     }
 
-fn input_schema(&self) -> Value {
+    fn input_schema(&self) -> Value {
         json!({
             "type": "object",
             "required": ["action"],
@@ -74,7 +74,7 @@ fn input_schema(&self) -> Value {
         })
     }
 
-async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
+    async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
         let action = args["action"].as_str().ok_or_else(|| {
             RecoverableError::new(
                 "action required — one of: context, reindex, tracker_design, workspace_state_at, audit_doc_refs",
@@ -135,7 +135,33 @@ mod tests {
 
     #[tokio::test]
     async fn audit_doc_refs_action_routes() {
-        let ctx = mk_ctx();
+        use crate::librarian::current_project::CurrentProject;
+        use crate::librarian::workspace::Root;
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+        // Write a minimal markdown file so the scanner has something to scan.
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs/readme.md"), "# hello\n").unwrap();
+        let ctx = ToolContext {
+            catalog: Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap())),
+            workspace: Arc::new(WorkspaceConfig {
+                roots: vec![Root {
+                    name: "r".into(),
+                    path: root.clone(),
+                }],
+                ignore: vec![],
+                rules: vec![],
+                umbrellas: vec![],
+            }),
+            rules: Arc::new(vec![]),
+            embedding: None,
+            current_project: Some(Arc::new(CurrentProject {
+                abs_path: root.clone(),
+                git_root: root,
+                umbrella: None,
+            })),
+        };
         let result = crate::librarian::tools::audit_doc_refs::call(&ctx, serde_json::json!({}))
             .await
             .unwrap();
