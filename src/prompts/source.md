@@ -188,6 +188,10 @@ the server. Returns `{"status": "cancelled"}` or `{"status": "no_active_sync"}`.
 
 **Full reference** (filter syntax, tracker archetypes, augmentation lifecycle): `resources/read doc://librarian-guide`
 
+### Artifact CLI
+
+For shell scripts and hooks that need to read or mutate the catalog without speaking MCP, the codescout binary exposes the artifact surface as subcommands: `codescout artifact find/get/graph/state-at/create/update/move/link`, `codescout artifact-event create/list`, `codescout artifact-refresh gather/list-stale`, `codescout artifact-augment <id>`. Each subcommand defaults to pretty output and adds `--json` for machine consumers. Names mirror MCP tool names 1:1, so any MCP example translates trivially.
+
 ### Goal-trackers
 
 A **goal-tracker** is a tracker artifact (`kind=tracker`, `tags: ["goal"]`) that names a completion criterion and aggregates the state of typed child trackers. Each project should have at most one goal with `status=active` at a time.
