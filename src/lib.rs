@@ -16,6 +16,7 @@ pub fn install_default_crypto_provider() {
 
 pub mod agent;
 pub mod ast;
+pub mod cli;
 pub mod config;
 #[cfg(feature = "dashboard")]
 pub mod dashboard;
