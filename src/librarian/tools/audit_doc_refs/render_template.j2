@@ -1,0 +1,18 @@
+**Last scan:** {{ scan_meta.last_scan_at }} ({{ scan_meta.last_scan_commit }}) —
+{{ issues|selectattr("status","equalto","open")|list|length }} open /
+{{ issues|length }} total
+{% if scan_meta.degraded %} — ⚠ degraded ({{ scan_meta.lsp_languages_offline|join(", ") }} offline){% endif %}
+
+| # | severity | reason | status | ref | found in |
+|---|---|---|---|---|---|
+{% for i in issues %}| {{ i.n }} | {{ i.severity }} | {{ i.severity_reason }} | {{ i.status }} | `{{ i.raw_ref }}` | {{ i.md_file }}:{{ i.md_line }} |
+{% endfor %}
+
+{% if parse_warnings %}
+### Parse warnings ({{ parse_warnings|length }})
+
+| file | line | reason |
+|---|---|---|
+{% for w in parse_warnings %}| {{ w.md_file }} | {{ w.line }} | {{ w.reason }} |
+{% endfor %}
+{% endif %}
