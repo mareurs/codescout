@@ -142,11 +142,44 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 rows.into_iter().map(|r| r.id).collect()
             }
         } else {
-            return Ok(json!({
-                "markdown": "",
-                "included_ids": [],
-                "scope": scope_summary(effective_scope, current, scope_fallback),
-            }));
+            // No anchor, no topic: surface active goal-trackers.
+            let mut clauses: Vec<FilterNode> = vec![
+                FilterNode::Leaf(
+                    [("kind".to_string(), json!({"eq": "tracker"}))]
+                        .into_iter()
+                        .collect(),
+                ),
+                FilterNode::Leaf(
+                    [("tags".to_string(), json!({"contains": "goal"}))]
+                        .into_iter()
+                        .collect(),
+                ),
+                FilterNode::Leaf(
+                    [("status".to_string(), json!({"eq": "active"}))]
+                        .into_iter()
+                        .collect(),
+                ),
+            ];
+            if !a.include_archived {
+                clauses.push(FilterNode::Leaf(
+                    [("status".to_string(), json!({"nin": HIDDEN_STATUSES}))]
+                        .into_iter()
+                        .collect(),
+                ));
+            }
+            let goal_filter = FilterNode::And { and: clauses };
+            let (scoped_filter, _) =
+                apply_scope(Some(goal_filter), effective_scope, &ctx.workspace, current)?;
+            let rows = find(
+                &cat,
+                &FindOpts {
+                    filter: scoped_filter,
+                    limit: 10,
+                    offset: 0,
+                    semantic: None,
+                },
+            )?;
+            rows.into_iter().map(|r| r.id).collect()
         }
     };
 
@@ -191,7 +224,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
     });
 
-    let mut markdown = String::new();
+    let active_goals_header =
+        matches!((&a.topic, &a.anchor_id), (None, None)) && !sorted_ids.is_empty();
+    let mut markdown = if active_goals_header {
+        String::from("## Active goals\n\n")
+    } else {
+        String::new()
+    };
     let mut included_ids: Vec<String> = Vec::new();
 
     for id in &sorted_ids {
@@ -419,7 +458,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn no_args_returns_empty() {
+    async fn no_args_with_no_active_goals_returns_empty() {
         let tmp = TempDir::new().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
         let ctx = mk_ctx(tmp.path().to_path_buf(), cat);
@@ -428,6 +467,43 @@ mod tests {
 
         assert_eq!(v["markdown"].as_str().unwrap(), "");
         assert_eq!(v["included_ids"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn no_args_returns_active_goals_header() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        // Create the real .md file the no-anchor branch will read.
+        let goal_dir = root.join("docs/trackers");
+        std::fs::create_dir_all(&goal_dir).unwrap();
+        std::fs::write(goal_dir.join("goal-a.md"), "# Ship Feature X\nsome body\n").unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let mut goal_row = sample_row(
+            "r/docs/trackers/goal-a.md",
+            "r",
+            "docs/trackers/goal-a.md",
+            "Ship Feature X",
+            None,
+        );
+        goal_row.kind = "tracker".into();
+        goal_row.tags = vec!["goal".into()];
+        artifact::upsert(&cat, &goal_row).unwrap();
+
+        let ctx = mk_ctx(root.to_path_buf(), cat);
+
+        let v = call(&ctx, json!({})).await.unwrap();
+
+        let md = v["markdown"].as_str().unwrap();
+        assert!(
+            md.contains("## Active goals"),
+            "expected '## Active goals' header in markdown; got: {md}"
+        );
+        assert!(
+            md.contains("Ship Feature X"),
+            "expected goal title in active-goals section; got: {md}"
+        );
     }
 
     #[tokio::test]
