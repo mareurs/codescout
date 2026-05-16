@@ -78,6 +78,7 @@ pub(crate) fn write_value<W: Write>(value: &Value, opts: &OutputOpts, w: &mut W)
         Shape::WriteAck => write_ack(value, no_color, w),
         Shape::FindResult => write_find_table(value, no_color, w),
         Shape::GetResult => write_get_summary(value, no_color, w),
+        Shape::GraphResult => write_graph_tree(value, no_color, w),
         // Other pretty branches land in later tasks. Until then, fall back
         // to JSON for everything else so output is never silent.
         _ => fallback_json(value, w),
@@ -191,6 +192,58 @@ fn write_get_summary<W: Write>(value: &Value, _no_color: bool, w: &mut W) -> Res
     } else {
         // No body field — print the whole JSON as a fallback so users still see the data.
         fallback_json(value, w)?;
+    }
+    Ok(())
+}
+
+fn write_graph_tree<W: Write>(value: &Value, _no_color: bool, w: &mut W) -> Result<()> {
+    let nodes = value
+        .get("nodes")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let edges = value
+        .get("edges")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    if nodes.is_empty() {
+        writeln!(w, "(empty graph)")?;
+        return Ok(());
+    }
+    let id_to_title: std::collections::HashMap<String, String> = nodes
+        .iter()
+        .filter_map(|n| {
+            let id = n.get("id")?.as_str()?.to_string();
+            let title = n
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(untitled)")
+                .to_string();
+            Some((id, title))
+        })
+        .collect();
+
+    let root = nodes
+        .first()
+        .and_then(|n| n.get("id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    writeln!(
+        w,
+        "{} — {}",
+        root,
+        id_to_title.get(root).cloned().unwrap_or_default()
+    )?;
+    for e in &edges {
+        let src = e.get("src_id").and_then(|v| v.as_str()).unwrap_or("");
+        let dst = e.get("dst_id").and_then(|v| v.as_str()).unwrap_or("");
+        let rel = e.get("rel").and_then(|v| v.as_str()).unwrap_or("?");
+        let other = if src == root { dst } else { src };
+        let title = id_to_title.get(other).cloned().unwrap_or_default();
+        let arrow = if src == root { "→" } else { "←" };
+        writeln!(w, "  {arrow} [{rel}] {other} — {title}")?;
     }
     Ok(())
 }

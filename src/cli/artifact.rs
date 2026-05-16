@@ -12,6 +12,8 @@ pub enum Verb {
     Find(FindArgs),
     /// Read one artifact by id.
     Get(GetArgs),
+    /// BFS neighbourhood around an artifact.
+    Graph(GraphArgs),
 }
 
 #[derive(Debug, Args)]
@@ -112,6 +114,7 @@ pub async fn dispatch(verb: Verb) -> Result<()> {
     match verb {
         Verb::Find(args) => run_find(args).await,
         Verb::Get(args) => run_get(args).await,
+        Verb::Graph(args) => run_graph(args).await,
     }
 }
 
@@ -241,6 +244,66 @@ pub(crate) async fn run_get(args: GetArgs) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, clap::Args)]
+pub struct GraphArgs {
+    /// Artifact id.
+    pub id: String,
+    /// BFS depth (1..=3).
+    #[arg(long, default_value_t = 1)]
+    pub depth: u8,
+    /// Comma-separated list of rel types to include (e.g. "supersedes,implements").
+    #[arg(long)]
+    pub rels: Option<String>,
+    /// Include event/source nodes via event edges.
+    #[arg(long = "include-events")]
+    pub include_events: bool,
+    /// Optional project root override (defaults to cwd).
+    #[arg(long)]
+    pub project: Option<std::path::PathBuf>,
+    /// Emit JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+    /// Force no color (also implicit when stdout is not a TTY).
+    #[arg(long = "no-color")]
+    pub no_color: bool,
+}
+
+impl GraphArgs {
+    pub fn common(&self) -> CommonOpts {
+        CommonOpts {
+            project: self.project.clone(),
+            json: self.json,
+            no_color: self.no_color,
+        }
+    }
+}
+
+pub(crate) async fn run_graph(args: GraphArgs) -> Result<()> {
+    if !(1..=3).contains(&args.depth) {
+        return Err(anyhow!("--depth must be in 1..=3 (got {})", args.depth));
+    }
+    let common = args.common();
+    let output = common.output();
+    let ctx = open_ctx(&common).await?;
+    let mut tool_args = serde_json::Map::new();
+    tool_args.insert("id".into(), Value::String(args.id.clone()));
+    tool_args.insert("depth".into(), Value::Number(args.depth.into()));
+    if let Some(r) = &args.rels {
+        let list: Vec<Value> = r
+            .split(',')
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| Value::String(s.trim().to_string()))
+            .collect();
+        tool_args.insert("rels".into(), Value::Array(list));
+    }
+    if args.include_events {
+        tool_args.insert("include_events".into(), Value::Bool(true));
+    }
+    let v = librarian_mcp::tools::graph::call(&ctx, Value::Object(tool_args)).await?;
+    crate::cli::format::print(&v, &output)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,5 +408,21 @@ mod tests {
         assert_eq!(c.project, Some(std::path::PathBuf::from("/tmp/proj")));
         assert!(c.json);
         assert!(c.no_color);
+    }
+
+    #[tokio::test]
+    async fn run_graph_rejects_depth_zero() {
+        let args = GraphArgs {
+            id: "abc".into(),
+            depth: 0,
+            rels: None,
+            include_events: false,
+            project: None,
+            json: false,
+            no_color: false,
+        };
+        let err = run_graph(args).await.unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("--depth must be in 1..=3"), "got: {msg}");
     }
 }
