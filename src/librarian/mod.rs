@@ -110,12 +110,15 @@ pub async fn build_tool_context() -> Result<tools::ToolContext> {
     })
 }
 
-pub async fn run_stdio_server() -> Result<()> {
+#[allow(dead_code)]
+pub(crate) async fn run_stdio_server() -> Result<()> {
     let ctx = build_tool_context().await?;
     server::LibrarianServer::new(ctx).serve_stdio().await
 }
 
-pub fn import_codescout() -> Result<()> {
+#[cfg(test)]
+
+pub(crate) fn import_codescout() -> Result<()> {
     use anyhow::Context as _;
     use std::path::PathBuf;
 
@@ -252,7 +255,9 @@ pub fn import_codescout() -> Result<()> {
     Ok(())
 }
 
-pub async fn reindex_cli(repo: Option<&str>, force: bool) -> Result<()> {
+#[cfg(test)]
+
+pub(crate) async fn reindex_cli(repo: Option<&str>, force: bool) -> Result<()> {
     use std::path::PathBuf;
 
     let cfg_path = std::env::var("LIBRARIAN_WORKSPACE")

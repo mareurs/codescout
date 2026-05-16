@@ -64,13 +64,13 @@ jobs:
           diff /tmp/code-tools.txt /tmp/doc-tools.txt || { echo "::error::Tool docs out of sync! Update docs/manual/src/tools/ to match src/tools/"; exit 1; }
 
   msrv:
-    name: MSRV (1.75)
+    name: MSRV (1.82)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.75"
+          toolchain: "1.82"
       - uses: Swatinem/rust-cache@v2
         with:
           key: msrv

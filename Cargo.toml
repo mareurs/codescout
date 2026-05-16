@@ -136,14 +136,17 @@ uuid = { version = "1.20.0", features = ["v4", "v5"] }
 # hot paths where std::sync poisoning is a correctness footgun.
 parking_lot = "0.12"
 
-# Librarian dependencies (formerly in crates/librarian-mcp, now dissolved into src/librarian/)
-serde_yml = "0.0.12"
-dirs = "5"
-pulldown-cmark = "0.13"
-futures = "0.3"
-ulid = "1"
-minijinja = { version = "2", default-features = false, features = ["builtins", "serde"] }
-jsonschema = { version = "0.30", default-features = false }
+# Librarian dependencies (formerly in crates/librarian-mcp, now dissolved into src/librarian/).
+# All marked optional — they are only used by src/librarian/** which is
+# cfg(feature = "librarian")-gated. When building --no-default-features these
+# crates do not resolve, keeping the lean-build promise documented in [features].
+serde_yml      = { version = "0.0.12", optional = true }
+dirs           = { version = "5",      optional = true }
+pulldown-cmark = { version = "0.13",   optional = true }
+futures        = { version = "0.3",    optional = true }
+ulid           = { version = "1",      optional = true }
+minijinja      = { version = "2", default-features = false, features = ["builtins", "serde"], optional = true }
+jsonschema     = { version = "0.30", default-features = false, optional = true }
 
 [features]
 default = ["remote-embed", "http", "librarian"]
@@ -152,7 +155,15 @@ default = ["remote-embed", "http", "librarian"]
 # Runtime registration is **enabled by default** when compiled in.
 # Opt out via `LIBRARIAN_ENABLED=0` env or
 # `[librarian] enabled = false` in `<project>/.codescout/project.toml`.
-librarian = []
+librarian = [
+    "dep:serde_yml",
+    "dep:dirs",
+    "dep:pulldown-cmark",
+    "dep:futures",
+    "dep:ulid",
+    "dep:minijinja",
+    "dep:jsonschema",
+]
 dashboard = ["dep:axum", "dep:tower-http", "dep:open"]
 http = ["dep:axum", "dep:tower-http", "rmcp/transport-streamable-http-server"]
 # Remote embedding via OpenAI-compatible HTTP API (Ollama, OpenAI, etc.)
