@@ -1,6 +1,6 @@
 // src/librarian/tools/audit_doc_refs/parser.rs
 use super::{ParseWarning, RefCandidate, RefKind, RefPosition};
-use pulldown_cmark::{Event, Options, Parser};
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::path::Path;
 
 pub fn parse_refs(text: &str, md_path: &Path) -> (Vec<RefCandidate>, Vec<ParseWarning>) {
@@ -9,24 +9,54 @@ pub fn parse_refs(text: &str, md_path: &Path) -> (Vec<RefCandidate>, Vec<ParseWa
     let mut candidates = Vec::new();
     let warnings = Vec::new(); // populated in Task 5
 
+    let mut in_code_block = false;
     let parser = Parser::new_ext(text, opts).into_offset_iter();
     for (event, span) in parser {
         let line = byte_offset_to_line(text, span.start);
-        if let Event::Code(content) = event {
-            if let Some(kind) = classify(content.as_ref()) {
+        match event {
+            Event::Code(content) => {
+                for raw in tokenize_code_span(content.as_ref()) {
+                    if let Some(kind) = classify(raw, true) {
+                        candidates.push(RefCandidate {
+                            md_file: md_file.clone(),
+                            md_line: line,
+                            raw_ref: raw.to_string(),
+                            ref_kind: kind,
+                            position: RefPosition::InlineSpan,
+                        });
+                    }
+                }
+            }
+            Event::Start(Tag::CodeBlock(_)) => in_code_block = true,
+            Event::End(TagEnd::CodeBlock) => in_code_block = false,
+            Event::Text(content) if in_code_block => {
+                for raw in tokenize_code_span(content.as_ref()) {
+                    if let Some(kind) = classify(raw, true) {
+                        candidates.push(RefCandidate {
+                            md_file: md_file.clone(),
+                            md_line: line,
+                            raw_ref: raw.to_string(),
+                            ref_kind: kind,
+                            position: RefPosition::FencedBlock,
+                        });
+                    }
+                }
+            }
+            Event::Start(Tag::Link { dest_url, .. }) => {
                 candidates.push(RefCandidate {
                     md_file: md_file.clone(),
                     md_line: line,
-                    raw_ref: content.into_string(),
-                    ref_kind: kind,
-                    position: RefPosition::InlineSpan,
+                    raw_ref: dest_url.into_string(),
+                    ref_kind: RefKind::Link,
+                    position: RefPosition::LinkTarget,
                 });
             }
+            _ => {}
         }
     }
     (candidates, warnings)
 }
-fn classify(s: &str) -> Option<RefKind> {
+fn classify(s: &str, in_code_context: bool) -> Option<RefKind> {
     if let Some((path_part, suffix)) = s.rsplit_once(':') {
         if looks_like_path(path_part) {
             if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
@@ -40,13 +70,32 @@ fn classify(s: &str) -> Option<RefKind> {
     if looks_like_path(s) {
         return Some(RefKind::FilePath);
     }
+    if in_code_context && is_module_path(s) {
+        return Some(RefKind::ModulePath);
+    }
     None
 }
 fn is_symbol_suffix(s: &str) -> bool {
     !s.is_empty()
         && s.chars()
             .all(|c| c.is_alphanumeric() || c == '_' || c == '/' || c == '.')
-        && s.chars().next().map(|c| !c.is_ascii_digit()).unwrap_or(false)
+        && s.chars()
+            .next()
+            .map(|c| !c.is_ascii_digit())
+            .unwrap_or(false)
+}
+
+fn tokenize_code_span(s: &str) -> impl Iterator<Item = &str> {
+    s.split_whitespace()
+}
+
+fn is_module_path(s: &str) -> bool {
+    s.contains('.')
+        && !s.contains('/')
+        && !s.contains(char::is_whitespace)
+        && s.chars()
+            .all(|c| c.is_lowercase() || c.is_ascii_digit() || c == '.' || c == '_')
+        && s.split('.').all(|part| !part.is_empty())
 }
 
 fn looks_like_path(s: &str) -> bool {
@@ -123,5 +172,36 @@ mod tests {
         let (cands, _) = parse("see `src/foo.rs:Bar/baz` for...");
         assert_eq!(cands.len(), 1);
         assert_eq!(cands[0].ref_kind, RefKind::FileSymbol);
+    }
+
+    #[test]
+    fn parser_module_path_requires_code_context() {
+        // Prose — must NOT classify
+        let (cands, _) = parse("We import from mrv.chat_app in the runner.");
+        assert!(
+            cands.iter().all(|c| c.ref_kind != RefKind::ModulePath),
+            "prose dotted-ident must not emit ModulePath"
+        );
+
+        // Code span — must classify
+        let (cands, _) = parse("Use `mrv.chat_app` here.");
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].ref_kind, RefKind::ModulePath);
+    }
+
+    #[test]
+    fn parser_extracts_link_targets() {
+        let (cands, _) = parse("[label](src/foo.py)");
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].ref_kind, RefKind::Link);
+        assert_eq!(cands[0].position, RefPosition::LinkTarget);
+    }
+
+    #[test]
+    fn parser_walks_fenced_code_blocks() {
+        let text = "```\nimport mrv.chat_app\n```\n";
+        let (cands, _) = parse(text);
+        // expect at least one module_path candidate from the fenced block
+        assert!(cands.iter().any(|c| c.ref_kind == RefKind::ModulePath));
     }
 }
