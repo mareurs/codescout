@@ -2,7 +2,7 @@ use crate::e2e::expectations::{load_expectations, LangExpectation};
 use codescout::agent::Agent;
 use codescout::lsp::manager::LspManager;
 use codescout::tools::ast::ListFunctions;
-use codescout::tools::file::Grep;
+use codescout::tools::grep::Grep;
 use codescout::tools::symbol::{References, Symbols};
 use codescout::tools::{Tool, ToolContext};
 use serde_json::{json, Value};

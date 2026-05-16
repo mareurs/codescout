@@ -291,10 +291,10 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn iron_law_8_promotes_call_graph_before_references() {
         let raw = SERVER_INSTRUCTIONS;
-        let idx = raw.find("8. **CALL GRAPH BEFORE STRUCTURAL EDITS.**")
+        let idx = raw
+            .find("8. **CALL GRAPH BEFORE STRUCTURAL EDITS.**")
             .expect("Iron Law 8 must be the call_graph promotion");
         let body = &raw[idx..idx.saturating_add(500)];
         let cg = body.find("call_graph").expect("call_graph must appear");
@@ -306,18 +306,28 @@ mod tests {
     fn impact_analysis_section_contains_call_graph_with_full_arguments() {
         let raw = SERVER_INSTRUCTIONS;
         let section_start = raw.find("### Impact Analysis").expect("section must exist");
-        let next = raw[section_start..].find("\n### ").map(|i| section_start + i)
+        let next = raw[section_start..]
+            .find("\n### ")
+            .map(|i| section_start + i)
             .unwrap_or(raw.len());
         let section = &raw[section_start..next];
 
-        assert!(section.contains("call_graph(symbol="),
-            "Impact Analysis must include a call_graph call with named symbol arg");
-        assert!(section.contains("direction=\"callers\""),
-            "Impact Analysis must demonstrate direction=\"callers\"");
-        assert!(section.contains("max_depth=3"),
-            "Impact Analysis must demonstrate max_depth=3");
-        assert!(section.contains("`references`"),
-            "Impact Analysis must reference the references tool");
+        assert!(
+            section.contains("call_graph(symbol="),
+            "Impact Analysis must include a call_graph call with named symbol arg"
+        );
+        assert!(
+            section.contains("direction=\"callers\""),
+            "Impact Analysis must demonstrate direction=\"callers\""
+        );
+        assert!(
+            section.contains("max_depth=3"),
+            "Impact Analysis must demonstrate max_depth=3"
+        );
+        assert!(
+            section.contains("`references`"),
+            "Impact Analysis must reference the references tool"
+        );
     }
 
     #[test]

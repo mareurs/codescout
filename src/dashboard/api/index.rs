@@ -50,6 +50,7 @@ pub async fn get_index(State(state): State<DashboardState>) -> Json<Value> {
 
 #[derive(Deserialize)]
 pub struct DriftParams {
+    #[allow(dead_code)]
     pub threshold: Option<f32>,
 }
 
