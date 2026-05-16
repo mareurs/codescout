@@ -2,44 +2,7 @@
 
 All notable changes to codescout are documented here.
 
-## Unreleased
-
-### Added
-
-- Nav-tool eval harness (`tests/e2e/nav_eval_harness.rs`, `tests/fixtures/nav-eval-rust/`).
-  Library-level adversarial eval grading action-correctness of `symbols`,
-  `symbol_at`, `references`, and `call_graph` on hand-authored Rust ambiguity
-  traps. Run via `cargo test --test e2e_tests -- --ignored run_nav_eval`. First
-  round verdict committed at `docs/superpowers/specs/2026-05-15-nav-eval-round-1.md`.
-  See spec at `docs/superpowers/specs/2026-05-15-nav-tool-eval-design.md`.
-- Nav-tool eval round 2: matchers corrected to read real tool response field
-  names (`symbols`/`definitions`/`file_groups.items`/`callers|callees`).
-  Round 2 verdict at `docs/superpowers/specs/2026-05-15-nav-eval-round-2.md`.
-- Nav-tool eval round 3 + bug fixes:
-  - `symbols`: `scope="project"` now filters out stdlib/dependency matches whose
-    path is outside the project root (only when scope is strictly `Project`, not `All`).
-  - `call_graph`: BFS no longer aborts when a non-seed node's resolver returns
-    `RecoverableError` — skips that hop and continues, matching the existing
-    `lookup_pos` behavior.
-  - Nav-eval matcher: `match_symbols` now falls back to the hoisted top-level
-    `file` field when per-item `file` is absent (mirrors the shared-file hoisting
-    in `symbols.rs`). New unit test `correct_when_file_is_hoisted_to_top_level`.
-  - Round 3 verdict (14 cases — Correct: 12, Partial: 0, CleanError: 0,
-    SilentWrong: 1, Hung: 0, Panic: 1):
-    `docs/superpowers/specs/2026-05-15-nav-eval-round-3.md`.
-- Nav-tool eval round 4:
-  - Runner grades transient LSP `-32801 / content modified` errors as SilentWrong (retryable) instead of Panic; the existing retry-on-warmup loop now absorbs LSP reindex races.
-  - LIMIT-001 widened to document the depth-≥2 ceiling for `call_graph` callees BFS.
-  - Round 4 verdict (14 cases — Correct: 13, Partial: 0, CleanError: 0, SilentWrong: 1, Hung: 0, Panic: 0): `docs/superpowers/specs/2026-05-15-nav-eval-round-4.md`.
-### Fixed
-
-- `edit_code(replace)` no longer strips preceding `///` doc comments or `#[...]` attributes when the new body omits them. The walk-back extension introduced for BUG-031 was unconditional; it now narrows back forward past decorator lines when `new_body` does not lead with one. Regression: `tests/symbol_lsp.rs::replace_symbol_preserves_doc_when_new_body_has_no_doc_comment` and edit-eval R-08.
-
-### Testing
-
-- Adversarial library-level eval for `edit_code` — 14 cases across replace/insert/remove/rename, graded via composite (return + on-disk content + cargo check exit). Shared eval_common module factored out of nav-eval. Surfaced and fixed BUG-055 (`edit_code` replace stripped preceding doc comments when new body omitted decorators).
-
-## [0.12.0] — 2026-05-13
+## [0.12.0] — 2026-05-16
 
 ### Breaking changes
 
@@ -76,6 +39,20 @@ All notable changes to codescout are documented here.
 - **`call_edges` cache extracted to `.codescout/call_edges.db`** — call-graph
   data is now in its own SQLite file rather than co-housed with the deleted
   chunk storage.
+- **Nav-tool eval harness** (`tests/e2e/nav_eval_harness.rs`,
+  `tests/fixtures/nav-eval-rust/`). Library-level adversarial eval grading
+  action-correctness of `symbols`, `symbol_at`, `references`, and `call_graph`
+  on hand-authored Rust ambiguity traps. Run via
+  `cargo test --test e2e_tests -- --ignored run_nav_eval`. Verdicts for
+  rounds 1-4 under `docs/superpowers/specs/2026-05-15-nav-eval-round-*.md`.
+- **Adversarial library-level eval for `edit_code`** — 14 cases across
+  replace/insert/remove/rename, graded via composite (return + on-disk content
+  + cargo check exit). Shared `eval_common` module factored out of nav-eval.
+- **`call_graph` TS same-file fallback (LIMIT-001 Phase A).**
+  `CachedResolver::lookup_pos` now falls back to a tree-sitter scan of the
+  seed file when both pre-seeded positions and LSP `workspace_symbols` are
+  unavailable, rescuing depth-≥2 BFS in LSP-down scenarios. Closes nav-eval
+  C-11 (a→b→c→a cycle, depth=5).
 
 ### Changed
 
@@ -104,6 +81,12 @@ All notable changes to codescout are documented here.
   2018).
 - **Tool hint strings** updated to current names (`index_project` →
   `index(action='build')`, `Run index_project()` → `Run index(action='build')`).
+- **`symbols` `scope="project"`** now filters out stdlib/dependency matches
+  whose path is outside the project root (only when scope is strictly
+  `Project`, not `All`). Found via nav-eval round 3.
+- **`call_graph` BFS** no longer aborts when a non-seed node's resolver
+  returns `RecoverableError` — skips that hop and continues, matching the
+  existing `lookup_pos` behavior. Found via nav-eval round 3.
 
 ### Removed
 
@@ -122,9 +105,17 @@ All notable changes to codescout are documented here.
   file alongside the memory entry.
 - `create_semantic_anchors` now uses the cross-encoder reranker for anchor
   selection, raising precision.
+- `edit_code(replace)` no longer strips preceding `///` doc comments or
+  `#[...]` attributes when the new body omits them. The walk-back extension
+  introduced for BUG-031 was unconditional; it now narrows back forward past
+  decorator lines when `new_body` does not lead with one. Regression:
+  `tests/symbol_lsp.rs::replace_symbol_preserves_doc_when_new_body_has_no_doc_comment`
+  and edit-eval R-08 (BUG-055).
+- Nav-eval runner grades transient LSP `-32801 / content modified` errors as
+  SilentWrong (retryable) instead of Panic; the existing retry-on-warmup loop
+  now absorbs LSP reindex races.
 
 ---
-
 ## [0.11.0] — 2026-05-06
 
 ### Breaking changes — tool consolidation
