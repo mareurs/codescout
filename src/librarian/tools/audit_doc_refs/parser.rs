@@ -232,5 +232,4 @@ mod tests {
         );
         assert!(warns[0].reason.contains("fence") || warns[0].reason.contains("unterminated"));
     }
-
 }

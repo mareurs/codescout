@@ -31,7 +31,7 @@ pub struct RefCandidate {
     pub position: RefPosition,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParseWarning {
     pub md_file: String,
     pub line: u32,
@@ -81,4 +81,33 @@ pub struct ScanMeta {
     pub n_refs_found: u32,
     pub degraded: bool,
     pub lsp_languages_offline: Vec<String>,
+}
+
+pub mod merger;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Issue {
+    pub n: u32,
+    pub title: String,
+    pub severity: Severity,
+    pub severity_reason: String,
+    pub status: String, // "open" | "in-progress" | "fixed" | "wontfix"
+    pub owner: String,
+    pub ref_kind: RefKind,
+    pub md_file: String,
+    pub md_line: u32,
+    pub raw_ref: String,
+    pub first_seen_commit: String,
+    pub first_seen_at: String,
+    pub last_verified_at: String,
+    pub notes: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TrackerParams {
+    pub issues: Vec<Issue>,
+    pub scan_meta: ScanMeta,
+    pub parse_warnings: Vec<ParseWarning>,
 }
