@@ -26,7 +26,7 @@ const DESIGN_VERSION: &str = "1";
 /// `artifact_find {kind:"tracker"}` directly.
 const EXISTING_TRACKERS_CAP: usize = 30;
 
-fn archetypes() -> Value {
+pub fn archetypes() -> Value {
     json!([
         archetype_deployment_state(),
         archetype_failure_table(),
