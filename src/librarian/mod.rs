@@ -117,7 +117,6 @@ pub(crate) async fn run_stdio_server() -> Result<()> {
 }
 
 #[cfg(test)]
-
 pub(crate) fn import_codescout() -> Result<()> {
     use anyhow::Context as _;
     use std::path::PathBuf;
@@ -256,7 +255,6 @@ pub(crate) fn import_codescout() -> Result<()> {
 }
 
 #[cfg(test)]
-
 pub(crate) async fn reindex_cli(repo: Option<&str>, force: bool) -> Result<()> {
     use std::path::PathBuf;
 
