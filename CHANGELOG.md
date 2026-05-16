@@ -2,6 +2,17 @@
 
 All notable changes to codescout are documented here.
 
+## Unreleased
+
+### Changed
+
+- **LSP pool default capacity bumped 5 → 10** to support multi-worktree swarm
+  workflows. Each `(language, project_root)` pair gets its own pooled LSP
+  client; with 5 slots, a swarm of 3-4 worktrees touching 2 languages would
+  thrash via LRU eviction and pay cold-start cost on every switch. 10 covers
+  realistic parallel-agent setups while staying well under per-process memory
+  ceilings. ([#5](https://github.com/mareurs/codescout/issues/5))
+
 ## [0.12.0] — 2026-05-16
 
 ### Breaking changes

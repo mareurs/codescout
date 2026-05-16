@@ -183,7 +183,7 @@ impl LspManager {
             clients: Mutex::new(HashMap::new()),
             last_used: Mutex::new(HashMap::new()),
             starting: StdMutex::new(HashMap::new()),
-            max_clients: 5,
+            max_clients: 10,
             idle_ttl: Self::DEFAULT_IDLE_TTL,
             pending_first_response: StdMutex::new(HashMap::new()),
             pending_reason: StdMutex::new(HashMap::new()),
