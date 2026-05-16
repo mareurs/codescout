@@ -4,6 +4,15 @@ All notable changes to codescout are documented here.
 
 ## [0.12.1] — 2026-05-16
 
+### Added
+
+- **`audit_doc_refs` librarian action** — scans markdown for stale code refs
+  (file paths, line refs, symbols, module paths, link targets) against the
+  current filesystem and LSP symbol index. Emits findings as an `audit_issues`
+  tracker at `docs/trackers/doc-ref-audit.md` (auto-created). Manual cadence
+  in v1; `fail_on` flag available for downstream CI integration. See
+  [docs/manual/src/concepts/audit-doc-refs.md](docs/manual/src/concepts/audit-doc-refs.md).
+
 ### Changed
 
 - **LSP pool default capacity bumped 5 → 10** to support multi-worktree swarm
