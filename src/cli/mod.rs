@@ -6,6 +6,7 @@
 
 pub mod artifact;
 pub mod artifact_event;
+pub mod artifact_refresh;
 pub mod format;
 
 use anyhow::{anyhow, Context, Result};

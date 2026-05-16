@@ -40,6 +40,12 @@ pub(crate) fn infer_shape(v: &Value) -> Shape {
         }
     }
     if let Some(obj) = v.as_object() {
+        // artifact_refresh(list_stale) returns {count, threshold_hours, items, next_step}.
+        // Match on `threshold_hours` + `items` before the generic FindResult
+        // check below (FindResult uses `items` + `total`).
+        if obj.contains_key("threshold_hours") && obj.contains_key("items") {
+            return Shape::StaleList;
+        }
         if obj.contains_key("items") && obj.contains_key("total") {
             // could be FindResult or EventList — disambiguate on shape of items
             if let Some(first) = obj
@@ -58,9 +64,6 @@ pub(crate) fn infer_shape(v: &Value) -> Shape {
         }
         if obj.contains_key("as_of") && obj.contains_key("status_at_as_of") {
             return Shape::StateAtResult;
-        }
-        if obj.contains_key("stale") && obj.contains_key("threshold_hours") {
-            return Shape::StaleList;
         }
         if obj.contains_key("id") && obj.contains_key("body") {
             return Shape::GetResult;
@@ -90,6 +93,7 @@ pub(crate) fn write_value<W: Write>(value: &Value, opts: &OutputOpts, w: &mut W)
         Shape::GraphResult => write_graph_tree(value, no_color, w),
         Shape::StateAtResult => write_state_summary(value, no_color, w),
         Shape::EventList => write_event_list(value, no_color, w),
+        Shape::StaleList => write_stale_list(value, no_color, w),
         // Other pretty branches land in later tasks. Until then, fall back
         // to JSON for everything else so output is never silent.
         _ => fallback_json(value, w),
@@ -341,6 +345,41 @@ fn write_event_list<W: Write>(value: &Value, _no_color: bool, w: &mut W) -> Resu
     Ok(())
 }
 
+fn write_stale_list<W: Write>(value: &Value, _no_color: bool, w: &mut W) -> Result<()> {
+    // The librarian `artifact_refresh(action="list_stale")` tool returns
+    // `{count, threshold_hours, items, next_step}` where each item carries
+    // `{id, kind, title, abs_path, last_refreshed_at, refresh_count, age_hours}`.
+    // Accept either the canonical envelope or a bare-array shape so the
+    // renderer is forgiving if the envelope evolves.
+    let items: &Vec<Value> = if let Some(arr) = value.as_array() {
+        arr
+    } else if let Some(arr) = value.get("items").and_then(|v| v.as_array()) {
+        arr
+    } else {
+        return fallback_json(value, w);
+    };
+    if items.is_empty() {
+        writeln!(w, "(no stale artifacts)")?;
+        return Ok(());
+    }
+    writeln!(w, "{:<18}  {:>9}  {:<8}  title", "id", "age_hours", "kind")?;
+    for it in items {
+        let id = it.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let kind = it.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+        let age = it
+            .get("age_hours")
+            .and_then(|v| v.as_i64())
+            .map(|h| h.to_string())
+            .unwrap_or_else(|| "never".to_string());
+        let title = it
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("(untitled)");
+        writeln!(w, "{id:<18}  {age:>9}  {kind:<8}  {title}")?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -436,6 +475,59 @@ mod tests {
         );
         assert!(s.contains("note"), "expected event kind; got: {s}");
         assert!(s.contains("1700000000000"), "expected timestamp; got: {s}");
+    }
+
+    #[test]
+    fn pretty_stale_list_renders_header_and_rows() {
+        // Real envelope shape from `artifact_refresh::call(action=list_stale)`:
+        // `{count, threshold_hours, items, next_step}` with per-item keys
+        // `{id, kind, title, abs_path, last_refreshed_at, refresh_count, age_hours}`.
+        let v = json!({
+            "count": 1,
+            "threshold_hours": 24,
+            "items": [
+                {
+                    "id": "abc123",
+                    "kind": "spec",
+                    "title": "Old Spec",
+                    "abs_path": "/tmp/old.md",
+                    "last_refreshed_at": "2026-04-01T00:00:00Z",
+                    "refresh_count": 2,
+                    "age_hours": 999
+                }
+            ],
+            "next_step": "Call artifact_refresh(id) on each item …"
+        });
+        let mut buf = Vec::new();
+        write_value(
+            &v,
+            &OutputOpts {
+                json: false,
+                no_color: true,
+            },
+            &mut buf,
+        )
+        .unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(
+            s.lines()
+                .any(|l| l.contains("id") && l.contains("age_hours") && l.contains("title")),
+            "expected header; got: {s}"
+        );
+        assert!(s.contains("abc123"), "expected id; got: {s}");
+        assert!(s.contains("Old Spec"), "expected title; got: {s}");
+        assert!(s.contains("999"), "expected age_hours rendered; got: {s}");
+    }
+
+    #[test]
+    fn infer_shape_recognises_stale_list() {
+        let v = json!({
+            "count": 0,
+            "threshold_hours": 24,
+            "items": [],
+            "next_step": "No stale augmented artifacts in scope."
+        });
+        assert!(matches!(infer_shape(&v), Shape::StaleList));
     }
 
     #[test]

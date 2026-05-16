@@ -140,6 +140,12 @@ enum Commands {
         #[command(subcommand)]
         verb: codescout::cli::artifact_event::Verb,
     },
+
+    /// Read and trigger artifact augmentation refreshes.
+    ArtifactRefresh {
+        #[command(subcommand)]
+        verb: codescout::cli::artifact_refresh::Verb,
+    },
 }
 
 fn parse_env_kv(s: &str) -> Result<(String, String), String> {
@@ -292,6 +298,9 @@ async fn main() -> Result<()> {
         }
         Commands::ArtifactEvent { verb } => {
             codescout::cli::artifact_event::dispatch(verb).await?;
+        }
+        Commands::ArtifactRefresh { verb } => {
+            codescout::cli::artifact_refresh::dispatch(verb).await?;
         }
         Commands::Mux {
             socket,
