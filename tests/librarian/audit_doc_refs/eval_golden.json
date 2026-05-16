@@ -1,0 +1,502 @@
+[
+  {
+    "md_file": "docs/issues/_TEMPLATE.md",
+    "md_line": 60,
+    "raw_ref": "/mcp",
+    "ref_kind": "file_path",
+    "verdict": "unknown",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": "path outside active project; scope=umbrella required"
+  },
+  {
+    "md_file": "docs/issues/_TEMPLATE.md",
+    "md_line": 74,
+    "raw_ref": ".codescout/diagnostic-XXXX.log",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/_TEMPLATE.md",
+    "md_line": 85,
+    "raw_ref": "src/server.rs:202-358",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/_TEMPLATE.md",
+    "md_line": 100,
+    "raw_ref": "N/A",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 14,
+    "raw_ref": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "ref_kind": "file_path",
+    "verdict": "resolved",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/bug-tracker.md",
+    "md_line": 19,
+    "raw_ref": "params.issues",
+    "ref_kind": "module_path",
+    "verdict": "unknown",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/bug-tracker.md",
+    "md_line": 21,
+    "raw_ref": "docs/issues/<date>-<slug>.md",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/bug-tracker.md",
+    "md_line": 24,
+    "raw_ref": "docs/issues/_TEMPLATE.md",
+    "ref_kind": "file_path",
+    "verdict": "resolved",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/bug-tracker.md",
+    "md_line": 50,
+    "raw_ref": "docs/issues/INDEX.md",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/memory-leak-x-session-freeze.md",
+    "md_line": 52,
+    "raw_ref": "5.0",
+    "ref_kind": "module_path",
+    "verdict": "unknown",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/memory-leak-x-session-freeze.md",
+    "md_line": 96,
+    "raw_ref": "src/embed/index.rs:1968",
+    "ref_kind": "file_line",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/memory-leak-x-session-freeze.md",
+    "md_line": 104,
+    "raw_ref": "src/server.rs",
+    "ref_kind": "file_path",
+    "verdict": "resolved",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/memory-leak-x-session-freeze.md",
+    "md_line": 104,
+    "raw_ref": "/proc/self/status",
+    "ref_kind": "file_path",
+    "verdict": "unknown",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": "path outside active project; scope=umbrella required"
+  },
+  {
+    "md_file": "docs/issues/memory-leak-x-session-freeze.md",
+    "md_line": 105,
+    "raw_ref": "target/release/codescout",
+    "ref_kind": "file_path",
+    "verdict": "resolved",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/memory-leak-x-session-freeze.md",
+    "md_line": 112,
+    "raw_ref": "examples/embed_leak_probe",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/memory-leak-x-session-freeze.md",
+    "md_line": 139,
+    "raw_ref": "usage.db",
+    "ref_kind": "module_path",
+    "verdict": "unknown",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/memory-leak-x-session-freeze.md",
+    "md_line": 148,
+    "raw_ref": "examples/lsp_document_leak_probe",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/memory-leak-x-session-freeze.md",
+    "md_line": 156,
+    "raw_ref": "src/lsp/mux/protocol.rs:62",
+    "ref_kind": "file_line",
+    "verdict": "resolved",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/memory-leak-x-session-freeze.md",
+    "md_line": 158,
+    "raw_ref": "src/lsp/client.rs:213",
+    "ref_kind": "file_line",
+    "verdict": "resolved",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/memory-leak-x-session-freeze.md",
+    "md_line": 167,
+    "raw_ref": "examples/activate_leak_probe",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/memory-leak-x-session-freeze.md",
+    "md_line": 204,
+    "raw_ref": "usage.db",
+    "ref_kind": "module_path",
+    "verdict": "unknown",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/memory-leak-x-session-freeze.md",
+    "md_line": 233,
+    "raw_ref": "73.1",
+    "ref_kind": "module_path",
+    "verdict": "unknown",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/memory-leak-x-session-freeze.md",
+    "md_line": 233,
+    "raw_ref": "23.7",
+    "ref_kind": "module_path",
+    "verdict": "unknown",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/memory-leak-x-session-freeze.md",
+    "md_line": 263,
+    "raw_ref": "src/embed/index.rs:1604-1675",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/memory-leak-x-session-freeze.md",
+    "md_line": 328,
+    "raw_ref": "/metrics",
+    "ref_kind": "file_path",
+    "verdict": "unknown",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": "path outside active project; scope=umbrella required"
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 21,
+    "raw_ref": "/mcp",
+    "ref_kind": "file_path",
+    "verdict": "unknown",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": "path outside active project; scope=umbrella required"
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 30,
+    "raw_ref": ".codescout/diagnostic-*.log",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 31,
+    "raw_ref": "~/.claude/projects/-home-marius-work-mirela-backend-kotlin/<session>.jsonl",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 32,
+    "raw_ref": "src/tools/workflow.rs",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 39,
+    "raw_ref": "src/server.rs::call_tool",
+    "ref_kind": "file_symbol",
+    "verdict": "file_missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 39,
+    "raw_ref": "req_ctx.peer",
+    "ref_kind": "module_path",
+    "verdict": "unknown",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 51,
+    "raw_ref": "Cargo.toml",
+    "ref_kind": "file_path",
+    "verdict": "resolved",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 54,
+    "raw_ref": "src/server.rs",
+    "ref_kind": "file_path",
+    "verdict": "resolved",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 67,
+    "raw_ref": "src/tools/workflow.rs::run_command_inner",
+    "ref_kind": "file_symbol",
+    "verdict": "file_missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 72,
+    "raw_ref": "src/server.rs::tests::call_tool_cancellation_kills_long_running_run_command",
+    "ref_kind": "file_symbol",
+    "verdict": "file_missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 86,
+    "raw_ref": "/tmp/codescout-cancel-live-test,",
+    "ref_kind": "file_path",
+    "verdict": "unknown",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": "path outside active project; scope=umbrella required"
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 89,
+    "raw_ref": ".codescout/diagnostic-a993.log",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 101,
+    "raw_ref": "/tmp/codescout-cancel-live-test",
+    "ref_kind": "file_path",
+    "verdict": "unknown",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": "path outside active project; scope=umbrella required"
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 110,
+    "raw_ref": "/mcp",
+    "ref_kind": "file_path",
+    "verdict": "unknown",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": "path outside active project; scope=umbrella required"
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 118,
+    "raw_ref": "rmcp-1.3.0/src/service.rs:986-995",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 163,
+    "raw_ref": "src/server.rs:202-358",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 164,
+    "raw_ref": "src/server.rs:432-464",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 165,
+    "raw_ref": "src/server.rs:1311-1378",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 166,
+    "raw_ref": "src/tools/workflow.rs:3132-3351",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 167,
+    "raw_ref": "Cargo.toml",
+    "ref_kind": "file_path",
+    "verdict": "resolved",
+    "severity": "low",
+    "severity_reason": "policy_default",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 168,
+    "raw_ref": "~/.cargo/registry/src/.../rmcp-1.3.0/src/service.rs:920-1010",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 169,
+    "raw_ref": ".codescout/diagnostic-a993.log",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/issues/archive/2026-04-16-mcp-cancel-disconnect.md",
+    "md_line": 170,
+    "raw_ref": "~/.claude/projects/-home-marius-work-mirela-backend-kotlin/b0d0b929-bf3b-42be-88c0-641f5d92964f.jsonl",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "med",
+    "severity_reason": "issues_drop",
+    "notes": null
+  },
+  {
+    "md_file": "docs/usage-reports/2026-05-03-usage-analysis.md",
+    "md_line": 11,
+    "raw_ref": "eduplanner-mcp/Cargo.toml",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "high",
+    "severity_reason": "policy_default",
+    "notes": null
+  },
+  {
+    "md_file": "docs/usage-reports/2026-05-03-usage-analysis.md",
+    "md_line": 11,
+    "raw_ref": "ktor-server/...",
+    "ref_kind": "file_path",
+    "verdict": "missing",
+    "severity": "high",
+    "severity_reason": "policy_default",
+    "notes": null
+  }
+]
