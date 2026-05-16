@@ -51,6 +51,59 @@ async fn fixture_context(language: &str) -> Arc<ToolContext> {
         )),
     })
 }
+/// File extensions to prime per language.
+fn language_extensions(language: &str) -> &'static [&'static str] {
+    match language {
+        "rust" => &["rs"],
+        "kotlin" => &["kt", "kts"],
+        "java" => &["java"],
+        "python" => &["py"],
+        "typescript" => &["ts", "tsx", "js", "jsx"],
+        _ => &[],
+    }
+}
+
+/// Pre-warm the LSP by issuing one `symbols` call per source file in the
+/// fixture. Forces the LSP to open + index each file eagerly so that
+/// textDocument/references has the workspace populated when refs tests run.
+async fn prime_lsp(ctx: &ToolContext, language: &str) {
+    let root = fixture_dir(language);
+    let exts = language_extensions(language);
+    if exts.is_empty() {
+        return;
+    }
+
+    fn walk(dir: &std::path::Path, exts: &[&str], out: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if name == "target" || name == "build" || name == "node_modules" || name == ".git" {
+                    continue;
+                }
+                walk(&path, exts, out);
+            } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                if exts.contains(&ext) {
+                    out.push(path);
+                }
+            }
+        }
+    }
+
+    let mut files = Vec::new();
+    walk(&root, exts, &mut files);
+
+    for abs in files {
+        let rel = match abs.strip_prefix(&root) {
+            Ok(r) => r.to_string_lossy().into_owned(),
+            Err(_) => continue,
+        };
+        let _ = Symbols.call(json!({ "path": rel }), ctx).await;
+    }
+}
 
 /// Run expectations from multiple TOML files for a language, sharing one LSP context.
 ///
@@ -59,6 +112,13 @@ async fn fixture_context(language: &str) -> Arc<ToolContext> {
 /// take 30-60s to initialize).
 pub async fn run_all_expectations(language: &str, toml_filenames: &[&str]) {
     let ctx = fixture_context(language).await;
+
+    // Pre-warm the LSP by issuing a `symbols` call on every source file in
+    // the fixture. textDocument/references needs workspace-wide analysis;
+    // touching each file forces the LSP to open + index it eagerly instead
+    // of lazily on first use.
+    prime_lsp(&ctx, language).await;
+
     let mut total_pass = 0;
     let mut total_failures = Vec::new();
 
