@@ -74,7 +74,7 @@ rather than return wrong results.
 ## `[ignored_paths]` — Indexing Exclusions
 
 Glob patterns for directories and files that should be excluded from semantic search indexing,
-`list_dir`, and file traversal.
+`tree`, and file traversal.
 
 ```toml
 [ignored_paths]

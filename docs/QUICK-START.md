@@ -78,7 +78,7 @@ claude mcp list
 
 ## Install LSP Servers
 
-LSP servers power symbol navigation (`find_symbol`, `list_symbols`, `goto_definition`, etc.).
+LSP servers power symbol navigation (`symbols`, `symbol_at`, `references`).
 Grab the install script from the repo without cloning:
 
 ```bash
@@ -130,13 +130,13 @@ api_key = "sk-..."
 Open a Claude Code session in your project and ask:
 
 ```
-Run index_project to build the semantic search index.
+Run index(action: build) to build the semantic search index.
 ```
 
 Or call it directly:
 
 ```json
-{ "name": "index_project", "arguments": {} }
+{ "name": "index", "arguments": { "action": "build" } }
 ```
 
 Indexing takes 1–3 minutes for a ~100k line project. It is incremental — subsequent runs only
@@ -190,15 +190,15 @@ future sessions start with context already loaded.
 
 | Goal | Tool |
 |---|---|
-| Explore directory structure | `list_dir` |
-| List all symbols in a file or dir | `list_symbols` |
-| Find a function by name | `find_symbol` with `include_body: true` |
+| Explore directory structure | `tree` |
+| List all symbols in a file or dir | `symbols` |
+| Find a function by name | `symbols` with `query: "<name>", include_body: true` |
 | Find code by concept | `semantic_search` |
-| Search by text / regex | `search_pattern` |
-| Jump to a definition | `goto_definition` |
+| Search by text / regex | `grep` |
+| Jump to a definition | `symbol_at` |
 | Find all usages | `references` |
-| Rename a symbol everywhere | `rename_symbol` |
-| Replace a function body | `replace_symbol` |
+| Rename a symbol everywhere | `edit_code` with `action: "rename"` |
+| Replace a function body | `edit_code` with `action: "replace"` |
 | View git blame | `run_command("git blame <file>")` |
 | Save a project note | `memory` with `action: "write"` |
 

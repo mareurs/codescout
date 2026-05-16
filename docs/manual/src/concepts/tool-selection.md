@@ -94,7 +94,7 @@ before. Start with structure and orient yourself before looking at any code.
 **Step 1 — see the directory structure:**
 
 ```json
-{ "tool": "list_dir", "arguments": { "path": "src" } }
+{ "tool": "tree", "arguments": { "path": "src" } }
 ```
 
 This gives you the top-level layout: which directories exist, rough file
@@ -156,7 +156,7 @@ tracing usages of a known symbol.
 | Function/class name | `symbols(pattern)` |
 | Who calls a function | `references(name_path, file)` |
 | A concept or behaviour | `semantic_search(query)` |
-| Nothing (unfamiliar area) | `list_dir` → `symbols` → `semantic_search` |
+| Nothing (unfamiliar area) | `tree` → `symbols` → `semantic_search` |
 | Exact string or import | `grep(regex)` |
 
 ## Further Reading

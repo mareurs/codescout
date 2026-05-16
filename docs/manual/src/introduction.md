@@ -64,7 +64,7 @@ Four pillars:
 
 Supported languages: Rust, Python, TypeScript/JavaScript, Go, Java, Kotlin,
 C/C++, C#, Ruby.
-### Semantic Search (3 tools)
+### Semantic Search (2 tools)
 
 Sometimes you know the concept but not the name. Semantic search finds code by
 meaning using embeddings, not keywords.
@@ -104,10 +104,12 @@ project root.
 
 ### The Rest
 
-Beyond these pillars: 6 file operation tools (directory listing, file
-reading, pattern search, file search, file creation, find-and-replace editing), 2 workflow tools
-(project onboarding, shell commands), 2 config tools, and 5 GitHub tools — **22 tools total**.
-
+Beyond these pillars: 7 file/markdown operation tools (directory listing,
+file reading, pattern search, file creation, find-and-replace editing,
+markdown-aware reading and editing), 3 workflow tools (project onboarding,
+shell commands, write-root approval), and 1 config tool (`workspace`). With
+librarian enabled (default), 5 additional artifact tools appear at session
+start. **~20 tools in the base server, ~25 with librarian.**
 ### Token Efficiency by Design
 
 Every tool defaults to the most compact representation that is still useful.
