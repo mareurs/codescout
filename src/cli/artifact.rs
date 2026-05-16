@@ -19,6 +19,8 @@ pub enum Verb {
     StateAt(StateAtArgs),
     /// Create a new artifact.
     Create(CreateArgs),
+    /// Update an existing artifact.
+    Update(UpdateArgs),
 }
 
 #[derive(Debug, Args)]
@@ -122,6 +124,7 @@ pub async fn dispatch(verb: Verb) -> Result<()> {
         Verb::Graph(args) => run_graph(args).await,
         Verb::StateAt(args) => run_state_at(args).await,
         Verb::Create(args) => run_create(args).await,
+        Verb::Update(args) => run_update(args).await,
     }
 }
 
@@ -481,6 +484,111 @@ pub(crate) async fn run_create(args: CreateArgs) -> Result<()> {
     }
 
     let v = librarian_mcp::tools::create::call(&ctx, Value::Object(tool_args)).await?;
+    crate::cli::format::print(&v, &output)?;
+    Ok(())
+}
+
+#[derive(Debug, clap::Args)]
+pub struct UpdateArgs {
+    /// Artifact id.
+    pub id: String,
+    /// New title.
+    #[arg(long)]
+    pub title: Option<String>,
+    /// New status.
+    #[arg(long)]
+    pub status: Option<String>,
+    /// Comma-separated owner list (replaces existing list).
+    #[arg(long)]
+    pub owners: Option<String>,
+    /// Comma-separated tag list (replaces existing list).
+    #[arg(long)]
+    pub tags: Option<String>,
+    /// New topic.
+    #[arg(long)]
+    pub topic: Option<String>,
+    /// Body content: `@<file>`, `-`, or literal.
+    #[arg(long)]
+    pub body: Option<String>,
+    /// RFC 7396 merge-patch on augmentation params (`@<file>`, `-`, or literal JSON).
+    #[arg(long = "patch-params")]
+    pub patch_params: Option<String>,
+    /// Record a completed refresh cycle atomically.
+    #[arg(long = "commit-refresh")]
+    pub commit_refresh: bool,
+    /// Optional project root override (defaults to cwd).
+    #[arg(long)]
+    pub project: Option<std::path::PathBuf>,
+    /// Emit JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+    /// Force no color (also implicit when stdout is not a TTY).
+    #[arg(long = "no-color")]
+    pub no_color: bool,
+}
+
+impl UpdateArgs {
+    pub fn common(&self) -> CommonOpts {
+        CommonOpts {
+            project: self.project.clone(),
+            json: self.json,
+            no_color: self.no_color,
+        }
+    }
+}
+
+pub(crate) async fn run_update(args: UpdateArgs) -> Result<()> {
+    let common = args.common();
+    let output = common.output();
+    let ctx = open_ctx(&common).await?;
+
+    let mut tool_args = serde_json::Map::new();
+    tool_args.insert("id".into(), Value::String(args.id.clone()));
+
+    let mut patch = serde_json::Map::new();
+    if let Some(t) = &args.title {
+        patch.insert("title".into(), Value::String(t.clone()));
+    }
+    if let Some(s) = &args.status {
+        patch.insert("status".into(), Value::String(s.clone()));
+    }
+    if let Some(o) = &args.owners {
+        let list: Vec<Value> = o
+            .split(',')
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| Value::String(s.trim().into()))
+            .collect();
+        patch.insert("owners".into(), Value::Array(list));
+    }
+    if let Some(t) = &args.tags {
+        let list: Vec<Value> = t
+            .split(',')
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| Value::String(s.trim().into()))
+            .collect();
+        patch.insert("tags".into(), Value::Array(list));
+    }
+    if let Some(t) = &args.topic {
+        patch.insert("topic".into(), Value::String(t.clone()));
+    }
+    if let Some(b) = &args.body {
+        patch.insert(
+            "body".into(),
+            Value::String(crate::cli::read_at_or_stdin(b)?),
+        );
+    }
+    if let Some(pp) = &args.patch_params {
+        let raw = crate::cli::read_at_or_stdin(pp)?;
+        let parsed: Value =
+            serde_json::from_str(&raw).context("--patch-params is not valid JSON")?;
+        patch.insert("params".into(), parsed);
+    }
+    tool_args.insert("patch".into(), Value::Object(patch));
+    if args.commit_refresh {
+        tool_args.insert("commit_refresh".into(), Value::Bool(true));
+    }
+
+    let v = librarian_mcp::tools::update::call(&ctx, Value::Object(tool_args)).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
 }
