@@ -21,6 +21,10 @@ pub enum Verb {
     Create(CreateArgs),
     /// Update an existing artifact.
     Update(UpdateArgs),
+    /// Move an artifact to a new path.
+    Move(MoveArgs),
+    /// Add a typed edge between two artifacts.
+    Link(LinkArgs),
 }
 
 #[derive(Debug, Args)]
@@ -125,6 +129,8 @@ pub async fn dispatch(verb: Verb) -> Result<()> {
         Verb::StateAt(args) => run_state_at(args).await,
         Verb::Create(args) => run_create(args).await,
         Verb::Update(args) => run_update(args).await,
+        Verb::Move(args) => run_move(args).await,
+        Verb::Link(args) => run_link(args).await,
     }
 }
 
@@ -589,6 +595,93 @@ pub(crate) async fn run_update(args: UpdateArgs) -> Result<()> {
     }
 
     let v = librarian_mcp::tools::update::call(&ctx, Value::Object(tool_args)).await?;
+    crate::cli::format::print(&v, &output)?;
+    Ok(())
+}
+
+#[derive(Debug, clap::Args)]
+pub struct MoveArgs {
+    /// Artifact id.
+    pub id: String,
+    /// Destination path relative to repo root.
+    #[arg(long = "new-rel-path")]
+    pub new_rel_path: String,
+    /// Optional project root override (defaults to cwd).
+    #[arg(long)]
+    pub project: Option<std::path::PathBuf>,
+    /// Emit JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+    /// Force no color (also implicit when stdout is not a TTY).
+    #[arg(long = "no-color")]
+    pub no_color: bool,
+}
+
+impl MoveArgs {
+    pub fn common(&self) -> CommonOpts {
+        CommonOpts {
+            project: self.project.clone(),
+            json: self.json,
+            no_color: self.no_color,
+        }
+    }
+}
+
+pub(crate) async fn run_move(args: MoveArgs) -> Result<()> {
+    let common = args.common();
+    let output = common.output();
+    let ctx = open_ctx(&common).await?;
+    let tool_args = serde_json::json!({
+        "id": args.id,
+        "new_rel_path": args.new_rel_path,
+    });
+    let v = librarian_mcp::tools::mv::call(&ctx, tool_args).await?;
+    crate::cli::format::print(&v, &output)?;
+    Ok(())
+}
+
+#[derive(Debug, clap::Args)]
+pub struct LinkArgs {
+    /// Source artifact id.
+    #[arg(long)]
+    pub src: String,
+    /// Destination artifact id.
+    #[arg(long)]
+    pub dst: String,
+    /// Relation type (e.g. supersedes, implements, child).
+    #[arg(long)]
+    pub rel: String,
+    /// Optional project root override (defaults to cwd).
+    #[arg(long)]
+    pub project: Option<std::path::PathBuf>,
+    /// Emit JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+    /// Force no color (also implicit when stdout is not a TTY).
+    #[arg(long = "no-color")]
+    pub no_color: bool,
+}
+
+impl LinkArgs {
+    pub fn common(&self) -> CommonOpts {
+        CommonOpts {
+            project: self.project.clone(),
+            json: self.json,
+            no_color: self.no_color,
+        }
+    }
+}
+
+pub(crate) async fn run_link(args: LinkArgs) -> Result<()> {
+    let common = args.common();
+    let output = common.output();
+    let ctx = open_ctx(&common).await?;
+    let tool_args = serde_json::json!({
+        "src_id": args.src,
+        "dst_id": args.dst,
+        "rel": args.rel,
+    });
+    let v = librarian_mcp::tools::link::call(&ctx, tool_args).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
 }
