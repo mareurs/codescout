@@ -102,6 +102,7 @@ pub mod reindex;
 
 pub mod context;
 
+pub mod audit_doc_refs;
 pub mod augment;
 pub mod refresh;
 pub mod refresh_stale;
