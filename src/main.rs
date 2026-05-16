@@ -128,6 +128,12 @@ enum Commands {
     /// Print the codescout git SHA, full SHA, and dirty status baked into this
     /// binary at build time. JSON output for use by the bench harness.
     Version,
+
+    /// Read and mutate artifacts (find, get, graph, state-at, create, …).
+    Artifact {
+        #[command(subcommand)]
+        verb: codescout::cli::artifact::Verb,
+    },
 }
 
 fn parse_env_kv(s: &str) -> Result<(String, String), String> {
@@ -274,6 +280,9 @@ async fn main() -> Result<()> {
                 .unwrap_or_else(|| std::path::PathBuf::from("."));
             tracing::info!("Launching dashboard for {}", root.display());
             codescout::dashboard::serve(root, host, port, !no_open).await?;
+        }
+        Commands::Artifact { verb } => {
+            codescout::cli::artifact::dispatch(verb).await?;
         }
         Commands::Mux {
             socket,

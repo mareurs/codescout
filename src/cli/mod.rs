@@ -4,6 +4,7 @@
 //! like the corresponding librarian-mcp tool's input, calls the tool, and
 //! routes the response through `format::print`.
 
+pub mod artifact;
 pub mod format;
 
 use anyhow::{anyhow, Context, Result};
