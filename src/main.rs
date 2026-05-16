@@ -146,6 +146,9 @@ enum Commands {
         #[command(subcommand)]
         verb: codescout::cli::artifact_refresh::Verb,
     },
+
+    /// Attach or merge augmentation (prompt + params) on an artifact.
+    ArtifactAugment(codescout::cli::artifact_augment::AugmentArgs),
 }
 
 fn parse_env_kv(s: &str) -> Result<(String, String), String> {
@@ -301,6 +304,9 @@ async fn main() -> Result<()> {
         }
         Commands::ArtifactRefresh { verb } => {
             codescout::cli::artifact_refresh::dispatch(verb).await?;
+        }
+        Commands::ArtifactAugment(args) => {
+            codescout::cli::artifact_augment::run(args).await?;
         }
         Commands::Mux {
             socket,
