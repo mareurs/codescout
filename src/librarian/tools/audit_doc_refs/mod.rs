@@ -72,3 +72,13 @@ pub struct Finding {
     pub candidate: RefCandidate,
     pub resolution: Resolution,
 }
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ScanMeta {
+    pub last_scan_at: Option<String>,
+    pub last_scan_commit: Option<String>,
+    pub n_files_scanned: u32,
+    pub n_refs_found: u32,
+    pub degraded: bool,
+    pub lsp_languages_offline: Vec<String>,
+}
