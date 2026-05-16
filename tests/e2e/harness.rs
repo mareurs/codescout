@@ -178,23 +178,47 @@ async fn run_symbols(ctx: &ToolContext, exp: &LangExpectation) -> Result<(), Str
         params["include_body"] = json!(true);
     }
 
-    let result = Symbols
-        .call(params, ctx)
-        .await
-        .map_err(|e| format!("Tool error: {e}"))?;
+    // Kotlin/Java LSPs index incrementally — `documentSymbol` may return a
+    // partial child list on the first call. Retry until expected symbols
+    // appear or the budget is exhausted.
+    let expected_children = exp.contains_symbols.as_deref().unwrap_or(&[]);
+    let expected_body = exp.body_contains.as_deref().unwrap_or(&[]);
+    let mut last_result = serde_json::Value::Null;
+    let mut last_err: Option<String> = None;
 
-    // Check children/contains_symbols
-    if let Some(expected) = &exp.contains_symbols {
-        assert_contains_symbols(&result, expected)?;
+    for attempt in 0..8 {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64)).await;
+        }
+        match Symbols.call(params.clone(), ctx).await {
+            Ok(result) => {
+                last_err = None;
+                last_result = result;
+                let result_str = serde_json::to_string(&last_result).unwrap_or_default();
+                let children_ok = expected_children.is_empty()
+                    || assert_contains_symbols(&last_result, expected_children).is_ok();
+                let body_ok = expected_body.iter().all(|n| result_str.contains(n));
+                if children_ok && body_ok {
+                    return Ok(());
+                }
+            }
+            Err(e) => {
+                last_err = Some(format!("Tool error: {e}"));
+            }
+        }
     }
 
-    // Check body content
-    if let Some(expected_body) = &exp.body_contains {
-        let result_str = serde_json::to_string(&result).unwrap_or_default();
-        for needle in expected_body {
-            if !result_str.contains(needle) {
-                return Err(format!("symbols(\"{symbol}\") body missing \"{needle}\""));
-            }
+    if let Some(err) = last_err {
+        return Err(err);
+    }
+
+    if !expected_children.is_empty() {
+        assert_contains_symbols(&last_result, expected_children)?;
+    }
+    let result_str = serde_json::to_string(&last_result).unwrap_or_default();
+    for needle in expected_body {
+        if !result_str.contains(needle) {
+            return Err(format!("symbols(\"{symbol}\") body missing \"{needle}\""));
         }
     }
 
@@ -209,13 +233,16 @@ async fn run_find_references(ctx: &ToolContext, exp: &LangExpectation) -> Result
     // LSP servers index in the background — early calls may return only partial
     // results (e.g., just the definition site) before cross-file analysis completes.
     // Retry until ALL expected references are found or we exhaust attempts.
+    // Budget: up to 16 attempts × 750ms backoff base ≈ 90s of wait time, which
+    // is long enough for rust-analyzer to finish workspace analysis on a small
+    // fixture project even on a cold CI runner.
     let expected = exp.expected_refs_contain.as_deref().unwrap_or(&[]);
     let mut last_result_str = String::new();
     let mut last_err: Option<String> = None;
 
-    for attempt in 0..8 {
+    for attempt in 0..16 {
         if attempt > 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(750 * attempt as u64)).await;
         }
         match References
             .call(json!({ "symbol": symbol, "path": file }), ctx)
