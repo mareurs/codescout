@@ -1,8 +1,8 @@
 //! `codescout artifact-augment <id>` — attach or merge augmentation params/prompt.
 
+use crate::librarian::tools::Tool;
 use anyhow::{Context, Result};
 use clap::Args;
-use librarian_mcp::tools::Tool;
 use serde_json::Value;
 
 use crate::cli::{open_ctx, CommonOpts};
@@ -109,7 +109,7 @@ pub async fn run(args: AugmentArgs) -> Result<()> {
 
     // `augment::call` is a Tool-trait method, not a free function — instantiate
     // the zero-sized ArtifactAugment struct and dispatch via the trait.
-    let tool = librarian_mcp::tools::augment::ArtifactAugment;
+    let tool = crate::librarian::tools::augment::ArtifactAugment;
     let v = tool.call(&ctx, Value::Object(tool_args)).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())

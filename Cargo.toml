@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/codescout-embed", "crates/librarian-mcp"]
+members = [".", "crates/codescout-embed"]
 resolver = "2"
 
 [workspace.package]
@@ -29,7 +29,7 @@ repository = "https://github.com/mareurs/codescout"
 homepage = "https://mareurs.github.io/codescout/"
 documentation = "https://mareurs.github.io/codescout/"
 license = "MIT"
-rust-version = "1.75"
+rust-version = "1.82"
 build = "build.rs"
 exclude = [".codescout/", "docs/", "scripts/", ".github/", "CLAUDE.md"]
 
@@ -63,7 +63,6 @@ async-trait = "0.1"
 
 # Sibling crates
 codescout-embed = { path = "crates/codescout-embed", version = "0.1.0" }
-librarian-mcp = { path = "crates/librarian-mcp", version = "0.1.0", optional = true }
 
 # Logging / tracing
 tracing = "0.1"
@@ -74,12 +73,12 @@ tracing-appender = "0.2"
 clap = { version = "4", features = ["derive"] }
 
 # Git integration
-git2 = "0.20"
+git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }
 
 # Database — SQLite with bundled libsqlite3 (used by call_edges cache +
-# migrate-memories legacy reader). sqlite-vec was dropped in L-01 step 8b
-# alongside the legacy embed::index module.
+# migrate-memories legacy reader).
 rusqlite = { version = "0.39" }
+sqlite-vec = "0.1"
 
 # Retrieval stack client (Qdrant gRPC). Default features drop:
 #  - download_snapshots (pulls reqwest, snapshot API unused)
@@ -123,7 +122,7 @@ tree-sitter-css = "0.23"
 tree-sitter-bash = "0.23"
 libc = "0.2.182"
 
-# Temp files (buffer reference resolution in run_command)
+chrono = { version = "0.4", features = ["serde"] }
 tempfile = "3"
 
 # Dashboard web server (behind "dashboard" feature) and HTTP transport (behind "http" feature)
@@ -137,14 +136,23 @@ uuid = { version = "1.20.0", features = ["v4", "v5"] }
 # hot paths where std::sync poisoning is a correctness footgun.
 parking_lot = "0.12"
 
+# Librarian dependencies (formerly in crates/librarian-mcp, now dissolved into src/librarian/)
+serde_yml = "0.0.12"
+dirs = "5"
+pulldown-cmark = "0.13"
+futures = "0.3"
+ulid = "1"
+minijinja = { version = "2", default-features = false, features = ["builtins", "serde"] }
+jsonschema = { version = "0.30", default-features = false }
+
 [features]
 default = ["remote-embed", "http", "librarian"]
-# Embedded librarian-mcp (workspace doc/spec/plan index). Compiled in by
+# Embedded librarian (workspace doc/spec/plan index). Compiled in by
 # default for dev; turn off for production publishes via `--no-default-features`.
 # Runtime registration is **enabled by default** when compiled in.
 # Opt out via `LIBRARIAN_ENABLED=0` env or
 # `[librarian] enabled = false` in `<project>/.codescout/project.toml`.
-librarian = ["dep:librarian-mcp"]
+librarian = []
 dashboard = ["dep:axum", "dep:tower-http", "dep:open"]
 http = ["dep:axum", "dep:tower-http", "rmcp/transport-streamable-http-server"]
 # Remote embedding via OpenAI-compatible HTTP API (Ollama, OpenAI, etc.)
@@ -184,7 +192,6 @@ strip = true
 panic = "abort"
 
 [dev-dependencies]
-chrono = "0.4"
 tempfile = "3"
 tower = "0.5"
 filetime = "0.2"
@@ -192,3 +199,4 @@ mockito = "1"
 tokio = { version = "1", features = ["test-util"] }
 assert_cmd = "2"
 predicates = "3"
+serial_test = "3.4.0"

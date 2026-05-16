@@ -44,7 +44,7 @@
   - [Tool Description Diet](concepts/tool-description-diet.md)
   - [Tool Usage Doctor](concepts/tool-usage-doctor.md)
 
-- [librarian-mcp](concepts/librarian-mcp.md)
+- [Librarian](concepts/librarian-embedded.md)
   - [Librarian Embedded](concepts/librarian-embedded.md)
   - [Librarian Tools Collapse (16 → 5)](concepts/librarian-tools-collapse.md)
   - [doc://librarian-guide Resource](concepts/librarian-guide-resource.md)

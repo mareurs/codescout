@@ -1,6 +1,7 @@
 //! codescout: high-performance coding agent MCP server.
 //!
 //! Provides IDE-grade code intelligence to LLMs via the Model Context Protocol.
+#![recursion_limit = "256"]
 
 /// Install rustls' ring crypto provider as the default. Idempotent — safe to
 /// call from multiple entry points (binary `main`, integration tests, library

@@ -88,7 +88,7 @@ impl CodeScoutServer {
         #[cfg(feature = "librarian")]
         if librarian_enabled_at_runtime(status.as_ref().map(|s| s.path.as_str())) {
             instructions.push_str("\n\n");
-            instructions.push_str(librarian_mcp::INSTRUCTIONS);
+            instructions.push_str(crate::librarian::INSTRUCTIONS);
         }
         #[cfg_attr(not(feature = "librarian"), allow(unused_mut))]
         let mut tools: Vec<Arc<dyn Tool>> = vec![
@@ -365,7 +365,7 @@ impl CodeScoutServer {
         #[cfg(feature = "librarian")]
         if librarian_enabled_at_runtime(status.as_ref().map(|s| s.path.as_str())) {
             new_instructions.push_str("\n\n");
-            new_instructions.push_str(librarian_mcp::INSTRUCTIONS);
+            new_instructions.push_str(crate::librarian::INSTRUCTIONS);
         }
         *self.instructions.write() = new_instructions;
     }
@@ -508,7 +508,7 @@ impl CodeScoutServer {
             Err(e) => route_tool_error(e),
         };
 
-        let ok = call_result.is_error.map_or(true, |e| !e);
+        let ok = call_result.is_error.is_none_or(|e| !e);
         tracing::debug!(ok, "tool result");
         tracing::info!(
             tool = %req.name,

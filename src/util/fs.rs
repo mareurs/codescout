@@ -61,9 +61,8 @@ pub fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
         let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode));
     }
 
-    std::fs::rename(&tmp, path).map_err(|e| {
+    std::fs::rename(&tmp, path).inspect_err(|_| {
         let _ = std::fs::remove_file(&tmp);
-        e
     })
 }
 

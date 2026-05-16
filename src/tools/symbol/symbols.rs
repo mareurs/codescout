@@ -348,8 +348,7 @@ impl Tool for Symbols {
                         let name_ok = n.contains(&pattern_lower)
                             || (pattern_lower.contains('/')
                                 && sym.name_path.to_lowercase().contains(&pattern_lower));
-                        let kind_ok =
-                            kind_filter.map_or(true, |f| matches_kind_filter(&sym.kind, f));
+                        let kind_ok = kind_filter.is_none_or(|f| matches_kind_filter(&sym.kind, f));
                         // When scope is strictly Project (not All), filter out matches
                         // from stdlib/dependency crates whose path lies outside the root.
                         let in_root = scope != crate::library::scope::Scope::Project
@@ -480,7 +479,7 @@ impl Tool for Symbols {
                     // Collect matching symbols, rewriting file paths to lib: prefix
                     for sym in &symbols {
                         if name_ok(sym)
-                            && kind_filter.map_or(true, |f| matches_kind_filter(&sym.kind, f))
+                            && kind_filter.is_none_or(|f| matches_kind_filter(&sym.kind, f))
                         {
                             let mut json_val =
                                 symbol_to_json(sym, include_body, source.as_deref(), depth, true);

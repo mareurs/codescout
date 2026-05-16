@@ -77,7 +77,7 @@ async fn run_list(args: ListArgs) -> Result<()> {
         tool_args.insert("until".into(), Value::Number(u.into()));
     }
     tool_args.insert("limit".into(), Value::Number(args.limit.into()));
-    let v = librarian_mcp::tools::timeline::call(&ctx, Value::Object(tool_args)).await?;
+    let v = crate::librarian::tools::timeline::call(&ctx, Value::Object(tool_args)).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
 }
@@ -192,7 +192,7 @@ async fn run_create(args: CreateArgs) -> Result<()> {
             ));
         }
     }
-    let v = librarian_mcp::tools::event_create::call(&ctx, Value::Object(tool_args)).await?;
+    let v = crate::librarian::tools::event_create::call(&ctx, Value::Object(tool_args)).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
 }

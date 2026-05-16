@@ -181,7 +181,7 @@ pub fn check_all_memories(project_root: &Path, memories_dir: &Path) -> Result<Va
     for entry in walkdir::WalkDir::new(memories_dir).into_iter().flatten() {
         let path = entry.path();
         // Skip directories and non-.md files.
-        if !entry.file_type().is_file() || !path.extension().is_some_and(|e| e == "md") {
+        if !entry.file_type().is_file() || path.extension().is_none_or(|e| e != "md") {
             continue;
         }
         // Derive topic from relative path so nested topics like

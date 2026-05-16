@@ -16,7 +16,7 @@ the librarian server instructions block is appended to codescout's MCP
 # Cargo.toml
 [features]
 default = ["remote-embed", "http", "librarian"]
-librarian = ["dep:librarian-mcp"]
+librarian = []  # module compilation gate (formerly dep:librarian-mcp)
 ```
 
 ```bash

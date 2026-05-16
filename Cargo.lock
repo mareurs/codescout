@@ -601,19 +601,23 @@ dependencies = [
  "chrono",
  "clap",
  "codescout-embed",
+ "dirs 5.0.1",
  "filetime",
  "fs4",
+ "futures",
  "git2",
  "globset",
  "hex",
  "ignore",
+ "jsonschema",
  "libc",
- "librarian-mcp",
  "lsp-types",
+ "minijinja",
  "mockito",
  "open",
  "parking_lot",
  "predicates",
+ "pulldown-cmark",
  "qdrant-client",
  "regex",
  "reqwest 0.13.2",
@@ -623,7 +627,10 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "serde_yml",
+ "serial_test",
  "sha2",
+ "sqlite-vec",
  "tempfile",
  "thiserror 2.0.18",
  "tikv-jemallocator",
@@ -645,6 +652,7 @@ dependencies = [
  "tree-sitter-python",
  "tree-sitter-rust",
  "tree-sitter-typescript",
+ "ulid",
  "url",
  "uuid",
  "walkdir",
@@ -1482,8 +1490,6 @@ dependencies = [
  "libc",
  "libgit2-sys",
  "log",
- "openssl-probe 0.1.6",
- "openssl-sys",
  "url",
 ]
 
@@ -2174,47 +2180,8 @@ checksum = "c9b3acc4b91781bb0b3386669d325163746af5f6e4f73e6d2d630e09a35f3487"
 dependencies = [
  "cc",
  "libc",
- "libssh2-sys",
  "libz-sys",
- "openssl-sys",
  "pkg-config",
-]
-
-[[package]]
-name = "librarian-mcp"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "async-trait",
- "chrono",
- "codescout-embed",
- "dirs 5.0.1",
- "futures",
- "git2",
- "globset",
- "ignore",
- "jsonschema",
- "minijinja",
- "parking_lot",
- "predicates",
- "pulldown-cmark",
- "regex",
- "rmcp",
- "rusqlite",
- "schemars",
- "serde",
- "serde_json",
- "serde_yml",
- "serial_test",
- "sha2",
- "sqlite-vec",
- "tempfile",
- "tokio",
- "toml",
- "tracing",
- "ulid",
- "walkdir",
 ]
 
 [[package]]
@@ -2235,20 +2202,6 @@ version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1f111c8c41e7c61a49cd34e44c7619462967221a6443b0ec299e0ac30cfb9b1"
 dependencies = [
- "pkg-config",
- "vcpkg",
-]
-
-[[package]]
-name = "libssh2-sys"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "220e4f05ad4a218192533b300327f5150e809b54c4ec83b5a1d91833601811b9"
-dependencies = [
- "cc",
- "libc",
- "libz-sys",
- "openssl-sys",
  "pkg-config",
  "vcpkg",
 ]
@@ -2514,7 +2467,7 @@ dependencies = [
  "libc",
  "log",
  "openssl",
- "openssl-probe 0.2.1",
+ "openssl-probe",
  "openssl-sys",
  "schannel",
  "security-framework",
@@ -2755,12 +2708,6 @@ dependencies = [
  "quote",
  "syn",
 ]
-
-[[package]]
-name = "openssl-probe"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
 
 [[package]]
 name = "openssl-probe"
@@ -3640,7 +3587,7 @@ version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "612460d5f7bea540c490b2b6395d8e34a953e52b491accd6c86c8164c5932a63"
 dependencies = [
- "openssl-probe 0.2.1",
+ "openssl-probe",
  "rustls-pki-types",
  "schannel",
  "security-framework",
@@ -4078,9 +4025,9 @@ dependencies = [
 
 [[package]]
 name = "sqlite-vec"
-version = "0.1.7"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76b546e18bc6c1ee5154218bd9a7a8a6807b7cbe7d377923ff76a0b6b399c4d5"
+checksum = "d0ba424237a9a5db2f6071f193319e2b6a32f7f3961debb2fbbfe67067abce3f"
 dependencies = [
  "cc",
 ]

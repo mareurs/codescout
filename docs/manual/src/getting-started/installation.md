@@ -158,7 +158,7 @@ even without `local-embed`, the binary always speaks HTTP to the stack via
 | `remote-embed` (default) | HTTP client for the dense embedder service (TEI or OpenAI protocol) | Always — required for the retrieval stack and for Ollama / OpenAI / llama.cpp endpoints |
 | `local-embed` | In-process CPU embeddings via fastembed-rs + ONNX Runtime | Air-gapped machines; **requires building from source** and skips the network rerank/sparse pipeline |
 | `http` (default) | HTTP/SSE MCP transport (vs stdio-only) | Always — used by `codescout dashboard` and remote MCP clients |
-| `librarian` (default) | Embeds the librarian-mcp doc/spec/plan indexer | Always — runtime-enabled by default; opt out via `LIBRARIAN_ENABLED=0` |
+| `librarian` (default) | Embeds the librarian doc/spec/plan indexer (formerly librarian-mcp, now dissolved into `src/librarian/`) | Always — runtime-enabled by default; opt out via `LIBRARIAN_ENABLED=0` |
 
 > **Want free, local embeddings without running docker?** Two options:
 >

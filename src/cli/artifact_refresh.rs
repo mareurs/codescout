@@ -68,7 +68,7 @@ async fn run_list_stale(args: ListStaleArgs) -> Result<()> {
     if let Some(l) = args.limit {
         tool_args.insert("limit".into(), Value::Number(l.into()));
     }
-    let v = librarian_mcp::tools::refresh_stale::call(&ctx, Value::Object(tool_args)).await?;
+    let v = crate::librarian::tools::refresh_stale::call(&ctx, Value::Object(tool_args)).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
 }
@@ -100,7 +100,7 @@ async fn run_gather(args: GatherArgs) -> Result<()> {
     let tool_args = serde_json::json!({
         "id": args.id,
     });
-    let v = librarian_mcp::tools::refresh::call(&ctx, tool_args).await?;
+    let v = crate::librarian::tools::refresh::call(&ctx, tool_args).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
 }

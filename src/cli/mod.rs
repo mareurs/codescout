@@ -38,11 +38,11 @@ impl CommonOpts {
 /// threads. The codescout binary runs one command per process, so the racy
 /// window does not exist in practice. If a future refactor moves CLI dispatch
 /// into a long-running context (e.g. a REPL), this must change.
-pub async fn open_ctx(opts: &CommonOpts) -> Result<librarian_mcp::tools::ToolContext> {
+pub async fn open_ctx(opts: &CommonOpts) -> Result<crate::librarian::tools::ToolContext> {
     if let Some(p) = opts.project.as_ref() {
         std::env::set_var("LIBRARIAN_CWD", p);
     }
-    librarian_mcp::build_tool_context()
+    crate::librarian::build_tool_context()
         .await
         .context("opening librarian tool context")
 }

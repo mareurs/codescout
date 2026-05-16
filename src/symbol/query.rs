@@ -61,7 +61,7 @@ pub fn collect_matching(
     kind_filter: Option<&str>,
 ) {
     for sym in symbols {
-        let kind_ok = kind_filter.map_or(true, |f| matches_kind_filter(&sym.kind, f));
+        let kind_ok = kind_filter.is_none_or(|f| matches_kind_filter(&sym.kind, f));
         let pushed = name_ok(sym) && kind_ok;
         if pushed {
             out.push(symbol_to_json(

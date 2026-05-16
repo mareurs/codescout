@@ -165,7 +165,7 @@ pub(crate) async fn run_find(args: FindArgs) -> Result<()> {
     tool_args.insert("limit".into(), Value::Number(args.limit.into()));
     tool_args.insert("offset".into(), Value::Number(args.offset.into()));
 
-    let v = librarian_mcp::tools::find::call(&ctx, Value::Object(tool_args)).await?;
+    let v = crate::librarian::tools::find::call(&ctx, Value::Object(tool_args)).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
 }
@@ -255,7 +255,7 @@ pub(crate) async fn run_get(args: GetArgs) -> Result<()> {
         tool_args.insert("include_events".into(), Value::Bool(true));
     }
 
-    let v = librarian_mcp::tools::get::call(&ctx, Value::Object(tool_args)).await?;
+    let v = crate::librarian::tools::get::call(&ctx, Value::Object(tool_args)).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
 }
@@ -315,7 +315,7 @@ pub(crate) async fn run_graph(args: GraphArgs) -> Result<()> {
     if args.include_events {
         tool_args.insert("include_events".into(), Value::Bool(true));
     }
-    let v = librarian_mcp::tools::graph::call(&ctx, Value::Object(tool_args)).await?;
+    let v = crate::librarian::tools::graph::call(&ctx, Value::Object(tool_args)).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
 }
@@ -368,7 +368,7 @@ pub(crate) async fn run_state_at(args: StateAtArgs) -> Result<()> {
     if let Some(t) = args.timestamp {
         tool_args.insert("timestamp".into(), Value::Number(t.into()));
     }
-    let v = librarian_mcp::tools::state_at::call(&ctx, Value::Object(tool_args)).await?;
+    let v = crate::librarian::tools::state_at::call(&ctx, Value::Object(tool_args)).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
 }
@@ -489,7 +489,7 @@ pub(crate) async fn run_create(args: CreateArgs) -> Result<()> {
         tool_args.insert("augment".into(), Value::Object(aug));
     }
 
-    let v = librarian_mcp::tools::create::call(&ctx, Value::Object(tool_args)).await?;
+    let v = crate::librarian::tools::create::call(&ctx, Value::Object(tool_args)).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
 }
@@ -594,7 +594,7 @@ pub(crate) async fn run_update(args: UpdateArgs) -> Result<()> {
         tool_args.insert("commit_refresh".into(), Value::Bool(true));
     }
 
-    let v = librarian_mcp::tools::update::call(&ctx, Value::Object(tool_args)).await?;
+    let v = crate::librarian::tools::update::call(&ctx, Value::Object(tool_args)).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
 }
@@ -635,7 +635,7 @@ pub(crate) async fn run_move(args: MoveArgs) -> Result<()> {
         "id": args.id,
         "new_rel_path": args.new_rel_path,
     });
-    let v = librarian_mcp::tools::mv::call(&ctx, tool_args).await?;
+    let v = crate::librarian::tools::mv::call(&ctx, tool_args).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
 }
@@ -681,7 +681,7 @@ pub(crate) async fn run_link(args: LinkArgs) -> Result<()> {
         "dst_id": args.dst,
         "rel": args.rel,
     });
-    let v = librarian_mcp::tools::link::call(&ctx, tool_args).await?;
+    let v = crate::librarian::tools::link::call(&ctx, tool_args).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
 }
