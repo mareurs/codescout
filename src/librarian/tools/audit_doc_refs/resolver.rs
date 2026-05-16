@@ -20,6 +20,14 @@ pub fn resolve_ref(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
 }
 
 fn resolve_file_path(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
+    if c.raw_ref.starts_with("../") || c.raw_ref.starts_with('/') {
+        return Resolution {
+            verdict: Verdict::Unknown,
+            severity: Severity::Low,
+            severity_reason: "policy_default",
+            notes: Some("path outside active project; scope=umbrella required".to_string()),
+        };
+    }
     let path = ctx.repo_root.join(&c.raw_ref);
     if path.exists() {
         Resolution {
@@ -64,14 +72,34 @@ fn resolve_link(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
             notes: None,
         };
     }
-    if c.raw_ref.starts_with('#') {
-        // anchor — wired in Task 8b; stub as resolved for now
-        return Resolution {
-            verdict: Verdict::Resolved,
-            severity: Severity::Low,
-            severity_reason: "policy_default",
-            notes: None,
-        };
+    if let Some(anchor) = c.raw_ref.strip_prefix('#') {
+        let target_md = ctx.repo_root.join(&c.md_file);
+        if let Ok(text) = std::fs::read_to_string(&target_md) {
+            let slugs: std::collections::HashSet<String> = text
+                .lines()
+                .filter_map(|l| {
+                    let trimmed = l.trim_start();
+                    if trimmed.starts_with('#') {
+                        Some(slugify(trimmed.trim_start_matches('#').trim()))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if slugs.contains(&slugify(anchor)) {
+                return Resolution {
+                    verdict: Verdict::Resolved,
+                    severity: Severity::Low,
+                    severity_reason: "policy_default",
+                    notes: None,
+                };
+            }
+        }
+        return verdict_with_drops(
+            Verdict::AnchorMissing,
+            Path::new(&c.md_file),
+            ctx.memory_globs,
+        );
     }
     // fs-scheme link → same as file_path
     let path = ctx.repo_root.join(&c.raw_ref);
@@ -102,7 +130,11 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
         .expect("file_symbol invariant: raw_ref must be 'path:symbol'");
     let path = ctx.repo_root.join(path_str);
     if !path.exists() {
-        return verdict_with_drops(Verdict::FileMissing, Path::new(&c.md_file), ctx.memory_globs);
+        return verdict_with_drops(
+            Verdict::FileMissing,
+            Path::new(&c.md_file),
+            ctx.memory_globs,
+        );
     }
     let lang = detect_language(path_str);
     let Some(lsp) = ctx.lsp else {
@@ -138,7 +170,11 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
                     notes: None,
                 }
             } else {
-                verdict_with_drops(Verdict::SymbolMissing, Path::new(&c.md_file), ctx.memory_globs)
+                verdict_with_drops(
+                    Verdict::SymbolMissing,
+                    Path::new(&c.md_file),
+                    ctx.memory_globs,
+                )
             }
         }
         Err(_) => {
@@ -178,6 +214,16 @@ fn verdict_with_drops(
         severity_reason: reason,
         notes: None,
     }
+}
+fn slugify(s: &str) -> String {
+    s.to_lowercase()
+        .chars()
+        .filter_map(|c| match c {
+            'a'..='z' | '0'..='9' => Some(c),
+            ' ' | '-' | '_' => Some('-'),
+            _ => None,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -280,13 +326,28 @@ mod tests {
     fn severity_reason_populated_for_every_finding() {
         let tmp = TempDir::new().unwrap();
         // FilePath: plain path raw ref
-        let r = resolve_ref(&cand("gone.py", "docs/spec.md", RefKind::FilePath), &ctx(tmp.path(), &[]));
-        assert!(!r.severity_reason.is_empty(), "FilePath severity_reason empty");
+        let r = resolve_ref(
+            &cand("gone.py", "docs/spec.md", RefKind::FilePath),
+            &ctx(tmp.path(), &[]),
+        );
+        assert!(
+            !r.severity_reason.is_empty(),
+            "FilePath severity_reason empty"
+        );
         // FileLine: must have a colon-separated line number to satisfy the resolver invariant
-        let r = resolve_ref(&cand("gone.py:1", "docs/spec.md", RefKind::FileLine), &ctx(tmp.path(), &[]));
-        assert!(!r.severity_reason.is_empty(), "FileLine severity_reason empty");
+        let r = resolve_ref(
+            &cand("gone.py:1", "docs/spec.md", RefKind::FileLine),
+            &ctx(tmp.path(), &[]),
+        );
+        assert!(
+            !r.severity_reason.is_empty(),
+            "FileLine severity_reason empty"
+        );
         // Link: external URL
-        let r = resolve_ref(&cand("https://example.com/gone", "docs/spec.md", RefKind::Link), &ctx(tmp.path(), &[]));
+        let r = resolve_ref(
+            &cand("https://example.com/gone", "docs/spec.md", RefKind::Link),
+            &ctx(tmp.path(), &[]),
+        );
         assert!(!r.severity_reason.is_empty(), "Link severity_reason empty");
     }
 
@@ -349,5 +410,53 @@ mod tests {
         // This encodes the "prefer disk truth" rule: the LSP responded (not offline),
         // so an empty symbol list means the symbol genuinely isn't there.
         assert_eq!(r.verdict, Verdict::SymbolMissing);
+    }
+
+    // ── Task 8b: path-outside-project + anchor link resolution ───────────────
+
+    #[test]
+    fn resolver_unknown_for_path_outside_project() {
+        let tmp = TempDir::new().unwrap();
+        let r = resolve_ref(
+            &cand(
+                "../other-repo/src/foo.py",
+                "docs/spec.md",
+                RefKind::FilePath,
+            ),
+            &ctx(tmp.path(), &[]),
+        );
+        assert_eq!(r.verdict, Verdict::Unknown);
+        assert!(r
+            .notes
+            .as_deref()
+            .unwrap_or("")
+            .contains("outside active project"));
+    }
+
+    #[test]
+    fn resolver_anchor_resolved_when_heading_present() {
+        let tmp = TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::write(docs.join("spec.md"), "# Top\n\n## Auth\n\nbody\n").unwrap();
+        let r = resolve_ref(
+            &cand("#auth", "docs/spec.md", RefKind::Link),
+            &ctx(tmp.path(), &[]),
+        );
+        assert_eq!(r.verdict, Verdict::Resolved);
+    }
+
+    #[test]
+    fn resolver_anchor_missing_when_heading_absent() {
+        let tmp = TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::write(docs.join("spec.md"), "# Top\n\n## Auth\n\nbody\n").unwrap();
+        let r = resolve_ref(
+            &cand("#missing-section", "docs/spec.md", RefKind::Link),
+            &ctx(tmp.path(), &[]),
+        );
+        assert_eq!(r.verdict, Verdict::AnchorMissing);
+        assert_eq!(r.severity, Severity::Med);
     }
 }
