@@ -178,4 +178,37 @@ mod tests {
         let r3 = merge_into_tracker(vec![med], &r2, now(), "c3");
         assert_eq!(r3.issues[0].severity, Severity::High);
     }
+
+    #[test]
+    fn idempotent_merge() {
+        let a = finding("a.md", "x.py", Verdict::Missing);
+        let b = finding("b.md", "y.py", Verdict::Missing);
+        let r1 = merge_into_tracker(
+            vec![a.clone(), b.clone()],
+            &TrackerParams::default(),
+            now(),
+            "c1",
+        );
+        let r2 = merge_into_tracker(vec![a, b], &r1, now(), "c1");
+        let s1 = serde_json::to_string(&r1).unwrap();
+        let s2 = serde_json::to_string(&r2).unwrap();
+        assert_eq!(
+            s1, s2,
+            "two back-to-back merges on unchanged input must be byte-identical"
+        );
+    }
+
+    #[test]
+    fn unknown_field_preserved_across_merge() {
+        let a = finding("a.md", "x.py", Verdict::Missing);
+        let mut r1 = merge_into_tracker(vec![a.clone()], &TrackerParams::default(), now(), "c1");
+        r1.issues[0]
+            .extra
+            .insert("custom".to_string(), serde_json::json!("user-edit"));
+        let r2 = merge_into_tracker(vec![a], &r1, now(), "c2");
+        assert_eq!(
+            r2.issues[0].extra.get("custom"),
+            Some(&serde_json::json!("user-edit"))
+        );
+    }
 }
