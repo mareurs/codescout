@@ -14,6 +14,9 @@ pub enum Verb {
     Get(GetArgs),
     /// BFS neighbourhood around an artifact.
     Graph(GraphArgs),
+    /// Snapshot an artifact at a past commit or timestamp.
+    #[command(name = "state-at")]
+    StateAt(StateAtArgs),
 }
 
 #[derive(Debug, Args)]
@@ -115,6 +118,7 @@ pub async fn dispatch(verb: Verb) -> Result<()> {
         Verb::Find(args) => run_find(args).await,
         Verb::Get(args) => run_get(args).await,
         Verb::Graph(args) => run_graph(args).await,
+        Verb::StateAt(args) => run_state_at(args).await,
     }
 }
 
@@ -304,6 +308,59 @@ pub(crate) async fn run_graph(args: GraphArgs) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, clap::Args)]
+pub struct StateAtArgs {
+    /// Artifact id.
+    pub id: String,
+    /// Git commit hash to time-travel to. Mutually exclusive with --timestamp.
+    #[arg(long, conflicts_with = "timestamp")]
+    pub commit: Option<String>,
+    /// Unix epoch ms to time-travel to. Mutually exclusive with --commit.
+    #[arg(long, conflicts_with = "commit")]
+    pub timestamp: Option<i64>,
+    /// Optional project root override (defaults to cwd).
+    #[arg(long)]
+    pub project: Option<std::path::PathBuf>,
+    /// Emit JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+    /// Force no color (also implicit when stdout is not a TTY).
+    #[arg(long = "no-color")]
+    pub no_color: bool,
+}
+
+impl StateAtArgs {
+    pub fn common(&self) -> CommonOpts {
+        CommonOpts {
+            project: self.project.clone(),
+            json: self.json,
+            no_color: self.no_color,
+        }
+    }
+}
+
+pub(crate) async fn run_state_at(args: StateAtArgs) -> Result<()> {
+    if args.commit.is_none() && args.timestamp.is_none() {
+        return Err(anyhow!(
+            "state-at requires exactly one of --commit <sha> or --timestamp <ms>"
+        ));
+    }
+    let common = args.common();
+    let output = common.output();
+    let ctx = open_ctx(&common).await?;
+    let mut tool_args = serde_json::Map::new();
+    tool_args.insert("artifact_id".into(), Value::String(args.id.clone()));
+    if let Some(c) = &args.commit {
+        tool_args.insert("commit".into(), Value::String(c.clone()));
+    }
+    if let Some(t) = args.timestamp {
+        tool_args.insert("timestamp".into(), Value::Number(t.into()));
+    }
+    let v = librarian_mcp::tools::state_at::call(&ctx, Value::Object(tool_args)).await?;
+    crate::cli::format::print(&v, &output)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,5 +481,21 @@ mod tests {
         let err = run_graph(args).await.unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("--depth must be in 1..=3"), "got: {msg}");
+    }
+
+    #[tokio::test]
+    async fn run_state_at_rejects_missing_cutoff() {
+        let args = StateAtArgs {
+            id: "abc".into(),
+            commit: None,
+            timestamp: None,
+            project: None,
+            json: false,
+            no_color: false,
+        };
+        let err = run_state_at(args).await.unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("--commit"), "got: {msg}");
+        assert!(msg.contains("--timestamp"), "got: {msg}");
     }
 }

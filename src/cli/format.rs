@@ -47,7 +47,7 @@ pub(crate) fn infer_shape(v: &Value) -> Shape {
         if obj.contains_key("nodes") && obj.contains_key("edges") {
             return Shape::GraphResult;
         }
-        if obj.contains_key("artifact") && obj.contains_key("status_at") {
+        if obj.contains_key("as_of") && obj.contains_key("status_at_as_of") {
             return Shape::StateAtResult;
         }
         if obj.contains_key("stale") && obj.contains_key("threshold_hours") {
@@ -79,6 +79,7 @@ pub(crate) fn write_value<W: Write>(value: &Value, opts: &OutputOpts, w: &mut W)
         Shape::FindResult => write_find_table(value, no_color, w),
         Shape::GetResult => write_get_summary(value, no_color, w),
         Shape::GraphResult => write_graph_tree(value, no_color, w),
+        Shape::StateAtResult => write_state_summary(value, no_color, w),
         // Other pretty branches land in later tasks. Until then, fall back
         // to JSON for everything else so output is never silent.
         _ => fallback_json(value, w),
@@ -248,6 +249,44 @@ fn write_graph_tree<W: Write>(value: &Value, _no_color: bool, w: &mut W) -> Resu
     Ok(())
 }
 
+fn write_state_summary<W: Write>(value: &Value, _no_color: bool, w: &mut W) -> Result<()> {
+    let title = value
+        .get("frontmatter")
+        .and_then(|fm| fm.get("title"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("(untitled)");
+    let status_at = value
+        .get("status_at_as_of")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    let freshness_now = value
+        .get("freshness_now")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+
+    writeln!(w, "{title}")?;
+    if let Some(as_of) = value.get("as_of").and_then(|v| v.as_i64()) {
+        writeln!(w, "  as_of (ms):       {as_of}")?;
+    } else if let Some(as_of) = value.get("as_of").and_then(|v| v.as_str()) {
+        writeln!(w, "  as_of:            {as_of}")?;
+    } else {
+        writeln!(w, "  as_of:            ?")?;
+    }
+    writeln!(w, "  status_at_as_of:  {status_at}")?;
+    writeln!(w, "  freshness_now:    {freshness_now}")?;
+    if let Some(chain) = value.get("supersession_chain").and_then(|v| v.as_array()) {
+        if !chain.is_empty() {
+            writeln!(w, "  supersession_chain ({}):", chain.len())?;
+            for item in chain {
+                if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
+                    writeln!(w, "    - {id}")?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,6 +339,16 @@ mod tests {
     fn infer_shape_unknown_for_arbitrary_object() {
         let v = json!({"weird": "shape"});
         assert!(matches!(infer_shape(&v), Shape::Unknown));
+    }
+
+    #[test]
+    fn infer_shape_recognises_state_at_result() {
+        let v = json!({
+            "as_of": 1_700_000_000_000_i64,
+            "status_at_as_of": "active",
+            "frontmatter": {"title": "Test"}
+        });
+        assert!(matches!(infer_shape(&v), Shape::StateAtResult));
     }
 
     #[test]
