@@ -4,11 +4,14 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
 description = "Shared embedding primitives for codescout + librarian-mcp"
 
 [features]
 # Remote embedding via OpenAI-compatible HTTP API (Ollama, OpenAI, etc.)
-remote-embed = ["dep:reqwest"]
+remote-embed = ["dep:reqwest", "dep:rustls"]
 # Local CPU embedding via fastembed-rs (ONNX Runtime + HuggingFace model hub).
 # First use downloads the chosen model (~20-300MB) to ~/.cache/huggingface/hub/.
 local-embed = ["dep:fastembed"]
@@ -22,5 +25,8 @@ tokio = { workspace = true }
 
 # HTTP client (remote embeddings — OpenAI-compatible APIs, Ollama, etc.)
 reqwest = { version = "0.13", default-features = false, features = ["json", "http2", "charset", "rustls-no-provider"], optional = true }
+# rustls + ring: required because reqwest uses `rustls-no-provider`. The
+# embedder installs the ring provider on first use (idempotent via `Once`).
+rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
 # Local CPU embeddings via ONNX Runtime (fastembed model hub)
 fastembed = { version = "5", optional = true }

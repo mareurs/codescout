@@ -2,7 +2,7 @@
 
 All notable changes to codescout are documented here.
 
-## Unreleased
+## [0.12.1] — 2026-05-16
 
 ### Changed
 
@@ -21,6 +21,22 @@ All notable changes to codescout are documented here.
   [mareurs.github.io/codescout](https://mareurs.github.io/codescout/). Added a
   prominent **Artifacts** section advertising the embedded librarian — what it
   is, why it matters, and a four-call usage example.
+- Manual is now advertised on the repo landing page: 3 badges (docs /
+  crates.io / license), a 📖 callout linking to the manual root, `homepage`
+  and `documentation` fields populated in `Cargo.toml` (so crates.io shows
+  them), and 9 GitHub topic tags (`mcp`, `mcp-server`, `claude-code`, etc.)
+  for discovery.
+- Plugin documentation consolidated: there is only one plugin
+  (`codescout-companion`), not two. Removed the stale "companion-plugin.md"
+  duplicate and merged content into the single canonical page.
+
+### Publishing
+
+- **First publish of `codescout-embed` (0.1.0) and `librarian-mcp` (0.1.0)**
+  to crates.io. Both were previously workspace-internal path dependencies and
+  blocked `codescout` itself from publishing past 0.9.0. Now public.
+- License unified to MIT across the workspace (was inconsistently Apache-2.0
+  in `[workspace.package]` while the repo `LICENSE` file is MIT).
 
 ## [0.12.0] — 2026-05-16
 

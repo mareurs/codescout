@@ -4,9 +4,13 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+description = "Workspace artifact registry: indexes markdown specs, plans, ADRs, runbooks, and memories with a typed link graph"
 
 [dependencies]
-codescout-embed = { path = "../codescout-embed", features = ["remote-embed"] }
+codescout-embed = { path = "../codescout-embed", version = "0.1.0", features = ["remote-embed"] }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

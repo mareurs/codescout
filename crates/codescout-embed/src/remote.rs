@@ -60,10 +60,23 @@ fn is_https_or_loopback(url: &str) -> bool {
 }
 
 impl RemoteEmbedder {
+    /// Install rustls' ring crypto provider as the default. Idempotent — safe
+    /// to call from multiple entry points. Required because reqwest uses
+    /// `rustls-no-provider`: callers must install a provider before the first
+    /// TLS handshake.
+    fn install_default_crypto_provider() {
+        use std::sync::Once;
+        static ONCE: Once = Once::new();
+        ONCE.call_once(|| {
+            let _ = rustls::crypto::ring::default_provider().install_default();
+        });
+    }
+
     /// Build a reqwest client with a per-request timeout so that a hung
     /// embedding server (e.g. Ollama during GPU discovery failure) doesn't
     /// block `index_project` forever.
     fn http_client() -> Client {
+        Self::install_default_crypto_provider();
         Client::builder()
             .timeout(std::time::Duration::from_secs(300))
             .build()
