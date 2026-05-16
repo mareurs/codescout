@@ -2,7 +2,8 @@
 use serde::{Deserialize, Serialize};
 
 pub mod parser;
-// resolver, severity, merger added in later tasks
+pub mod resolver;
+pub mod severity;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -35,4 +36,39 @@ pub struct ParseWarning {
     pub md_file: String,
     pub line: u32,
     pub reason: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Verdict {
+    Resolved,
+    Missing,
+    FileMissing,
+    SymbolMissing,
+    LineOob,
+    AnchorMissing,
+    Unknown,
+    External,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Severity {
+    High,
+    Med,
+    Low,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Resolution {
+    pub verdict: Verdict,
+    pub severity: Severity,
+    pub severity_reason: &'static str,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Finding {
+    pub candidate: RefCandidate,
+    pub resolution: Resolution,
 }
