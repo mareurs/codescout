@@ -46,5 +46,5 @@ immediately needs accurate `symbol_at` results after compaction.
 
 Requires:
 - codescout ≥ 0.4.1 (server-side `post_compact` parameter)
-- codescout-companion companion plugin with the `PostCompact` hook registered
+- codescout-companion plugin with the `PostCompact` hook registered
   in `hooks/hooks.json`

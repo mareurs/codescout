@@ -9,8 +9,7 @@
 
 - [Installation](getting-started/installation.md)
   - [Your First Project](getting-started/first-project.md)
-  - [Routing Plugin](getting-started/routing-plugin.md)
-  - [Companion Plugin](getting-started/companion-plugin.md)
+  - [codescout-companion Plugin](getting-started/routing-plugin.md)
 
 - [Agent Integrations](agents/overview.md)
   - [Claude Code](agents/claude-code.md)

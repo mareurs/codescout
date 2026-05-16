@@ -1,4 +1,4 @@
-# Routing Plugin
+# codescout-companion Plugin
 
 ## Why the Plugin Exists
 
@@ -151,4 +151,3 @@ claude /plugin uninstall codescout-companion@sdd-misc-plugins
 ## Further Reading
 
 - [Routing Plugin (concepts)](../concepts/routing-plugin.md) — how the plugin works, why hard blocks beat soft warnings, the subagent coverage problem
-- [Companion Plugin (getting started)](companion-plugin.md) — quick install guide for `codescout-companion`

@@ -50,7 +50,7 @@ Then use in Claude Code — it will route all file/symbol/search operations thro
 > the agent has no project context and will navigate the codebase blind.
 > See the [Claude Code integration guide](docs/agents/claude-code.md) for details.
 
-> **Tip:** Install the [codescout-companion plugin](docs/manual/src/getting-started/companion-plugin.md) to automatically steer Claude toward codescout tools in every session — including subagents.
+> **Tip:** Install the [codescout-companion plugin](docs/manual/src/getting-started/routing-plugin.md) to automatically steer Claude toward codescout tools in every session — including subagents.
 ## Retrieval Stack
 
 codescout uses an external Docker Compose stack (Qdrant + llama-server + TEI) for

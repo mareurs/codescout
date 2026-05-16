@@ -1,4 +1,4 @@
-# The Routing Plugin
+# Routing (codescout-companion Plugin)
 
 ## Why It Exists
 
@@ -15,7 +15,7 @@ is to reach for the native tools it was trained on: `Read`, `Grep`, `Glob`,
 `Bash cat`. Without intervention it will happily read whole files, grep walls of
 text, and never touch `symbols` or `semantic_search`.
 
-The routing plugin exists to close that gap. It injects guidance into every
+The `codescout-companion` plugin exists to close that gap. It injects guidance into every
 agent and every subagent, and hard-blocks the native tool patterns that
 codescout is designed to replace.
 
@@ -100,4 +100,4 @@ configuration options.
 - [Routing Plugin Setup Guide](../getting-started/routing-plugin.md) — installation
   steps, configuration options, and verification
 - [Superpowers Workflow](superpowers.md) — the Superpowers plugin that pairs
-  with the routing plugin for full lifecycle development
+  with `codescout-companion` for full lifecycle development
