@@ -18,7 +18,7 @@ file and prints a compact inline summary.
 - User invokes `/analyze-usage clear` → clear all projects' usage data
 - User invokes `/analyze-usage clear <project>` → clear one project's usage data
 - User asks for a tool usage health check, error audit, or anti-pattern review
-- User wants an actionable improvement list for code-explorer tools
+- User wants an actionable improvement list for codescout tools
 - User wants to reset statistics before a new measurement period
 ## When NOT to Use
 
@@ -41,7 +41,7 @@ Optional: if a project name or path was given as argument, filter results to tha
 
 After running query A for each DB, skip projects with fewer than 20 calls — include them only as a row in a summary table at the end of the report rather than with full per-project sections.
 
-Note: `find` may return nested DBs (e.g. `code-explorer/crates/librarian-mcp/.codescout/usage.db`). Include these as separate projects — each sub-project DB tracks its own activation context.
+Note: `find` may return nested DBs (e.g. `codescout/crates/librarian-mcp/.codescout/usage.db`). Include these as separate projects — each sub-project DB tracks its own activation context.
 
 Store the list of DB paths — loop over each one in Steps 2–4.
 
@@ -198,7 +198,7 @@ path: docs/usage-reports/YYYY-MM-DD-usage-analysis.md
 ```
 
 Use `create_file` with `overwrite: true`. If `docs/usage-reports/` doesn't exist, it will
-be created. Path is relative to the code-explorer project root — use absolute path if
+be created. Path is relative to the codescout project root — use absolute path if
 running from a different project.
 
 ### 6. Print Inline Summary
@@ -300,7 +300,7 @@ Invoked when the user passes `clear` as the argument. Resets usage data so futur
 find ~/work -path "*/.codescout/usage.db"
 ```
 
-If a project name or path was given after `clear` (e.g. `/analyze-usage clear code-explorer`), filter to that project only.
+If a project name or path was given after `clear` (e.g. `/analyze-usage clear codescout`), filter to that project only.
 
 ### 2. Show what will be cleared
 
@@ -314,7 +314,7 @@ Print to the conversation:
 
 ```
 About to clear usage data from N project(s):
-- code-explorer  (5,050 calls)
+- codescout       (5,050 calls)
 - backend-kotlin (1,745 calls)
 ...
 
@@ -339,7 +339,7 @@ Print:
 
 ```
 Cleared N project(s):
-- code-explorer  — 5,050 calls removed
+- codescout       — 5,050 calls removed
 - backend-kotlin — 1,745 calls removed
 ...
 Total removed: X calls

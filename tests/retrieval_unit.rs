@@ -117,7 +117,7 @@ use codescout::retrieval::payload::{map_to_payload, payload_to_map, CodePayload}
 #[test]
 fn payload_roundtrip_preserves_fields() {
     let p = CodePayload {
-        project_id: "code-explorer".into(),
+        project_id: "codescout".into(),
         file_path: "src/lib.rs".into(),
         language: "rust".into(),
         start_line: 10,

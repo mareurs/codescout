@@ -33,7 +33,7 @@ All fields are optional.
       "id": "abc123",
       "kind": "tracker",
       "title": "My Tracker",
-      "rel_path": "code-explorer/docs/trackers/my-tracker.md",
+      "rel_path": "codescout/docs/trackers/my-tracker.md",
       "last_refreshed_at": null,
       "refresh_count": 0,
       "age_hours": null

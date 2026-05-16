@@ -830,7 +830,7 @@ impl Agent {
 
     /// Returns the canonical project_id used for call-edge cache entries.
     ///
-    /// This is the focused sub-project name (e.g. `"code-explorer"`) when a
+    /// This is the focused sub-project name (e.g. `"codescout"`) when a
     /// workspace is active, or `ROOT_PROJECT_ID` otherwise. Must match the
     /// value used by the `call_graph` tool when it upserts edges — both sides
     /// call this method so they always agree.

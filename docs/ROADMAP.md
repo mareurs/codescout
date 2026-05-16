@@ -34,7 +34,7 @@ See [`FEATURES.md`](FEATURES.md) for the full feature reference. Summary:
 - **Onboarding** — language-specific nav hints, system-prompt draft generation
 - **RecoverableError** — non-fatal tool failures don't abort sibling parallel calls
 - **Dashboard** — `codescout dashboard` web UI with tool stats and project health ([concept page](manual/src/concepts/dashboard.md))
-- **Companion Claude Code plugin** — `code-explorer-routing` for tool routing guidance (live at [mareurs/claude-plugins](https://github.com/mareurs/claude-plugins))
+- **Companion Claude Code plugin** — `codescout-companion` for tool routing guidance (live at [mareurs/claude-plugins](https://github.com/mareurs/claude-plugins))
 - **Usage monitor** — per-tool call stats in `usage.db`, surfaced via the dashboard
 - **Semantic memories** — `remember`/`recall`/`forget` actions with sqlite-vec vector search, auto-classification into buckets (code/system/preferences/unstructured), cross-embedding of markdown memories, preferences auto-injection during onboarding
 - **Git blame** via git2; persistent memory store (markdown topics + semantic memories)
@@ -116,7 +116,7 @@ Make codescout usable by any MCP-capable agent — Copilot, Cursor, Cline, custo
 
 2. **Agent-neutral routing prompt** — refactor `server_instructions.md` into a well-structured decision tree that any agent can consume as a system prompt or tool description prefix. Avoid Claude-specific framing.
 
-3. **`code-explorer-routing` plugin / extension** — a thin adapter per agent platform:
+3. **`codescout-companion` plugin / extension** — a thin adapter per agent platform:
    - Claude Code: existing plugin approach
    - VS Code Copilot: Language Model Tools API (`vscode.lm.registerTool`)
    - Cursor: `.cursorrules` + MCP config

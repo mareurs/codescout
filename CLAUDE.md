@@ -309,7 +309,7 @@ The `PreToolUse` hook will **block** any attempt to use the native `Read`, `Grep
 
 **Configuration:**
 - Auto-detects codescout from `.mcp.json` or `~/.claude/settings.json`
-- Can be overridden via `.claude/code-explorer-routing.json`
+- Can be overridden via `.claude/codescout-companion.json`
 - `block_reads: false` in that config to disable blocking (dev/debug use)
 
 ## Language-Specific LSP Issues

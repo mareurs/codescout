@@ -89,7 +89,7 @@ requiring a manual `index(action: build)` call.
 
 ```
 /plugin marketplace add mareurs/sdd-misc-plugins
-/plugin install code-explorer-routing@sdd-misc-plugins
+/plugin install codescout-companion@sdd-misc-plugins
 ```
 
 See the [Routing Plugin setup guide](../getting-started/routing-plugin.md) for

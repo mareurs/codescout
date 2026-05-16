@@ -125,7 +125,7 @@ mod tests {
 
     fn sample() -> SemanticMemory {
         SemanticMemory {
-            project_id: "code-explorer".into(),
+            project_id: "codescout".into(),
             bucket: "system".into(),
             title: "BUG-021 parallel writes".into(),
             content: "Never dispatch parallel write tool calls...".into(),

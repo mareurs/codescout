@@ -330,18 +330,15 @@ mod classify_search_error_tests {
     #[test]
     fn missing_collection_routes_to_sync_project_hint() {
         let err = "hybrid_query: Collection `code_chunks` doesn't exist!";
-        let hint = classify_search_error(err, "code-explorer");
+        let hint = classify_search_error(err, "codescout");
         assert!(hint.contains("sync_project"), "hint: {hint}");
-        assert!(
-            hint.contains("code-explorer"),
-            "hint must name project: {hint}"
-        );
+        assert!(hint.contains("codescout"), "hint must name project: {hint}");
     }
 
     #[test]
     fn dim_mismatch_routes_to_drop_and_reindex_hint() {
         let err = "upsert_points: Vector dimension error: expected dim: 512, got 768";
-        let hint = classify_search_error(err, "code-explorer");
+        let hint = classify_search_error(err, "codescout");
         assert!(hint.contains("dim mismatch"), "hint: {hint}");
         assert!(
             hint.contains("DELETE"),
@@ -356,7 +353,7 @@ mod classify_search_error_tests {
     #[test]
     fn transport_error_routes_to_restart_hint() {
         let err = "tonic::transport::Error: Connection refused (os error 111)";
-        let hint = classify_search_error(err, "code-explorer");
+        let hint = classify_search_error(err, "codescout");
         assert!(hint.contains("offline"), "hint: {hint}");
         assert!(
             hint.contains("retrieval-stack.sh up"),
@@ -367,7 +364,7 @@ mod classify_search_error_tests {
     #[test]
     fn unknown_error_routes_to_diagnostic_hint() {
         let err = "some weird unrelated failure";
-        let hint = classify_search_error(err, "code-explorer");
+        let hint = classify_search_error(err, "codescout");
         assert!(hint.contains("ps"), "fallback must check stack: {hint}");
         assert!(
             hint.contains("docker logs"),
@@ -379,7 +376,7 @@ mod classify_search_error_tests {
     fn collection_missing_takes_priority_over_transport() {
         // If both signals present, collection-missing wins (more actionable).
         let err = "Collection `code_chunks` not found via tonic transport";
-        let hint = classify_search_error(err, "code-explorer");
+        let hint = classify_search_error(err, "codescout");
         assert!(
             hint.contains("sync_project"),
             "specificity ordering: {hint}"

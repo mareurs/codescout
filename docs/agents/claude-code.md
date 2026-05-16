@@ -87,7 +87,7 @@ Or follow the [Routing Plugin guide](../manual/src/getting-started/routing-plugi
 for manual setup.
 
 **Debugging:** If the plugin blocks a legitimate operation, create
-`.claude/code-explorer-routing.json` with `{"block_reads": false}` to temporarily
+`.claude/codescout-companion.json` with `{"block_reads": false}` to temporarily
 disable blocking.
 
 ## Verify

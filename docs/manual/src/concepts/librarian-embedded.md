@@ -93,12 +93,12 @@ defaults**, first-match-wins.
 ```toml
 # <project>/.codescout/librarian.toml
 [[rule]]
-glob = "code-explorer/docs/reviews/**/*.md"
+glob = "codescout/docs/reviews/**/*.md"
 kind = "memory"
 time_scope = "dated_snapshot"
 
 [[rule]]
-glob = "code-explorer/docs/agents/*.md"
+glob = "codescout/docs/agents/*.md"
 kind = "doc"
 ```
 
