@@ -119,15 +119,11 @@ use serde_json::{json, Value};
 #[derive(Debug, Deserialize)]
 pub struct AuditArgs {
     #[serde(default)]
-    pub scope: Option<String>,
-    #[serde(default)]
     pub paths: Option<Vec<String>>,
     #[serde(default = "default_true")]
     pub emit_tracker: bool,
     #[serde(default)]
     pub tracker_id: Option<String>,
-    #[serde(default)]
-    pub severity_overrides: Option<Value>,
     #[serde(default = "default_fail_on")]
     pub fail_on: String,
 }
@@ -303,9 +299,7 @@ async fn ensure_default_tracker(ctx: &ToolContext) -> Result<(String, String)> {
         .current_project
         .as_ref()
         .ok_or_else(|| {
-            crate::librarian::tools::RecoverableError::new(
-                "audit_doc_refs: no active project",
-            )
+            crate::librarian::tools::RecoverableError::new("audit_doc_refs: no active project")
         })?
         .abs_path
         .clone();
@@ -340,7 +334,10 @@ async fn ensure_default_tracker(ctx: &ToolContext) -> Result<(String, String)> {
         "render_template": include_str!("./render_template.j2")
     });
     // Ignore error — render_template is cosmetic; tracker is usable without it
-    if let Err(e) = crate::librarian::tools::augment::ArtifactAugment.call(ctx, augment_args).await {
+    if let Err(e) = crate::librarian::tools::augment::ArtifactAugment
+        .call(ctx, augment_args)
+        .await
+    {
         tracing::warn!("audit_doc_refs: failed to attach render_template: {e:#}");
     }
 
@@ -352,7 +349,9 @@ async fn load_tracker_params(ctx: &ToolContext, tracker_id: &str) -> Option<Trac
         "action": "get",
         "id": tracker_id,
     });
-    let v = crate::librarian::tools::get::call(ctx, get_args).await.ok()?;
+    let v = crate::librarian::tools::get::call(ctx, get_args)
+        .await
+        .ok()?;
     let params_value = v.get("augmentation").and_then(|a| a.get("params"))?;
     serde_json::from_value::<TrackerParams>(params_value.clone()).ok()
 }
@@ -368,7 +367,9 @@ async fn write_tracker_params(
         "merge": true,
         "params": params_value,
     });
-    crate::librarian::tools::augment::ArtifactAugment.call(ctx, augment_args).await?;
+    crate::librarian::tools::augment::ArtifactAugment
+        .call(ctx, augment_args)
+        .await?;
     Ok(())
 }
 
@@ -395,10 +396,12 @@ async fn upsert_tracker(
     let prior = load_tracker_params(ctx, &tracker_id)
         .await
         .unwrap_or_default();
+    let n_refs_found = findings.len() as u32;
     let mut new_params = merger::merge_into_tracker(findings, &prior, now, commit);
     new_params.scan_meta.last_scan_at = Some(now.to_rfc3339());
     new_params.scan_meta.last_scan_commit = Some(commit.to_string());
     new_params.scan_meta.n_files_scanned = n_files as u32;
+    new_params.scan_meta.n_refs_found = n_refs_found;
     new_params.scan_meta.degraded = !offline.is_empty();
     new_params.scan_meta.lsp_languages_offline = offline;
     new_params.parse_warnings = warnings;
@@ -545,6 +548,7 @@ fn build_response(
 
 fn finding_to_json(f: &Finding) -> Value {
     json!({
+        "n": Value::Null,
         "md_file": f.candidate.md_file,
         "md_line": f.candidate.md_line,
         "raw_ref": f.candidate.raw_ref,
@@ -552,6 +556,7 @@ fn finding_to_json(f: &Finding) -> Value {
         "verdict": f.resolution.verdict,
         "severity": f.resolution.severity,
         "severity_reason": f.resolution.severity_reason,
+        "status": "open",
         "notes": f.resolution.notes,
     })
 }
@@ -689,7 +694,9 @@ mod tests {
         );
         // by_file is a BTreeMap serialized as a JSON object: {<path>: <count>}
         assert!(
-            result["overflow"]["by_file"]["docs/spec.md"].as_u64().is_some(),
+            result["overflow"]["by_file"]["docs/spec.md"]
+                .as_u64()
+                .is_some(),
             "by_file should map docs/spec.md to a count; got overflow: {}",
             result["overflow"]
         );

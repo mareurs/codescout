@@ -14,7 +14,7 @@ pub fn resolve_ref(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
         RefKind::FilePath => resolve_file_path(c, ctx),
         RefKind::FileLine => resolve_file_line(c, ctx),
         RefKind::FileSymbol => resolve_file_symbol(c, ctx),
-        RefKind::ModulePath => stub_unknown(c, ctx),
+        RefKind::ModulePath => resolve_module_path_v1(c, ctx),
         RefKind::Link => resolve_link(c, ctx),
     }
 }
@@ -115,7 +115,11 @@ fn resolve_link(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     }
 }
 
-fn stub_unknown(_c: &RefCandidate, _ctx: &ResolveCtx<'_>) -> Resolution {
+/// v1: module_path candidates are reported as Unknown without consulting LSP.
+/// Workspace symbol search for dotted module identifiers is Phase 2.
+/// We do NOT push to `degraded_languages` here because no language detection
+/// is meaningful for bare dotted identifiers.
+fn resolve_module_path_v1(_c: &RefCandidate, _ctx: &ResolveCtx<'_>) -> Resolution {
     Resolution {
         verdict: Verdict::Unknown,
         severity: Severity::Low,
@@ -207,7 +211,7 @@ fn verdict_with_drops(
     memory_globs: &[globset::Glob],
 ) -> Resolution {
     let base = severity::default_severity(verdict);
-    let (sev, reason) = severity::apply_drops(md_file, verdict, base, memory_globs);
+    let (sev, reason) = severity::apply_drops(md_file, base, memory_globs);
     Resolution {
         verdict,
         severity: sev,

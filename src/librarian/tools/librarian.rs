@@ -68,7 +68,6 @@ impl Tool for Librarian {
                 },
                 "emit_tracker": { "type": "boolean", "default": true, "description": "audit_doc_refs: create/update an audit_issues tracker artifact with results" },
                 "tracker_id": { "type": "string", "description": "audit_doc_refs: existing tracker id to update (creates new if omitted)" },
-                "severity_overrides": { "type": "object", "description": "audit_doc_refs: map of ref_kind -> severity override" },
                 "fail_on": { "type": "string", "default": "never", "description": "audit_doc_refs: exit_code 1 when findings reach this severity (high | med | low | never)" }
             }
         })

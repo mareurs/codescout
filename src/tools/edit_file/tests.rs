@@ -4310,7 +4310,7 @@ async fn read_file_large_content_returns_file_id_not_inline() {
     let file = dir.path().join("big.txt");
     // Create a file > 10 KB (exceeds MAX_INLINE_TOKENS)
     let line = "x".repeat(100);
-    let lines: Vec<&str> = std::iter::repeat(line.as_str()).take(120).collect();
+    let lines: Vec<&str> = std::iter::repeat_n(line.as_str(), 120).collect();
     std::fs::write(
         &file,
         lines.join(

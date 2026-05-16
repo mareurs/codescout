@@ -15,7 +15,6 @@ pub fn default_severity(verdict: Verdict) -> Severity {
 /// Apply path-based drop rules. Returns `(severity, reason)`.
 pub fn apply_drops(
     md_file: &Path,
-    _verdict: Verdict,
     base: Severity,
     memory_globs: &[globset::Glob],
 ) -> (Severity, &'static str) {
