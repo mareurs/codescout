@@ -21,18 +21,20 @@ pub fn merge_into_tracker(
         {
             // Update existing
             existing.last_verified_at = now_str.clone();
-            // verdict change → status transition
-            if f.resolution.verdict == Verdict::Resolved && existing.status == "open" {
-                existing.status = "fixed".to_string();
-                existing.notes = format!("auto-resolved at {commit}");
-            } else if f.resolution.verdict != Verdict::Resolved
-                && f.resolution.verdict != Verdict::External
-                && existing.status == "fixed"
-            {
-                existing.status = "open".to_string();
-                existing.notes = format!("regression at {commit}; prior: {}", existing.notes);
+            if existing.status != "wontfix" {
+                // verdict change → status transition
+                if f.resolution.verdict == Verdict::Resolved && existing.status == "open" {
+                    existing.status = "fixed".to_string();
+                    existing.notes = format!("auto-resolved at {commit}");
+                } else if f.resolution.verdict != Verdict::Resolved
+                    && f.resolution.verdict != Verdict::External
+                    && existing.status == "fixed"
+                {
+                    existing.status = "open".to_string();
+                    existing.notes = format!("regression at {commit}; prior: {}", existing.notes);
+                }
             }
-            // severity escalates only
+            // severity escalates only — applies even for wontfix (tracks worst-ever)
             if severity_rank(f.resolution.severity) > severity_rank(existing.severity) {
                 existing.severity = f.resolution.severity;
                 existing.severity_reason = f.resolution.severity_reason.to_string();
@@ -42,11 +44,8 @@ pub fn merge_into_tracker(
             let next_n = out.issues.iter().map(|i| i.n).max().unwrap_or(0) + 1;
             out.issues.push(Issue {
                 n: next_n,
-                title: format!(
-                    "{} — {:?}",
-                    f.candidate.raw_ref, f.resolution.verdict
-                )
-                .to_lowercase(),
+                title: format!("{} — {:?}", f.candidate.raw_ref, f.resolution.verdict)
+                    .to_lowercase(),
                 severity: f.resolution.severity,
                 severity_reason: f.resolution.severity_reason.to_string(),
                 status: "open".to_string(),
@@ -122,5 +121,61 @@ mod tests {
         let r1 = merge_into_tracker(vec![a.clone()], &TrackerParams::default(), now(), "c1");
         let r2 = merge_into_tracker(vec![a], &r1, now(), "c2");
         assert_eq!(r2.issues[0].first_seen_commit, "c1");
+    }
+
+    #[test]
+    fn lifecycle_open_to_fixed() {
+        let a = finding("a.md", "x.py", Verdict::Missing);
+        let r1 = merge_into_tracker(vec![a.clone()], &TrackerParams::default(), now(), "c1");
+        assert_eq!(r1.issues[0].status, "open");
+
+        let a_resolved = finding("a.md", "x.py", Verdict::Resolved);
+        let r2 = merge_into_tracker(vec![a_resolved], &r1, now(), "c2");
+        assert_eq!(r2.issues[0].status, "fixed");
+        assert!(r2.issues[0].notes.contains("auto-resolved at c2"));
+    }
+
+    #[test]
+    fn lifecycle_fixed_to_open_regression() {
+        let a = finding("a.md", "x.py", Verdict::Missing);
+        let r1 = merge_into_tracker(vec![a.clone()], &TrackerParams::default(), now(), "c1");
+        let a_ok = finding("a.md", "x.py", Verdict::Resolved);
+        let r2 = merge_into_tracker(vec![a_ok], &r1, now(), "c2");
+        assert_eq!(r2.issues[0].status, "fixed");
+
+        let a_broken = finding("a.md", "x.py", Verdict::Missing);
+        let r3 = merge_into_tracker(vec![a_broken], &r2, now(), "c3");
+        assert_eq!(r3.issues[0].status, "open");
+        assert!(r3.issues[0].notes.contains("regression at c3"));
+    }
+
+    #[test]
+    fn wontfix_never_auto_flipped() {
+        let a = finding("a.md", "x.py", Verdict::Missing);
+        let mut r1 = merge_into_tracker(vec![a.clone()], &TrackerParams::default(), now(), "c1");
+        r1.issues[0].status = "wontfix".to_string();
+
+        let a_ok = finding("a.md", "x.py", Verdict::Resolved);
+        let r2 = merge_into_tracker(vec![a_ok], &r1, now(), "c2");
+        assert_eq!(r2.issues[0].status, "wontfix");
+    }
+
+    #[test]
+    fn severity_escalates_only() {
+        let mut low = finding("a.md", "x.py", Verdict::Missing);
+        low.resolution.severity = Severity::Low;
+        let r1 = merge_into_tracker(vec![low], &TrackerParams::default(), now(), "c1");
+        assert_eq!(r1.issues[0].severity, Severity::Low);
+
+        let mut high = finding("a.md", "x.py", Verdict::Missing);
+        high.resolution.severity = Severity::High;
+        let r2 = merge_into_tracker(vec![high], &r1, now(), "c2");
+        assert_eq!(r2.issues[0].severity, Severity::High);
+
+        // downgrade attempt — severity should NOT drop
+        let mut med = finding("a.md", "x.py", Verdict::Missing);
+        med.resolution.severity = Severity::Med;
+        let r3 = merge_into_tracker(vec![med], &r2, now(), "c3");
+        assert_eq!(r3.issues[0].severity, Severity::High);
     }
 }
