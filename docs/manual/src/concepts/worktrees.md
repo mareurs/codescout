@@ -8,7 +8,7 @@ and the shell's working directory moves into it. The MCP server does not follow.
 codescout's project root is set when the server starts (or when
 `workspace(action: activate)` is called). It has no visibility into where the shell is
 currently pointed. So after `EnterWorktree`, write tools — `edit_file`,
-`create_file`, `replace_symbol`, `insert_code`, `remove_symbol` — are still
+`create_file`, `edit_code` — are still
 targeting the main repo. The AI writes to the wrong tree, silently, with no
 error, because the path is valid in both contexts.
 

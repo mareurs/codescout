@@ -33,6 +33,7 @@
   - [Index Scope Guard](concepts/index-scope-guard.md)
   - [Auto-Reindex on Edit](concepts/auto-reindex-on-edit.md)
   - [Hybrid Dense + Sparse Retrieval](concepts/hybrid-bm25-vector.md)
+  - [SPLADE on ROCm](concepts/sparse-amd.md)
 
 - [Library Navigation](concepts/library-navigation.md)
   - [Auto-Registration](concepts/multi-ecosystem-auto-registration.md)
@@ -112,7 +113,6 @@
 # Experimental
 
 - [Experimental Features](experimental/index.md)
-  - [SPLADE on ROCm](experimental/sparse-amd.md)
 # Development
 
 - [Architecture](architecture.md)

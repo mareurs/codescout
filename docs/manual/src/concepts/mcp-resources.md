@@ -28,7 +28,7 @@ Longer usage notes (examples, tradeoffs, gotchas) live in
 Tools are also hidden from `list_tools` when their required capability is
 missing:
 
-- LSP tools (`symbol_at`, `references`, `rename_symbol`) —
+- LSP tools (`symbol_at`, `references`, `edit_code(action="rename")`) —
   hidden when no LSP provider is wired for the project's language.
 - Embedding tools (`semantic_search`, `index`) — hidden
   when embeddings are disabled at build time.

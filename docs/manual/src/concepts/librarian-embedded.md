@@ -15,7 +15,7 @@ the librarian server instructions block is appended to codescout's MCP
 ```toml
 # Cargo.toml
 [features]
-default = ["remote-embed", "local-embed", "dashboard", "http", "librarian"]
+default = ["remote-embed", "http", "librarian"]
 librarian = ["dep:librarian-mcp"]
 ```
 
@@ -25,7 +25,7 @@ cargo build --release
 
 # Production build — librarian compiled out, zero runtime cost
 cargo build --release --no-default-features \
-  --features remote-embed,local-embed,dashboard,http
+  --features remote-embed,http
 ```
 
 ## Runtime override

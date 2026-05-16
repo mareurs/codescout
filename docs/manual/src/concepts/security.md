@@ -82,8 +82,8 @@ that directory.
 
 ## Write Policy
 
-`create_file`, `edit_file`, and all symbol-editing tools (`replace_symbol`,
-`insert_code`, `rename_symbol`, `remove_symbol`) enforce a **project root
+`create_file`, `edit_file`, and `edit_code` (all actions — `replace`,
+`insert`, `remove`, `rename`) enforce a **project root
 boundary**. The check happens before any I/O:
 
 1. **Deny list first** — the target path is checked against the built-in deny

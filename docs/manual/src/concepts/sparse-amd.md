@@ -1,8 +1,9 @@
 # SPLADE on ROCm (`sparse-amd`)
 
-> **Status:** experimental. The image is built from a not-yet-merged upstream
-> PR and verified on gfx1100. Other RDNA3 / CDNA arches will probably work but
-> have not been tested by us.
+> **Status:** stable since v0.12.0. The image is built from a not-yet-merged
+> upstream PR and verified on gfx1100. Other RDNA3 / CDNA arches will probably
+> work but have not been tested by us. If upstream PR #860 ships, this page
+> will simplify to a one-line pointer at the official ROCm image.
 
 The default `amd` profile keeps SPLADE on CPU because upstream
 [text-embeddings-inference][tei] (TEI) does not ship a ROCm release. The
