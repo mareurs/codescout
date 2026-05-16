@@ -17,6 +17,8 @@ pub enum Verb {
     /// Snapshot an artifact at a past commit or timestamp.
     #[command(name = "state-at")]
     StateAt(StateAtArgs),
+    /// Create a new artifact.
+    Create(CreateArgs),
 }
 
 #[derive(Debug, Args)]
@@ -119,6 +121,7 @@ pub async fn dispatch(verb: Verb) -> Result<()> {
         Verb::Get(args) => run_get(args).await,
         Verb::Graph(args) => run_graph(args).await,
         Verb::StateAt(args) => run_state_at(args).await,
+        Verb::Create(args) => run_create(args).await,
     }
 }
 
@@ -357,6 +360,127 @@ pub(crate) async fn run_state_at(args: StateAtArgs) -> Result<()> {
         tool_args.insert("timestamp".into(), Value::Number(t.into()));
     }
     let v = librarian_mcp::tools::state_at::call(&ctx, Value::Object(tool_args)).await?;
+    crate::cli::format::print(&v, &output)?;
+    Ok(())
+}
+
+#[derive(Debug, clap::Args)]
+pub struct CreateArgs {
+    /// Artifact kind (e.g. spec, plan, tracker, adr).
+    #[arg(long)]
+    pub kind: String,
+    /// Human-readable title.
+    #[arg(long)]
+    pub title: String,
+    /// Relative path for the new file (e.g. docs/specs/foo.md).
+    #[arg(long = "rel-path")]
+    pub rel_path: String,
+    /// Workspace root name (git repo basename); omit to infer from active project.
+    #[arg(long)]
+    pub repo: Option<String>,
+    /// Initial status.
+    #[arg(long)]
+    pub status: Option<String>,
+    /// Comma-separated owner list.
+    #[arg(long)]
+    pub owners: Option<String>,
+    /// Comma-separated tag list.
+    #[arg(long)]
+    pub tags: Option<String>,
+    /// Topic keyword for search.
+    #[arg(long)]
+    pub topic: Option<String>,
+    /// Body content: `@<file>` reads from file, `-` reads stdin, else literal string.
+    #[arg(long)]
+    pub body: Option<String>,
+    /// Persistent augmentation prompt (or `@<file>` / `-`).
+    #[arg(long = "augment-prompt")]
+    pub augment_prompt: Option<String>,
+    /// Augmentation params JSON (`@<file>` / `-` / literal JSON string).
+    #[arg(long = "augment-params")]
+    pub augment_params: Option<String>,
+    /// Optional project root override (defaults to cwd).
+    #[arg(long)]
+    pub project: Option<std::path::PathBuf>,
+    /// Emit JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+    /// Force no color (also implicit when stdout is not a TTY).
+    #[arg(long = "no-color")]
+    pub no_color: bool,
+}
+
+impl CreateArgs {
+    pub fn common(&self) -> CommonOpts {
+        CommonOpts {
+            project: self.project.clone(),
+            json: self.json,
+            no_color: self.no_color,
+        }
+    }
+}
+
+pub(crate) async fn run_create(args: CreateArgs) -> Result<()> {
+    let common = args.common();
+    let output = common.output();
+    let ctx = open_ctx(&common).await?;
+
+    let mut tool_args = serde_json::Map::new();
+    tool_args.insert("kind".into(), Value::String(args.kind.clone()));
+    tool_args.insert("title".into(), Value::String(args.title.clone()));
+    tool_args.insert("rel_path".into(), Value::String(args.rel_path.clone()));
+    if let Some(r) = &args.repo {
+        tool_args.insert("repo".into(), Value::String(r.clone()));
+    }
+    if let Some(s) = &args.status {
+        tool_args.insert("status".into(), Value::String(s.clone()));
+    }
+    if let Some(o) = &args.owners {
+        let list: Vec<Value> = o
+            .split(',')
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| Value::String(s.trim().into()))
+            .collect();
+        tool_args.insert("owners".into(), Value::Array(list));
+    }
+    if let Some(t) = &args.tags {
+        let list: Vec<Value> = t
+            .split(',')
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| Value::String(s.trim().into()))
+            .collect();
+        tool_args.insert("tags".into(), Value::Array(list));
+    }
+    if let Some(t) = &args.topic {
+        tool_args.insert("topic".into(), Value::String(t.clone()));
+    }
+    if let Some(b) = &args.body {
+        tool_args.insert(
+            "body".into(),
+            Value::String(crate::cli::read_at_or_stdin(b)?),
+        );
+    } else {
+        // Server requires a body field; default to empty when caller omits --body.
+        tool_args.insert("body".into(), Value::String(String::new()));
+    }
+    if args.augment_prompt.is_some() || args.augment_params.is_some() {
+        let mut aug = serde_json::Map::new();
+        if let Some(p) = &args.augment_prompt {
+            aug.insert(
+                "prompt".into(),
+                Value::String(crate::cli::read_at_or_stdin(p)?),
+            );
+        }
+        if let Some(params) = &args.augment_params {
+            let raw = crate::cli::read_at_or_stdin(params)?;
+            let parsed: Value =
+                serde_json::from_str(&raw).context("--augment-params is not valid JSON")?;
+            aug.insert("params".into(), parsed);
+        }
+        tool_args.insert("augment".into(), Value::Object(aug));
+    }
+
+    let v = librarian_mcp::tools::create::call(&ctx, Value::Object(tool_args)).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
 }
