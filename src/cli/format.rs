@@ -76,9 +76,9 @@ pub(crate) fn write_value<W: Write>(value: &Value, opts: &OutputOpts, w: &mut W)
     }
     match infer_shape(value) {
         Shape::WriteAck => write_ack(value, no_color, w),
-        // All pretty branches land in CLI-5 (FindResult table) or later. Until then,
-        // fall back to JSON for everything other than WriteAck so the user always
-        // sees something useful.
+        Shape::FindResult => write_find_table(value, no_color, w),
+        // Other pretty branches land in later tasks. Until then, fall back
+        // to JSON for everything else so output is never silent.
         _ => fallback_json(value, w),
     }
 }
@@ -98,6 +98,77 @@ fn write_ack<W: Write>(value: &Value, _no_color: bool, w: &mut W) -> Result<()> 
 fn fallback_json<W: Write>(value: &Value, w: &mut W) -> Result<()> {
     serde_json::to_writer_pretty(&mut *w, value)?;
     writeln!(w)?;
+    Ok(())
+}
+
+fn write_find_table<W: Write>(value: &Value, _no_color: bool, w: &mut W) -> Result<()> {
+    let items = value.get("items").and_then(|v| v.as_array());
+    let Some(items) = items else {
+        return fallback_json(value, w);
+    };
+    if items.is_empty() {
+        writeln!(w, "(no results)")?;
+        return Ok(());
+    }
+    // Compute column widths from the data so each row aligns.
+    let mut widths = [8usize, 7, 7, 40]; // id, kind, status, title (rel_path follows wrapped)
+    for it in items {
+        let id = it.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let kind = it.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+        let status = it.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        let title = it.get("title").and_then(|v| v.as_str()).unwrap_or("");
+        widths[0] = widths[0].max(id.len());
+        widths[1] = widths[1].max(kind.len());
+        widths[2] = widths[2].max(status.len());
+        widths[3] = widths[3].max(title.len()).min(60);
+    }
+    writeln!(
+        w,
+        "{:<w0$}  {:<w1$}  {:<w2$}  {:<w3$}  rel_path",
+        "id",
+        "kind",
+        "status",
+        "title",
+        w0 = widths[0],
+        w1 = widths[1],
+        w2 = widths[2],
+        w3 = widths[3]
+    )?;
+    for it in items {
+        let id = it.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let kind = it.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+        let status = it.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        let title = it.get("title").and_then(|v| v.as_str()).unwrap_or("");
+        let rel_path = it.get("rel_path").and_then(|v| v.as_str()).unwrap_or("");
+        let title_trunc = if title.len() > widths[3] {
+            format!("{}…", &title[..widths[3].saturating_sub(1)])
+        } else {
+            title.to_string()
+        };
+        writeln!(
+            w,
+            "{:<w0$}  {:<w1$}  {:<w2$}  {:<w3$}  {}",
+            id,
+            kind,
+            status,
+            title_trunc,
+            rel_path,
+            w0 = widths[0],
+            w1 = widths[1],
+            w2 = widths[2],
+            w3 = widths[3]
+        )?;
+    }
+    if let Some(total) = value.get("total").and_then(|v| v.as_u64()) {
+        if (total as usize) > items.len() {
+            writeln!(
+                w,
+                "\nShowing {} of {} — narrow with --kind / --tag / --filter, or paginate with --offset.",
+                items.len(),
+                total
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -153,5 +224,48 @@ mod tests {
     fn infer_shape_unknown_for_arbitrary_object() {
         let v = json!({"weird": "shape"});
         assert!(matches!(infer_shape(&v), Shape::Unknown));
+    }
+
+    #[test]
+    fn pretty_find_result_renders_table_with_id_kind_status_title() {
+        let v = json!({
+            "items": [
+                {"id":"abcd1234","kind":"tracker","status":"active","title":"Ship Feature X","rel_path":"docs/trackers/x.md"},
+                {"id":"bbbb5678","kind":"spec","status":"draft","title":"Design Y","rel_path":"docs/specs/y.md"}
+            ],
+            "total": 2
+        });
+        let mut buf = Vec::new();
+        write_value(
+            &v,
+            &OutputOpts {
+                json: false,
+                no_color: true,
+            },
+            &mut buf,
+        )
+        .unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("abcd1234"), "row 1 id missing; got: {s}");
+        assert!(
+            s.contains("Ship Feature X"),
+            "row 1 title missing; got: {s}"
+        );
+        assert!(
+            s.contains("docs/specs/y.md"),
+            "row 2 rel_path missing; got: {s}"
+        );
+        // The "kind | status" axis should be visible regardless of exact framing.
+        assert!(s.contains("tracker"));
+        assert!(s.contains("draft"));
+        // The table must NOT be JSON — assert the column-header line is present
+        // so a JSON fallback would visibly fail this test.
+        assert!(
+            s.lines().any(|line| line.contains("id")
+                && line.contains("kind")
+                && line.contains("status")
+                && line.contains("title")),
+            "expected a table header line; got: {s}"
+        );
     }
 }
