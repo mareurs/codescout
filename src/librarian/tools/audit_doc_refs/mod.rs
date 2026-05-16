@@ -656,4 +656,61 @@ mod tests {
         let id2 = r2["tracker_id"].as_str().unwrap();
         assert_eq!(id1, id2, "second run should reuse same tracker id");
     }
+
+    #[tokio::test]
+    async fn outputguard_caps_findings_inline() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+        let mut body = String::new();
+        for i in 0..51 {
+            body.push_str(&format!("`src/gone{i}.py`\n"));
+        }
+        std::fs::write(tmp.path().join("docs/spec.md"), body).unwrap();
+
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let result = call(
+            &ctx,
+            serde_json::json!({
+                "emit_tracker": false,
+                "paths": ["docs/**/*.md"],
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            result["findings"].as_array().unwrap().len(),
+            50,
+            "findings should be capped at 50"
+        );
+        assert_eq!(
+            result["overflow"]["total"], 51,
+            "overflow.total should reflect all 51 findings"
+        );
+        // by_file is a BTreeMap serialized as a JSON object: {<path>: <count>}
+        assert!(
+            result["overflow"]["by_file"]["docs/spec.md"].as_u64().is_some(),
+            "by_file should map docs/spec.md to a count; got overflow: {}",
+            result["overflow"]
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn glob_explosion_returns_recoverable() {
+        let tmp = TempDir::new().unwrap();
+        for i in 0..5 {
+            std::fs::write(tmp.path().join(format!("doc{i}.md")), "x").unwrap();
+        }
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        std::env::set_var("LIBRARIAN_AUDIT_MAX_FILES", "1");
+        let err = call(&ctx, serde_json::json!({"paths": ["*.md"]}))
+            .await
+            .unwrap_err();
+        std::env::remove_var("LIBRARIAN_AUDIT_MAX_FILES");
+        assert!(
+            format!("{err}").contains("cap") || format!("{err}").contains("files"),
+            "error should mention the file cap; got: {err}"
+        );
+    }
 }
