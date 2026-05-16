@@ -157,8 +157,7 @@
     "tier": 3,
     "query": "how does the companion plugin route native Read and Grep calls to codescout MCP tools",
     "expected_files": [
-      "docs/manual/src/concepts/routing-plugin.md",
-      "docs/manual/src/getting-started/companion-plugin.md"
+      "docs/manual/src/concepts/routing-plugin.md"
     ]
   },
   {

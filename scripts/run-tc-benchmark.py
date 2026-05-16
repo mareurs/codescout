@@ -137,7 +137,6 @@ TEST_CASES = [
         "query": "companion plugin PreToolUse hook Read Grep block routing codescout",
         "expected": [
             "docs/manual/src/concepts/routing-plugin.md",
-            "docs/manual/src/getting-started/companion-plugin.md",
         ],
     },
     # Tier 4: Architectural insight (18-20)

@@ -77,7 +77,7 @@ docker compose --profile amd up -d
 | Qdrant | `6333` HTTP / `6334` gRPC | `qdrant/qdrant:v1.17.0` | Shared across all profiles. |
 | Dense (`dense-amd`) | `48081` | `rocm/llama.cpp:llama.cpp-b6652.amd0_rocm7.0.0_ubuntu24.04_server` | llama-server `--embedding --pooling mean`, `CodeRankEmbed-Q4_K_M.gguf`. |
 | Reranker (`reranker-amd`) | `48083` | same image | llama-server `--reranking --pooling rank`, `bge-reranker-v2-m3-Q4_K_M.gguf`. |
-| Sparse (`sparse-amd`) | `48084` | `codescout/sparse-amd:tei-1588129f93` (built locally) | TEI-on-ROCm running SPLADE-PP_en_v1. See [SPLADE on ROCm](../experimental/sparse-amd.md). |
+| Sparse (`sparse-amd`) | `48084` | `codescout/sparse-amd:tei-1588129f93` (built locally) | TEI-on-ROCm running SPLADE-PP_en_v1. See [SPLADE on ROCm](sparse-amd.md). |
 
 **Required model files** in `${CODESCOUT_MODEL_DIR:-./models}`:
 
@@ -119,7 +119,7 @@ CODESCOUT_RERANKER_PROTOCOL=llama-server  # Cohere-shape /rerank
 **Why sparse uses TEI:** SPLADE is an MLM-style model with no llama.cpp
 implementation, and CPU latency saturates 32 cores on a full reindex of a
 21k-chunk project. Building TEI from source against ROCm 7.1 + PyTorch 2.8
-(see [SPLADE on ROCm](../experimental/sparse-amd.md)) puts SPLADE on the
+(see [SPLADE on ROCm](sparse-amd.md)) puts SPLADE on the
 GPU and drops a full reindex from "minutes of CPU melting" to ~6 m 36 s at
 121 % CPU.
 ## How codescout finds the stack
