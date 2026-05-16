@@ -1,0 +1,28 @@
+{
+  "criterion": "Split src/tools/mod.rs (1487 lines), src/tools/run_command/mod.rs (1196 lines), and src/tools/file_summary.rs (1350 lines) into focused submodules.",
+  "status": "scoping",
+  "acceptance_signals": [
+    {
+      "description": "file_summary.rs tests extracted to tests.rs sibling (Task B)",
+      "met": false
+    },
+    {
+      "description": "run_command/mod.rs split into mod/inner/interactive/output (Task C)",
+      "met": false
+    },
+    {
+      "description": "tools/mod.rs split into tools/core/{types,params,guards,tests} (Task A)",
+      "met": false
+    },
+    {
+      "description": "cargo fmt && cargo clippy -- -D warnings && cargo test passes",
+      "met": false
+    },
+    {
+      "description": "No file in src/tools/ exceeds ~600 lines after the splits",
+      "met": false
+    }
+  ],
+  "children": [],
+  "progress_log": []
+}

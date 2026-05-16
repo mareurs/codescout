@@ -1,0 +1,88 @@
+{
+  "criterion": "Push retrieval benchmark score past P5 (>= 40/75) on the pinned 25-TC log using a reproducible, documented config.",
+  "status": "done",
+  "acceptance_signals": [
+    {
+      "description": "Champion config (model + quantization + boost + mode) documented in the tracker",
+      "met": true,
+      "evidence": "Final champion: CodeRankEmbed Q4_K_M, bm25=5.0, mode=code, jina-rerank-v2 → 42/75."
+    },
+    {
+      "description": "Tier-T5 (real-user query) score >= 10/15",
+      "met": true,
+      "evidence": "T5 finishes at 11/15 after reranker enabled."
+    },
+    {
+      "description": "Code-vs-md ranking pathology investigated and either fixed or documented",
+      "met": true,
+      "evidence": "semantic_search mode defaults to code; full mode kept as opt-in. Documented in tracker §code/full modes."
+    },
+    {
+      "description": "Reranker A/B vs no-reranker decision recorded",
+      "met": true,
+      "evidence": "jina-rerank-v2 wins +5 points over no-reranker on the pinned log; bge-v2-m3 only +2."
+    }
+  ],
+  "children": [
+    {
+      "id": "C-1",
+      "artifact_id": "3037fe58fffb87d2",
+      "title": "Query prefix experiment (negative result on Q4_K_M)",
+      "archetype": "metric_baseline",
+      "status": "done"
+    },
+    {
+      "id": "C-2",
+      "artifact_id": "ba3acd085c063fa2",
+      "title": "T5 expected-path fix (4 of 5 TCs had wrong truth)",
+      "archetype": "audit_issues",
+      "status": "done"
+    },
+    {
+      "id": "C-3",
+      "artifact_id": "acf9b5bcbfac0439",
+      "title": "Reranker A/B/C: bge-v2-m3 vs jina-rerank-v2",
+      "archetype": "metric_baseline",
+      "status": "done"
+    },
+    {
+      "id": "C-4",
+      "artifact_id": "fce952a1d10a22ef",
+      "title": "Sparse-AMD SPLADE-on-ROCm stack",
+      "archetype": "task_list",
+      "status": "done"
+    }
+  ],
+  "progress_log": [
+    {
+      "date": "2026-05-12",
+      "note": "Initial pinned bench at HEAD ede25e69. Boost sweep peaks at 35/75 at bm25=5.0.",
+      "evidence_commits": [],
+      "evidence_artifacts": ["8e09ca67f463027e"]
+    },
+    {
+      "date": "2026-05-12",
+      "note": "Fixed T5 expected paths — 4 of 5 cited wrong truth lists.",
+      "evidence_commits": ["f651cef5"],
+      "evidence_artifacts": []
+    },
+    {
+      "date": "2026-05-13",
+      "note": "Default semantic_search to mode=code — TC-24 unblocks 0/3 → 3/3.",
+      "evidence_commits": [],
+      "evidence_artifacts": []
+    },
+    {
+      "date": "2026-05-14",
+      "note": "SPLADE-on-ROCm sparse stack landed (afc16394). Sparse precision-at-5 unchanged but recall stabilized across re-runs.",
+      "evidence_commits": ["afc16394", "1a01611d"],
+      "evidence_artifacts": []
+    },
+    {
+      "date": "2026-05-15",
+      "note": "Reranker A/B/C complete: jina-rerank-v2 (Infinity) lifts champion 37 → 42 / 75. Bench passes P5. Closing goal.",
+      "evidence_commits": [],
+      "evidence_artifacts": ["8e09ca67f463027e"]
+    }
+  ]
+}

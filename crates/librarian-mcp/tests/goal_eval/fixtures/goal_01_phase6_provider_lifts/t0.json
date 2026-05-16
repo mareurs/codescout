@@ -1,0 +1,24 @@
+{
+  "criterion": "Lift the deferred Phase 6 provider modules (fs/, text/) out of src/tools/ and thin tool-files to ~600 lines.",
+  "status": "scoping",
+  "acceptance_signals": [
+    {
+      "description": "src/fs/ provider module exists with path/uri/glob helpers lifted out of src/tools/symbol/path_helpers.rs",
+      "met": false
+    },
+    {
+      "description": "src/text/ provider module decision recorded (lift or won't-do at this scale)",
+      "met": false
+    },
+    {
+      "description": "All non-test src/tools/*.rs files trend below 600 lines or have a documented exception",
+      "met": false
+    },
+    {
+      "description": "docs/TODO-phase6-provider-lifts.md updated to reflect final state of 6.2/6.3/6.4",
+      "met": false
+    }
+  ],
+  "children": [],
+  "progress_log": []
+}

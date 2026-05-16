@@ -1,0 +1,28 @@
+{
+  "criterion": "Land the augmentation/timeline postfix work: persistent prompts + params on artifacts, with state_at(commit) replay and freshness derivation.",
+  "status": "scoping",
+  "acceptance_signals": [
+    {
+      "description": "Agent memory research survey complete with conclusion on git-anchored vs wall-clock anchoring",
+      "met": false
+    },
+    {
+      "description": "Timeline schema (events + commits + sources + event_edges) implemented",
+      "met": false
+    },
+    {
+      "description": "artifact_augment supports prompt + params with RFC 7396 merge-patch",
+      "met": false
+    },
+    {
+      "description": "state_at(commit) returns the artifact graph as it was at a SHA",
+      "met": false
+    },
+    {
+      "description": "Freshness enum {fresh, unknown, stale, superseded} derived from topo-distance to HEAD",
+      "met": false
+    }
+  ],
+  "children": [],
+  "progress_log": []
+}

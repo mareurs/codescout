@@ -1,0 +1,73 @@
+{
+  "criterion": "Lift the deferred Phase 6 provider modules (fs/, text/) out of src/tools/ and thin tool-files to ~600 lines.",
+  "status": "active",
+  "acceptance_signals": [
+    {
+      "description": "src/fs/ provider module exists with path/uri/glob helpers lifted out of src/tools/symbol/path_helpers.rs",
+      "met": true,
+      "evidence": "Commit 59b3f63d landed fs-provider implementation per Phase 6.2 plan"
+    },
+    {
+      "description": "src/text/ provider module decision recorded (lift or won't-do at this scale)",
+      "met": false
+    },
+    {
+      "description": "All non-test src/tools/*.rs files trend below 600 lines or have a documented exception",
+      "met": false
+    },
+    {
+      "description": "docs/TODO-phase6-provider-lifts.md updated to reflect final state of 6.2/6.3/6.4",
+      "met": false
+    }
+  ],
+  "children": [
+    {
+      "id": "C-1",
+      "artifact_id": "182cc474aaaa1111",
+      "title": "Phase 6.2 fs-provider lift design",
+      "archetype": "task_list",
+      "status": "done"
+    },
+    {
+      "id": "C-2",
+      "artifact_id": "59b3f63dbbbb2222",
+      "title": "Phase 6.2 fs-provider lift implementation plan",
+      "archetype": "task_list",
+      "status": "done"
+    },
+    {
+      "id": "C-3",
+      "artifact_id": "395c54a7b00be847",
+      "title": "Decide 6.3 text/ provider — lift or document won't-do",
+      "archetype": "audit_issues",
+      "status": "in-progress"
+    },
+    {
+      "id": "C-4",
+      "artifact_id": "ba2721925acd88a4",
+      "title": "Tool-file thinning audit (6.4) — list non-test files >600 lines",
+      "archetype": "audit_issues",
+      "status": "active"
+    }
+  ],
+  "progress_log": [
+    {
+      "date": "2026-04-22",
+      "note": "Phase 6.1 shipped — src/symbol/ provider lifted; query.rs and edit.rs moved.",
+      "evidence_commits": ["f7ca520b", "47d122ce"],
+      "evidence_artifacts": []
+    },
+    {
+      "date": "2026-05-02",
+      "note": "Phase 6.2 shipped — src/fs/ provider exists, path_helpers.rs deleted; 5 pure helpers + ctx-coupled cluster moved together.",
+      "evidence_commits": ["59b3f63d", "182cc474"],
+      "evidence_artifacts": []
+    },
+    {
+      "date": "2026-05-09",
+      "note": "Started 6.3 audit — three of four text helpers are single-caller; leaning toward 'won't lift'. Audit issue C-3 still open.",
+      "evidence_commits": [],
+      "evidence_artifacts": ["c54ad4ece0a71aed"]
+    }
+  ]
+}

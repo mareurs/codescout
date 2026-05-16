@@ -1,0 +1,86 @@
+{
+  "criterion": "Land the augmentation/timeline postfix work: persistent prompts + params on artifacts, with state_at(commit) replay and freshness derivation.",
+  "status": "active",
+  "acceptance_signals": [
+    {
+      "description": "Agent memory research survey complete with conclusion on git-anchored vs wall-clock anchoring",
+      "met": true,
+      "evidence": "Tracker 7c910f78bf28796c — Zep/Graphiti closest analogue; GCC paper sole git-anchored prior art; librarian's commits + anchor_commit fills the gap."
+    },
+    {
+      "description": "Timeline schema (events + commits + sources + event_edges) implemented",
+      "met": true,
+      "evidence": "Schema landed per docs/superpowers/specs/2026-04-28-librarian-timeline-design.md."
+    },
+    {
+      "description": "artifact_augment supports prompt + params with RFC 7396 merge-patch",
+      "met": true,
+      "evidence": "artifact_augment tool exposes merge=true mode; commit 69d09851 fixed BUG-056 (params patch was being dropped)."
+    },
+    {
+      "description": "state_at(commit) returns the artifact graph as it was at a SHA",
+      "met": false
+    },
+    {
+      "description": "Freshness enum {fresh, unknown, stale, superseded} derived from topo-distance to HEAD",
+      "met": false
+    }
+  ],
+  "children": [
+    {
+      "id": "C-1",
+      "artifact_id": "7c910f78bf28796c",
+      "title": "Agent memory research survey (April 2026)",
+      "archetype": "reflective",
+      "status": "done"
+    },
+    {
+      "id": "C-2",
+      "artifact_id": "5e68d81c3920030f",
+      "title": "Artifact timeline design spec",
+      "archetype": "task_list",
+      "status": "done"
+    },
+    {
+      "id": "C-3",
+      "artifact_id": "a42d467b6b8fd6bb",
+      "title": "artifact_augment merge-patch + BUG-056 fix",
+      "archetype": "task_list",
+      "status": "done"
+    },
+    {
+      "id": "C-4",
+      "artifact_id": "379a4498fc936a81",
+      "title": "TimeMachine state_at(commit) implementation",
+      "archetype": "task_list",
+      "status": "in-progress"
+    },
+    {
+      "id": "C-5",
+      "artifact_id": "fab3fa79cc34724e",
+      "title": "Freshness enum derivation from topo-distance",
+      "archetype": "audit_issues",
+      "status": "active"
+    }
+  ],
+  "progress_log": [
+    {
+      "date": "2026-04-28",
+      "note": "Research survey complete. Validity-windowed edges (Graphiti pattern) considered as supplemental projection; not adopting in v1.",
+      "evidence_commits": [],
+      "evidence_artifacts": ["7c910f78bf28796c"]
+    },
+    {
+      "date": "2026-05-02",
+      "note": "Timeline schema migration landed. events + commits + sources + event_edges tables created.",
+      "evidence_commits": [],
+      "evidence_artifacts": []
+    },
+    {
+      "date": "2026-05-05",
+      "note": "artifact_augment ships merge-patch mode; BUG-056 closed (params merge was dropping non-prompt updates).",
+      "evidence_commits": ["69d09851"],
+      "evidence_artifacts": []
+    }
+  ]
+}

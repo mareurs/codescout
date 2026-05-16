@@ -1,0 +1,24 @@
+{
+  "criterion": "Push retrieval benchmark score past P5 (>= 40/75) on the pinned 25-TC log using a reproducible, documented config.",
+  "status": "scoping",
+  "acceptance_signals": [
+    {
+      "description": "Champion config (model + quantization + boost + mode) documented in the tracker",
+      "met": false
+    },
+    {
+      "description": "Tier-T5 (real-user query) score >= 10/15",
+      "met": false
+    },
+    {
+      "description": "Code-vs-md ranking pathology investigated and either fixed or documented",
+      "met": false
+    },
+    {
+      "description": "Reranker A/B vs no-reranker decision recorded",
+      "met": false
+    }
+  ],
+  "children": [],
+  "progress_log": []
+}

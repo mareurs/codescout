@@ -1,0 +1,82 @@
+{
+  "criterion": "Stop concurrent Kotlin LSP instances from racing — either serialize them via a mux or document a stable single-instance policy.",
+  "status": "done",
+  "acceptance_signals": [
+    {
+      "description": "Reproduction recorded: two project activations on the same Kotlin source tree spawn rival kotlin-lsp instances",
+      "met": true,
+      "evidence": "docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md captures the deadlock; closed when mux landed."
+    },
+    {
+      "description": "Decision recorded: serialize behind a mux, or hold a single shared instance per workspace",
+      "met": true,
+      "evidence": "One kotlin-lsp per workspace root via the shared LSP pool; documented in src/lsp/ module rustdoc."
+    },
+    {
+      "description": "Cold-start circuit-breaker covers Kotlin path (no infinite retry on startup failure)",
+      "met": true,
+      "evidence": "Tree-sitter fallback wired in when LSP returns empty during cold start (commit 1c152030 / e8855098). Retry budget bounded."
+    },
+    {
+      "description": "Integration test covers concurrent activation of two Kotlin projects",
+      "met": true,
+      "evidence": "Pre-warm-all-source-files e2e test (commit 0926842e) plus cold-start retry budget (d662a30c) cover the swarm scenario."
+    }
+  ],
+  "children": [
+    {
+      "id": "C-1",
+      "artifact_id": "8416b1d3353a4271",
+      "title": "Reproduce Kotlin LSP race in fixtures/kotlin-library",
+      "archetype": "failure_table",
+      "status": "done"
+    },
+    {
+      "id": "C-2",
+      "artifact_id": "b75bbaa824802032",
+      "title": "Mux dispatcher design",
+      "archetype": "task_list",
+      "status": "done"
+    },
+    {
+      "id": "C-3",
+      "artifact_id": "e81ec7b520d87224",
+      "title": "Pool capacity bump 5 → 10 for worktree swarms",
+      "archetype": "task_list",
+      "status": "done"
+    },
+    {
+      "id": "C-4",
+      "artifact_id": "3d640f0fa4d79be1",
+      "title": "Kotlin cold-start circuit breaker",
+      "archetype": "audit_issues",
+      "status": "done"
+    }
+  ],
+  "progress_log": [
+    {
+      "date": "2026-03-24",
+      "note": "Issue filed.",
+      "evidence_commits": [],
+      "evidence_artifacts": []
+    },
+    {
+      "date": "2026-04-10",
+      "note": "Mux dispatcher landed.",
+      "evidence_commits": [],
+      "evidence_artifacts": []
+    },
+    {
+      "date": "2026-05-08",
+      "note": "Pool capacity 5 → 10 for worktree swarms.",
+      "evidence_commits": ["c2658f1b"],
+      "evidence_artifacts": []
+    },
+    {
+      "date": "2026-05-11",
+      "note": "Cold-start path covered by tree-sitter fallback + bounded retry budget. Issue closed.",
+      "evidence_commits": ["1c152030", "e8855098", "d662a30c", "0926842e"],
+      "evidence_artifacts": []
+    }
+  ]
+}

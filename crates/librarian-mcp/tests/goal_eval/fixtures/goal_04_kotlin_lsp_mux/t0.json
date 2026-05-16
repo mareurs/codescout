@@ -1,0 +1,24 @@
+{
+  "criterion": "Stop concurrent Kotlin LSP instances from racing — either serialize them via a mux or document a stable single-instance policy.",
+  "status": "scoping",
+  "acceptance_signals": [
+    {
+      "description": "Reproduction recorded: two project activations on the same Kotlin source tree spawn rival kotlin-lsp instances",
+      "met": false
+    },
+    {
+      "description": "Decision recorded: serialize behind a mux, or hold a single shared instance per workspace",
+      "met": false
+    },
+    {
+      "description": "Cold-start circuit-breaker covers Kotlin path (no infinite retry on startup failure)",
+      "met": false
+    },
+    {
+      "description": "Integration test covers concurrent activation of two Kotlin projects",
+      "met": false
+    }
+  ],
+  "children": [],
+  "progress_log": []
+}

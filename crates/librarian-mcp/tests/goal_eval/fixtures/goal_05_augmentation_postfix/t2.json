@@ -1,0 +1,94 @@
+{
+  "criterion": "Land the augmentation/timeline postfix work: persistent prompts + params on artifacts, with state_at(commit) replay and freshness derivation.",
+  "status": "done",
+  "acceptance_signals": [
+    {
+      "description": "Agent memory research survey complete with conclusion on git-anchored vs wall-clock anchoring",
+      "met": true,
+      "evidence": "Tracker 7c910f78bf28796c finalized — wall-clock dominates production; librarian's git-anchor is novel."
+    },
+    {
+      "description": "Timeline schema (events + commits + sources + event_edges) implemented",
+      "met": true,
+      "evidence": "Migration shipped; all tables active in librarian-mcp."
+    },
+    {
+      "description": "artifact_augment supports prompt + params with RFC 7396 merge-patch",
+      "met": true,
+      "evidence": "merge=true path live; BUG-056 closed by 69d09851."
+    },
+    {
+      "description": "state_at(commit) returns the artifact graph as it was at a SHA",
+      "met": true,
+      "evidence": "TimeMachine.state_at(commit) and workspace_state_at action expose snapshot+replay; integration tests cover both commit and timestamp cutoffs."
+    },
+    {
+      "description": "Freshness enum {fresh, unknown, stale, superseded} derived from topo-distance to HEAD",
+      "met": true,
+      "evidence": "Enum derives from topo-distance between HEAD and the newest reviewed event's anchor_commit; surfaces in artifact(find) payloads."
+    }
+  ],
+  "children": [
+    {
+      "id": "C-1",
+      "artifact_id": "7c910f78bf28796c",
+      "title": "Agent memory research survey (April 2026)",
+      "archetype": "reflective",
+      "status": "done"
+    },
+    {
+      "id": "C-2",
+      "artifact_id": "5e68d81c3920030f",
+      "title": "Artifact timeline design spec",
+      "archetype": "task_list",
+      "status": "done"
+    },
+    {
+      "id": "C-3",
+      "artifact_id": "a42d467b6b8fd6bb",
+      "title": "artifact_augment merge-patch + BUG-056 fix",
+      "archetype": "task_list",
+      "status": "done"
+    },
+    {
+      "id": "C-4",
+      "artifact_id": "379a4498fc936a81",
+      "title": "TimeMachine state_at(commit) implementation",
+      "archetype": "task_list",
+      "status": "done"
+    },
+    {
+      "id": "C-5",
+      "artifact_id": "fab3fa79cc34724e",
+      "title": "Freshness enum derivation from topo-distance",
+      "archetype": "audit_issues",
+      "status": "done"
+    }
+  ],
+  "progress_log": [
+    {
+      "date": "2026-04-28",
+      "note": "Research survey complete.",
+      "evidence_commits": [],
+      "evidence_artifacts": ["7c910f78bf28796c"]
+    },
+    {
+      "date": "2026-05-02",
+      "note": "Timeline schema migration landed.",
+      "evidence_commits": [],
+      "evidence_artifacts": []
+    },
+    {
+      "date": "2026-05-05",
+      "note": "artifact_augment ships merge-patch mode; BUG-056 closed.",
+      "evidence_commits": ["69d09851"],
+      "evidence_artifacts": []
+    },
+    {
+      "date": "2026-05-12",
+      "note": "TimeMachine state_at + freshness derivation shipped. workspace_state_at exposes snapshots at commit/timestamp. All acceptance signals met. Closing goal.",
+      "evidence_commits": [],
+      "evidence_artifacts": ["7c910f78bf28796c"]
+    }
+  ]
+}

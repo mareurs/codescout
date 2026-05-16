@@ -1,0 +1,74 @@
+{
+  "criterion": "Stop concurrent Kotlin LSP instances from racing — either serialize them via a mux or document a stable single-instance policy.",
+  "status": "active",
+  "acceptance_signals": [
+    {
+      "description": "Reproduction recorded: two project activations on the same Kotlin source tree spawn rival kotlin-lsp instances",
+      "met": true,
+      "evidence": "Repro captured in docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md — opening kotlin-library twice deadlocks both instances on the build/ lock."
+    },
+    {
+      "description": "Decision recorded: serialize behind a mux, or hold a single shared instance per workspace",
+      "met": true,
+      "evidence": "ADR: share one kotlin-lsp instance keyed by workspace root; the LSP mux dispatches requests by project id."
+    },
+    {
+      "description": "Cold-start circuit-breaker covers Kotlin path (no infinite retry on startup failure)",
+      "met": false
+    },
+    {
+      "description": "Integration test covers concurrent activation of two Kotlin projects",
+      "met": false
+    }
+  ],
+  "children": [
+    {
+      "id": "C-1",
+      "artifact_id": "8416b1d3353a4271",
+      "title": "Reproduce Kotlin LSP race in fixtures/kotlin-library",
+      "archetype": "failure_table",
+      "status": "done"
+    },
+    {
+      "id": "C-2",
+      "artifact_id": "b75bbaa824802032",
+      "title": "Mux dispatcher design",
+      "archetype": "task_list",
+      "status": "done"
+    },
+    {
+      "id": "C-3",
+      "artifact_id": "e81ec7b520d87224",
+      "title": "Pool capacity bump 5 → 10 for worktree swarms",
+      "archetype": "task_list",
+      "status": "in-progress"
+    },
+    {
+      "id": "C-4",
+      "artifact_id": "3d640f0fa4d79be1",
+      "title": "Kotlin cold-start circuit breaker",
+      "archetype": "audit_issues",
+      "status": "active"
+    }
+  ],
+  "progress_log": [
+    {
+      "date": "2026-03-24",
+      "note": "Issue filed — concurrent kotlin-lsp instances deadlock on build/ lock when two project activations land within a few seconds.",
+      "evidence_commits": [],
+      "evidence_artifacts": []
+    },
+    {
+      "date": "2026-04-10",
+      "note": "Mux dispatcher landed. Single kotlin-lsp per workspace root keyed in the LSP pool. Worktree swarms still fight for the 5-slot default.",
+      "evidence_commits": [],
+      "evidence_artifacts": []
+    },
+    {
+      "date": "2026-05-08",
+      "note": "Bumped LSP pool capacity 5 → 10 to absorb worktree swarms.",
+      "evidence_commits": ["c2658f1b"],
+      "evidence_artifacts": []
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "criterion": "Push retrieval benchmark score past P5 (>= 40/75) on the pinned 25-TC log using a reproducible, documented config.",
+  "status": "active",
+  "acceptance_signals": [
+    {
+      "description": "Champion config (model + quantization + boost + mode) documented in the tracker",
+      "met": true,
+      "evidence": "2026-05-12 entry: CodeRankEmbed Q4_K_M, no prefix, bm25=5.0, mode=code → 37/75."
+    },
+    {
+      "description": "Tier-T5 (real-user query) score >= 10/15",
+      "met": true,
+      "evidence": "T5 reached 10/15 in code-mode after TC-24 unblocked (augment.rs ranks #1)."
+    },
+    {
+      "description": "Code-vs-md ranking pathology investigated and either fixed or documented",
+      "met": true,
+      "evidence": "Root cause confirmed: .md plans dominate top-10 in full mode; mitigated by default mode=code."
+    },
+    {
+      "description": "Reranker A/B vs no-reranker decision recorded",
+      "met": false
+    }
+  ],
+  "children": [
+    {
+      "id": "C-1",
+      "artifact_id": "3037fe58fffb87d2",
+      "title": "Query prefix experiment (negative result on Q4_K_M)",
+      "archetype": "metric_baseline",
+      "status": "done"
+    },
+    {
+      "id": "C-2",
+      "artifact_id": "ba3acd085c063fa2",
+      "title": "T5 expected-path fix (4 of 5 TCs had wrong truth)",
+      "archetype": "audit_issues",
+      "status": "done"
+    },
+    {
+      "id": "C-3",
+      "artifact_id": "acf9b5bcbfac0439",
+      "title": "Reranker A/B/C: bge-v2-m3 vs jina-rerank-v2",
+      "archetype": "metric_baseline",
+      "status": "in-progress"
+    },
+    {
+      "id": "C-4",
+      "artifact_id": "fce952a1d10a22ef",
+      "title": "Sparse-AMD SPLADE-on-ROCm stack",
+      "archetype": "task_list",
+      "status": "active"
+    }
+  ],
+  "progress_log": [
+    {
+      "date": "2026-05-12",
+      "note": "Initial pinned bench at HEAD ede25e69. Boost sweep on CodeRankEmbed-Q4 peaks at 35/75 at bm25=5.0.",
+      "evidence_commits": [],
+      "evidence_artifacts": ["8e09ca67f463027e"]
+    },
+    {
+      "date": "2026-05-12",
+      "note": "Fixed T5 expected paths — 4 of 5 cited wrong truth lists.",
+      "evidence_commits": ["f651cef5"],
+      "evidence_artifacts": []
+    },
+    {
+      "date": "2026-05-13",
+      "note": "Default semantic_search to mode=code — TC-24 unblocks 0/3 → 3/3 as augment.rs surfaces past .md noise.",
+      "evidence_commits": [],
+      "evidence_artifacts": ["8e09ca67f463027e"]
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "criterion": "Split src/tools/mod.rs (1487 lines), src/tools/run_command/mod.rs (1196 lines), and src/tools/file_summary.rs (1350 lines) into focused submodules.",
+  "status": "active",
+  "acceptance_signals": [
+    {
+      "description": "file_summary.rs tests extracted to tests.rs sibling (Task B)",
+      "met": true,
+      "evidence": "Commit 1fc60c4 — directory module pattern; ~575 lines of tests moved out."
+    },
+    {
+      "description": "run_command/mod.rs split into mod/inner/interactive/output (Task C)",
+      "met": true,
+      "evidence": "Commit ba9fe16 — interactive.rs / output.rs / inner.rs extracted; mod.rs ~100 lines."
+    },
+    {
+      "description": "tools/mod.rs split into tools/core/{types,params,guards,tests} (Task A)",
+      "met": false
+    },
+    {
+      "description": "cargo fmt && cargo clippy -- -D warnings && cargo test passes",
+      "met": false
+    },
+    {
+      "description": "No file in src/tools/ exceeds ~600 lines after the splits",
+      "met": false
+    }
+  ],
+  "children": [
+    {
+      "id": "C-1",
+      "artifact_id": "d053ddac8eba563d",
+      "title": "Task B — file_summary.rs test extraction",
+      "archetype": "task_list",
+      "status": "done"
+    },
+    {
+      "id": "C-2",
+      "artifact_id": "6f9513790252fae5",
+      "title": "Task C — run_command/mod.rs split by concern",
+      "archetype": "task_list",
+      "status": "done"
+    },
+    {
+      "id": "C-3",
+      "artifact_id": "402e819474e07264",
+      "title": "Task A — tools/mod.rs core/ split",
+      "archetype": "task_list",
+      "status": "in-progress"
+    }
+  ],
+  "progress_log": [
+    {
+      "date": "2026-05-01",
+      "note": "Task B shipped — file_summary.rs tests extracted to tests.rs sibling.",
+      "evidence_commits": [],
+      "evidence_artifacts": ["ccd1cda1b4135fff"]
+    },
+    {
+      "date": "2026-05-04",
+      "note": "Task C shipped — run_command/mod.rs split into mod/inner/interactive/output. Cross-call survey + leaf-first ordering worked cleanly.",
+      "evidence_commits": [],
+      "evidence_artifacts": ["ccd1cda1b4135fff"]
+    },
+    {
+      "date": "2026-05-07",
+      "note": "Started Task A. Categorized tools/mod.rs symbols into types/params/guards. Types.rs ready to extract; params.rs in progress.",
+      "evidence_commits": [],
+      "evidence_artifacts": []
+    }
+  ]
+}
