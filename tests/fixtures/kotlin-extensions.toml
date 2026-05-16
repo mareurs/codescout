@@ -6,7 +6,7 @@ contains_symbols = ["SearchResult", "Found", "NotFound", "Error"]
 
 [companion_object]
 description = "Companion object with factory methods"
-tool = "find_symbol"
+tool = "symbols"
 file = "src/main/kotlin/library/models/Book.kt"
 symbol = "Companion"
 contains_symbols = ["create", "fromJson"]
@@ -43,7 +43,7 @@ contains_symbols = ["LazyBook", "formattedTitle"]
 
 [data_class_methods]
 description = "Data class is discoverable with its methods"
-tool = "find_symbol"
+tool = "symbols"
 file = "src/main/kotlin/library/models/Book.kt"
 symbol = "Book"
 body_contains = ["title", "isbn", "genre"]

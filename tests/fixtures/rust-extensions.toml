@@ -6,7 +6,7 @@ contains_symbols = ["SearchResult", "Found", "NotFound", "Error"]
 
 [trait_default_method_body]
 description = "Trait default method has readable body"
-tool = "find_symbol"
+tool = "symbols"
 file = "src/traits/searchable.rs"
 symbol = "relevance"
 body_contains = ["0.0"]
@@ -19,7 +19,7 @@ contains_symbols = ["BookRef"]
 
 [lifetime_function]
 description = "Function with lifetime annotations is discoverable"
-tool = "find_symbol"
+tool = "symbols"
 file = "src/extensions/advanced.rs"
 symbol = "borrow_title"
 body_contains = ["book.title()"]

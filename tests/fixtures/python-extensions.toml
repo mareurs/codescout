@@ -30,7 +30,7 @@ contains_symbols = ["AudioBook", "Playable"]
 
 [nested_function]
 description = "Nested function inside a function"
-tool = "find_symbol"
+tool = "symbols"
 file = "library/extensions/advanced.py"
 symbol = "rank_results"
 body_contains = ["_score"]

@@ -12,7 +12,7 @@ contains_symbols = ["Book"]
 
 [default_interface_method]
 description = "Default method in interface has body"
-tool = "find_symbol"
+tool = "symbols"
 file = "src/main/java/library/interfaces/Searchable.java"
 symbol = "relevance"
 body_contains = ["0.0"]
@@ -25,7 +25,7 @@ contains_symbols = ["Indexed"]
 
 [anonymous_class_method]
 description = "Method that returns anonymous class"
-tool = "find_symbol"
+tool = "symbols"
 file = "src/main/java/library/extensions/Advanced.java"
 symbol = "createAnonymousSearchable"
 body_contains = ["new Searchable"]
@@ -44,7 +44,7 @@ contains_symbols = ["BatchResult", "ProcessingContext"]
 
 [enum_method]
 description = "Enum with methods"
-tool = "find_symbol"
+tool = "symbols"
 file = "src/main/java/library/models/Genre.java"
 symbol = "label"
 body_contains = ["name()"]
