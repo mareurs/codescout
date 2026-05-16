@@ -111,3 +111,55 @@ pub struct TrackerParams {
     pub scan_meta: ScanMeta,
     pub parse_warnings: Vec<ParseWarning>,
 }
+
+use crate::librarian::tools::{RecoverableError, ToolContext};
+use anyhow::Result;
+use serde_json::{json, Value};
+
+#[derive(Debug, Deserialize)]
+pub struct AuditArgs {
+    #[serde(default)]
+    pub scope: Option<String>,
+    #[serde(default)]
+    pub paths: Option<Vec<String>>,
+    #[serde(default = "default_true")]
+    pub emit_tracker: bool,
+    #[serde(default)]
+    pub tracker_id: Option<String>,
+    #[serde(default)]
+    pub severity_overrides: Option<Value>,
+    #[serde(default = "default_fail_on")]
+    pub fail_on: String,
+}
+
+fn default_true() -> bool {
+    true
+}
+fn default_fail_on() -> String {
+    "never".to_string()
+}
+
+pub const DEFAULT_AUDIT_GLOBS: &[&str] = &[
+    "docs/**/*.md",
+    "CLAUDE.md",
+    "**/CLAUDE.md",
+    "**/README.md",
+];
+
+pub const MAX_FILES_DEFAULT: usize = 10_000;
+
+pub async fn call(_ctx: &ToolContext, args: Value) -> Result<Value> {
+    let _args: AuditArgs = serde_json::from_value(args).map_err(|e| {
+        RecoverableError::with_hint(
+            format!("audit_doc_refs: bad args: {e}"),
+            "see librarian(action=\"audit_doc_refs\") input schema",
+        )
+    })?;
+    // Task 13 wires the real scan; stub here so dispatch compiles.
+    Ok(json!({
+        "n_files_scanned": 0,
+        "n_refs_found": 0,
+        "findings": [],
+        "exit_code": 0,
+    }))
+}
