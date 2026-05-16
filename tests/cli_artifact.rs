@@ -110,3 +110,167 @@ fn artifact_refresh_list_stale_empty_catalog_succeeds() {
         .assert()
         .success();
 }
+
+/// Parse the `id` field out of an `artifact create` JSON envelope. The tool
+/// returns `{"id":"...","abs_path":"...","tracker_hint":...?}` — adjust this
+/// helper if the envelope shape changes.
+fn extract_created_id(stdout: &str) -> String {
+    let parsed: serde_json::Value = serde_json::from_str(stdout)
+        .unwrap_or_else(|e| panic!("create stdout is not JSON: {stdout}\nerror: {e}"));
+    parsed
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| panic!("create envelope has no 'id' field: {parsed}"))
+}
+
+#[test]
+fn artifact_create_then_get_round_trip() {
+    let tmp = TempDir::new().unwrap();
+    let work = tmp.path().join("project");
+    std::fs::create_dir_all(work.join("docs")).unwrap();
+
+    let create = run_cmd(&tmp)
+        .current_dir(&work)
+        .args([
+            "artifact",
+            "create",
+            "--kind",
+            "spec",
+            "--title",
+            "Test Spec",
+            "--rel-path",
+            "docs/test-spec.md",
+            "--body",
+            "round-trip body",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let create_out = String::from_utf8(create.get_output().stdout.clone()).unwrap();
+    let id = extract_created_id(&create_out);
+
+    run_cmd(&tmp)
+        .current_dir(&work)
+        .args(["artifact", "get", &id, "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Test Spec"));
+}
+
+#[test]
+fn artifact_update_status_archived_then_find_excludes() {
+    let tmp = TempDir::new().unwrap();
+    let work = tmp.path().join("project");
+    std::fs::create_dir_all(work.join("docs")).unwrap();
+
+    let create = run_cmd(&tmp)
+        .current_dir(&work)
+        .args([
+            "artifact",
+            "create",
+            "--kind",
+            "spec",
+            "--title",
+            "Soon Archived",
+            "--rel-path",
+            "docs/soon-archived.md",
+            "--body",
+            "to be archived",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let id = extract_created_id(&String::from_utf8(create.get_output().stdout.clone()).unwrap());
+
+    run_cmd(&tmp)
+        .current_dir(&work)
+        .args(["artifact", "update", &id, "--status", "archived", "--json"])
+        .assert()
+        .success();
+
+    let find = run_cmd(&tmp)
+        .current_dir(&work)
+        .args(["artifact", "find", "--kind", "spec", "--json"])
+        .assert()
+        .success();
+    let find_out = String::from_utf8(find.get_output().stdout.clone()).unwrap();
+    assert!(
+        !find_out.contains(&id),
+        "archived artifact should not appear in default find; got: {find_out}"
+    );
+}
+
+#[test]
+fn artifact_link_then_graph_shows_edge() {
+    let tmp = TempDir::new().unwrap();
+    let work = tmp.path().join("project");
+    std::fs::create_dir_all(work.join("docs")).unwrap();
+
+    let create_a = run_cmd(&tmp)
+        .current_dir(&work)
+        .args([
+            "artifact",
+            "create",
+            "--kind",
+            "spec",
+            "--title",
+            "A",
+            "--rel-path",
+            "docs/a.md",
+            "--body",
+            "a body",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let a_id =
+        extract_created_id(&String::from_utf8(create_a.get_output().stdout.clone()).unwrap());
+
+    let create_b = run_cmd(&tmp)
+        .current_dir(&work)
+        .args([
+            "artifact",
+            "create",
+            "--kind",
+            "spec",
+            "--title",
+            "B",
+            "--rel-path",
+            "docs/b.md",
+            "--body",
+            "b body",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let b_id =
+        extract_created_id(&String::from_utf8(create_b.get_output().stdout.clone()).unwrap());
+
+    run_cmd(&tmp)
+        .current_dir(&work)
+        .args([
+            "artifact",
+            "link",
+            "--src",
+            &a_id,
+            "--dst",
+            &b_id,
+            "--rel",
+            "implements",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let graph = run_cmd(&tmp)
+        .current_dir(&work)
+        .args(["artifact", "graph", &a_id, "--depth", "1", "--json"])
+        .assert()
+        .success();
+    let graph_out = String::from_utf8(graph.get_output().stdout.clone()).unwrap();
+    assert!(
+        graph_out.contains(&b_id),
+        "graph should mention B's id; got: {graph_out}"
+    );
+}
