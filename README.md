@@ -2,6 +2,12 @@
 MCP server giving AI coding agents IDE-grade code intelligence — symbol navigation,
 semantic search, persistent memory — optimized for token efficiency.
 
+[![docs](https://img.shields.io/badge/docs-mareurs.github.io%2Fcodescout-blue)](https://mareurs.github.io/codescout/)
+[![crates.io](https://img.shields.io/crates/v/codescout.svg)](https://crates.io/crates/codescout)
+[![license](https://img.shields.io/crates/l/codescout.svg)](https://github.com/mareurs/codescout/blob/master/LICENSE)
+
+📖 **[Full manual at mareurs.github.io/codescout](https://mareurs.github.io/codescout/)** — installation, agent integrations, tool reference, retrieval-stack setup, and architecture.
+
 Works with Claude Code, GitHub Copilot, Cursor, and any MCP-capable agent.
 
 ## What it does
