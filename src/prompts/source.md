@@ -187,6 +187,26 @@ the server. Returns `{"status": "cancelled"}` or `{"status": "no_active_sync"}`.
 - `artifact_event(action=create)` — log significant events on an artifact
 
 **Full reference** (filter syntax, tracker archetypes, augmentation lifecycle): `resources/read doc://librarian-guide`
+
+### Goal-trackers
+
+A **goal-tracker** is a tracker artifact (`kind=tracker`, `tags: ["goal"]`) that names a completion criterion and aggregates the state of typed child trackers. Each project should have at most one goal with `status=active` at a time.
+
+**Find the active goal for the current project:**
+
+```
+artifact(action="find", kind="tracker",
+         filter={"tags":{"in":["goal"]}, "status":{"eq":"active"}})
+```
+
+**Get richer context including active goals plus other project signal:**
+
+```
+librarian(action="context")   # no anchor — auto-includes active goals
+```
+
+When starting work toward a stated objective, create a goal-tracker via `librarian(action="tracker_design", intent="goal: ...")` then `artifact(action="create", kind="tracker", tags=["goal"], augment=...)`. Children are linked via `artifact(action="link", rel="child")` and use existing archetypes (failure_table, task_list, metric_baseline, audit_issues, reflective).
+
 ## Output System
 
 **File paths in tool output are relative to the project root** (e.g. `src/tools/mod.rs`,

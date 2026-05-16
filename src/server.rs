@@ -1552,6 +1552,21 @@ mod tests {
         );
     }
 
+    #[test]
+    fn server_instructions_documents_goal_tracker_discovery() {
+        let s = crate::prompts::SERVER_INSTRUCTIONS;
+        assert!(
+            s.contains("goal-tracker") || s.contains("Goal-tracker"),
+            "server_instructions.md should document the goal-tracker discovery pattern \
+             (expected the string `goal-tracker` or `Goal-tracker` to appear)"
+        );
+        assert!(
+            s.contains(r#"tags":{"in":["goal"]}"#) || s.contains(r#"tags: ["goal"]"#),
+            "server_instructions.md should show the goal-tracker tag discovery query \
+             (expected one of: `tags\":{{\"in\":[\"goal\"]}}` or `tags: [\"goal\"]`)"
+        );
+    }
+
     #[tokio::test]
     async fn find_tool_returns_none_for_unknown() {
         let (_dir, server) = make_server().await;
