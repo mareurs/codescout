@@ -77,6 +77,7 @@ pub(crate) fn write_value<W: Write>(value: &Value, opts: &OutputOpts, w: &mut W)
     match infer_shape(value) {
         Shape::WriteAck => write_ack(value, no_color, w),
         Shape::FindResult => write_find_table(value, no_color, w),
+        Shape::GetResult => write_get_summary(value, no_color, w),
         // Other pretty branches land in later tasks. Until then, fall back
         // to JSON for everything else so output is never silent.
         _ => fallback_json(value, w),
@@ -168,6 +169,28 @@ fn write_find_table<W: Write>(value: &Value, _no_color: bool, w: &mut W) -> Resu
                 total
             )?;
         }
+    }
+    Ok(())
+}
+
+fn write_get_summary<W: Write>(value: &Value, _no_color: bool, w: &mut W) -> Result<()> {
+    let id = value.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+    let title = value
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("(untitled)");
+    let kind = value.get("kind").and_then(|v| v.as_str()).unwrap_or("?");
+    let status = value.get("status").and_then(|v| v.as_str()).unwrap_or("?");
+    writeln!(w, "{title}  [{kind}/{status}]  {id}")?;
+    if let Some(path) = value.get("abs_path").and_then(|v| v.as_str()) {
+        writeln!(w, "{path}")?;
+    }
+    writeln!(w)?;
+    if let Some(body) = value.get("body").and_then(|v| v.as_str()) {
+        writeln!(w, "{body}")?;
+    } else {
+        // No body field — print the whole JSON as a fallback so users still see the data.
+        fallback_json(value, w)?;
     }
     Ok(())
 }

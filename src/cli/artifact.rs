@@ -10,6 +10,8 @@ use crate::cli::{open_ctx, CommonOpts};
 pub enum Verb {
     /// Find artifacts by filter / tag / kind / semantic query.
     Find(FindArgs),
+    /// Read one artifact by id.
+    Get(GetArgs),
 }
 
 #[derive(Debug, Args)]
@@ -109,6 +111,7 @@ pub(crate) fn compile_filter(args: &FindArgs) -> Result<Option<Value>> {
 pub async fn dispatch(verb: Verb) -> Result<()> {
     match verb {
         Verb::Find(args) => run_find(args).await,
+        Verb::Get(args) => run_get(args).await,
     }
 }
 
@@ -144,6 +147,96 @@ pub(crate) async fn run_find(args: FindArgs) -> Result<()> {
     tool_args.insert("offset".into(), Value::Number(args.offset.into()));
 
     let v = librarian_mcp::tools::find::call(&ctx, Value::Object(tool_args)).await?;
+    crate::cli::format::print(&v, &output)?;
+    Ok(())
+}
+
+#[derive(Debug, clap::Args)]
+pub struct GetArgs {
+    /// Artifact id.
+    pub id: String,
+    /// Include the full body.
+    #[arg(long)]
+    pub full: bool,
+    /// Fetch a specific section by heading.
+    #[arg(long)]
+    pub heading: Option<String>,
+    /// 1-indexed start of line slice.
+    #[arg(long = "start-line")]
+    pub start_line: Option<usize>,
+    /// 1-indexed inclusive end of line slice.
+    #[arg(long = "end-line")]
+    pub end_line: Option<usize>,
+    /// Include link edges in the response.
+    #[arg(long = "include-links")]
+    pub include_links: bool,
+    /// Filter links by direction (in|out|both).
+    #[arg(long = "links-direction")]
+    pub links_direction: Option<String>,
+    /// Filter links to this rel type.
+    #[arg(long = "links-rel")]
+    pub links_rel: Option<String>,
+    /// Include observations in the response.
+    #[arg(long = "include-observations")]
+    pub include_observations: bool,
+    /// Include events in the response.
+    #[arg(long = "include-events")]
+    pub include_events: bool,
+    /// Optional project root override (defaults to cwd).
+    #[arg(long)]
+    pub project: Option<std::path::PathBuf>,
+    /// Emit JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
+    /// Force no color (also implicit when stdout is not a TTY).
+    #[arg(long = "no-color")]
+    pub no_color: bool,
+}
+
+impl GetArgs {
+    pub fn common(&self) -> CommonOpts {
+        CommonOpts {
+            project: self.project.clone(),
+            json: self.json,
+            no_color: self.no_color,
+        }
+    }
+}
+
+pub(crate) async fn run_get(args: GetArgs) -> Result<()> {
+    let common = args.common();
+    let output = common.output();
+    let ctx = open_ctx(&common).await?;
+
+    let mut tool_args = serde_json::Map::new();
+    tool_args.insert("id".into(), Value::String(args.id.clone()));
+    tool_args.insert("full".into(), Value::Bool(args.full));
+    if let Some(h) = &args.heading {
+        tool_args.insert("heading".into(), Value::String(h.clone()));
+    }
+    if let Some(s) = args.start_line {
+        tool_args.insert("start_line".into(), Value::Number(s.into()));
+    }
+    if let Some(e) = args.end_line {
+        tool_args.insert("end_line".into(), Value::Number(e.into()));
+    }
+    if args.include_links {
+        tool_args.insert("include_links".into(), Value::Bool(true));
+    }
+    if let Some(d) = &args.links_direction {
+        tool_args.insert("links_direction".into(), Value::String(d.clone()));
+    }
+    if let Some(r) = &args.links_rel {
+        tool_args.insert("links_rel".into(), Value::String(r.clone()));
+    }
+    if args.include_observations {
+        tool_args.insert("include_observations".into(), Value::Bool(true));
+    }
+    if args.include_events {
+        tool_args.insert("include_events".into(), Value::Bool(true));
+    }
+
+    let v = librarian_mcp::tools::get::call(&ctx, Value::Object(tool_args)).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
 }
@@ -229,5 +322,28 @@ mod tests {
     fn compile_filter_none_when_no_shortcuts_or_filter() {
         let a = args_with_tag(&[]);
         assert!(compile_filter(&a).unwrap().is_none());
+    }
+
+    #[test]
+    fn get_args_common_carries_project_json_no_color() {
+        let a = GetArgs {
+            id: "abc".into(),
+            full: false,
+            heading: None,
+            start_line: None,
+            end_line: None,
+            include_links: false,
+            links_direction: None,
+            links_rel: None,
+            include_observations: false,
+            include_events: false,
+            project: Some(std::path::PathBuf::from("/tmp/proj")),
+            json: true,
+            no_color: true,
+        };
+        let c = a.common();
+        assert_eq!(c.project, Some(std::path::PathBuf::from("/tmp/proj")));
+        assert!(c.json);
+        assert!(c.no_color);
     }
 }
