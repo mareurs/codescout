@@ -177,4 +177,45 @@ mod tests {
         );
         assert_eq!(r.verdict, Verdict::External);
     }
+    #[test]
+    fn severity_drops_one_level_in_archive() {
+        let tmp = TempDir::new().unwrap();
+        let r = resolve_ref(
+            &cand("gone.py", "docs/archive/old.md", RefKind::FilePath),
+            &ctx(tmp.path(), &[]),
+        );
+        assert_eq!(r.verdict, Verdict::Missing);
+        assert_eq!(r.severity, Severity::Med);
+        assert_eq!(r.severity_reason, "archive_drop");
+    }
+
+    #[test]
+    fn severity_drops_two_levels_in_memory() {
+        let tmp = TempDir::new().unwrap();
+        let globs: Vec<_> = crate::librarian::tools::audit_doc_refs::severity::DEFAULT_MEMORY_GLOBS
+            .iter()
+            .map(|g| globset::Glob::new(g).unwrap())
+            .collect();
+        let r = resolve_ref(
+            &cand("gone.py", ".buddy/memory/foo.md", RefKind::FilePath),
+            &ctx(tmp.path(), &globs),
+        );
+        assert_eq!(r.severity, Severity::Low);
+        assert_eq!(r.severity_reason, "memory_drop");
+    }
+
+    #[test]
+    fn severity_reason_populated_for_every_finding() {
+        let tmp = TempDir::new().unwrap();
+        // FilePath: plain path raw ref
+        let r = resolve_ref(&cand("gone.py", "docs/spec.md", RefKind::FilePath), &ctx(tmp.path(), &[]));
+        assert!(!r.severity_reason.is_empty(), "FilePath severity_reason empty");
+        // FileLine: must have a colon-separated line number to satisfy the resolver invariant
+        let r = resolve_ref(&cand("gone.py:1", "docs/spec.md", RefKind::FileLine), &ctx(tmp.path(), &[]));
+        assert!(!r.severity_reason.is_empty(), "FileLine severity_reason empty");
+        // Link: external URL
+        let r = resolve_ref(&cand("https://example.com/gone", "docs/spec.md", RefKind::Link), &ctx(tmp.path(), &[]));
+        assert!(!r.severity_reason.is_empty(), "Link severity_reason empty");
+    }
+
 }
