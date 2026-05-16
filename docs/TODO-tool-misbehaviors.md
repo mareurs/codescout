@@ -25,19 +25,14 @@ Use the template at the bottom. Keep it one entry per observation, even if you t
 ### LIMIT-001 — `call_graph direction=callees` requires LSP callHierarchy; no tree-sitter fallback
 
 - **Observed:** 2026-05-01 (during Task 6 implementation)
-- **Component:** `src/tools/symbol/call_edges/resolver.rs` — `resolve_via_ts`
+- **Component:** `src/tools/symbol/call_edges/resolver.rs` — `resolve_via_ts`; `src/tools/symbol/call_graph/mod.rs` — `CachedResolver::lookup_pos`
 - **Severity:** Low (expected limitation, clearly communicated to caller)
-- **Status:** **RESOLVED 2026-05-15** for Rust, Python, TypeScript/JavaScript (incl. TSX/JSX), Kotlin, Java via `resolve_callees_via_ts`. Still pending for any language outside that set — those continue to return `RecoverableError` with the activate-an-LSP hint.
+- **Status:** **RESOLVED 2026-05-15** for Rust, Python, TypeScript/JavaScript (incl. TSX/JSX), Kotlin, Java via `resolve_callees_via_ts` (depth 1). **Depth-≥2 RESOLVED 2026-05-16** for the same language set via `CachedResolver::lookup_pos_via_ts_in_seed_files` — a tree-sitter same-file scan that locates a top-level (or impl-method) definition matching the BFS-discovered identifier. Still pending for any language outside that set — those continue to return `RecoverableError` with the activate-an-LSP hint.
 - **What used to happen:** when `prepare_call_hierarchy` returned `None` and the caller requested `direction=callees`, `resolve_one_hop` returned a `RecoverableError` for every language.
-- **Fix:** `resolve_callees_via_ts` walks the AST descendants of the enclosing function node (found via `enclosing_function_node`), collects every call-kind node from `call_kinds_for(language_id)`, and extracts the callee identifier with per-grammar rules (`callee_identifier`). One `Edge` is emitted per call site with `EdgeSource::Ts`.
-- **Workaround for unsupported languages:** activate a language server for the file. `direction=callers` already had a tree-sitter fallback and is unchanged.
-
-**Depth-≥2 corollary (originally observed 2026-05-15 via nav-eval round 2/3):** With the
-fix in place, BFS at `max_depth ≥ 2` now produces real edges from non-seed nodes for
-the supported language set, since each hop's TS fallback enumerates call expressions
-inside the symbol body. The nav-eval case `C-11` (`a → b → c → a` cycle, depth=5)
-flips from `SILENT_WRONG-by-design` to expected `CORRECT` — it remains the canonical
-regression watchdog and is updated to require the full `a→b`, `b→c`, `c→a` edge set.
+- **Fix (depth 1, 2026-05-15):** `resolve_callees_via_ts` walks the AST descendants of the enclosing function node (found via `enclosing_function_node`), collects every call-kind node from `call_kinds_for(language_id)`, and extracts the callee identifier with per-grammar rules (`callee_identifier`). One `Edge` is emitted per call site with `EdgeSource::Ts`.
+- **Fix (depth ≥ 2, 2026-05-16):** `CachedResolver::lookup_pos` previously gave up when both pre-seeded `positions` and LSP `workspace_symbols` failed, returning `None` and silently yielding empty hops from `one_hop`. It now falls back to `lookup_pos_via_ts_in_seed_files`, which reuses `extract_symbols_from_source` to walk the seed file(s) for a top-level/impl-method definition whose name matches the BFS-discovered identifier. Scope is intentionally narrow: only files already present in `positions` are searched. The nav-eval case `C-11` (`a → b → c → a` cycle, depth=5) grades **CORRECT** with the full edge set in round 1 of 2026-05-16.
+- **Phase B residual (not yet implemented):** workspace-wide search when the definition lives in a sibling file. Today the same-file scan still returns `None` for cross-file identifiers without LSP; BFS then continues for the rest of the graph and the edge is silently dropped. A future fix could walk the project's source tree (bounded), parse each candidate file with tree-sitter, and match against the identifier — feasible but expensive without an index.
+- **Workaround for unsupported languages / cross-file cases:** activate a language server for the file. `direction=callers` already had a tree-sitter fallback and is unchanged.
 ## Mitigated quirks (live caveats)
 
 These are fixed in the happy path but still have edge cases worth knowing about. Full write-ups in `docs/archive/bug-reports/2026-03-to-2026-04-tool-misbehaviors.md`.

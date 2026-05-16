@@ -34,7 +34,10 @@ impl CachedResolver {
     /// Look up the definition location of `symbol`.
     ///
     /// Checks the positions map first; on a miss, queries `workspace_symbols`
-    /// to discover it. Returns `None` when the symbol cannot be located.
+    /// to discover it. As a final fallback (LIMIT-001 Phase A), parses the
+    /// seed file(s) already in `positions` with tree-sitter and looks for a
+    /// top-level (or impl-method) definition whose name matches `symbol`.
+    /// Returns `None` when the symbol cannot be located.
     async fn lookup_pos(&self, symbol: &str) -> Option<(PathBuf, u32, u32)> {
         // Fast path: already known
         if let Some(pos) = self.positions.lock().unwrap().get(symbol).cloned() {
@@ -42,17 +45,93 @@ impl CachedResolver {
         }
 
         // Slow path: ask the LSP
-        let ws_syms = self.client.workspace_symbols(symbol).await.ok()?;
-        let found = ws_syms
-            .into_iter()
-            .find(|s| s.name == symbol || s.name_path == symbol)?;
-        let pos = (found.file, found.start_line, found.start_col);
-        self.positions
-            .lock()
-            .unwrap()
-            .insert(symbol.to_string(), pos.clone());
-        Some(pos)
+        if let Ok(ws_syms) = self.client.workspace_symbols(symbol).await {
+            if let Some(found) = ws_syms
+                .into_iter()
+                .find(|s| s.name == symbol || s.name_path == symbol)
+            {
+                let pos = (found.file, found.start_line, found.start_col);
+                self.positions
+                    .lock()
+                    .unwrap()
+                    .insert(symbol.to_string(), pos.clone());
+                return Some(pos);
+            }
+        }
+
+        // Final fallback (LIMIT-001 Phase A): tree-sitter scan of the seed
+        // file(s) already in `positions`. This rescues depth-≥2 BFS in
+        // LSP-down or LSP-unaware scenarios (e.g. tree-sitter-emitted callee
+        // edges with bare identifiers).
+        if let Some(pos) = self.lookup_pos_via_ts_in_seed_files(symbol) {
+            self.positions
+                .lock()
+                .unwrap()
+                .insert(symbol.to_string(), pos.clone());
+            return Some(pos);
+        }
+
+        None
     }
+
+    /// Tree-sitter same-file fallback: scan each unique file already present
+    /// in `positions` for a top-level definition (or impl-method) whose name
+    /// matches `symbol`. Returns the first match.
+    ///
+    /// Scope is intentionally narrow — workspace-wide search is Phase B.
+    fn lookup_pos_via_ts_in_seed_files(&self, symbol: &str) -> Option<(PathBuf, u32, u32)> {
+        // Collect unique candidate files. In practice all positions share a
+        // file (BFS pre-seeds the seed only) but we iterate defensively.
+        let files: Vec<PathBuf> = {
+            let guard = self.positions.lock().unwrap();
+            let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+            let mut out = Vec::new();
+            for (_, (p, _, _)) in guard.iter() {
+                if seen.insert(p.clone()) {
+                    out.push(p.clone());
+                }
+            }
+            out
+        };
+
+        for file in files {
+            let lang = crate::ast::detect_language(&file)?;
+            // Only languages with a tree-sitter grammar.
+            if crate::ast::get_ts_language(lang).is_none() {
+                continue;
+            }
+            let source = match std::fs::read_to_string(&file) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let syms =
+                match crate::ast::parser::extract_symbols_from_source(&source, Some(lang), &file) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+            if let Some(found) = find_named_def(&syms, symbol) {
+                return Some((found.file.clone(), found.start_line, found.start_col));
+            }
+        }
+        None
+    }
+}
+
+/// Recursively search a `SymbolInfo` tree for a definition whose `name` or
+/// `name_path` matches `symbol`. Returns the first hit found in DFS order.
+fn find_named_def<'a>(
+    syms: &'a [crate::lsp::SymbolInfo],
+    symbol: &str,
+) -> Option<&'a crate::lsp::SymbolInfo> {
+    for s in syms {
+        if s.name == symbol || s.name_path == symbol {
+            return Some(s);
+        }
+        if let Some(found) = find_named_def(&s.children, symbol) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 #[async_trait]
@@ -476,6 +555,49 @@ mod tests {
         assert!(compact.contains("callers"), "missing key: {compact}");
         assert!(compact.contains("7"), "missing count: {compact}");
         assert!(compact.contains("2 files"), "missing file count: {compact}");
+    }
+
+    /// LIMIT-001 Phase A: when LSP `workspace_symbols` returns empty (no LSP, or
+    /// LSP doesn't know the symbol), `lookup_pos` should fall back to a
+    /// tree-sitter scan of the seed's file to find a same-file definition.
+    #[tokio::test]
+    async fn lookup_pos_falls_back_to_ts_same_file_when_ws_symbols_empty() {
+        // Rust fixture with three top-level fns: a, b, c.
+        let src = "fn a() { b(); }\nfn b() { c(); }\nfn c() { a(); }\n";
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = dir.path().join("cycle.rs");
+        std::fs::write(&fixture, src).unwrap();
+
+        // Mock LSP: workspace_symbols returns empty (default).
+        let client = MockLspClient::new();
+        let client_arc: Arc<dyn crate::lsp::ops::LspClientOps> = Arc::new(client);
+
+        // In-memory sqlite for the edge cache (unused by lookup_pos, but the
+        // struct requires a Connection).
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::tools::symbol::call_edges::cache::apply_schema(&conn);
+
+        // Pre-seed `a` only — `b` must be discovered via the TS fallback.
+        let mut positions: HashMap<String, (PathBuf, u32, u32)> = HashMap::new();
+        positions.insert("a".to_string(), (fixture.clone(), 0, 3));
+
+        let resolver = CachedResolver {
+            conn: Arc::new(Mutex::new(conn)),
+            project_id: "test".to_string(),
+            client: client_arc,
+            lang: "rust".to_string(),
+            positions: Mutex::new(positions),
+        };
+
+        let pos = resolver.lookup_pos("b").await;
+        assert!(
+            pos.is_some(),
+            "lookup_pos should fall back to TS same-file scan when LSP returns empty"
+        );
+        let (path, line, _col) = pos.unwrap();
+        assert_eq!(path, fixture);
+        // `fn b()` is on the second line (0-indexed line 1).
+        assert_eq!(line, 1, "expected line 1 for `fn b`");
     }
 } // mod tests
 
