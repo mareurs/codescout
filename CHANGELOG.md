@@ -13,6 +13,15 @@ All notable changes to codescout are documented here.
   realistic parallel-agent setups while staying well under per-process memory
   ceilings. ([#5](https://github.com/mareurs/codescout/issues/5))
 
+### Docs
+
+- **README compacted and rewired to the manual.** Dropped detail-heavy sections
+  (full retrieval-stack tables, Kotlin specifics, embedding model rundown) in
+  favour of short summaries that link to the corresponding pages on
+  [mareurs.github.io/codescout](https://mareurs.github.io/codescout/). Added a
+  prominent **Artifacts** section advertising the embedded librarian — what it
+  is, why it matters, and a four-call usage example.
+
 ## [0.12.0] — 2026-05-16
 
 ### Breaking changes
