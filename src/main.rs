@@ -134,6 +134,12 @@ enum Commands {
         #[command(subcommand)]
         verb: codescout::cli::artifact::Verb,
     },
+
+    /// Read and write artifact events (list, create).
+    ArtifactEvent {
+        #[command(subcommand)]
+        verb: codescout::cli::artifact_event::Verb,
+    },
 }
 
 fn parse_env_kv(s: &str) -> Result<(String, String), String> {
@@ -283,6 +289,9 @@ async fn main() -> Result<()> {
         }
         Commands::Artifact { verb } => {
             codescout::cli::artifact::dispatch(verb).await?;
+        }
+        Commands::ArtifactEvent { verb } => {
+            codescout::cli::artifact_event::dispatch(verb).await?;
         }
         Commands::Mux {
             socket,

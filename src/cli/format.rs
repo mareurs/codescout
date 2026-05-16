@@ -30,6 +30,15 @@ pub(crate) fn infer_shape(v: &Value) -> Shape {
     if v.is_string() && v.as_str() == Some("ok") {
         return Shape::WriteAck;
     }
+    // artifact_event(list) returns a bare JSON array — disambiguate by
+    // checking first item for event-shaped keys.
+    if let Some(arr) = v.as_array() {
+        if let Some(first) = arr.first() {
+            if first.get("kind").is_some() && first.get("created_at").is_some() {
+                return Shape::EventList;
+            }
+        }
+    }
     if let Some(obj) = v.as_object() {
         if obj.contains_key("items") && obj.contains_key("total") {
             // could be FindResult or EventList — disambiguate on shape of items
@@ -38,7 +47,7 @@ pub(crate) fn infer_shape(v: &Value) -> Shape {
                 .and_then(|i| i.as_array())
                 .and_then(|a| a.first())
             {
-                if first.get("kind").is_some() && first.get("artifact_id").is_some() {
+                if first.get("kind").is_some() && first.get("created_at").is_some() {
                     return Shape::EventList;
                 }
             }
@@ -80,6 +89,7 @@ pub(crate) fn write_value<W: Write>(value: &Value, opts: &OutputOpts, w: &mut W)
         Shape::GetResult => write_get_summary(value, no_color, w),
         Shape::GraphResult => write_graph_tree(value, no_color, w),
         Shape::StateAtResult => write_state_summary(value, no_color, w),
+        Shape::EventList => write_event_list(value, no_color, w),
         // Other pretty branches land in later tasks. Until then, fall back
         // to JSON for everything else so output is never silent.
         _ => fallback_json(value, w),
@@ -287,6 +297,50 @@ fn write_state_summary<W: Write>(value: &Value, _no_color: bool, w: &mut W) -> R
     Ok(())
 }
 
+fn write_event_list<W: Write>(value: &Value, _no_color: bool, w: &mut W) -> Result<()> {
+    // The librarian `artifact_event(action="list")` tool returns a bare JSON
+    // array of event rows. Accept either a top-level array or an object with
+    // an `items` array (defensive, in case the envelope shape evolves).
+    let items: &Vec<Value> = if let Some(arr) = value.as_array() {
+        arr
+    } else if let Some(arr) = value.get("items").and_then(|v| v.as_array()) {
+        arr
+    } else {
+        return fallback_json(value, w);
+    };
+    if items.is_empty() {
+        writeln!(w, "(no events)")?;
+        return Ok(());
+    }
+    writeln!(
+        w,
+        "{:<16}  {:<16}  {:<12}  payload",
+        "created_at", "kind", "author"
+    )?;
+    for it in items {
+        let created = it.get("created_at").and_then(|v| v.as_i64()).unwrap_or(0);
+        let kind = it.get("kind").and_then(|v| v.as_str()).unwrap_or("?");
+        let author = it.get("author").and_then(|v| v.as_str()).unwrap_or("");
+        let payload = it
+            .get("payload")
+            .map(|v| {
+                let s = serde_json::to_string(v).unwrap_or_default();
+                if s.len() > 80 {
+                    format!("{}…", &s[..79])
+                } else {
+                    s
+                }
+            })
+            .unwrap_or_default();
+        writeln!(
+            w,
+            "{:<16}  {:<16}  {:<12}  {}",
+            created, kind, author, payload
+        )?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -349,6 +403,47 @@ mod tests {
             "frontmatter": {"title": "Test"}
         });
         assert!(matches!(infer_shape(&v), Shape::StateAtResult));
+    }
+
+    #[test]
+    fn pretty_event_list_renders_header_and_rows() {
+        // Real envelope: bare JSON array of event rows with keys matching
+        // librarian's timeline::call output (id, kind, payload, created_at, author).
+        let v = json!([
+            {
+                "id": "ev-1",
+                "kind": "note",
+                "payload": {"text": "hello"},
+                "created_at": 1_700_000_000_000_i64,
+                "author": "alice"
+            }
+        ]);
+        let mut buf = Vec::new();
+        write_value(
+            &v,
+            &OutputOpts {
+                json: false,
+                no_color: true,
+            },
+            &mut buf,
+        )
+        .unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(
+            s.lines()
+                .any(|l| l.contains("created_at") && l.contains("kind")),
+            "expected header; got: {s}"
+        );
+        assert!(s.contains("note"), "expected event kind; got: {s}");
+        assert!(s.contains("1700000000000"), "expected timestamp; got: {s}");
+    }
+
+    #[test]
+    fn infer_shape_recognises_event_list_bare_array() {
+        let v = json!([
+            {"id": "ev-1", "kind": "note", "created_at": 1_700_000_000_000_i64, "payload": null}
+        ]);
+        assert!(matches!(infer_shape(&v), Shape::EventList));
     }
 
     #[test]

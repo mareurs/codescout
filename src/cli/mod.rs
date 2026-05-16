@@ -5,6 +5,7 @@
 //! routes the response through `format::print`.
 
 pub mod artifact;
+pub mod artifact_event;
 pub mod format;
 
 use anyhow::{anyhow, Context, Result};
