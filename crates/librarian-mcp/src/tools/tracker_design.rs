@@ -34,6 +34,7 @@ fn archetypes() -> Value {
         archetype_audit_issues(),
         archetype_task_list(),
         archetype_reflective(),
+        archetype_goal(),
     ])
 }
 
@@ -261,13 +262,90 @@ fn archetype_reflective() -> Value {
     })
 }
 
+fn archetype_goal() -> Value {
+    json!({
+        "name": "goal",
+        "when_to_use": "Tracking an outcome-stated objective whose completion depends on a named criterion and on aggregated state of sibling/child artifacts. Use when the work has a definable 'done' line, decomposes into typed sub-trackers (tests, tasks, metrics, audits), and survives across sessions. Examples: 'all flaky tests resolved + suite green for 3 runs', 'retrieval P@5 reaches 0.20 on benchmark X', 'plan-lifecycle subsystem ships behind feature flag'. Not for: open-ended research (use `reflective`), single-metric tracking (use `metric_baseline`), bare task lists with no completion semantics (use `task_list`).",
+        "params_shape_example": {
+            "criterion": "Retrieval pipeline P@5 ≥ 0.20 on benchmark-25tc, with no regression on R@5",
+            "status": "active",
+            "blocked_reason": null,
+            "acceptance_signals": [
+                {"description": "P@5 ≥ 0.20 on benchmark-25tc", "met": false, "evidence": "metric_baseline child a1b2c3 current=0.193"},
+                {"description": "R@5 not below baseline 0.724",   "met": true,  "evidence": "metric_baseline child a1b2c3 current=0.781"},
+                {"description": "No new failures in chat-eval-v3", "met": true,  "evidence": "failure_table child d4e5f6 0 fail/12"}
+            ],
+            "children": [
+                {"id": "C-1", "artifact_id": "a1b2c3d4", "title": "Retrieval Benchmark",   "archetype": "metric_baseline", "status": "in-progress"},
+                {"id": "C-2", "artifact_id": "d4e5f6a7", "title": "chat-eval-v3 failures",  "archetype": "failure_table",   "status": "active"},
+                {"id": "C-3", "artifact_id": "b9c8d7e6", "title": "Reranker tuning tasks",  "archetype": "task_list",        "status": "done"}
+            ],
+            "progress_log": [
+                {"date": "2026-05-12", "note": "Reranker tuning landed. P@5 0.145 → 0.193.", "evidence_commits": ["abc1234"], "evidence_artifacts": ["a1b2c3d4"]},
+                {"date": "2026-05-14", "note": "chat-eval-v3 stable. Need final 7pt P@5.",  "evidence_commits": [],          "evidence_artifacts": ["d4e5f6a7"]}
+            ]
+        },
+        "params_schema_example": {
+            "type": "object",
+            "required": ["criterion", "status", "children"],
+            "properties": {
+                "criterion":      { "type": "string" },
+                "status":         { "type": "string", "enum": ["scoping","active","pending-confirmation","done","blocked","abandoned"] },
+                "blocked_reason": { "type": ["string","null"] },
+                "acceptance_signals": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["description","met"],
+                        "properties": {
+                            "description": { "type": "string" },
+                            "met":         { "type": "boolean" },
+                            "evidence":    { "type": "string" }
+                        }
+                    }
+                },
+                "children": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["id","artifact_id","title","archetype","status"],
+                        "properties": {
+                            "id":          { "type": "string", "pattern": "^C-\\d+$" },
+                            "artifact_id": { "type": "string" },
+                            "title":       { "type": "string" },
+                            "archetype":   { "type": "string" },
+                            "status":      { "type": "string", "enum": ["pending","active","in-progress","done","blocked","orphan","unknown"] }
+                        }
+                    }
+                },
+                "progress_log": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["date","note"],
+                        "properties": {
+                            "date":               { "type": "string" },
+                            "note":               { "type": "string" },
+                            "evidence_commits":   { "type": "array", "items": { "type": "string" } },
+                            "evidence_artifacts": { "type": "array", "items": { "type": "string" } }
+                        }
+                    }
+                }
+            }
+        },
+        "render_template_example": "**Goal:** {{ criterion }}\n**Status:** {{ status }}{% if blocked_reason %} — _blocked: {{ blocked_reason }}_{% endif %}\n\n{% if acceptance_signals %}**Acceptance signals** — {{ acceptance_signals|selectattr(\"met\")|list|length }}/{{ acceptance_signals|length }} met\n\n| signal | met | evidence |\n|--------|:---:|----------|\n{% for s in acceptance_signals %}| {{ s.description }} | {{ \"✅\" if s.met else \"❌\" }} | {{ s.evidence or \"—\" }} |\n{% endfor %}{% endif %}\n\n**Children** — {{ children|selectattr(\"status\",\"equalto\",\"done\")|list|length }}/{{ children|length }} done\n\n| id | title | archetype | status |\n|---:|-------|-----------|--------|\n{% for c in children %}| {{ c.id }} | {{ c.title }} | {{ c.archetype }} | {{ c.status }} |\n{% endfor %}\n\n{% if progress_log %}**Recent progress** _(last 3 of {{ progress_log|length }})_\n\n{% for p in progress_log|reverse|slice(3)|first %}- **{{ p.date }}**: {{ p.note }}\n{% endfor %}{% endif %}",
+        "body_skeleton": "## Why this goal exists\n\n_Briefly: the business / engineering driver. Two to four sentences._\n\n## Acceptance criteria (prose)\n\n_Long-form acceptance criteria. Mirrors `acceptance_signals` in params but with rationale, counterexamples, and what's explicitly out of scope._\n\n## Decomposition rationale\n\n_Why these children, in this archetype mix. When new children are spawned mid-refresh, the synthesizer appends a one-paragraph rationale here citing the trigger._\n\n## History\n\n_### YYYY-MM-DD — <event>_\n",
+        "prompt_template": "Maintain a goal-tracker. Your job is **aggregation**, not evaluation: read children via artifact(action=\"get\") and reconcile their state into the goal's params. Do not recompute children's evidence — trust the child's own params.\n\nINPUTS (gather):\n- This goal's current params.\n- For each `children[].artifact_id`, the child's params via artifact(action=\"get\").\n- Optional: commit log scoped to paths the criterion names (gather_from: git_log).\n\nUPDATE RULES:\n\n1. Reconcile each `children[].status` from the child's actual status, normalizing into our enum (pending|active|in-progress|done|blocked|orphan|unknown):\n   - failure_table child → \"done\" if 0 failures, \"active\" otherwise\n   - task_list child → \"done\" if all tasks done, \"in-progress\" otherwise\n   - metric_baseline child → \"done\" if current meets the related acceptance_signal, else \"in-progress\"\n   - audit_issues child → \"done\" if 0 open issues, \"active\" otherwise\n   - reflective child → \"done\" if child status ∈ {\"decided\",\"archived\"}; \"blocked\" if \"deferred\"; \"active\" otherwise.\n   - nested goal child → \"done\" if child status == \"done\"; \"blocked\" if ∈ {\"blocked\",\"abandoned\"}; \"pending\" if \"scoping\"; \"in-progress\" if \"pending-confirmation\"; \"active\" otherwise.\n   - Child artifact unreachable → set status: \"orphan\", DO NOT delete the row.\n\n2. Re-evaluate each `acceptance_signals[].met` from the children's evidence. Update the `evidence` string to cite the child id and the specific datum.\n\n3. Append exactly one entry to `progress_log` for this refresh cycle: {date: today, note: ≤200-char summary of what changed since previous log, evidence_commits: [commits added since last refresh that touched goal paths], evidence_artifacts: [child artifact_ids whose status changed]}. If nothing changed, append a \"no change\" entry — never skip the log.\n\n4. AUTO-CLOSE GATE (ALL conditions required):\n   a. len(children) > 0\n   b. All `children[].status` == \"done\".\n   c. Every `acceptance_signals[].met` is true.\n   If all three: set status: \"done\", append a History entry to body summarizing the closing evidence. Otherwise: leave status unchanged.\n\n5. SCOPE GROWTH: if your aggregation surfaces a missing sub-objective, you MAY:\n   a. Call artifact(action=\"create\", kind=\"tracker\", augment={...}) with the appropriate existing archetype (failure_table, task_list, metric_baseline, audit_issues, reflective, or nested goal).\n   b. Call artifact(action=\"link\", src_id=THIS_GOAL_ID, dst_id=NEW_CHILD_ID, rel=\"child\").\n   c. Add the new child to `children[]` with the next free C-N id.\n   d. Append one paragraph to body \"Decomposition rationale\" citing the trigger.\n\n6. NEVER:\n   - Delete a child row (use status=\"orphan\" if unreachable).\n   - Modify a child's params directly. The child has its own augmentation.\n   - Flip status to \"done\" without satisfying ALL gate conditions including 4a.\n   - Append more than one progress_log entry per refresh.\n\nSTOP CONDITION (you are done with this refresh when):\n- All children reconciled.\n- One progress_log entry appended.\n- Auto-close gate evaluated.\n- Output: the new params object. Body edits only for History append or Decomposition rationale append on scope growth.\n\nBody holds rationale and history; params hold mechanical state. Keep them separated."
+    })
+}
+
 const SYSTEM_PROMPT: &str = r#"# How to design a tracker
 
 A tracker is an artifact that mixes **live state** (params, refreshed often by gather sources) with **prose** (body, edited rarely by humans). The art of designing a good tracker is putting the right thing in the right place.
 
 ## Step 1 — Pick an archetype
 
-Match the user's intent to one of the 6 archetypes. Use this decision sketch:
+Match the user's intent to one of the 7 archetypes. Use this decision sketch:
 
 - **Will state change mechanically per commit/run/deploy?** → `deployment_state`, `failure_table`, `metric_baseline`, `audit_issues`, or `task_list`.
 - **Is the content options/decisions/research that requires human judgment?** → `reflective`.
@@ -436,7 +514,7 @@ mod tests {
         let v = call(&ctx, json!({})).await.unwrap();
         assert_eq!(v["design_version"], "1");
         assert!(v["system_prompt"].as_str().unwrap().len() > 1000);
-        assert_eq!(v["archetypes"].as_array().unwrap().len(), 6);
+        assert_eq!(v["archetypes"].as_array().unwrap().len(), 7);
         assert!(v["next_step"].as_str().unwrap().contains("artifact_create"));
     }
 
@@ -593,5 +671,16 @@ mod tests {
                 panic!("archetype '{name}' template fails on its example: {e}")
             });
         }
+    }
+    #[tokio::test]
+    async fn goal_archetype_present_and_registered() {
+        let v = archetypes();
+        let arr = v.as_array().unwrap();
+        assert_eq!(arr.len(), 7, "expected 7 archetypes including goal");
+        let names: Vec<&str> = arr.iter().map(|a| a["name"].as_str().unwrap()).collect();
+        assert!(
+            names.contains(&"goal"),
+            "goal archetype missing from archetypes() — got {names:?}"
+        );
     }
 }
