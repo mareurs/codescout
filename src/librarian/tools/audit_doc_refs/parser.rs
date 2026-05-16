@@ -27,11 +27,26 @@ pub fn parse_refs(text: &str, md_path: &Path) -> (Vec<RefCandidate>, Vec<ParseWa
     (candidates, warnings)
 }
 fn classify(s: &str) -> Option<RefKind> {
-    if looks_like_path(s) {
-        Some(RefKind::FilePath)
-    } else {
-        None
+    if let Some((path_part, suffix)) = s.rsplit_once(':') {
+        if looks_like_path(path_part) {
+            if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+                return Some(RefKind::FileLine);
+            }
+            if is_symbol_suffix(suffix) {
+                return Some(RefKind::FileSymbol);
+            }
+        }
     }
+    if looks_like_path(s) {
+        return Some(RefKind::FilePath);
+    }
+    None
+}
+fn is_symbol_suffix(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '/' || c == '.')
+        && s.chars().next().map(|c| !c.is_ascii_digit()).unwrap_or(false)
 }
 
 fn looks_like_path(s: &str) -> bool {
@@ -89,5 +104,24 @@ mod tests {
     fn parser_ignores_prose_outside_code_spans() {
         let (cands, _) = parse("We use Pydantic for validation.");
         assert_eq!(cands.len(), 0);
+    }
+
+    #[test]
+    fn parser_classifies_file_line_over_file_path() {
+        let (cands, _) = parse("at `scripts/eval_chunking.py:807` we see...");
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].ref_kind, RefKind::FileLine);
+        assert_eq!(cands[0].raw_ref, "scripts/eval_chunking.py:807");
+    }
+
+    #[test]
+    fn parser_classifies_file_symbol_over_file_line() {
+        let (cands, _) = parse("see `src/mrv/cli.py:cmd_generate` for...");
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].ref_kind, RefKind::FileSymbol);
+
+        let (cands, _) = parse("see `src/foo.rs:Bar/baz` for...");
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].ref_kind, RefKind::FileSymbol);
     }
 }
