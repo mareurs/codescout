@@ -1,13 +1,15 @@
 // src/librarian/tools/audit_doc_refs/parser.rs
 use super::{ParseWarning, RefCandidate, RefKind, RefPosition};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use regex::Regex;
 use std::path::Path;
+use std::sync::OnceLock;
 
 pub fn parse_refs(text: &str, md_path: &Path) -> (Vec<RefCandidate>, Vec<ParseWarning>) {
     let md_file = md_path.to_string_lossy().to_string();
     let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH;
     let mut candidates = Vec::new();
-    let warnings = Vec::new(); // populated in Task 5
+    let warnings = fence_warnings(text, &md_file);
 
     let mut in_code_block = false;
     let parser = Parser::new_ext(text, opts).into_offset_iter();
@@ -129,6 +131,22 @@ fn byte_offset_to_line(text: &str, offset: usize) -> u32 {
         .filter(|&b| b == b'\n')
         .count() as u32
 }
+fn fence_warnings(text: &str, md_file: &str) -> Vec<ParseWarning> {
+    static FENCE_RE: OnceLock<Regex> = OnceLock::new();
+    let re = FENCE_RE.get_or_init(|| Regex::new(r"(?m)^```").unwrap());
+    let opens: Vec<_> = re.find_iter(text).collect();
+    if opens.len() % 2 == 1 {
+        let last = opens.last().unwrap();
+        let line = 1 + text[..last.start()].bytes().filter(|&b| b == b'\n').count() as u32;
+        vec![ParseWarning {
+            md_file: md_file.to_string(),
+            line,
+            reason: "unterminated code fence".to_string(),
+        }]
+    } else {
+        Vec::new()
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -204,4 +222,15 @@ mod tests {
         // expect at least one module_path candidate from the fenced block
         assert!(cands.iter().any(|c| c.ref_kind == RefKind::ModulePath));
     }
+    #[test]
+    fn parser_recovers_from_unterminated_fence() {
+        let text = "intro\n```\nsome code without close\n";
+        let (_cands, warns) = parse(text);
+        assert!(
+            !warns.is_empty(),
+            "expected at least one parse_warning for unterminated fence"
+        );
+        assert!(warns[0].reason.contains("fence") || warns[0].reason.contains("unterminated"));
+    }
+
 }
