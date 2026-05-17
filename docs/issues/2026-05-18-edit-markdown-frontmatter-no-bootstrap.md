@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-05-18
-closed:
+closed: 2026-05-18
 severity: medium
 owner: marius
 related: [src/tools/edit_markdown/]
@@ -72,18 +72,36 @@ which worked uniformly.
 
 ## Fix
 
-`Unknown.` Proposed direction: when `frontmatter:{set:...}` is non-empty
-AND the file has no `---` block, synthesize one at the head of the file
-with the provided keys, in canonical key order. The `delete:` array on a
-no-block file is a no-op (idempotent). Mirror what `edit_file(prepend)`
-achieves today, but inside the tool.
 
+Landed in commit `4011ed2a` on `experiments`. Implementation:
+`apply_frontmatter_mutation` in `src/tools/markdown/edit_markdown.rs:299`
+now branches on `extract_frontmatter().is_none()`:
+
+- **`set:` non-empty:** synthesize a fresh block via `apply_ops(&[], set,
+  delete)`, prepend `---\n<block>\n---\n` to the original content. A
+  separator newline is added when the body does not already start with
+  one (so `# Heading` gets blank-line-separated, but `\nbody` does not
+  get double-blanked).
+- **`delete:`-only, `set:` empty:** return the original content unchanged
+  (idempotent — nothing to delete from a non-existent block).
+- **Existing block:** unchanged — `apply_ops` + `splice_back` flow.
+
+The old hard-error path is removed entirely.
 ## Tests added
 
-`N/A — bug only filed, fix not implemented yet.` Future fix should add:
-- `frontmatter_set_bootstraps_block_when_absent`
-- `frontmatter_delete_on_no_block_is_noop`
 
+In `src/tools/markdown/tests.rs`:
+
+- `frontmatter_set_bootstraps_block_on_file_without_frontmatter` — bootstrap on body-only file
+- `frontmatter_bootstrap_does_not_double_blank_when_body_already_blank_first` — leading-blank body is preserved verbatim
+- `frontmatter_bootstrap_on_empty_file_produces_block_only` — empty file becomes a block-only file
+- `frontmatter_delete_only_on_file_without_frontmatter_is_noop` — `delete:`-only on no-block file returns original
+
+Plus removed the superseded test
+`frontmatter_on_file_without_frontmatter_errors_with_hint` which pinned
+the old wrong-behavior contract.
+
+9/9 frontmatter tests pass; release build clean; clippy `-D warnings` clean.
 ## Workarounds
 
 Use `edit_file(insert="prepend", new_string="---\n<keys>\n---\n\n")` to
@@ -93,15 +111,12 @@ backfill commit `136f4c48` uses exactly this pattern.
 
 ## Resume
 
-Read `src/tools/edit_markdown/` (likely `mod.rs` or `frontmatter.rs`) to
-find the gate. Add a `bootstrap_if_absent` branch under the `set:` arm
-that writes a fresh `---...---` block before applying the merge-patch.
-Add the two regression tests above. Confirm `edit_markdown(frontmatter:
-{set:...})` on a body-only file now succeeds and produces a clean block
-at the head. Wire the existing key-ordering / value-encoding path into
-the bootstrap so the synthesized block matches what `set:` would produce
-on a real file.
 
+Shipped on `experiments` as `4011ed2a`. Standard Ship Sequence next:
+cherry-pick to `master`, then `git mv` this file to `docs/issues/archive/`.
+Live verification: restart MCP (`/mcp`), then run `edit_markdown` with
+`frontmatter:{set:{...}}` on a body-only markdown file; expect a
+synthesized block at the head.
 ## References
 
 - Discovered 2026-05-18 while backfilling `docs/trackers/*.md` frontmatter
