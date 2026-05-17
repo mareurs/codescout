@@ -57,6 +57,40 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             })
             .or_insert(r.data);
     }
+
+    // Goal-tracker injection (Yak variant (b)): if this artifact's params
+    // describe a goal-tracker (has `acceptance_signals` AND `children`),
+    // synthesize `deterministic_child_statuses` by running
+    // `goal_aggregation::child_status_pure` on each linked child. The LLM
+    // reads ground truth from context rather than re-deriving rule 1.
+    let is_goal_tracker = params.is_object()
+        && params.get("acceptance_signals").is_some()
+        && params.get("children").is_some();
+    if is_goal_tracker {
+        let children_tuples: Vec<(String, String, String)> = params
+            .get("children")
+            .and_then(|c| c.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|c| {
+                        let id = c.get("id")?.as_str()?.to_string();
+                        let aid = c.get("artifact_id")?.as_str()?.to_string();
+                        let arch = c
+                            .get("archetype")
+                            .and_then(|a| a.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        Some((id, aid, arch))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !children_tuples.is_empty() {
+            let det = crate::librarian::tools::gather::gather_goal_children(ctx, &children_tuples)?;
+            context.insert("deterministic_child_statuses".to_string(), det);
+        }
+    }
+
     if !warnings.is_empty() {
         context.insert("warnings".to_string(), json!(warnings));
     }
@@ -148,5 +182,154 @@ mod tests {
 
         let result = call(&ctx, serde_json::json!({"id": id})).await.unwrap();
         assert_eq!(result["append_mode"], serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn refresh_injects_deterministic_child_statuses_for_goal_tracker() {
+        use crate::librarian::catalog::artifact::{upsert as art_upsert, ArtifactRow};
+        use crate::librarian::catalog::augmentation::{upsert as aug_upsert, AugmentationRow};
+
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        // Helper closures (avoid module-private dependencies for sample data).
+        let mk_art = |id: &str| ArtifactRow {
+            id: id.to_string(),
+            abs_path: std::path::PathBuf::from(format!("/test/{id}.md")),
+            kind: "tracker".to_string(),
+            status: "active".to_string(),
+            title: Some(id.to_string()),
+            owners: vec![],
+            tags: vec![],
+            topic: None,
+            time_scope: None,
+            source: None,
+            created_at: 0,
+            updated_at: 0,
+            file_mtime: 0,
+            file_sha256: "x".to_string(),
+            confidence: 1.0,
+        };
+        let mk_aug = |aid: &str, params_json: &str| AugmentationRow {
+            artifact_id: aid.to_string(),
+            prompt: "p".to_string(),
+            params: params_json.to_string(),
+            last_refreshed_at: None,
+            refresh_count: 0,
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            render_template: None,
+            params_schema: None,
+            append_mode: false,
+            history_cap: None,
+        };
+
+        // Two children: a failure_table (all-pass → done) and a task_list (empty → pending).
+        {
+            let cat = ctx.catalog.lock();
+            art_upsert(&cat, &mk_art("child-a")).unwrap();
+            aug_upsert(
+                &cat,
+                &mk_aug("child-a", r#"{"failures":[{"id":"F-1","status":"pass"}]}"#),
+            )
+            .unwrap();
+            art_upsert(&cat, &mk_art("child-b")).unwrap();
+            aug_upsert(&cat, &mk_aug("child-b", r#"{"tasks":[]}"#)).unwrap();
+
+            // Parent goal: structurally a goal-tracker (has acceptance_signals + children).
+            art_upsert(&cat, &mk_art("goal-1")).unwrap();
+            let goal_params = serde_json::json!({
+                "criterion": "All children done",
+                "status": "active",
+                "acceptance_signals": [],
+                "children": [
+                    {"id": "C-1", "artifact_id": "child-a", "title": "A",
+                     "archetype": "failure_table", "status": "in-progress"},
+                    {"id": "C-2", "artifact_id": "child-b", "title": "B",
+                     "archetype": "task_list", "status": "pending"}
+                ]
+            });
+            aug_upsert(&cat, &mk_aug("goal-1", &goal_params.to_string())).unwrap();
+        }
+
+        let result = call(&ctx, serde_json::json!({"id": "goal-1"}))
+            .await
+            .unwrap();
+
+        // The context should carry deterministic_child_statuses with both children resolved.
+        let det = &result["context"]["deterministic_child_statuses"];
+        assert!(
+            det.is_array(),
+            "deterministic_child_statuses missing or not array: {result:#}"
+        );
+        let arr = det.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["child_id"], "C-1");
+        assert_eq!(arr[0]["status"], "done");
+        assert_eq!(arr[0]["basis"], "deterministic");
+        assert_eq!(arr[1]["child_id"], "C-2");
+        assert_eq!(arr[1]["status"], "pending");
+    }
+
+    #[tokio::test]
+    async fn refresh_skips_deterministic_injection_for_non_goal_tracker() {
+        use crate::librarian::catalog::artifact::{upsert as art_upsert, ArtifactRow};
+        use crate::librarian::catalog::augmentation::{upsert as aug_upsert, AugmentationRow};
+
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        // A regular task_list tracker — has children-shaped params but no acceptance_signals.
+        // Should NOT trigger goal-tracker injection.
+        let mk_art = |id: &str| ArtifactRow {
+            id: id.to_string(),
+            abs_path: std::path::PathBuf::from(format!("/test/{id}.md")),
+            kind: "tracker".to_string(),
+            status: "active".to_string(),
+            title: None,
+            owners: vec![],
+            tags: vec![],
+            topic: None,
+            time_scope: None,
+            source: None,
+            created_at: 0,
+            updated_at: 0,
+            file_mtime: 0,
+            file_sha256: "x".to_string(),
+            confidence: 1.0,
+        };
+        {
+            let cat = ctx.catalog.lock();
+            art_upsert(&cat, &mk_art("plain")).unwrap();
+            aug_upsert(
+                &cat,
+                &AugmentationRow {
+                    artifact_id: "plain".to_string(),
+                    prompt: "p".to_string(),
+                    params: r#"{"tasks":[{"id":"T-1","status":"done"}]}"#.to_string(),
+                    last_refreshed_at: None,
+                    refresh_count: 0,
+                    created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                    updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+                    render_template: None,
+                    params_schema: None,
+                    append_mode: false,
+                    history_cap: None,
+                },
+            )
+            .unwrap();
+        }
+
+        let result = call(&ctx, serde_json::json!({"id": "plain"}))
+            .await
+            .unwrap();
+        assert!(
+            result["context"]["deterministic_child_statuses"].is_null()
+                || !result["context"]
+                    .as_object()
+                    .unwrap()
+                    .contains_key("deterministic_child_statuses"),
+            "non-goal tracker should not receive deterministic_child_statuses: {result:#}"
+        );
     }
 }

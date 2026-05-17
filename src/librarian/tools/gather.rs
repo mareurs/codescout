@@ -159,6 +159,70 @@ pub async fn gather_all(
     Ok((results, warnings))
 }
 
+/// For each child reference, fetch the child's augmentation params from the
+/// catalog and run `goal_aggregation::child_status_pure(archetype, params)`.
+///
+/// Returns a JSON array of `{child_id, artifact_id, archetype, status, basis}`
+/// records. `basis` is one of:
+/// - `"deterministic"` — status derived from `child_status_pure`
+/// - `"needs parent context"` — archetype is `metric_baseline`; resolved in
+///   Phase 2 via `goal_aggregation::contextual::*`
+/// - `"unknown archetype"` — archetype not in the known set (H-5)
+/// - `"no augmentation"` — child has no augmentation row
+/// - `"child unreachable"` — child artifact not found in catalog (Orphan)
+///
+/// Yak's variant (b) gather-time integration: the LLM reads ground truth from
+/// `context.deterministic_child_statuses` rather than re-deriving rule 1
+/// per-archetype reconciliation logic from the augmentation prompt.
+pub fn gather_goal_children(
+    ctx: &ToolContext,
+    children: &[(String, String, String)],
+) -> Result<Value> {
+    use crate::librarian::catalog::augmentation;
+    use crate::librarian::tools::goal_aggregation::{child_status_pure, ChildStatus};
+
+    let cat = ctx.catalog.lock();
+    let mut out = Vec::with_capacity(children.len());
+
+    for (child_id, artifact_id, archetype) in children {
+        // Distinguish "no augmentation" (artifact exists, no augmentation row)
+        // from "unreachable" (no artifact row at all).
+        let artifact_exists =
+            crate::librarian::catalog::artifact::get(&cat, artifact_id)?.is_some();
+
+        let (status, basis) = if !artifact_exists {
+            (ChildStatus::Orphan, "child unreachable")
+        } else {
+            let aug_row = augmentation::get(&cat, artifact_id)?;
+            match aug_row {
+                None => (ChildStatus::Unknown, "no augmentation"),
+                Some(aug) => {
+                    let params: Value = serde_json::from_str(&aug.params).unwrap_or(Value::Null);
+                    let s = child_status_pure(archetype, &params);
+                    let b = match s {
+                        ChildStatus::Unknown if archetype == "metric_baseline" => {
+                            "needs parent context"
+                        }
+                        ChildStatus::Unknown => "unknown archetype",
+                        _ => "deterministic",
+                    };
+                    (s, b)
+                }
+            }
+        };
+
+        out.push(json!({
+            "child_id": child_id,
+            "artifact_id": artifact_id,
+            "archetype": archetype,
+            "status": status.as_str(),
+            "basis": basis,
+        }));
+    }
+
+    Ok(Value::Array(out))
+}
+
 fn project_root(ctx: &ToolContext) -> Option<std::path::PathBuf> {
     // CurrentProject.path is already the resolved absolute path to the project root
     ctx.current_project
@@ -596,5 +660,154 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].source_key, "config_value");
         assert_eq!(results[0].data["value"], serde_json::json!(8080));
+    }
+
+    // --- gather_goal_children (Yak variant (b) integration) ---
+
+    fn sample_artifact(id: &str) -> crate::librarian::catalog::artifact::ArtifactRow {
+        crate::librarian::catalog::artifact::ArtifactRow {
+            id: id.to_string(),
+            abs_path: std::path::PathBuf::from(format!("/test/{id}.md")),
+            kind: "tracker".to_string(),
+            status: "active".to_string(),
+            title: Some("T".to_string()),
+            owners: vec![],
+            tags: vec![],
+            topic: None,
+            time_scope: None,
+            source: None,
+            created_at: 0,
+            updated_at: 0,
+            file_mtime: 0,
+            file_sha256: "abc".to_string(),
+            confidence: 1.0,
+        }
+    }
+
+    fn sample_augmentation(
+        artifact_id: &str,
+        params_json: &str,
+    ) -> crate::librarian::catalog::augmentation::AugmentationRow {
+        crate::librarian::catalog::augmentation::AugmentationRow {
+            artifact_id: artifact_id.to_string(),
+            prompt: "test".to_string(),
+            params: params_json.to_string(),
+            last_refreshed_at: None,
+            refresh_count: 0,
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            render_template: None,
+            params_schema: None,
+            append_mode: false,
+            history_cap: None,
+        }
+    }
+
+    #[test]
+    fn gather_goal_children_returns_deterministic_status_per_child() {
+        use crate::librarian::catalog::{artifact, augmentation};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(&tmp);
+        {
+            let cat = ctx.catalog.lock();
+            artifact::upsert(&cat, &sample_artifact("child-a")).unwrap();
+            augmentation::upsert(
+                &cat,
+                &sample_augmentation("child-a", r#"{"failures":[{"id":"F-1","status":"pass"}]}"#),
+            )
+            .unwrap();
+            artifact::upsert(&cat, &sample_artifact("child-b")).unwrap();
+            augmentation::upsert(&cat, &sample_augmentation("child-b", r#"{"tasks":[]}"#)).unwrap();
+        }
+
+        let children = vec![
+            (
+                "C-1".to_string(),
+                "child-a".to_string(),
+                "failure_table".to_string(),
+            ),
+            (
+                "C-2".to_string(),
+                "child-b".to_string(),
+                "task_list".to_string(),
+            ),
+        ];
+        let result = gather_goal_children(&ctx, &children).unwrap();
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["child_id"], "C-1");
+        assert_eq!(arr[0]["archetype"], "failure_table");
+        assert_eq!(arr[0]["status"], "done");
+        assert_eq!(arr[0]["basis"], "deterministic");
+        assert_eq!(arr[1]["child_id"], "C-2");
+        assert_eq!(arr[1]["status"], "pending");
+        assert_eq!(arr[1]["basis"], "deterministic");
+    }
+
+    #[test]
+    fn gather_goal_children_marks_missing_artifact_as_orphan() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(&tmp);
+        // No artifact upserted — catalog is empty.
+        let children = vec![(
+            "C-1".to_string(),
+            "ghost".to_string(),
+            "failure_table".to_string(),
+        )];
+        let result = gather_goal_children(&ctx, &children).unwrap();
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["status"], "orphan");
+        assert_eq!(arr[0]["basis"], "child unreachable");
+    }
+
+    #[test]
+    fn gather_goal_children_marks_metric_baseline_needs_context() {
+        use crate::librarian::catalog::{artifact, augmentation};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(&tmp);
+        {
+            let cat = ctx.catalog.lock();
+            artifact::upsert(&cat, &sample_artifact("metric")).unwrap();
+            augmentation::upsert(
+                &cat,
+                &sample_augmentation("metric", r#"{"baseline":{"P@5":0.18}}"#),
+            )
+            .unwrap();
+        }
+
+        let children = vec![(
+            "C-1".to_string(),
+            "metric".to_string(),
+            "metric_baseline".to_string(),
+        )];
+        let result = gather_goal_children(&ctx, &children).unwrap();
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr[0]["status"], "unknown");
+        assert_eq!(arr[0]["basis"], "needs parent context");
+    }
+
+    #[test]
+    fn gather_goal_children_handles_missing_augmentation() {
+        use crate::librarian::catalog::artifact;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(&tmp);
+        {
+            let cat = ctx.catalog.lock();
+            artifact::upsert(&cat, &sample_artifact("bare")).unwrap();
+            // No augmentation upserted.
+        }
+
+        let children = vec![(
+            "C-1".to_string(),
+            "bare".to_string(),
+            "failure_table".to_string(),
+        )];
+        let result = gather_goal_children(&ctx, &children).unwrap();
+        assert_eq!(result[0]["status"], "unknown");
+        assert_eq!(result[0]["basis"], "no augmentation");
     }
 }
