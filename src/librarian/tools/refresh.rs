@@ -96,7 +96,84 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 &children_tuples,
                 &parent_signals,
             )?;
-            context.insert("deterministic_child_statuses".to_string(), det);
+            context.insert("deterministic_child_statuses".to_string(), det.clone());
+
+            // D5 — compute refresh_meta deterministically from prior + fresh state.
+            use crate::librarian::tools::goal_aggregation::{
+                child_status_from_str, compute_refresh_meta, ChildStatus, RefreshMeta,
+            };
+            let prior_refresh_meta: Option<RefreshMeta> = params
+                .get("refresh_meta")
+                .and_then(|m| serde_json::from_value(m.clone()).ok());
+            let prior_child_statuses: Vec<(String, ChildStatus)> = params
+                .get("children")
+                .and_then(|c| c.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|c| {
+                            let id = c.get("id")?.as_str()?.to_string();
+                            let status = c
+                                .get("status")
+                                .and_then(|s| s.as_str())
+                                .map(child_status_from_str)
+                                .unwrap_or(ChildStatus::Unknown);
+                            Some((id, status))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let fresh_child_statuses: Vec<(String, ChildStatus)> = det
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|entry| {
+                            let id = entry.get("child_id")?.as_str()?.to_string();
+                            let status = entry
+                                .get("status")
+                                .and_then(|s| s.as_str())
+                                .map(child_status_from_str)
+                                .unwrap_or(ChildStatus::Unknown);
+                            Some((id, status))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let orphan_children: Vec<String> = det
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|entry| {
+                            let basis = entry.get("basis").and_then(|b| b.as_str()).unwrap_or("");
+                            if basis == "child unreachable" {
+                                entry
+                                    .get("child_id")
+                                    .and_then(|c| c.as_str())
+                                    .map(String::from)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let commits_since_last = context
+                .get("git_log")
+                .and_then(|g| g.as_array())
+                .map(|a| a.len() as u64)
+                .unwrap_or(0);
+            let refresh_meta = compute_refresh_meta(
+                prior_refresh_meta.as_ref(),
+                &prior_child_statuses,
+                &fresh_child_statuses,
+                orphan_children,
+                chrono::Utc::now(),
+                None,
+                commits_since_last,
+            );
+            context.insert(
+                "refresh_meta".to_string(),
+                serde_json::to_value(&refresh_meta).unwrap_or(serde_json::Value::Null),
+            );
         }
     }
 
@@ -340,5 +417,173 @@ mod tests {
                     .contains_key("deterministic_child_statuses"),
             "non-goal tracker should not receive deterministic_child_statuses: {result:#}"
         );
+    }
+
+    #[tokio::test]
+    async fn refresh_injects_refresh_meta_with_status_deltas_for_goal_tracker() {
+        // D5: prior children statuses differ from kernel verdict → deltas surface.
+        use crate::librarian::catalog::artifact::{upsert as art_upsert, ArtifactRow};
+        use crate::librarian::catalog::augmentation::{upsert as aug_upsert, AugmentationRow};
+
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        let mk_art = |id: &str| ArtifactRow {
+            id: id.to_string(),
+            abs_path: std::path::PathBuf::from(format!("/test/{id}.md")),
+            kind: "tracker".to_string(),
+            status: "active".to_string(),
+            title: None,
+            owners: vec![],
+            tags: vec![],
+            topic: None,
+            time_scope: None,
+            source: None,
+            created_at: 0,
+            updated_at: 0,
+            file_mtime: 0,
+            file_sha256: "x".to_string(),
+            confidence: 1.0,
+        };
+        let mk_aug = |aid: &str, params: &str| AugmentationRow {
+            artifact_id: aid.to_string(),
+            prompt: "p".to_string(),
+            params: params.to_string(),
+            last_refreshed_at: None,
+            refresh_count: 0,
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            render_template: None,
+            params_schema: None,
+            append_mode: false,
+            history_cap: None,
+        };
+
+        {
+            let cat = ctx.catalog.lock();
+            art_upsert(&cat, &mk_art("child-a")).unwrap();
+            aug_upsert(
+                &cat,
+                &mk_aug("child-a", r#"{"tasks":[{"id":"T-1","status":"done"}]}"#),
+            )
+            .unwrap();
+            art_upsert(&cat, &mk_art("child-b")).unwrap();
+            aug_upsert(
+                &cat,
+                &mk_aug("child-b", r#"{"failures":[{"id":"F-1","status":"pass"}]}"#),
+            )
+            .unwrap();
+            art_upsert(&cat, &mk_art("goal-1")).unwrap();
+            // Prior state: child-a was "in-progress", child-b "active".
+            // Kernel will compute child-a=done (task all done), child-b=done (clean).
+            let goal_params = serde_json::json!({
+                "criterion": "Two children resolve",
+                "status": "active",
+                "acceptance_signals": [],
+                "children": [
+                    {"id": "C-1", "artifact_id": "child-a", "title": "A",
+                     "archetype": "task_list", "status": "in-progress"},
+                    {"id": "C-2", "artifact_id": "child-b", "title": "B",
+                     "archetype": "failure_table", "status": "active"}
+                ]
+            });
+            aug_upsert(&cat, &mk_aug("goal-1", &goal_params.to_string())).unwrap();
+        }
+
+        let result = call(&ctx, serde_json::json!({"id": "goal-1"}))
+            .await
+            .unwrap();
+        let meta = &result["context"]["refresh_meta"];
+        assert!(meta.is_object(), "refresh_meta missing: {result:#}");
+        let deltas = meta["children_status_delta"].as_array().unwrap();
+        assert_eq!(deltas.len(), 2, "expected 2 deltas: {meta:#}");
+        // Both C-1 and C-2 transition to done.
+        let to_vals: Vec<&str> = deltas.iter().filter_map(|d| d["to"].as_str()).collect();
+        assert!(to_vals.iter().all(|s| *s == "done"));
+        assert_eq!(meta["unchanged_refreshes"], 0);
+        assert_eq!(meta["commit_count_since_last"], 0);
+    }
+
+    #[tokio::test]
+    async fn refresh_injects_refresh_meta_unchanged_when_kernel_matches_prior() {
+        // D5: kernel verdict matches prior children[].status verbatim → no deltas,
+        // unchanged_refreshes increments from prior (or 1 if no prior).
+        use crate::librarian::catalog::artifact::{upsert as art_upsert, ArtifactRow};
+        use crate::librarian::catalog::augmentation::{upsert as aug_upsert, AugmentationRow};
+
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let mk_art = |id: &str| ArtifactRow {
+            id: id.to_string(),
+            abs_path: std::path::PathBuf::from(format!("/test/{id}.md")),
+            kind: "tracker".to_string(),
+            status: "active".to_string(),
+            title: None,
+            owners: vec![],
+            tags: vec![],
+            topic: None,
+            time_scope: None,
+            source: None,
+            created_at: 0,
+            updated_at: 0,
+            file_mtime: 0,
+            file_sha256: "x".to_string(),
+            confidence: 1.0,
+        };
+        let mk_aug = |aid: &str, params: &str| AugmentationRow {
+            artifact_id: aid.to_string(),
+            prompt: "p".to_string(),
+            params: params.to_string(),
+            last_refreshed_at: None,
+            refresh_count: 0,
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            render_template: None,
+            params_schema: None,
+            append_mode: false,
+            history_cap: None,
+        };
+        {
+            let cat = ctx.catalog.lock();
+            art_upsert(&cat, &mk_art("c-done")).unwrap();
+            aug_upsert(
+                &cat,
+                &mk_aug("c-done", r#"{"tasks":[{"id":"T-1","status":"done"}]}"#),
+            )
+            .unwrap();
+            art_upsert(&cat, &mk_art("c-done-2")).unwrap();
+            aug_upsert(
+                &cat,
+                &mk_aug("c-done-2", r#"{"tasks":[{"id":"T-2","status":"done"}]}"#),
+            )
+            .unwrap();
+            art_upsert(&cat, &mk_art("goal-x")).unwrap();
+            // Prior already records both as done; prior refresh_meta has unchanged=4.
+            let goal_params = serde_json::json!({
+                "criterion": "stable",
+                "status": "active",
+                "acceptance_signals": [],
+                "refresh_meta": {
+                    "last_refresh_at": "2026-05-16T12:00:00Z",
+                    "unchanged_refreshes": 4,
+                    "children_status_delta": [],
+                    "commit_count_since_last": 0
+                },
+                "children": [
+                    {"id": "C-1", "artifact_id": "c-done", "title": "A",
+                     "archetype": "task_list", "status": "done"},
+                    {"id": "C-2", "artifact_id": "c-done-2", "title": "B",
+                     "archetype": "task_list", "status": "done"}
+                ]
+            });
+            aug_upsert(&cat, &mk_aug("goal-x", &goal_params.to_string())).unwrap();
+        }
+
+        let result = call(&ctx, serde_json::json!({"id": "goal-x"}))
+            .await
+            .unwrap();
+        let meta = &result["context"]["refresh_meta"];
+        assert_eq!(meta["children_status_delta"].as_array().unwrap().len(), 0);
+        assert_eq!(meta["unchanged_refreshes"], 5);
     }
 }

@@ -534,6 +534,123 @@ pub fn child_status_in_context(
     }
 }
 
+// =====================================================================
+// Refresh metadata (D5) — Rust-owned bookkeeping projected into params
+// =====================================================================
+
+/// One child's status before/after a refresh — populated when the verdict
+/// changed since the prior refresh.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StatusDelta {
+    pub child_id: String,
+    pub from: String,
+    pub to: String,
+}
+
+/// Rust-owned bookkeeping for a goal-tracker refresh cycle (amendment D5).
+/// The LLM copies this verbatim from `context.refresh_meta` into
+/// `params.refresh_meta` and does not modify any field — Rust computes
+/// every value deterministically.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct RefreshMeta {
+    pub last_refresh_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_refresh_commit: Option<String>,
+    #[serde(default)]
+    pub children_status_delta: Vec<StatusDelta>,
+    #[serde(default)]
+    pub commit_count_since_last: u64,
+    #[serde(default)]
+    pub unchanged_refreshes: u64,
+    #[serde(default)]
+    pub degraded: bool,
+    #[serde(default)]
+    pub orphan_children: Vec<String>,
+}
+
+/// Compute a fresh `RefreshMeta` from prior state + the current refresh's
+/// observations.
+///
+/// `prior_refresh_meta` — last refresh's RefreshMeta (None on first refresh).
+/// `prior_child_statuses` — what the goal's `params.children[].status` said
+///   BEFORE this refresh. Used to compute deltas.
+/// `fresh_child_statuses` — what the kernel produced THIS refresh.
+/// `orphan_children` — child_ids whose `status == "orphan"` this refresh.
+/// `now` — clock-injectable timestamp (tests pass a fixed value).
+/// `head_commit` — git HEAD short hash, if available.
+/// `commits_since_last` — count of commits since the prior refresh,
+///   typically derived from `context.git_log.len()` when that gather
+///   source is configured.
+pub fn compute_refresh_meta(
+    prior_refresh_meta: Option<&RefreshMeta>,
+    prior_child_statuses: &[(String, ChildStatus)],
+    fresh_child_statuses: &[(String, ChildStatus)],
+    orphan_children: Vec<String>,
+    now: chrono::DateTime<chrono::Utc>,
+    head_commit: Option<String>,
+    commits_since_last: u64,
+) -> RefreshMeta {
+    let mut deltas: Vec<StatusDelta> = Vec::new();
+    for (child_id, fresh_status) in fresh_child_statuses {
+        let prior_status = prior_child_statuses
+            .iter()
+            .find(|(id, _)| id == child_id)
+            .map(|(_, s)| *s);
+        match prior_status {
+            None => {
+                // Newly-added child between refreshes.
+                deltas.push(StatusDelta {
+                    child_id: child_id.clone(),
+                    from: "(new)".to_string(),
+                    to: fresh_status.as_str().to_string(),
+                });
+            }
+            Some(prior) if prior != *fresh_status => {
+                deltas.push(StatusDelta {
+                    child_id: child_id.clone(),
+                    from: prior.as_str().to_string(),
+                    to: fresh_status.as_str().to_string(),
+                });
+            }
+            Some(_) => {}
+        }
+    }
+
+    let unchanged_now = deltas.is_empty() && commits_since_last == 0;
+    let prior_unchanged = prior_refresh_meta
+        .map(|m| m.unchanged_refreshes)
+        .unwrap_or(0);
+    let unchanged_refreshes = if unchanged_now {
+        prior_unchanged + 1
+    } else {
+        0
+    };
+
+    RefreshMeta {
+        last_refresh_at: now.to_rfc3339(),
+        last_refresh_commit: head_commit,
+        children_status_delta: deltas,
+        commit_count_since_last: commits_since_last,
+        unchanged_refreshes,
+        degraded: false,
+        orphan_children,
+    }
+}
+
+/// Parse a `ChildStatus` from the kebab-case string we serialize as.
+/// Returns `Unknown` for unrecognized inputs.
+pub fn child_status_from_str(s: &str) -> ChildStatus {
+    match s {
+        "pending" => ChildStatus::Pending,
+        "active" => ChildStatus::Active,
+        "in-progress" => ChildStatus::InProgress,
+        "done" => ChildStatus::Done,
+        "blocked" => ChildStatus::Blocked,
+        "orphan" => ChildStatus::Orphan,
+        _ => ChildStatus::Unknown,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1054,5 +1171,141 @@ mod tests {
         assert!(!result.met);
         assert!(result.error.is_some());
         assert!(result.error.unwrap().contains("C-MISSING"));
+    }
+
+    // =================================================================
+    // D5 — refresh_meta compute tests
+    // =================================================================
+
+    fn fixed_now() -> chrono::DateTime<chrono::Utc> {
+        use chrono::TimeZone;
+        chrono::Utc.with_ymd_and_hms(2026, 5, 17, 12, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn refresh_meta_no_prior_no_changes() {
+        let fresh = vec![
+            ("C-1".to_string(), ChildStatus::Active),
+            ("C-2".to_string(), ChildStatus::Done),
+        ];
+        let meta = compute_refresh_meta(None, &[], &fresh, vec![], fixed_now(), None, 0);
+        assert_eq!(meta.children_status_delta.len(), 2);
+        assert_eq!(meta.children_status_delta[0].from, "(new)");
+        assert_eq!(meta.commit_count_since_last, 0);
+        assert_eq!(meta.unchanged_refreshes, 0);
+        assert!(meta.orphan_children.is_empty());
+    }
+
+    #[test]
+    fn refresh_meta_no_change_increments_unchanged_counter() {
+        let prior_statuses = vec![
+            ("C-1".to_string(), ChildStatus::Active),
+            ("C-2".to_string(), ChildStatus::Done),
+        ];
+        let prior_meta = RefreshMeta {
+            last_refresh_at: "2026-05-16T12:00:00Z".into(),
+            unchanged_refreshes: 3,
+            ..Default::default()
+        };
+        let fresh = prior_statuses.clone();
+        let meta = compute_refresh_meta(
+            Some(&prior_meta),
+            &prior_statuses,
+            &fresh,
+            vec![],
+            fixed_now(),
+            None,
+            0,
+        );
+        assert!(meta.children_status_delta.is_empty());
+        assert_eq!(meta.unchanged_refreshes, 4);
+    }
+
+    #[test]
+    fn refresh_meta_status_change_resets_unchanged_counter() {
+        let prior_statuses = vec![("C-1".to_string(), ChildStatus::Active)];
+        let prior_meta = RefreshMeta {
+            unchanged_refreshes: 5,
+            ..Default::default()
+        };
+        let fresh = vec![("C-1".to_string(), ChildStatus::Done)];
+        let meta = compute_refresh_meta(
+            Some(&prior_meta),
+            &prior_statuses,
+            &fresh,
+            vec![],
+            fixed_now(),
+            None,
+            0,
+        );
+        assert_eq!(meta.children_status_delta.len(), 1);
+        assert_eq!(meta.children_status_delta[0].child_id, "C-1");
+        assert_eq!(meta.children_status_delta[0].from, "active");
+        assert_eq!(meta.children_status_delta[0].to, "done");
+        assert_eq!(meta.unchanged_refreshes, 0);
+    }
+
+    #[test]
+    fn refresh_meta_commits_reset_unchanged_counter() {
+        let prior_meta = RefreshMeta {
+            unchanged_refreshes: 2,
+            ..Default::default()
+        };
+        let fresh = vec![("C-1".to_string(), ChildStatus::Active)];
+        let prior_statuses = fresh.clone();
+        let meta = compute_refresh_meta(
+            Some(&prior_meta),
+            &prior_statuses,
+            &fresh,
+            vec![],
+            fixed_now(),
+            None,
+            3, // commits arrived
+        );
+        // No status change, but commits != 0 → unchanged_refreshes resets.
+        assert!(meta.children_status_delta.is_empty());
+        assert_eq!(meta.commit_count_since_last, 3);
+        assert_eq!(meta.unchanged_refreshes, 0);
+    }
+
+    #[test]
+    fn refresh_meta_orphan_children_carried_through() {
+        let fresh = vec![("C-1".to_string(), ChildStatus::Orphan)];
+        let meta = compute_refresh_meta(
+            None,
+            &[],
+            &fresh,
+            vec!["C-1".to_string()],
+            fixed_now(),
+            None,
+            0,
+        );
+        assert_eq!(meta.orphan_children, vec!["C-1".to_string()]);
+    }
+
+    #[test]
+    fn refresh_meta_head_commit_passthrough() {
+        let fresh = vec![("C-1".to_string(), ChildStatus::Active)];
+        let meta = compute_refresh_meta(
+            None,
+            &[],
+            &fresh,
+            vec![],
+            fixed_now(),
+            Some("abc1234".to_string()),
+            0,
+        );
+        assert_eq!(meta.last_refresh_commit.as_deref(), Some("abc1234"));
+    }
+
+    #[test]
+    fn refresh_meta_idempotent_when_inputs_unchanged() {
+        // Two back-to-back calls with same inputs (no time-skewing prior)
+        // should produce byte-identical RefreshMeta modulo last_refresh_at.
+        let prior_statuses = vec![("C-1".to_string(), ChildStatus::Active)];
+        let fresh = prior_statuses.clone();
+        let m1 = compute_refresh_meta(None, &prior_statuses, &fresh, vec![], fixed_now(), None, 0);
+        let m2 = compute_refresh_meta(None, &prior_statuses, &fresh, vec![], fixed_now(), None, 0);
+        assert_eq!(m1, m2);
     }
 }
