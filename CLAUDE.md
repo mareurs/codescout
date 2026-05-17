@@ -194,10 +194,20 @@ git push
 # 3. Rebase experiments back on master (drops the cherry-picked commit automatically)
 git checkout experiments
 git rebase master
+
+# 4. Migrate closed bug files whose fix shipped (run AFTER the cherry-pick lands on master)
+#    For each <fix-sha> just cherry-picked:
+#    - find docs/issues/<date>-<slug>.md whose Fix section cites <fix-sha>
+#    - confirm: git branch --contains <fix-sha>  → must show 'master'
+#    - if status is `fixed` / `mitigated` / `wontfix`: git mv it to docs/issues/archive/
+#    Skip files still `open` / `investigating` — they stay in docs/issues/ regardless.
+#    Commit the moves separately: docs: archive bug files for fixes shipped in <date>
 ```
 
 This is the default workflow for all completed work. The rebase step keeps `experiments`
-clean — git detects the cherry-pick and skips the duplicate commit automatically.
+clean — git detects the cherry-pick and skips the duplicate commit automatically. Step 4
+keeps `docs/issues/` showing only bugs whose fix is unreleased — see `_TEMPLATE.md` rule
+*"Archive moves happen after the fix has shipped to master, not when status flips to fixed."*
 
 ### Commit Discipline
 
