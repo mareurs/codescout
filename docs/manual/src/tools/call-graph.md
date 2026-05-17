@@ -37,6 +37,6 @@ so the cache stays correct across multi-session edits.
 - Cross-project edges are not supported in v1.
 - `direction="callees"` via tree-sitter fallback is not supported; a
   `RecoverableError` is returned for languages where LSP `callHierarchy` is
-  unavailable. See `docs/TODO-tool-misbehaviors.md` (LIMIT-001).
+  unavailable. See `docs/archive/old-trackers/TODO-tool-misbehaviors.md` (LIMIT-001).
 - Arrow function names in TypeScript/JavaScript show as `<anonymous>` in
   tree-sitter fallback mode.

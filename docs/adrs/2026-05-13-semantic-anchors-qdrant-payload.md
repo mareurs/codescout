@@ -159,5 +159,5 @@ sqlite table state:
 
 - [[memory-port-to-qdrant-design]] — parent design doc (steps 4a–4f, 5–8)
 - [[2026-05-07-legacy-retrieval-removal]] — the larger L-01..L-11 tracker
-- `docs/issues/bug-tracker.md` — log entries if the failure modes above
+- `docs/archive/old-trackers/bug-tracker.md` — log entries if the failure modes above
   bite us

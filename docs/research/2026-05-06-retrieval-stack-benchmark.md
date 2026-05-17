@@ -250,4 +250,4 @@ plus model-specific `CODESCOUT_EMBEDDER_URL` / `_PROTOCOL` / `_MODEL_NAME`.
 - `scripts/chunk-model-matrix.py`, `scripts/sweep-bm25-cr1200.sh` — orchestrators
 - `scripts/extract-kotlin-tcs.py` + `scripts/tc-kotlin.json` — kotlin TC mining
 - `docker-compose.matrix.yml` — 4 parallel embedder containers (8090–8093)
-- BUG-053 entry in `docs/TODO-tool-misbehaviors.md` — the UTF-8 panic that invalidated v1
+- BUG-053 entry in `docs/archive/old-trackers/TODO-tool-misbehaviors.md` — the UTF-8 panic that invalidated v1

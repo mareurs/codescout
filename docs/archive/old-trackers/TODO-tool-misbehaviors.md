@@ -1,4 +1,18 @@
-# Tool Misbehaviours — Living Log [DEPRECATED 2026-05-09]
+---
+id: null
+kind: null
+status: archived
+title: null
+owners: []
+tags: []
+topic: null
+time_scope: null
+---
+# Tool Misbehaviours — Living Log [RETIRED 2026-05-17 — historical reference only]
+
+> **This file is no longer maintained.** All 16 BUG-N / LIMIT-N entries below have been migrated to per-file format in `docs/issues/` (active or `docs/issues/archive/`). New tool quirks and misbehaviors go in `docs/issues/<date>-<slug>.md` using `docs/issues/_TEMPLATE.md` — see `CLAUDE.md § Bug Tracking`.
+>
+> **Migration commit:** 2026-05-17. Entries below preserved verbatim for `git blame` continuity and historical context. Do not append.
 
 > **Going forward, all new tool quirks and misbehaviors are tracked as bug
 > files in `docs/issues/<date>-<slug>.md` using `docs/issues/_TEMPLATE.md`.**

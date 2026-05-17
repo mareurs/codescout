@@ -1,4 +1,29 @@
 ---
+id: null
+kind: null
+status: archived
+title: null
+owners: []
+tags: []
+topic: null
+time_scope: null
+---
+<!--
+=========================================================================
+RETIRED 2026-05-17 — historical reference only.
+
+This tracker is no longer maintained. The 8 #N rows below have been
+migrated to per-file format in docs/issues/ (active) and
+docs/issues/archive/ (after fix shipped to master). New bugs go in
+docs/issues/<date>-<slug>.md using docs/issues/_TEMPLATE.md — see
+CLAUDE.md § Bug Tracking.
+
+Migration commit: 2026-05-17. Body preserved verbatim for `git blame`
+continuity. Do not append.
+=========================================================================
+-->
+
+---
 id: '0ed68e66d69ceec0'
 kind: tracker
 status: active

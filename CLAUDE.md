@@ -12,19 +12,28 @@ See codescout memory `development-commands` for the full command reference.
 
 **To test changes via the live MCP server, always run `cargo build --release` first**, then restart the server with `/mcp`. The MCP server runs the release binary — dev builds are not picked up.
 
-## Tool Misbehavior Log — MANDATORY
+## Bug Tracking
 
-**`docs/TODO-tool-misbehaviors.md` is a living document. You MUST maintain it.**
+**Per-file bug tracking lives in `docs/issues/`.** Every bug noticed during work gets its own file, copied from `docs/issues/_TEMPLATE.md`.
 
-- **Before starting any task**, read it to know current tool limitations.
-- **While working**, watch for: wrong edits, corrupt output, silent failures, misleading errors from codescout's own MCP tools.
-- **When you notice anything unexpected**, add an entry to that file **before continuing** — even a one-liner. Capture: what you did, what you expected, what happened, and a probable cause.
-- Do not wait until you finish the task. Log it immediately while context is fresh.
+- **Path:** `docs/issues/YYYY-MM-DD-<slug>.md` for active bugs; `docs/issues/archive/` only after the fix has shipped to `master` (verify via `git branch --contains <fix-sha>`).
+- **Slug:** short kebab-case noun-phrase (3–6 words), e.g. `edit-code-insert-mid-function`, `reindex-cascade-delete-data-loss`.
+- **Status field** in frontmatter: `open` | `investigating` | `fixed` | `mitigated` | `wontfix` (semantics in `_TEMPLATE.md`'s header comment).
+- **`closed:` date** in frontmatter alongside any of `fixed` / `mitigated` / `wontfix`.
 
-This applies to ALL unexpected tool behavior: `edit_file`, `rename_symbol`, `replace_symbol`, `symbols`, `semantic_search`, etc.
+**Trigger rules — open a bug file for ANY bug noticed during work:**
+- ✓ User explicitly asks ("log this", "open a tracker")
+- ✓ Bug blocking the current task (fix-now or parking-lot)
+- ✓ Incidental bug we won't fix in the current session
+- ✓ Just-fixed bug whose investigation is worth preserving
+- ✓ Tool quirks / misbehaviors (formerly the BUG-XXX log in `docs/TODO-tool-misbehaviors.md`, retired 2026-05-17)
+- ✗ Pure typos / one-token corrections — commit message is enough
+- ✗ Feature ideas / refactors — those go in `docs/trackers/` or `docs/plans/`
+- ✗ Subjective dislikes that aren't bugs
 
+**Capture discipline (while working):** add the file the moment the bug is noticed — don't wait until task end. Watch for wrong edits, corrupt output, silent failures, misleading errors from codescout's own MCP tools. Each bug file holds Symptom / Reproduction / Root cause / Evidence / Hypotheses tried / Fix / Tests added / Workarounds / Resume — see `docs/issues/_TEMPLATE.md`.
 
-
+**Don't add to retired surfaces.** `docs/archive/old-trackers/TODO-tool-misbehaviors.md` and `docs/archive/old-trackers/bug-tracker.md` are historical reference only — do not append. Open a new `docs/issues/<date>-<slug>.md` instead.
 ## Session Intelligence Trackers
 
 Two living trackers capture observations from real sessions. Keep them current — they feed

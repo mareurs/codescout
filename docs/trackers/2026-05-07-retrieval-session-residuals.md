@@ -5,7 +5,7 @@
 Issues that surfaced during the Phase 5.5 / 6 / 7 (narrow) work and are **not**
 captured by:
 - `docs/trackers/2026-05-07-legacy-retrieval-removal.md` (legacy code deletion)
-- `docs/TODO-tool-misbehaviors.md` (BUG-NNN log; BUG-053 lives there)
+- `docs/archive/old-trackers/TODO-tool-misbehaviors.md` (BUG-NNN log; BUG-053 lives there)
 - `docs/research/2026-05-06-retrieval-stack-benchmark.md` (open follow-ups in
   the research doc — listed here only when they need a separate owner)
 

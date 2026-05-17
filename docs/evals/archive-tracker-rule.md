@@ -79,7 +79,7 @@ resolved.
 
 ### Case 5 — Edge: wrong path
 
-**Shape:** Tracker at `docs/issues/bug-tracker.md` (note: `docs/issues/`, not
+**Shape:** Tracker at `docs/archive/old-trackers/bug-tracker.md` (note: `docs/issues/`, not
 `docs/trackers/`). Zero-open per its enumeration.
 
 **Criteria (all must PASS for case PASS):**

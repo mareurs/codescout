@@ -289,7 +289,7 @@ Meanwhile the codebase ships full gather machinery: `gather_all`, `gather_git_lo
 - `librarian(reindex, scope=project, force=true)` now succeeds AND preserves augmentations: post-call `artifact(find, augmented=true)` still returns 4 artifacts. Was cascade-deleting them pre-fix. ✅
 - F-6b dim-validation code path verified via the unit test suite (2329 passed); live trigger not reproduced today because the embedder isn't currently failing.
 
-**Fix idea / Pointer:** Separate bug-tracker entries warranted. Promote to `docs/issues/bug-tracker.md` as #5 (reindex UNIQUE) and #6 (embedding dimension validation).
+**Fix idea / Pointer:** Separate bug-tracker entries warranted. Promote to `docs/archive/old-trackers/bug-tracker.md` as #5 (reindex UNIQUE) and #6 (embedding dimension validation).
 
 ---
 
@@ -406,7 +406,7 @@ Each of these is a category of bug that an unprincipled merger would ship. The c
 
 **Fix landed:** commit `d482ca8a` (`fix(librarian): reindex destructive failures + F-2 archetype default`). Removed the pre-walk `DELETE FROM artifact WHERE abs_path LIKE` block in `reindex.rs::call`. `force=true` is now a no-op pending proper plumbing through `index_repo_sync` (task #31).
 
-**Fix idea / Pointer:** Promoted to `docs/issues/bug-tracker.md` #7. Three-part fix:
+**Fix idea / Pointer:** Promoted to `docs/archive/old-trackers/bug-tracker.md` #7. Three-part fix:
 1. Wrap force-reindex's DELETE + re-walk in a single SQLite transaction so failures roll back.
 2. Document the data-loss risk in the reindex tool description (until #1 ships).
 3. Consider whether the cascade-delete is correct — maybe augmentations should survive a re-index by being preserved across artifact-row recreation (key on `abs_path` or content-hash rather than synthetic `id`).

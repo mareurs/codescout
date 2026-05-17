@@ -490,7 +490,7 @@ reference. No file serves three audiences.
    knowledge lives in codescout memory (`architecture`). No doc needed.
 5. **Audit `docs/plans/`**: delete shipped plans (point to commit ranges
    in CHANGELOG.md instead).
-6. **Refactor `docs/TODO-tool-misbehaviors.md`**: open bugs as GitHub
+6. **Refactor `docs/archive/old-trackers/TODO-tool-misbehaviors.md`**: open bugs as GitHub
    issues, move LLM-relevant quirks into a "Known Tool Quirks" section
    in CLAUDE.md, delete the file.
 
@@ -531,6 +531,6 @@ ephemeral.
   separate commits, separate PRs.
 - **Test improvements.** If tests reveal weakness during refactoring
   (flaky, slow, implementation-coupled), note in
-  `docs/TODO-tool-misbehaviors.md` (or its successor) for separate work.
+  `docs/archive/old-trackers/TODO-tool-misbehaviors.md` (or its successor) for separate work.
 - **LSP lifecycle restructuring.** Essential complexity. Out of scope.
 - **Embedding pipeline restructuring.** Essential complexity. Out of scope.

@@ -204,7 +204,7 @@ Requires understanding design decisions, consistency invariants, and cross-modul
 - **Expected files:**
   - `src/tools/markdown.rs` (compute_section_end)
   - `src/tools/file_summary.rs` (parse_all_headings)
-  - `docs/TODO-tool-misbehaviors.md` (BUG-035)
+  - `docs/archive/old-trackers/TODO-tool-misbehaviors.md` (BUG-035)
 
 #### TC-19: Activation wiring
 - **Query:** `relationship between project activation, LSP server lifecycle, and tool context wiring`
@@ -694,7 +694,7 @@ TC-09 expected corrected to `workflow.rs` (command.rs no longer exists).
    `src/tools/command.rs` → `src/tools/run_command/`, `src/tools/markdown.rs` → `src/tools/markdown/`,
    `src/agent.rs` → `src/agent/mod.rs`, `src/tools/symbol_edit.rs` → `src/tools/symbol/edit_code.rs`,
    `src/tools/workflow.rs::build_system_prompt_draft` → `src/prompts/builders.rs`,
-   `docs/TODO-tool-misbehaviors.md` → `docs/archive/bug-reports/...`. Moved equivalents were credited.
+   `docs/archive/old-trackers/TODO-tool-misbehaviors.md` → `docs/archive/bug-reports/...`. Moved equivalents were credited.
 2. **Dual storage:** `index(force=true)` rebuilt sqlite-vec (.codescout/embeddings/project.db, jina-v2 768d).
    `semantic_search` queries the qdrant retrieval stack independently. This run scores the qdrant stack's
    indexed state — not the freshly rebuilt sqlite-vec.

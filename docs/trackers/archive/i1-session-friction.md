@@ -1,8 +1,12 @@
 ---
+id: null
+kind: null
+status: archived
 title: I1 Refactor — Session Friction Log
-date: 2026-05-17
-parent: docs/trackers/goal-tracker-cross-pollination.md
-purpose: Lightweight scratch surface for frictions observed while working through the I1 refactor plan. Cheap to append; promotable to formal bug files later.
+owners: []
+tags: []
+topic: null
+time_scope: null
 ---
 
 # I1 Refactor — Session Friction Log
@@ -458,7 +462,7 @@ remaining-after-N — not total.
 
 **Fix pointer:** Same future bug tracker as F-1 (related).
 
-**Status:** promoted-to-bug-tracker 2026-05-17 — see `docs/issues/bug-tracker.md` #3.
+**Status:** promoted-to-bug-tracker 2026-05-17 — see `docs/archive/old-trackers/bug-tracker.md` #3.
 
 ---
 
@@ -833,7 +837,7 @@ inspection. Reserve `grep` for filesystem paths.
 false-negative cost is potentially expensive ("Oh, the fix didn't
 land!") if the user doesn't re-check via another tool.
 
-**Status:** promoted-to-bug-tracker 2026-05-17 — see `docs/issues/bug-tracker.md` #4. Original observation: codescout tool friction; med severity (silently mis-routes verification queries).
+**Status:** promoted-to-bug-tracker 2026-05-17 — see `docs/archive/old-trackers/bug-tracker.md` #4. Original observation: codescout tool friction; med severity (silently mis-routes verification queries).
 
 **Fix idea:** Either `grep` on `@tool_*` should run on raw text and not
 emit the "looks like a symbol" suggestion (the suggestion is

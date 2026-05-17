@@ -12,7 +12,7 @@ context on demand:
 | URI                           | Contents                                                         |
 |-------------------------------|------------------------------------------------------------------|
 | `doc://progressive-disclosure`| `docs/PROGRESSIVE_DISCOVERABILITY.md` — output sizing, overflow hints |
-| `doc://tool-misbehaviors`     | `docs/TODO-tool-misbehaviors.md` — living log of observed tool bugs |
+| `doc://tool-misbehaviors`     | `docs/archive/old-trackers/TODO-tool-misbehaviors.md` — living log of observed tool bugs |
 | `doc://codescout-tool-guide`  | Generated per-tool long-form usage notes                         |
 | `memory://<name>`             | One resource per file in the active project's memory directory   |
 | `project://summary`           | JSON snapshot — active project, index status, language, LSP ready |
