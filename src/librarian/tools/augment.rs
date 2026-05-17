@@ -81,88 +81,151 @@ impl Tool for ArtifactAugment {
 
     async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
         let a: Args = serde_json::from_value(args)?;
-        let cat = ctx.catalog.lock();
+
+        // D11: when the gate ran and passed, capture evidence to emit a
+        // `note` event after the catalog lock is released (event_create is
+        // async and acquires its own lock).
+        let mut gate_check_evidence: Option<Value> = None;
 
         if a.merge {
-            // RFC 7396 merge-patch path
-            let patch = a
-                .params
-                .as_ref()
-                .cloned()
-                .unwrap_or(Value::Object(Default::default()));
-            if let Some(existing) = augmentation::get(&cat, &a.id)? {
-                let mut current: Value = serde_json::from_str(&existing.params)
+            // Scope the catalog lock so it's dropped before the async
+            // event_create call below (parking_lot MutexGuard is !Send).
+            {
+                let cat = ctx.catalog.lock();
+                let patch = a
+                    .params
+                    .as_ref()
+                    .cloned()
                     .unwrap_or(Value::Object(Default::default()));
-                let pre_status = current
-                    .get("status")
-                    .and_then(|s| s.as_str())
-                    .map(String::from);
-                augmentation::apply_merge_patch(&mut current, &patch);
-
-                if let Some(schema_text) = existing.params_schema.as_deref() {
-                    crate::librarian::tools::schema_validate::validate_against_stored(
-                        schema_text,
-                        &current,
-                    )
-                    .map_err(|e| {
-                        RecoverableError::new(format!("merged params violate params_schema: {e}"))
-                    })?;
-                }
-
-                // D6 — Rust enforces the auto-close gate. Only fires when
-                // (1) the artifact is structurally a goal-tracker (has
-                // acceptance_signals + children), and (2) the merge flips
-                // status from non-done to "done". Other merges pass through.
-                let post_status = current.get("status").and_then(|s| s.as_str());
-                let is_goal_tracker = current.get("acceptance_signals").is_some()
-                    && current.get("children").is_some();
-
-                // D10 — scope-growth cap. Fires on any goal-tracker merge
-                // touching children. Initial seed is exempt (prior empty).
-                if is_goal_tracker {
-                    use crate::librarian::tools::goal_aggregation::validate_scope_growth;
-                    let pre_existing: Value = serde_json::from_str(&existing.params)
+                if let Some(existing) = augmentation::get(&cat, &a.id)? {
+                    let mut current: Value = serde_json::from_str(&existing.params)
                         .unwrap_or(Value::Object(Default::default()));
-                    let empty_vec: Vec<Value> = Vec::new();
-                    let prior_children: &[Value] = pre_existing
-                        .get("children")
-                        .and_then(|c| c.as_array())
-                        .map(Vec::as_slice)
-                        .unwrap_or(&empty_vec);
-                    let submitted_children: &[Value] = current
-                        .get("children")
-                        .and_then(|c| c.as_array())
-                        .map(Vec::as_slice)
-                        .unwrap_or(&empty_vec);
-                    if let Err(e) = validate_scope_growth(prior_children, submitted_children) {
-                        return Err(RecoverableError::new(format!("{e}")));
-                    }
-                }
+                    let pre_status = current
+                        .get("status")
+                        .and_then(|s| s.as_str())
+                        .map(String::from);
+                    augmentation::apply_merge_patch(&mut current, &patch);
 
-                if is_goal_tracker
-                    && pre_status.as_deref() != Some("done")
-                    && post_status == Some("done")
-                {
-                    use crate::librarian::tools::goal_aggregation::{evaluate_gate, GateOutcome};
-                    match evaluate_gate(&current) {
-                        GateOutcome::AutoClose => {}
-                        GateOutcome::Block(reason) => {
-                            return Err(RecoverableError::new(format!(
-                                "goal auto-close gate blocked: {reason}"
-                            )));
+                    if let Some(schema_text) = existing.params_schema.as_deref() {
+                        crate::librarian::tools::schema_validate::validate_against_stored(
+                            schema_text,
+                            &current,
+                        )
+                        .map_err(|e| {
+                            RecoverableError::new(format!(
+                                "merged params violate params_schema: {e}"
+                            ))
+                        })?;
+                    }
+
+                    let post_status = current.get("status").and_then(|s| s.as_str());
+                    let is_goal_tracker = current.get("acceptance_signals").is_some()
+                        && current.get("children").is_some();
+
+                    if is_goal_tracker {
+                        use crate::librarian::tools::goal_aggregation::validate_scope_growth;
+                        let pre_existing: Value = serde_json::from_str(&existing.params)
+                            .unwrap_or(Value::Object(Default::default()));
+                        let empty_vec: Vec<Value> = Vec::new();
+                        let prior_children: &[Value] = pre_existing
+                            .get("children")
+                            .and_then(|c| c.as_array())
+                            .map(Vec::as_slice)
+                            .unwrap_or(&empty_vec);
+                        let submitted_children: &[Value] = current
+                            .get("children")
+                            .and_then(|c| c.as_array())
+                            .map(Vec::as_slice)
+                            .unwrap_or(&empty_vec);
+                        if let Err(e) = validate_scope_growth(prior_children, submitted_children) {
+                            return Err(RecoverableError::new(format!("{e}")));
+                        }
+                    }
+
+                    if is_goal_tracker
+                        && pre_status.as_deref() != Some("done")
+                        && post_status == Some("done")
+                    {
+                        use crate::librarian::tools::goal_aggregation::{
+                            evaluate_gate, GateOutcome,
+                        };
+                        match evaluate_gate(&current) {
+                            GateOutcome::AutoClose => {
+                                let children = current
+                                    .get("children")
+                                    .and_then(|c| c.as_array())
+                                    .cloned()
+                                    .unwrap_or_default();
+                                let signals = current
+                                    .get("acceptance_signals")
+                                    .and_then(|s| s.as_array())
+                                    .cloned()
+                                    .unwrap_or_default();
+                                let children_done = children
+                                    .iter()
+                                    .filter(|c| {
+                                        c.get("status").and_then(|s| s.as_str()) == Some("done")
+                                    })
+                                    .count();
+                                let signals_met = signals
+                                    .iter()
+                                    .filter(|s| {
+                                        s.get("met").and_then(|m| m.as_bool()) == Some(true)
+                                    })
+                                    .count();
+                                gate_check_evidence = Some(json!({
+                                    "tag": "gate_check",
+                                    "gate_passed": true,
+                                    "text": format!(
+                                        "auto-close gate passed: {}/{} children done, {}/{} signals met",
+                                        children_done, children.len(),
+                                        signals_met, signals.len()
+                                    ),
+                                    "evidence": {
+                                        "children_count": children.len(),
+                                        "children_done": children_done,
+                                        "signal_count_total": signals.len(),
+                                        "signal_count_met": signals_met,
+                                    },
+                                    "refresh_at": chrono::Utc::now().to_rfc3339(),
+                                }));
+                            }
+                            GateOutcome::Block(reason) => {
+                                return Err(RecoverableError::new(format!(
+                                    "goal auto-close gate blocked: {reason}"
+                                )));
+                            }
                         }
                     }
                 }
+                let found = augmentation::merge_params(&cat, &a.id, &patch)?;
+                if !found {
+                    return Err(RecoverableError::new(format!(
+                        "no augmentation for artifact '{}' — call artifact_augment first",
+                        a.id
+                    )));
+                }
+            } // cat dropped here
+
+            // D11 — emit gate_check note event after the catalog lock is
+            // released. Best-effort: if event emission fails, the augment
+            // itself still succeeded.
+            if let Some(payload) = gate_check_evidence {
+                let _ = crate::librarian::tools::event_create::call(
+                    ctx,
+                    json!({
+                        "artifact_id": &a.id,
+                        "kind": "note",
+                        "payload": payload,
+                    }),
+                )
+                .await;
             }
-            let found = augmentation::merge_params(&cat, &a.id, &patch)?;
-            if !found {
-                return Err(RecoverableError::new(format!(
-                    "no augmentation for artifact '{}' — call artifact_augment first",
-                    a.id
-                )));
-            }
+
             return Ok(json!("ok"));
         }
+
+        let cat = ctx.catalog.lock();
 
         // Create/replace path — prompt is required
         let prompt = a.prompt.ok_or_else(|| {
@@ -479,5 +542,141 @@ mod tests {
         let row = augmentation::get(&cat, "a100").unwrap().unwrap();
         assert!(!row.append_mode);
         assert_eq!(row.history_cap, None);
+    }
+
+    // =================================================================
+    // D11 — gate_check note event emission
+    // =================================================================
+
+    #[tokio::test]
+    async fn gate_check_note_event_emitted_on_autoclose() {
+        let ctx = mk_ctx();
+        // Seed goal with two done children + two met signals, status=active.
+        let goal_id = "g-pass";
+        seed_artifact(&ctx, goal_id);
+        let _ = ArtifactAugment
+            .call(
+                &ctx,
+                serde_json::json!({
+                    "id": goal_id,
+                    "prompt": "p",
+                    "params": {
+                        "criterion": "x",
+                        "status": "active",
+                        "acceptance_signals": [
+                            {"description":"A","met":true,"kind":"freeform"},
+                            {"description":"B","met":true,"kind":"freeform"}
+                        ],
+                        "children": [
+                            {"id":"C-1","artifact_id":"a","title":"A","archetype":"task_list","status":"done"},
+                            {"id":"C-2","artifact_id":"b","title":"B","archetype":"task_list","status":"done"}
+                        ]
+                    }
+                }),
+            )
+            .await
+            .unwrap();
+
+        // Flip status to done — gate passes, note event must emit.
+        ArtifactAugment
+            .call(
+                &ctx,
+                serde_json::json!({
+                    "id": goal_id,
+                    "merge": true,
+                    "params": {"status": "done"}
+                }),
+            )
+            .await
+            .unwrap();
+
+        // Inspect events for this artifact.
+        use crate::librarian::catalog::events::timeline_for_artifact;
+        let cat = ctx.catalog.lock();
+        let events = timeline_for_artifact(&cat, goal_id, None, None, 50).unwrap();
+        let gate_notes: Vec<_> = events
+            .iter()
+            .filter(|e| {
+                e.kind == "note"
+                    && serde_json::from_str::<serde_json::Value>(&e.payload)
+                        .ok()
+                        .and_then(|p| p.get("tag").and_then(|t| t.as_str()).map(String::from))
+                        .as_deref()
+                        == Some("gate_check")
+            })
+            .collect();
+        assert_eq!(
+            gate_notes.len(),
+            1,
+            "expected exactly one gate_check note event"
+        );
+        let payload: serde_json::Value = serde_json::from_str(&gate_notes[0].payload).unwrap();
+        assert_eq!(payload["gate_passed"], true);
+        assert_eq!(payload["evidence"]["children_count"], 2);
+        assert_eq!(payload["evidence"]["children_done"], 2);
+        assert_eq!(payload["evidence"]["signal_count_total"], 2);
+        assert_eq!(payload["evidence"]["signal_count_met"], 2);
+    }
+
+    #[tokio::test]
+    async fn gate_check_event_not_emitted_when_gate_blocks() {
+        let ctx = mk_ctx();
+        let goal_id = "g-block";
+        seed_artifact(&ctx, goal_id);
+        // Seed with 1 child (too few — D9 blocks the gate).
+        ArtifactAugment
+            .call(
+                &ctx,
+                serde_json::json!({
+                    "id": goal_id,
+                    "prompt": "p",
+                    "params": {
+                        "criterion": "x",
+                        "status": "active",
+                        "acceptance_signals": [{"description":"A","met":true,"kind":"freeform"}],
+                        "children": [
+                            {"id":"C-1","artifact_id":"a","title":"A","archetype":"task_list","status":"done"}
+                        ]
+                    }
+                }),
+            )
+            .await
+            .unwrap();
+
+        // Attempt to flip status to done — gate blocks.
+        let res = ArtifactAugment
+            .call(
+                &ctx,
+                serde_json::json!({
+                    "id": goal_id,
+                    "merge": true,
+                    "params": {"status": "done"}
+                }),
+            )
+            .await;
+        assert!(res.is_err(), "expected gate to block status flip");
+
+        use crate::librarian::catalog::events::timeline_for_artifact;
+        let cat = ctx.catalog.lock();
+        let events = timeline_for_artifact(&cat, goal_id, None, None, 50).unwrap();
+        let gate_notes: Vec<_> = events
+            .iter()
+            .filter(|e| {
+                e.kind == "note"
+                    && serde_json::from_str::<serde_json::Value>(&e.payload)
+                        .ok()
+                        .and_then(|p| p.get("tag").and_then(|t| t.as_str()).map(String::from))
+                        .as_deref()
+                        == Some("gate_check")
+            })
+            .collect();
+        assert_eq!(
+            gate_notes.len(),
+            0,
+            "expected NO gate_check note event when gate blocks: {gate_notes:?}"
+        );
+
+        // Suppress unused warning.
+        let _: i32 = 0;
     }
 }
