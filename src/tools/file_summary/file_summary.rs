@@ -415,8 +415,9 @@ fn json_type_name(v: &Value) -> String {
     .to_string()
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Segment {
+pub(crate) enum Segment {
     /// Object key access: `.field` or bare `field` after `$`.
     Key(String),
     /// Non-negative array index: `[N]` where N ≥ 0.
@@ -504,6 +505,103 @@ fn parse_json_path_segments(path: &str) -> Result<Vec<String>, RecoverableError>
         }
     }
     Ok(segments)
+}
+#[allow(dead_code)]
+pub(crate) fn parse_segments_v2(path: &str) -> Result<Vec<Segment>, RecoverableError> {
+    let path = path
+        .strip_prefix("$.")
+        .or_else(|| path.strip_prefix('$'))
+        .unwrap_or(path);
+    if path.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut segments = Vec::new();
+    for part in path.split('.') {
+        if part.is_empty() {
+            continue;
+        }
+        if let Some(bracket_pos) = part.find('[') {
+            let key = &part[..bracket_pos];
+            if !key.is_empty() {
+                segments.push(Segment::Key(key.to_string()));
+            }
+            let mut rest = &part[bracket_pos..];
+            while !rest.is_empty() {
+                if !rest.starts_with('[') {
+                    return Err(unsupported_bracket(rest));
+                }
+                let end = rest.find(']').ok_or_else(|| unsupported_bracket(rest))?;
+                let inner = &rest[1..end];
+                segments.push(parse_bracket(inner)?);
+                rest = &rest[end + 1..];
+            }
+        } else {
+            segments.push(Segment::Key(part.to_string()));
+        }
+    }
+    Ok(segments)
+}
+
+#[allow(dead_code)]
+fn parse_bracket(inner: &str) -> Result<Segment, RecoverableError> {
+    let supported_hint = "Supported forms: '.key', '[N]' (non-negative integer), '[-N]' (negative integer), '[-N:]' (last N elements). Other slice/filter forms not supported.";
+    if inner.is_empty() {
+        return Err(RecoverableError::with_hint(
+            "unsupported json_path segment '[]'".to_string(),
+            supported_hint,
+        ));
+    }
+    if inner.chars().all(|c| c.is_ascii_digit()) {
+        let n: usize = inner.parse().map_err(|_| {
+            RecoverableError::with_hint(
+                format!("unsupported json_path segment '[{}]'", inner),
+                supported_hint,
+            )
+        })?;
+        return Ok(Segment::Index(n));
+    }
+    if let Some(rest) = inner.strip_prefix('-') {
+        let (mag_str, is_slice) = if let Some(s) = rest.strip_suffix(':') {
+            (s, true)
+        } else {
+            (rest, false)
+        };
+        if mag_str.is_empty() || !mag_str.chars().all(|c| c.is_ascii_digit()) {
+            return Err(RecoverableError::with_hint(
+                format!("unsupported json_path segment '[{}]'", inner),
+                supported_hint,
+            ));
+        }
+        let mag: usize = mag_str.parse().map_err(|_| {
+            RecoverableError::with_hint(
+                format!("unsupported json_path segment '[{}]'", inner),
+                supported_hint,
+            )
+        })?;
+        if mag == 0 {
+            return Err(RecoverableError::with_hint(
+                format!("unsupported json_path segment '[{}]'", inner),
+                "Use [0] for the first element",
+            ));
+        }
+        return Ok(if is_slice {
+            Segment::NegSliceFrom(mag)
+        } else {
+            Segment::NegIndex(mag)
+        });
+    }
+    Err(RecoverableError::with_hint(
+        format!("unsupported json_path segment '[{}]'", inner),
+        supported_hint,
+    ))
+}
+
+#[allow(dead_code)]
+fn unsupported_bracket(s: &str) -> RecoverableError {
+    RecoverableError::with_hint(
+        format!("unsupported json_path bracket near '{}'", s),
+        "Supported forms: '.key', '[N]', '[-N]', '[-N:]'.",
+    )
 }
 
 fn resolve_json_segment<'a>(value: &'a Value, segment: &str) -> Option<&'a Value> {

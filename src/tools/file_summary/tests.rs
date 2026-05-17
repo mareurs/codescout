@@ -570,3 +570,85 @@ fn resolve_section_range_heading_in_code_block() {
     let range = resolve_section_range(content, "## Real").unwrap();
     assert_eq!(range.heading_line, 5);
 }
+
+#[test]
+fn parse_empty_path_returns_empty_segments() {
+    assert_eq!(parse_segments_v2("").unwrap(), Vec::<Segment>::new());
+}
+
+#[test]
+fn parse_root_only() {
+    assert_eq!(parse_segments_v2("$").unwrap(), Vec::<Segment>::new());
+}
+
+#[test]
+fn parse_negative_single_index() {
+    assert_eq!(
+        parse_segments_v2("$.a[-1]").unwrap(),
+        vec![Segment::Key("a".into()), Segment::NegIndex(1)]
+    );
+}
+
+#[test]
+fn parse_negative_slice_from() {
+    assert_eq!(
+        parse_segments_v2("$.a[-3:]").unwrap(),
+        vec![Segment::Key("a".into()), Segment::NegSliceFrom(3)]
+    );
+}
+
+#[test]
+fn parse_chained_negative_after_positive() {
+    assert_eq!(
+        parse_segments_v2("$.a[0][-1]").unwrap(),
+        vec![
+            Segment::Key("a".into()),
+            Segment::Index(0),
+            Segment::NegIndex(1)
+        ]
+    );
+}
+
+#[test]
+fn parse_top_level_negative_index() {
+    assert_eq!(
+        parse_segments_v2("$[-1]").unwrap(),
+        vec![Segment::NegIndex(1)]
+    );
+}
+
+#[test]
+fn parse_rejects_positive_slice() {
+    let err = parse_segments_v2("$.a[1:3]").unwrap_err();
+    assert!(
+        err.to_string().contains("unsupported json_path segment"),
+        "got: {}",
+        err
+    );
+    assert!(err.to_string().contains("[1:3]"), "got: {}", err);
+}
+
+#[test]
+fn parse_rejects_slice_with_step() {
+    let err = parse_segments_v2("$.a[::2]").unwrap_err();
+    assert!(err.to_string().contains("unsupported json_path segment"));
+}
+
+#[test]
+fn parse_rejects_open_end_positive() {
+    let err = parse_segments_v2("$.a[1:]").unwrap_err();
+    assert!(err.to_string().contains("unsupported json_path segment"));
+}
+
+#[test]
+fn parse_rejects_negative_zero() {
+    let err = parse_segments_v2("$.a[-0]").unwrap_err();
+    assert!(err.to_string().contains("[-0]"), "got: {}", err);
+    assert!(err.to_string().contains("[0]"), "got: {}", err);
+}
+
+#[test]
+fn parse_rejects_non_integer_bracket() {
+    let err = parse_segments_v2("$.a[abc]").unwrap_err();
+    assert!(err.to_string().contains("[abc]"));
+}
