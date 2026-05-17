@@ -116,3 +116,62 @@ Running log of rough edges found while using project skills. Feed into refactor 
 **When:** Monorepo with real root-layer code (dev scripts, docker-compose, top-level scripts).
 **Got:** Workspace prompt explicitly forbade a root subagent and had no fallback to capture root content.
 **Fix idea (FIXED 2026-05-07):** workspace `architecture` template grew Top-Level Code Map + Generic Navigation subsections; the no-root-subagent rule now states the reason.
+
+
+## `/superpowers:writing-plans` + `/codescout-companion:reconnaissance`
+
+### F-001 — writing-plans writes test assertions naming types without scouting them; recon's triggers don't catch this
+
+**When:** Plan `docs/superpowers/plans/2026-05-18-jsonpath-negative-slice.md`
+written via the writing-plans skill, then re-scouted via `/codescout-companion:reconnaissance`
+before subagent dispatch. Recon caught a defect that the plan-writing phase
+had baked in.
+
+**Got:** Plan's Task 2 + Task 3 tests asserted on `err.hint.as_deref()` — a
+field that doesn't exist. The actual `RecoverableError` (at
+`src/tools/core/types.rs:169`) has `pub message` + `pub guidance:
+Option<Guidance>` + a `.hint()` *method* on the impl block. The Display
+impl's own comment documents `to_string().contains(...)` as the canonical
+test-assertion form. The plan-writing skill never read the type — it
+inferred the shape from the design spec, which itself didn't pin the
+assertion form.
+
+**Two-skill tension:**
+
+1. **writing-plans** has no "scout types named in test assertions" step.
+   Its self-review checklist covers placeholders / type consistency /
+   spec coverage — but `type consistency` only catches inconsistencies
+   *within* the plan, not between the plan and the codebase.
+2. **reconnaissance** lists triggers like "before subagent dispatch" and
+   "before editing code that changes a struct, function signature, or API
+   contract" — but does NOT list "before writing a plan that asserts on a
+   type the planner has not read". If the user hadn't re-invoked recon
+   between writing-plans and subagent dispatch, F-3 (in
+   `docs/trackers/bug-fix-session-log.md`, 2026-05-18) would have surfaced
+   as the first subagent's compile error.
+
+**Fix ideas (both surfaces are candidates):**
+
+- **In writing-plans:** add a pre-write step "for every type T whose
+  accessors appear in plan test code, `symbols(name=T, include_body=true)`
+  once; cite the file path + exposed accessors in a footnote of the task
+  that names T". Tightens Section 9 (Self-Review) "type consistency" to
+  *external* consistency.
+- **In reconnaissance:** add a `When to Use` bullet — "before writing
+  test code in a plan, scout every type named in an assertion". Recon's
+  current model is "at the seam"; this expands it to "before the seam
+  becomes a plan token".
+- **Composition fix:** writing-plans could declare reconnaissance as a
+  REQUIRED SUB-SKILL for any plan whose tasks include test code that
+  asserts on a type's accessors. Currently the cross-skill linkage is
+  user-mediated.
+
+**Severity:** med — caught this round, cost ~6 tool calls. Without the
+user's mid-plan recon invoke, would have cost a failed subagent task +
+controller drift mid-dispatch.
+
+**Confirming data:** F-3 + W-2 in `docs/trackers/bug-fix-session-log.md`
+(2026-05-18). Both surface the same gap from different angles — F-3 is
+the drift, W-2 is the win-from-catching-it. The fact that both could be
+*one* friction in the right place (writing-plans pre-write scout) and
+not just a recon-saves-the-day story is the substantive complaint.

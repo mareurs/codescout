@@ -36,11 +36,13 @@
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-05-17 | low | plan-prose | fixed-verified | Bug-file Resume paths cite non-existent layout |
 | F-2 | 2026-05-17 | med | self-friction | fixed-verified | 2 of 3 buffer bugs likely stale — code reads correct |
+| F-3 | 2026-05-18 | med | plan-prose | fixed-verified | Plan test assertions cited non-existent `RecoverableError.hint` field |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-05-17 | med | Scout helper-fn bodies before fixing reported bugs | Would have written instrumentation / "fix" for `extract_lines` and `extract_json_path` despite both being correct + having passing tests | promoted-to-permanent-docs |
+| W-2 | 2026-05-18 | med | Pre-dispatch recon scouts type accessors named in plan assertions | Task 2's first subagent would have failed `cargo check` on `err.hint.as_deref()` (no such field); 1+ wasted round-trip per test, controller drift mid-dispatch | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -212,6 +214,82 @@ Codified so the Index column means the same thing across sessions.
 **Status:** validated
 
 ---
+## F-3 — Plan test assertions cited non-existent `RecoverableError.hint` field
+
+**When:** Pre-dispatch reconnaissance for the jsonpath negative-slice
+implementation plan (`docs/superpowers/plans/2026-05-18-jsonpath-negative-slice.md`).
+About to dispatch Task 1 subagent.
+
+**Expected (plan):** `RecoverableError` has accessible `.hint: Option<String>`
+field; plan tests used `err.hint.as_deref().unwrap_or("")`.
+
+**Got (scouted reality):** `RecoverableError` at `src/tools/core/types.rs:169`
+exposes `pub message: String` and `pub guidance: Option<Guidance>` — there is
+NO `.hint` field. There IS a method `.hint() -> Option<&str>` that returns the
+text only for the `Guidance::Hint` variant. The `Display` impl's own comment
+explicitly recommends `to_string().contains(...)` for test assertions because
+it renders `"{message} — Hint: {text}"` and is the documented stable contract:
+
+> "Display renders only `message`. The structured `hint` and `recovery_steps`
+> are intentionally omitted here so existing `to_string().contains(...)` test
+> assertions stay stable."
+
+Wait — re-reading: Display renders `message` PLUS `" — {field_name}: {text}"`
+when guidance is present. The contract is: `to_string().contains(hint_text)`
+holds. So tests can use `err.to_string().contains("...")` regardless of which
+guidance variant is attached.
+
+**Probable cause:** Plan was written from the design spec; spec didn't pin
+the assertion-side accessor shape; writing-plans phase didn't scout
+`RecoverableError`. Standard "scout helper-fn bodies" rule (W-1 in this same
+session log) applies to type shapes too.
+
+**Workaround:** Edit the plan's Task 2 + Task 3 test code to use
+`err.to_string().contains("...")` everywhere a hint-text or message-text
+assertion is made. Drops the `.hint` field reference. Less brittle than
+`err.message.contains(...)` because it also covers cases where the failing
+substring lives in the guidance text rather than the message text.
+
+**Severity:** med — would have caused first subagent's tests to fail to
+compile; controller would then absorb the failed-task drift mid-dispatch.
+
+**Status:** open → fixed-verified after plan edit lands this turn.
+## W-2 — Pre-dispatch recon caught test-shape error before any subagent ran
+
+**When:** About to dispatch Task 1 of the jsonpath negative-slice plan to a
+fresh subagent (subagent-driven-development mode).
+
+**Pattern:** Before the first subagent dispatch on a plan that names *types*
+in test assertions (not just *fns*), invoke the reconnaissance skill and
+scout each referenced type's actual field/method shape. Specifically:
+`symbols(name=<TypeName>, include_body=true)` for any type whose accessors
+the plan tests mention.
+
+**Counterfactual:** Without this scout, Task 2's first subagent would have
+written `err.hint.as_deref().unwrap_or("")` and failed `cargo check` on the
+first parse test. The subagent would have flailed (probable retries with
+`err.guidance`, or `err.hint().unwrap_or("")`, or `err.to_string()`) without
+the Display-impl contract context. Best case: 1 extra round-trip per failing
+test (~11 round-trips for the 11 parser tests in Task 2). Worst case: the
+subagent gives up, controller re-scopes plan mid-dispatch, F-N entry written
+*after* drift instead of *before*.
+
+**Confirming data points:**
+1. F-3 (this session) — `RecoverableError.hint` field cited by plan does not
+   exist; scout caught it pre-dispatch.
+2. Pending: any future plan that names types in assertions.
+
+**Impact:** med — saves ≥1 failed subagent task and prevents controller
+context absorption of cascading test failures. The saving compounds
+across the 4 implementation tasks in the plan.
+
+**Promote-when:** A second pre-dispatch recon catches a similarly hidden
+type-shape mismatch (any plan, any type). At 2 datapoints, promote to
+CLAUDE.md's "Before dispatching the first subagent of an implementation
+plan, scout every type whose accessors the plan asserts on" rule.
+
+**Status:** validated — single datapoint, drift caught + fixed in the same
+turn before any subagent dispatch. Awaiting promotion criterion.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
