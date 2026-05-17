@@ -22,7 +22,7 @@ cause hypothesis, fix pointer (issue # in audit, plan task, or new spec).
 
 **Status:** VERIFIED FIXED 2026-05-17.
 - **Structural fix** in commit `c968391a` (T-3): `gather_goal_children` + structural detection in `refresh.rs::call` + 6 tests.
-- **Empirical verification** after MCP reload: `context.deterministic_child_statuses` populates with 3 entries (C-1 active, C-2 done, C-3 in-progress, all `basis: deterministic`). `hints: ["3 items gathered from deterministic_child_statuses"]`. See W-5 in i1-session-friction.md.
+- **Empirical verification** after MCP reload: `context.deterministic_child_statuses` populates with 3 entries (C-1 active, C-2 done, C-3 in-progress, all `basis: deterministic`). `hints: ["3 items gathered from deterministic_child_statuses"]`. See W-5 in archive/i1-session-friction.md.
 
 **Related friction surfaced during verification:** F-9 (existing trackers retain stale prompts after `archetype_goal()` edits without explicit re-augmentation). The L1 still serves pre-T-4 prompt; pipeline still injects new context key. Workaround: re-augment L1 manually post-Phase-1.
 

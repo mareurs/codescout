@@ -2,7 +2,7 @@
 
 **Status:** Scoping — two concrete instances on file, conventions
 shipped, structural fix deferred  
-**Origin:** `docs/trackers/i1-session-friction.md` F-13 (mitigated
+**Origin:** `docs/trackers/archive/i1-session-friction.md` F-13 (mitigated
 2026-05-17 first session) + F-14 (mitigated 2026-05-17 second session)  
 **Pattern:** shared resource accessed by ≥2 concurrent agents with no
 transaction between observation and action.  

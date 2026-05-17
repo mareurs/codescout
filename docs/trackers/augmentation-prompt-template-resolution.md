@@ -1,7 +1,7 @@
 # Augmentation Prompt Template Resolution
 
 **Status:** Scoping — three options on the table, no decision  
-**Origin:** `docs/trackers/i1-session-friction.md` F-9 (closed `mitigated`
+**Origin:** `docs/trackers/archive/i1-session-friction.md` F-9 (closed `mitigated`
 2026-05-17 second session — Option 1 workaround shipped for L1)  
 **Decision-by:** next `archetype_goal()` prompt iteration that touches
 more than one active tracker.
