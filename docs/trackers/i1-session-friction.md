@@ -65,6 +65,7 @@ say what to change.
 | F-13 | 2026-05-17 | high | multi-agent  | mitigated | `git reset --soft HEAD~1` on stale HEAD during concurrent work blew away parallel agent's T-13 commit; recovered via reflog SHA |
 | F-14 | 2026-05-17 | med  | multi-agent  | open      | F-N namespace shared across concurrent sessions — parallel session's W-6 references "F-11" but their friction was renumbered to F-12 after mine landed first |
 | F-15 | 2026-05-17 | high | codescout-tool | mitigated | `artifact_augment` schema description says `params` is "gather config"; actually it's the data params — calling `merge=false, params={}` wiped live tracker state (acceptance_signals, children, criterion, progress_log) |
+| F-16 | 2026-05-17 | med  | codescout-tool | open      | `artifact_augment(merge=false)` also overwrites `render_template` / `params_schema` / `append_mode` / `history_cap` with `excluded.*` in `augmentation::upsert`'s `ON CONFLICT DO UPDATE` — schema description (post-F-15) still doesn't warn callers; passing them as None silently wipes them |
 
 
 ## Wins Index
@@ -80,6 +81,7 @@ say what to change.
 | W-7 | 2026-05-17 | high   | Reflog scouted via `git reflog -10` after destructive op; T-13 commit blown away by stale `HEAD~1` reset was recovered by quoting the SHA directly, not relative ref |
 | W-8 | 2026-05-17 | high   | Single `artifact_refresh(action="gather")` call simultaneously verified T-3 (deterministic_child_statuses populated) + T-9 (refresh_meta with real delta `C-3 in-progress→done`) + DF-1 fix (context no longer `{}`) — multi-feature smoke test in one probe |
 | W-9 | 2026-05-17 | high   | T-12 gate_check note event payload matched amendment D11 spec byte-for-byte at first live observation — `tag/gate_passed/text/evidence/refresh_at` all present and shaped correctly without iteration |
+| W-10 | 2026-05-17 | high | F-15 muscle-memory drove scouting `augmentation::upsert` SQL before re-augmenting L1 with new prompt — surfaced both the surgical part (`created_at` / `last_refreshed_at` / `refresh_count` preserved by `ON CONFLICT DO UPDATE`) and the destructive part (`render_template` / `params_schema` / `append_mode` / `history_cap` overwritten, logged as F-16) |
 
 ## W-1 — F-8 caught before subagent dispatch via mandatory "log the friction first" discipline
 
@@ -375,41 +377,42 @@ cleanly.
 
 **Promote-when:** Reused for `external_signal` events or future audit-issues auto-promotion events. Then graduate "event payload defined in spec, validated in live probe" to a CONTRIBUTING.md addendum.
 
-## F-1 — `read_file(@buf_id, json_path="$.symbols[0].body")` returns 0 lines
+## W-10 — F-15 muscle-memory drove scouting `augmentation::upsert` before re-augmenting L1 with new prompt
 
-**Observed:** 2026-05-17, T-1 prep. Tried to extract the `archetype_goal`
-function body via the symbols-tool's suggested follow-up call.
+**When:** H-8 close. After editing `archetype_goal().prompt_template` in source, the existing L1 dogfood goal `d2cd00fc837e53f2` carried the OLD frozen prompt in its augmentation row. Closing H-8 fully required a `merge=false` re-augment of L1 — the exact tool call F-15 had previously weaponized to wipe live data.
 
-**Steps:**
+**Pattern:** Before issuing the merge=false call, read `augmentation::upsert` directly (`symbols(name="upsert", include_body=true)` on `src/librarian/catalog/augmentation.rs`). The body revealed two coexisting truths in the same SQL statement:
+
+```sql
+INSERT INTO artifact_augmentation (artifact_id, prompt, params, last_refreshed_at, refresh_count,
+  created_at, updated_at, render_template, params_schema, append_mode, history_cap)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+ON CONFLICT(artifact_id) DO UPDATE SET
+  prompt = excluded.prompt,
+  params = excluded.params,
+  render_template = excluded.render_template,
+  params_schema = excluded.params_schema,
+  append_mode = excluded.append_mode,
+  history_cap = excluded.history_cap,
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 ```
-symbols(path="src/librarian/tools/tracker_design.rs", symbol="archetype_goal", include_body=true)
-→ summary says "76-line body — use json_path=\"$.symbols[0].body\" to extract"
-→ output_id: @tool_34c4435e
-read_file(path="@tool_34c4435e", json_path="$.symbols[0].body")
-→ "0 lines\n"
-```
 
-**Expected:** 76-line body returned per the summary hint.
+**Surgical (good):** `created_at`, `last_refreshed_at`, `refresh_count` are NOT in the UPDATE list — ON CONFLICT preserves them. So a re-augment is safe for refresh history.
 
-**Got:** Empty (`0 lines`).
+**Destructive (caught):** `render_template`, `params_schema`, `append_mode`, `history_cap` ARE in the UPDATE list and use `excluded.*` — they get overwritten by whatever the caller sends, which is None/false if absent. This is F-15's shape extending past the `params` field.
 
-**Workaround used:** Re-ran `symbols(..., detail_level="full", include_body=true)`.
-That one returned the body inline in the summary up to ~line 34, but
-tail still inaccessible (see F-2). Final workaround: read the raw source
-file with `read_file(path=..., force=true, start_line, end_line)`.
+For L1 specifically those four fields were already null/false, so the call was safe. But the discovery itself is the win: scout caught a future F-15 footprint that the post-F-15 schema description doesn't surface.
 
-**Root cause hypothesis:** The summary's hint references a json_path
-shape that the buffer encoder doesn't actually populate, or it does
-populate but `$.symbols[0].body` isn't the right JSONPath. The hint is
-generated from the symbols-tool side; the buffer query goes through
-read_file's JSON dispatch which may use a different reader.
+**Counterfactual:** Without scouting the upsert, I'd have either (a) skipped re-augmenting L1 entirely ("closing H-8 for new instances is enough") — leaving the dogfood goal carrying the broken old prompt and H-8 still effectively unresolved for the instance the audit had named, or (b) blind-fired the merge=false call and gambled. Path (a) accepts partial close; path (b) is F-15 redux on a goal with refresh_count > 0.
 
-**Fix pointer:** Promote to `docs/issues/2026-05-17-symbols-body-json_path-empty.md` when ready to investigate. For now: don't trust the json_path hint; use `force=true` + line range.
+**Confirming data points:**
+1. The upsert SQL was readable in one `symbols(...)` call and explained the semantic in 30 lines — the same body the `upsert_preserves_refresh_count_on_update` test pins.
+2. F-16 came from the same scout pass — one read produced both a win and a finding.
+3. Verification after the call: `artifact(get, id=d2cd00fc837e53f2, full=true)` showed the new prompt landed AND all 4 acceptance_signals + 3 children + 2 progress_log entries intact.
 
-**Status:** promoted-to-bug-tracker 2026-05-17 — see `docs/issues/bug-tracker.md` #2.
+**Impact:** high — if H-8's close had skipped L1 re-augment, the dogfood would have invisibly continued producing the broken behavior the audit had logged, and the "fixed" status on H-8 would have been a lie for the instance that mattered.
 
----
-
+**Promote-when:** never a single rule — the lesson is meta: **`merge=false` augment is partly surgical, partly destructive; read the upsert before each new call shape, not just the schema doc.** Belongs in the same future doc that captures F-15's lesson about reading the schema before calling.
 ## F-2 — `read_file(@buf_id, start_line=N, end_line=M)` empty when N is past midpoint
 
 **Observed:** 2026-05-17, T-1 prep. After hitting F-1, fell back to
@@ -954,24 +957,20 @@ Recovered by `git reset --soft d8b38f26` — quoting the explicit SHA, not a rel
 
 **Cross-reference:** Same family as F-13 — destructive op on shared mutable state, no scout step, no confirmation. The reconnaissance discipline this session loaded would have caught this if applied to the tool itself (read `ArtifactAugment::call` before invoking with `params={}`).
 
-## Template for new entries
+## F-16 — `artifact_augment(merge=false)` also wipes `render_template` / `params_schema` / `append_mode` / `history_cap`
 
-```markdown
-## F-N — <one-line title>
+**When:** H-8 close. Re-augmenting L1 dogfood `d2cd00fc837e53f2` with a new prompt. Post-F-15 the schema description warns that `params` is data and full-replaces on merge=false; it doesn't warn that the sibling fields (`render_template`, `params_schema`, `append_mode`, `history_cap`) ALSO get clobbered.
 
-**Observed:** YYYY-MM-DD, <during what task>.
+**Expected:** After F-15's schema description fix landed (commit `2005d9fa`), `merge=false` would only put `params` at risk; sibling fields would be preserved across re-augments.
 
-**Steps / Symptom:** <verbatim, no paraphrasing>
+**Got:** `augmentation::upsert`'s `ON CONFLICT DO UPDATE` clause lists six fields with `= excluded.<field>`: `prompt`, `params`, `render_template`, `params_schema`, `append_mode`, `history_cap`. All six come from the caller's `Args` payload — if absent in the call, they default to None/false and overwrite whatever the existing row had. So a naive "just update the prompt" merge=false call wipes any non-default render_template, schema, append_mode, or history_cap silently.
 
-**Expected:** <what should have happened>
+**Probable cause:** F-15 fix narrowed to the `params` field's description because that was the field weaponized in the original incident. The same destructive semantic on the four sibling fields wasn't surfaced because the original failure mode didn't touch them. Single-instance bug-fix didn't generalize to the broader class.
 
-**Got:** <what happened, in code fence if it's output>
+**Workaround for this session:** L1 has all four fields at their default values (None / false), so my merge=false call had no destructive footprint. Confirmed by reading the upsert SQL before issuing the call (see W-10) and verifying L1's augmentation row after.
 
-**Workaround used:** <if any>
+**Workaround in general:** Before any `merge=false` re-augment, read `augmentation::upsert` directly OR query the existing row and pass every non-default sibling field back in the call. Schema description still doesn't tell callers this — a future fix should either (a) widen the description to cover all six replaced fields, or (b) restructure the upsert to only overwrite fields the caller explicitly named.
 
-**Root cause hypothesis:** <mechanism, not symptom>
+**Severity:** med — silent state loss for any tracker with a non-default render_template, schema, append_mode, or history_cap. Doesn't fire on the common case (most trackers don't set them), but a re-augment on the wrong tracker shape is hard to detect after the fact.
 
-**Fix pointer:** <plan task / future bug file / "needs investigation">
-
-**Status:** open | mitigated | fixed | wontfix
-```
+**Status:** open — description-only fix is straightforward but I'm not stacking it on this commit; H-8's close is the focused work. F-16 is the next-session candidate alongside H-9 / H-10 / S-4 follow-ups.

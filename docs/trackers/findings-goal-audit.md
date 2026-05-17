@@ -41,13 +41,6 @@ for audit trail.
 
 ### Open findings (need code/spec/style work)
 
-- **#1 — H-8** *(open, med, partial-mitigation)*: `evidence_commits`
-  since-last-refresh anchoring partially landed. T9 added
-  `refresh_meta.last_refresh_at` + `refresh_meta.commit_count_since_last`
-  (live-verified — see W-8). The mechanism exists; the prompt still lacks
-  an explicit "fill `evidence_commits` with commits touching goal paths
-  since `refresh_meta.last_refresh_at`" instruction. Follow-up: prompt edit.
-
 - **#2 — H-9** *(open, med)*: `date: today` has no resolution mechanism.
   Prompt mentions `today` but no placeholder syntax; model guesses.
   Fix candidate: surface today's date as a templated gather param.
@@ -94,6 +87,7 @@ for audit trail.
 
 ### Closed by amendment + plan
 
+- **#1 — H-8** *(fixed)*: `evidence_commits` since-last-refresh anchoring fully landed. T9 (commit `20b5ba1a`) added `refresh_meta.last_refresh_at` + `refresh_meta.commit_count_since_last` to the deterministic gather context; this session (commit `44632d3e`) updated rule 3 of the goal-tracker `prompt_template` to explicitly instruct the LLM to select `evidence_commits` from `context.git_log` restricted by `refresh_meta.last_refresh_at`, and `evidence_artifacts` from `refresh_meta.children_status_delta`. Regression test `goal_prompt_rule_3_anchors_evidence_fields_to_gather_context` asserts all three required anchors. L1 dogfood `d2cd00fc837e53f2` re-augmented with the new prompt.
 - **#12 — H-1** *(fixed)*: `deployment_state` missing from prompt rule 1 → resolved by **D3** + plan **T1** (constants) + **T2** (predicate).
 - **#13 — H-2** *(fixed)*: "Re-evaluate" verb contradicts "do not recompute" framing → resolved by **T4** prompt edit.
 - **#14 — H-3** *(fixed)*: Children-free goal gate-locked forever → resolved by **D9** (`len(children) >= 2`) + **T4** prompt edit.
@@ -131,6 +125,23 @@ All 38 findings logged. 27 closed by amendment doc (D1–D11) + plan doc
 follow-ups; 4 low (H-10, S-3, W-2, A-4, A-5) are cosmetic / can wait;
 3 high (C-4 eval gate, A-2 contract test, Q4 Stop-hook-as-CLI) are
 separate efforts tracked outside this audit.
+
+### 2026-05-17 — H-8 closed via goal-tracker prompt edit
+
+H-8 (`evidence_commits` anchoring undefined) flipped from
+*(open, med, partial-mitigation)* to *(fixed)*. Rule 3 of the
+goal-tracker `prompt_template` now explicitly tells the LLM to populate
+the four progress_log fields from the Rust-supplied gather context:
+`date` (today UTC), `note` (one-line summary), `evidence_commits`
+(filtered subset of `context.git_log` after `refresh_meta.last_refresh_at`),
+and `evidence_artifacts` (looked up via `refresh_meta.children_status_delta`).
+New test `goal_prompt_rule_3_anchors_evidence_fields_to_gather_context`
+carves out rule 3 and asserts the three required anchors plus a
+regression guard against the old "note is the only LLM-owned field"
+claim. L1 dogfood `d2cd00fc837e53f2` re-augmented with the new prompt;
+the `ON CONFLICT DO UPDATE` clause in `augmentation::upsert` preserved
+`created_at` / `last_refreshed_at` / `refresh_count` automatically.
+Counts now: 28 fixed / 10 open.
 
 ### 2026-05-17 — First fix shipped
 
