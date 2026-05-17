@@ -3,11 +3,11 @@
 
 [[anchors]]
 path = "src/server.rs"
-hash = "65f7410ca589b2fbfb063e8aa12355cc1fb3f9ce318868283c8bb72776397c4a"
+hash = "d6a350c3c9e864962235073e3513a8bea20e9bccb159d7eb7d5decdf13d60c47"
 
 [[anchors]]
 path = "src/tools/mod.rs"
-hash = "c2cc571f5922441fe1c1e9fbcbc0926e219e9debd2cbed5ed00c034f316300ab"
+hash = "c41a6ee6009e7d73cc5efa07ff8ed23d938f7f4fce8f92adcef44a94cabe96ca"
 
 [[anchors]]
 path = "src/tools/output.rs"
@@ -15,11 +15,11 @@ hash = "3780a914063ee4973c233c17fd9299424725ea08cd775e0e4d2415e4d414a88a"
 
 [[anchors]]
 path = "src/lsp/ops.rs"
-hash = "1a89cfda5c177d26f0b354dff3d56896cc12948686acdaa790575b8891d7922f"
+hash = "4c12308497e11e1057d1e9ae97503ac5fda307026f29134155a802f73c3503e6"
 
 [[anchors]]
 path = "docs/TODO-tool-misbehaviors.md"
-hash = "4798ebcad8b70c01e642f9f787917ffd91bdd16efc31b4199c0f283d6685f34d"
+hash = "3a41895e1ab773118574f471504be884faaba340e1c243f0ae274f2ac2c53a73"
 
 [[anchors]]
 path = "docs/PROGRESSIVE_DISCOVERABILITY.md"
@@ -27,15 +27,15 @@ hash = "dd5fd6f8fdbb6662d9eb0f6510e4b3e706df309723350e93abad061a2d6b54d6"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "e6c22cf1254f9eeab6edac384dc89985cfd2f46b20a134ea5e7d54d52b229277"
+hash = "f209d8c70447190d6c5f6ca34e35bb979ba5461c9ecf6f04bef80d8e52a857be"
 
 [[anchors]]
 path = "src/lib.rs"
-hash = "d7fabcbfe4c95b8c9d583f5c8a3c35d3fad097eb6a7e9290a0a768c4093fc883"
+hash = "ad0e85f7250eb474a849509291466e669f26eef3656e4b76f918d9ca449c763a"
 
 [[anchors]]
 path = "src/agent/mod.rs"
-hash = "0a19395ac0cd2716fcddb7df617d95a3845cdf6406eb1ebb07b1f8019a06d59b"
+hash = "65ebfa32e43d282086416a906474fb28d3a1612607556dff60e3b808d8f01540"
 
 [[anchors]]
 path = "src/tools/output_buffer.rs"
@@ -43,4 +43,4 @@ hash = "521194730f585c90fc9c36c96504ac3f5ee6195a3538d9d7f393dec9d4080236"
 
 [[anchors]]
 path = "src/util/path_security.rs"
-hash = "c247fda737bccbba63429454cbb14168a0c37fe1516c0175462c54305a00aebb"
+hash = "666d63d6e5896856d6a37cdfc6ca95a73b0c4fd55414ae3604a9a5bce9242bb4"

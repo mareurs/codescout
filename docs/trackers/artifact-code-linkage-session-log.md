@@ -20,9 +20,10 @@
 | F-3 | 2026-05-17 | med | architectural | open | 0 of 4 augmented artifacts use the `gather_from` channel in production |
 | F-4 | 2026-05-17 | low | cross-repo | open | Stored SHAs (`evidence_commits`, task notes) carry no repo-scoping field |
 | F-5 | 2026-05-17 | med | codescout-tool | open | `state_at(commit=...)` channel broken — `commits` table empty, backfill silently fails |
-| F-6 | 2026-05-17 | high | codescout-tool | open | `librarian(reindex)` has two stacked failures — UNIQUE constraint (default) + embedding dimension mismatch (force) |
+| F-6 | 2026-05-17 | high | codescout-tool | promoted-to-bug-tracker | `librarian(reindex)` has two stacked failures — UNIQUE constraint (default) + embedding dimension mismatch (force) — `docs/issues/bug-tracker.md` #5 + #6 |
 | F-7 | 2026-05-17 | low | architectural | open | `last_changed` is single-purpose (gather_config_value only) and per-line, not per-symbol |
 | F-8 | 2026-05-17 | med | architectural | open | 6 of 8 codescout memories anchor to deleted/moved files post-dissolve refactor |
+| F-9 | 2026-05-17 | high | codescout-tool | open | `librarian(reindex, force=true)` cascade-deletes all augmentations — DATA LOSS (promoted to bug-tracker #7) |
 
 ## Wins Index
 
@@ -273,7 +274,7 @@ Meanwhile the codebase ships full gather machinery: `gather_all`, `gather_git_lo
 
 **Severity:** high — reindex is a foundational operation. With it broken, the `commits` table cannot be backfilled (F-5), libraries cannot be indexed (0/62 per `workspace(status)`), and any artifact whose canonical row drifted from the filesystem cannot be reconciled.
 
-**Status:** open
+**Status:** promoted-to-bug-tracker (#5 + #6 in `docs/issues/bug-tracker.md` 2026-05-17)
 
 **Fix idea / Pointer:** Separate bug-tracker entries warranted. Promote to `docs/issues/bug-tracker.md` as #5 (reindex UNIQUE) and #6 (embedding dimension validation).
 
@@ -360,6 +361,36 @@ Each of these is a category of bug that an unprincipled merger would ship. The c
 **Promote-when:** Already shipped + tested. Worth surfacing in `docs/ARCHITECTURE.md` as an example of "stable primary key from content, not from row order" for re-mergeable trackers — the pattern applies beyond audit_doc_refs.
 
 **Status:** validated
+
+---
+## F-9 — `librarian(reindex, force=true)` cascade-deletes all augmentations (DATA LOSS)
+
+**Observed:** 2026-05-17, during the artifact-code linkage deep dive, when trying to re-augment the goal-tracker per F-1 workaround.
+
+**When:** After running `librarian(action=reindex, scope=project, force=true)` earlier in the session (which failed with the F-6b dimension mismatch error), attempted `artifact_augment(merge=true, id=d2cd00fc837e53f2, params={gather_from: [...]})`.
+
+**Expected:** The merge=true call patches `gather_from` into the existing augmentation row, preserving the prompt + other params per F-15/F-16 semantics.
+
+**Got:** *"no augmentation for artifact 'd2cd00fc837e53f2' — call artifact_augment first"*. Subsequent `artifact(find, augmented=true)` returns **count: 0**. All 4 augmented artifacts in the project (`d2cd00fc837e53f2`, `0df5ebc95d284b8e`, `4b6294bf495dbfb3`, `64f10cc45d802a11`) have `augmentation: null` and `created_at` timestamps from after the failed reindex — i.e. they were re-inserted by the post-delete re-walk, without their augmentation data.
+
+**Probable cause:** Tracing the chain:
+1. `reindex.rs::call` with `force=true` runs `DELETE FROM artifact WHERE abs_path LIKE ?1` per target.
+2. `artifact_augmentation` schema (`src/librarian/catalog/schema.sql:116`) declares `artifact_id TEXT NOT NULL REFERENCES artifact(id) ON DELETE CASCADE` — so the DELETE cascade-removes all matching augmentation rows.
+3. The subsequent re-walk + embedding INSERT runs as separate statements; when the embedding INSERT fails (F-6b dimension mismatch), the prior DELETE has already auto-committed.
+4. The artifact rows are re-inserted from filesystem on next walk, but **augmentation data is permanently gone** — no transactional boundary wrapped DELETE+rebuild.
+
+**Workaround:** Reconstruct augmentations from this session's transcript (which contains the full prompt + params from earlier `artifact_get` calls). Re-call `artifact_augment(merge=false, ...)` with the reconstructed data per artifact. Data not captured in the transcript is **lost** (e.g. any `progress_log` entries written after my last read).
+
+**Severity:** **high** — silent data loss on a foundational operation. The `force=true` flag is documented as "force full reindex, ignoring cached file hashes" — nothing warns that augmentation rows will be destroyed.
+
+**Status:** open
+
+**Fix idea / Pointer:** Promoted to `docs/issues/bug-tracker.md` #7. Three-part fix:
+1. Wrap force-reindex's DELETE + re-walk in a single SQLite transaction so failures roll back.
+2. Document the data-loss risk in the reindex tool description (until #1 ships).
+3. Consider whether the cascade-delete is correct — maybe augmentations should survive a re-index by being preserved across artifact-row recreation (key on `abs_path` or content-hash rather than synthetic `id`).
+
+Backs F-6b (dimension mismatch) into a higher-severity bug than originally filed — the symptom is noisy, but the side-effect is destructive.
 
 ---
 ## Template for new entries

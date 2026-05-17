@@ -136,3 +136,20 @@ This tracker becomes wrong when **any** of:
 
 Scoping — Option 1 shipped as workaround; Options 2/3 deferred pending
 the Promote-when criteria.
+
+**Concretes log:**
+- **C-1 (2026-05-17, first session):** F-9 in archived `i1-session-friction.md` — `archetype_goal()` prompt edits don't propagate to existing goal-trackers (the original observation that spawned this tracker).
+- **C-2 (2026-05-17, third session):** F-1 in `artifact-code-linkage-session-log.md` — dogfood goal-tracker `d2cd00fc837e53f2` has prompt referencing `context.git_log` but augmentation row has no matching `gather_from: git_log` source. Symmetric drift on a different field (gather config, not prompt template).
+- **C-3 (2026-05-17, third session):** F-2 in same log — zero archetypes in `tracker_design.rs` seed `gather_from` defaults (grep `"gather_from"` returns 0 matches). Structural confirmation that creator must hand-compose; archetype only prescribes shape.
+- **C-4 (2026-05-17, third session):** F-3 in same log — 0 of 4 augmented artifacts in the project actually configure `gather_from`. Empirical extent of C-3.
+
+**Proximity to Promote-when:**
+
+| Criterion | State |
+|---|---|
+| Second archetype exhibits same drift | **fires** — C-3 shows it's universal across archetypes |
+| Active goal-trackers > 5 | not fired (4 augmented artifacts, 1 of them goal) |
+| External-facing audit depends on "on latest prompt" | not fired |
+| Prompt edit must reach every tracker same-session | not fired |
+
+**One Promote-when criterion has now fired (the first one, via C-3).** Per the tracker's own rule ("any" — disjunction), this is now eligible to graduate from scoping. **Recommend escalation to an ADR + plan in a follow-up session** rather than absorbing the work mid-reconnaissance. The escalation cost is non-trivial (Option 2's column add + dispatch refactor; Option 3's version-tracking and warning surface).

@@ -208,6 +208,30 @@ When working on a shared branch alongside another active agent or session:
 - **Before any `git rebase`, `git reset`, `git push --force`, or `git commit --amend`** during concurrent work: scout `git reflog -10` first. If unexpected entries appear (commits you didn't author at the tip), pause and reconcile *before* the destructive op.
 
 This rule comes from F-13: `git reset --soft HEAD~1` erased another session's T-13 commit because HEAD had moved between observation and action. Recovered via reflog-quoted SHA (W-7).
+
+### Cross-Repo Commit References (added 2026-05-17 after F-4 incident)
+
+When a tracker artifact stores commit SHAs as evidence (`evidence_commits`,
+task `notes`, `anchor_commit`, etc.), default reading assumes the SHA
+belongs to the **same repo the tracker lives in**. For cross-repo
+references — common in this workspace, where work spans codescout,
+codescout-companion, buddy, and claude-plugins — prefix the SHA with the
+repo name:
+
+```text
+<repo>:<sha>
+```
+
+Example: `codescout-companion:0b75991`, `buddy:abc1234`. A bare SHA
+implies the current repo. The convention is unenforced; readers
+following citations must notice the prefix. Schema-level enforcement
+(adding a `repo` field to `evidence_commits`) is deferred until a
+third cross-repo confusion lands (currently 1 concrete: F-4 in
+`docs/trackers/artifact-code-linkage-session-log.md`).
+
+When citing a cross-repo SHA in a goal-tracker's progress_log, also
+include the repo name in the `note` body so readers don't have to
+parse the SHA prefix to know which `git log` to consult.
 ## Design Principles
 
 **Progressive Disclosure & Discoverability** — Every tool defaults to the most

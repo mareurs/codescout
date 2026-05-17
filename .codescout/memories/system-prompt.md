@@ -7,6 +7,7 @@
 - `src/agent.rs::Agent::new` — project activation and state wiring
 - `crates/codescout-embed/src/lib.rs` — embedding factory + chunk size formula
 - `crates/librarian-mcp/src/tools/mod.rs` — librarian ToolContext + all librarian tools
+
 ## Key Abstractions
 
 - `Tool` trait (`src/tools/mod.rs`) — name/description/schema/call/call_content/format_compact
@@ -14,7 +15,9 @@
 - `RecoverableError` (`src/tools/mod.rs`) — recoverable vs fatal error routing
 - `LspProvider` / `LspClientOps` (`src/lsp/ops.rs`) — LSP abstraction; `MockLspClient` for tests
 - `Agent` / `ActiveProject` (`src/agent.rs`) — project state; all tools access via `ctx.agent.with_project()`
+
 ## Search Tips
+
 - Good queries: "OutputGuard cap_items", "route_tool_error", "RecoverableError", "strip_project_root"
 - codescout-embed: "Embedder trait backend", "chunk_size_for_model", "RemoteEmbedder batching"
 - librarian-mcp: "FilterNode compile SQL", "TimeMachine state_at", "index_repo_sync pipeline"
@@ -32,6 +35,7 @@
 6. Embedding question → `symbols("crates/codescout-embed/src/")` first
 7. Librarian question → `symbols("crates/librarian-mcp/src/")` first
 8. Fixture inspection → `symbols("tests/fixtures/<lang>-library/src/")` — read-only targets
+
 ## Project Rules
 
 - `cargo fmt && cargo clippy -- -D warnings && cargo test` before every completion
@@ -40,19 +44,4 @@
 - Use `edit_code` for all structural code edits (replaces old `replace_symbol`, `insert_code`, `remove_symbol`, `rename_symbol`)
 - Read `docs/PROGRESSIVE_DISCOVERABILITY.md` before adding any tool with variable-length output
 - When renaming tools: update all 3 prompt surfaces (see `CLAUDE.md § Prompt Surface Consistency`)
-- GitHub tools shell to `gh` CLI — not HTTP; `sqlite-vec` is fully active (vec0 virtual tables with KNN search)
 - Subagents MUST restore home project after activating a different workspace project
-## Workspace Projects
-| Project | Root | Languages | Role |
-|---------|------|-----------|------|
-| code-explorer | . | rust | Main MCP server |
-| codescout-embed | crates/codescout-embed | rust | Embedding library |
-| librarian-mcp | crates/librarian-mcp | rust | Markdown doc indexer |
-| java-library | tests/fixtures/java-library | kotlin, java | Test fixture |
-| kotlin-library | tests/fixtures/kotlin-library | kotlin, java | Test fixture |
-| python-library | tests/fixtures/python-library | python | Test fixture |
-| rust-library | tests/fixtures/rust-library | rust | Test fixture |
-| typescript-library | tests/fixtures/typescript-library | typescript, javascript | Test fixture |
-
-GitHub: @mareurs | repo: mareurs/codescout
-→ For issues/PRs/repo ops, use codescout github tools with owner="mareurs" repo="codescout".
