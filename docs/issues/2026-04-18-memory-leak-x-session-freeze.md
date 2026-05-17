@@ -1,3 +1,12 @@
+---
+status: investigating
+opened: 2026-04-18
+severity: critical
+owner: marius
+related: []
+tags: ["memory-leak", "oom", "embeddings", "ptmalloc2", "phase-2"]
+---
+
 # BUG: codescout memory leak → OOM → X session freeze
 
 **Severity:** Critical (causes full desktop freeze requiring reboot)
