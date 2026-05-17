@@ -13,26 +13,41 @@ use super::super::{parse_bool_param, RecoverableError, Tool, ToolContext};
 
 /// Pure string transformation: apply `action` to the section identified by `heading_query`.
 ///
+/// Test-only thin wrapper that delegates to `perform_section_edit_ext` with
+/// `at=None`, preserving the historical 4-arg signature for the test suite.
+/// Production code (`EditMarkdown::call`) calls `perform_section_edit_ext`
+/// directly so the `at` parameter threads through.
+///
 /// Returns the full modified file content (always ends with a single newline).
+#[cfg(test)]
 pub fn perform_section_edit(
     content: &str,
     heading_query: &str,
     action: &str,
     new_content: Option<&str>,
 ) -> Result<String> {
+    perform_section_edit_ext(content, heading_query, action, new_content, None)
+}
+
+/// Extended form: `at` controls where `insert_after` lands. Pass
+/// `Some("end-of-section")` (or `None`) for the historical behavior
+/// of inserting at the end of the heading's section, or
+/// `Some("after-heading-line")` to insert content immediately after
+/// the heading line itself. Ignored by other actions.
+pub fn perform_section_edit_ext(
+    content: &str,
+    heading_query: &str,
+    action: &str,
+    new_content: Option<&str>,
+    at: Option<&str>,
+) -> Result<String> {
     use crate::tools::file_summary::{heading_level, resolve_section_range};
 
     let range =
         resolve_section_range(content, heading_query).map_err(|e| anyhow::anyhow!("{}", e))?;
 
-    // Split into lines using split('\n') so the trailing newline is preserved as
-    // a final empty-string element: "a\nb\n".split('\n') == ["a", "b", ""].
     let lines: Vec<&str> = content.split('\n').collect();
-
-    // Convert 1-based line numbers from the range to 0-based indices into `lines`.
     let heading_idx = (range.heading_line - 1) as usize;
-
-    // Compute the exclusive-end index for the section.
     let end_idx = compute_section_end(&lines, heading_idx + 1, range.level);
 
     match action {
@@ -40,7 +55,6 @@ pub fn perform_section_edit(
             let new = new_content
                 .ok_or_else(|| anyhow::anyhow!("content is required for the replace action"))?;
 
-            // Smart detection: does the new content start with a Markdown heading?
             let replace_heading = new
                 .lines()
                 .next()
@@ -48,12 +62,10 @@ pub fn perform_section_edit(
                 .unwrap_or(false);
 
             let result = if replace_heading {
-                // Replace heading + body entirely.
                 let before = join_lines(&lines[..heading_idx]);
                 let after = join_lines_tail(&lines[end_idx..]);
                 format!("{}{}{}", before, ensure_trailing_newline(new), after)
             } else {
-                // Preserve the existing heading, replace body only.
                 let heading_line_str = lines[heading_idx];
                 let before = join_lines(&lines[..heading_idx]);
                 let after = join_lines_tail(&lines[end_idx..]);
@@ -84,8 +96,18 @@ pub fn perform_section_edit(
             let new = new_content.ok_or_else(|| {
                 anyhow::anyhow!("content is required for the insert_after action")
             })?;
-            let before = join_lines(&lines[..end_idx]);
-            let after = join_lines_tail(&lines[end_idx..]);
+            let insert_idx = match at.unwrap_or("end-of-section") {
+                "end-of-section" => end_idx,
+                "after-heading-line" => heading_idx + 1,
+                other => {
+                    return Err(anyhow::anyhow!(
+                        "invalid at={:?}; expected 'end-of-section' (default) or 'after-heading-line'",
+                        other
+                    ));
+                }
+            };
+            let before = join_lines(&lines[..insert_idx]);
+            let after = join_lines_tail(&lines[insert_idx..]);
             let result = format!("{}{}{}", before, new, after);
             Ok(normalize_trailing_newline(&result))
         }
@@ -316,6 +338,11 @@ impl Tool for EditMarkdown {
                     "description": "Operation to perform. Required unless using edits[] batch mode."
                 },
                 "content": { "type": "string", "description": "New content for replace/insert actions (body only — heading preserved on replace)" },
+                "at": {
+                    "type": "string",
+                    "enum": ["end-of-section", "after-heading-line"],
+                    "description": "For action='insert_after': where to insert. 'end-of-section' (default) places content at the end of the heading's section, after any nested sub-sections — useful for adding new H3/H4 to an existing section. 'after-heading-line' places content immediately after the heading line itself — useful when a top-level H1 wraps the whole doc and 'end-of-section' would mean EOF. Ignored by other actions."
+                },
                 "old_string": { "type": "string", "description": "For action='edit': exact text to find within section" },
                 "new_string": { "type": "string", "description": "For action='edit': replacement text" },
                 "replace_all": { "type": "boolean", "default": false, "description": "For action='edit': replace all occurrences" },
@@ -329,6 +356,7 @@ impl Tool for EditMarkdown {
                             "heading": { "type": "string" },
                             "action": { "type": "string", "enum": ["replace", "insert_before", "insert_after", "remove", "edit"] },
                             "content": { "type": "string" },
+                            "at": { "type": "string", "enum": ["end-of-section", "after-heading-line"] },
                             "old_string": { "type": "string" },
                             "new_string": { "type": "string" },
                             "replace_all": { "type": "boolean" },
@@ -421,7 +449,14 @@ impl Tool for EditMarkdown {
                             }
                         }
                     }
-                    perform_section_edit(&content, heading, action, edit_content).map_err(|e| {
+                    perform_section_edit_ext(
+                        &content,
+                        heading,
+                        action,
+                        edit_content,
+                        edit["at"].as_str(),
+                    )
+                    .map_err(|e| {
                         RecoverableError::with_hint(
                             format!("edits[{}]: {}", i, e),
                             "Check heading name and action.",
@@ -459,7 +494,14 @@ impl Tool for EditMarkdown {
                         }
                     }
                 }
-                perform_section_edit(&file_content, heading, action, content).map_err(|e| {
+                perform_section_edit_ext(
+                    &file_content,
+                    heading,
+                    action,
+                    content,
+                    input["at"].as_str(),
+                )
+                .map_err(|e| {
                     RecoverableError::with_hint(e.to_string(), "Check heading name and action.")
                 })?
             }

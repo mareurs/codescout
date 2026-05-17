@@ -70,7 +70,9 @@ async fn read_markdown_large_no_headings_hint_pivots_to_line_ranges() {
     );
 }
 
-use super::edit_markdown::{find_consumed_subsections, perform_scoped_edit, perform_section_edit};
+use super::edit_markdown::{
+    find_consumed_subsections, perform_scoped_edit, perform_section_edit, perform_section_edit_ext,
+};
 
 // ── perform_section_edit tests (moved from section_edit.rs) ──────────
 
@@ -903,6 +905,80 @@ fn insert_after_last_section() {
     .unwrap();
     assert!(result.contains("## Only\ncontent"));
     assert!(result.contains("## Appended\nnew stuff"));
+}
+
+#[test]
+fn insert_after_h1_default_appends_at_end_of_section() {
+    // Regression pin for 2026-05-09-edit-markdown-insert-after-h1.
+    // Default `at="end-of-section"` semantic: for a sole H1 wrapping the
+    // whole document, "section end" == EOF. Content lands at the bottom.
+    let content = "# Title\n\nintro paragraph\n\nmore body\n";
+    let result =
+        perform_section_edit(content, "# Title", "insert_after", Some("appended\n")).unwrap();
+    assert_eq!(
+        result, "# Title\n\nintro paragraph\n\nmore body\n\nappended\n",
+        "default insert_after on sole H1 should land at end-of-section (EOF here)"
+    );
+}
+
+#[test]
+fn insert_after_h1_with_at_after_heading_line_inserts_right_after_heading() {
+    // Fix for 2026-05-09-edit-markdown-insert-after-h1.
+    // Opt-in `at="after-heading-line"` puts content immediately after the
+    // heading line itself, which is the intuitive behavior for whole-doc-wrap H1.
+    let content = "# Title\n\nintro paragraph\n\nmore body\n";
+    let result = perform_section_edit_ext(
+        content,
+        "# Title",
+        "insert_after",
+        Some("inserted right after\n"),
+        Some("after-heading-line"),
+    )
+    .unwrap();
+    assert_eq!(
+        result, "# Title\ninserted right after\n\nintro paragraph\n\nmore body\n",
+        "at=after-heading-line should insert directly after the heading line"
+    );
+}
+
+#[test]
+fn insert_after_with_explicit_end_of_section_matches_default() {
+    // `at="end-of-section"` is the explicit form of the default.
+    let content = "# Title\n## Setup\ncontent\n## Usage\nuse it\n";
+    let default_result = perform_section_edit(
+        content,
+        "## Setup",
+        "insert_after",
+        Some("\n## Testing\ntest\n"),
+    )
+    .unwrap();
+    let explicit_result = perform_section_edit_ext(
+        content,
+        "## Setup",
+        "insert_after",
+        Some("\n## Testing\ntest\n"),
+        Some("end-of-section"),
+    )
+    .unwrap();
+    assert_eq!(default_result, explicit_result);
+}
+
+#[test]
+fn insert_after_invalid_at_value_errors() {
+    let content = "# Title\nbody\n";
+    let err = perform_section_edit_ext(
+        content,
+        "# Title",
+        "insert_after",
+        Some("x\n"),
+        Some("nonsense"),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("invalid at=") && msg.contains("nonsense"),
+        "error should name the invalid value, got: {msg}"
+    );
 }
 
 /// Deeply nested section (###) inside a ## section — replace ## consumes ### children.
