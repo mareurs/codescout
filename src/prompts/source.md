@@ -194,7 +194,7 @@ For shell scripts and hooks that need to read or mutate the catalog without spea
 
 ### Goal-trackers
 
-A **goal-tracker** is a tracker artifact (`kind=tracker`, `tags: ["goal"]`) that names a completion criterion and aggregates the state of typed child trackers. Each project should have at most one goal with `status=active` at a time.
+A **goal-tracker** is a tracker artifact (`kind=tracker`, `tags: ["goal"]`) that names a completion criterion and aggregates the state of typed child trackers. Each project should have at most one goal with `status=active` at a time — if multiple goals are simultaneously active, the Stop hook fails open (deferring) and the librarian context surfaces them in created_at order.
 
 **Find the active goal for the current project:**
 
@@ -209,7 +209,7 @@ artifact(action="find", kind="tracker",
 librarian(action="context")   # no anchor — auto-includes active goals
 ```
 
-When starting work toward a stated objective, create a goal-tracker via `librarian(action="tracker_design", intent="goal: ...")` then `artifact(action="create", kind="tracker", tags=["goal"], augment=...)`. Children are linked via `artifact(action="link", rel="child")` and use existing archetypes (failure_table, task_list, metric_baseline, audit_issues, reflective).
+When starting work toward a stated objective, create a goal-tracker via `librarian(action="tracker_design", intent="goal: ...")` then `artifact(action="create", kind="tracker", tags=["goal"], augment=...)`. Children are linked via `artifact(action="link", rel="child")` and use existing archetypes (failure_table, task_list, metric_baseline, audit_issues, reflective, deployment_state, or a nested goal for multi-level objectives). Not for open-ended research (use reflective), bare task lists, or anything without a definable 'done' line. The goal archetype requires 2+ child sub-trackers — for a single criterion checked directly, use the underlying archetype.
 
 ## Output System
 

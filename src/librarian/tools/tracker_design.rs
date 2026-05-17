@@ -269,45 +269,12 @@ fn archetype_reflective() -> Value {
 //
 // Edit here, NOT inline in `archetype_goal()`'s prompt JSON.
 
-pub(super) const RULE_1_FAILURE_TABLE: &str =
-    "   - failure_table child → \"done\" if all entries are status `pass` or `wontfix`; \"active\" if any are `fail` or `flaky`; \"pending\" if `failures` is empty";
-pub(super) const RULE_1_TASK_LIST: &str =
-    "   - task_list child → \"done\" if `tasks` is non-empty AND all `status == \"done\"`; \"pending\" if `tasks` is empty; \"in-progress\" otherwise";
-pub(super) const RULE_1_METRIC_BASELINE: &str =
-    "   - metric_baseline child → status derives from acceptance_signals[kind=metric_threshold] citing this child (see rule 2). Not archetype-local.";
-pub(super) const RULE_1_AUDIT_ISSUES: &str =
-    "   - audit_issues child → \"done\" if `issues` has zero entries with `status == \"open\"`; \"pending\" if `issues` is empty; \"active\" otherwise";
-pub(super) const RULE_1_REFLECTIVE: &str =
-    "   - reflective child → \"done\" if `status ∈ {\"decided\",\"archived\"}`; \"blocked\" if `\"deferred\"`; \"active\" otherwise";
-pub(super) const RULE_1_NESTED_GOAL: &str =
-    "   - nested goal child → \"done\" if `status == \"done\"`; \"blocked\" if ∈ {\"blocked\",\"abandoned\"}; \"pending\" if `\"scoping\"`; \"in-progress\" if `\"pending-confirmation\"`; \"active\" otherwise";
-pub(super) const RULE_1_DEPLOYMENT_STATE: &str =
-    "   - deployment_state child → \"done\" if all `envs[*].enabled == true`; \"pending\" if `envs` is empty; \"in-progress\" otherwise";
-pub(super) const RULE_1_UNREACHABLE: &str =
-    "   - Child artifact unreachable → set status: \"orphan\"; DO NOT delete the row";
-pub(super) const RULE_1_UNKNOWN_ARCHETYPE: &str =
-    "   - Child whose archetype is not in this list → set status: \"unknown\"; note in progress_log";
 
-fn rule_1_block() -> String {
-    [
-        RULE_1_FAILURE_TABLE,
-        RULE_1_TASK_LIST,
-        RULE_1_METRIC_BASELINE,
-        RULE_1_AUDIT_ISSUES,
-        RULE_1_REFLECTIVE,
-        RULE_1_NESTED_GOAL,
-        RULE_1_DEPLOYMENT_STATE,
-        RULE_1_UNREACHABLE,
-        RULE_1_UNKNOWN_ARCHETYPE,
-    ]
-    .join("\n")
-}
 
 fn archetype_goal() -> Value {
-    let rule_1_clauses = rule_1_block();
     json!({
         "name": "goal",
-        "when_to_use": "Tracking an outcome-stated objective whose completion depends on a named criterion and on aggregated state of sibling/child artifacts. Use when the work has a definable 'done' line, decomposes into typed sub-trackers (tests, tasks, metrics, audits), and survives across sessions. Examples: 'all flaky tests resolved + suite green for 3 runs', 'retrieval P@5 reaches 0.20 on benchmark X', 'plan-lifecycle subsystem ships behind feature flag'. Not for: open-ended research (use `reflective`), single-metric tracking (use `metric_baseline`), bare task lists with no completion semantics (use `task_list`).",
+        "when_to_use": "Tracking an outcome-stated objective whose completion depends on a named criterion and on aggregated state of sibling/child artifacts. Use when the work has a definable 'done' line, decomposes into typed sub-trackers (tests, tasks, metrics, audits), and survives across sessions. Examples: 'all flaky tests resolved + suite green for 3 runs', 'retrieval P@5 reaches 0.20 on benchmark X', 'plan-lifecycle subsystem ships behind feature flag'. Not for: open-ended research (use `reflective`), single-metric tracking (use `metric_baseline`), bare task lists with no completion semantics (use `task_list`), goals with fewer than 2 child sub-trackers (the container archetype's job is aggregation — without 2+ children to aggregate, use the underlying archetype directly).",
         "params_shape_example": {
             "criterion": "Retrieval pipeline P@5 ≥ 0.20 on benchmark-25tc, with no regression on R@5",
             "status": "active",
@@ -377,10 +344,7 @@ fn archetype_goal() -> Value {
         },
         "render_template_example": "**Goal:** {{ criterion }}\n**Status:** {{ status }}{% if blocked_reason %} — _blocked: {{ blocked_reason }}_{% endif %}\n\n{% if acceptance_signals %}**Acceptance signals** — {{ acceptance_signals|selectattr(\"met\")|list|length }}/{{ acceptance_signals|length }} met\n\n| signal | met | evidence |\n|--------|:---:|----------|\n{% for s in acceptance_signals %}| {{ s.description }} | {{ \"✅\" if s.met else \"❌\" }} | {{ s.evidence or \"—\" }} |\n{% endfor %}{% endif %}\n\n**Children** — {{ children|selectattr(\"status\",\"equalto\",\"done\")|list|length }}/{{ children|length }} done\n\n| id | title | archetype | status |\n|---:|-------|-----------|--------|\n{% for c in children %}| {{ c.id }} | {{ c.title }} | {{ c.archetype }} | {{ c.status }} |\n{% endfor %}\n\n{% if progress_log %}**Recent progress** _(last 3 of {{ progress_log|length }})_\n\n{% for p in progress_log|reverse|slice(3)|first %}- **{{ p.date }}**: {{ p.note }}\n{% endfor %}{% endif %}",
         "body_skeleton": "## Why this goal exists\n\n_Briefly: the business / engineering driver. Two to four sentences._\n\n## Acceptance criteria (prose)\n\n_Long-form acceptance criteria. Mirrors `acceptance_signals` in params but with rationale, counterexamples, and what's explicitly out of scope._\n\n## Decomposition rationale\n\n_Why these children, in this archetype mix. When new children are spawned mid-refresh, the synthesizer appends a one-paragraph rationale here citing the trigger._\n\n## History\n\n_### YYYY-MM-DD — <event>_\n",
-        "prompt_template": format!(
-            "Maintain a goal-tracker. Your job is **aggregation**, not evaluation: read children via artifact(action=\"get\") and reconcile their state into the goal's params. Do not recompute children's evidence — trust the child's own params.\n\nINPUTS (gather):\n- This goal's current params.\n- For each `children[].artifact_id`, the child's params via artifact(action=\"get\").\n- Optional: commit log scoped to paths the criterion names (gather_from: git_log).\n\nUPDATE RULES:\n\n1. Reconcile each `children[].status` from the child's actual status, normalizing into our enum (pending|active|in-progress|done|blocked|orphan|unknown):\n{}\n\n2. Re-evaluate each `acceptance_signals[].met` from the children's evidence. Update the `evidence` string to cite the child id and the specific datum.\n\n3. Append exactly one entry to `progress_log` for this refresh cycle: {{date: today, note: ≤200-char summary of what changed since previous log, evidence_commits: [commits added since last refresh that touched goal paths], evidence_artifacts: [child artifact_ids whose status changed]}}. If nothing changed, append a \"no change\" entry — never skip the log.\n\n4. AUTO-CLOSE GATE (ALL conditions required):\n   a. len(children) > 0\n   b. All `children[].status` == \"done\".\n   c. Every `acceptance_signals[].met` is true.\n   If all three: set status: \"done\", append a History entry to body summarizing the closing evidence. Otherwise: leave status unchanged.\n\n5. SCOPE GROWTH: if your aggregation surfaces a missing sub-objective, you MAY:\n   a. Call artifact(action=\"create\", kind=\"tracker\", augment={{}}) with the appropriate existing archetype (failure_table, task_list, metric_baseline, audit_issues, reflective, deployment_state, or nested goal).\n   b. Call artifact(action=\"link\", src_id=THIS_GOAL_ID, dst_id=NEW_CHILD_ID, rel=\"child\").\n   c. Add the new child to `children[]` with the next free C-N id.\n   d. Append one paragraph to body \"Decomposition rationale\" citing the trigger.\n\n6. NEVER:\n   - Delete a child row (use status=\"orphan\" if unreachable).\n   - Modify a child's params directly. The child has its own augmentation.\n   - Flip status to \"done\" without satisfying ALL gate conditions including 4a.\n   - Append more than one progress_log entry per refresh.\n\nSTOP CONDITION (you are done with this refresh when):\n- All children reconciled.\n- One progress_log entry appended.\n- Auto-close gate evaluated.\n- Output: the new params object. Body edits only for History append or Decomposition rationale append on scope growth.\n\nBody holds rationale and history; params hold mechanical state. Keep them separated.",
-            rule_1_clauses
-        )
+        "prompt_template": "Maintain a goal-tracker. Your job is **aggregation**, not evaluation: reconcile each child's state into the goal's params using ground truth supplied by the refresh pipeline. Do not recompute children's evidence — trust the child's own params.\n\nINPUTS (gather):\n- This goal's current params.\n- `context.deterministic_child_statuses` — an array, one entry per linked child, of `{child_id, artifact_id, archetype, status, basis}`. `basis` is `\"deterministic\"` for archetypes the Rust kernel resolved, `\"needs parent context\"` for `metric_baseline` (you evaluate it via rule 1b), `\"unknown archetype\"` for any archetype the kernel doesn't know, `\"no augmentation\"` if the child has no augmentation row, or `\"child unreachable\"` if the artifact_id has no row in the catalog.\n- Optional: commit log scoped to paths the criterion names (gather_from: git_log).\n\nUPDATE RULES:\n\n1. Reconcile each `children[].status` from the child's actual status:\n\n   a. **First, copy ground truth from `context.deterministic_child_statuses`.** For every entry whose `basis == \"deterministic\"`, copy its `status` into `children[id].status` verbatim. Do not reinterpret — these archetypes are handled by the Rust kernel and its verdict is authoritative.\n\n   b. **For entries whose `basis != \"deterministic\"`** (currently `metric_baseline` only, plus any future archetype not yet in the Rust kernel), evaluate manually:\n      - metric_baseline child → \"done\" if `current` meets the related acceptance_signal's threshold; \"in-progress\" otherwise. See rule 2 for the threshold cross-reference.\n\n   c. **For entries with `basis == \"child unreachable\"`** → set `children[id].status = \"orphan\"`. Do NOT delete the row.\n\n2. For each `acceptance_signals[i]`, set `.met` by looking up the cited child's params and copying the relevant value forward. Do not re-derive the underlying metric — read it from the child's params verbatim and compare against the signal's description. Update the `evidence` string to cite the child id and the specific datum.\n\n3. Append exactly one entry to `progress_log` for this refresh cycle: {date: today, note: ≤200-char summary of what changed since previous log, evidence_commits: [commits added since last refresh that touched goal paths], evidence_artifacts: [child artifact_ids whose status changed]}. If nothing changed, append a \"no change\" entry — never skip the log.\n\n4. AUTO-CLOSE GATE (ALL conditions required):\n   a. len(children) >= 2 (per amendment D9 — single-child or empty goals should use the underlying archetype directly)\n   b. All `children[].status` == \"done\".\n   c. Every `acceptance_signals[].met` is true.\n   If all three: set status: \"done\", append a History entry to body summarizing the closing evidence. Otherwise: leave status unchanged.\n\n5. SCOPE GROWTH: if your aggregation surfaces a missing sub-objective, you MAY:\n   a. Call artifact(action=\"create\", kind=\"tracker\", augment={}) with the appropriate existing archetype (failure_table, task_list, metric_baseline, audit_issues, reflective, deployment_state, or nested goal).\n   b. Call artifact(action=\"link\", src_id=THIS_GOAL_ID, dst_id=NEW_CHILD_ID, rel=\"child\").\n   c. Add the new child to `children[]` with the next free C-N id.\n   d. Append one paragraph to body \"Decomposition rationale\" citing the trigger.\n\n6. NEVER:\n   - Delete a child row (use status=\"orphan\" if unreachable).\n   - Modify a child's params directly. The child has its own augmentation.\n   - Flip status to \"done\" without satisfying ALL gate conditions including 4a.\n   - Append more than one progress_log entry per refresh.\n\nSTOP CONDITION (you are done with this refresh when):\n- All children reconciled.\n- One progress_log entry appended.\n- Auto-close gate evaluated.\n- Output: the new params object. Body edits only for History append or Decomposition rationale append on scope growth.\n\nBody holds rationale and history; params hold mechanical state. Keep them separated."
     })
 }
 
@@ -524,31 +488,6 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     Ok(response)
 }
 
-#[test]
-fn archetype_goal_prompt_contains_all_rule_1_constants() {
-    let v = archetype_goal();
-    let prompt = v
-        .get("prompt_template")
-        .and_then(|p: &serde_json::Value| p.as_str())
-        .unwrap();
-    for clause in [
-        RULE_1_FAILURE_TABLE,
-        RULE_1_TASK_LIST,
-        RULE_1_METRIC_BASELINE,
-        RULE_1_AUDIT_ISSUES,
-        RULE_1_REFLECTIVE,
-        RULE_1_NESTED_GOAL,
-        RULE_1_DEPLOYMENT_STATE,
-        RULE_1_UNREACHABLE,
-        RULE_1_UNKNOWN_ARCHETYPE,
-    ] {
-        assert!(
-            prompt.contains(clause),
-            "prompt missing clause: {}…",
-            &clause[..40.min(clause.len())]
-        );
-    }
-}
 
 #[cfg(test)]
 mod tests {
