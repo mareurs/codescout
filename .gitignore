@@ -32,6 +32,7 @@ tests/fixtures/*/.codescout/
 !/.buddy/memory/
 # Cross-process write lock file (per-project; recreated on activate)
 .codescout/write.lock
+/.codescout/call_edges.db
 # Runtime / session files
 .codescout/cc_session_id
 .codescout/tantivy/
