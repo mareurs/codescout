@@ -32,6 +32,10 @@ Status field semantics:
   fixed         — Root cause addressed, regression test added, verified.
   mitigated     — Workaround in place; root cause not addressed.
   wontfix       — Intentionally not fixing; justification in the file.
+  zombie        — No longer observed but root cause not confirmed; kept
+                  open in case it recurs. Pair with `last_observed:` in
+                  frontmatter and a "Status: zombie" section documenting
+                  the re-open trigger.
   `closed:` stays empty at creation — fill in YYYY-MM-DD only when
   status flips to fixed/mitigated/wontfix.
 
