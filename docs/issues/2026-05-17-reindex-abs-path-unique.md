@@ -41,7 +41,7 @@ Repro on a clean catalog: not yet established.
 
 ## Evidence
 
-- Reproduced live on this project's catalog (4 augmented artifacts, ~497 files) — see session log `docs/trackers/artifact-code-linkage-session-log.md` F-6.
+- Reproduced live on this project's catalog (4 augmented artifacts, ~497 files) — see session log `docs/trackers/archive/artifact-code-linkage-session-log.md` F-6.
 - Post-fix verification: `reindex(scope=project)` returns `unchanged: 493, backfill_error_count: 0`.
 
 ## Hypotheses tried
@@ -77,6 +77,6 @@ N/A — fixed. After commit lands on master, move this file to `docs/issues/arch
 ## References
 
 - Originally tracked as **#5** in `docs/issues/bug-tracker.md` (retired after migration to per-file system).
-- Session log: `docs/trackers/artifact-code-linkage-session-log.md` F-6.
+- Session log: `docs/trackers/archive/artifact-code-linkage-session-log.md` F-6.
 - Fix commit: `d482ca8a` on `experiments`.
 - Related: bug-tracker.md #6 (embedding dim mismatch), #7 (cascade-delete data loss) — same commit fixes all three reindex failure modes.

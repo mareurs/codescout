@@ -114,7 +114,7 @@ the per-bug file, not here.
 - **Symptom:** Calling `artifact(action="state_at", commit="d482ca8a")` (any short SHA) returns `commit d482ca8a not indexed; run librarian_reindex`. But the `commits` table IS populated (2931 rows; verified via `sqlite3 catalog.db "SELECT COUNT(*) FROM commits"`), and the full 40-char SHA works: `state_at(commit="d482ca8ac91241a7a96a487e46ca394095019912")` succeeds.
 - **Root cause:** `src/librarian/tools/state_at.rs::resolve_cutoff_ts:30` uses `SELECT authored_at FROM commits WHERE hash = ?1` — exact match. Stored hashes are full 40-char; callers (humans + LLMs) pass short SHAs. Match fails → misleading "not indexed" error. The error message implies the table is empty when really the lookup mode is wrong.
 - **Workaround:** Pass the full 40-char SHA, or use `timestamp=<unix-ms>` instead.
-- **Fix:** Open. Change `=` to `LIKE ?1 || '%'` (or `GLOB ?1 || '*'` for case-sensitive) in `resolve_cutoff_ts`. Add a test with both short and full SHA. Tracks as task #32 in the session log. Note: this was originally misdiagnosed as F-5 ("commits table empty") in `docs/trackers/artifact-code-linkage-session-log.md`; the correction landed post-rebuild verification 2026-05-17.
+- **Fix:** Open. Change `=` to `LIKE ?1 || '%'` (or `GLOB ?1 || '*'` for case-sensitive) in `resolve_cutoff_ts`. Add a test with both short and full SHA. Tracks as task #32 in the session log. Note: this was originally misdiagnosed as F-5 ("commits table empty") in `docs/trackers/archive/artifact-code-linkage-session-log.md`; the correction landed post-rebuild verification 2026-05-17.
 
 ## History
 
@@ -128,7 +128,7 @@ footgun observed during this very bootstrap session.
 
 ### 2026-05-17 — #5, #6 filed (reindex broken)
 
-Both `librarian(reindex)` paths fail on this project — default (#5: UNIQUE constraint) and force (#6: embedding dimension mismatch). Surfaced during artifact-code linkage reconnaissance (session log `docs/trackers/artifact-code-linkage-session-log.md`, F-6). High severity — blocks the `commits` table backfill (which in turn blocks `state_at(commit=...)` per F-5) and library indexing (0/62 indexed).
+Both `librarian(reindex)` paths fail on this project — default (#5: UNIQUE constraint) and force (#6: embedding dimension mismatch). Surfaced during artifact-code linkage reconnaissance (session log `docs/trackers/archive/artifact-code-linkage-session-log.md`, F-6). High severity — blocks the `commits` table backfill (which in turn blocks `state_at(commit=...)` per F-5) and library indexing (0/62 indexed).
 
 
 ### 2026-05-17 — #5, #6, #7 fixed (commit `d482ca8a`)

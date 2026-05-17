@@ -44,7 +44,7 @@ Two layers:
 
 ## Evidence
 
-- Reproduced live on this project's catalog — see session log `docs/trackers/artifact-code-linkage-session-log.md` F-6.
+- Reproduced live on this project's catalog — see session log `docs/trackers/archive/artifact-code-linkage-session-log.md` F-6.
 - Post-fix: validation path verified by the unit test suite (2329 passed). The original triggering condition was not reproduced live today, but the validation path now fires before any DELETE with a diagnostic naming likely causes.
 
 ## Hypotheses tried
@@ -78,7 +78,7 @@ Concrete next action: in `codescout-embed`, trace the `embed_batch` (or equivale
 ## References
 
 - Originally tracked as **#6** in `docs/issues/bug-tracker.md` (retired after migration to per-file system).
-- Session log: `docs/trackers/artifact-code-linkage-session-log.md` F-6.
+- Session log: `docs/trackers/archive/artifact-code-linkage-session-log.md` F-6.
 - Defensive fix commit: `d482ca8a` on `experiments`.
 - Related: bug-tracker.md #5 (UNIQUE constraint), #7 (cascade-delete data loss) — same commit fixes all three reindex failure modes.
 - Upstream investigation: open in `codescout-embed` crate.

@@ -141,7 +141,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // augmentations. When the subsequent embedding INSERT failed (e.g.
     // dim mismatch — bug-tracker #6), the DELETE was already committed.
     // Removed 2026-05-17 per bug-tracker #7 (F-9 in
-    // docs/trackers/artifact-code-linkage-session-log.md). `force=true`
+    // docs/trackers/archive/artifact-code-linkage-session-log.md). `force=true`
     // now means "ignore cached file hashes during the upsert walk"; the
     // walk's own deletion logic still removes rows for files no longer
     // on disk (the `removed` count in the response).

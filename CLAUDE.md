@@ -236,7 +236,7 @@ implies the current repo. The convention is unenforced; readers
 following citations must notice the prefix. Schema-level enforcement
 (adding a `repo` field to `evidence_commits`) is deferred until a
 third cross-repo confusion lands (currently 1 concrete: F-4 in
-`docs/trackers/artifact-code-linkage-session-log.md`).
+`docs/trackers/archive/artifact-code-linkage-session-log.md`).
 
 When citing a cross-repo SHA in a goal-tracker's progress_log, also
 include the repo name in the `note` body so readers don't have to

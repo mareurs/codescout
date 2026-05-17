@@ -46,7 +46,7 @@ Note: original session-log diagnosis (F-5 first version) thought the `commits` t
 - `sqlite3 catalog.db "SELECT COUNT(*) FROM commits"` → 2931 rows.
 - `state_at(commit="d482ca8a")` → "not indexed" error.
 - `state_at(commit="d482ca8ac91241a7a96a487e46ca394095019912")` → success.
-- Session log: `docs/trackers/artifact-code-linkage-session-log.md` F-5 (with corrected diagnosis).
+- Session log: `docs/trackers/archive/artifact-code-linkage-session-log.md` F-5 (with corrected diagnosis).
 
 ## Hypotheses tried
 
@@ -82,5 +82,5 @@ N/A — fixed. After commit `2f085f45` lands on master, move this file to `docs/
 ## References
 
 - Originally tracked as **#8** in `docs/issues/bug-tracker.md` (retired after migration to per-file system).
-- Session log: `docs/trackers/artifact-code-linkage-session-log.md` F-5 (with verification trail post-rebuild).
+- Session log: `docs/trackers/archive/artifact-code-linkage-session-log.md` F-5 (with verification trail post-rebuild).
 - Fix commit: `2f085f45` on `experiments`.

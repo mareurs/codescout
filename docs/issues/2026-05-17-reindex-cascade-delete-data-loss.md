@@ -81,7 +81,7 @@ N/A — fixed. After commits `d482ca8a` and `2f085f45` land on master, move this
 ## References
 
 - Originally tracked as **#7** in `docs/issues/bug-tracker.md` (retired after migration to per-file system).
-- Session log: `docs/trackers/artifact-code-linkage-session-log.md` F-9 (incident) and F-9 fix-verified note.
+- Session log: `docs/trackers/archive/artifact-code-linkage-session-log.md` F-9 (incident) and F-9 fix-verified note.
 - Fix commits: `d482ca8a` + `2f085f45` on `experiments`.
 - Related: bug-tracker.md #5 (UNIQUE), #6 (dim mismatch) — same commit cluster.
 - Schema reference: `src/librarian/catalog/schema.sql:116`.

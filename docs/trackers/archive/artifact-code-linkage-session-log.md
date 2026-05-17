@@ -1,3 +1,13 @@
+---
+id: null
+kind: null
+status: archived
+title: null
+owners: []
+tags: []
+topic: null
+time_scope: null
+---
 # Artifact-Code Linkage — Session Log
 
 > **Purpose:** Two-sided observation log for the multi-session work of
@@ -16,12 +26,12 @@
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-05-17 | med | architectural | fixed-verified | Augmentation prompt references `context.git_log` but augmentation row has no `gather_from: git_log` source — silent drift (instance fixed; F-2/F-3 structural) |
-| F-2 | 2026-05-17 | med | architectural | open | Archetype designs in `tracker_design.rs` supply no `gather_from` defaults (root of F-1) |
-| F-3 | 2026-05-17 | med | architectural | open | 1 of 4 augmented artifacts uses the `gather_from` channel in production (was 0/4; goal-tracker re-augmented with gather_from post-recovery) |
-| F-4 | 2026-05-17 | low | cross-repo | open | Stored SHAs (`evidence_commits`, task notes) carry no repo-scoping field |
+| F-2 | 2026-05-17 | med | architectural | promoted-to-augmentation-prompt-template-resolution | Archetype designs in `tracker_design.rs` supply no `gather_from` defaults (root of F-1) |
+| F-3 | 2026-05-17 | med | architectural | promoted-to-augmentation-prompt-template-resolution | 1 of 4 augmented artifacts uses the `gather_from` channel in production (was 0/4; goal-tracker re-augmented with gather_from post-recovery) |
+| F-4 | 2026-05-17 | low | cross-repo | promoted-to-CLAUDE.md-convention | Stored SHAs (`evidence_commits`, task notes) carry no repo-scoping field — `<repo>:<sha>` convention shipped to CLAUDE.md (task #22); schema-level enforcement deferred per two-concretes (1 concrete currently) |
 | F-5 | 2026-05-17 | med | codescout-tool | fixed-verified | `state_at(commit=...)` short-SHA lookup (#32, commit `2f085f45`) — verified `d482ca8a` resolves + ambiguity guard fires |
 | F-6 | 2026-05-17 | high | codescout-tool | fixed-verified | `librarian(reindex)` UNIQUE constraint + dim mismatch (default + force) — bug-tracker #5/#6, verified post-rebuild |
-| F-7 | 2026-05-17 | low | architectural | open | `last_changed` is single-purpose (gather_config_value only) and per-line, not per-symbol |
+| F-7 | 2026-05-17 | low | architectural | deferred-two-concretes | `last_changed` is single-purpose (gather_config_value only) and per-line, not per-symbol — deferred per two-concretes-threshold (no second consumer) |
 | F-8 | 2026-05-17 | med | architectural | fixed-verified | 6 of 8 codescout memories anchored to deleted/moved files post-dissolve refactor (refreshed via `memory(refresh_anchors)` per topic) |
 | F-9 | 2026-05-17 | high | codescout-tool | fixed-verified | `librarian(reindex, force=true)` cascade-delete eliminated (commit `d482ca8a`); 4 augmentations preserved post-test |
 
@@ -155,7 +165,7 @@ the live prompt surface already encodes it.
 
 **Severity:** med — root cause for F-1. Affects every goal-tracker created via the current `tracker_design` path.
 
-**Status:** open
+**Status:** promoted-to-augmentation-prompt-template-resolution
 
 **Fix idea / Pointer:** Same routing as F-1 — folds into `augmentation-prompt-template-resolution.md`. The structural fix (Option 2 or Option 3 in that tracker) needs to cover gather defaults alongside prompt template.
 
@@ -186,7 +196,7 @@ Meanwhile the codebase ships full gather machinery: `gather_all`, `gather_git_lo
 
 **Severity:** med — extent of F-2. Feature exists end-to-end in Rust but adoption is zero in declarative config. The live channel runs only via hardcoded dispatch, not via the configurable surface the API exposes.
 
-**Status:** open (improved 0/4 → 1/4 post-F-9 recovery)
+**Status:** promoted-to-augmentation-prompt-template-resolution (improved 0/4 → 1/4 post-F-9 recovery)
 
 **Update 2026-05-17 (post-recovery):** The F-9 recovery re-augmented the goal-tracker with `gather_from: git_log` per F-1's workaround — so the count is now **1 of 4** augmented artifacts using gather_from. The other three (audit_issues, reflective, task_list) still don't use it because their archetype prompts don't reference gather sources. The structural finding (F-2) remains the bottleneck.
 
@@ -210,7 +220,7 @@ Meanwhile the codebase ships full gather machinery: `gather_all`, `gather_git_lo
 
 **Severity:** low — by design unvalidated, but lossy when work spans repos (which this session does — codescout + codescout-companion + buddy + claude-plugins). A reader following SHA citations across artifact archives will hit silent dead-ends.
 
-**Status:** open
+**Status:** promoted-to-CLAUDE.md-convention (cross-repo `<repo>:<sha>`); schema enforcement deferred per two-concretes (1 concrete)
 
 **Fix idea / Pointer:** Two possible: (1) add `repo` field to `evidence_commits` shape (breaking schema change); (2) document the convention `<repo>:<sha>` for cross-repo SHAs (zero-code, propagates via prompt template). Option 2 is the cheaper near-term — option 1 only earns its keep at the third concrete of cross-repo confusion. Currently 1 concrete (this one).
 
@@ -309,7 +319,7 @@ Meanwhile the codebase ships full gather machinery: `gather_all`, `gather_git_lo
 
 **Severity:** low — architectural observation, not a bug. The function does what it was designed for.
 
-**Status:** open
+**Status:** deferred-two-concretes (no second consumer)
 
 **Fix idea / Pointer:** Per two-concretes-threshold: keep as-is until a second caller wants this. If/when an artifact-refresh path needs per-symbol freshness, lift the implementation then.
 
@@ -421,3 +431,14 @@ Backs F-6b (dimension mismatch) into a higher-severity bug than originally filed
                    heading="## Template for new entries",
                    content="## F-N — title\n...")
      Also update the matching Index / Wins Index table row at the top. -->
+
+**Work stream closed — 2026-05-17.** All 9 frictions and 3 wins reached terminal status. 5 fixed-verified (F-1 instance / F-5 / F-6 / F-8 / F-9), 2 promoted to `augmentation-prompt-template-resolution.md` (F-2 / F-3), 1 promoted to CLAUDE.md convention (F-4), 1 deferred per two-concretes (F-7). Wins W-1/W-2/W-3 validated. Archived to `docs/trackers/archive/` per archive-on-zero-open rule (CLAUDE.md / src/prompts/source.md).
+
+**Cross-references (the artifact↔code channels surveyed during this work stream):**
+
+- `audit_doc_refs` — health verdict: green; lifecycle logic robust (W-3).
+- `gather_from: git_log` — health verdict: yellow; 1/4 augmented artifacts use it in production. Structural fix tracked in `docs/trackers/augmentation-prompt-template-resolution.md`.
+- `state_at(commit=...)` — fixed in commit `2f085f45` (short-SHA + ambiguity guard).
+- `last_changed` — single-purpose by design; deferred per two-concretes-threshold.
+
+**Commits attributable to this work stream:** see `docs/trackers/archive/` predecessor session logs + the 16 commits on `experiments` between `a70feee6` (memory refresh) and `7395ce99` (bug-tracker per-file migration).
