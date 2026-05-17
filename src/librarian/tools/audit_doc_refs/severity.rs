@@ -6,8 +6,8 @@ pub fn default_severity(verdict: Verdict) -> Severity {
     use Verdict::*;
     match verdict {
         Missing | FileMissing | SymbolMissing => High,
-        AnchorMissing | LineOob => Med,
-        Unknown => Low,
+        AnchorMissing | LineOob | AmbiguousBasename => Med,
+        Unknown | ResolvedBasename => Low,
         Resolved | External => Low,
     }
 }

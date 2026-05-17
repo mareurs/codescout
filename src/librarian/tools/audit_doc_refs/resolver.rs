@@ -7,6 +7,12 @@ pub struct ResolveCtx<'a> {
     pub memory_globs: &'a [globset::Glob],
     pub lsp: Option<&'a dyn crate::lsp::ops::LspProvider>,
     pub degraded_languages: std::cell::RefCell<Vec<String>>,
+    /// Basename → list of relative paths in the workspace. Used by
+    /// `resolve_file_path` as a fallback when a bare basename (no `/`) doesn't
+    /// literally exist at the repo root. Built once per audit run in
+    /// `mod.rs::call`. Empty disables the fallback (treat misses as
+    /// `Verdict::Missing` exactly as before).
+    pub basename_index: std::collections::HashMap<String, Vec<std::path::PathBuf>>,
 }
 
 pub fn resolve_ref(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
@@ -30,14 +36,62 @@ fn resolve_file_path(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     }
     let path = ctx.repo_root.join(&c.raw_ref);
     if path.exists() {
-        Resolution {
+        return Resolution {
             verdict: Verdict::Resolved,
             severity: Severity::Low,
             severity_reason: "policy_default",
             notes: None,
+        };
+    }
+    // Basename fallback: conversational mentions of files without their full
+    // path (e.g. `docling_reader.py` instead of `src/mrv/readers/docling_reader.py`).
+    // See `docs/issues/2026-05-17-audit-doc-refs-basename-false-positives.md`.
+    if let Some(r) = try_basename_fallback(&c.raw_ref, ctx) {
+        return r;
+    }
+    verdict_with_drops(Verdict::Missing, Path::new(&c.md_file), ctx.memory_globs)
+}
+
+/// Look up `raw_ref` in the basename index when it has no `/`. Returns
+/// `Some(Resolution)` with `ResolvedBasename` (single hit) or
+/// `AmbiguousBasename` (multiple hits); `None` means "no match — caller should
+/// fall through to the default missing verdict".
+fn try_basename_fallback(raw_ref: &str, ctx: &ResolveCtx<'_>) -> Option<Resolution> {
+    if raw_ref.contains('/') {
+        return None;
+    }
+    let matches = ctx.basename_index.get(raw_ref)?;
+    match matches.len() {
+        0 => None,
+        1 => Some(Resolution {
+            verdict: Verdict::ResolvedBasename,
+            severity: Severity::Low,
+            severity_reason: "basename_match",
+            notes: Some(format!("resolved by basename to {}", matches[0].display())),
+        }),
+        n => {
+            let preview: Vec<String> = matches
+                .iter()
+                .take(5)
+                .map(|p| p.display().to_string())
+                .collect();
+            let suffix = if n > 5 {
+                format!(", and {} more", n - 5)
+            } else {
+                String::new()
+            };
+            Some(Resolution {
+                verdict: Verdict::AmbiguousBasename,
+                severity: Severity::Med,
+                severity_reason: "basename_ambiguous",
+                notes: Some(format!(
+                    "basename matches {} files: {}{}",
+                    n,
+                    preview.join(", "),
+                    suffix
+                )),
+            })
         }
-    } else {
-        verdict_with_drops(Verdict::Missing, Path::new(&c.md_file), ctx.memory_globs)
     }
 }
 
@@ -104,15 +158,17 @@ fn resolve_link(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     // fs-scheme link → same as file_path
     let path = ctx.repo_root.join(&c.raw_ref);
     if path.exists() {
-        Resolution {
+        return Resolution {
             verdict: Verdict::Resolved,
             severity: Severity::Low,
             severity_reason: "policy_default",
             notes: None,
-        }
-    } else {
-        verdict_with_drops(Verdict::Missing, Path::new(&c.md_file), ctx.memory_globs)
+        };
     }
+    if let Some(r) = try_basename_fallback(&c.raw_ref, ctx) {
+        return r;
+    }
+    verdict_with_drops(Verdict::Missing, Path::new(&c.md_file), ctx.memory_globs)
 }
 
 /// v1: module_path candidates are reported as Unknown without consulting LSP.
@@ -252,6 +308,7 @@ mod tests {
             memory_globs: globs,
             lsp: None,
             degraded_languages: Default::default(),
+            basename_index: std::collections::HashMap::new(),
         }
     }
 
@@ -372,6 +429,7 @@ mod tests {
                 memory_globs: &[],
                 lsp: Some(lsp.as_ref()),
                 degraded_languages: Default::default(),
+                basename_index: std::collections::HashMap::new(),
             },
         );
         assert_eq!(r.verdict, Verdict::SymbolMissing);
@@ -387,6 +445,7 @@ mod tests {
             memory_globs: &[],
             lsp: None,
             degraded_languages: Default::default(),
+            basename_index: std::collections::HashMap::new(),
         };
         let r = resolve_ref(&c, &ctx);
         assert_eq!(r.verdict, Verdict::Unknown);
@@ -408,6 +467,7 @@ mod tests {
                 memory_globs: &[],
                 lsp: Some(lsp.as_ref()),
                 degraded_languages: Default::default(),
+                basename_index: std::collections::HashMap::new(),
             },
         );
         // File exists on disk but LSP returned no symbols → SymbolMissing, NOT Unknown.
@@ -462,5 +522,126 @@ mod tests {
         );
         assert_eq!(r.verdict, Verdict::AnchorMissing);
         assert_eq!(r.severity, Severity::Med);
+    }
+
+    /// Basename fallback: bare basename (no `/`) that exists as exactly one
+    /// file in the workspace resolves with `ResolvedBasename` + severity Low.
+    /// Closes the false-positive class called out in
+    /// `docs/issues/2026-05-17-audit-doc-refs-basename-false-positives.md`.
+    #[test]
+    fn resolver_resolves_by_basename_when_unique() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src/mrv/readers")).unwrap();
+        std::fs::write(
+            tmp.path().join("src/mrv/readers/docling_reader.py"),
+            "# stub\n",
+        )
+        .unwrap();
+
+        let mut index = std::collections::HashMap::new();
+        index.insert(
+            "docling_reader.py".to_string(),
+            vec![std::path::PathBuf::from(
+                "src/mrv/readers/docling_reader.py",
+            )],
+        );
+        let ctx = ResolveCtx {
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: index,
+        };
+        let r = resolve_ref(
+            &cand("docling_reader.py", "docs/adr/0006.md", RefKind::FilePath),
+            &ctx,
+        );
+        assert_eq!(r.verdict, Verdict::ResolvedBasename);
+        assert_eq!(r.severity, Severity::Low);
+        assert_eq!(r.severity_reason, "basename_match");
+        assert!(
+            r.notes
+                .as_ref()
+                .is_some_and(|n| n.contains("src/mrv/readers/docling_reader.py")),
+            "notes should cite the resolved path: {:?}",
+            r.notes
+        );
+    }
+
+    #[test]
+    fn resolver_ambiguous_when_basename_matches_multiple_files() {
+        let tmp = TempDir::new().unwrap();
+        let mut index = std::collections::HashMap::new();
+        index.insert(
+            "__init__.py".to_string(),
+            vec![
+                std::path::PathBuf::from("src/foo/__init__.py"),
+                std::path::PathBuf::from("src/bar/__init__.py"),
+                std::path::PathBuf::from("src/baz/__init__.py"),
+            ],
+        );
+        let ctx = ResolveCtx {
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: index,
+        };
+        let r = resolve_ref(
+            &cand("__init__.py", "docs/spec.md", RefKind::FilePath),
+            &ctx,
+        );
+        assert_eq!(r.verdict, Verdict::AmbiguousBasename);
+        assert_eq!(r.severity, Severity::Med);
+        assert_eq!(r.severity_reason, "basename_ambiguous");
+        assert!(
+            r.notes.as_ref().is_some_and(|n| n.contains("3 files")),
+            "notes should report match count: {:?}",
+            r.notes
+        );
+    }
+
+    #[test]
+    fn resolver_still_missing_when_basename_not_in_index() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = ResolveCtx {
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: std::collections::HashMap::new(),
+        };
+        let r = resolve_ref(
+            &cand("nonexistent.py", "docs/spec.md", RefKind::FilePath),
+            &ctx,
+        );
+        assert_eq!(r.verdict, Verdict::Missing);
+        assert_eq!(r.severity, Severity::High);
+    }
+
+    #[test]
+    fn resolver_skips_basename_fallback_when_ref_contains_slash() {
+        // Path-prefixed ref (`src/foo/bar.py`) that doesn't exist on disk
+        // must remain Missing — even if `bar.py` is in the basename index,
+        // we don't second-guess an explicit path.
+        let tmp = TempDir::new().unwrap();
+        let mut index = std::collections::HashMap::new();
+        index.insert(
+            "bar.py".to_string(),
+            vec![std::path::PathBuf::from("other/place/bar.py")],
+        );
+        let ctx = ResolveCtx {
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: index,
+        };
+        let r = resolve_ref(
+            &cand("src/foo/bar.py", "docs/spec.md", RefKind::FilePath),
+            &ctx,
+        );
+        assert_eq!(r.verdict, Verdict::Missing);
+        assert_eq!(r.severity, Severity::High);
     }
 }

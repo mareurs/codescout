@@ -23,10 +23,11 @@ pub fn merge_into_tracker(
             existing.last_verified_at = now_str.clone();
             if existing.status != "wontfix" {
                 // verdict change → status transition
-                if f.resolution.verdict == Verdict::Resolved && existing.status == "open" {
+                let resolved_now = is_resolved_verdict(f.resolution.verdict);
+                if resolved_now && existing.status == "open" {
                     existing.status = "fixed".to_string();
                     existing.notes = format!("auto-resolved at {commit}");
-                } else if f.resolution.verdict != Verdict::Resolved
+                } else if !resolved_now
                     && f.resolution.verdict != Verdict::External
                     && existing.status == "fixed"
                 {
@@ -39,7 +40,9 @@ pub fn merge_into_tracker(
                 existing.severity = f.resolution.severity;
                 existing.severity_reason = f.resolution.severity_reason.to_string();
             }
-        } else if !matches!(f.resolution.verdict, Verdict::Resolved | Verdict::External) {
+        } else if !is_resolved_verdict(f.resolution.verdict)
+            && f.resolution.verdict != Verdict::External
+        {
             // New finding — append with next n
             let next_n = out.issues.iter().map(|i| i.n).max().unwrap_or(0) + 1;
             out.issues.push(Issue {
@@ -63,6 +66,13 @@ pub fn merge_into_tracker(
         }
     }
     out
+}
+
+/// A verdict counts as "resolved" for tracker bookkeeping if the audit found
+/// the reference — exact path match OR basename fallback. Both successfully
+/// locate the referenced file; the difference is only confidence.
+fn is_resolved_verdict(v: Verdict) -> bool {
+    matches!(v, Verdict::Resolved | Verdict::ResolvedBasename)
 }
 
 fn severity_rank(s: super::Severity) -> u8 {

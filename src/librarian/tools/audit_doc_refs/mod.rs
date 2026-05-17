@@ -41,12 +41,21 @@ pub struct ParseWarning {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Verdict {
+    /// File / symbol resolved by literal path match.
     Resolved,
+    /// File resolved via basename fallback (raw_ref had no `/`; exactly one
+    /// file in the repo matched the basename). Lower confidence than `Resolved`
+    /// — the doc didn't specify the path, we inferred it.
+    ResolvedBasename,
+    /// File / symbol could not be located at all.
     Missing,
     FileMissing,
     SymbolMissing,
     LineOob,
     AnchorMissing,
+    /// Basename fallback matched more than one file. The reference is not
+    /// broken per se, but it's ambiguous — the doc should specify the path.
+    AmbiguousBasename,
     Unknown,
     External,
 }
@@ -184,11 +193,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         .map(|g| globset::Glob::new(g).unwrap())
         .collect();
 
+    let basename_index = build_basename_index(&repo_root);
+
     let resolve_ctx = resolver::ResolveCtx {
         repo_root: &repo_root,
         memory_globs: &memory_globs,
         lsp: None, // v1: LSP not plumbed through ToolContext yet
         degraded_languages: Default::default(),
+        basename_index,
     };
 
     let mut all_findings: Vec<Finding> = Vec::new();
@@ -260,6 +272,47 @@ fn git_head_commit(repo_root: &std::path::Path) -> Option<String> {
     let commit = head.peel_to_commit().ok()?;
     let full = commit.id().to_string();
     Some(full[..8.min(full.len())].to_string())
+}
+
+/// Walk `repo_root` and build a basename → relative-paths index for the
+/// audit resolver's basename-fallback path.
+///
+/// `ignore::WalkBuilder` honours `.gitignore` so generated artefacts
+/// (`target/`, `node_modules/`, `.venv/`) are skipped naturally. A hard cap
+/// keeps a runaway monorepo from blowing up the audit's runtime; once the
+/// cap is hit we stop indexing (the audit still functions — basename misses
+/// just fall through to `Verdict::Missing` for the un-indexed tail).
+fn build_basename_index(
+    repo_root: &std::path::Path,
+) -> std::collections::HashMap<String, Vec<std::path::PathBuf>> {
+    /// Soft cap — typical projects (1k–10k files) fit comfortably; monorepos
+    /// stop indexing past this and degrade gracefully.
+    const MAX_INDEXED_FILES: usize = 50_000;
+
+    let mut index: std::collections::HashMap<String, Vec<std::path::PathBuf>> =
+        std::collections::HashMap::new();
+    let walker = ignore::WalkBuilder::new(repo_root)
+        .hidden(true)
+        .git_ignore(true)
+        .build();
+
+    let mut count = 0usize;
+    for entry in walker.flatten() {
+        if count >= MAX_INDEXED_FILES {
+            break;
+        }
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let rel = path.strip_prefix(repo_root).unwrap_or(path).to_path_buf();
+        index.entry(name.to_string()).or_default().push(rel);
+        count += 1;
+    }
+    index
 }
 
 async fn ensure_default_tracker(ctx: &ToolContext) -> Result<(String, String)> {
