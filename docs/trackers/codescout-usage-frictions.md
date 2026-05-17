@@ -120,3 +120,50 @@ message did not land; three round-trips wasted before correction).
 **Notes:** All 3 paths are doc/config markdown, not source-adjacent.
 The predicate is shape-only (`.md` suffix); no command-family
 variation as with U-1.
+
+
+
+### U-3 — IL3 piped `run_command`, session 2026-05-18 (×4)
+
+**When:** Tracker backfill + jsonpath ship-prep session, 2026-05-18.
+Bound: this conversation (continued from compacted 2026-05-17 fix work).
+
+**Iron Law / pattern:** Iron Law 3 — `run_command` output piped to a
+filter (`| head`, `| tail`, `| sort | uniq -c`, `&&`-chained `cat` →
+`grep`) instead of running bare and querying the `@cmd_*` buffer.
+
+**Confirming data:** four strikes in a single session, all flagged by
+Pika's PreToolUse warning:
+
+1. `git log --all --oneline | grep -E "^(808fe4b|a70816b5|66bee623)"`
+   — looking up short SHAs. Fix: `git log --all --oneline -200` →
+   `grep PATTERN @cmd_xxx`.
+2. `diff trackers/X.md trackers/archive/X.md | head -20` — comparing
+   two files. Fix: run `diff` bare, slice via buffer.
+3. `cat .codescout/.../@tool_X | grep ... | sort | uniq -c` — counting
+   status values in a JSON tool buffer. Fix: `grep PATTERN @tool_X`
+   directly (the @tool_* handle works the same as @cmd_*).
+4. `cat _TEMPLATE.md && echo "---" && grep -oE "..." trackers/X.md | tail -3`
+   — fetching template + a small grep slice in one shot. Fix: run each
+   read bare, query separately.
+
+**Severity:** med — each strike added ~200-500 tokens of pipe output to
+my context vs. the bounded buffer-query path. Cumulative drift over a
+long session is the real cost; individual strikes look free.
+
+**Status:** open — pattern recurs across sessions despite Pika warnings.
+
+**Diagnosis (introspection):** the four strikes break down as:
+- 2× reaching for `| head` / `| tail` to bound output size before
+  it lands in context — buffer-query gives the same bound for free.
+- 1× `sort | uniq -c` aggregation — habit from shell pipelines;
+  buffer-query supports the same `grep` step but not the trailing
+  `sort | uniq`, which means I'd need a follow-up run_command for
+  the aggregation. The "single round-trip" instinct pushes me to
+  pipe instead.
+- 1× `&&`-chained two commands — saving a round-trip by bundling
+  two reads into one call. Same root cause: round-trip aversion.
+
+**Pointer:** Promotes H-1's warn→deny criterion. With ×4 in one session,
+H-1 has 2 sessions of evidence (the U-1 baseline + this U-3 follow-up)
+— close to deny-threshold.
