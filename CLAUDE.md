@@ -18,7 +18,7 @@ See codescout memory `development-commands` for the full command reference.
 
 - **Path:** `docs/issues/YYYY-MM-DD-<slug>.md` for active bugs; `docs/issues/archive/` only after the fix has shipped to `master` (verify via `git branch --contains <fix-sha>`).
 - **Slug:** short kebab-case noun-phrase (3–6 words), e.g. `edit-code-insert-mid-function`, `reindex-cascade-delete-data-loss`.
-- **Status field** in frontmatter: `open` | `investigating` | `fixed` | `mitigated` | `wontfix` (semantics in `_TEMPLATE.md`'s header comment).
+- **Status field** in frontmatter: `open` | `investigating` | `fixed` | `mitigated` | `wontfix` | `zombie` (semantics in `_TEMPLATE.md`'s header comment). `zombie` = no longer observed, root cause unconfirmed; pair with `last_observed:` and a re-open trigger.
 - **`closed:` date** in frontmatter alongside any of `fixed` / `mitigated` / `wontfix`.
 
 **Trigger rules — open a bug file for ANY bug noticed during work:**

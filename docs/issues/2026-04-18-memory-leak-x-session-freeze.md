@@ -1,10 +1,11 @@
 ---
-status: investigating
+status: zombie
 opened: 2026-04-18
 severity: critical
 owner: marius
 related: []
 tags: ["memory-leak", "oom", "embeddings", "ptmalloc2", "phase-2"]
+last_observed: 2026-04-30
 ---
 
 # BUG: codescout memory leak → OOM → X session freeze
@@ -360,3 +361,23 @@ kernel: amdgpu 0000:03:00.0: [drm] *ERROR* dpcd_set_link_settings:1122:
 ```
 
 Known RDNA3 + in-tree amdgpu bug. Workaround: use HDMI on the 7800 XT instead of DP.
+
+
+
+## Status: zombie (2026-05-18)
+
+No longer observed since `last_observed: 2026-04-30`. Kept open as a
+zombie rather than closed because:
+
+- The Phase 2 investigation rejected the two top hypotheses (fastembed
+  local; LSP document path) without identifying a confirmed root cause.
+- A latent regression could resurface with future LSP/embedding work.
+- Closing as `fixed` would be misleading (no fix); closing as `wontfix`
+  would be misleading (we'd fix it if it recurred).
+
+**Re-open trigger:** any subsequent OOM that matches the Phase 1
+signature — `cargo build` or codescout binary at >2 GB RSS during an
+indexing-heavy session, X session freeze, or recurring `ptmalloc2`
+heap-fragmentation evidence. If observed, flip `status: investigating`,
+set `last_observed:` to that date, and resume from the Phase 2 step 5
+result.
