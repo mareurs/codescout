@@ -3,8 +3,8 @@
 
 [[anchors]]
 path = "Cargo.toml"
-hash = "c92567de78888ddf9dc3e3f5e583d92d2bce1a4f7980225be0013dbb5226afd4"
+hash = "6045b4b9c23cd03abbdc69ed601a0c98825e6c8cc0a9831ae72af65964f332a0"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "e6c22cf1254f9eeab6edac384dc89985cfd2f46b20a134ea5e7d54d52b229277"
+hash = "0f651cd601e1a96be5e6294baa7bcb51484d736468f01eb5ee49e590b40ebd39"

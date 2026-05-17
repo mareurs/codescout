@@ -6,28 +6,20 @@ path = "docs/PROGRESSIVE_DISCOVERABILITY.md"
 hash = "dd5fd6f8fdbb6662d9eb0f6510e4b3e706df309723350e93abad061a2d6b54d6"
 
 [[anchors]]
-path = "src/prompts/server_instructions.md"
-hash = "9936214dd470e077b1a4c3609ff473a458f57c6f7ce0448c7c41d64994f543e9"
-
-[[anchors]]
-path = "src/prompts/onboarding_prompt.md"
-hash = "24ef55f393887ce1149d7d91fbaf418e3f9bebc03bde5d9ea3a3a10f1a0f4648"
-
-[[anchors]]
 path = "src/prompts/builders.rs"
-hash = "378d8493a690180060bda81491e26bb30d472281e37d0d8d137550242e2432c3"
+hash = "5133ac4a32dd4e139af6f9fdb983997ef93846cfc454b2679eb46f7b8d47c4cd"
 
 [[anchors]]
 path = "src/tools/onboarding.rs"
-hash = "a1ba605ded7a28aa905ad1818724459920864b0f31da153cc98f503e2d131950"
+hash = "61ad8cdb2a705b4b8f129250d3196adfb6f16fa49b4afa4ecc4726d2ff64fc95"
 
 [[anchors]]
 path = "src/util/path_security.rs"
-hash = "c247fda737bccbba63429454cbb14168a0c37fe1516c0175462c54305a00aebb"
+hash = "666d63d6e5896856d6a37cdfc6ca95a73b0c4fd55414ae3604a9a5bce9242bb4"
 
 [[anchors]]
 path = "docs/manual/src/experimental/index.md"
-hash = "5470bec36a44a1fe1921495add5c7f514b6e19877da5aeace2d08ffd7501b5c2"
+hash = "81a5ff4f113b9976520500ba44a541f29e42241c467d73292b718d2c539ecb49"
 
 [[anchors]]
 path = "docs/trackers/archive/experiments-to-master.md"
@@ -35,23 +27,23 @@ hash = "cb57b5fd62bc7af6f134589c1ff9b8aa9037a8b38d4551c17ab0646e6d473b8c"
 
 [[anchors]]
 path = "Cargo.toml"
-hash = "c92567de78888ddf9dc3e3f5e583d92d2bce1a4f7980225be0013dbb5226afd4"
+hash = "6045b4b9c23cd03abbdc69ed601a0c98825e6c8cc0a9831ae72af65964f332a0"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "e6c22cf1254f9eeab6edac384dc89985cfd2f46b20a134ea5e7d54d52b229277"
+hash = "0f651cd601e1a96be5e6294baa7bcb51484d736468f01eb5ee49e590b40ebd39"
 
 [[anchors]]
 path = "src/tools/mod.rs"
-hash = "c2cc571f5922441fe1c1e9fbcbc0926e219e9debd2cbed5ed00c034f316300ab"
+hash = "c41a6ee6009e7d73cc5efa07ff8ed23d938f7f4fce8f92adcef44a94cabe96ca"
 
 [[anchors]]
 path = ".codescout/project.toml"
-hash = "d1093e6b2d7d7598663034ee8d5e59378fd5d60e92ebe7def7b5cf93ee5ee382"
+hash = "a7d11e017d074be1ef559c01672fc8fec7c28cb38c29b2a252691b0fb6c2292f"
 
 [[anchors]]
 path = ".codescout/libraries.json"
-hash = "0f26d6ffff9627fcb9a06ba2362633c0945fc89c2e29789c35848a02f3e2cd25"
+hash = "41b60c4c33ef3ba3b976f5ff4bb41cc2ddb59483872e154dda425805f764ed46"
 
 [[anchors]]
 path = ".codescout/write.lock"

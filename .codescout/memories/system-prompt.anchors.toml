@@ -27,7 +27,7 @@ hash = "dd5fd6f8fdbb6662d9eb0f6510e4b3e706df309723350e93abad061a2d6b54d6"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "f209d8c70447190d6c5f6ca34e35bb979ba5461c9ecf6f04bef80d8e52a857be"
+hash = "0f651cd601e1a96be5e6294baa7bcb51484d736468f01eb5ee49e590b40ebd39"
 
 [[anchors]]
 path = "src/lib.rs"

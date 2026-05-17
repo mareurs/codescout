@@ -22,7 +22,7 @@
 | F-5 | 2026-05-17 | med | codescout-tool | open | `state_at(commit=...)` channel broken — `commits` table empty, backfill silently fails |
 | F-6 | 2026-05-17 | high | codescout-tool | promoted-to-bug-tracker | `librarian(reindex)` has two stacked failures — UNIQUE constraint (default) + embedding dimension mismatch (force) — `docs/issues/bug-tracker.md` #5 + #6 |
 | F-7 | 2026-05-17 | low | architectural | open | `last_changed` is single-purpose (gather_config_value only) and per-line, not per-symbol |
-| F-8 | 2026-05-17 | med | architectural | open | 6 of 8 codescout memories anchor to deleted/moved files post-dissolve refactor |
+| F-8 | 2026-05-17 | med | architectural | fixed-verified | 6 of 8 codescout memories anchored to deleted/moved files post-dissolve refactor (refreshed via `memory(refresh_anchors)` per topic) |
 | F-9 | 2026-05-17 | high | codescout-tool | open | `librarian(reindex, force=true)` cascade-deletes all augmentations — DATA LOSS (promoted to bug-tracker #7) |
 
 ## Wins Index
@@ -330,7 +330,11 @@ The deletions are all from the librarian dissolve (`d48bf992`) and embed reorg �
 
 **Severity:** med — the staleness is surfaced but accumulates. Each future refactor adds more drift. Adjacent concern to artifact→code linkage (same "stored reference to moving code" pattern at the memory layer).
 
-**Status:** open
+**Status:** fixed-verified (2026-05-17 third session)
+
+**Resolution:** Called `mcp__codescout__memory(action=refresh_anchors, topic=<X>)` for each of the 6 stale topics: architecture, conventions, gotchas, domain-glossary, development-commands, project-overview. Plus `system-prompt` (which became stale during this session due to the CLAUDE.md edit). Post-refresh `workspace(status)` shows all 7 topics in `fresh`; only `language-patterns` and `onboarding` remain `untracked` (intentional — those are tracker-independent).
+
+**Caveat:** The fix is point-in-time. The next refactor that moves/deletes anchored files will re-create the staleness. The staleness *signal* works; what's missing is an automated remediation (e.g. `memory(refresh_anchors, all_stale=true)` batch command, or a hook on file-deletion events).
 
 **Fix idea / Pointer:** Out of scope for this session log's primary topic, but worth its own followup. The staleness signal exists; a `refresh_anchors` command per topic would close 6 of 6 with one batch.
 

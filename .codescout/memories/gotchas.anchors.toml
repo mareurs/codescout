@@ -3,40 +3,36 @@
 
 [[anchors]]
 path = ".codescout/embeddings/project.db"
-hash = "968321804ae947b5ec35c6462f9162695ae250f097a8ec9e4a08dd2db76d84a4"
+hash = "299cc710929e49e6dcaead85f654d22518b5d6268a0ca361e1cb0da98ea0a2b1"
 
 [[anchors]]
 path = "src/lsp/client.rs"
-hash = "5a9e8bf60365897cdec638eaa63641ee8779b29f62b286a7d4f75f806fb2a2ca"
+hash = "db0e153bb5f47a1b64a5cc254f32581d04947a8c0135490bf2be783397973475"
 
 [[anchors]]
 path = "src/util/path_security.rs"
-hash = "c247fda737bccbba63429454cbb14168a0c37fe1516c0175462c54305a00aebb"
-
-[[anchors]]
-path = "src/embed/index.rs"
-hash = "b294e7ecf74612d2a0e08a64522531a69ef26da4d42a3c5cf27c98d5c08c97ba"
+hash = "666d63d6e5896856d6a37cdfc6ca95a73b0c4fd55414ae3604a9a5bce9242bb4"
 
 [[anchors]]
 path = ".codescout/project.toml"
-hash = "d1093e6b2d7d7598663034ee8d5e59378fd5d60e92ebe7def7b5cf93ee5ee382"
+hash = "a7d11e017d074be1ef559c01672fc8fec7c28cb38c29b2a252691b0fb6c2292f"
 
 [[anchors]]
 path = "src/memory/anchors.rs"
-hash = "ad45ffeb7f4b83fd275c600d0b63a8c6982c7b9b8097cb248e149c73f4db2faa"
+hash = "ec269942aa229cdf317b8a8bca43e6f5555c55b2ef803735762102bc9e3863b0"
 
 [[anchors]]
 path = "src/tools/mod.rs"
-hash = "c2cc571f5922441fe1c1e9fbcbc0926e219e9debd2cbed5ed00c034f316300ab"
+hash = "c41a6ee6009e7d73cc5efa07ff8ed23d938f7f4fce8f92adcef44a94cabe96ca"
 
 [[anchors]]
 path = "docs/TODO-tool-misbehaviors.md"
-hash = "4798ebcad8b70c01e642f9f787917ffd91bdd16efc31b4199c0f283d6685f34d"
+hash = "3a41895e1ab773118574f471504be884faaba340e1c243f0ae274f2ac2c53a73"
 
 [[anchors]]
 path = "Cargo.toml"
-hash = "c92567de78888ddf9dc3e3f5e583d92d2bce1a4f7980225be0013dbb5226afd4"
+hash = "6045b4b9c23cd03abbdc69ed601a0c98825e6c8cc0a9831ae72af65964f332a0"
 
 [[anchors]]
 path = ".codescout/system-prompt.md"
-hash = "49870752300d0022f07b0c9fcef54b3949af684c4181c3c1e01a5dd4c34e4bbd"
+hash = "12afd23cbc5401965d537d37e6d78aaf68588ced2bd7e664d2948c19a200c5ce"

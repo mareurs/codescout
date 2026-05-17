@@ -15,11 +15,11 @@ hash = "dd5fd6f8fdbb6662d9eb0f6510e4b3e706df309723350e93abad061a2d6b54d6"
 
 [[anchors]]
 path = "src/tools/mod.rs"
-hash = "c2cc571f5922441fe1c1e9fbcbc0926e219e9debd2cbed5ed00c034f316300ab"
+hash = "c41a6ee6009e7d73cc5efa07ff8ed23d938f7f4fce8f92adcef44a94cabe96ca"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "e6c22cf1254f9eeab6edac384dc89985cfd2f46b20a134ea5e7d54d52b229277"
+hash = "0f651cd601e1a96be5e6294baa7bcb51484d736468f01eb5ee49e590b40ebd39"
 
 [[anchors]]
 path = "src/tools/output_buffer.rs"
@@ -27,7 +27,7 @@ hash = "521194730f585c90fc9c36c96504ac3f5ee6195a3538d9d7f393dec9d4080236"
 
 [[anchors]]
 path = "src/lsp/ops.rs"
-hash = "1a89cfda5c177d26f0b354dff3d56896cc12948686acdaa790575b8891d7922f"
+hash = "4c12308497e11e1057d1e9ae97503ac5fda307026f29134155a802f73c3503e6"
 
 [[anchors]]
 path = "src/tools/section_coverage.rs"
@@ -39,7 +39,7 @@ hash = "ae41e8f7e849d4bad2d0e635d350673313ff7d71301ce85ab319939d6ef715e1"
 
 [[anchors]]
 path = "Cargo.toml"
-hash = "c92567de78888ddf9dc3e3f5e583d92d2bce1a4f7980225be0013dbb5226afd4"
+hash = "6045b4b9c23cd03abbdc69ed601a0c98825e6c8cc0a9831ae72af65964f332a0"
 
 [[anchors]]
 path = "src/memory/classify.rs"
@@ -51,20 +51,16 @@ hash = "a482f238a9c54a16fb21274728d66a09d96ff5230bd7b890722b582b406d7d32"
 
 [[anchors]]
 path = ".codescout/project.toml"
-hash = "d1093e6b2d7d7598663034ee8d5e59378fd5d60e92ebe7def7b5cf93ee5ee382"
+hash = "a7d11e017d074be1ef559c01672fc8fec7c28cb38c29b2a252691b0fb6c2292f"
 
 [[anchors]]
 path = "src/library/scope.rs"
 hash = "1dfa2682cc0a01a5830e2f986e37ad2ac4f333c7f10e5abf71824e2ecbdad19e"
 
 [[anchors]]
-path = "src/embed/drift.rs"
-hash = "72cb96da5382cf70741ed8a61914e9eed3691497ffb101f2a9b85d91d5eefb86"
-
-[[anchors]]
 path = "src/server.rs"
-hash = "65f7410ca589b2fbfb063e8aa12355cc1fb3f9ce318868283c8bb72776397c4a"
+hash = "d6a350c3c9e864962235073e3513a8bea20e9bccb159d7eb7d5decdf13d60c47"
 
 [[anchors]]
 path = "src/memory/anchors.rs"
-hash = "ad45ffeb7f4b83fd275c600d0b63a8c6982c7b9b8097cb248e149c73f4db2faa"
+hash = "ec269942aa229cdf317b8a8bca43e6f5555c55b2ef803735762102bc9e3863b0"

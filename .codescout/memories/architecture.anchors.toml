@@ -3,11 +3,11 @@
 
 [[anchors]]
 path = "Cargo.toml"
-hash = "c92567de78888ddf9dc3e3f5e583d92d2bce1a4f7980225be0013dbb5226afd4"
+hash = "6045b4b9c23cd03abbdc69ed601a0c98825e6c8cc0a9831ae72af65964f332a0"
 
 [[anchors]]
 path = ".codescout/project.toml"
-hash = "d1093e6b2d7d7598663034ee8d5e59378fd5d60e92ebe7def7b5cf93ee5ee382"
+hash = "a7d11e017d074be1ef559c01672fc8fec7c28cb38c29b2a252691b0fb6c2292f"
 
 [[anchors]]
 path = ".codescout/workspace.toml"
@@ -15,15 +15,15 @@ hash = "fa321fd1c5e9e5e0584ee926e7b5caa4f1ac17d23d6b6904660ccd4205cc7d8c"
 
 [[anchors]]
 path = "src/tools/mod.rs"
-hash = "c2cc571f5922441fe1c1e9fbcbc0926e219e9debd2cbed5ed00c034f316300ab"
+hash = "c41a6ee6009e7d73cc5efa07ff8ed23d938f7f4fce8f92adcef44a94cabe96ca"
 
 [[anchors]]
 path = "src/server.rs"
-hash = "65f7410ca589b2fbfb063e8aa12355cc1fb3f9ce318868283c8bb72776397c4a"
+hash = "d6a350c3c9e864962235073e3513a8bea20e9bccb159d7eb7d5decdf13d60c47"
 
 [[anchors]]
 path = "src/agent/mod.rs"
-hash = "0a19395ac0cd2716fcddb7df617d95a3845cdf6406eb1ebb07b1f8019a06d59b"
+hash = "65ebfa32e43d282086416a906474fb28d3a1612607556dff60e3b808d8f01540"
 
 [[anchors]]
 path = "src/tools/output_buffer.rs"
@@ -35,7 +35,7 @@ hash = "3780a914063ee4973c233c17fd9299424725ea08cd775e0e4d2415e4d414a88a"
 
 [[anchors]]
 path = "src/lsp/ops.rs"
-hash = "1a89cfda5c177d26f0b354dff3d56896cc12948686acdaa790575b8891d7922f"
+hash = "4c12308497e11e1057d1e9ae97503ac5fda307026f29134155a802f73c3503e6"
 
 [[anchors]]
 path = "src/agent/write_guard.rs"
@@ -47,23 +47,19 @@ hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 [[anchors]]
 path = ".codescout/embeddings/project.db"
-hash = "968321804ae947b5ec35c6462f9162695ae250f097a8ec9e4a08dd2db76d84a4"
+hash = "299cc710929e49e6dcaead85f654d22518b5d6268a0ca361e1cb0da98ea0a2b1"
 
 [[anchors]]
 path = "src/util/path_security.rs"
-hash = "c247fda737bccbba63429454cbb14168a0c37fe1516c0175462c54305a00aebb"
+hash = "666d63d6e5896856d6a37cdfc6ca95a73b0c4fd55414ae3604a9a5bce9242bb4"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "e6c22cf1254f9eeab6edac384dc89985cfd2f46b20a134ea5e7d54d52b229277"
+hash = "0f651cd601e1a96be5e6294baa7bcb51484d736468f01eb5ee49e590b40ebd39"
 
 [[anchors]]
 path = ".codescout/tmp/onboarding-workspace-synthesis.md"
 hash = "452114d2cd0868ef8f26dbdfccf31ec9ec504d75ba7a9d31c58d4b18d9d62610"
-
-[[anchors]]
-path = "src/tools/markdown.rs"
-hash = "d4cd268f2aff6166f3d3b3c887ec3a6d4a7ce45cf701ec42623db1a8f6cc473d"
 
 [[anchors]]
 path = "src/tools/section_coverage.rs"
@@ -82,32 +78,16 @@ path = "src/tools/ast.rs"
 hash = "0afee7c68f25bbbc09c165e9452851f5fa67acd0ecc717f576c9faf9bf5e0cc8"
 
 [[anchors]]
-path = "src/prompts/server_instructions.md"
-hash = "9936214dd470e077b1a4c3609ff473a458f57c6f7ce0448c7c41d64994f543e9"
-
-[[anchors]]
-path = "src/prompts/onboarding_prompt.md"
-hash = "24ef55f393887ce1149d7d91fbaf418e3f9bebc03bde5d9ea3a3a10f1a0f4648"
-
-[[anchors]]
 path = "src/prompts/workspace_onboarding_prompt.md"
-hash = "9fdea0237e9c2157fb9ee95149a486c1c9a80bf9cf8e480dd192e1814da4f6b1"
-
-[[anchors]]
-path = "docs/ARCHITECTURE.md"
-hash = "a881603e0cf188f5f19d1570a90fdbb6e38592aaaa8ceb9a814cefa01e47e2b8"
+hash = "f18fd76056042d7a6d969648f676ac232363f974ac28852f3aa9df9219478112"
 
 [[anchors]]
 path = "src/lsp/manager.rs"
-hash = "3b24f6510fa8b9f3dbff8a2375c624dfc93bd6a806009057558efc578d720aa5"
-
-[[anchors]]
-path = "src/embed/index.rs"
-hash = "b294e7ecf74612d2a0e08a64522531a69ef26da4d42a3c5cf27c98d5c08c97ba"
+hash = "919338e88278526866cc67fa24c5c6d0a6505d9865238fa4ab07e399e9448165"
 
 [[anchors]]
 path = ".codescout/system-prompt.md"
-hash = "49870752300d0022f07b0c9fcef54b3949af684c4181c3c1e01a5dd4c34e4bbd"
+hash = "12afd23cbc5401965d537d37e6d78aaf68588ced2bd7e664d2948c19a200c5ce"
 
 [[anchors]]
 path = "src/memory/classify.rs"
@@ -115,8 +95,4 @@ hash = "30ff0aa1b4aa14154992e63220a0a03ad18894c3c6931324377def53676877bf"
 
 [[anchors]]
 path = "src/tools/library.rs"
-hash = "fbec651f5a24cfd5526fcdcfb3964eb418b72ce6b40d1a74a642c181e179b145"
-
-[[anchors]]
-path = "src/tools/memory.rs"
-hash = "7bfd1879ecd09ef5c549c3161dbed9bced3bd3f68f8b8cb5854cca49680b179a"
+hash = "e9585c09054a951c537bb082b42f547a65387abd3c714569b3d424a8a1e7dd8c"

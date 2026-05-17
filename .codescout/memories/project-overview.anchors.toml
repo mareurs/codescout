@@ -3,16 +3,16 @@
 
 [[anchors]]
 path = "src/main.rs"
-hash = "57d08166a33557174579c904acb7c9fa51b40a833ac20269acc71c56b7e16cde"
+hash = "7d23590b66b1fab7d19757008786962e3cb10b3370aef8dc1dbef20ce806fef1"
 
 [[anchors]]
 path = "src/lib.rs"
-hash = "d7fabcbfe4c95b8c9d583f5c8a3c35d3fad097eb6a7e9290a0a768c4093fc883"
+hash = "ad0e85f7250eb474a849509291466e669f26eef3656e4b76f918d9ca449c763a"
 
 [[anchors]]
 path = "Cargo.toml"
-hash = "c92567de78888ddf9dc3e3f5e583d92d2bce1a4f7980225be0013dbb5226afd4"
+hash = "6045b4b9c23cd03abbdc69ed601a0c98825e6c8cc0a9831ae72af65964f332a0"
 
 [[anchors]]
 path = ".codescout/project.toml"
-hash = "d1093e6b2d7d7598663034ee8d5e59378fd5d60e92ebe7def7b5cf93ee5ee382"
+hash = "a7d11e017d074be1ef559c01672fc8fec7c28cb38c29b2a252691b0fb6c2292f"
