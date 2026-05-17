@@ -652,3 +652,21 @@ fn parse_rejects_non_integer_bracket() {
     let err = parse_segments_v2("$.a[abc]").unwrap_err();
     assert!(err.to_string().contains("[abc]"));
 }
+
+#[test]
+fn parse_rejects_negative_zero_slice() {
+    let err = parse_segments_v2("$.a[-0:]").unwrap_err();
+    assert!(err.to_string().contains("[-0:]"), "got: {}", err);
+    assert!(err.to_string().contains("[0]"), "got: {}", err);
+}
+
+#[test]
+fn parse_rejects_positive_sign() {
+    let err = parse_segments_v2("$.a[+1]").unwrap_err();
+    assert!(err.to_string().contains("[+1]"), "got: {}", err);
+    assert!(
+        err.to_string().contains("unsupported json_path segment"),
+        "got: {}",
+        err
+    );
+}

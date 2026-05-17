@@ -18,7 +18,6 @@
 tests/fixtures/*/.codescout/
 /.codescout/workspace.toml
 # memories/, projects/*/memories/, and system-prompt.md are intentionally tracked
-/docs/observations.md
 /scripts/node_modules/
 /scripts/package-lock.json
 .codescout/private-memories/

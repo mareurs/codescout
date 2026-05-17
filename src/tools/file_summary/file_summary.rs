@@ -599,7 +599,7 @@ fn parse_bracket(inner: &str) -> Result<Segment, RecoverableError> {
 #[allow(dead_code)]
 fn unsupported_bracket(s: &str) -> RecoverableError {
     RecoverableError::with_hint(
-        format!("unsupported json_path bracket near '{}'", s),
+        format!("unsupported json_path segment near '{}'", s),
         "Supported forms: '.key', '[N]', '[-N]', '[-N:]'.",
     )
 }
