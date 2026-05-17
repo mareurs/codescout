@@ -8,7 +8,6 @@
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
-use std::collections::HashMap;
 
 #[derive(Debug)]
 pub struct Frontmatter {
@@ -59,7 +58,7 @@ pub fn extract_frontmatter(content: &str) -> Result<Option<Frontmatter>> {
 ///   - Object → rejected (this module is flat-only).
 pub fn apply_ops(
     block: &[String],
-    set: &HashMap<String, Value>,
+    set: &serde_json::Map<String, Value>,
     delete: &[String],
 ) -> Result<Vec<String>> {
     // Preserve order; flag which keys we mutated so we can append the rest.
@@ -80,12 +79,12 @@ pub fn apply_ops(
             _ => out.push(line.clone()),
         }
     }
-    // Append any set keys that didn't already exist.
+    // Append any set keys that didn't already exist, in caller order
+    // (serde_json::Map preserves insertion order via preserve_order feature).
     for (key, value) in set {
         if applied.contains(key.as_str()) {
             continue;
         }
-        // Validate key shape — no whitespace, no leading punctuation.
         if key.is_empty() || key.chars().any(|c| c.is_whitespace() || c == ':') {
             bail!(
                 "invalid frontmatter key '{}' — must be non-empty with no whitespace or colons",
@@ -229,7 +228,7 @@ mod tests {
             "opened: 2026-04-24".to_string(),
             "closed:".to_string(),
         ];
-        let mut set = HashMap::new();
+        let mut set = serde_json::Map::new();
         set.insert("status".to_string(), json!("fixed"));
         set.insert("closed".to_string(), json!("2026-05-17"));
         let out = apply_ops(&block, &set, &[]).unwrap();
@@ -246,10 +245,32 @@ mod tests {
     #[test]
     fn set_appends_new_key_at_end() {
         let block = vec!["status: open".to_string()];
-        let mut set = HashMap::new();
+        let mut set = serde_json::Map::new();
         set.insert("owner".to_string(), json!("marius"));
         let out = apply_ops(&block, &set, &[]).unwrap();
         assert_eq!(out, vec!["status: open", "owner: marius"]);
+    }
+
+    #[test]
+    fn bootstrap_emits_keys_in_caller_order() {
+        // Regression for the HashMap iteration-order non-determinism bug
+        // (docs/issues/2026-05-18-frontmatter-bootstrap-key-order-nondeterminism.md).
+        // The bootstrap path must emit keys in the order the caller inserted
+        // them — guaranteed by serde_json::Map's preserve_order feature.
+        let block: Vec<String> = vec![];
+        let mut forward = serde_json::Map::new();
+        forward.insert("alpha".to_string(), json!("1"));
+        forward.insert("bravo".to_string(), json!("2"));
+        forward.insert("charlie".to_string(), json!("3"));
+        let out_f = apply_ops(&block, &forward, &[]).unwrap();
+        assert_eq!(out_f, vec!["alpha: 1", "bravo: 2", "charlie: 3"]);
+
+        let mut reverse = serde_json::Map::new();
+        reverse.insert("charlie".to_string(), json!("3"));
+        reverse.insert("bravo".to_string(), json!("2"));
+        reverse.insert("alpha".to_string(), json!("1"));
+        let out_r = apply_ops(&block, &reverse, &[]).unwrap();
+        assert_eq!(out_r, vec!["charlie: 3", "bravo: 2", "alpha: 1"]);
     }
 
     #[test]
@@ -259,21 +280,26 @@ mod tests {
             "legacy: yes".to_string(),
             "severity: low".to_string(),
         ];
-        let out = apply_ops(&block, &HashMap::new(), &["legacy".to_string()]).unwrap();
+        let out = apply_ops(&block, &serde_json::Map::new(), &["legacy".to_string()]).unwrap();
         assert_eq!(out, vec!["status: open", "severity: low"]);
     }
 
     #[test]
     fn delete_of_missing_key_is_silent_idempotent() {
         let block = vec!["status: open".to_string()];
-        let out = apply_ops(&block, &HashMap::new(), &["nonexistent".to_string()]).unwrap();
+        let out = apply_ops(
+            &block,
+            &serde_json::Map::new(),
+            &["nonexistent".to_string()],
+        )
+        .unwrap();
         assert_eq!(out, vec!["status: open"]);
     }
 
     #[test]
     fn array_values_serialize_inline() {
         let block: Vec<String> = vec![];
-        let mut set = HashMap::new();
+        let mut set = serde_json::Map::new();
         set.insert("tags".to_string(), json!(["lsp", "cold-start"]));
         let out = apply_ops(&block, &set, &[]).unwrap();
         assert_eq!(out, vec!["tags: [\"lsp\", \"cold-start\"]"]);
@@ -282,7 +308,7 @@ mod tests {
     #[test]
     fn nested_object_value_errors() {
         let block: Vec<String> = vec![];
-        let mut set = HashMap::new();
+        let mut set = serde_json::Map::new();
         set.insert("foo".to_string(), json!({"a": 1}));
         let err = apply_ops(&block, &set, &[]).unwrap_err().to_string();
         assert!(err.contains("flat-only"), "got: {err}");
@@ -297,7 +323,7 @@ mod tests {
             "# review fields".to_string(),
             "owner: marius".to_string(),
         ];
-        let mut set = HashMap::new();
+        let mut set = serde_json::Map::new();
         set.insert("status".to_string(), json!("fixed"));
         let out = apply_ops(&block, &set, &[]).unwrap();
         assert_eq!(
@@ -315,11 +341,10 @@ mod tests {
     #[test]
     fn reserved_literal_strings_get_quoted() {
         let block: Vec<String> = vec![];
-        let mut set = HashMap::new();
+        let mut set = serde_json::Map::new();
         set.insert("a".to_string(), json!("true"));
         set.insert("b".to_string(), json!("null"));
         let out = apply_ops(&block, &set, &[]).unwrap();
-        // HashMap iteration order is unstable — check membership not position.
         assert!(out.contains(&"a: \"true\"".to_string()));
         assert!(out.contains(&"b: \"null\"".to_string()));
     }
@@ -327,7 +352,7 @@ mod tests {
     #[test]
     fn strings_with_colons_get_quoted() {
         let block: Vec<String> = vec![];
-        let mut set = HashMap::new();
+        let mut set = serde_json::Map::new();
         set.insert("note".to_string(), json!("see: BUG-049"));
         let out = apply_ops(&block, &set, &[]).unwrap();
         assert_eq!(out, vec!["note: \"see: BUG-049\""]);
@@ -336,7 +361,7 @@ mod tests {
     #[test]
     fn invalid_key_rejected() {
         let block: Vec<String> = vec![];
-        let mut set = HashMap::new();
+        let mut set = serde_json::Map::new();
         set.insert("has space".to_string(), json!("v"));
         let err = apply_ops(&block, &set, &[]).unwrap_err().to_string();
         assert!(err.contains("invalid frontmatter key"), "got: {err}");

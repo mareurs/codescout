@@ -316,10 +316,10 @@ pub(super) fn apply_frontmatter_mutation(content: &str, param: &Value) -> Result
         )
     })?;
 
-    let set: std::collections::HashMap<String, Value> = obj
+    let set: serde_json::Map<String, Value> = obj
         .get("set")
         .and_then(|v| v.as_object())
-        .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        .cloned()
         .unwrap_or_default();
     let delete: Vec<String> = obj
         .get("delete")

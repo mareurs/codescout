@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-05-18
-closed:
+closed: 2026-05-18
 severity: low
 owner: marius
 related: [src/tools/markdown/edit_markdown.rs, src/tools/markdown/frontmatter.rs]
@@ -99,30 +99,44 @@ For the bootstrap path, the existing block is `&[]`, so every key is
 
 ## Fix
 
-Replace `std::collections::HashMap<String, Value>` with
-`indexmap::IndexMap<String, Value>` (insertion-ordered) in
-`apply_frontmatter_mutation` AND in `apply_ops`. Update the signature of
-`apply_ops` to accept `&IndexMap<String, Value>` (or `&dyn AsRef<...>`
-for less coupling). The conversion at the obj-parse site preserves
-serde_json's insertion order, so the bootstrap and in-place paths both
-emit keys in the order the caller wrote them.
 
-Alternative (smaller diff): keep `HashMap` but sort keys alphabetically
-before emitting in `apply_ops`. Sacrifices caller-intended order for
-determinism. Less ergonomic for human readers.
+Approach: change `apply_ops` to take `&serde_json::Map<String, Value>`
+instead of `&HashMap<String, Value>`. serde_json's `preserve_order`
+feature is already enabled at `Cargo.toml:17,56`, so `as_object()`
+returns an order-preserving map. Zero new dependency.
 
-Recommendation: `IndexMap` — `indexmap` is already a likely transitive
-dep (used by `serde_json` preserve_order). Confirm via `cargo tree`
-before adding to Cargo.toml.
+**Changes:**
+- `src/tools/markdown/frontmatter.rs:60` — signature updated.
+- `src/tools/markdown/edit_markdown.rs:316-320` — drop the
+  HashMap-collect, clone the `serde_json::Map` directly.
+- Test sites (9 occurrences in `frontmatter.rs`) — `HashMap::new()`
+  → `serde_json::Map::new()`. Same insert API.
+- `use std::collections::HashMap;` dropped from `frontmatter.rs:11`
+  (no longer referenced).
+- Stale comment `// HashMap iteration order is unstable — check
+  membership not position` removed from
+  `reserved_literal_strings_get_quoted` test.
+
+**Tests added:**
+- `bootstrap_emits_keys_in_caller_order` at
+  `src/tools/markdown/frontmatter.rs:253` — asserts the same keys in
+  reversed insertion order produce reversed output, locking in the
+  order-preservation contract.
+
+**Verification:**
+- 36 frontmatter tests pass (previously 35 + the new regression).
+- Full `cargo test --lib` — 2387 passed, 0 failed, 7 ignored.
+- `cargo clippy --lib --tests` clean.
+
+**Commit:** `<tba>` on `experiments`.
 
 ## Tests added
 
-`N/A — bug only filed.` Future fix should add:
 
-- `frontmatter_bootstrap_emits_keys_in_caller_order` — call with `set:
-  {a, b, c}` and `set: {c, b, a}` separately, assert each preserves the
-  written-in order. Will fail with the current HashMap implementation
-  on at least some HashMap seeds.
+`bootstrap_emits_keys_in_caller_order` at
+`src/tools/markdown/frontmatter.rs:253`. Asserts that two
+serde_json::Map calls with reversed key insertion order produce
+reversed output — locks in the preserve_order contract.
 
 ## Workarounds
 
