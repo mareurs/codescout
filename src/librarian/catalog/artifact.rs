@@ -24,6 +24,23 @@ pub struct ArtifactRow {
 }
 
 pub fn upsert(cat: &Catalog, row: &ArtifactRow) -> Result<()> {
+    // F-6a fix (bug-tracker #5): the artifact schema declares
+    // `abs_path TEXT NOT NULL UNIQUE`, but the INSERT below only handles
+    // `ON CONFLICT(id)`. A row at the same abs_path with a *different* id
+    // (e.g. caused by an id-algorithm change across catalog versions, or
+    // path normalization drift between walks) would trigger an unhandled
+    // UNIQUE constraint failure.
+    //
+    // The safe pre-clean: remove any row whose abs_path matches but id
+    // differs. The natural identity of a file in this catalog is its
+    // abs_path; the id is a derived hash. When the two diverge, the
+    // abs_path wins (file content survives across id-algorithm changes;
+    // the old id-based row is stale).
+    cat.conn.execute(
+        "DELETE FROM artifact WHERE abs_path = ?1 AND id != ?2",
+        params![row.abs_path.to_string_lossy().as_ref(), row.id],
+    )?;
+
     cat.conn.execute(
         "INSERT INTO artifact (id, abs_path, kind, status, title, owners, tags,
             topic, time_scope, source, created_at, updated_at, file_mtime, file_sha256, confidence)

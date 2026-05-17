@@ -304,6 +304,14 @@ fn archetype_goal() -> Value {
             "progress_log": [
                 {"date": "2026-05-12", "note": "Reranker tuning landed. P@5 0.145 → 0.193.", "evidence_commits": ["abc1234"], "evidence_artifacts": ["a1b2c3d4"]},
                 {"date": "2026-05-14", "note": "chat-eval-v3 stable. Need final 7pt P@5.",  "evidence_commits": [],          "evidence_artifacts": ["d4e5f6a7"]}
+            ],
+            "gather_from": [
+                {
+                    "source": "git_log",
+                    "since": "last_refreshed_at",
+                    "limit": 30,
+                    "grep": "<path or component pattern named in your criterion>"
+                }
             ]
         },
         "params_schema_example": {

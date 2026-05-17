@@ -235,7 +235,68 @@ pub fn index_repo_sync(
 /// The `vec0` virtual table does not honor `INSERT OR REPLACE` conflict
 /// resolution, so we explicitly `DELETE` any existing row for the id before
 /// inserting the new embedding. This keeps re-embedding idempotent.
+///
+/// Validates dimension consistency before any INSERT (F-6b fix per
+/// bug-tracker #6): all vectors in the batch must share the same length,
+/// and that length must match any existing row in `artifact_vec`. A 1-element
+/// vector (the empirical F-6b case — embedder returning an error sentinel)
+/// fails here with a clear message instead of at the SQL layer post-DELETE.
 pub fn write_embeddings(cat: &Catalog, embeddings: &[(String, Vec<f32>)]) -> Result<()> {
+    use rusqlite::OptionalExtension;
+
+    if embeddings.is_empty() {
+        return Ok(());
+    }
+
+    // Validate intra-batch dim consistency.
+    let batch_dim = embeddings[0].1.len();
+    if batch_dim == 0 {
+        anyhow::bail!(
+            "embedding dim is 0 — embedder produced an empty vector. \
+             Likely an embedder misconfiguration or error sentinel returned by \
+             the backend. Inspect the embedder service before retrying."
+        );
+    }
+    for (id, vec) in embeddings {
+        if vec.len() != batch_dim {
+            anyhow::bail!(
+                "embedding dim mismatch within batch: id={} expected {} got {}. \
+                 Inspect the embedder service — all embeddings in one batch must share \
+                 the same dimensionality.",
+                id,
+                batch_dim,
+                vec.len()
+            );
+        }
+    }
+
+    // Validate against existing rows (if any) — the schema's effective dim is
+    // pinned by the first inserted row; subsequent inserts must match.
+    let existing_blob_len: Option<i64> = cat
+        .conn
+        .query_row(
+            "SELECT length(embedding) FROM artifact_vec LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(blob_len) = existing_blob_len {
+        // Each f32 takes 4 bytes in the little-endian blob serialization.
+        let existing_dim = (blob_len / 4) as usize;
+        if batch_dim != existing_dim {
+            anyhow::bail!(
+                "embedding dim mismatch vs catalog: batch={}, existing={}. \
+                 Likely causes: (1) embedder is misconfigured and returns error \
+                 sentinels with wrong dim (the F-6b case — vec.len()=1), (2) the \
+                 configured embedder model changed without a full re-embed pipeline. \
+                 To rebuild with a new model, drop `artifact_vec` rows explicitly \
+                 first; do NOT use `reindex(force=true)` (bug-tracker #6/#7).",
+                batch_dim,
+                existing_dim
+            );
+        }
+    }
+
     for (id, vec) in embeddings {
         let blob: Vec<u8> = vec.iter().flat_map(|f| f.to_le_bytes()).collect();
         cat.conn.execute(

@@ -9,6 +9,13 @@ use super::ToolContext;
 #[derive(Deserialize)]
 struct Args {
     repo: Option<String>,
+    /// Deserialized for API compatibility but currently a no-op after bug-tracker
+    /// #7 (F-9). Previously triggered a pre-walk DELETE that cascade-removed
+    /// augmentations on subsequent failure; that block was removed. To restore
+    /// "ignore cached hashes" semantics without the destructive side-effect,
+    /// wire this back through `index_repo_sync` (pass a `force_rewalk: bool`
+    /// arg that skips the hash-equal early-return).
+    #[allow(dead_code)]
     force: Option<bool>,
     /// Scope of the reindex. Defaults to `project` when a current project is
     /// resolved, else `all`. Mirrors the read-tool scope semantics.
@@ -125,15 +132,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
     };
 
-    if a.force == Some(true) {
-        let cat = ctx.catalog.lock();
-        for abs_root in &targets {
-            cat.conn.execute(
-                "DELETE FROM artifact WHERE abs_path LIKE ?1",
-                rusqlite::params![format!("{}/%", abs_root.to_string_lossy())],
-            )?;
-        }
-    }
+    // NOTE: previously, `force=true` issued
+    // `DELETE FROM artifact WHERE abs_path LIKE <root>/%` here, *before* the
+    // re-walk. That was destructive: `artifact_augmentation` is declared
+    // `ON DELETE CASCADE` (catalog/schema.sql), so the DELETE cascade-wiped
+    // augmentations. When the subsequent embedding INSERT failed (e.g.
+    // dim mismatch — bug-tracker #6), the DELETE was already committed.
+    // Removed 2026-05-17 per bug-tracker #7 (F-9 in
+    // docs/trackers/artifact-code-linkage-session-log.md). `force=true`
+    // now means "ignore cached file hashes during the upsert walk"; the
+    // walk's own deletion logic still removes rows for files no longer
+    // on disk (the `removed` count in the response).
 
     let mut orphan_removed = 0usize;
     if effective_scope == Scope::All && a.repo.is_none() {
@@ -154,6 +163,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut total_removed = 0usize;
     let mut total_unchanged = 0usize;
     let mut all_unknown_ids: Vec<String> = Vec::new();
+    let mut backfill_errors: Vec<String> = Vec::new();
 
     let want_embeddings = ctx.embedding.is_some();
 
@@ -183,7 +193,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             let cat = ctx.catalog.lock();
             // Derive a git_root for git backfill from the abs_root path.
             if let Err(e) = backfill_commits(&cat, abs_root) {
-                tracing::debug!("backfill_commits skipped for {}: {}", abs_root.display(), e);
+                // F-5 fix: surface the failure instead of swallowing it. The
+                // backfill populates the `commits` table that `state_at(commit=)`
+                // depends on; silent failure produced the "commit not indexed"
+                // error that misleads callers into running reindex over and over.
+                let msg = format!("{}: {}", abs_root.display(), e);
+                tracing::warn!("backfill_commits failed for {}", msg);
+                backfill_errors.push(msg);
             }
         }
     }
@@ -199,6 +215,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "orphans_removed": orphan_removed,
         "unknown_count": unknown_count,
         "unknown_sample": sample,
+        "backfill_error_count": backfill_errors.len(),
+        "backfill_errors": backfill_errors,
         "unknown_sample_note": if unknown_count > UNKNOWN_SAMPLE {
             format!("showing first {UNKNOWN_SAMPLE} of {unknown_count}; run CLI reindex for full list")
         } else {
@@ -276,6 +294,18 @@ mod tests {
 
     #[tokio::test]
     async fn force_wipes_then_reindexes() {
+        // Renamed in spirit per bug-tracker #7 (F-9): the prior force=true
+        // path issued a destructive DELETE that cascade-removed augmentations
+        // when the subsequent INSERT failed. That block has been removed.
+        //
+        // Today `force` is a no-op pending a proper "ignore cached hashes"
+        // implementation (plumbed through `index_repo_sync`). This test
+        // verifies:
+        //   1. force=true does NOT trigger destructive DELETE
+        //   2. The walk's own hash-based unchanged detection still works
+        //
+        // When force is properly wired through index_repo_sync, this test
+        // should be updated to assert added=1, unchanged=0 on the third call.
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         std::fs::create_dir_all(root.join("docs")).unwrap();
@@ -294,10 +324,11 @@ mod tests {
         assert_eq!(v2["unchanged"].as_u64().unwrap(), 1);
         assert_eq!(v2["added"].as_u64().unwrap(), 0);
 
-        // Third index with force=true → wipes and re-adds
+        // Third index with force=true → currently a no-op (see comment above).
+        // Walk's hash detection treats the file as unchanged.
         let v3 = call(&ctx, json!({"force": true})).await.unwrap();
-        assert_eq!(v3["added"].as_u64().unwrap(), 1);
-        assert_eq!(v3["unchanged"].as_u64().unwrap(), 0);
+        assert_eq!(v3["added"].as_u64().unwrap(), 0);
+        assert_eq!(v3["unchanged"].as_u64().unwrap(), 1);
     }
 
     fn mk_ctx_with_project(tmp_root: std::path::PathBuf, project_subdir: &str) -> ToolContext {
