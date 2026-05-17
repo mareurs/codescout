@@ -1,7 +1,7 @@
 ---
-status: mitigated
+status: fixed
 opened: 2026-05-01
-closed:
+closed: 2026-05-17
 severity: low
 owner: marius
 related: []
@@ -12,8 +12,7 @@ tags: ["call_graph", "lsp", "tree-sitter", "language-coverage"]
 
 ## Summary
 
-`call_graph(direction="callees")` originally required `prepare_call_hierarchy` LSP support — every language without it returned `RecoverableError`. Resolved 2026-05-15 (depth 1) and 2026-05-16 (depth ≥ 2) for Rust, Python, TypeScript/JavaScript (incl. TSX/JSX), Kotlin, Java via `resolve_callees_via_ts` and `CachedResolver::lookup_pos_via_ts_in_seed_files`. **Phase B residual:** workspace-wide search when the definition lives in a sibling file is not yet implemented — the same-file scan returns `None` for cross-file identifiers without LSP, BFS continues silently, edges are dropped. The original entry was a "Known design limitation (not bugs)"; the residual keeps it open as a mitigated entry rather than fixed.
-
+`call_graph(direction="callees")` originally required `prepare_call_hierarchy` LSP support — every language without it returned `RecoverableError`. Resolved 2026-05-15 (depth 1) and 2026-05-16 (depth ≥ 2) for Rust, Python, TypeScript/JavaScript (incl. TSX/JSX), Kotlin, Java via `resolve_callees_via_ts` and `CachedResolver::lookup_pos_via_ts_in_seed_files`. Phase B (workspace-wide cross-file lookup) shipped 2026-05-17 via `CachedResolver::lookup_pos_via_ts_workspace` — bounded `ignore::WalkBuilder` over the project root, language-filtered tree-sitter parse, first matching top-level / impl-method def wins. Negative cache (`not_found`) ensures the walk runs at most once per missing symbol per resolver lifetime.
 ## Symptom (Effect)
 
 Pre-2026-05-15: `call_graph(direction="callees")` on any non-LSP language returned a `RecoverableError` with the "activate-an-LSP" hint.
@@ -51,14 +50,14 @@ Eval case `C-11` (cycle case, depth = 5) was the deterministic anchor across rou
 
 **Depth 1 (2026-05-15):** `resolve_callees_via_ts` walks the AST descendants of the enclosing function node (found via `enclosing_function_node`), collects every call-kind node from `call_kinds_for(language_id)`, and extracts the callee identifier with per-grammar rules (`callee_identifier`). One `Edge` is emitted per call site with `EdgeSource::Ts`.
 
-**Depth ≥ 2 (2026-05-16):** `CachedResolver::lookup_pos` now falls back to `lookup_pos_via_ts_in_seed_files`, which reuses `extract_symbols_from_source` to walk the seed file(s) for a top-level / impl-method definition whose name matches the BFS-discovered identifier. Scope is intentionally narrow: only files already present in `positions` are searched. The nav-eval case `C-11` grades CORRECT in round 1 of 2026-05-16.
+**Depth ≥ 2 same-file (2026-05-16):** `CachedResolver::lookup_pos` falls back to `lookup_pos_via_ts_in_seed_files`, which reuses `extract_symbols_from_source` to walk the seed file(s) for a top-level / impl-method definition whose name matches the BFS-discovered identifier. Scope intentionally narrow: only files already present in `positions` are searched. The nav-eval case `C-11` grades CORRECT in round 1 of 2026-05-16.
 
-**Phase B (not yet implemented):** workspace-wide search when the definition lives in a sibling file. Today the same-file scan still returns `None` for cross-file identifiers without LSP; BFS then continues for the rest of the graph and the edge is silently dropped. A future fix could walk the project's source tree (bounded), parse each candidate file with tree-sitter, and match against the identifier — feasible but expensive without an index.
-
+**Phase B cross-file (2026-05-17):** `CachedResolver::lookup_pos_via_ts_workspace` walks `self.root` with `ignore::WalkBuilder` (gitignore-aware, hidden-aware), filters by `detect_language(path) == self.lang`, parses with `extract_symbols_from_source`, and returns the first match. Hard cap `MAX_WORKSPACE_FILES_SCAN = 5000` keeps a monorepo from stalling the call. The resolver also carries a `not_found: Mutex<HashSet<String>>` negative cache so BFS doesn't re-scan the workspace for the same unresolvable identifier on every hop — each missing symbol pays the walk cost at most once per `call_graph` invocation. Regression test: `lookup_pos_falls_back_to_ts_workspace_when_def_in_sibling_file` exercises a two-file fixture where `b` lives in `sibling.rs` and is discovered from `caller.rs` with the LSP returning empty for `workspace_symbols`.
 ## Tests added
 
-*N/A — migrated from compact form; the original entry tracked eval grade rather than naming specific unit tests. Eval anchor: `C-11`.*
-
+- `lookup_pos_falls_back_to_ts_same_file_when_ws_symbols_empty` — Phase A.
+- `lookup_pos_falls_back_to_ts_workspace_when_def_in_sibling_file` — Phase B (also asserts the negative-cache invariant).
+- Eval anchor: `C-11`.
 ## Workarounds
 
 - For unsupported languages: activate a language server for the file.
@@ -66,8 +65,7 @@ Eval case `C-11` (cycle case, depth = 5) was the deterministic anchor across rou
 
 ## Resume
 
-If the Phase B residual blocks a real session: implement bounded workspace-wide tree-sitter search in `lookup_pos_via_ts_in_seed_files`. Concrete next action: open `src/tools/symbol/call_graph/mod.rs`, locate `CachedResolver::lookup_pos`, plan a bounded BFS that consults `extract_symbols_from_source` on each candidate file. Cap fan-out by file count; cache results within the resolver lifetime.
-
+If the 5000-file cap proves too tight for a real monorepo: revisit `MAX_WORKSPACE_FILES_SCAN` in `src/tools/symbol/call_graph/mod.rs::CachedResolver::lookup_pos_via_ts_workspace`. A future improvement could query codescout's semantic index (when available) for an O(1) symbol-name lookup, falling back to the walk only when the index is unbuilt or cold. Today the walk is fast enough on typical projects (< 10k files) that the index integration is YAGNI.
 ## References
 
 - Originally tracked as **LIMIT-001** in `docs/TODO-tool-misbehaviors.md` (deprecated 2026-05-09; superseded by per-file system).

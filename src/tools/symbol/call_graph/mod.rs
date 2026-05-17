@@ -26,22 +26,39 @@ struct CachedResolver {
     project_id: String,
     client: Arc<dyn crate::lsp::ops::LspClientOps>,
     lang: String,
+    /// Project root for the workspace-wide tree-sitter fallback (Phase B).
+    root: PathBuf,
     /// sym_name → (definition path, line, col)
     positions: Mutex<HashMap<String, (PathBuf, u32, u32)>>,
+    /// Symbols whose definition could not be resolved via LSP or any
+    /// tree-sitter fallback. Cached so BFS doesn't re-scan the workspace
+    /// for the same unresolvable identifier on every hop.
+    not_found: Mutex<std::collections::HashSet<String>>,
 }
 
 impl CachedResolver {
     /// Look up the definition location of `symbol`.
     ///
-    /// Checks the positions map first; on a miss, queries `workspace_symbols`
-    /// to discover it. As a final fallback (LIMIT-001 Phase A), parses the
-    /// seed file(s) already in `positions` with tree-sitter and looks for a
-    /// top-level (or impl-method) definition whose name matches `symbol`.
-    /// Returns `None` when the symbol cannot be located.
+    /// Resolution order:
+    /// 1. Positions map (cache from earlier hops or pre-seeded callsite).
+    /// 2. LSP `workspace_symbols`.
+    /// 3. Tree-sitter scan of files already in `positions` (Phase A —
+    ///    `lookup_pos_via_ts_in_seed_files`).
+    /// 4. Tree-sitter scan of project source files matching `lang`
+    ///    (Phase B — `lookup_pos_via_ts_workspace`), bounded by file count.
+    ///
+    /// Returns `None` when the symbol cannot be located; the miss is
+    /// remembered in `not_found` so BFS doesn't re-scan the workspace for
+    /// the same identifier on subsequent hops.
     async fn lookup_pos(&self, symbol: &str) -> Option<(PathBuf, u32, u32)> {
         // Fast path: already known
         if let Some(pos) = self.positions.lock().unwrap().get(symbol).cloned() {
             return Some(pos);
+        }
+
+        // Negative cache: already tried and failed
+        if self.not_found.lock().unwrap().contains(symbol) {
+            return None;
         }
 
         // Slow path: ask the LSP
@@ -59,10 +76,9 @@ impl CachedResolver {
             }
         }
 
-        // Final fallback (LIMIT-001 Phase A): tree-sitter scan of the seed
-        // file(s) already in `positions`. This rescues depth-≥2 BFS in
-        // LSP-down or LSP-unaware scenarios (e.g. tree-sitter-emitted callee
-        // edges with bare identifiers).
+        // Phase A fallback: tree-sitter scan of the seed file(s) already in
+        // `positions`. Rescues depth-≥2 BFS in LSP-down scenarios when the
+        // callee shares a file with a known caller.
         if let Some(pos) = self.lookup_pos_via_ts_in_seed_files(symbol) {
             self.positions
                 .lock()
@@ -71,6 +87,19 @@ impl CachedResolver {
             return Some(pos);
         }
 
+        // Phase B fallback: bounded tree-sitter walk of the project root.
+        // Picks up cross-file definitions when LSP is down. The not_found
+        // cache below ensures we pay the walk cost at most once per missing
+        // symbol per resolver lifetime.
+        if let Some(pos) = self.lookup_pos_via_ts_workspace(symbol) {
+            self.positions
+                .lock()
+                .unwrap()
+                .insert(symbol.to_string(), pos.clone());
+            return Some(pos);
+        }
+
+        self.not_found.lock().unwrap().insert(symbol.to_string());
         None
     }
 
@@ -109,6 +138,61 @@ impl CachedResolver {
                     Ok(s) => s,
                     Err(_) => continue,
                 };
+            if let Some(found) = find_named_def(&syms, symbol) {
+                return Some((found.file.clone(), found.start_line, found.start_col));
+            }
+        }
+        None
+    }
+
+    /// Phase B fallback: bounded workspace walk.
+    ///
+    /// Scans `self.root` for source files matching `self.lang`, parses each
+    /// with tree-sitter (`extract_symbols_from_source`), and returns the first
+    /// top-level / impl-method definition whose name matches `symbol`.
+    ///
+    /// Caps file count at [`MAX_WORKSPACE_FILES_SCAN`] so a monorepo with
+    /// 100k source files doesn't burn the BFS budget on one missing symbol.
+    /// The caller's `not_found` cache ensures this walk runs at most once per
+    /// missing symbol per resolver lifetime.
+    fn lookup_pos_via_ts_workspace(&self, symbol: &str) -> Option<(PathBuf, u32, u32)> {
+        /// Hard cap on files walked before giving up. Set so a typical
+        /// project (1k–10k files) completes well under the MCP 60 s ceiling
+        /// while a monorepo stops short instead of stalling the call.
+        const MAX_WORKSPACE_FILES_SCAN: usize = 5_000;
+
+        let walker = ignore::WalkBuilder::new(&self.root)
+            .hidden(true)
+            .git_ignore(true)
+            .build();
+
+        let mut scanned = 0usize;
+        for entry in walker.flatten() {
+            if scanned >= MAX_WORKSPACE_FILES_SCAN {
+                break;
+            }
+            if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                continue;
+            }
+            let path = entry.path();
+            let Some(file_lang) = crate::ast::detect_language(path) else {
+                continue;
+            };
+            if file_lang != self.lang {
+                continue;
+            }
+            if crate::ast::get_ts_language(file_lang).is_none() {
+                continue;
+            }
+            scanned += 1;
+            let Ok(source) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            let Ok(syms) =
+                crate::ast::parser::extract_symbols_from_source(&source, Some(file_lang), path)
+            else {
+                continue;
+            };
             if let Some(found) = find_named_def(&syms, symbol) {
                 return Some((found.file.clone(), found.start_line, found.start_col));
             }
@@ -356,7 +440,9 @@ impl Tool for CallGraph {
                 project_id: project_id.clone(),
                 client: Arc::clone(&client),
                 lang: lang.clone(),
+                root: root.clone(),
                 positions: Mutex::new(positions),
+                not_found: Mutex::new(std::collections::HashSet::new()),
             };
 
             let result = bfs(&resolver, symbol, direction.clone(), cfg.clone()).await?;
@@ -586,7 +672,9 @@ mod tests {
             project_id: "test".to_string(),
             client: client_arc,
             lang: "rust".to_string(),
+            root: dir.path().to_path_buf(),
             positions: Mutex::new(positions),
+            not_found: Mutex::new(std::collections::HashSet::new()),
         };
 
         let pos = resolver.lookup_pos("b").await;
@@ -598,6 +686,66 @@ mod tests {
         assert_eq!(path, fixture);
         // `fn b()` is on the second line (0-indexed line 1).
         assert_eq!(line, 1, "expected line 1 for `fn b`");
+    }
+
+    /// LIMIT-001 Phase B: when LSP `workspace_symbols` is empty AND the
+    /// callee is defined in a sibling file, `lookup_pos` must fall back to a
+    /// bounded workspace tree-sitter walk to find it. Closes the cross-file
+    /// edge-drop residual called out in
+    /// `docs/issues/2026-05-01-call-graph-callees-ts-fallback.md`.
+    #[tokio::test]
+    async fn lookup_pos_falls_back_to_ts_workspace_when_def_in_sibling_file() {
+        // Two-file fixture: `a()` in caller.rs references `b()` defined in
+        // sibling.rs. BFS pre-seeds `a`; `b` must be discovered via the
+        // workspace walk.
+        let dir = tempfile::tempdir().unwrap();
+        let caller = dir.path().join("caller.rs");
+        let sibling = dir.path().join("sibling.rs");
+        std::fs::write(&caller, "fn a() { b(); }\n").unwrap();
+        std::fs::write(&sibling, "fn b() { /* lives here */ }\n").unwrap();
+
+        // Mock LSP returns empty for workspace_symbols.
+        let client = MockLspClient::new();
+        let client_arc: Arc<dyn crate::lsp::ops::LspClientOps> = Arc::new(client);
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::tools::symbol::call_edges::cache::apply_schema(&conn);
+
+        let mut positions: HashMap<String, (PathBuf, u32, u32)> = HashMap::new();
+        positions.insert("a".to_string(), (caller.clone(), 0, 3));
+
+        let resolver = CachedResolver {
+            conn: Arc::new(Mutex::new(conn)),
+            project_id: "test".to_string(),
+            client: client_arc,
+            lang: "rust".to_string(),
+            root: dir.path().to_path_buf(),
+            positions: Mutex::new(positions),
+            not_found: Mutex::new(std::collections::HashSet::new()),
+        };
+
+        let pos = resolver.lookup_pos("b").await;
+        assert!(
+            pos.is_some(),
+            "lookup_pos should walk the workspace and resolve `b` from sibling.rs"
+        );
+        let (path, line, _col) = pos.unwrap();
+        assert_eq!(path, sibling, "expected sibling.rs as the definition file");
+        assert_eq!(line, 0, "fn b is on the first line of sibling.rs");
+
+        // Negative-cache invariant: looking up a symbol that exists nowhere
+        // must cache the miss so a subsequent call short-circuits without
+        // re-walking the workspace.
+        let miss = resolver.lookup_pos("nonexistent_symbol_xyz").await;
+        assert!(miss.is_none());
+        assert!(
+            resolver
+                .not_found
+                .lock()
+                .unwrap()
+                .contains("nonexistent_symbol_xyz"),
+            "missing symbol must be recorded in the not_found cache"
+        );
     }
 } // mod tests
 
