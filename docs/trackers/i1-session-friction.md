@@ -63,7 +63,7 @@ say what to change.
 | F-11 | 2026-05-17 | med  | codescout-tool | promoted-to-bug-tracker | `grep` on `@tool_*` buffer false-negatives on a string present in the buffer (see bug-tracker.md #4) |
 | F-12 | 2026-05-17 | low  | plan-prose   | mitigated | T-12 plan payload sketch omitted required `note.text` field; event_create rejects silently if `let _ = ...await` swallows the error |
 | F-13 | 2026-05-17 | high | multi-agent  | mitigated | `git reset --soft HEAD~1` on stale HEAD during concurrent work blew away parallel agent's T-13 commit; recovered via reflog SHA |
-| F-14 | 2026-05-17 | med  | multi-agent  | open      | F-N namespace shared across concurrent sessions — parallel session's W-6 references "F-11" but their friction was renumbered to F-12 after mine landed first |
+| F-14 | 2026-05-17 | med  | multi-agent  | mitigated | F-N namespace shared across concurrent sessions — parallel session's W-6 references "F-11" but their friction was renumbered to F-12 after mine landed first |
 | F-15 | 2026-05-17 | high | codescout-tool | mitigated | `artifact_augment` schema description says `params` is "gather config"; actually it's the data params — calling `merge=false, params={}` wiped live tracker state (acceptance_signals, children, criterion, progress_log) |
 | F-16 | 2026-05-17 | med  | codescout-tool | fixed-verified | `artifact_augment(merge=false)` also overwrites `render_template` / `params_schema` / `append_mode` / `history_cap` with `excluded.*` in `augmentation::upsert`'s `ON CONFLICT DO UPDATE` — schema description (post-F-15) still doesn't warn callers; passing them as None silently wipes them |
 
@@ -939,7 +939,7 @@ Recovered by `git reset --soft d8b38f26` — quoting the explicit SHA, not a rel
 
 **Severity:** med — failure mode is silent: the broken reference reads plausibly until someone tries to follow it. Worse, the cost grows with cross-reference depth (W-N → F-N → "fixed by commit XYZ" chains break in cascade).
 
-**Status:** open — design gap, not just an editorial slip.
+**Status:** mitigated 2026-05-17 second session — manual editorial pass (workaround) shipped inline; the structural concern is promoted out of this friction log into `docs/trackers/multi-agent-concurrent-coordination.md` (status `scoping`), which groups F-13 + F-14 as two concretes of the "shared resource, no read-act transaction" fault line per the two-concretes-threshold Snow Lion OP-4 rule.
 
 **Fix idea (sketch — earns its keep after one more recurrence per Snow Lion two-concretes rule):**
 - **Cheap fix:** session-prefixed IDs, e.g. `S1-F-1`, `S2-F-1`. Decentralized, zero infra, immediately namespaced. Cost: longer IDs, prefix lookup needed when promoting to permanent docs.
