@@ -107,7 +107,7 @@ The default rule at `src/librarian/classify.rs:90-93`
 (`docs/issues/**/*.md → kind=tracker`) was kept as defense-in-depth for any
 future bug file that omits the field.
 
-**Commit:** `<tba>` on `experiments`.
+**Commit:** `2fb99e13` on `experiments`.
 
 ## Tests added
 
