@@ -64,6 +64,7 @@ say what to change.
 | F-12 | 2026-05-17 | low  | plan-prose   | mitigated | T-12 plan payload sketch omitted required `note.text` field; event_create rejects silently if `let _ = ...await` swallows the error |
 | F-13 | 2026-05-17 | high | multi-agent  | mitigated | `git reset --soft HEAD~1` on stale HEAD during concurrent work blew away parallel agent's T-13 commit; recovered via reflog SHA |
 | F-14 | 2026-05-17 | med  | multi-agent  | open      | F-N namespace shared across concurrent sessions — parallel session's W-6 references "F-11" but their friction was renumbered to F-12 after mine landed first |
+| F-15 | 2026-05-17 | high | codescout-tool | mitigated | `artifact_augment` schema description says `params` is "gather config"; actually it's the data params — calling `merge=false, params={}` wiped live tracker state (acceptance_signals, children, criterion, progress_log) |
 
 
 ## Wins Index
@@ -77,6 +78,8 @@ say what to change.
 | W-5 | 2026-05-17 | high   | Post-MCP-reload gather returned populated `deterministic_child_statuses` array (3/3 children deterministic) + new "3 items gathered from..." hint — DF-1 empirically verified, not just structurally fixed |
 | W-6 | 2026-05-17 | high   | Integration test for T-12 immediately caught F-12 (silent failure from swallowed event_create error) — `let _ = ...await` is dangerous without the test sandwiching it |
 | W-7 | 2026-05-17 | high   | Reflog scouted via `git reflog -10` after destructive op; T-13 commit blown away by stale `HEAD~1` reset was recovered by quoting the SHA directly, not relative ref |
+| W-8 | 2026-05-17 | high   | Single `artifact_refresh(action="gather")` call simultaneously verified T-3 (deterministic_child_statuses populated) + T-9 (refresh_meta with real delta `C-3 in-progress→done`) + DF-1 fix (context no longer `{}`) — multi-feature smoke test in one probe |
+| W-9 | 2026-05-17 | high   | T-12 gate_check note event payload matched amendment D11 spec byte-for-byte at first live observation — `tag/gate_passed/text/evidence/refresh_at` all present and shaped correctly without iteration |
 
 ## W-1 — F-8 caught before subagent dispatch via mandatory "log the friction first" discipline
 
@@ -331,6 +334,46 @@ cleanly.
 **Status:** validated — one data point, but high-severity counterfactual. Promote at next CLAUDE.md edit batch.
 
 ---
+
+
+## W-8 — Single gather call simultaneously verified 3 features (T-3 + T-9 + DF-1)
+
+**When:** Live verification of T-9..T-13 post-MCP-reload.
+
+**Pattern:** Call `artifact_refresh(action="gather", id=L1_goal_id)` once. In one response payload, read:
+- `context.deterministic_child_statuses` → confirms T-3 (Yak's gather-time child resolution) is wired
+- `context.refresh_meta` → confirms T-9 (Rust-owned refresh metadata) is computed and surfaced
+- `context` is non-empty object (not `{}`) → confirms DF-1 (the original "gather returns empty context" bug) is fixed end-to-end
+
+**Counterfactual:** Without this realization, would have written three separate verification probes (one per feature) and burned ~3× the round-trips. The gather endpoint is the natural integration point — every goal-tracker injection feature lands in `context`, so one call exposes all of them. Bonus: revealed F-15 (params wipe) by surfacing the absent params — which is *not* what the verification was looking for, but the smoke-test surface area caught it anyway.
+
+**Confirming data points:**
+- 1 gather call surfaced 3 features as observable JSON.
+- `children_status_delta` revealed staleness (`C-3 in-progress → done`) — proved kernel resolved fresh state.
+- Detected F-15 as a side-effect (params field empty in same payload).
+
+**Impact:** high — pattern for any future archetype kernel verification: hit the gather endpoint first, drill into the keys it adds to `context`.
+
+**Promote-when:** Reused on a second archetype (e.g., when failure_table or audit_issues grow their own kernel-time injection). At that point, document as "gather-as-integration-test" pattern in `docs/PROGRESSIVE_DISCOVERABILITY.md` or a new `docs/testing-archetypes.md`.
+
+---
+
+## W-9 — gate_check event payload matched D11 spec byte-for-byte at first observation
+
+**When:** T-10/T-12 live verification (gate-pass path).
+
+**Pattern:** Amendment D11 (`docs/superpowers/specs/2026-05-17-goal-tracker-amendment.md`) specified the exact gate_check note event shape: `{kind: "note", payload: {tag: "gate_check", gate_passed: bool, text: string, evidence: {children_count, children_done, signal_count_total, signal_count_met}, refresh_at: iso8601}}`. The T-12 implementer subagent (and the controller's fix in `augment.rs::ArtifactAugment::call`) had to derive the JSON shape from the amendment doc + the integration test sketch.
+
+**Counterfactual:** Spec-impl drift is the most expensive late-binding bug in goal-tracker. If the payload had been missing a field or used a different key (`passed` vs `gate_passed`, or omitted `refresh_at`), no integration test would have flagged it — the note event just gets stored as-is, and consumers reading the timeline would silently get wrong/missing data. Catching this at first observation (not at "weeks-later consumer breakage") is high-impact.
+
+**Confirming data points:**
+- Live `artifact_event(list, kinds=["note"])` returned the exact field set: `tag, gate_passed, text, evidence{4 keys}, refresh_at`.
+- `evidence.children_count: 3 / children_done: 3 / signal_count_total: 4 / signal_count_met: 4` matched expected.
+- `text` was the human-readable summary from the spec ("auto-close gate passed: 3/3 children done, 4/4 signals met").
+
+**Impact:** high — validates the discipline of writing the event payload schema *in the spec* (D11), not in implementer hands. The amendment doc was the source of truth; both the impl and the verification probe consumed it.
+
+**Promote-when:** Reused for `external_signal` events or future audit-issues auto-promotion events. Then graduate "event payload defined in spec, validated in live probe" to a CONTRIBUTING.md addendum.
 
 ## F-1 — `read_file(@buf_id, json_path="$.symbols[0].body")` returns 0 lines
 
@@ -886,6 +929,30 @@ Recovered by `git reset --soft d8b38f26` — quoting the explicit SHA, not a rel
 - **Defer for now:** add to the multi-agent design candidate alongside worktree-UX (F-13 + F-14 are two concretes for the same fault line — shared resources with no transaction between observe and act).
 
 ---
+
+
+## F-15 — `artifact_augment` schema description says `params` is gather config; actually it's data params
+
+**When:** Re-augmenting L1 goal-tracker (`d2cd00fc837e53f2`) to pick up post-T-8 prompt. Called `artifact_augment(id=..., prompt=<fresh>, params={})` based on the tool's JSON schema description: `"Optional gather config (gather_from, format, max_tokens). Defaults to {}."`.
+
+**Expected:** Either (a) `params={}` is ignored because no gather config is being set, or (b) `params={}` writes an empty gather config (gather_from/format/max_tokens were never set anyway), leaving the data params untouched.
+
+**Got:** `params={}` overwrote the entire data params payload. The L1 augmentation row went from `{acceptance_signals, children, criterion, progress_log, status}` (4 signals, 3 children, 1 progress entry) to `{}`. Discovered when the next `artifact_refresh(action="gather")` call returned `params: {}` and `context: {}` (because the goal-tracker injection skips when `params.acceptance_signals + params.children` are absent).
+
+**Probable cause:** The schema description on `src/librarian/tools/augment.rs:50` is **stale**. Reading `Args.params` field at line 16: `params: Option<Value>`. Reading the create/replace path (`if !a.merge` at line 228+): `prompt` is required, `params` is folded into the augmentation row as the canonical data params payload. The description was likely copied from an earlier `gather` config concept that never landed. The merge=true and merge=false paths *both* treat `params` as data params — the description applies to neither.
+
+**Workaround:** Recover from in-scrollback snapshot. The previous `artifact(action="get")` response (taken minutes earlier) had the full params under `augmentation.params`. Re-augmented with `merge=false, prompt=<fresh>, params=<full restored payload>`. State byte-identical to pre-incident.
+
+**Severity:** high — silent destructive op. No error raised, no preview, no undo. If the artifact_get snapshot hadn't been in scrollback (e.g., post-`/compact`), recovery would require git-archeology against the SQLite catalog or a fresh body parse.
+
+**Status:** mitigated (live tracker recovered) — but the schema description still misleads.
+
+**Fix idea:**
+1. Update `src/librarian/tools/augment.rs:50` description: `"The data params payload. On merge=false (default), fully replaces existing params. On merge=true, RFC 7396 merge-patched into existing params."`
+2. Consider: refuse `merge=false, params={}` if an augmentation already exists and has non-empty params — require explicit `params=null` or a confirmation flag. This is the same destructive-op-on-stale-state pattern as F-13 (git reset on stale HEAD).
+3. Add a regression test: `merge_false_with_empty_params_on_existing_augmentation_warns_or_refuses` (TBD on semantics — but the silent wipe is the worst outcome).
+
+**Cross-reference:** Same family as F-13 — destructive op on shared mutable state, no scout step, no confirmation. The reconnaissance discipline this session loaded would have caught this if applied to the tool itself (read `ArtifactAugment::call` before invoking with `params={}`).
 
 ## Template for new entries
 

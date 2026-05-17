@@ -51,7 +51,7 @@ impl Tool for ArtifactAugment {
                 },
                 "params": {
                     "type": "object",
-                    "description": "Optional gather config (gather_from, format, max_tokens). Defaults to {}."
+                    "description": "The data params payload on the augmentation row. On merge=false (default — create/replace), fully replaces existing params. On merge=true, RFC 7396 merge-patched into existing params. NOT gather config — gather behavior is controlled by gather_from/format/max_tokens fields written into the params payload itself by callers that need them."
                 },
                 "render_template": {
                     "type": "string",
