@@ -1,7 +1,7 @@
 ---
-status: mitigated
+status: fixed
 opened: 2026-04-24
-closed:
+closed: 2026-05-17
 severity: medium
 owner: marius
 related: ["BUG-048"]
@@ -46,9 +46,10 @@ kotlin-lsp stderr capture from the hang. Tests `detect_fatal_stderr_flags_kotlin
 
 Applied 2026-04-24:
 
-- Per-language 8 s hard budget in `src/tools/symbol/find_symbol.rs` JoinSet.
-- `detect_fatal_stderr` in `src/lsp/client.rs` fast-fails kotlin-lsp's multi-session error on every init attempt.
+- Per-language 8 s hard budget in `src/tools/symbol/symbols.rs` (PER_LANG_BUDGET in the workspace/symbol JoinSet at lines 312–338).
+- `detect_fatal_stderr` in `src/lsp/client.rs` fast-fails kotlin-lsp's multi-session error — checked pre-flight (line 767) and after every failed init attempt (line 798), so once the fatal pattern is in `stderr_lines` further `get_or_start(kotlin)` calls bail immediately.
 
+**Architectural review 2026-05-17 (M4 closure):** considered a streaming stderr watcher that would abort `initialize` the moment kotlin-lsp emits the fatal line (closing the 8 s residual on the first call). Rejected. The pattern-detection abstraction currently has ONE concrete (multi-session error); growing it into a watcher + abort-channel for a rare, bounded-cost path is decoration. The two-stage design (per-language budget + post-failure pattern detection) absorbs the scenario exhaustively. First call costs at most 8 s; all subsequent calls in the same session fast-fail. Status flipped from `mitigated` to `fixed`.
 ## Tests added
 
 - `detect_fatal_stderr_flags_kotlin_multi_session`
@@ -60,8 +61,7 @@ Pin `path=` to a non-Kotlin file to skip kotlin-lsp entirely. Or close the other
 
 ## Resume
 
-If the 8 s budget proves too generous in practice (i.e. routine warm calls bump up against it), profile typical kotlin-lsp first-call latency on a small fixture and tighten. Concrete next action: open `src/tools/symbol/find_symbol.rs`, locate the JoinSet wiring, instrument with `tracing::debug!` for per-language latency over a representative session.
-
+If the 8 s budget proves too generous in practice (i.e. routine warm calls bump up against it), profile typical kotlin-lsp first-call latency on a small fixture and tighten. Concrete next action: open `src/tools/symbol/symbols.rs` (around line 312, `PER_LANG_BUDGET` constant), instrument with `tracing::debug!` for per-language latency over a representative session. If a second fatal kotlin-lsp pattern shows up, add it to `detect_fatal_stderr` in `src/lsp/client.rs` rather than building a streaming watcher.
 ## References
 
 - Originally tracked as **BUG-049** in `docs/TODO-tool-misbehaviors.md` (deprecated 2026-05-09; superseded by per-file system).
