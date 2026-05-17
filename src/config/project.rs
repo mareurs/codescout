@@ -593,9 +593,7 @@ name = "demo"
 mod tests {
     use super::*;
 
-    use std::sync::Mutex;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    use crate::config::global::lock_env_for_tests;
 
     #[test]
     fn default_embed_model_is_allminilm() {
@@ -958,7 +956,7 @@ model = "local:AllMiniLML6V2Q"
 
     #[allow(dead_code)] // stale test — missing #[test] attribute, kept for future re-enable
     fn load_or_default_applies_global_when_project_absent() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = lock_env_for_tests();
         let saved_home = std::env::var_os("HOME");
         let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
         let dir = tempfile::tempdir().unwrap();
@@ -989,7 +987,7 @@ model = "local:AllMiniLML6V2Q"
 
     #[allow(dead_code)] // stale test — missing #[test] attribute, kept for future re-enable
     fn load_or_default_project_wins_over_global() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = lock_env_for_tests();
         let saved_home = std::env::var_os("HOME");
         let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
         let dir = tempfile::tempdir().unwrap();
@@ -1025,7 +1023,7 @@ model = "local:AllMiniLML6V2Q"
 
     #[allow(dead_code)] // stale test — missing #[test] attribute, kept for future re-enable
     fn load_or_default_global_fills_gap_in_project() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = lock_env_for_tests();
         let saved_home = std::env::var_os("HOME");
         let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
         let dir = tempfile::tempdir().unwrap();
@@ -1062,7 +1060,7 @@ model = "local:AllMiniLML6V2Q"
 
     #[allow(dead_code)] // stale test — missing #[test] attribute, kept for future re-enable
     fn load_or_default_no_global_behaves_as_before() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = lock_env_for_tests();
         let saved_home = std::env::var_os("HOME");
         let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
         let dir = tempfile::tempdir().unwrap();
@@ -1092,7 +1090,7 @@ model = "local:AllMiniLML6V2Q"
 
     #[test]
     fn env_vars_override_model_and_url() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = lock_env_for_tests();
         let saved_home = std::env::var_os("HOME");
         let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
         let saved_model = std::env::var_os("CODESCOUT_EMBED_MODEL");

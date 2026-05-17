@@ -88,13 +88,27 @@ impl GlobalConfig {
 // Declared at module level so preflight and other modules can import it.
 pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Acquire `ENV_LOCK`, ignoring poison.
+///
+/// The lock only guards env-var setup/teardown sequencing in tests — a
+/// poisoned mutex from a panicking test does not corrupt the env-var
+/// state itself, since each test sets the vars it needs at the top.
+/// Without this helper, a single test panic cascades into "all tests
+/// fail with PoisonError" on subsequent runs in the same process.
+#[allow(dead_code)] // used by #[cfg(test)] modules across crates
+pub(crate) fn lock_env_for_tests() -> std::sync::MutexGuard<'static, ()> {
+    ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 mod tests {
-    use super::ENV_LOCK;
+    use super::lock_env_for_tests;
     use super::*;
 
     #[test]
     fn global_config_path_uses_xdg_config_home() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = lock_env_for_tests();
         let saved = std::env::var_os("XDG_CONFIG_HOME");
         std::env::set_var("XDG_CONFIG_HOME", "/tmp/xdg-test-codescout");
         let path = global_config_path().unwrap();
@@ -110,7 +124,7 @@ mod tests {
 
     #[test]
     fn global_config_path_falls_back_to_home_dot_config() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = lock_env_for_tests();
         let saved_home = std::env::var_os("HOME");
         let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
         std::env::remove_var("XDG_CONFIG_HOME");
@@ -132,7 +146,7 @@ mod tests {
 
     #[test]
     fn global_config_load_returns_none_when_absent() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = lock_env_for_tests();
         let saved_home = std::env::var_os("HOME");
         let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
         let dir = tempfile::tempdir().unwrap();
@@ -152,7 +166,7 @@ mod tests {
 
     #[test]
     fn global_config_load_parses_valid_toml() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = lock_env_for_tests();
         let saved_home = std::env::var_os("HOME");
         let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
         let dir = tempfile::tempdir().unwrap();
@@ -182,7 +196,7 @@ mod tests {
 
     #[allow(dead_code)] // stale test — missing #[test] attribute, kept for future re-enable
     fn global_config_load_errors_on_malformed_toml() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = lock_env_for_tests();
         let saved_home = std::env::var_os("HOME");
         let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
         let dir = tempfile::tempdir().unwrap();

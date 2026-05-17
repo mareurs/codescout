@@ -34,14 +34,9 @@ impl Tool for EditCode {
     }
 
     fn description(&self) -> &str {
-        "Mutate a symbol in the codebase. action='replace': overwrite the symbol body. \
-         action='insert': inject code adjacent to a symbol. action='remove': delete the symbol. \
-         action='rename': rename across the entire codebase via LSP (also sweeps textual \
-         occurrences in comments/strings). \
-         NOTE on action='replace': outer attributes (`#[...]`) directly above the symbol — \
-         with no doc comment between them and the symbol — are PRESERVED, not replaced. \
-         The new_body only overrides the declaration body. To drop a stranded attribute \
-         after replace, follow up with edit_file removing the attribute line."
+        "Mutate a symbol. action='replace' overwrites body (PRESERVES outer #[...] attributes — \
+         drop with edit_file). action='insert' injects code adjacent. action='remove' deletes. \
+         action='rename' renames across codebase via LSP (sweeps textual occurrences)."
     }
 
     fn input_schema(&self) -> Value {
