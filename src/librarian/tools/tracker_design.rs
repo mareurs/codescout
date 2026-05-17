@@ -269,8 +269,6 @@ fn archetype_reflective() -> Value {
 //
 // Edit here, NOT inline in `archetype_goal()`'s prompt JSON.
 
-
-
 fn archetype_goal() -> Value {
     json!({
         "name": "goal",
@@ -488,7 +486,6 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     Ok(response)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -692,5 +689,69 @@ mod tests {
             names.contains(&"goal"),
             "goal archetype missing from archetypes() — got {names:?}"
         );
+    }
+
+    /// Drift tripwire — enumerates archetypes that `child_status_pure` returns
+    /// non-`Unknown` for and asserts the prompt's rule 1 correctly delegates
+    /// to Rust for exactly those. If a future edit adds an archetype to the
+    /// kernel but forgets to collapse its prompt clause (or removes one from
+    /// the kernel while leaving the "copy verbatim" framing), this test fails.
+    ///
+    /// Closes Phase 1 of the I1 refactor: rule 1 lives in Rust, prompt is the
+    /// consumer.
+    #[test]
+    fn prompt_rule_1_matches_rust_kernel_coverage() {
+        use crate::librarian::tools::goal_aggregation::{child_status_pure, ChildStatus};
+        use serde_json::json;
+
+        // Each archetype × canonical params known to elicit a definite verdict.
+        let probes = [
+            (
+                "failure_table",
+                json!({"failures":[{"id":"F-1","status":"pass"}]}),
+            ),
+            ("task_list", json!({"tasks":[{"id":"T-1","status":"done"}]})),
+            ("audit_issues", json!({"issues":[{"n":1,"status":"fixed"}]})),
+            ("reflective", json!({"status":"decided"})),
+            ("goal", json!({"status":"done"})),
+            (
+                "deployment_state",
+                json!({"envs":{"prod":{"enabled":true}}}),
+            ),
+            (
+                "metric_baseline",
+                json!({"baseline":{"P@5":0.18},"current":{"P@5":0.20}}),
+            ),
+        ];
+
+        let v = super::archetype_goal();
+        let prompt = v.get("prompt_template").and_then(|p| p.as_str()).unwrap();
+        // Everything before rule 2 — covers rules 1a/1b/1c and the gather framing.
+        let rule_1_section = prompt
+            .split("2. For each `acceptance_signals[i]")
+            .next()
+            .unwrap();
+
+        for (arch, params) in &probes {
+            let status = child_status_pure(arch, params);
+            if status == ChildStatus::Unknown {
+                // Archetype is NOT Rust-handled in this phase. Prompt MUST
+                // mention it explicitly under rule 1b's LLM-fallback list.
+                assert!(
+                    rule_1_section.contains(arch),
+                    "{arch} returns Unknown in kernel — prompt rule 1b must mention it \
+                     for the LLM fallback path"
+                );
+            } else {
+                // Archetype IS Rust-handled. Rule 1a's copy-verbatim clause
+                // governs it. The prompt must reference the gather context key
+                // so the LLM knows where to read ground truth.
+                assert!(
+                    rule_1_section.contains("deterministic_child_statuses"),
+                    "{arch} resolved in kernel — prompt rule 1 must reference \
+                     deterministic_child_statuses as the source of truth"
+                );
+            }
+        }
     }
 }
