@@ -57,7 +57,7 @@ say what to change.
 | F-5 | 2026-05-17 | low | subagent      | fixed-verified | T-1 subagent placed cross-check test at module-level scope, not inside `mod tests` block as plan said |
 | F-6 | 2026-05-17 | low | plan-prose     | fixed-verified | T-2 Step 3 says "18 tests" but Step 1 fixture has 20 |
 | F-7 | 2026-05-17 | med  | plan-prose     | fixed-verified | T-3 title says `GatherSource::GoalChildren variant` but body adds a standalone fn, not an enum variant |
-| F-8 | 2026-05-17 | high | plan-prose     | open | T-3's code snippet uses `cat.get(id).augmentation.archetype` — three field accesses that don't compile against actual structs |
+| F-8 | 2026-05-17 | high | plan-prose     | fixed-verified | T-3's code snippet uses `cat.get(id).augmentation.archetype` — three field accesses that don't compile against actual structs |
 | F-9 | 2026-05-17 | med  | architectural | open | Augmentation prompt stored per-artifact at creation; `archetype_goal().prompt_template` edits don't propagate to existing trackers without explicit re-augment |
 | F-10 | 2026-05-17 | high | rust-serde    | mitigated | Serde `flatten + default` doesn't handle missing internally-tagged discriminator — custom `Deserialize` impl required |
 | F-11 | 2026-05-17 | med  | codescout-tool | promoted-to-bug-tracker | `grep` on `@tool_*` buffer false-negatives on a string present in the buffer (see bug-tracker.md #4) |
@@ -692,9 +692,7 @@ let status = child_status_pure(archetype, &params);
 
 **Impact:** A subagent following the plan literally would generate ~10 compile errors before discovering the truth. With this F-8 entry on file, future subagent prompts can cite "see F-8 for correct shapes" or include the corrected code inline.
 
-**Status:** open — will be fixed when T-3 implementation lands (inline,
-since the corrections are too involved to delegate without a fully
-rewritten prompt).
+**Status:** fixed-verified 2026-05-17 second session — plan Task 3 Step 3's fictional 55-line code block replaced with a terse F-8 annotation block (blockquote) pointing at the live `gather_goal_children` via `symbols(name=..., include_body=true, path="src/librarian/tools/gather.rs")`. Annotation names the three errors and the Phase 2 Task 7 evolution (added `parent_signals` parameter; uses `child_status_in_context` not `child_status_pure`). Live source is now the canonical reference — plan no longer carries uncompilable code.
 
 ---
 
