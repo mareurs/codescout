@@ -37,12 +37,15 @@
 | F-1 | 2026-05-17 | low | plan-prose | fixed-verified | Bug-file Resume paths cite non-existent layout |
 | F-2 | 2026-05-17 | med | self-friction | fixed-verified | 2 of 3 buffer bugs likely stale — code reads correct |
 | F-3 | 2026-05-18 | med | plan-prose | fixed-verified | Plan test assertions cited non-existent `RecoverableError.hint` field |
+| F-4 | 2026-05-18 | med | codescout-tool | promoted-to-bug-tracker | `edit_markdown action="replace"` with a heading clobbers the whole section body |
+| F-5 | 2026-05-18 | high | release-pipeline | open | HEAD detached from `experiments` without `git checkout` in this session |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-05-17 | med | Scout helper-fn bodies before fixing reported bugs | Would have written instrumentation / "fix" for `extract_lines` and `extract_json_path` despite both being correct + having passing tests | promoted-to-permanent-docs |
 | W-2 | 2026-05-18 | med | Pre-dispatch recon scouts type accessors named in plan assertions | Task 2's first subagent would have failed `cargo check` on `err.hint.as_deref()` (no such field); 1+ wasted round-trip per test, controller drift mid-dispatch | validated |
+| W-3 | 2026-05-18 | high | `git merge --ff-only <sha>` for detached-HEAD recovery under concurrent work | Naive `git branch -f` would silently traverse a parallel session's commit (the F-13 failure mode); `--ff-only` errors loudly on stale tip instead | promotion-eligible |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -290,6 +293,81 @@ plan, scout every type whose accessors the plan asserts on" rule.
 
 **Status:** validated — single datapoint, drift caught + fixed in the same
 turn before any subagent dispatch. Awaiting promotion criterion.
+## F-4 — `edit_markdown action="replace"` with a heading argument clobbers the whole section body
+
+**Observed:** 2026-05-18, while adding the "When the Substrate Catches Itself" section to `docs/observations.md`.
+
+**When:** Tried to add a new H2 section after the existing `## The Plugin Closes the Loop` via `edit_markdown(action="replace", heading="## The Plugin Closes the Loop", content="<new section + trailing closer line>")` — expecting insert-after-like semantics.
+
+**Expected:** `action="replace"` with `heading=X` would either replace only the heading line or operate on a localized region near the anchor.
+
+**Got:** The full body of `## The Plugin Closes the Loop` (~30 lines of SessionStart / SubagentStart / PreToolUse hook narrative + the marketplace install hint) was overwritten wholesale with the new section's content. The original body was destroyed.
+
+**Probable cause:** `edit_markdown action="replace"` with a `heading` argument has "set the body of this section to `content`" semantics. The argument is the section anchor, not an insertion anchor; the operation wipes from the heading's end through to the next sibling heading. Not aliased with `insert_after`.
+
+**Workaround:** Caught by the Frog discipline's post-edit verify (`read_markdown` after every write). Reconstructed the original body from an earlier in-session `read_markdown` snapshot, ran `edit_markdown action="replace"` again with the original content to restore it, then `edit_markdown action="edit"` for cosmetic blank-line repairs. Three extra round-trips beyond the intended insert.
+
+**Severity:** med — data loss within session, fully recovered, but easy to miss without verify-after-edit.
+
+**Status:** promoted-to-bug-tracker (this session); see `docs/issues/2026-05-18-edit-markdown-replace-clobber.md`.
+
+**Fix idea / Pointer:** `docs/issues/2026-05-18-edit-markdown-replace-clobber.md` carries the bug-tracker entry. Two fix options drafted there: (a) foreground the destructive scope in the tool description (lighter), (b) refuse `action="replace"` when `len(new) < 0.2 * len(old)` unless a `force=true` flag is set (substrate-level safety). Option (a) ships first; option (b) only if (a) doesn't reduce frequency.
+
+---
+
+## F-5 — HEAD detached from `experiments` without `git checkout` originating in this session
+
+**Observed:** 2026-05-18, after several `/reload-plugins` calls + one `/mcp` reconnect cycle while working on observations.md.
+
+**When:** Session started on `experiments` per the git status snapshot at the top of the system prompt. After multi-step work (tracker rectification, hook verification, observations.md edits), ran `git commit` for the observations work — output showed `[detached HEAD a70816b5]`, NOT `[experiments a70816b5]`.
+
+**Expected:** `git checkout`-style branch detachment requires an explicit checkout call. Host operations (`/reload-plugins`, `/mcp` reconnect) and codescout MCP tool calls should leave HEAD on its current branch.
+
+**Got:** `git reflog -15` revealed three unattributed HEAD moves between my last commit (`81a6d136`, on `experiments`) and the detached commit (`a70816b5`):
+```
+HEAD@{1}: checkout: moving from experiments to d5bf7116
+HEAD@{2}: checkout: moving from 59f6b53c… to experiments
+HEAD@{3}: checkout: moving from experiments to 59f6b53c
+```
+HEAD was actively bounced between `experiments` and parallel-session commit SHAs (the `feat(file_summary)` work the other session shipped). My session issued zero `git checkout` calls during that window.
+
+**Probable cause:** Unknown. Candidates:
+1. `codescout-companion` PostToolUse hook on `mcp__.*__workspace` (`cs-activate-project.sh` or `worktree-activate.sh`) running `git checkout` as a side effect.
+2. Parallel session's commits propagating into shared workspace state in a way the host translates to a HEAD move on my side.
+3. `/reload-plugins` re-running SessionStart-style hooks that touch git refs.
+
+**Workaround:** Detected via the `[detached HEAD ...]` string in `git commit` output. Recovered via W-3 (`git merge --ff-only`). No data lost.
+
+**Severity:** high — silent data-loss vector. Commits on detached HEAD are reachable only via reflog and expire on `git gc`. The user only sees the failure if they read the `git commit` output carefully — easy to miss.
+
+**Status:** open — root cause unknown.
+
+**Fix idea / Pointer:** Open a bug file with the reflog snippet preserved. Audit companion hooks that touch git state — likely candidates: `hooks/cs-activate-project.sh`, `hooks/worktree-activate.sh`, anything in the SessionStart hook chain. If a hook is moving HEAD as a side effect of workspace activation, scope it to only run when the active project itself changed, not on every reconnect.
+
+---
+
+## W-3 — `git merge --ff-only` as the atomic recovery primitive under concurrent-work HEAD detachment
+
+**When:** 2026-05-18, recovering commit `a70816b5` (observations.md narrative) from detached HEAD after `/reload-plugins` + `/mcp` cycle silently moved HEAD to a parallel session's commit SHA (`d5bf7116`).
+
+**Pattern:**
+1. Read full state in a single command — `git reflog -15 && git branch -v && git rev-parse HEAD && git symbolic-ref HEAD` — so the observation set is internally consistent before any write.
+2. Recover with `git checkout <target-branch> && git merge --ff-only <recovered-sha>` in a single command. The `--ff-only` flag is the atomic safety: it succeeds silently if `<recovered-sha>` is a strict descendant of the target branch's current tip (history is not fabricated, only the branch pointer moves), and it fails loudly if anything diverged between the read and the write.
+
+**Counterfactual:** Naive recovery `git branch -f experiments a70816b5` would force-move the branch ref regardless of whether `experiments` had moved between observation and action. If a parallel session shipped a commit to `experiments` in the gap between my `git reflog -15` read and the `git branch -f` write, the force-move would silently traverse that commit — the F-13 failure mode incarnate. `--ff-only` removes the traversal hazard by making git refuse to invent history; if `experiments` has moved, the merge errors out and the operator reconciles manually rather than discovering the loss later via reflog.
+
+**Confirming data points:**
+1. F-13 (2026-05-17, prior session) — `git reset --soft HEAD~1` erased a parallel session's T-13 commit because HEAD moved between observation and `reset` action. Recovered via reflog-quoted SHA. Driving incident for the existing CLAUDE.md § Concurrent-Work Rules block.
+2. This session (2026-05-18) — F-5 detached-HEAD recovery used `git merge --ff-only a70816b5` after a single combined `reflog -15` read; experiments tip was `d5bf7116`, recovered-sha's parent was also `d5bf7116`, ff-only succeeded silently. Working tree clean, no data lost.
+
+**Impact:** high. Concurrent-work git is the single most common silent-data-loss vector in multi-session work; `--ff-only` is one of the few git primitives that fails-loudly on stale-tip.
+
+**Promote-when:** Two concretes reached (F-13 + F-5). Promote to CLAUDE.md § Concurrent-Work Rules with an explicit primitive callout: *"For detached-HEAD recovery, use `git checkout <branch> && git merge --ff-only <recovered-sha>` in one command. Never `git branch -f <branch> <recovered-sha>` — it traverses parallel commits silently."*
+
+**Status:** promotion-eligible (criterion fires this session).
+
+---
+
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
