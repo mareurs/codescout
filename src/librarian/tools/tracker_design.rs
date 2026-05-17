@@ -158,7 +158,12 @@ fn archetype_audit_issues() -> Value {
         "when_to_use": "Numbered audit output: issue table with severity, status, owner. Examples: 'chunking-pipeline audit', 'production-trace audit'.",
         "params_shape_example": {
             "issues": [
-                { "n": 1, "title": "Long PDFs split mid-sentence", "severity": "high", "status": "fixed", "owner": "@mareurs" },
+                { "n": 1, "title": "Long PDFs split mid-sentence", "severity": "high", "status": "fixed", "owner": "@mareurs",
+                  "severity_reason": "splits within a paragraph break sentence boundaries; downstream retrieval scores 0.05 lower P@5",
+                  "ref_kind": "code_symbol", "md_file": "docs/chunking-audit.md", "md_line": 42,
+                  "raw_ref": "src/chunking/splitter.rs::Splitter::next_chunk",
+                  "first_seen_commit": "abc1234", "first_seen_at": "2026-04-12T09:30:00Z",
+                  "last_verified_at": "2026-05-15T14:20:00Z" },
                 { "n": 2, "title": "Headers lost in xlsx",        "severity": "med",  "status": "open",  "owner": "@mareurs" }
             ]
         },
@@ -172,11 +177,19 @@ fn archetype_audit_issues() -> Value {
                         "type": "object",
                         "required": ["n", "title", "severity", "status"],
                         "properties": {
-                            "n":        { "type": "integer", "minimum": 1 },
-                            "title":    { "type": "string" },
-                            "severity": { "type": "string", "enum": ["high", "med", "low"] },
-                            "status":   { "type": "string", "enum": ["open", "in-progress", "fixed", "wontfix"] },
-                            "owner":    { "type": "string" }
+                            "n":                 { "type": "integer", "minimum": 1 },
+                            "title":             { "type": "string" },
+                            "severity":          { "type": "string", "enum": ["high", "med", "low"] },
+                            "status":            { "type": "string", "enum": ["open", "in-progress", "fixed", "wontfix"] },
+                            "owner":             { "type": "string" },
+                            "severity_reason":   { "type": "string", "description": "Optional rationale for the severity rating." },
+                            "ref_kind":          { "type": "string", "description": "Optional: nature of the target ref (e.g. code_symbol, file_path, url, line)." },
+                            "md_file":           { "type": "string", "description": "Optional: path of the markdown document where this finding originated." },
+                            "md_line":           { "type": "integer", "minimum": 1, "description": "Optional: line number within md_file." },
+                            "raw_ref":           { "type": "string", "description": "Optional: the exact ref string as it appeared in the source." },
+                            "first_seen_commit": { "type": "string", "description": "Optional: git commit SHA where the issue was first observed." },
+                            "first_seen_at":     { "type": "string", "format": "date-time", "description": "Optional: ISO-8601 timestamp of first observation." },
+                            "last_verified_at":  { "type": "string", "format": "date-time", "description": "Optional: ISO-8601 timestamp of the most recent check that re-confirmed the issue." }
                         }
                     }
                 }
