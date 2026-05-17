@@ -19,7 +19,7 @@
 | F-2 | 2026-05-17 | med | architectural | open | Archetype designs in `tracker_design.rs` supply no `gather_from` defaults (root of F-1) |
 | F-3 | 2026-05-17 | med | architectural | open | 1 of 4 augmented artifacts uses the `gather_from` channel in production (was 0/4; goal-tracker re-augmented with gather_from post-recovery) |
 | F-4 | 2026-05-17 | low | cross-repo | open | Stored SHAs (`evidence_commits`, task notes) carry no repo-scoping field |
-| F-5 | 2026-05-17 | med | codescout-tool | open | `state_at(commit=...)` channel broken — `commits` table empty, backfill silently fails |
+| F-5 | 2026-05-17 | med | codescout-tool | fixed-verified | `state_at(commit=...)` short-SHA lookup (#32, commit `2f085f45`) — verified `d482ca8a` resolves + ambiguity guard fires |
 | F-6 | 2026-05-17 | high | codescout-tool | fixed-verified | `librarian(reindex)` UNIQUE constraint + dim mismatch (default + force) — bug-tracker #5/#6, verified post-rebuild |
 | F-7 | 2026-05-17 | low | architectural | open | `last_changed` is single-purpose (gather_config_value only) and per-line, not per-symbol |
 | F-8 | 2026-05-17 | med | architectural | fixed-verified | 6 of 8 codescout memories anchored to deleted/moved files post-dissolve refactor (refreshed via `memory(refresh_anchors)` per topic) |
@@ -252,11 +252,13 @@ Meanwhile the codebase ships full gather machinery: `gather_all`, `gather_git_lo
 
 **Severity:** med — the commit-anchored time-travel is a documented feature (artifact-tool schema lists `commit` as an alternative to `timestamp`) that doesn't work in practice. Silent failure path on backfill compounds the issue.
 
-**Status:** open (corrected diagnosis 2026-05-17 post-rebuild verification)
+**Status:** fixed-verified (2026-05-17 post-Round-3 rebuild — commit `2f085f45`)
 
 **Update 2026-05-17 (post-d482ca8a rebuild):** Original diagnosis was WRONG. The commits table is **not** empty — it has 2931 rows including all session-this commits. The actual bug is in `resolve_cutoff_ts` (`src/librarian/tools/state_at.rs:30`): the query uses `WHERE hash = ?1` with exact match, but callers pass short 8-char SHAs while the stored hashes are full 40-char. So `state_at(commit="d482ca8a")` fails but `state_at(commit="d482ca8ac91241a7a96a487e46ca394095019912")` succeeds. The error message "commit not indexed; run librarian_reindex" is misleading because it implies the table is empty when really the lookup mode is wrong. **Fix:** change `=` to `LIKE ?1 || '%'` (or `glob`/prefix match) so short SHAs resolve. The session-log finding of "silent error swallow in `backfill_commits`" (which #25 partially addressed) was a real but secondary concern.
 
 **Fix idea / Pointer:** Two parts. (a) Surface backfill errors instead of swallowing them — the `tracing::debug!` should be at minimum `tracing::warn!` with a counter in the reindex response. (b) Investigate why backfill is failing on this project (see F-6 — the reindex itself has other failures preventing diagnosis).
+
+**Verification 2026-05-17 (post-`2f085f45`):** `state_at(commit="d482ca8a", artifact_id="0df5ebc95d284b8e")` → `as_of: 1779038809000` (pre-fix: "not indexed" error). Ambiguity guard: `commit="d"` → `"ambiguous (matches at least dd43... and d9e2...); use a longer prefix or the full 40-char SHA"`. Both the success path (short SHA resolves) and failure path (ambiguous prefix produces actionable error naming conflicts) verified live.
 
 ---
 
