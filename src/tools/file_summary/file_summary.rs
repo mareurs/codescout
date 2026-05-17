@@ -415,6 +415,18 @@ fn json_type_name(v: &Value) -> String {
     .to_string()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Segment {
+    /// Object key access: `.field` or bare `field` after `$`.
+    Key(String),
+    /// Non-negative array index: `[N]` where N ≥ 0.
+    Index(usize),
+    /// Negative single-index: `[-N]` where N ≥ 1, stored as positive magnitude.
+    NegIndex(usize),
+    /// Negative-start open-end slice: `[-N:]` where N ≥ 1, last N elements.
+    NegSliceFrom(usize),
+}
+
 /// Extract a JSON subtree by path. Returns (pretty-printed content, type name, optional count).
 pub fn extract_json_path(
     content: &str,
