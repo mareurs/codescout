@@ -94,10 +94,16 @@ without justification means the bug isn't really closed.*
 *What users can do RIGHT NOW to unblock themselves while a fix lands.*
 
 ## Resume
+
 *Concrete next action, not a goal. Bad: "investigate the LSP path". Good:
 "diff src/lsp/client.rs between commits X and Y; check if `did_change` is
 sent before `hover` query. Run `cargo test did_change_refreshes` to anchor
 behavior." Wipe and replace each session. `N/A` once fixed.*
 
+*Cite paths with prefix (`src/lsp/client.rs`, not bare `client.rs`). The
+audit_doc_refs lint resolves bare basenames via fallback (severity Low) but
+the prefixed form is unambiguous and survives renames cleanly. If your fix
+moves a file, update the Resume sections of any open bugs that cite the
+old path.*
 ## References
 *Files, dashboards, related issues, external links, session log paths.*

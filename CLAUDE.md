@@ -202,13 +202,27 @@ git rebase master
 #    - if status is `fixed` / `mitigated` / `wontfix`: git mv it to docs/issues/archive/
 #    Skip files still `open` / `investigating` — they stay in docs/issues/ regardless.
 #    Commit the moves separately: docs: archive bug files for fixes shipped in <date>
+
+# 5. (Optional, recommended after large refactors or batched-bug sessions)
+#    Verify doc refs still resolve — bug-file Resume sections cite paths that
+#    src refactors may have moved (F-1 friction, multiple datapoints).
+#    Run from any active project:
+#      mcp call codescout librarian '{"action":"audit_doc_refs","emit_tracker":true}'
+#    Inspect findings JSON. Per-finding actions:
+#      - verdict=missing, severity=high → real drift; fix the doc OR archive the bug
+#      - verdict=ambiguous_basename → doc cites a basename matching multiple files;
+#                                      add a path prefix to disambiguate
+#      - verdict=resolved_basename → audit auto-resolved by basename match; OK
+#                                     (consider adding the prefix anyway for clarity)
+#    The audit covers docs/**/*.md by default (which includes docs/issues/).
 ```
 
 This is the default workflow for all completed work. The rebase step keeps `experiments`
 clean — git detects the cherry-pick and skips the duplicate commit automatically. Step 4
 keeps `docs/issues/` showing only bugs whose fix is unreleased — see `_TEMPLATE.md` rule
 *"Archive moves happen after the fix has shipped to master, not when status flips to fixed."*
-
+Step 5 is the drift-detection step — `audit_doc_refs` is the canonical lint for stale
+path / link / line references across all markdown surfaces.
 ### Commit Discipline
 
 - **Batch related changes** into a single well-tested commit rather than committing every incremental step.
