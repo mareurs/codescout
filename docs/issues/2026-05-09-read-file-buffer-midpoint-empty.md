@@ -1,7 +1,7 @@
 ---
-status: open
+status: wontfix
 opened: 2026-05-09
-closed:
+closed: 2026-05-17
 severity: medium
 owner: marius
 related: []
@@ -37,8 +37,9 @@ Cache any large tool response (a buffer with ≥ 100 lines), then query a line r
 
 ## Root cause
 
-Unknown. Possible pagination or buffer-chunk offset miscalculation. Buffer total bytes reported correctly; only `start_line` past a threshold triggers the empty response.
+**Not reproducible as of 2026-05-17.** Probe test (see Tests added) confirms `read_file(@tool_*, start_line=150, end_line=160)` on a 200-line buffer returns the correct 11-line slice. `extract_lines` in `src/util/text.rs:23-33` is a 12-line filter that iterates `text.lines().enumerate()` — there is no chunk-walker that could fail to advance.
 
+Likely explanations for the original report: (a) the buffer at observation time had fewer post-pretty-print lines than the user assumed from a count taken on the raw stdout, (b) an intervening commit fixed an underlying defect without crediting back to this file, or (c) the user observed correct empty-out-of-bounds behavior on a smaller buffer than they thought.
 ## Evidence
 
 Multiple instances during the i1-refactor session log (F-2 in `docs/trackers/archive/i1-session-friction.md`). Same buffer + start_line < N succeeds, start_line > N returns empty.
@@ -49,12 +50,10 @@ Multiple instances during the i1-refactor session log (F-2 in `docs/trackers/arc
 
 ## Fix
 
-Open. Investigation queued.
-
+No code change. Closed as `wontfix` because the reported behavior could not be reproduced and the current code path is provably correct.
 ## Tests added
 
-N/A — open.
-
+`tools::read_file::tests::read_file_buffer_midpoint_returns_content` — seeds a 200-line buffer (`line 1` through `line 200`), reads `start_line=150, end_line=160`, asserts content contains both `line 150` and `line 160`. Passes immediately on 2026-05-17. Kept as a regression pin so future changes to the buffer pipeline cannot silently re-introduce the reported failure mode.
 ## Workarounds
 
 - Read filesystem path directly (`force=true`) — skips the buffer layer entirely.
@@ -62,8 +61,7 @@ N/A — open.
 
 ## Resume
 
-Concrete next action: locate `@tool_*` buffer handler in `src/tools/buffer/`, identify the chunk-walker (if any), write a regression test that caches a 200-line response then reads `start_line=150, end_line=160`. If the threshold is reproducible, instrument the chunk-walker with `tracing::debug!` showing each chunk boundary.
-
+Closed. The pinned test is the load-bearing artifact — if it starts failing, the original bug-shape has re-emerged and root-cause investigation should resume from there.
 ## References
 
 - Originally tracked as **#3** in `docs/issues/bug-tracker.md` (retired after migration to per-file system).

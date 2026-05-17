@@ -1,7 +1,7 @@
 ---
-status: open
+status: wontfix
 opened: 2026-05-09
-closed:
+closed: 2026-05-17
 severity: medium
 owner: marius
 related: []
@@ -46,8 +46,9 @@ Cache any tool response with an array-of-objects under a key, then call `read_fi
 
 ## Root cause
 
-Unknown — likely a jsonpath dispatch difference between array-index-with-property access vs. plain object property access. Hypothesis: the buffer-aware jsonpath path may treat `$.symbols[0]` and `$.symbols[0].field` differently from `$.field` when reading from an `@tool_*` ref.
+**Not reproducible as of 2026-05-17.** Probe test (see Tests added) confirms `read_file(@tool_*, json_path="$.symbols[0].body")` returns the inner string value correctly. `extract_json_path` in `src/tools/file_summary/file_summary.rs:419` handles array indexing via `parse_json_path_segments` + `resolve_json_segment`, and the function-level comment explicitly cites `$.symbols[0].body` as the canonical working case. There is also an existing passing unit test `extract_json_path_array_index` using `$.users[0]`.
 
+Likely explanations for the original report: (a) the value at the json path was an empty string (correct return — misread as "broken"), or (b) an intervening commit fixed an underlying defect without crediting back here.
 ## Evidence
 
 Multiple instances during the i1-refactor session log (F-1 in `docs/trackers/archive/i1-session-friction.md`). Same buffer + different json_path → different success.
@@ -58,12 +59,10 @@ Multiple instances during the i1-refactor session log (F-1 in `docs/trackers/arc
 
 ## Fix
 
-Open. Investigation queued.
-
+No code change. Closed as `wontfix` because the reported behavior could not be reproduced and the current code path is provably correct + already unit-tested for array indexing.
 ## Tests added
 
-N/A — open.
-
+`tools::read_file::tests::read_file_buffer_json_path_array_element_returns_value` — seeds an `@tool_*` buffer with `{"symbols":[{"name":"alpha","body":"fn alpha() {}"},...]}` (exact shape from the original report), queries `$.symbols[0].body`, asserts the response content contains `fn alpha`. Passes immediately on 2026-05-17. Kept as a regression pin against the original bug shape.
 ## Workarounds
 
 - Use `read_file(path=@tool_, start_line, end_line)` and parse manually.
@@ -72,8 +71,7 @@ N/A — open.
 
 ## Resume
 
-Concrete next action: open `src/tools/buffer/handlers.rs` (or wherever `@tool_*` ref expansion lives), search for the json_path evaluator wiring, and write a minimal repro test: cache a response with `[{"body": "x"}]`, query `$.[0].body` and `$.body` (on a flat ref), see which path returns 0 lines.
-
+Closed. Pinned test is the regression guard.
 ## References
 
 - Originally tracked as **#2** in `docs/issues/bug-tracker.md` (retired after migration to per-file system).

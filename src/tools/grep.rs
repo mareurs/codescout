@@ -36,6 +36,13 @@ impl Tool for Grep {
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
         let pattern = super::require_str_param_or(&input, "pattern", &["query", "regex"])?;
         let raw_path = input["path"].as_str().unwrap_or(".");
+
+        // Buffer ref (@tool_*, @cmd_*, @file_*): search the cached content
+        // instead of treating the ref as a filesystem path.
+        if raw_path.starts_with('@') {
+            return grep_in_buffer(&input, ctx).await;
+        }
+
         let project_root = ctx.agent.project_root().await;
         let security = ctx.agent.security_config().await;
         let search_path = crate::util::path_security::validate_read_path(
@@ -310,6 +317,196 @@ fn format_search_context_mode(out: &mut String, matches: &[Value]) {
     }
 }
 
+/// Build a search regex with literal-fallback for plain-text patterns.
+fn build_grep_regex(pattern: &str) -> Result<(regex::Regex, bool)> {
+    match regex::RegexBuilder::new(pattern)
+        .size_limit(1 << 20)
+        .dfa_size_limit(1 << 20)
+        .build()
+    {
+        Ok(re) => Ok((re, false)),
+        Err(e) => {
+            if super::is_regex_like(pattern) {
+                return Err(RecoverableError::with_hint(
+                    format!("invalid regex: {e}"),
+                    "patterns are full regex syntax — escape metacharacters like \\( \\. \\[ for literals",
+                )
+                .into());
+            }
+            let escaped = regex::escape(pattern);
+            let re = regex::RegexBuilder::new(&escaped)
+                .size_limit(1 << 20)
+                .dfa_size_limit(1 << 20)
+                .build()
+                .map_err(|e2| {
+                    RecoverableError::with_hint(
+                        format!("invalid pattern even after escaping: {e2}"),
+                        format!("original error: {e}"),
+                    )
+                })?;
+            Ok((re, true))
+        }
+    }
+}
+
+/// Grep against a buffer ref (`@tool_*`, `@cmd_*`, `@file_*`).
+///
+/// `@tool_*` content is JSON; it is pretty-printed before search so
+/// identifier-shaped strings sit on dedicated lines and become matchable.
+async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
+    let pattern = super::require_str_param_or(input, "pattern", &["query", "regex"])?;
+    let raw_path = input["path"].as_str().unwrap_or_default();
+    let max = optional_u64_param(input, "limit").unwrap_or(50) as usize;
+    let context_lines = optional_u64_param(input, "context_lines")
+        .unwrap_or(0)
+        .min(20) as usize;
+
+    let raw = ctx
+        .output_buffer
+        .get(raw_path)
+        .ok_or_else(|| {
+            RecoverableError::with_hint(
+                format!("buffer reference not found: '{raw_path}'"),
+                "Buffer refs expire when the session resets. Re-run the command to get a fresh ref.",
+            )
+        })?
+        .stdout;
+
+    let text = if raw_path.starts_with("@tool_") {
+        serde_json::from_str::<serde_json::Value>(&raw)
+            .ok()
+            .and_then(|v| serde_json::to_string_pretty(&v).ok())
+            .unwrap_or(raw)
+    } else {
+        raw
+    };
+
+    let (re, is_literal_fallback) = build_grep_regex(pattern)?;
+
+    let mut matches: Vec<Value> = vec![];
+    let mut total_match_count = 0usize;
+    let mut hit_cap = false;
+
+    if context_lines == 0 {
+        for (i, line) in text.lines().enumerate() {
+            if re.is_match(line) {
+                total_match_count += 1;
+                matches.push(json!({
+                    "file": raw_path,
+                    "line": i + 1,
+                    "content": line,
+                }));
+                if matches.len() >= max {
+                    hit_cap = true;
+                    break;
+                }
+            }
+        }
+    } else {
+        let file_lines: Vec<&str> = text.lines().collect();
+        let n = file_lines.len();
+        let mut current: Option<(usize, usize, usize)> = None;
+
+        for (i, line) in file_lines.iter().enumerate() {
+            if !re.is_match(line) {
+                continue;
+            }
+            total_match_count += 1;
+            let ctx_start = i.saturating_sub(context_lines);
+            let ctx_end = (i + context_lines).min(n.saturating_sub(1));
+
+            match current {
+                None => current = Some((ctx_start, i, ctx_end)),
+                Some((blk_start, blk_first, blk_end)) => {
+                    if ctx_start <= blk_end + 1 {
+                        current = Some((blk_start, blk_first, ctx_end.max(blk_end)));
+                    } else {
+                        let content = file_lines[blk_start..=blk_end].join("\n");
+                        matches.push(json!({
+                            "file": raw_path,
+                            "match_line": blk_first + 1,
+                            "start_line": blk_start + 1,
+                            "content": content,
+                        }));
+                        current = Some((ctx_start, i, ctx_end));
+                    }
+                }
+            }
+
+            if total_match_count >= max {
+                hit_cap = true;
+                break;
+            }
+        }
+
+        if let Some((blk_start, blk_first, blk_end)) = current {
+            let content = file_lines[blk_start..=blk_end].join("\n");
+            matches.push(json!({
+                "file": raw_path,
+                "match_line": blk_first + 1,
+                "start_line": blk_start + 1,
+                "content": content,
+            }));
+        }
+    }
+
+    let shown_count = if context_lines > 0 {
+        matches.len()
+    } else {
+        total_match_count
+    };
+
+    let mut result = if context_lines == 0 {
+        use crate::tools::file_group::{cap_grouped, group_by_file, groups_to_json};
+        let (visible, total, files) = cap_grouped(matches, max);
+        let truncated = hit_cap || total > visible.len();
+        let groups = group_by_file(&visible);
+        let file_groups = groups_to_json(&groups);
+        let mut r = json!({
+            "file_groups": file_groups,
+            "total": total,
+            "files": files,
+        });
+        if truncated {
+            r["overflow"] = json!({
+                "shown": visible.len(),
+                "total": total,
+                "hint": "Many matches. Narrow the pattern.",
+            });
+        }
+        r
+    } else {
+        let mut r = json!({
+            "matches": matches,
+            "total": shown_count,
+            "context_lines": context_lines,
+        });
+        if hit_cap {
+            r["overflow"] = json!({
+                "shown": shown_count,
+                "hint": format!(
+                    "Showing first {shown_count} matches (cap hit). Narrow the pattern."
+                ),
+            });
+        }
+        r
+    };
+
+    if is_literal_fallback {
+        result["mode"] = json!("literal_fallback");
+        result["reason"] = json!("pattern was not valid regex — searched as literal text");
+    }
+    if crate::util::path_security::is_identifier_pattern(pattern) {
+        let name = pattern.split('|').next().unwrap_or(pattern);
+        result["suggestion"] = json!(format!(
+            "Pattern looks like a symbol name. Consider: \
+             symbols(name='{name}') for declarations, \
+             references(symbol='{name}') for direct callers."
+        ));
+    }
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -371,6 +568,28 @@ mod tests {
             result["files"].as_u64().unwrap() >= 2,
             "files must be >= 2, got {}",
             result["files"]
+        );
+    }
+
+    #[tokio::test]
+    async fn grep_buffer_ref_matches_content_in_tool_buffer() {
+        // Probe bug 2026-05-09-grep-buffer-false-negatives.
+        // Seed an @tool_* buffer with a known identifier, then assert grep finds it.
+        use serde_json::json;
+        let ctx = test_ctx().await;
+        let raw = r#"{"symbols":[{"name":"foo_bar_baz","kind":"fn"}]}"#;
+        let buf_id = ctx.output_buffer.store_tool("symbols", raw.to_string());
+
+        let tool = Grep;
+        let result = tool
+            .call(json!({ "pattern": "foo_bar_baz", "path": buf_id }), &ctx)
+            .await
+            .unwrap();
+
+        let total = result.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
+        assert!(
+            total > 0,
+            "grep should find 'foo_bar_baz' in @tool_* buffer content, got total={total}: {result}"
         );
     }
 }

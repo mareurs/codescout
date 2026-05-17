@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-05-09
-closed:
+closed: 2026-05-17
 severity: medium
 owner: marius
 related: []
@@ -37,11 +37,9 @@ Verify with `read_file(@tool_xxx, start_line=1, end_line=200)` — output contai
 
 ## Root cause
 
-Two layered causes (hypothesis):
+`Grep::call` had no buffer-ref handling. It passed `@tool_*` / `@cmd_*` / `@file_*` paths through `validate_read_path`, which either rejected the ref outright (no active project) or resolved it to `<project_root>/@tool_*` (non-existent path). `WalkBuilder` then returned 0 matches silently — making the failure look like a search miss rather than a missing feature.
 
-1. `grep` on `@tool_*` may not operate on raw buffer text the way it does on filesystem paths.
-2. The symbol-name-suggestion router may intercept queries containing underscores / identifier-shaped tokens before the search runs.
-
+A secondary effect: `is_identifier_pattern` runs unconditionally and injects the "Pattern looks like a symbol name" suggestion regardless of result count. That made the empty result look like an active redirect by a symbol-name router, when in fact no routing was happening — grep simply searched a path that didn't exist.
 ## Evidence
 
 Multiple instances during the i1-refactor session log (F-11 in `docs/trackers/archive/i1-session-friction.md`). Same buffer + patterns that should match → no matches; identifier-shape always triggers the same router hint.
@@ -53,12 +51,16 @@ Multiple instances during the i1-refactor session log (F-11 in `docs/trackers/ar
 
 ## Fix
 
-Open. Investigation queued.
+Branch on `@` prefix at the top of `Grep::call` and route to a new `grep_in_buffer` helper that:
 
+1. Loads the buffer via `ctx.output_buffer.get(path).stdout`.
+2. Pretty-prints `@tool_*` content (matches the `read_from_buffer` convention so identifier-shaped strings sit on their own lines).
+3. Iterates lines, runs the same regex (with literal-fallback) used by the filesystem path, emits matches in the same response shape (`file_groups` for simple mode, `matches[]` for context mode).
+
+A `build_grep_regex` helper was extracted alongside, used by the new buffer path.
 ## Tests added
 
-N/A — open.
-
+`tools::grep::tests::grep_buffer_ref_matches_content_in_tool_buffer` — seeds an `@tool_*` buffer with `foo_bar_baz` inside a JSON payload, asserts grep finds it. Pre-fix: panicked on `validate_read_path` with `relative path '@tool_*' requires an active project`. Post-fix: returns `total >= 1`.
 ## Workarounds
 
 - Use `read_file(path=@tool_, json_path=…)` for structured fields.
@@ -67,8 +69,7 @@ N/A — open.
 
 ## Resume
 
-Concrete next action: locate the grep tool's dispatch in `src/tools/search/grep.rs`, audit how it handles `@tool_*` ref expansion, and write a regression: cache a buffer containing `foo_bar_baz`, then assert `grep("foo_bar_baz", path="@tool_xxx")` returns a match. If the router intercept is the cause, gate it on filesystem-path lookups only.
-
+Done — fix landed, regression test pinned. If a future bug surfaces with `@cmd_*` or `@file_*` refs specifically, the same `grep_in_buffer` path handles them but they're not exercised by the probe test yet — add another seed if needed.
 ## References
 
 - Originally tracked as **#4** in `docs/issues/bug-tracker.md` (retired after migration to per-file system).

@@ -952,3 +952,73 @@ fn find_symbols_for_range(
         .map(|sym| sym.name_path.clone())
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::Agent;
+    use crate::lsp::LspManager;
+    use crate::tools::ToolContext;
+    use serde_json::json;
+
+    async fn test_ctx() -> ToolContext {
+        ToolContext {
+            agent: Agent::new(None).await.unwrap(),
+            lsp: LspManager::new_arc(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+        }
+    }
+
+    #[tokio::test]
+    async fn read_file_buffer_midpoint_returns_content() {
+        // Probe bug 2026-05-09-read-file-buffer-midpoint-empty.
+        // Seed a buffer with 200 plain lines; read midpoint range.
+        let lines: Vec<String> = (1..=200).map(|i| format!("line {i}")).collect();
+        let content = lines.join("\n");
+        let ctx = test_ctx().await;
+        let buf_id = ctx.output_buffer.store_tool("cmd", content);
+
+        let tool = ReadFile;
+        let result = tool
+            .call(
+                json!({ "path": buf_id, "start_line": 150, "end_line": 160 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let body = result.get("content").and_then(|v| v.as_str()).unwrap_or("");
+        assert!(
+            body.contains("line 150") && body.contains("line 160"),
+            "buffer midpoint read should include lines 150-160, got: {body:?} from {result}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_file_buffer_json_path_array_element_returns_value() {
+        // Probe bug 2026-05-09-read-file-json-path-array-elements.
+        let content = r#"{"symbols":[{"name":"alpha","body":"fn alpha() {}"},{"name":"beta","body":"fn beta() {}"}],"context":"ok"}"#;
+        let ctx = test_ctx().await;
+        let buf_id = ctx.output_buffer.store_tool("symbols", content.to_string());
+
+        let tool = ReadFile;
+        let result = tool
+            .call(
+                json!({ "path": buf_id, "json_path": "$.symbols[0].body" }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let body = result.get("content").and_then(|v| v.as_str()).unwrap_or("");
+        assert!(
+            body.contains("fn alpha"),
+            "json_path $.symbols[0].body should return the body string, got: {result}"
+        );
+    }
+}
