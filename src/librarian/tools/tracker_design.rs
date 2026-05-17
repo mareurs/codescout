@@ -278,9 +278,10 @@ fn archetype_goal() -> Value {
             "status": "active",
             "blocked_reason": null,
             "acceptance_signals": [
-                {"description": "P@5 ≥ 0.20 on benchmark-25tc", "met": false, "evidence": "metric_baseline child a1b2c3 current=0.193"},
-                {"description": "R@5 not below baseline 0.724",   "met": true,  "evidence": "metric_baseline child a1b2c3 current=0.781"},
-                {"description": "No new failures in chat-eval-v3", "met": true,  "evidence": "failure_table child d4e5f6 0 fail/12"}
+                {"description": "P@5 ≥ 0.20 on benchmark-25tc", "met": false, "evidence": "metric_baseline C-1: current.P@5=0.193 >= 0.20", "kind": "metric_threshold", "evidence_child_id": "C-1", "metric_key": "P@5", "op": ">=", "threshold": 0.20},
+                {"description": "No new failures in chat-eval-v3", "met": true,  "evidence": "failure_table C-2: 0/12 fail|flaky", "kind": "failure_table_clean", "evidence_child_id": "C-2"},
+                {"description": "All reranker-tuning tasks done", "met": false, "evidence": "task_list C-3: 4/7 done", "kind": "task_list_complete", "evidence_child_id": "C-3"},
+                {"description": "Out-of-band human review complete", "met": false, "evidence": "pending stakeholder sign-off", "kind": "freeform"}
             ],
             "children": [
                 {"id": "C-1", "artifact_id": "a1b2c3d4", "title": "Retrieval Benchmark",   "archetype": "metric_baseline", "status": "in-progress"},
@@ -305,9 +306,16 @@ fn archetype_goal() -> Value {
                         "type": "object",
                         "required": ["description","met"],
                         "properties": {
-                            "description": { "type": "string" },
-                            "met":         { "type": "boolean" },
-                            "evidence":    { "type": "string" }
+                            "description":       { "type": "string" },
+                            "met":               { "type": "boolean" },
+                            "evidence":          { "type": "string" },
+                            "kind":              { "type": "string", "enum": ["freeform","audit_issues_open_count","failure_table_clean","task_list_complete","metric_threshold","reflective_decided","deployment_envs_enabled"], "description": "Optional discriminator for Rust-side evaluation (amendment D4). Default freeform — human-evaluated. Other kinds drive deterministic .met derivation from the cited child's params." },
+                            "evidence_child_id": { "type": "string", "pattern": "^C-\\d+$", "description": "Required for non-freeform kinds — names the child whose params satisfy the signal." },
+                            "max_open":          { "type": "integer", "minimum": 0, "description": "audit_issues_open_count only — max allowed status=open count." },
+                            "metric_key":        { "type": "string", "description": "metric_threshold only — key path under child's params.current to read." },
+                            "op":                { "type": "string", "enum": [">=",">","<=","<","=="], "description": "metric_threshold only — comparison operator." },
+                            "threshold":         { "type": "number", "description": "metric_threshold only — RHS of the comparison." },
+                            "envs":              { "type": ["array","null"], "items": {"type": "string"}, "description": "deployment_envs_enabled only — subset of envs required enabled. null = all envs must be enabled." }
                         }
                     }
                 },

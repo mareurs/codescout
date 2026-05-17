@@ -8,7 +8,7 @@
 //! return `ChildStatus::Unknown` here — those go through
 //! `goal_aggregation::contextual::*` in a later phase.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -132,6 +132,353 @@ fn deployment_state_status(p: &Value) -> ChildStatus {
             ChildStatus::Done
         }
         Some(_) => ChildStatus::InProgress,
+    }
+}
+
+// =====================================================================
+// Acceptance signals (D4) — structured kind discriminant for goal-tracker
+// =====================================================================
+
+/// Comparison operator for `MetricThreshold` signal evaluation.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ThresholdOp {
+    #[serde(rename = ">=")]
+    Gte,
+    #[serde(rename = ">")]
+    Gt,
+    #[serde(rename = "<=")]
+    Lte,
+    #[serde(rename = "<")]
+    Lt,
+    #[serde(rename = "==")]
+    Eq,
+}
+
+impl ThresholdOp {
+    fn compare(self, lhs: f64, rhs: f64) -> bool {
+        match self {
+            ThresholdOp::Gte => lhs >= rhs,
+            ThresholdOp::Gt => lhs > rhs,
+            ThresholdOp::Lte => lhs <= rhs,
+            ThresholdOp::Lt => lhs < rhs,
+            ThresholdOp::Eq => (lhs - rhs).abs() < f64::EPSILON,
+        }
+    }
+}
+
+/// Structured per-kind acceptance signal specification (amendment D4).
+///
+/// Each variant carries the parameters needed to evaluate that kind of signal
+/// against a referenced child artifact's params. `Freeform` is the backward-compat
+/// default — when `kind` is absent in the input JSON, the signal is treated as
+/// human-evaluated and its `met` field is trusted verbatim.
+#[derive(Debug, Clone, Deserialize, PartialEq, Default)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AcceptanceSignalSpec {
+    /// Human-evaluated signal. `met` and `evidence` are written by the LLM
+    /// during refresh. No Rust-side derivation.
+    #[default]
+    Freeform,
+
+    /// Audit-issues child has at most `max_open` rows with `status == "open"`.
+    /// `max_open` defaults to 0 (zero open = goal met).
+    AuditIssuesOpenCount {
+        evidence_child_id: String,
+        #[serde(default)]
+        max_open: u64,
+    },
+
+    /// Failure-table child has zero rows with `status ∈ {"fail","flaky"}`.
+    /// `pass` and `wontfix` count as clean.
+    FailureTableClean { evidence_child_id: String },
+
+    /// Task-list child has all rows with `status == "done"` and the list is non-empty.
+    TaskListComplete { evidence_child_id: String },
+
+    /// Metric-baseline child's `current[metric_key]` satisfies `op threshold`.
+    MetricThreshold {
+        evidence_child_id: String,
+        metric_key: String,
+        op: ThresholdOp,
+        threshold: f64,
+    },
+
+    /// Reflective child's `status` is `"decided"` or `"archived"`.
+    ReflectiveDecided { evidence_child_id: String },
+
+    /// Deployment-state child has the listed envs all enabled.
+    /// If `envs` is None, all envs in the child must be enabled.
+    DeploymentEnvsEnabled {
+        evidence_child_id: String,
+        #[serde(default)]
+        envs: Option<Vec<String>>,
+    },
+}
+
+
+/// Acceptance signal envelope: the LLM-readable description + status fields,
+/// plus the structured spec that drives Rust-side evaluation (D4).
+///
+/// Legacy signals lacking `kind` deserialize as `Freeform` and bypass Rust
+/// evaluation — their `met` field is trusted verbatim.
+///
+/// Custom `Deserialize` impl rather than derive: serde's `flatten + default`
+/// combination doesn't gracefully handle a missing internally-tagged
+/// discriminator (it raises `missing field 'kind'`). We probe for `kind` and
+/// fall back to `Freeform` when absent.
+#[derive(Debug, Clone)]
+pub struct AcceptanceSignal {
+    pub description: String,
+    pub met: bool,
+    pub evidence: String,
+    pub spec: AcceptanceSignalSpec,
+}
+
+impl<'de> Deserialize<'de> for AcceptanceSignal {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        let description = value
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let met = value.get("met").and_then(|v| v.as_bool()).unwrap_or(false);
+        let evidence = value
+            .get("evidence")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let spec = if value.get("kind").is_none() {
+            AcceptanceSignalSpec::Freeform
+        } else {
+            AcceptanceSignalSpec::deserialize(value.clone()).map_err(serde::de::Error::custom)?
+        };
+        Ok(AcceptanceSignal {
+            description,
+            met,
+            evidence,
+            spec,
+        })
+    }
+}
+
+/// Result of running `evaluate_signal` against a child's params.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EvalResult {
+    pub met: bool,
+    pub evidence: String,
+    /// `Some(msg)` when the signal could not be evaluated (e.g. unresolvable
+    /// `evidence_child_id`, missing required field in child params). The LLM
+    /// should surface this in the next refresh's progress_log note.
+    pub error: Option<String>,
+}
+
+/// Evaluate one `AcceptanceSignal` against a slice of `(child_id, archetype, params)` tuples.
+/// `Freeform` passes through the signal's existing `met`/`evidence`. Every other
+/// variant looks up `evidence_child_id`, applies the archetype-appropriate
+/// predicate, and returns a fresh `EvalResult`.
+pub fn evaluate_signal(
+    signal: &AcceptanceSignal,
+    children: &[(String, String, Value)],
+) -> EvalResult {
+    match &signal.spec {
+        AcceptanceSignalSpec::Freeform => EvalResult {
+            met: signal.met,
+            evidence: signal.evidence.clone(),
+            error: None,
+        },
+        AcceptanceSignalSpec::AuditIssuesOpenCount {
+            evidence_child_id,
+            max_open,
+        } => match find_child(children, evidence_child_id) {
+            None => unresolved(evidence_child_id),
+            Some((_, params)) => {
+                let open_count = params
+                    .get("issues")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter(|i| i.get("status").and_then(|s| s.as_str()) == Some("open"))
+                            .count()
+                    })
+                    .unwrap_or(0) as u64;
+                EvalResult {
+                    met: open_count <= *max_open,
+                    evidence: format!(
+                        "audit_issues {evidence_child_id}: {open_count} open (max {max_open})"
+                    ),
+                    error: None,
+                }
+            }
+        },
+        AcceptanceSignalSpec::FailureTableClean { evidence_child_id } => {
+            match find_child(children, evidence_child_id) {
+                None => unresolved(evidence_child_id),
+                Some((_, params)) => {
+                    let failures = params.get("failures").and_then(|v| v.as_array());
+                    let (total, bad) = match failures {
+                        None => (0, 0),
+                        Some(arr) => {
+                            let bad = arr
+                                .iter()
+                                .filter(|f| {
+                                    matches!(
+                                        f.get("status").and_then(|s| s.as_str()),
+                                        Some("fail") | Some("flaky")
+                                    )
+                                })
+                                .count();
+                            (arr.len(), bad)
+                        }
+                    };
+                    EvalResult {
+                        met: bad == 0,
+                        evidence: format!(
+                            "failure_table {evidence_child_id}: {bad}/{total} fail|flaky"
+                        ),
+                        error: None,
+                    }
+                }
+            }
+        }
+        AcceptanceSignalSpec::TaskListComplete { evidence_child_id } => {
+            match find_child(children, evidence_child_id) {
+                None => unresolved(evidence_child_id),
+                Some((_, params)) => {
+                    let tasks = params.get("tasks").and_then(|v| v.as_array());
+                    let (total, done) = match tasks {
+                        None => (0, 0),
+                        Some(arr) => {
+                            let done = arr
+                                .iter()
+                                .filter(|t| {
+                                    t.get("status").and_then(|s| s.as_str()) == Some("done")
+                                })
+                                .count();
+                            (arr.len(), done)
+                        }
+                    };
+                    EvalResult {
+                        met: total > 0 && done == total,
+                        evidence: format!("task_list {evidence_child_id}: {done}/{total} done"),
+                        error: None,
+                    }
+                }
+            }
+        }
+        AcceptanceSignalSpec::MetricThreshold {
+            evidence_child_id,
+            metric_key,
+            op,
+            threshold,
+        } => match find_child(children, evidence_child_id) {
+            None => unresolved(evidence_child_id),
+            Some((_, params)) => {
+                let current_value = params
+                    .get("current")
+                    .and_then(|c| c.get(metric_key))
+                    .and_then(|v| v.as_f64());
+                match current_value {
+                    None => EvalResult {
+                        met: false,
+                        evidence: format!(
+                            "metric_baseline {evidence_child_id}: current.{metric_key} missing or not a number"
+                        ),
+                        error: Some(format!(
+                            "missing metric {metric_key} in child {evidence_child_id} params.current"
+                        )),
+                    },
+                    Some(v) => EvalResult {
+                        met: op.compare(v, *threshold),
+                        evidence: format!(
+                            "metric_baseline {evidence_child_id}: current.{metric_key}={v} {op_str} {threshold}",
+                            op_str = match op {
+                                ThresholdOp::Gte => ">=",
+                                ThresholdOp::Gt => ">",
+                                ThresholdOp::Lte => "<=",
+                                ThresholdOp::Lt => "<",
+                                ThresholdOp::Eq => "==",
+                            }
+                        ),
+                        error: None,
+                    },
+                }
+            }
+        },
+        AcceptanceSignalSpec::ReflectiveDecided { evidence_child_id } => {
+            match find_child(children, evidence_child_id) {
+                None => unresolved(evidence_child_id),
+                Some((_, params)) => {
+                    let status = params.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                    let decided = matches!(status, "decided" | "archived");
+                    EvalResult {
+                        met: decided,
+                        evidence: format!("reflective {evidence_child_id}: status={status}"),
+                        error: None,
+                    }
+                }
+            }
+        }
+        AcceptanceSignalSpec::DeploymentEnvsEnabled {
+            evidence_child_id,
+            envs,
+        } => match find_child(children, evidence_child_id) {
+            None => unresolved(evidence_child_id),
+            Some((_, params)) => {
+                let envs_obj = params.get("envs").and_then(|e| e.as_object());
+                let (all_required, total) = match (envs_obj, envs) {
+                    (None, _) => (false, 0),
+                    (Some(o), None) => {
+                        let total = o.len();
+                        let enabled = o
+                            .values()
+                            .filter(|v| v.get("enabled").and_then(|b| b.as_bool()) == Some(true))
+                            .count();
+                        (total > 0 && enabled == total, total)
+                    }
+                    (Some(o), Some(required)) => {
+                        let enabled = required
+                            .iter()
+                            .filter(|env| {
+                                o.get(env.as_str())
+                                    .and_then(|e| e.get("enabled"))
+                                    .and_then(|b| b.as_bool())
+                                    == Some(true)
+                            })
+                            .count();
+                        (enabled == required.len(), required.len())
+                    }
+                };
+                EvalResult {
+                    met: all_required,
+                    evidence: format!(
+                        "deployment_state {evidence_child_id}: {total} envs evaluated, all_enabled={all_required}"
+                    ),
+                    error: None,
+                }
+            }
+        },
+    }
+}
+
+fn find_child<'a>(
+    children: &'a [(String, String, Value)],
+    target_id: &str,
+) -> Option<(&'a str, &'a Value)> {
+    children
+        .iter()
+        .find(|(id, _, _)| id == target_id)
+        .map(|(_, archetype, params)| (archetype.as_str(), params))
+}
+
+fn unresolved(child_id: &str) -> EvalResult {
+    EvalResult {
+        met: false,
+        evidence: format!("evidence_child_id={child_id} not found among linked children"),
+        error: Some(format!("unresolvable evidence_child_id: {child_id}")),
     }
 }
 
@@ -350,5 +697,310 @@ mod tests {
             let r2 = child_status_pure(arch, params);
             assert_eq!(r1, r2, "non-idempotent: {arch}");
         }
+    }
+
+    // =================================================================
+    // D4 — acceptance signal evaluation tests
+    // =================================================================
+
+    fn child(id: &str, archetype: &str, params: Value) -> (String, String, Value) {
+        (id.to_string(), archetype.to_string(), params)
+    }
+
+    #[test]
+    fn freeform_passes_through_existing_met_and_evidence() {
+        let signal = AcceptanceSignal {
+            description: "manual gate".into(),
+            met: true,
+            evidence: "human note".into(),
+            spec: AcceptanceSignalSpec::Freeform,
+        };
+        let result = evaluate_signal(&signal, &[]);
+        assert_eq!(result.met, true);
+        assert_eq!(result.evidence, "human note");
+        assert!(result.error.is_none());
+    }
+
+    #[test]
+    fn legacy_signal_without_kind_field_deserializes_as_freeform() {
+        let s: AcceptanceSignal =
+            serde_json::from_str(r#"{"description":"x","met":true,"evidence":"e"}"#).unwrap();
+        assert_eq!(s.spec, AcceptanceSignalSpec::Freeform);
+        assert!(s.met);
+    }
+
+    #[test]
+    fn explicit_kind_freeform_deserializes_as_freeform() {
+        let s: AcceptanceSignal = serde_json::from_str(
+            r#"{"description":"x","met":false,"evidence":"","kind":"freeform"}"#,
+        )
+        .unwrap();
+        assert_eq!(s.spec, AcceptanceSignalSpec::Freeform);
+    }
+
+    #[test]
+    fn audit_issues_open_count_met_when_zero_open() {
+        let signal = AcceptanceSignal {
+            description: "no open audits".into(),
+            met: false,
+            evidence: String::new(),
+            spec: AcceptanceSignalSpec::AuditIssuesOpenCount {
+                evidence_child_id: "C-1".into(),
+                max_open: 0,
+            },
+        };
+        let children = vec![child(
+            "C-1",
+            "audit_issues",
+            json!({"issues":[{"n":1,"status":"fixed"}]}),
+        )];
+        let result = evaluate_signal(&signal, &children);
+        assert!(result.met);
+        assert!(result.evidence.contains("0 open"));
+    }
+
+    #[test]
+    fn audit_issues_open_count_unmet_when_above_max() {
+        let signal = AcceptanceSignal {
+            description: "≤1 open".into(),
+            met: false,
+            evidence: String::new(),
+            spec: AcceptanceSignalSpec::AuditIssuesOpenCount {
+                evidence_child_id: "C-1".into(),
+                max_open: 1,
+            },
+        };
+        let children = vec![child(
+            "C-1",
+            "audit_issues",
+            json!({"issues":[
+                {"n":1,"status":"open"},
+                {"n":2,"status":"open"},
+                {"n":3,"status":"fixed"}
+            ]}),
+        )];
+        let result = evaluate_signal(&signal, &children);
+        assert!(!result.met);
+        assert!(result.evidence.contains("2 open"));
+    }
+
+    #[test]
+    fn failure_table_clean_met_when_no_bad() {
+        let signal = AcceptanceSignal {
+            description: "all pass".into(),
+            met: false,
+            evidence: String::new(),
+            spec: AcceptanceSignalSpec::FailureTableClean {
+                evidence_child_id: "C-2".into(),
+            },
+        };
+        let children = vec![child(
+            "C-2",
+            "failure_table",
+            json!({"failures":[
+                {"id":"F-1","status":"pass"},
+                {"id":"F-2","status":"wontfix"}
+            ]}),
+        )];
+        let result = evaluate_signal(&signal, &children);
+        assert!(result.met);
+    }
+
+    #[test]
+    fn failure_table_clean_unmet_when_any_flaky() {
+        let signal = AcceptanceSignal {
+            description: "".into(),
+            met: false,
+            evidence: String::new(),
+            spec: AcceptanceSignalSpec::FailureTableClean {
+                evidence_child_id: "C-2".into(),
+            },
+        };
+        let children = vec![child(
+            "C-2",
+            "failure_table",
+            json!({"failures":[{"id":"F-1","status":"flaky"}]}),
+        )];
+        let result = evaluate_signal(&signal, &children);
+        assert!(!result.met);
+        assert!(result.evidence.contains("1/1 fail|flaky"));
+    }
+
+    #[test]
+    fn task_list_complete_met_when_all_done() {
+        let signal = AcceptanceSignal {
+            description: "".into(),
+            met: false,
+            evidence: String::new(),
+            spec: AcceptanceSignalSpec::TaskListComplete {
+                evidence_child_id: "C-3".into(),
+            },
+        };
+        let children = vec![child(
+            "C-3",
+            "task_list",
+            json!({"tasks":[
+                {"id":"T-1","status":"done"},
+                {"id":"T-2","status":"done"}
+            ]}),
+        )];
+        let result = evaluate_signal(&signal, &children);
+        assert!(result.met);
+    }
+
+    #[test]
+    fn task_list_complete_unmet_when_empty() {
+        let signal = AcceptanceSignal {
+            description: "".into(),
+            met: false,
+            evidence: String::new(),
+            spec: AcceptanceSignalSpec::TaskListComplete {
+                evidence_child_id: "C-3".into(),
+            },
+        };
+        let children = vec![child("C-3", "task_list", json!({"tasks":[]}))];
+        let result = evaluate_signal(&signal, &children);
+        assert!(!result.met);
+    }
+
+    #[test]
+    fn metric_threshold_gte_met() {
+        let signal = AcceptanceSignal {
+            description: "".into(),
+            met: false,
+            evidence: String::new(),
+            spec: AcceptanceSignalSpec::MetricThreshold {
+                evidence_child_id: "C-M".into(),
+                metric_key: "P@5".into(),
+                op: ThresholdOp::Gte,
+                threshold: 0.20,
+            },
+        };
+        let children = vec![child(
+            "C-M",
+            "metric_baseline",
+            json!({"baseline":{"P@5":0.18},"current":{"P@5":0.21}}),
+        )];
+        let result = evaluate_signal(&signal, &children);
+        assert!(result.met);
+        assert!(result.evidence.contains("0.21"));
+    }
+
+    #[test]
+    fn metric_threshold_lt_unmet() {
+        let signal = AcceptanceSignal {
+            description: "".into(),
+            met: false,
+            evidence: String::new(),
+            spec: AcceptanceSignalSpec::MetricThreshold {
+                evidence_child_id: "C-M".into(),
+                metric_key: "P@5".into(),
+                op: ThresholdOp::Gte,
+                threshold: 0.25,
+            },
+        };
+        let children = vec![child(
+            "C-M",
+            "metric_baseline",
+            json!({"current":{"P@5":0.19}}),
+        )];
+        let result = evaluate_signal(&signal, &children);
+        assert!(!result.met);
+    }
+
+    #[test]
+    fn metric_threshold_missing_key_returns_error() {
+        let signal = AcceptanceSignal {
+            description: "".into(),
+            met: false,
+            evidence: String::new(),
+            spec: AcceptanceSignalSpec::MetricThreshold {
+                evidence_child_id: "C-M".into(),
+                metric_key: "R@10".into(),
+                op: ThresholdOp::Gte,
+                threshold: 0.5,
+            },
+        };
+        let children = vec![child(
+            "C-M",
+            "metric_baseline",
+            json!({"current":{"P@5":0.21}}),
+        )];
+        let result = evaluate_signal(&signal, &children);
+        assert!(!result.met);
+        assert!(result.error.is_some());
+        assert!(result.error.unwrap().contains("R@10"));
+    }
+
+    #[test]
+    fn reflective_decided_met() {
+        let signal = AcceptanceSignal {
+            description: "".into(),
+            met: false,
+            evidence: String::new(),
+            spec: AcceptanceSignalSpec::ReflectiveDecided {
+                evidence_child_id: "C-R".into(),
+            },
+        };
+        let children = vec![child("C-R", "reflective", json!({"status":"decided"}))];
+        let result = evaluate_signal(&signal, &children);
+        assert!(result.met);
+    }
+
+    #[test]
+    fn deployment_envs_enabled_all_when_no_list() {
+        let signal = AcceptanceSignal {
+            description: "".into(),
+            met: false,
+            evidence: String::new(),
+            spec: AcceptanceSignalSpec::DeploymentEnvsEnabled {
+                evidence_child_id: "C-D".into(),
+                envs: None,
+            },
+        };
+        let children = vec![child(
+            "C-D",
+            "deployment_state",
+            json!({"envs":{"dev":{"enabled":true},"prod":{"enabled":true}}}),
+        )];
+        let result = evaluate_signal(&signal, &children);
+        assert!(result.met);
+    }
+
+    #[test]
+    fn deployment_envs_enabled_subset_required() {
+        let signal = AcceptanceSignal {
+            description: "prod only".into(),
+            met: false,
+            evidence: String::new(),
+            spec: AcceptanceSignalSpec::DeploymentEnvsEnabled {
+                evidence_child_id: "C-D".into(),
+                envs: Some(vec!["prod".into()]),
+            },
+        };
+        // dev disabled, prod enabled — required subset met
+        let children = vec![child(
+            "C-D",
+            "deployment_state",
+            json!({"envs":{"dev":{"enabled":false},"prod":{"enabled":true}}}),
+        )];
+        let result = evaluate_signal(&signal, &children);
+        assert!(result.met);
+    }
+
+    #[test]
+    fn unresolvable_evidence_child_id_returns_error() {
+        let signal = AcceptanceSignal {
+            description: "".into(),
+            met: false,
+            evidence: String::new(),
+            spec: AcceptanceSignalSpec::ReflectiveDecided {
+                evidence_child_id: "C-MISSING".into(),
+            },
+        };
+        let result = evaluate_signal(&signal, &[]);
+        assert!(!result.met);
+        assert!(result.error.is_some());
+        assert!(result.error.unwrap().contains("C-MISSING"));
     }
 }
