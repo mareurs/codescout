@@ -670,3 +670,73 @@ fn parse_rejects_positive_sign() {
         err
     );
 }
+
+#[test]
+fn extract_root_returns_parsed() {
+    let (content, ty, count) = extract_json_path_v2(r#"{"a":1}"#, "$").unwrap();
+    assert!(content.contains("\"a\""), "got: {}", content);
+    assert_eq!(ty, "object");
+    assert_eq!(count, Some(1));
+}
+
+#[test]
+fn extract_top_level_negative_index() {
+    let (content, ty, _) = extract_json_path_v2(r#"["a","b","c"]"#, "$[-1]").unwrap();
+    assert_eq!(content, "c");
+    assert_eq!(ty, "string");
+}
+
+#[test]
+fn extract_negative_index_returns_last_element() {
+    let (content, ty, _) =
+        extract_json_path_v2(r#"{"items":["a","b","c"]}"#, "$.items[-1]").unwrap();
+    assert_eq!(content, "c");
+    assert_eq!(ty, "string");
+}
+
+#[test]
+fn extract_negative_slice_returns_tail() {
+    let (content, ty, count) =
+        extract_json_path_v2(r#"{"items":["a","b","c","d"]}"#, "$.items[-2:]").unwrap();
+    assert!(content.contains("\"c\""));
+    assert!(content.contains("\"d\""));
+    assert!(!content.contains("\"a\""));
+    assert_eq!(ty, "array");
+    assert_eq!(count, Some(2));
+}
+
+#[test]
+fn extract_negative_index_oob_returns_clear_error() {
+    let err = extract_json_path_v2(r#"{"items":["a"]}"#, "$.items[-5]").unwrap_err();
+    assert!(err.to_string().contains("out of bounds"), "got: {}", err);
+    assert!(err.to_string().contains("length 1"), "got: {}", err);
+}
+
+#[test]
+fn extract_negative_slice_oob_returns_clear_error() {
+    let err = extract_json_path_v2(r#"{"items":["a"]}"#, "$.items[-5:]").unwrap_err();
+    assert!(err.to_string().contains("out of bounds"));
+    assert!(err.to_string().contains("length 1"));
+}
+
+#[test]
+fn extract_mid_path_slice_then_index() {
+    let (content, ty, _) = extract_json_path_v2(
+        r#"{"items":[{"v":1},{"v":2},{"v":3}]}"#,
+        "$.items[-2:][0].v",
+    )
+    .unwrap();
+    assert_eq!(content, "2");
+    assert_eq!(ty, "number");
+}
+
+#[test]
+fn extract_unsupported_syntax_distinguished_from_not_found() {
+    let err = extract_json_path_v2(r#"{"items":["a"]}"#, "$.items[1:3]").unwrap_err();
+    assert!(
+        err.to_string().contains("unsupported json_path segment"),
+        "got: {}",
+        err
+    );
+    assert!(!err.to_string().contains("not found"), "got: {}", err);
+}

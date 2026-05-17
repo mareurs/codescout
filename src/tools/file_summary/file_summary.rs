@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use serde_json::Value;
 
 use crate::tools::RecoverableError;
@@ -611,6 +613,134 @@ fn resolve_json_segment<'a>(value: &'a Value, segment: &str) -> Option<&'a Value
     } else {
         value.get(segment)
     }
+}
+#[allow(dead_code)]
+fn resolve_segment_v2<'a>(
+    value: &'a Value,
+    seg: &Segment,
+) -> Result<Cow<'a, Value>, RecoverableError> {
+    match seg {
+        Segment::Key(k) => match value {
+            Value::Object(obj) => obj.get(k).map(Cow::Borrowed).ok_or_else(|| {
+                let available = obj.keys().take(10).cloned().collect::<Vec<_>>().join(", ");
+                RecoverableError::with_hint(
+                    format!("path segment '{}' not found", k),
+                    format!("Available keys: {}", available),
+                )
+            }),
+            other => Err(RecoverableError::with_hint(
+                format!(
+                    "cannot apply key '{}' to {} (expected object)",
+                    k,
+                    json_type_name(other)
+                ),
+                "Use [N] to index into an array.",
+            )),
+        },
+        Segment::Index(n) => match value {
+            Value::Array(arr) => arr.get(*n).map(Cow::Borrowed).ok_or_else(|| {
+                RecoverableError::with_hint(
+                    format!(
+                        "index {} out of bounds for array of length {}",
+                        n,
+                        arr.len()
+                    ),
+                    format!("Use an index in 0..{}", arr.len()),
+                )
+            }),
+            other => Err(RecoverableError::with_hint(
+                format!(
+                    "cannot apply index '[{}]' to {} (expected array)",
+                    n,
+                    json_type_name(other)
+                ),
+                "Use .key to access an object field.",
+            )),
+        },
+        Segment::NegIndex(n) => match value {
+            Value::Array(arr) => {
+                if *n >= 1 && *n <= arr.len() {
+                    Ok(Cow::Borrowed(&arr[arr.len() - *n]))
+                } else {
+                    let len = arr.len();
+                    Err(RecoverableError::with_hint(
+                        format!("index -{} out of bounds for array of length {}", n, len),
+                        format!(
+                            "Use a non-negative index in 0..{} or a negative index in -{}..-1",
+                            len, len
+                        ),
+                    ))
+                }
+            }
+            other => Err(RecoverableError::with_hint(
+                format!(
+                    "cannot apply index '[-{}]' to {} (expected array)",
+                    n,
+                    json_type_name(other)
+                ),
+                "Use .key to access an object field.",
+            )),
+        },
+        Segment::NegSliceFrom(n) => match value {
+            Value::Array(arr) => {
+                if *n >= 1 && *n <= arr.len() {
+                    let start = arr.len() - *n;
+                    Ok(Cow::Owned(Value::Array(arr[start..].to_vec())))
+                } else {
+                    let len = arr.len();
+                    Err(RecoverableError::with_hint(
+                        format!("index -{} out of bounds for array of length {}", n, len),
+                        format!("For slice '[-N:]', N must be in 1..={}", len),
+                    ))
+                }
+            }
+            other => Err(RecoverableError::with_hint(
+                format!(
+                    "cannot apply slice '[-{}:]' to {} (expected array)",
+                    n,
+                    json_type_name(other)
+                ),
+                "Slice requires an array.",
+            )),
+        },
+    }
+}
+
+/// Temporary scaffold for Task 3 tests. Removed in Task 4 cutover.
+#[allow(dead_code)]
+pub(crate) fn extract_json_path_v2(
+    content: &str,
+    path: &str,
+) -> Result<(String, String, Option<usize>), RecoverableError> {
+    let parsed: Value = serde_json::from_str(content).map_err(|e| {
+        RecoverableError::with_hint(
+            format!("failed to parse JSON: {}", e),
+            "Ensure the file contains valid JSON",
+        )
+    })?;
+    let segments = parse_segments_v2(path)?;
+    let mut current: Cow<'_, Value> = Cow::Borrowed(&parsed);
+    for seg in &segments {
+        current = match current {
+            Cow::Borrowed(v) => resolve_segment_v2(v, seg)?,
+            Cow::Owned(v) => {
+                let r = resolve_segment_v2(&v, seg)?;
+                Cow::Owned(r.into_owned())
+            }
+        };
+    }
+    let final_ref: &Value = current.as_ref();
+    let pretty = match final_ref {
+        Value::String(s) => s.clone(),
+        _ => serde_json::to_string_pretty(final_ref).unwrap_or_else(|_| final_ref.to_string()),
+    };
+    let type_name = json_type_name(final_ref);
+    let count = match final_ref {
+        Value::Object(m) => Some(m.len()),
+        Value::Array(a) => Some(a.len()),
+        _ => None,
+    };
+    Ok((pretty, type_name, count))
 }
 
 pub fn summarize_toml(content: &str) -> Value {
