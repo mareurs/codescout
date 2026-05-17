@@ -105,8 +105,19 @@ fn looks_like_path(s: &str) -> bool {
         return false;
     }
     if s.contains('/') {
+        // `/foo` with no further structure (no second segment, no extension)
+        // is almost always a slash-command or shell shorthand in prose, not a
+        // file path. Require either a second path segment or a known extension.
+        let single_root_segment = s.starts_with('/') && !s[1..].contains('/');
+        if single_root_segment {
+            return has_known_ext(s);
+        }
         return true;
     }
+    has_known_ext(s)
+}
+
+fn has_known_ext(s: &str) -> bool {
     matches!(
         s.rsplit_once('.').map(|(_, ext)| ext),
         Some(
@@ -171,6 +182,39 @@ mod tests {
     fn parser_ignores_prose_outside_code_spans() {
         let (cands, _) = parse("We use Pydantic for validation.");
         assert_eq!(cands.len(), 0);
+    }
+
+    #[test]
+    fn parser_rejects_root_single_segment_without_extension() {
+        // `/claude-traces`, `/mcp`, `/tmp` etc. are slash-commands or shell
+        // shorthand in prose — not file paths. Reject them in code spans.
+        let (cands, _) =
+            parse("Run `/claude-traces` then `/mcp`; also `/tmp` is not a project file.");
+        let kinds: Vec<_> = cands
+            .iter()
+            .map(|c| (c.raw_ref.as_str(), c.ref_kind))
+            .collect();
+        assert!(
+            kinds.is_empty(),
+            "expected no path candidates, got {kinds:?}",
+        );
+    }
+
+    #[test]
+    fn parser_accepts_root_single_segment_with_extension() {
+        // `/foo.rs` is plausibly an absolute path — keep accepting it so
+        // genuine absolute file refs still resolve.
+        let (cands, _) = parse("See `/foo.rs` for the reference impl.");
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].raw_ref, "/foo.rs");
+        assert_eq!(cands[0].ref_kind, RefKind::FilePath);
+    }
+
+    #[test]
+    fn parser_accepts_multi_segment_absolute_path() {
+        let (cands, _) = parse("Check `/usr/local/bin/codescout`.");
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].raw_ref, "/usr/local/bin/codescout");
     }
 
     #[test]
