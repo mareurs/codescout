@@ -6,6 +6,7 @@ severity: medium
 owner: marius
 related: []
 tags: ["edit_markdown", "heading-insert", "semantics"]
+kind: bug
 ---
 
 # BUG: `edit_markdown insert_after` on H1 places content at section end (EOF) not after the heading line

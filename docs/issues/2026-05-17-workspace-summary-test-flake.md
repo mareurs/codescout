@@ -6,6 +6,7 @@ severity: low
 owner: marius
 related: []
 tags: ["test-isolation", "agent", "config", "tmpdir", "order-dependent"]
+kind: bug
 ---
 
 # BUG: `workspace_summary_returns_none_for_single_project` flakes under full-workspace runs

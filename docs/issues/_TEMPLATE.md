@@ -6,6 +6,7 @@ severity: medium
 owner: marius
 related: []
 tags: []
+kind: bug
 ---
 
 <!--

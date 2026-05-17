@@ -6,6 +6,7 @@ owner: marius
 related: []
 tags: ["memory-leak", "oom", "embeddings", "ptmalloc2", "phase-2"]
 last_observed: 2026-04-30
+kind: bug
 ---
 
 # BUG: codescout memory leak → OOM → X session freeze

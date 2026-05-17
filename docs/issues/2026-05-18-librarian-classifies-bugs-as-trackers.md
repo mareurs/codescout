@@ -1,11 +1,12 @@
 ---
-status: open
+status: fixed
 opened: 2026-05-18
-closed:
+closed: 2026-05-18
 severity: low
 owner: marius
 related: [src/librarian/classify/]
 tags: [librarian, classification, kind]
+kind: bug
 ---
 
 # BUG: librarian classifies `docs/issues/*.md` (bug files) as `kind: tracker`
@@ -78,20 +79,35 @@ carry `kind:` in their frontmatter (`docs/issues/_TEMPLATE.md` ships only
 
 ## Fix
 
-Three viable approaches, ordered by ergonomics:
 
-1. **Add `kind: bug` to `docs/issues/_TEMPLATE.md`** and run a one-pass
-   migration that flips existing bug-file frontmatter to `kind: bug`. The
-   librarian classifier then has a typed source of truth. Smallest behavior
-   change.
-2. **Path-classifier rule:** any markdown under `docs/issues/` gets
-   `kind: bug` regardless of frontmatter. Stronger guarantee, but
-   convention-coupled.
-3. **No change** — accept that the canonical query needs a `rel_path` filter
-   and document it (already done in CLAUDE.md commit `136f4c48`).
+Approach (1) shipped — frontmatter-driven classification.
 
-Recommendation: (1) — frontmatter is the source of truth elsewhere in the
-librarian; bug files should follow.
+**Steps:**
+1. Added `kind: bug` to `docs/issues/_TEMPLATE.md` frontmatter.
+2. Migrated 35 existing bug files via python script that appends `kind: bug`
+   to frontmatter blocks lacking it. One file (`2026-04-16-mcp-cancel-disconnect.md`)
+   had a stale `kind: null` from an older librarian auto-write, patched
+   separately via `edit_markdown(frontmatter={set:{kind:"bug"}})`. Total: 37 files.
+3. Ran `librarian(action="reindex", scope="project")` — 35 updated rows.
+4. Verified:
+   - `artifact(find, kind="tracker")` → 32 rows, **zero from `docs/issues/`**
+     (previously 56, with 32 mislabeled bugs)
+   - `artifact(find, kind="bug")` → 37 rows, all from `docs/issues/`
+5. Simplified canonical tracker query in `CLAUDE.md` — dropped the
+   `rel_path: docs/trackers/` workaround filter; bare `kind="tracker"` now suffices.
+
+**Indexer behavior (scouted, no code change required):**
+The classifier already supports frontmatter-driven override at
+`src/librarian/indexer.rs:102-105`:
+```rust
+let kind = fm.and_then(|f| f.kind.clone())               // frontmatter wins
+    .or_else(|| rule_match.as_ref().map(|r| r.kind.clone()))  // rule fallback
+```
+The default rule at `src/librarian/classify.rs:90-93`
+(`docs/issues/**/*.md → kind=tracker`) was kept as defense-in-depth for any
+future bug file that omits the field.
+
+**Commit:** `<tba>` on `experiments`.
 
 ## Tests added
 

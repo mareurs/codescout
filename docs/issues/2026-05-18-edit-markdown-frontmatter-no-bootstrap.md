@@ -6,6 +6,7 @@ severity: medium
 owner: marius
 related: [src/tools/edit_markdown/]
 tags: [edit_markdown, frontmatter, dx]
+kind: bug
 ---
 
 # BUG: `edit_markdown(frontmatter:{set})` refuses to bootstrap a frontmatter block on files that have none

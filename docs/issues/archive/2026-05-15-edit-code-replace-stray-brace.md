@@ -6,6 +6,7 @@ severity: medium
 owner: marius
 related: ["BUG-030", "BUG-032", "BUG-055"]
 tags: ["edit_code", "ast", "range-over-capture", "trait-impl"]
+kind: bug
 ---
 
 # BUG: `edit_code action="replace"` on trait-method body appended a stray `}`

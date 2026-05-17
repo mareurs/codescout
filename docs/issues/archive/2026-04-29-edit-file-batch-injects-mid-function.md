@@ -6,6 +6,7 @@ severity: high
 owner: marius
 related: []
 tags: ["edit_file", "structural-guard", "silent-corruption"]
+kind: bug
 ---
 
 # BUG: `edit_file` batch silently injected mid-function when `new_string` contained `fn `

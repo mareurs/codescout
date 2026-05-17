@@ -6,6 +6,7 @@ severity: medium
 owner: marius
 related: ["BUG-031", "BUG-054"]
 tags: ["edit_code", "doc-comment", "walk-back"]
+kind: bug
 ---
 
 # BUG: `edit_code action="replace"` stripped preceding doc comment when `new_body` omitted it

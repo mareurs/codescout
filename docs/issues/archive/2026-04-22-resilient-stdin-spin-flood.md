@@ -6,6 +6,7 @@ severity: critical
 owner: marius
 related: ["BUG-033"]
 tags: ["resilient-stdin", "logging", "disk-exhaustion", "regression"]
+kind: bug
 ---
 
 # BUG: `ResilientStdin` spinning `Poll::Pending` flooded log files to 268 GB

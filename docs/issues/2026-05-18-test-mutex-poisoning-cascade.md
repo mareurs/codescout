@@ -6,6 +6,7 @@ severity: medium
 owner: marius
 related: [src/config/global.rs, src/config/project.rs, src/embed/preflight.rs]
 tags: [tests, mutex, poisoning, parallel-tests, env-vars]
+kind: bug
 ---
 
 # BUG: Test-suite mutex poisoning cascade + duplicate ENV_LOCK statics

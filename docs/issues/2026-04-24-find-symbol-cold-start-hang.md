@@ -6,6 +6,7 @@ severity: medium
 owner: marius
 related: ["BUG-049"]
 tags: ["find_symbol", "lsp", "cold-start", "workspace-symbol", "tree-sitter-fallback"]
+kind: bug
 ---
 
 # BUG: `find_symbol` hung 60 s during LSP cold-start indexing

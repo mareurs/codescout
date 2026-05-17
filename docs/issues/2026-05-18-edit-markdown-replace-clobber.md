@@ -6,6 +6,7 @@ severity: medium
 owner: marius
 related: []
 tags: [edit_markdown, codescout-tool, footgun, action-replace]
+kind: bug
 ---
 
 # BUG: `edit_markdown action="replace"` with a heading clobbers the whole section body

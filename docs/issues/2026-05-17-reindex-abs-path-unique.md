@@ -6,6 +6,7 @@ severity: high
 owner: marius
 related: []
 tags: ["librarian", "reindex", "sqlite", "unique-constraint", "upsert"]
+kind: bug
 ---
 
 # BUG: `librarian(reindex)` failed with `UNIQUE constraint failed: artifact.abs_path`

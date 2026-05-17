@@ -38,16 +38,28 @@ See codescout memory `development-commands` for the full command reference.
 
 ### Querying active trackers (librarian)
 
-The librarian indexes every `docs/trackers/*.md` file with `kind: tracker`. The
-canonical "what's live right now" query — path-scoped, archived auto-hidden:
+
+The librarian indexes every `docs/trackers/*.md` file with `kind: tracker`,
+and every `docs/issues/*.md` file with `kind: bug`. The canonical
+"what's live right now" query — archived auto-hidden:
 
 ```
-artifact(action="find",
-         filter={"and": [{"kind": {"eq": "tracker"}},
-                         {"rel_path": {"contains": "docs/trackers/"}}]})
+artifact(action="find", kind="tracker")
 ```
 
-**Status vocabulary** (frontmatter `status:` field):
+For bugs, swap the kind:
+
+```
+artifact(action="find", kind="bug", status="open")
+```
+
+Until 2026-05-18, bug files lacked `kind:` frontmatter and the default
+classifier rule mapped `docs/issues/**/*.md → kind=tracker`, polluting
+tracker queries. The migration added `kind: bug` to the bug template +
+all 37 existing files. The classifier rule is kept as a defense-in-depth
+fallback for any bug file that omits the field.
+
+**Status vocabulary** (frontmatter `status:` field for trackers):
 
 | Value | Meaning | Visibility |
 |---|---|---|
@@ -75,7 +87,6 @@ tags:
 ```
 
 The librarian re-allocates `id:` on next `librarian(action="reindex")` if omitted.
-
 
 Two living trackers capture observations from real sessions. Keep them current — they feed
 prompt improvements and skill refactors.

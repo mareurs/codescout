@@ -1,6 +1,6 @@
 ---
 id: null
-kind: null
+kind: bug
 status: done
 title: null
 owners: []

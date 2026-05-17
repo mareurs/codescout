@@ -6,6 +6,7 @@ severity: medium
 owner: marius
 related: ["BUG-030", "BUG-037"]
 tags: ["remove_symbol", "edit_code", "ast", "stale-position"]
+kind: bug
 ---
 
 # BUG: `remove_symbol` left orphaned `impl` block code after enum removal

@@ -6,6 +6,7 @@ severity: medium
 owner: marius
 related: []
 tags: ["librarian", "audit_doc_refs", "doc-refs", "false-positives", "basename-resolution"]
+kind: bug
 ---
 
 # BUG: `audit_doc_refs` flags bare-basename file references as `missing` with severity `high`

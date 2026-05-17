@@ -6,6 +6,7 @@ severity: medium
 owner: marius
 related: []
 tags: ["read_file", "json_path", "buffer", "jsonpath"]
+kind: bug
 ---
 
 # BUG: `read_file(@buf, json_path="$.array[N].field")` returned 0 lines for array-element paths

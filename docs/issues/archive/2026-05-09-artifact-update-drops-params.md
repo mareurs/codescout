@@ -6,6 +6,7 @@ severity: medium
 owner: marius
 related: []
 tags: ["artifact", "update", "augmentation", "params", "silent-drop"]
+kind: bug
 ---
 
 # BUG: `artifact(update, patch={params: ...})` silently dropped `params`

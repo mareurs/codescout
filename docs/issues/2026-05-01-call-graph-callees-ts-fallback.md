@@ -6,6 +6,7 @@ severity: low
 owner: marius
 related: []
 tags: ["call_graph", "lsp", "tree-sitter", "language-coverage"]
+kind: bug
 ---
 
 # BUG: `call_graph direction=callees` required LSP callHierarchy; no tree-sitter fallback (Phase B residual)

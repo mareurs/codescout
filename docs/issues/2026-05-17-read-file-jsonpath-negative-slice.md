@@ -6,6 +6,7 @@ severity: low
 owner: marius
 related: ["2026-05-09-read-file-json-path-array-elements.md"]
 tags: ["read_file", "json_path", "jsonpath", "negative-slice"]
+kind: bug
 ---
 
 # BUG: `read_file(json_path="$.symbols[-3:]")` rejects negative slice syntax

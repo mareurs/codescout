@@ -6,6 +6,7 @@ severity: medium
 owner: marius
 related: ["BUG-033"]
 tags: ["edit_file", "parallel", "transaction", "by-design"]
+kind: bug
 ---
 
 # BUG: Partial state after parallel `edit_file` calls (by design)

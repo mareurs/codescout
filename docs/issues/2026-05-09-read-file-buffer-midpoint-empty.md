@@ -6,6 +6,7 @@ severity: medium
 owner: marius
 related: []
 tags: ["read_file", "buffer", "pagination", "offset"]
+kind: bug
 ---
 
 # BUG: `read_file(@buf, start_line=N, end_line=M)` returned empty content past buffer midpoint

@@ -6,6 +6,7 @@ severity: medium
 owner: marius
 related: []
 tags: ["symbols", "lsp", "cold-start", "silent-empty", "tree-sitter-fallback"]
+kind: bug
 ---
 
 # BUG: `symbols(path)` returned silent empty `[]` during LSP cold-start indexing

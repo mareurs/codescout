@@ -6,6 +6,7 @@ severity: low
 owner: marius
 related: [src/tools/edit_code/]
 tags: [edit_code, range, outer-attributes]
+kind: bug
 ---
 
 # BUG: `edit_code(action="replace")` does not include outer attributes in the replace range

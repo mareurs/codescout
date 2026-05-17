@@ -6,6 +6,7 @@ severity: medium
 owner: marius
 related: []
 tags: ["artifact", "create", "side-effects", "orphan-file", "transaction"]
+kind: bug
 ---
 
 # BUG: `artifact(create)` left orphan file on disk when DB insert failed

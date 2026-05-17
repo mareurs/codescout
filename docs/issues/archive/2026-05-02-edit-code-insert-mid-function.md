@@ -6,6 +6,7 @@ severity: high
 owner: marius
 related: ["BUG-029", "BUG-031", "BUG-036"]
 tags: ["edit_code", "ast", "lsp", "silent-corruption", "residual"]
+kind: bug
 ---
 
 # BUG: `edit_code insert after` injected code mid-function body when symbol body was truncated in display

@@ -6,6 +6,7 @@ severity: medium
 owner: marius
 related: []
 tags: ["librarian", "state_at", "short-sha", "lookup", "ambiguity-guard"]
+kind: bug
 ---
 
 # BUG: `state_at(commit=<short-sha>)` failed: lookup used exact match not prefix

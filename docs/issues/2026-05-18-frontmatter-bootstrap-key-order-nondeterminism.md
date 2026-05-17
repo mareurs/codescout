@@ -6,6 +6,7 @@ severity: low
 owner: marius
 related: [src/tools/markdown/edit_markdown.rs, src/tools/markdown/frontmatter.rs]
 tags: [edit_markdown, frontmatter, non-determinism]
+kind: bug
 ---
 
 # BUG: `edit_markdown(frontmatter:{set})` bootstrap path emits keys in HashMap iteration order

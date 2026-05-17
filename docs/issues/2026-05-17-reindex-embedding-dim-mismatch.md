@@ -6,6 +6,7 @@ severity: high
 owner: marius
 related: []
 tags: ["librarian", "reindex", "embedding", "dim-mismatch", "vec0"]
+kind: bug
 ---
 
 # BUG: `librarian(reindex, force=true)` failed with embedding dimension mismatch (768 → 1)

@@ -6,6 +6,7 @@ severity: high
 owner: marius
 related: []
 tags: ["semantic_search", "utf-8", "panic", "mcp-crash"]
+kind: bug
 ---
 
 # BUG: `semantic_search` MCP server panicked on UTF-8 multi-byte char near byte 47 of result preview

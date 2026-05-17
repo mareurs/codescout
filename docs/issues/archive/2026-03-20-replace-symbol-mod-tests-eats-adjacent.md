@@ -6,6 +6,7 @@ severity: medium
 owner: marius
 related: ["BUG-032", "BUG-037"]
 tags: ["replace_symbol", "edit_code", "ast", "lsp", "stale-position"]
+kind: bug
 ---
 
 # BUG: `replace_symbol` on `mod tests` ate adjacent function body

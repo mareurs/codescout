@@ -6,6 +6,7 @@ severity: medium
 owner: marius
 related: []
 tags: ["grep", "buffer", "router", "false-negative"]
+kind: bug
 ---
 
 # BUG: `grep(pattern, path="@tool_*")` false-negatives on strings present in the buffer

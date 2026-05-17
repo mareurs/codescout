@@ -6,6 +6,7 @@ severity: medium
 owner: marius
 related: []
 tags: ["grep", "integration-test", "output-shape", "regression"]
+kind: bug
 ---
 
 # BUG: `workflow_read_search_replace` integration test fails — grep result missing `matches` field

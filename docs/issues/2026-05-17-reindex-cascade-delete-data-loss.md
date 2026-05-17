@@ -6,6 +6,7 @@ severity: critical
 owner: marius
 related: []
 tags: ["librarian", "reindex", "data-loss", "cascade-delete", "transaction"]
+kind: bug
 ---
 
 # BUG: `librarian(reindex, force=true)` cascade-deleted all augmentations (DATA LOSS)

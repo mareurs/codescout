@@ -6,6 +6,7 @@ severity: medium
 owner: marius
 related: ["BUG-048"]
 tags: ["find_symbol", "kotlin-lsp", "multi-session", "joinset", "detect_fatal_stderr"]
+kind: bug
 ---
 
 # BUG: `find_symbol` hung ~90 s when kotlin-lsp hit "Multiple editing sessions"

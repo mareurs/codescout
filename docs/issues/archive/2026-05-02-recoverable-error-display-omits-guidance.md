@@ -6,6 +6,7 @@ severity: low
 owner: marius
 related: []
 tags: ["recoverable-error", "display", "test-footgun"]
+kind: bug
 ---
 
 # BUG: `RecoverableError` guidance / hint not included in `Display` / `to_string()`
