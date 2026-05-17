@@ -1,7 +1,7 @@
 ---
-status: mitigated
+status: wontfix
 opened: 2026-03-21
-closed:
+closed: 2026-05-17
 severity: medium
 owner: marius
 related: ["BUG-033"]
@@ -42,8 +42,9 @@ Direct observation: parallel batch with one denied + one approved write leaves t
 
 ## Fix
 
-No code fix planned. Mitigation is the rule: never dispatch parallel write tool calls.
+No code fix in codescout. The crash mode (rmcp cancellation race) was fixed upstream in rmcp 1.2.0; the partial-state semantics are by-design at the MCP protocol level — there is no "wait for all denials/approvals to settle before any write fires" primitive. A write-barrier protocol change is upstream of rmcp and outside codescout's scope.
 
+**Architectural review 2026-05-17 (M6 closure):** Status flipped from `mitigated` to `wontfix`. `mitigated` falsely implied an unresolved root cause living in codescout's code; the actual root cause lives in the MCP protocol's lack of write transactions. The durable answer is the rule (sequence writes; use `edit_file(edits=[...])` for single-file atomic batches). If a future MCP / rmcp revision adds transactional write semantics, reopen and revisit.
 ## Tests added
 
 N/A — by-design behavior; not a regression and not test-coverable without protocol change.
@@ -54,8 +55,7 @@ Sequence writes. If a multi-file change must be transactional, batch via `edit_f
 
 ## Resume
 
-If a future MCP protocol revision adds transactional write semantics, revisit. Concrete next action: monitor rmcp's transaction proposals; current status as of 2026-05-17 is no such proposal exists.
-
+If MCP / rmcp ever ships transactional write semantics, reopen this file: revisit the partial-state mode and decide whether to wire codescout's write tools to the new primitive. Concrete next action: monitor rmcp's release notes for "transaction" / "write barrier" keywords. Current status as of 2026-05-17 is no such proposal exists. If parallel-write violations start recurring in practice (i.e. tracked occurrences in tool-usage-patterns.md), promote the rule to a `codescout-companion` PreToolUse hook that blocks parallel write batches.
 ## References
 
 - Originally tracked as **BUG-021** in `docs/TODO-tool-misbehaviors.md` (deprecated 2026-05-09; superseded by per-file system).
