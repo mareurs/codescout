@@ -82,6 +82,7 @@ say what to change.
 | W-8 | 2026-05-17 | high   | Single `artifact_refresh(action="gather")` call simultaneously verified T-3 (deterministic_child_statuses populated) + T-9 (refresh_meta with real delta `C-3 in-progress→done`) + DF-1 fix (context no longer `{}`) — multi-feature smoke test in one probe |
 | W-9 | 2026-05-17 | high   | T-12 gate_check note event payload matched amendment D11 spec byte-for-byte at first live observation — `tag/gate_passed/text/evidence/refresh_at` all present and shaped correctly without iteration |
 | W-10 | 2026-05-17 | high | F-15 muscle-memory drove scouting `augmentation::upsert` SQL before re-augmenting L1 with new prompt — surfaced both the surgical part (`created_at` / `last_refreshed_at` / `refresh_count` preserved by `ON CONFLICT DO UPDATE`) and the destructive part (`render_template` / `params_schema` / `append_mode` / `history_cap` overwritten, logged as F-16) |
+| W-11 | 2026-05-17 | high | Matrix test (synthetic, 9 branches + leak guard) + live probe against the real codescout binary both passed before declaring S-4 closed — belt-and-suspenders coverage; synthetic verified branch logic, live probe confirmed CLI returns the exact JSON shape the jq filter expects (`payload.tag/gate_passed/text`) under the hook's `2>/dev/null` stderr strip |
 
 ## W-1 — F-8 caught before subagent dispatch via mandatory "log the friction first" discipline
 
@@ -413,6 +414,22 @@ For L1 specifically those four fields were already null/false, so the call was s
 **Impact:** high — if H-8's close had skipped L1 re-augment, the dogfood would have invisibly continued producing the broken behavior the audit had logged, and the "fixed" status on H-8 would have been a lie for the instance that mattered.
 
 **Promote-when:** never a single rule — the lesson is meta: **`merge=false` augment is partly surgical, partly destructive; read the upsert before each new call shape, not just the schema doc.** Belongs in the same future doc that captures F-15's lesson about reading the schema before calling.
+## W-11 — Matrix test + live probe together verified S-4 close before commit
+
+**When:** S-4 close. Goal-stop-hook gains a new query path (`codescout artifact-event list ... --json`) that the existing 8-branch matrix test didn't exercise. Two distinct failure modes to guard against: (a) the synthetic test passes but the real CLI returns a slightly different JSON shape than the jq filter expects, and (b) edge cases in branch logic (legacy goals with no gate event) aren't covered.
+
+**Pattern:** Extended the matrix test to 9 branches with a defensive leak assertion (branch 9 asserts the gate text substring is ABSENT in the fallback path), THEN ran the real codescout binary against the L1 dogfood goal to extract the gate_check `payload.text` via the exact jq filter the hook uses. Both passed before commit.
+
+**Counterfactual:** Without the live probe I'd have shipped a hook with a filter that's CORRECT against synthetic JSON. If the real binary mixed tracing lines into stdout, or returned the event payload at a different nesting depth, the synthetic test would pass and the live hook would silently emit the legacy fallback for every done branch — a regression invisible until a goal actually closed. The probe revealed the real binary DOES emit tracing INFO/WARN — but to stderr, which the hook strips via the existing `2>/dev/null` (see hook line ~52 comment). Probe confirmed the stderr-strip guard handles it correctly. The matrix test alone could not have validated that interaction.
+
+**Confirming data points:**
+1. Matrix test: all 10 assertions passed (9 branches + 1 leak-absent guard for branch 9).
+2. Live probe: `codescout artifact-event list --artifact-id d2cd00fc837e53f2 --kinds note --limit 5 --project ... --json 2>/dev/null | jq '... .[0].payload.text'` returned `auto-close gate passed: 3/3 children done, 4/4 signals met` — exact bytes the hook will append to the done reason.
+3. Without `2>/dev/null`, the same command returns tracing INFO/WARN lines interleaved with the JSON, which jq would fail on — the existing comment about the strip was load-bearing, and the probe surfaced *why*.
+
+**Impact:** high — if the live probe had been skipped, the hook would have a silent always-fallback bug for every done goal that crossed the gate; the matrix test would not catch this because the synthetic stub doesn't model tracing output.
+
+**Promote-when:** after a second case where a synthetic test would have shipped a bug a live probe caught (or vice-versa), promote to a project rule: "two-stage verification — synthetic for branch coverage, live probe for shape coverage — before any hook or shell-pipeline ships".
 ## F-2 — `read_file(@buf_id, start_line=N, end_line=M)` empty when N is past midpoint
 
 **Observed:** 2026-05-17, T-1 prep. After hitting F-1, fell back to

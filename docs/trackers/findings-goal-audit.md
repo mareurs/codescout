@@ -52,12 +52,6 @@ for audit trail.
 - **#4 — S-3** *(open, low)*: Stop hook active-branch surfaces only first
   unmet signal, no count. Reader cannot tell "1 of 4 left" from "1 of 1 left".
 
-- **#5 — S-4** *(open, med, partial-mitigation)*: Done-branch reason has no
-  gate evidence on the *Stop hook surface*. The underlying `note` event with
-  `tag: gate_check` now carries `text` + structured `evidence` (T12 +
-  D11, live-verified — see W-9). The hook still doesn't read these events
-  to populate done-branch reason text. Follow-up: hook edit in companion repo.
-
 - **#6 — W-2** *(open, low)*: `when_to_use` field includes "survives across
   sessions" — decoration, doesn't discriminate goal from other trackers.
 
@@ -88,6 +82,7 @@ for audit trail.
 ### Closed by amendment + plan
 
 - **#1 — H-8** *(fixed)*: `evidence_commits` since-last-refresh anchoring fully landed. T9 (commit `20b5ba1a`) added `refresh_meta.last_refresh_at` + `refresh_meta.commit_count_since_last` to the deterministic gather context; this session (commit `44632d3e`) updated rule 3 of the goal-tracker `prompt_template` to explicitly instruct the LLM to select `evidence_commits` from `context.git_log` restricted by `refresh_meta.last_refresh_at`, and `evidence_artifacts` from `refresh_meta.children_status_delta`. Regression test `goal_prompt_rule_3_anchors_evidence_fields_to_gather_context` asserts all three required anchors. L1 dogfood `d2cd00fc837e53f2` re-augmented with the new prompt.
+- **#5 — S-4** *(fixed)*: Done-branch reason now carries gate evidence. The companion repo's `goal-stop-hook.sh` queries `codescout artifact-event list --kinds note` for the goal, filters for `payload.tag == "gate_check" AND payload.gate_passed == true`, takes the newest, and appends `payload.text` (e.g. "auto-close gate passed: 3/3 children done, 4/4 signals met") to the reason — fail-soft fallback to the legacy form if no event found. Matrix test extended 8 → 9 branches; live probe verified CLI shape matches the jq filter end-to-end against L1 dogfood event. Shipped companion-repo commit `ab0364c`.
 - **#12 — H-1** *(fixed)*: `deployment_state` missing from prompt rule 1 → resolved by **D3** + plan **T1** (constants) + **T2** (predicate).
 - **#13 — H-2** *(fixed)*: "Re-evaluate" verb contradicts "do not recompute" framing → resolved by **T4** prompt edit.
 - **#14 — H-3** *(fixed)*: Children-free goal gate-locked forever → resolved by **D9** (`len(children) >= 2`) + **T4** prompt edit.
@@ -143,7 +138,29 @@ the `ON CONFLICT DO UPDATE` clause in `augmentation::upsert` preserved
 `created_at` / `last_refreshed_at` / `refresh_count` automatically.
 Counts now: 28 fixed / 10 open.
 
-### 2026-05-17 — First fix shipped
+### 2026-05-17 — S-4 closed via companion Stop hook gate_check surfacing
+
+S-4 (`done reason has no gate evidence`) flipped from
+*(open, med, partial-mitigation)* to *(fixed)*. The codescout side had
+been emitting `note` events with `payload.tag == "gate_check"` carrying
+`text` + structured `evidence` since T-12 + D11 (codescout commit
+`1e76a43c`); the companion Stop hook just wasn't reading them. The
+hook's `done)` branch now queries `codescout artifact-event list
+--artifact-id <goal_id> --kinds note --limit 20 --json`, selects the
+newest event with `payload.gate_passed == true`, and appends
+`payload.text` to the reason. Fail-soft fallback: if no matching
+event is found (legacy goals, status flipped by hand, or the
+subcommand errors), the hook falls back to the legacy reason form so
+no regression for goals that never crossed the auto-close gate.
+Matrix test (`goal-stop-hook.matrix.test.sh`) extended from 8 to 9
+branches: branch 3 (existing done) now asserts the gate text appears
+in the reason; branch 9 (new) covers done + no gate event and asserts
+the fallback works without leak (defensive substring-absent assertion).
+Live probe against the real codescout binary + L1 dogfood's
+gate_check event confirmed the CLI shape matches the jq filter
+end-to-end (`auto-close gate passed: 3/3 children done, 4/4 signals
+met`). Shipped companion-repo commit `ab0364c`. Counts now: 29 fixed
+/ 9 open.### 2026-05-17 — First fix shipped
 
 Hamsa S-1 + S-2 (issues #23 + #24) closed by commit `0b75991` in
 `codescout-companion`. Stop hook now surfaces `last refreshed: <ts>`
