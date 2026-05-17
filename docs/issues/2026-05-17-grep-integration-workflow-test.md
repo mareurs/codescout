@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-05-17
-closed:
+closed: 2026-05-18
 severity: medium
 owner: marius
 related: []
@@ -79,11 +79,31 @@ of any uncommitted M5 changes.
 
 ## Fix
 
-Not yet applied.
+
+Hypothesis (2) confirmed — output shape changed without updating the
+integration test. `Grep::call` with default `context_lines=0` returns
+`{file_groups, total, files}` (grouped-by-file shape, see
+`src/tools/grep.rs:188-203`). Only `context_lines > 0` keeps the legacy
+flat `matches` array.
+
+**Fix:** updated `tests/integration.rs:66-71` to read
+`search_result["total"].as_u64()` instead of
+`search_result["matches"].as_array()`. The new shape's `total` field
+counts individual matching lines and is the direct semantic equivalent
+of the old `matches.len()` assertion.
+
+**Verification:**
+- `cargo test --test integration workflow_read_search_replace` — passes.
+
+**Commit:** `<tba>` on `experiments`.
 
 ## Tests added
 
-N/A — this bug *is* about a failing test.
+
+`workflow_read_search_replace` itself — the test now reads the
+current grep output shape (`total` field) and passes again. Catches
+future regressions if grep output drops `total` or returns a
+non-numeric.
 
 ## Workarounds
 

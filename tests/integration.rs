@@ -63,9 +63,9 @@ async fn workflow_read_search_replace() {
         )
         .await
         .unwrap();
-    let matches = search_result["matches"].as_array().unwrap();
+    let total_matches = search_result["total"].as_u64().unwrap();
     assert!(
-        matches.len() >= 2,
+        total_matches >= 2,
         "expected matches in both files: {:?}",
         search_result
     );
