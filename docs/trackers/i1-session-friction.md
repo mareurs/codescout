@@ -50,8 +50,8 @@ say what to change.
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
-| F-1 | 2026-05-17 | low | codescout-tool | open | `read_file(@buf_id, json_path="$.symbols[0].body")` returns 0 lines |
-| F-2 | 2026-05-17 | low | codescout-tool | open | `read_file(@buf_id, start_line=N, end_line=M)` empty when N is past midpoint |
+| F-1 | 2026-05-17 | low | codescout-tool | promoted-to-bug-tracker | `read_file(@buf_id, json_path="$.symbols[0].body")` returns 0 lines (see bug-tracker.md #2) |
+| F-2 | 2026-05-17 | low | codescout-tool | promoted-to-bug-tracker | `read_file(@buf_id, start_line=N, end_line=M)` empty when N is past midpoint (see bug-tracker.md #3) |
 | F-3 | 2026-05-17 | low | self-friction | wontfix-false-alarm | Predicted `cargo test -p codescout` would fail — actually works fine |
 | F-4 | 2026-05-17 | low | self-friction | wontfix-false-alarm | Predicted plan's `src/librarian/...` path was wrong — actually correct |
 | F-5 | 2026-05-17 | low | subagent      | open | T-1 subagent placed cross-check test at module-level scope, not inside `mod tests` block as plan said |
@@ -60,8 +60,10 @@ say what to change.
 | F-8 | 2026-05-17 | high | plan-prose     | open | T-3's code snippet uses `cat.get(id).augmentation.archetype` — three field accesses that don't compile against actual structs |
 | F-9 | 2026-05-17 | med  | architectural | open | Augmentation prompt stored per-artifact at creation; `archetype_goal().prompt_template` edits don't propagate to existing trackers without explicit re-augment |
 | F-10 | 2026-05-17 | high | rust-serde    | mitigated | Serde `flatten + default` doesn't handle missing internally-tagged discriminator — custom `Deserialize` impl required |
-| F-11 | 2026-05-17 | med  | codescout-tool | open | `grep` on `@tool_*` buffer false-negatives on a string present in the buffer |
+| F-11 | 2026-05-17 | med  | codescout-tool | promoted-to-bug-tracker | `grep` on `@tool_*` buffer false-negatives on a string present in the buffer (see bug-tracker.md #4) |
 | F-12 | 2026-05-17 | low  | plan-prose   | mitigated | T-12 plan payload sketch omitted required `note.text` field; event_create rejects silently if `let _ = ...await` swallows the error |
+| F-13 | 2026-05-17 | high | multi-agent  | mitigated | `git reset --soft HEAD~1` on stale HEAD during concurrent work blew away parallel agent's T-13 commit; recovered via reflog SHA |
+| F-14 | 2026-05-17 | med  | multi-agent  | open      | F-N namespace shared across concurrent sessions — parallel session's W-6 references "F-11" but their friction was renumbered to F-12 after mine landed first |
 
 
 ## Wins Index
@@ -73,7 +75,8 @@ say what to change.
 | W-3 | 2026-05-17 | high   | Inline-vs-subagent decision made per-task (not per-skill-default) — T-3 inline saved ~25 min and eliminated re-dispatch risk |
 | W-4 | 2026-05-17 | high   | Attempting end-to-end verification (live gather) caught release-binary deployment gap *before* declaring Phase 1 "shipped" — MCP runs release, dev builds invisible to live tools |
 | W-5 | 2026-05-17 | high   | Post-MCP-reload gather returned populated `deterministic_child_statuses` array (3/3 children deterministic) + new "3 items gathered from..." hint — DF-1 empirically verified, not just structurally fixed |
-| W-6 | 2026-05-17 | high   | Integration test for T-12 immediately caught F-11 (silent failure from swallowed event_create error) — `let _ = ...await` is dangerous without the test sandwiching it |
+| W-6 | 2026-05-17 | high   | Integration test for T-12 immediately caught F-12 (silent failure from swallowed event_create error) — `let _ = ...await` is dangerous without the test sandwiching it |
+| W-7 | 2026-05-17 | high   | Reflog scouted via `git reflog -10` after destructive op; T-13 commit blown away by stale `HEAD~1` reset was recovered by quoting the SHA directly, not relative ref |
 
 ## W-1 — F-8 caught before subagent dispatch via mandatory "log the friction first" discipline
 
@@ -307,6 +310,28 @@ context). The W-5 pattern (verification-after-deployment) reproduced
 cleanly.
 
 ---
+
+
+## W-7 — Reflog scouted after destructive op; SHA-quoting recovered parallel commit
+
+**Observed:** 2026-05-17, continuation session, during F-13 recovery.
+
+**Pattern:** After realizing my `git reset --soft HEAD~1` had moved HEAD backward through an unfamiliar commit (parallel agent's T-13), the response was: stop, run `git reflog -10`, *read the actual sequence of HEAD movements*, identify the SHA I needed to land on, and `git reset --soft <explicit-sha>`. Not a relative ref.
+
+**Counterfactual:** Without the reflog scout, the natural next move would have been "git reset --soft HEAD~1 again" or "git commit --amend" — either of which would have permanently orphaned the parallel agent's T-13 commit. Reflog retention is 90 days by default, but in a public-repo cherry-pick-to-master workflow, an orphaned commit lost from the branch tip is effectively gone the moment it's pushed.
+
+**Confirming data points:**
+- This turn: reflog showed `8b067616 HEAD@{0}: reset...` and `d8b38f26 HEAD@{1}: commit: feat(audit_issues)... (T-13)`. The SHA `d8b38f26` was the recovery target.
+- General pattern: every `git reset` during multi-agent work should be preceded by `git reflog -N` in the same command, and the destination should be a SHA, not a relative ref.
+
+**Impact:** high — prevented silent destruction of another agent's commit. The reflog discipline is also the foundation for any future "undo my last N git ops" tooling.
+
+**Promote-when:** This W should graduate into a CLAUDE.md `## Git Workflow` rule alongside the F-13 fix-idea. Recommended Iron-Law-class wording: *"During concurrent work on a shared branch, never `git reset` to a relative ref. Always: (1) run `git reflog` in the same command, (2) identify the explicit SHA, (3) reset to the SHA."*
+
+**Status:** validated — one data point, but high-severity counterfactual. Promote at next CLAUDE.md edit batch.
+
+---
+
 ## F-1 — `read_file(@buf_id, json_path="$.symbols[0].body")` returns 0 lines
 
 **Observed:** 2026-05-17, T-1 prep. Tried to extract the `archetype_goal`
@@ -338,7 +363,7 @@ read_file's JSON dispatch which may use a different reader.
 
 **Fix pointer:** Promote to `docs/issues/2026-05-17-symbols-body-json_path-empty.md` when ready to investigate. For now: don't trust the json_path hint; use `force=true` + line range.
 
-**Status:** open (mitigated via workaround).
+**Status:** promoted-to-bug-tracker 2026-05-17 — see `docs/issues/bug-tracker.md` #2.
 
 ---
 
@@ -370,7 +395,7 @@ remaining-after-N — not total.
 
 **Fix pointer:** Same future bug tracker as F-1 (related).
 
-**Status:** open (mitigated).
+**Status:** promoted-to-bug-tracker 2026-05-17 — see `docs/issues/bug-tracker.md` #3.
 
 ---
 
@@ -747,8 +772,7 @@ inspection. Reserve `grep` for filesystem paths.
 false-negative cost is potentially expensive ("Oh, the fix didn't
 land!") if the user doesn't re-check via another tool.
 
-**Status:** open — codescout tool friction; candidate for
-`docs/TODO-tool-misbehaviors.md` promotion.
+**Status:** promoted-to-bug-tracker 2026-05-17 — see `docs/issues/bug-tracker.md` #4. Original observation: codescout tool friction; med severity (silently mis-routes verification queries).
 
 **Fix idea:** Either `grep` on `@tool_*` should run on raw text and not
 emit the "looks like a symbol" suggestion (the suggestion is
@@ -804,6 +828,62 @@ Test now passes; payload validates.
 
 **Status:** mitigated (text field shipped; W-6 logs the test sandwich
 that caught it).
+
+---
+
+## F-13 — `git reset --soft HEAD~1` on stale HEAD erased parallel agent's intervening commit
+
+**Observed:** 2026-05-17, continuation session, during attempted amend of my reconnaissance commit.
+
+**When:** Tried to surgically remove "contested" content (DF-1 status block + i1-session-friction.md additions authored by parallel session) from my own commit `8b067616`. Ran `git reset --soft HEAD~1` thinking HEAD~1 was the pre-my-commit state. By the time the command actually executed, the parallel agent had committed T-13 (`d8b38f26`) on top. **HEAD~1 was now MY commit, and HEAD itself was the parallel agent's T-13.**
+
+**Expected:** Reset moves HEAD back to before my commit, leaves my staged content for re-edit.
+
+**Got:** Reset moved HEAD back through the parallel agent's T-13 commit — `d8b38f26` vanished from the branch tip. Their entire `tracker_design.rs` schema-widening work was sitting in my index as if I were about to commit it. **If I had recommitted, T-13 would have become orphaned in reflog only.**
+
+**Probable cause:** `git reset` semantics evaluate `HEAD~N` at execution time, not at observation time. There's no transaction between `git log` (read) and `git reset` (write). With another agent actively committing, HEAD can move arbitrarily in the gap.
+
+**Workaround:** Caught via `git reflog -10`, which showed the destructive move:
+```
+8b067616 HEAD@{0}: reset: moving to HEAD~1
+d8b38f26 HEAD@{1}: commit: feat(audit_issues)... (T-13)
+8b067616 HEAD@{2}: commit: docs: ship reconnaissance substrate
+```
+Recovered by `git reset --soft d8b38f26` — quoting the explicit SHA, not a relative ref. Branch restored, both commits intact.
+
+**Severity:** high — silent destruction of another agent's work. Recovery only possible because reflog retained the SHA and I noticed within seconds. A retention-window or longer gap and the commit would have been irrecoverable except via the parallel agent's local reflog.
+
+**Status:** mitigated — recovered this incident; root cause (HEAD-relative ops during concurrent work) un-fixed without convention change.
+
+**Fix idea:**
+- Convention: never `git reset HEAD~N` during concurrent work — always quote the explicit SHA after re-reading `git log` in the same command.
+- CLAUDE.md `## Git Workflow` rule update (proposed in same session).
+- Longer-term: worktree-per-session would have prevented the race entirely (see W-5 design notes + the multi-agent worktree-UX design candidate).
+
+---
+
+## F-14 — F-N namespace shared across concurrent sessions; cross-references go stale
+
+**Observed:** 2026-05-17, continuation session, while scouting the trackers after parallel agent stopped.
+
+**When:** Cross-checking parallel agent's W-6 entry. Discovered the index row reads "Integration test for T-12 immediately caught **F-11** (silent failure from swallowed event_create error)..." — but in the current index, F-11 is *grep on `@tool_*` buffer* (mine), and F-12 is *silent failure from swallowed event_create error* (theirs).
+
+**Expected:** Cross-references in the wins index should point to the friction they actually caught.
+
+**Got:** Stale cross-reference. The parallel session originally allocated their friction as F-11. My F-11 landed first via commit `8b067616`. Their friction got renumbered to F-12 in the index. Their W-6 body / index row was never updated to reflect the new ID.
+
+**Probable cause:** F-N namespace is shared (one global counter per tracker file) but allocated independently by each concurrent session. There is no locking, no atomic "next free ID" allocation, no visibility into what the other session is about to add.
+
+**Workaround:** Fixed inline this turn (W-6 row updated F-11 → F-12). Manual editorial pass after-the-fact.
+
+**Severity:** med — failure mode is silent: the broken reference reads plausibly until someone tries to follow it. Worse, the cost grows with cross-reference depth (W-N → F-N → "fixed by commit XYZ" chains break in cascade).
+
+**Status:** open — design gap, not just an editorial slip.
+
+**Fix idea (sketch — earns its keep after one more recurrence per Snow Lion two-concretes rule):**
+- **Cheap fix:** session-prefixed IDs, e.g. `S1-F-1`, `S2-F-1`. Decentralized, zero infra, immediately namespaced. Cost: longer IDs, prefix lookup needed when promoting to permanent docs.
+- **Correct fix:** coordinator-allocated IDs via a librarian artifact (atomic claim of next free ID). Requires infra; benefit only after >2 concurrent sessions become common.
+- **Defer for now:** add to the multi-agent design candidate alongside worktree-UX (F-13 + F-14 are two concretes for the same fault line — shared resources with no transaction between observe and act).
 
 ---
 

@@ -197,6 +197,17 @@ clean — git detects the cherry-pick and skips the duplicate commit automatical
 - **Do not push after every commit.** Accumulate local commits during a work session; push once when the work is solid.
 - When iterating on a fix, keep working locally until the fix is confirmed, then commit the final state — not every intermediate attempt.
 
+
+### Concurrent-Work Rules (added 2026-05-17 after F-13 incident)
+
+When working on a shared branch alongside another active agent or session:
+
+- **Never `git reset` to a relative ref** (`HEAD~N`, `HEAD^`, `@{N}`). Relative refs evaluate at execution time, not observation time — the gap between `git log` (read) and `git reset` (write) is enough for another agent to move HEAD, and your reset will silently traverse their commit.
+- **Always quote an explicit SHA** for destructive ops. Read `git reflog -N` in the *same command* as the reset; copy the target SHA from the reflog output.
+- **Treat your last-observed HEAD as immediately stale.** If any time has elapsed since your last `git log` / `git status`, re-read in the same command as the destructive op.
+- **Before any `git rebase`, `git reset`, `git push --force`, or `git commit --amend`** during concurrent work: scout `git reflog -10` first. If unexpected entries appear (commits you didn't author at the tip), pause and reconcile *before* the destructive op.
+
+This rule comes from F-13: `git reset --soft HEAD~1` erased another session's T-13 commit because HEAD had moved between observation and action. Recovered via reflog-quoted SHA (W-7).
 ## Design Principles
 
 **Progressive Disclosure & Discoverability** — Every tool defaults to the most

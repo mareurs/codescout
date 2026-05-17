@@ -131,6 +131,86 @@ If reconnaissance fires here, the trigger is over-broad.
 
 ---
 
+### Case 8 — Refactor with named shape contact (BOUNDARY → TRIGGER)
+
+**Prompt:** *"Refactor `gather_all` to take a `&Catalog` parameter explicitly instead of pulling from `ctx`."*
+
+**Expected:** TRIGGER
+
+**Reasoning:** Refactor that NAMES a signature change in the prompt itself. Distinguishes from Case 6 (refactor without named shape) and Case 9 (refactor purely internal). If the description correctly fires here while skipping Case 9, the refactor-shape distinction is anchored.
+
+---
+
+### Case 9 — Refactor purely internal (BOUNDARY → SKIP)
+
+**Prompt:** *"Refactor `child_status_pure` to use a single `match` expression instead of nested `if let` blocks."*
+
+**Expected:** SKIP
+
+**Reasoning:** Internal restructure, no signature change, no caller impact, no API shape contact. Should NOT trigger reconnaissance. Together with Case 8, brackets the refactor-precision question.
+
+---
+
+### Case 10 — Compile error during routine work (SKIP, competing skill)
+
+**Prompt:** *"`cargo build` failed with `cannot find function 'frobnicate' in this scope` — fix it."*
+
+**Expected:** SKIP
+
+**Reasoning:** This is `systematic-debugging` territory. A compile error from a missing identifier is bug-fix work, not plan-vs-reality scout. Reconnaissance phase 2 (compare expected to got) is about plan drift, not toolchain output.
+
+---
+
+### Case 11 — About to claim work complete (SKIP, competing skill)
+
+**Prompt:** *"All 14 I1 tasks landed. Ready to cherry-pick to master."*
+
+**Expected:** SKIP
+
+**Reasoning:** `verification-before-completion` territory. Reconnaissance is at the seam (before an edit / dispatch / decision), not at the completion gate. Distinct timing.
+
+---
+
+### Case 12 — Plan task with multi-file integration (TRIGGER)
+
+**Prompt:** *"Wire `gather_goal_children` into `refresh.rs::call` so the deterministic statuses flow through to the context HashMap."*
+
+**Expected:** TRIGGER
+
+**Reasoning:** Plan task, multi-file integration, struct/API shape contact (`refresh.rs::call` signature + HashMap key naming + return shape). F-8 precedent: plan code that names multiple symbols can be fictional — scout first.
+
+---
+
+### Case 13 — Test addition for already-scouted symbol (SKIP)
+
+**Prompt:** *"Add a unit test for the `audit_issues` branch of `child_status_pure`."*
+
+**Expected:** SKIP
+
+**Reasoning:** Test addition for code already in scope (existing handler, existing test module). No new shape contact, no plan drift surface. Reconnaissance overkill if invoked.
+
+---
+
+### Case 14 — Plan-status query (SKIP, pressure-tests "multi-task work")
+
+**Prompt:** *"I just finished 5 tasks in the I1 refactor. What's next?"*
+
+**Expected:** SKIP
+
+**Reasoning:** Status query about plan progress. The trigger string's *"at the start of multi-task work"* phrase could over-fire here ("I'm in a multi-task session, planning what's next"). This case discriminates whether the model correctly bounds *"start of multi-task work"* to "starting a new task" rather than "operating within a multi-task session."
+
+---
+
+### Case 15 — Architectural decision needing shape scout (BOUNDARY → TRIGGER)
+
+**Prompt:** *"Should `metric_baseline` move into the Rust kernel like the other archetypes, or stay LLM-evaluated?"*
+
+**Expected:** TRIGGER
+
+**Reasoning:** Architectural decision where the right answer depends on understanding current shape: how is `metric_baseline` currently evaluated? What are its inputs? What's the kernel's contract? Scout BEFORE deciding. Competing skill `brainstorming` could also fire, but reconnaissance is the right primary because the decision is shape-bounded, not preference-bounded.
+
+---
+
 ## Baseline Score — Predicted (inspection, not measurement)
 
 **Draft under test:**
@@ -185,6 +265,7 @@ _(Append one row per scoring run. First row should be the empirical baseline.)_
 | 2026-05-17 | v0 (current draft) | 4/7 predicted | Inspection only — not empirically run |
 | 2026-05-17 | v0 (current draft) | **6/7 empirical** | Fresh `general-purpose` subagent, no project context. Hamsa's prediction wrong on Cases 4, 5, 7 (predicted FAIL → actual PASS). Only true FAIL is Case 6 (refactor — AMBIGUOUS counts as FAIL). At ship threshold. |
 | 2026-05-17 | **v0.1 (shipped)** | 6/7 inherited | Path A: replaced `V-N` with `F-N/W-N` in the parenthetical taxonomy reference. Trigger phrases unchanged → baseline transfers without re-scoring. SKILL.md written to `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`. |
+| 2026-05-17 | v0.1 (15 cases) | **12/15 empirical** | Expanded eval 7 → 15 cases (added 8: refactor-with-shape-named, refactor-internal, compile-error, completion-claim, multi-file integration, test-for-scouted-symbol, plan-status query, architectural decision). 3 FAILs: Case 6 AMBIGUOUS (refactor unanchored — same as 7-case run), Case 14 AMBIGUOUS ("multi-task work" unanchored on plan-status query), Case 15 NO/expected-YES (subagent routed to brainstorming — case-design questionable; regrading to SKIP would land 13/15 = at threshold). Below 87% threshold; refactor + plan-context phrases now have TWO concretes — rewrite earned per two-concretes rule. |
 ## Re-evaluation after baseline
 
 **Inversion of Hamsa's diagnosis:** the trigger string is at the ship threshold without
