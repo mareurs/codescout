@@ -15,9 +15,9 @@
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
-| F-1 | 2026-05-17 | med | architectural | open | Augmentation prompt references `context.git_log` but augmentation row has no `gather_from: git_log` source — silent drift |
+| F-1 | 2026-05-17 | med | architectural | fixed-verified | Augmentation prompt references `context.git_log` but augmentation row has no `gather_from: git_log` source — silent drift (instance fixed; F-2/F-3 structural) |
 | F-2 | 2026-05-17 | med | architectural | open | Archetype designs in `tracker_design.rs` supply no `gather_from` defaults (root of F-1) |
-| F-3 | 2026-05-17 | med | architectural | open | 0 of 4 augmented artifacts use the `gather_from` channel in production |
+| F-3 | 2026-05-17 | med | architectural | open | 1 of 4 augmented artifacts uses the `gather_from` channel in production (was 0/4; goal-tracker re-augmented with gather_from post-recovery) |
 | F-4 | 2026-05-17 | low | cross-repo | open | Stored SHAs (`evidence_commits`, task notes) carry no repo-scoping field |
 | F-5 | 2026-05-17 | med | codescout-tool | open | `state_at(commit=...)` channel broken — `commits` table empty, backfill silently fails |
 | F-6 | 2026-05-17 | high | codescout-tool | promoted-to-bug-tracker | `librarian(reindex)` has two stacked failures — UNIQUE constraint (default) + embedding dimension mismatch (force) — `docs/issues/bug-tracker.md` #5 + #6 |
@@ -85,7 +85,9 @@ because `context.git_log` is empty, even when commits *did* land touching
 the criterion's paths. No error fires. The user only notices the gap by
 inspecting the augmentation row directly.
 
-**Status:** open
+**Status:** fixed-verified (instance only — 2026-05-17 third session, post-F-9 recovery)
+
+**Verification:** After re-augmenting `d2cd00fc837e53f2` via `artifact_augment(merge=false, prompt=..., params={..., gather_from: [{source: "git_log", since: "last_refreshed_at", limit: 30, grep: "goal|i1|librarian|hamsa|pika|archetype|gather"}]})`, `artifact_refresh(action=gather)` returned `hints: ["30 items gathered from git_log"]` and `context.git_log` populated with 30 matching commits. The pipeline works when configured. Note: this fix is **instance-only** — F-2 (no archetype defaults) and F-3 (adoption count) remain structural.
 
 **Fix idea / Pointer:** Routes to existing design tracker
 `docs/trackers/augmentation-prompt-template-resolution.md` — second
@@ -184,7 +186,9 @@ Meanwhile the codebase ships full gather machinery: `gather_all`, `gather_git_lo
 
 **Severity:** med — extent of F-2. Feature exists end-to-end in Rust but adoption is zero in declarative config. The live channel runs only via hardcoded dispatch, not via the configurable surface the API exposes.
 
-**Status:** open
+**Status:** open (improved 0/4 → 1/4 post-F-9 recovery)
+
+**Update 2026-05-17 (post-recovery):** The F-9 recovery re-augmented the goal-tracker with `gather_from: git_log` per F-1's workaround — so the count is now **1 of 4** augmented artifacts using gather_from. The other three (audit_issues, reflective, task_list) still don't use it because their archetype prompts don't reference gather sources. The structural finding (F-2) remains the bottleneck.
 
 **Fix idea / Pointer:** Two routes — (a) fix F-2 and let adoption follow, or (b) retire the user-facing `gather_from` surface and document gather as archetype-dispatched-only. Folds into `augmentation-prompt-template-resolution.md` design conversation.
 
