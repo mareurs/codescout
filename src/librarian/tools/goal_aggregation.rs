@@ -1047,7 +1047,7 @@ mod tests {
             spec: AcceptanceSignalSpec::Freeform,
         };
         let result = evaluate_signal(&signal, &[]);
-        assert_eq!(result.met, true);
+        assert!(result.met);
         assert_eq!(result.evidence, "human note");
         assert!(result.error.is_none());
     }
