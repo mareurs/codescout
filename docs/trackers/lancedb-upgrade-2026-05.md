@@ -1,3 +1,14 @@
+---
+kind: tracker
+status: draft
+title: LanceDB Upgrade Path
+owners: []
+tags:
+  - lancedb
+  - deps
+  - watching
+---
+
 # Tracker: LanceDB Upgrade Path
 
 **Status:** Watching — not ready  

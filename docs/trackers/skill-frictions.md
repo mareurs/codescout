@@ -1,3 +1,13 @@
+---
+kind: tracker
+status: active
+title: Skill Frictions Tracker
+owners: []
+tags:
+  - skills
+  - frictions
+---
+
 # Skill Frictions Tracker
 
 Running log of rough edges found while using project skills. Feed into refactor passes.

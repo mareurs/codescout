@@ -1,3 +1,13 @@
+---
+kind: tracker
+status: draft
+title: Retrieval Stack — Session Residuals 2026-05-07
+owners: []
+tags:
+  - retrieval
+  - session-log
+---
+
 # Retrieval Stack — Session Residuals (2026-05-07)
 
 **Created:** 2026-05-07 · **Status:** open

@@ -36,6 +36,47 @@ See codescout memory `development-commands` for the full command reference.
 **Don't add to retired surfaces.** `docs/archive/old-trackers/TODO-tool-misbehaviors.md` and `docs/archive/old-trackers/bug-tracker.md` are historical reference only — do not append. Open a new `docs/issues/<date>-<slug>.md` instead.
 ## Session Intelligence Trackers
 
+### Querying active trackers (librarian)
+
+The librarian indexes every `docs/trackers/*.md` file with `kind: tracker`. The
+canonical "what's live right now" query — path-scoped, archived auto-hidden:
+
+```
+artifact(action="find",
+         filter={"and": [{"kind": {"eq": "tracker"}},
+                         {"rel_path": {"contains": "docs/trackers/"}}]})
+```
+
+**Status vocabulary** (frontmatter `status:` field):
+
+| Value | Meaning | Visibility |
+|---|---|---|
+| `active` | Living tracker, actively appended to | visible |
+| `draft` | Scoped/watching, not yet active | visible |
+| `archived` | Terminal — work-stream wrapped | **hidden by default** (`HIDDEN_STATUSES` in `find.rs`) |
+| `superseded` | Replaced by a successor artifact | **hidden by default** |
+
+`done`, `in-progress`, etc. are NOT special-cased — they appear as active.
+When a tracker is wrapped, set `status: archived` AND `git mv` to
+`docs/trackers/archive/`. The frontmatter status drives librarian visibility;
+the path move keeps the filesystem clean.
+
+**Frontmatter shape** (required for new trackers):
+
+```yaml
+---
+kind: tracker
+status: active           # or draft | archived | superseded
+title: <human title>
+owners: []
+tags:
+  - <topic>
+---
+```
+
+The librarian re-allocates `id:` on next `librarian(action="reindex")` if omitted.
+
+
 Two living trackers capture observations from real sessions. Keep them current — they feed
 prompt improvements and skill refactors.
 

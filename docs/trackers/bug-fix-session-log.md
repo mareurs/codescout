@@ -1,3 +1,13 @@
+---
+kind: tracker
+status: active
+title: Session Log — Bug-Fix Work Stream
+owners: []
+tags:
+  - session-log
+  - bug-fix
+---
+
 # Session Log — Bug-Fix Work Stream
 
 > **Scope:** Multi-session work to close the OPEN bugs in `docs/issues/`.

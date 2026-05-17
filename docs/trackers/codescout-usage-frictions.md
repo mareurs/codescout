@@ -1,3 +1,14 @@
+---
+kind: tracker
+status: active
+title: Codescout Usage Frictions — U-N Log
+owners: []
+tags:
+  - pika
+  - iron-law
+  - usage
+---
+
 # Codescout Usage Frictions — U-N Log
 
 Observed tool-misuse violations. Each U-N is allocated by the Pika at scan

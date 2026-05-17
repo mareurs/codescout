@@ -1,7 +1,7 @@
 ---
 id: '8e09ca67f463027e'
 kind: tracker
-status: in-progress
+status: active
 title: Retrieval Benchmark — pinned 25-TC log
 owners:
 - '@mareurs'

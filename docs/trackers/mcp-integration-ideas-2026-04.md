@@ -1,3 +1,13 @@
+---
+kind: tracker
+status: draft
+title: MCP Integration Ideas — April 2026
+owners: []
+tags:
+  - mcp
+  - research
+---
+
 # MCP Integration Ideas — April 2026
 
 Landscape captured after a deep read of the Claude Code source at

@@ -1,3 +1,14 @@
+---
+kind: tracker
+status: active
+title: Codescout Usage Hookify Candidates — H-N Log
+owners: []
+tags:
+  - pika
+  - hookify
+  - promotion-candidates
+---
+
 # Codescout Usage Hookify Candidates — H-N Log
 
 Patterns observed across U-N entries that earn substrate enforcement.

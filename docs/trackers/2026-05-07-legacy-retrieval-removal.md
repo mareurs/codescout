@@ -1,3 +1,13 @@
+---
+kind: tracker
+status: draft
+title: Legacy Retrieval Removal — Phase 7 residuals
+owners: []
+tags:
+  - retrieval
+  - phase-7
+---
+
 # Legacy Retrieval Removal Tracker (Phase 7 residuals)
 
 **Created:** 2026-05-07 · **Status:** open

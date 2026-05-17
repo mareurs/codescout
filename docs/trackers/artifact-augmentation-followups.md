@@ -1,7 +1,7 @@
 ---
 id: null
 kind: tracker
-status: in-progress
+status: active
 title: Artifact augmentation - followups and enhancement roadmap
 owners: []
 tags: []

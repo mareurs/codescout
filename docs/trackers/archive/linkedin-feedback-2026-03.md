@@ -1,7 +1,7 @@
 ---
 id: null
 kind: null
-status: done
+status: archived
 title: null
 owners: []
 tags: []

@@ -1,3 +1,13 @@
+---
+kind: tracker
+status: draft
+title: Augmentation Prompt Template Resolution
+owners: []
+tags:
+  - augmentation
+  - scoping
+---
+
 # Augmentation Prompt Template Resolution
 
 **Status:** Scoping — three options on the table, no decision  

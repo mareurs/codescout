@@ -1,3 +1,13 @@
+---
+kind: tracker
+status: draft
+title: Multi-Agent Concurrent Coordination
+owners: []
+tags:
+  - multi-agent
+  - scoping
+---
+
 # Multi-Agent Concurrent Coordination
 
 **Status:** Scoping — two concrete instances on file, conventions

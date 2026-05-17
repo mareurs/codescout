@@ -1,3 +1,14 @@
+---
+kind: tracker
+status: draft
+title: Heuristic Code Analysis During Indexing
+owners: []
+tags:
+  - indexing
+  - heuristics
+  - deferred
+---
+
 # Heuristic Code Analysis During Indexing
 
 **Status:** deferred — brainstormed 2026-04-19, not yet scoped

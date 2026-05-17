@@ -1,3 +1,13 @@
+---
+kind: tracker
+status: active
+title: Shine-In-All-Directions Tracker
+owners: []
+tags:
+  - shine
+  - code-quality
+---
+
 # Shine-In-All-Directions Tracker
 
 **Created:** 2026-05-07 · **Status:** open · **Scope:** codescout + claude-plugins (buddy, codescout-companion)

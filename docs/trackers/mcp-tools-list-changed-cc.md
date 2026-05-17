@@ -1,3 +1,14 @@
+---
+kind: tracker
+status: draft
+title: CC notifications/tools/list_changed Support
+owners: []
+tags:
+  - mcp
+  - claude-code
+  - monitoring
+---
+
 # Tracker: CC `notifications/tools/list_changed` Support
 
 **Purpose:** Monitor when Claude Code implements handling for the MCP

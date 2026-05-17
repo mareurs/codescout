@@ -1,3 +1,13 @@
+---
+kind: tracker
+status: active
+title: Pika Phase 1 — Validation Results
+owners: []
+tags:
+  - pika
+  - validation
+---
+
 # Pika Phase 1 — Validation Results
 
 **Date:** 2026-05-17
