@@ -51,11 +51,13 @@ tags:
 | F-5 | 2026-05-18 | high | release-pipeline | open | HEAD detached from `experiments` without `git checkout` in this session |
 ## Wins Index
 
+
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-05-17 | med | Scout helper-fn bodies before fixing reported bugs | Would have written instrumentation / "fix" for `extract_lines` and `extract_json_path` despite both being correct + having passing tests | promoted-to-permanent-docs |
 | W-2 | 2026-05-18 | med | Pre-dispatch recon scouts type accessors named in plan assertions | Task 2's first subagent would have failed `cargo check` on `err.hint.as_deref()` (no such field); 1+ wasted round-trip per test, controller drift mid-dispatch | validated |
 | W-3 | 2026-05-18 | high | `git merge --ff-only <sha>` for detached-HEAD recovery under concurrent work | Naive `git branch -f` would silently traverse a parallel session's commit (the F-13 failure mode); `--ff-only` errors loudly on stale tip instead | promotion-eligible |
+| W-4 | 2026-05-18 | high | Pre-fix recon validates filed-bug claims against pinned regression tests | Would have implemented a "fix" that broke the BUG-037 regression test `editing_start_line_does_not_walk_back_to_outer_attribute_on_impl_block`; bug filing itself was inaccurate (claimed attrs not included; actually they ARE via BUG-031) | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -377,6 +379,63 @@ HEAD was actively bounced between `experiments` and parallel-session commit SHAs
 **Status:** promotion-eligible (criterion fires this session).
 
 ---
+
+## W-4 — Pre-fix recon caught wontfix bug (BUG-037 was already shipped)
+
+**Observed:** 2026-05-18, about to implement
+`docs/issues/2026-05-18-edit-code-replace-misses-outer-attrs.md`.
+
+**Pattern:** Before writing code to "fix" a behavior reported as buggy
+by a prior subagent's escape-hatch fallback (e.g. `python3 re.sub`),
+scout the symbol that owns the behavior — including its sibling tests.
+If a regression test pins the current behavior with a `BUG-XXX`
+reference in its name or doc comment, the current behavior is
+deliberate, not a bug. Update the filed bug to `wontfix` and pivot to
+the real surface (usually documentation).
+
+**Counterfactual:** Without this scout, I would have written code to
+extend `editing_start_line`'s walk-back to include attribute-only
+blocks above an `impl`/`fn`. That code would have broken the
+`editing_start_line_does_not_walk_back_to_outer_attribute_on_impl_block`
+regression test pinned by BUG-037, which catches the more dangerous
+failure mode (silently dropping `#[async_trait]`-style attributes).
+The TDD red-bar would have fired at cargo test, but only AFTER I'd
+written the wrong-direction fix — at least 1 wasted round-trip plus
+reviewer cycles.
+
+The scout also caught that the bug description I just filed (≤2
+minutes prior) was inaccurate: it claimed "outer attributes are NOT
+included in the replace range," but the actual default behavior IS
+inclusive via BUG-031 walk-back. The narrower BUG-037 guard is what
+the user's pain point ran into.
+
+**Confirming data points:**
+1. F-3 (this same session log) — `RecoverableError.hint` field cited
+   by a plan was non-existent; scout caught it pre-dispatch.
+2. W-2 (this same session log) — the W-N for F-3.
+3. **W-4 (this entry):** scout caught a wontfix-bug-filing mistake AND
+   prevented a regression-test-breaking fix attempt. Two failure
+   modes prevented in one scout.
+
+**Impact:** high — scout prevented (a) bad bug filing being treated as
+ground truth, and (b) wrong-direction fix attempt that would have
+broken pinned regression coverage. The cost of NOT scouting compounds:
+filed bug → planned fix → coded fix → red bar → debugging → revert →
+correct fix. Each step is 5-20 minutes; total cost could be 1-2 hours
+of churn.
+
+**Promote-when:** Already at 3 datapoints (F-3, W-2, W-3). At 3
+distinct datapoints, the recon habit is no longer probationary.
+Promote to CLAUDE.md as a permanent rule:
+
+> Before writing code to fix a behavior reported as wrong, scout the
+> symbol that owns it AND its sibling tests. If a regression test
+> pins the current behavior with a `BUG-XXX` doc reference, treat
+> that as a strong "the current behavior is intentional" signal.
+> Validate the bug filing's claim against the test pin before
+> committing to a fix direction.
+
+**Status:** validated — promotable; awaiting CLAUDE.md edit.
 
 ## Template for new entries
 

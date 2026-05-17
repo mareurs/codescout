@@ -1,8 +1,8 @@
 ---
-status: open
+status: wontfix
 opened: 2026-05-18
-closed:
-severity: medium
+closed: 2026-05-18
+severity: low
 owner: marius
 related: [src/tools/edit_code/]
 tags: [edit_code, range, outer-attributes]
@@ -12,14 +12,14 @@ tags: [edit_code, range, outer-attributes]
 
 ## Summary
 
-When replacing a symbol via `edit_code(action="replace")`, the range used
-is the symbol's declaration body — but outer attributes (`#[allow(...)]`,
-`#[derive(...)]`, `#[cfg(...)]`, doc comments, etc.) that sit on the lines
-ABOVE the symbol are NOT included in the replace span. The result: if the
-new body needs to drop or change an outer attribute, the old attribute
-lines remain in the file alongside the new declaration. Users have to
-fall back to `edit_file` or shell tools to strip the leftover attributes.
 
+When replacing a symbol via `edit_code(action="replace")`, outer attributes
+(`#[allow(...)]`, `#[derive(...)]`, etc.) that sit directly above the
+symbol — with NO doc comment above the attribute block — are
+intentionally PRESERVED, not replaced. The `new_body` only overrides the
+declaration body; existing attributes stay in the file. Users wanting to
+drop a stranded attribute must use `edit_file` separately. This is a
+documentation gap, not a behavior bug.
 ## Symptom (Effect)
 
 Observed during Task 4 of the jsonpath-negative-slice plan execution
@@ -80,17 +80,28 @@ line above it stranded — pointing at a now-unrelated function.
 
 ## Root cause
 
-`Unknown — best lead:` the symbol-range resolution in `edit_code` uses
-the LSP-reported `Range` which conventionally starts AT the declaration
-keyword (`fn`/`struct`/`impl`/etc.), not at the first attribute or doc
-comment. Tree-sitter-based fallback paths may have the same convention.
 
-To include outer attributes, the replace-range must be extended backward
-from the symbol's `start_line` to include any contiguous lines that
-start with `#[...]` or `#![...]` or `///` or `//!` (and preserve
-trailing blank lines if any between the attribute cluster and a leading
-doc/comment cluster).
+**Not a bug — intentional behavior.** Confirmed via reconnaissance against
+`src/symbol/edit.rs:43-104` (`editing_start_line`) and the regression test
+`editing_start_line_does_not_walk_back_to_outer_attribute_on_impl_block`
+at `src/tools/symbol/tests.rs:2802-2827`.
 
+History:
+
+- **BUG-031:** initially extended the replace range backward to include
+  `///` doc comments above a function, so `new_body` containing doc
+  comments could fully replace them without duplication.
+- **BUG-037:** added a guard preventing the walk-back when only `#[...]`
+  attributes (no doc comments) sit above. Reason: an LLM's `new_body`
+  typically starts at `impl`/`fn` (matching what `symbols(name=...)`
+  reports), so walking back would silently DELETE the attributes that
+  the LLM didn't include. The current code at
+  `src/tools/symbol/edit_code.rs:466-543` further narrows the start
+  forward if the LLM's `new_body` doesn't lead with a decorator —
+  belt-and-braces protection.
+
+Result: stranded attributes are a feature, not a bug. They protect
+against the more dangerous failure mode (silent attribute drop).
 ## Evidence
 
 - Subagent task log in the prior session (compaction summary cited the
@@ -108,26 +119,25 @@ doc/comment cluster).
 
 ## Fix
 
-In the symbol-range resolver inside `src/tools/edit_code/`:
 
-1. Read the file lines.
-2. Walk backward from `start_line - 1` while the line (after trimming)
-   starts with `#[`, `#![`, `///`, `//!`, or is a contiguous-trivia
-   blank line BETWEEN such markers.
-3. The earliest such line becomes the new `start_line` for `replace`.
-4. Document the behavior in the tool description: "replace includes
-   outer attributes and doc comments above the symbol".
+**Wontfix — current behavior is correct.** The Task 4 implementer's
+pain was real but the fix is documentation, not code:
 
-Edge cases: do NOT include preceding `//` line comments that aren't
-doc comments — those are unrelated. Do NOT cross a blank line that
-breaks the attribute cluster from arbitrary code above. Specifically:
-the extension stops at the first line that's neither an attribute
-nor a doc comment nor a blank-line-within-trivia.
+1. Update the `edit_code` tool description (in `src/tools/symbol/edit_code.rs::EditCode/description`)
+   to call out: "Outer attributes immediately above the symbol (with no
+   doc comment between them and the attribute block) are preserved by
+   `replace`. To drop or replace them, use `edit_file` with the
+   attribute text as `old_string` after the `replace` lands."
 
-For `action="remove"` and `action="rename"`: the same logic should
-apply — removing a symbol should remove its attributes too (orphan
-attributes after a remove is at least as bad as after a replace).
+2. Optional: surface this in the tool's success response when the LLM
+   asks for `replace` on a symbol that has stranded attributes. E.g.
+   `replaced_lines: "N-M", preserved_attributes: ["#[allow(dead_code)]"]`.
+   Lets the LLM know it might want a follow-up `edit_file` call.
 
+Future opt-in (separate ticket if needed): an explicit param like
+`include_outer_attributes: true` on `edit_code(replace)` that disables
+the BUG-037 guard for this call. Only justify if multiple sessions hit
+this. Currently 1 datapoint (Task 4 of jsonpath fix).
 ## Tests added
 
 `N/A — bug only filed.` Future fix should add:
@@ -141,15 +151,18 @@ attributes after a remove is at least as bad as after a replace).
 
 ## Workarounds
 
-After `edit_code(action="replace")`, follow up with a targeted
-`edit_file` to drop the stranded attribute line(s):
+
+After `edit_code(action="replace")` leaves a stranded attribute, use
+`edit_file` to drop the attribute line:
 
 ```
 edit_file(path="...", old_string="#[allow(dead_code)]\n", new_string="")
 ```
 
-Or use shell — but `edit_file` is preferred (no pipe-IL3 risk).
-
+No need for `python3 re.sub` — `edit_file` is the supported workaround.
+The Task 4 implementer reached for Python because the discoverability
+of this pattern is poor (the tool description doesn't surface it).
+That's the actual fix surface: prompt/docs, not code.
 ## Resume
 
 Locate the symbol-range resolver in `src/tools/edit_code/` (suspected
