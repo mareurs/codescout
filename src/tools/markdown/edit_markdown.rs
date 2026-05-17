@@ -4,6 +4,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use super::super::{parse_bool_param, RecoverableError, Tool, ToolContext};
+use super::frontmatter;
 
 // ── edit_markdown ────────────────────────────────────────────────────────────
 
@@ -295,6 +296,58 @@ pub(crate) fn perform_scoped_edit(
 // EditMarkdown tool
 // ---------------------------------------------------------------------------
 
+/// Apply a JSON-shaped frontmatter mutation request to a markdown source.
+///
+/// `param` is the value of the tool's `frontmatter` field — expected to be an
+/// object with optional `set` (object: key → JSON value) and `delete` (array of
+/// strings) sub-fields. At least one of the two must be non-empty.
+///
+/// Returns the rewritten file content with the frontmatter block updated and
+/// the body preserved verbatim. Errors if the file has no frontmatter or if
+/// the request is empty / shaped wrong.
+pub(super) fn apply_frontmatter_mutation(content: &str, param: &Value) -> Result<String> {
+    let obj = param.as_object().ok_or_else(|| {
+        RecoverableError::with_hint(
+            "frontmatter param must be an object",
+            "Pass `frontmatter: {set: {key: value}, delete: [keys]}`.",
+        )
+    })?;
+
+    let fm = frontmatter::extract_frontmatter(content)?.ok_or_else(|| {
+        RecoverableError::with_hint(
+            "file has no frontmatter block (must start with `---`)",
+            "frontmatter editing is only valid on files with a `---`-delimited \
+             YAML block at the start of the file.",
+        )
+    })?;
+
+    let set: std::collections::HashMap<String, Value> = obj
+        .get("set")
+        .and_then(|v| v.as_object())
+        .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        .unwrap_or_default();
+    let delete: Vec<String> = obj
+        .get("delete")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if set.is_empty() && delete.is_empty() {
+        return Err(RecoverableError::with_hint(
+            "frontmatter param requires at least one of `set` or `delete`",
+            "Pass `frontmatter: {set: {key: value}}` or `frontmatter: {delete: [keys]}`.",
+        )
+        .into());
+    }
+
+    let new_block = frontmatter::apply_ops(&fm.lines, &set, &delete)?;
+    Ok(frontmatter::splice_back(content, &new_block, &fm))
+}
+
 pub struct EditMarkdown;
 
 #[async_trait::async_trait]
@@ -309,7 +362,8 @@ impl Tool for EditMarkdown {
 
     fn description(&self) -> &str {
         "Edit a Markdown document by heading. Actions: replace, insert_before, insert_after, \
-         remove, edit. Supports batch mode via edits array."
+         remove, edit. Supports batch mode via edits array. Optional `frontmatter: {set, delete}` \
+         mutates the YAML frontmatter block atomically alongside any body edits."
     }
 
     fn long_docs(&self) -> Option<&str> {
@@ -321,7 +375,8 @@ impl Tool for EditMarkdown {
              | 2 | `read_markdown(path, headings=[...])` | Read target sections (one call, multiple sections) |\n\
              | 3a | `edit_markdown(path, heading, action, content)` | Whole-section: replace (body only — heading preserved), insert, remove |\n\
              | 3b | `edit_markdown(path, heading, action=\"edit\", old_string, new_string)` | Surgical: scoped string replacement within a section |\n\
-             | 3c | `edit_markdown(path, edits=[...])` | Batch: multiple edits across sections, atomic |"
+             | 3c | `edit_markdown(path, edits=[...])` | Batch: multiple edits across sections, atomic |\n\
+             | 3d | `edit_markdown(path, frontmatter={set: {status: \"fixed\"}})` | Mutate the YAML frontmatter block (status flips, closed dates, etc.) without sed. Combinable with any body edit above — one atomic write covers both. |"
         )
     }
 
@@ -347,6 +402,22 @@ impl Tool for EditMarkdown {
                 "new_string": { "type": "string", "description": "For action='edit': replacement text" },
                 "replace_all": { "type": "boolean", "default": false, "description": "For action='edit': replace all occurrences" },
                 "include_subsections": { "type": "boolean", "default": false, "description": "For action='replace': opt in to consuming nested sub-headings (deeper levels). Default refuses to wipe children — see BUG-043." },
+                "frontmatter": {
+                    "type": "object",
+                    "description": "Mutate the YAML frontmatter block at the start of the file. Flat keys only (one-key-per-line; scalar / string / inline-array values). Combinable atomically with `edits` or `heading`+`action` in the same call. Example: `{set: {status: \"fixed\", closed: \"2026-05-17\"}, delete: [\"legacy_field\"]}`. At least one of `set` / `delete` must be non-empty.",
+                    "properties": {
+                        "set": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "description": "Key → value pairs to set. Existing keys are updated in place (order preserved); new keys are appended at the end of the block. Values may be strings, numbers, booleans, null, or arrays of those."
+                        },
+                        "delete": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Keys to remove from the block. Missing keys are silently ignored (idempotent)."
+                        }
+                    }
+                },
                 "edits": {
                     "type": "array",
                     "items": {
@@ -397,7 +468,20 @@ impl Tool for EditMarkdown {
         // Reject librarian-managed artifacts — use artifact(action="update") instead.
         crate::util::librarian_guard::guard_not_librarian_managed(path, &file_content)?;
 
-        // Determine mode: batch vs single
+        // Working buffer — frontmatter mutation (if requested) lands here first,
+        // then body edits run on the result. One atomic_write at the end keeps
+        // mixed frontmatter+body edits transactional.
+        let mut new_content = file_content.clone();
+
+        // ── Frontmatter mutation (optional) ──────────────────────────
+        let frontmatter_changed = if input["frontmatter"].is_object() {
+            new_content = apply_frontmatter_mutation(&new_content, &input["frontmatter"])?;
+            true
+        } else {
+            false
+        };
+
+        // ── Body edit mode detection ─────────────────────────────────
         let has_edits = input["edits"].is_array();
         let has_heading = input["heading"].is_string();
         let has_action = input["action"].is_string();
@@ -410,11 +494,18 @@ impl Tool for EditMarkdown {
             .into());
         }
 
-        let new_content = if has_edits {
+        let has_body_edit = has_edits || has_heading || has_action;
+        if !frontmatter_changed && !has_body_edit {
+            return Err(RecoverableError::with_hint(
+                "no operation specified",
+                "Pass `frontmatter: {set:{...}, delete:[...]}`, `edits=[...]`, or `heading`+`action`.",
+            )
+            .into());
+        }
+
+        if has_edits {
             // ── Batch mode ───────────────────────────────────────────
             let edits = input["edits"].as_array().unwrap();
-            let mut content = file_content.clone();
-
             for (i, edit) in edits.iter().enumerate() {
                 let heading = edit["heading"].as_str().ok_or_else(|| {
                     anyhow::anyhow!("edits[{}]: missing required 'heading' field", i)
@@ -423,25 +514,31 @@ impl Tool for EditMarkdown {
                     anyhow::anyhow!("edits[{}]: missing required 'action' field", i)
                 })?;
 
-                content = if action == "edit" {
+                new_content = if action == "edit" {
                     let old_string = edit["old_string"].as_str().ok_or_else(|| {
                         anyhow::anyhow!("edits[{}]: old_string is required for action='edit'", i)
                     })?;
                     let new_string = edit["new_string"].as_str().unwrap_or("");
                     let replace_all_val = edit["replace_all"].as_bool().unwrap_or(false);
-                    perform_scoped_edit(&content, heading, old_string, new_string, replace_all_val)
-                        .map_err(|e| {
-                            RecoverableError::with_hint(
-                                format!("edits[{}]: {}", i, e),
-                                "Check heading name and old_string content.",
-                            )
-                        })?
+                    perform_scoped_edit(
+                        &new_content,
+                        heading,
+                        old_string,
+                        new_string,
+                        replace_all_val,
+                    )
+                    .map_err(|e| {
+                        RecoverableError::with_hint(
+                            format!("edits[{}]: {}", i, e),
+                            "Check heading name and old_string content.",
+                        )
+                    })?
                 } else {
                     let edit_content = edit["content"].as_str();
                     if action == "replace"
                         && !edit["include_subsections"].as_bool().unwrap_or(false)
                     {
-                        if let Ok(victims) = find_consumed_subsections(&content, heading) {
+                        if let Ok(victims) = find_consumed_subsections(&new_content, heading) {
                             if !victims.is_empty() {
                                 return Err(
                                     subsection_guard_error(Some(i), heading, &victims).into()
@@ -450,7 +547,7 @@ impl Tool for EditMarkdown {
                         }
                     }
                     perform_section_edit_ext(
-                        &content,
+                        &new_content,
                         heading,
                         action,
                         edit_content,
@@ -464,19 +561,17 @@ impl Tool for EditMarkdown {
                     })?
                 };
             }
-
-            content
-        } else {
+        } else if has_body_edit {
             // ── Single edit mode ─────────────────────────────────────
             let heading = crate::tools::require_str_param(&input, "heading")?;
             let action = crate::tools::require_str_param(&input, "action")?;
 
-            if action == "edit" {
+            new_content = if action == "edit" {
                 let old_string = crate::tools::require_str_param(&input, "old_string")?;
                 let new_string = input["new_string"].as_str().unwrap_or("");
                 let replace_all_val = parse_bool_param(&input["replace_all"]);
                 perform_scoped_edit(
-                    &file_content,
+                    &new_content,
                     heading,
                     old_string,
                     new_string,
@@ -488,14 +583,14 @@ impl Tool for EditMarkdown {
             } else {
                 let content = input["content"].as_str();
                 if action == "replace" && !input["include_subsections"].as_bool().unwrap_or(false) {
-                    if let Ok(victims) = find_consumed_subsections(&file_content, heading) {
+                    if let Ok(victims) = find_consumed_subsections(&new_content, heading) {
                         if !victims.is_empty() {
                             return Err(subsection_guard_error(None, heading, &victims).into());
                         }
                     }
                 }
                 perform_section_edit_ext(
-                    &file_content,
+                    &new_content,
                     heading,
                     action,
                     content,
@@ -504,8 +599,8 @@ impl Tool for EditMarkdown {
                 .map_err(|e| {
                     RecoverableError::with_hint(e.to_string(), "Check heading name and action.")
                 })?
-            }
-        };
+            };
+        }
 
         crate::util::fs::atomic_write(&resolved, &new_content)?;
 

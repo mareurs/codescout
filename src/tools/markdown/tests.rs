@@ -1601,3 +1601,68 @@ async fn empty_file_with_heading_arg_returns_recoverable_error() {
         rec.message
     );
 }
+
+// ── apply_frontmatter_mutation wrapper tests ────────────────────────────────
+
+#[test]
+fn frontmatter_set_flips_status_in_place() {
+    use super::edit_markdown::apply_frontmatter_mutation;
+    let src = "---\nstatus: open\nopened: 2026-04-24\nclosed:\n---\n\n# BUG: ...\nbody\n";
+    let param = json!({"set": {"status": "fixed", "closed": "2026-05-17"}});
+    let out = apply_frontmatter_mutation(src, &param).unwrap();
+    assert_eq!(
+        out,
+        "---\nstatus: fixed\nopened: 2026-04-24\nclosed: 2026-05-17\n---\n\n# BUG: ...\nbody\n"
+    );
+}
+
+#[test]
+fn frontmatter_delete_removes_key_preserves_body() {
+    use super::edit_markdown::apply_frontmatter_mutation;
+    let src = "---\nstatus: open\nlegacy_field: yes\n---\nbody\n";
+    let param = json!({"delete": ["legacy_field"]});
+    let out = apply_frontmatter_mutation(src, &param).unwrap();
+    assert_eq!(out, "---\nstatus: open\n---\nbody\n");
+}
+
+#[test]
+fn frontmatter_set_and_delete_combined_atomic() {
+    use super::edit_markdown::apply_frontmatter_mutation;
+    let src = "---\nstatus: open\nlegacy: x\n---\nbody\n";
+    let param = json!({"set": {"status": "fixed"}, "delete": ["legacy"]});
+    let out = apply_frontmatter_mutation(src, &param).unwrap();
+    assert_eq!(out, "---\nstatus: fixed\n---\nbody\n");
+}
+
+#[test]
+fn frontmatter_on_file_without_frontmatter_errors_with_hint() {
+    use super::edit_markdown::apply_frontmatter_mutation;
+    let src = "# Title\n\nbody\n";
+    let param = json!({"set": {"status": "fixed"}});
+    let err = apply_frontmatter_mutation(src, &param)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("no frontmatter block"), "got: {err}");
+}
+
+#[test]
+fn frontmatter_empty_set_and_delete_rejected() {
+    use super::edit_markdown::apply_frontmatter_mutation;
+    let src = "---\nstatus: open\n---\nbody\n";
+    let param = json!({});
+    let err = apply_frontmatter_mutation(src, &param)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("at least one"), "got: {err}");
+}
+
+#[test]
+fn frontmatter_param_not_object_rejected() {
+    use super::edit_markdown::apply_frontmatter_mutation;
+    let src = "---\nstatus: open\n---\nbody\n";
+    let param = json!("not an object");
+    let err = apply_frontmatter_mutation(src, &param)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("must be an object"), "got: {err}");
+}
