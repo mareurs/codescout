@@ -9,13 +9,15 @@ use super::ToolContext;
 #[derive(Deserialize)]
 struct Args {
     repo: Option<String>,
-    /// Deserialized for API compatibility but currently a no-op after bug-tracker
-    /// #7 (F-9). Previously triggered a pre-walk DELETE that cascade-removed
-    /// augmentations on subsequent failure; that block was removed. To restore
-    /// "ignore cached hashes" semantics without the destructive side-effect,
-    /// wire this back through `index_repo_sync` (pass a `force_rewalk: bool`
-    /// arg that skips the hash-equal early-return).
-    #[allow(dead_code)]
+    /// When true, the upsert walk ignores cached file hashes and re-processes
+    /// every file (re-classification + re-embedding). Plumbed through
+    /// `index_repo_sync` as `force_rewalk` (task #31). Default false — files
+    /// matching their stored hash are skipped via the early-return path.
+    ///
+    /// Historically this also issued a destructive pre-walk DELETE that
+    /// cascade-removed augmentations on subsequent failure (bug-tracker #7).
+    /// That DELETE was removed in commit `d482ca8a`; force is now a safe
+    /// hash-cache-bypass with no destructive side-effect.
     force: Option<bool>,
     /// Scope of the reindex. Defaults to `project` when a current project is
     /// resolved, else `all`. Mirrors the read-tool scope semantics.
@@ -170,7 +172,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     for abs_root in &targets {
         let (report, embed_queue) = {
             let cat = ctx.catalog.lock();
-            indexer::index_repo_sync(&cat, &ctx.rules, abs_root, &ignore, want_embeddings)?
+            indexer::index_repo_sync(
+                &cat,
+                &ctx.rules,
+                abs_root,
+                &ignore,
+                want_embeddings,
+                a.force.unwrap_or(false),
+            )?
         };
 
         total_added += report.added;
@@ -294,18 +303,17 @@ mod tests {
 
     #[tokio::test]
     async fn force_wipes_then_reindexes() {
-        // Renamed in spirit per bug-tracker #7 (F-9): the prior force=true
-        // path issued a destructive DELETE that cascade-removed augmentations
-        // when the subsequent INSERT failed. That block has been removed.
+        // History (kept verbatim — see bug-tracker #7 / F-9):
+        //   pre-bug-tracker-#7 → force=true issued a destructive DELETE +
+        //     re-INSERT; expected added=1, unchanged=0.
+        //   commit d482ca8a → DELETE removed; force=true was a no-op
+        //     pending proper plumbing.
+        //   task #31 → force_rewalk plumbed through index_repo_sync;
+        //     force=true now bypasses the hash-equal early-return, so the
+        //     row is re-walked → upsert path → counts as updated (not added).
         //
-        // Today `force` is a no-op pending a proper "ignore cached hashes"
-        // implementation (plumbed through `index_repo_sync`). This test
-        // verifies:
-        //   1. force=true does NOT trigger destructive DELETE
-        //   2. The walk's own hash-based unchanged detection still works
-        //
-        // When force is properly wired through index_repo_sync, this test
-        // should be updated to assert added=1, unchanged=0 on the third call.
+        // Today's expectation: force=true on an existing-unchanged file →
+        // updated=1, added=0, unchanged=0.
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         std::fs::create_dir_all(root.join("docs")).unwrap();
@@ -319,16 +327,17 @@ mod tests {
         // First index
         call(&ctx, json!({})).await.unwrap();
 
-        // Second index without force → unchanged
+        // Second index without force → unchanged (hash matches)
         let v2 = call(&ctx, json!({})).await.unwrap();
         assert_eq!(v2["unchanged"].as_u64().unwrap(), 1);
         assert_eq!(v2["added"].as_u64().unwrap(), 0);
 
-        // Third index with force=true → currently a no-op (see comment above).
-        // Walk's hash detection treats the file as unchanged.
+        // Third index with force=true → re-walks regardless of hash,
+        // re-runs the upsert → counts as updated (id pre-existed).
         let v3 = call(&ctx, json!({"force": true})).await.unwrap();
+        assert_eq!(v3["updated"].as_u64().unwrap(), 1);
         assert_eq!(v3["added"].as_u64().unwrap(), 0);
-        assert_eq!(v3["unchanged"].as_u64().unwrap(), 1);
+        assert_eq!(v3["unchanged"].as_u64().unwrap(), 0);
     }
 
     fn mk_ctx_with_project(tmp_root: std::path::PathBuf, project_subdir: &str) -> ToolContext {

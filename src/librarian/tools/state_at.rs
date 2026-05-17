@@ -18,6 +18,11 @@ pub(crate) struct ReplayedState {
 }
 
 /// Resolve a commit hash or raw timestamp to a cutoff `i64` epoch-ms value.
+///
+/// For commit hashes, supports prefix matching (e.g. an 8-char short SHA
+/// resolves against the stored 40-char hash). Bug-tracker #8 / F-5 fix.
+/// Ambiguous prefixes (matching ≥2 commits) return an explicit error
+/// listing the conflicting SHAs.
 pub(crate) fn resolve_cutoff_ts(
     ctx: &ToolContext,
     commit: Option<&str>,
@@ -25,17 +30,30 @@ pub(crate) fn resolve_cutoff_ts(
 ) -> Result<i64> {
     if let Some(hash) = commit {
         let cat = ctx.catalog.lock();
-        let ts = cat
+        // Find all hashes that start with the supplied prefix. LIMIT 2 keeps
+        // the ambiguity check cheap — we only need to know if there's 1 or
+        // many.
+        let mut stmt = cat
             .conn
-            .query_row(
-                "SELECT authored_at FROM commits WHERE hash=?1",
-                rusqlite::params![hash],
-                |r| r.get::<_, Option<i64>>(0),
-            )
-            .ok()
-            .flatten()
-            .ok_or_else(|| anyhow!("commit {hash} not indexed; run librarian_reindex"))?;
-        Ok(ts)
+            .prepare("SELECT hash, authored_at FROM commits WHERE hash LIKE ?1 || '%' LIMIT 2")?;
+        let rows: Vec<(String, Option<i64>)> = stmt
+            .query_map(rusqlite::params![hash], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        match rows.len() {
+            0 => Err(anyhow!("commit {hash} not indexed; run librarian_reindex")),
+            1 => rows[0]
+                .1
+                .ok_or_else(|| anyhow!("commit {hash} has no authored_at timestamp")),
+            _ => Err(anyhow!(
+                "commit prefix {hash} is ambiguous (matches at least {} and {}); \
+                 use a longer prefix or the full 40-char SHA",
+                rows[0].0,
+                rows[1].0
+            )),
+        }
     } else {
         Ok(timestamp.unwrap())
     }
