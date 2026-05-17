@@ -573,18 +573,21 @@ fn resolve_section_range_heading_in_code_block() {
 
 #[test]
 fn parse_empty_path_returns_empty_segments() {
-    assert_eq!(parse_segments_v2("").unwrap(), Vec::<Segment>::new());
+    assert_eq!(parse_json_path_segments("").unwrap(), Vec::<Segment>::new());
 }
 
 #[test]
 fn parse_root_only() {
-    assert_eq!(parse_segments_v2("$").unwrap(), Vec::<Segment>::new());
+    assert_eq!(
+        parse_json_path_segments("$").unwrap(),
+        Vec::<Segment>::new()
+    );
 }
 
 #[test]
 fn parse_negative_single_index() {
     assert_eq!(
-        parse_segments_v2("$.a[-1]").unwrap(),
+        parse_json_path_segments("$.a[-1]").unwrap(),
         vec![Segment::Key("a".into()), Segment::NegIndex(1)]
     );
 }
@@ -592,7 +595,7 @@ fn parse_negative_single_index() {
 #[test]
 fn parse_negative_slice_from() {
     assert_eq!(
-        parse_segments_v2("$.a[-3:]").unwrap(),
+        parse_json_path_segments("$.a[-3:]").unwrap(),
         vec![Segment::Key("a".into()), Segment::NegSliceFrom(3)]
     );
 }
@@ -600,7 +603,7 @@ fn parse_negative_slice_from() {
 #[test]
 fn parse_chained_negative_after_positive() {
     assert_eq!(
-        parse_segments_v2("$.a[0][-1]").unwrap(),
+        parse_json_path_segments("$.a[0][-1]").unwrap(),
         vec![
             Segment::Key("a".into()),
             Segment::Index(0),
@@ -612,14 +615,14 @@ fn parse_chained_negative_after_positive() {
 #[test]
 fn parse_top_level_negative_index() {
     assert_eq!(
-        parse_segments_v2("$[-1]").unwrap(),
+        parse_json_path_segments("$[-1]").unwrap(),
         vec![Segment::NegIndex(1)]
     );
 }
 
 #[test]
 fn parse_rejects_positive_slice() {
-    let err = parse_segments_v2("$.a[1:3]").unwrap_err();
+    let err = parse_json_path_segments("$.a[1:3]").unwrap_err();
     assert!(
         err.to_string().contains("unsupported json_path segment"),
         "got: {}",
@@ -630,39 +633,39 @@ fn parse_rejects_positive_slice() {
 
 #[test]
 fn parse_rejects_slice_with_step() {
-    let err = parse_segments_v2("$.a[::2]").unwrap_err();
+    let err = parse_json_path_segments("$.a[::2]").unwrap_err();
     assert!(err.to_string().contains("unsupported json_path segment"));
 }
 
 #[test]
 fn parse_rejects_open_end_positive() {
-    let err = parse_segments_v2("$.a[1:]").unwrap_err();
+    let err = parse_json_path_segments("$.a[1:]").unwrap_err();
     assert!(err.to_string().contains("unsupported json_path segment"));
 }
 
 #[test]
 fn parse_rejects_negative_zero() {
-    let err = parse_segments_v2("$.a[-0]").unwrap_err();
+    let err = parse_json_path_segments("$.a[-0]").unwrap_err();
     assert!(err.to_string().contains("[-0]"), "got: {}", err);
     assert!(err.to_string().contains("[0]"), "got: {}", err);
 }
 
 #[test]
 fn parse_rejects_non_integer_bracket() {
-    let err = parse_segments_v2("$.a[abc]").unwrap_err();
+    let err = parse_json_path_segments("$.a[abc]").unwrap_err();
     assert!(err.to_string().contains("[abc]"));
 }
 
 #[test]
 fn parse_rejects_negative_zero_slice() {
-    let err = parse_segments_v2("$.a[-0:]").unwrap_err();
+    let err = parse_json_path_segments("$.a[-0:]").unwrap_err();
     assert!(err.to_string().contains("[-0:]"), "got: {}", err);
     assert!(err.to_string().contains("[0]"), "got: {}", err);
 }
 
 #[test]
 fn parse_rejects_positive_sign() {
-    let err = parse_segments_v2("$.a[+1]").unwrap_err();
+    let err = parse_json_path_segments("$.a[+1]").unwrap_err();
     assert!(err.to_string().contains("[+1]"), "got: {}", err);
     assert!(
         err.to_string().contains("unsupported json_path segment"),
@@ -673,7 +676,7 @@ fn parse_rejects_positive_sign() {
 
 #[test]
 fn extract_root_returns_parsed() {
-    let (content, ty, count) = extract_json_path_v2(r#"{"a":1}"#, "$").unwrap();
+    let (content, ty, count) = extract_json_path(r#"{"a":1}"#, "$").unwrap();
     assert!(content.contains("\"a\""), "got: {}", content);
     assert_eq!(ty, "object");
     assert_eq!(count, Some(1));
@@ -681,15 +684,14 @@ fn extract_root_returns_parsed() {
 
 #[test]
 fn extract_top_level_negative_index() {
-    let (content, ty, _) = extract_json_path_v2(r#"["a","b","c"]"#, "$[-1]").unwrap();
+    let (content, ty, _) = extract_json_path(r#"["a","b","c"]"#, "$[-1]").unwrap();
     assert_eq!(content, "c");
     assert_eq!(ty, "string");
 }
 
 #[test]
 fn extract_negative_index_returns_last_element() {
-    let (content, ty, _) =
-        extract_json_path_v2(r#"{"items":["a","b","c"]}"#, "$.items[-1]").unwrap();
+    let (content, ty, _) = extract_json_path(r#"{"items":["a","b","c"]}"#, "$.items[-1]").unwrap();
     assert_eq!(content, "c");
     assert_eq!(ty, "string");
 }
@@ -697,7 +699,7 @@ fn extract_negative_index_returns_last_element() {
 #[test]
 fn extract_negative_slice_returns_tail() {
     let (content, ty, count) =
-        extract_json_path_v2(r#"{"items":["a","b","c","d"]}"#, "$.items[-2:]").unwrap();
+        extract_json_path(r#"{"items":["a","b","c","d"]}"#, "$.items[-2:]").unwrap();
     assert!(content.contains("\"c\""));
     assert!(content.contains("\"d\""));
     assert!(!content.contains("\"a\""));
@@ -707,21 +709,21 @@ fn extract_negative_slice_returns_tail() {
 
 #[test]
 fn extract_negative_index_oob_returns_clear_error() {
-    let err = extract_json_path_v2(r#"{"items":["a"]}"#, "$.items[-5]").unwrap_err();
+    let err = extract_json_path(r#"{"items":["a"]}"#, "$.items[-5]").unwrap_err();
     assert!(err.to_string().contains("out of bounds"), "got: {}", err);
     assert!(err.to_string().contains("length 1"), "got: {}", err);
 }
 
 #[test]
 fn extract_negative_slice_oob_returns_clear_error() {
-    let err = extract_json_path_v2(r#"{"items":["a"]}"#, "$.items[-5:]").unwrap_err();
+    let err = extract_json_path(r#"{"items":["a"]}"#, "$.items[-5:]").unwrap_err();
     assert!(err.to_string().contains("out of bounds"));
     assert!(err.to_string().contains("length 1"));
 }
 
 #[test]
 fn extract_mid_path_slice_then_index() {
-    let (content, ty, _) = extract_json_path_v2(
+    let (content, ty, _) = extract_json_path(
         r#"{"items":[{"v":1},{"v":2},{"v":3}]}"#,
         "$.items[-2:][0].v",
     )
@@ -732,7 +734,7 @@ fn extract_mid_path_slice_then_index() {
 
 #[test]
 fn extract_unsupported_syntax_distinguished_from_not_found() {
-    let err = extract_json_path_v2(r#"{"items":["a"]}"#, "$.items[1:3]").unwrap_err();
+    let err = extract_json_path(r#"{"items":["a"]}"#, "$.items[1:3]").unwrap_err();
     assert!(
         err.to_string().contains("unsupported json_path segment"),
         "got: {}",

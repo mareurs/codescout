@@ -417,7 +417,6 @@ fn json_type_name(v: &Value) -> String {
     .to_string()
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Segment {
     /// Object key access: `.field` or bare `field` after `$`.
@@ -431,6 +430,12 @@ pub(crate) enum Segment {
 }
 
 /// Extract a JSON subtree by path. Returns (pretty-printed content, type name, optional count).
+///
+/// For `Value::String` nodes the raw string is returned unescaped — not the JSON-quoted form.
+/// `serde_json::to_string_pretty` on `Value::String("fn foo(){\n}")` produces
+/// `"\"fn foo(){\\n}\""` — quoted with `\n` escapes — which is unreadable as code.
+/// Returning the raw string means `json_path="$.symbols[0].body"` gives actual
+/// source lines that can be browsed, grepped, and displayed directly.
 pub fn extract_json_path(
     content: &str,
     path: &str,
@@ -441,75 +446,32 @@ pub fn extract_json_path(
             "Ensure the file contains valid JSON",
         )
     })?;
-
     let segments = parse_json_path_segments(path)?;
-
-    let mut current = &parsed;
+    let mut current: Cow<'_, Value> = Cow::Borrowed(&parsed);
     for seg in &segments {
-        current = resolve_json_segment(current, seg).ok_or_else(|| {
-            let available = match current {
-                Value::Object(m) => m.keys().take(10).cloned().collect::<Vec<_>>().join(", "),
-                Value::Array(a) => format!(
-                    "array with {} elements (0..{})",
-                    a.len(),
-                    a.len().saturating_sub(1)
-                ),
-                _ => format!("{} (not navigable)", json_type_name(current)),
-            };
-            RecoverableError::with_hint(
-                format!("path segment '{}' not found at '{}'", seg, path),
-                format!("Available: {}", available),
-            )
-        })?;
+        current = match current {
+            Cow::Borrowed(v) => resolve_json_segment(v, seg)?,
+            Cow::Owned(v) => {
+                let r = resolve_json_segment(&v, seg)?;
+                Cow::Owned(r.into_owned())
+            }
+        };
     }
-
-    // For string values return the raw content, not the JSON-encoded form.
-    // serde_json::to_string_pretty on Value::String("fn foo(){\n}") produces
-    // "\"fn foo(){\\n}\"" — quoted and with \n escapes — which is unreadable as code.
-    // Returning the raw string means json_path="$.symbols[0].body" gives actual
-    // source lines that can be browsed, grepped, and displayed directly.
-    let pretty = match current {
+    let final_ref: &Value = current.as_ref();
+    let pretty = match final_ref {
         Value::String(s) => s.clone(),
-        _ => serde_json::to_string_pretty(current).unwrap_or_else(|_| current.to_string()),
+        _ => serde_json::to_string_pretty(final_ref).unwrap_or_else(|_| final_ref.to_string()),
     };
-    let type_name = json_type_name(current);
-    let count = match current {
+    let type_name = json_type_name(final_ref);
+    let count = match final_ref {
         Value::Object(m) => Some(m.len()),
         Value::Array(a) => Some(a.len()),
         _ => None,
     };
-
     Ok((pretty, type_name, count))
 }
 
-fn parse_json_path_segments(path: &str) -> Result<Vec<String>, RecoverableError> {
-    let path = path
-        .strip_prefix("$.")
-        .or_else(|| path.strip_prefix("$"))
-        .unwrap_or(path);
-    if path.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut segments = Vec::new();
-    for part in path.split('.') {
-        if part.is_empty() {
-            continue;
-        }
-        if let Some(bracket_pos) = part.find('[') {
-            let key = &part[..bracket_pos];
-            if !key.is_empty() {
-                segments.push(key.to_string());
-            }
-            let idx_str = &part[bracket_pos..];
-            segments.push(idx_str.to_string());
-        } else {
-            segments.push(part.to_string());
-        }
-    }
-    Ok(segments)
-}
-#[allow(dead_code)]
-pub(crate) fn parse_segments_v2(path: &str) -> Result<Vec<Segment>, RecoverableError> {
+pub(crate) fn parse_json_path_segments(path: &str) -> Result<Vec<Segment>, RecoverableError> {
     let path = path
         .strip_prefix("$.")
         .or_else(|| path.strip_prefix('$'))
@@ -544,7 +506,6 @@ pub(crate) fn parse_segments_v2(path: &str) -> Result<Vec<Segment>, RecoverableE
     Ok(segments)
 }
 
-#[allow(dead_code)]
 fn parse_bracket(inner: &str) -> Result<Segment, RecoverableError> {
     let supported_hint = "Supported forms: '.key', '[N]' (non-negative integer), '[-N]' (negative integer), '[-N:]' (last N elements). Other slice/filter forms not supported.";
     if inner.is_empty() {
@@ -598,7 +559,6 @@ fn parse_bracket(inner: &str) -> Result<Segment, RecoverableError> {
     ))
 }
 
-#[allow(dead_code)]
 fn unsupported_bracket(s: &str) -> RecoverableError {
     RecoverableError::with_hint(
         format!("unsupported json_path segment near '{}'", s),
@@ -606,16 +566,7 @@ fn unsupported_bracket(s: &str) -> RecoverableError {
     )
 }
 
-fn resolve_json_segment<'a>(value: &'a Value, segment: &str) -> Option<&'a Value> {
-    if segment.starts_with('[') && segment.ends_with(']') {
-        let idx: usize = segment[1..segment.len() - 1].parse().ok()?;
-        value.as_array()?.get(idx)
-    } else {
-        value.get(segment)
-    }
-}
-#[allow(dead_code)]
-fn resolve_segment_v2<'a>(
+fn resolve_json_segment<'a>(
     value: &'a Value,
     seg: &Segment,
 ) -> Result<Cow<'a, Value>, RecoverableError> {
@@ -704,43 +655,6 @@ fn resolve_segment_v2<'a>(
             )),
         },
     }
-}
-
-/// Temporary scaffold for Task 3 tests. Removed in Task 4 cutover.
-#[allow(dead_code)]
-pub(crate) fn extract_json_path_v2(
-    content: &str,
-    path: &str,
-) -> Result<(String, String, Option<usize>), RecoverableError> {
-    let parsed: Value = serde_json::from_str(content).map_err(|e| {
-        RecoverableError::with_hint(
-            format!("failed to parse JSON: {}", e),
-            "Ensure the file contains valid JSON",
-        )
-    })?;
-    let segments = parse_segments_v2(path)?;
-    let mut current: Cow<'_, Value> = Cow::Borrowed(&parsed);
-    for seg in &segments {
-        current = match current {
-            Cow::Borrowed(v) => resolve_segment_v2(v, seg)?,
-            Cow::Owned(v) => {
-                let r = resolve_segment_v2(&v, seg)?;
-                Cow::Owned(r.into_owned())
-            }
-        };
-    }
-    let final_ref: &Value = current.as_ref();
-    let pretty = match final_ref {
-        Value::String(s) => s.clone(),
-        _ => serde_json::to_string_pretty(final_ref).unwrap_or_else(|_| final_ref.to_string()),
-    };
-    let type_name = json_type_name(final_ref);
-    let count = match final_ref {
-        Value::Object(m) => Some(m.len()),
-        Value::Array(a) => Some(a.len()),
-        _ => None,
-    };
-    Ok((pretty, type_name, count))
 }
 
 pub fn summarize_toml(content: &str) -> Value {
