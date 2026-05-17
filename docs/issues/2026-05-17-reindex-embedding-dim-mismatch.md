@@ -1,5 +1,5 @@
 ---
-status: mitigated
+status: fixed
 opened: 2026-05-17
 closed: 2026-05-17
 severity: high
@@ -37,11 +37,15 @@ Pre-fix: any condition that caused the embedder to return a sentinel 1-element v
 
 ## Root cause
 
-Two layers:
+Two layers — both now fixed.
 
-1. **Defensive layer (now fixed):** `write_embeddings` did not validate that the batch's vector lengths matched the expected dim before issuing the vec0 INSERT. The error fired at the SQL layer rather than at the validation layer — yielding a misleading mid-pipeline diagnostic.
-2. **Upstream (still pending):** the embedder occasionally returns 1-element vectors, presumably an error sentinel (e.g. `vec![0.0]` returned when the embedder fails). The error was swallowed and a fallback short vector was emitted instead of bubbling up.
+1. **Defensive layer (fixed in `d482ca8a`, 2026-05-17):** `write_embeddings` did not validate that the batch's vector lengths matched the expected dim before issuing the vec0 INSERT. The error fired at the SQL layer rather than at the validation layer — yielding a misleading mid-pipeline diagnostic.
 
+2. **Upstream (fixed 2026-05-17):** Two paths in `RemoteEmbedder::embed` (`crates/codescout-embed/src/remote.rs`) silently produced 1-element vectors:
+   - **All-empty batch early return** (`non_empty.is_empty()` branch) returned `Ok(vec![vec![0.0; 1]; texts.len()])` — a 1-element sentinel for every input slot. Intent was "server would 400 on all-empty, return placeholders" but the placeholders didn't match the model's real dim and silently corrupted the vec0 INSERT downstream.
+   - **Defensive `map_or(1, ...)` fallback** for the post-loop dim computation: `let dim = embedded.first().map_or(1, |e| e.len());` defaulted dim to 1 when `embedded` was empty (server returned 200 with no data, etc.).
+
+   Both now bail with explicit error messages: the all-empty case names the count ("cannot embed batch — all N text(s) are empty/whitespace"), and the no-data case surfaces "embedding server returned no data and no cached dimensions are available".
 ## Evidence
 
 - Reproduced live on this project's catalog — see session log `docs/trackers/archive/artifact-code-linkage-session-log.md` F-6.
@@ -61,12 +65,12 @@ Two layers:
 
 If any check fails, the error fires before any DELETE — combined with the cascade-delete fix (#7), this prevents data loss.
 
-**Upstream (still pending):** find why the embedder returns 1-elem vectors. Investigation to land in `codescout-embed` crate.
-
+**Upstream (fixed 2026-05-17):** `RemoteEmbedder::embed` in `crates/codescout-embed/src/remote.rs` now bails on both unsafe paths instead of returning sentinel 1-element vectors. See Root cause for the two specific branches changed. Regression test `embed_returns_err_when_all_inputs_empty` pins the all-empty-batch case.
 ## Tests added
 
-Unit test coverage for the validation path is exercised by the 2329-test suite. Specific test names not enumerated in the commit; recommend `write_embeddings_rejects_dim_mismatch_before_insert`.
+`crates/codescout-embed/src/remote.rs::tests::embed_returns_err_when_all_inputs_empty` — constructs a RemoteEmbedder (no network), calls `embed(&["", "  ", "\t\n"])`, asserts the returned error message contains the input count. The pre-fix path would have silently returned 3×1-elem vectors; post-fix it returns `Err` so the caller can filter empties or skip the batch.
 
+No regression test for the second branch (`embedded.first()` is None) yet — it requires mocking an HTTP server that returns 200 with empty data, which is an unusual server behavior. The defensive bail in code prevents corruption even without a test; if the path ever fires in production the bail message will name the cause.
 ## Workarounds
 
 Pre-fix: no workaround — library indexing (0/62 indexed) was blocked by the same code path. Post-fix: validation rejects bad input early; the upstream embedder bug remains to be diagnosed.

@@ -203,7 +203,16 @@ impl Embedder for RemoteEmbedder {
             .map(|(i, t)| (i, *t))
             .collect();
         if non_empty.is_empty() {
-            return Ok(vec![vec![0.0; 1]; texts.len()]);
+            // Pre-fix path returned `vec![vec![0.0; 1]; texts.len()]` here — a
+            // 1-element sentinel vector that did not match the model's real
+            // dim and silently corrupted the vec0 INSERT downstream (see
+            // 2026-05-17-reindex-embedding-dim-mismatch.md). Surface the
+            // condition instead so callers filter empties before calling.
+            bail!(
+                "cannot embed batch — all {} text(s) are empty/whitespace; \
+                 filter empty inputs before calling embed()",
+                texts.len()
+            );
         }
         let filtered: Vec<&str> = non_empty.iter().map(|(_, t)| *t).collect();
 
@@ -282,7 +291,22 @@ impl Embedder for RemoteEmbedder {
         }
 
         // Reconstruct: filtered embeddings in original positions, zeros for empty inputs.
-        let dim = embedded.first().map_or(1, |e| e.len());
+        // If `embedded` is empty here, the server returned 200 with no data — refuse
+        // rather than fall back to a 1-element dim sentinel that would corrupt the
+        // vec0 INSERT downstream (2026-05-17-reindex-embedding-dim-mismatch).
+        let dim = match embedded.first() {
+            Some(first) => first.len(),
+            None => {
+                let cached = self.cached_dims.load(Ordering::Relaxed);
+                if cached == 0 {
+                    bail!(
+                        "embedding server returned no data and no cached dimensions \
+                         are available — cannot determine vector size"
+                    );
+                }
+                cached
+            }
+        };
 
         // Cache dimensions on first successful embed so dimensions() returns a real value.
         if self.cached_dims.load(Ordering::Relaxed) == 0 && dim > 0 {
@@ -510,5 +534,23 @@ mod tests {
         let e = RemoteEmbedder::openai("text-embedding-3-small", Some("sk-from-config".into()))
             .unwrap();
         assert_eq!(e.api_key.as_deref(), Some("sk-from-config"));
+    }
+
+    /// Regression pin for 2026-05-17-reindex-embedding-dim-mismatch.
+    ///
+    /// The pre-fix code path silently returned `vec![vec![0.0; 1]; texts.len()]`
+    /// when every input was empty/whitespace — 1-element sentinel vectors that
+    /// did not match the model's real dim, corrupting the downstream vec0
+    /// INSERT with a misleading mid-pipeline error. The fix bails before any
+    /// vector construction so callers see the cause directly.
+    #[tokio::test]
+    async fn embed_returns_err_when_all_inputs_empty() {
+        let emb = make_embedder();
+        let err = emb.embed(&["", "  ", "\t\n"]).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("all 3 text(s) are empty"),
+            "expected error message naming the empty count, got: {msg}"
+        );
     }
 }
