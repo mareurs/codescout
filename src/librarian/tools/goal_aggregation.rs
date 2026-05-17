@@ -215,7 +215,6 @@ pub enum AcceptanceSignalSpec {
     },
 }
 
-
 /// Acceptance signal envelope: the LLM-readable description + status fields,
 /// plus the structured spec that drives Rust-side evaluation (D4).
 ///
@@ -479,6 +478,59 @@ fn unresolved(child_id: &str) -> EvalResult {
         met: false,
         evidence: format!("evidence_child_id={child_id} not found among linked children"),
         error: Some(format!("unresolvable evidence_child_id: {child_id}")),
+    }
+}
+
+/// Like `child_status_pure`, but consults the parent goal's
+/// `acceptance_signals` when the archetype is `metric_baseline` (D8).
+///
+/// For `metric_baseline`, this folds across every parent signal whose
+/// `MetricThreshold` cites `child_id`:
+/// - all citing signals met → `ChildStatus::Done`
+/// - at least one met (mixed) → `ChildStatus::InProgress`
+/// - none met → `ChildStatus::Active`
+/// - no citing signals at all → `ChildStatus::Active` (the child exists,
+///   but no parent signal pins a threshold to it — needs prompt-level
+///   evaluation per legacy behavior)
+///
+/// All other archetypes fall through to `child_status_pure`.
+pub fn child_status_in_context(
+    archetype: &str,
+    child_id: &str,
+    child_params: &Value,
+    parent_signals: &[AcceptanceSignal],
+    children: &[(String, String, Value)],
+) -> ChildStatus {
+    if archetype != "metric_baseline" {
+        return child_status_pure(archetype, child_params);
+    }
+
+    let citing: Vec<&AcceptanceSignal> = parent_signals
+        .iter()
+        .filter(|s| {
+            matches!(
+                &s.spec,
+                AcceptanceSignalSpec::MetricThreshold { evidence_child_id, .. }
+                    if evidence_child_id == child_id
+            )
+        })
+        .collect();
+
+    if citing.is_empty() {
+        return ChildStatus::Active;
+    }
+
+    let evaluated: Vec<bool> = citing
+        .iter()
+        .map(|s| evaluate_signal(s, children).met)
+        .collect();
+
+    if evaluated.iter().all(|&m| m) {
+        ChildStatus::Done
+    } else if evaluated.iter().any(|&m| m) {
+        ChildStatus::InProgress
+    } else {
+        ChildStatus::Active
     }
 }
 

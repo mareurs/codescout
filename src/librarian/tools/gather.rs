@@ -160,13 +160,15 @@ pub async fn gather_all(
 }
 
 /// For each child reference, fetch the child's augmentation params from the
-/// catalog and run `goal_aggregation::child_status_pure(archetype, params)`.
+/// catalog and run `goal_aggregation::child_status_in_context(archetype, …)`.
 ///
 /// Returns a JSON array of `{child_id, artifact_id, archetype, status, basis}`
 /// records. `basis` is one of:
-/// - `"deterministic"` — status derived from `child_status_pure`
-/// - `"needs parent context"` — archetype is `metric_baseline`; resolved in
-///   Phase 2 via `goal_aggregation::contextual::*`
+/// - `"deterministic"` — status derived from `child_status_in_context`
+///   (pure for 6 archetypes, signal-driven for `metric_baseline` when at
+///   least one `metric_threshold` signal cites the child)
+/// - `"needs parent context"` — archetype is `metric_baseline` but no
+///   parent signal cites it; LLM falls back to rule 1b
 /// - `"unknown archetype"` — archetype not in the known set (H-5)
 /// - `"no augmentation"` — child has no augmentation row
 /// - `"child unreachable"` — child artifact not found in catalog (Orphan)
@@ -177,11 +179,24 @@ pub async fn gather_all(
 pub fn gather_goal_children(
     ctx: &ToolContext,
     children: &[(String, String, String)],
+    parent_signals: &[crate::librarian::tools::goal_aggregation::AcceptanceSignal],
 ) -> Result<Value> {
     use crate::librarian::catalog::augmentation;
-    use crate::librarian::tools::goal_aggregation::{child_status_pure, ChildStatus};
+    use crate::librarian::tools::goal_aggregation::{child_status_in_context, ChildStatus};
 
     let cat = ctx.catalog.lock();
+
+    // Pre-fetch every child's params once so the metric_baseline lookup
+    // (which evaluate_signal needs) sees the same snapshot as the
+    // per-child status derivation.
+    let mut child_params_lookup: Vec<(String, String, Value)> = Vec::with_capacity(children.len());
+    for (child_id, artifact_id, archetype) in children {
+        let params = augmentation::get(&cat, artifact_id)?
+            .and_then(|a| serde_json::from_str(&a.params).ok())
+            .unwrap_or(Value::Null);
+        child_params_lookup.push((child_id.clone(), archetype.clone(), params));
+    }
+
     let mut out = Vec::with_capacity(children.len());
 
     for (child_id, artifact_id, archetype) in children {
@@ -198,11 +213,32 @@ pub fn gather_goal_children(
                 None => (ChildStatus::Unknown, "no augmentation"),
                 Some(aug) => {
                     let params: Value = serde_json::from_str(&aug.params).unwrap_or(Value::Null);
-                    let s = child_status_pure(archetype, &params);
+                    let s = child_status_in_context(
+                        archetype,
+                        child_id,
+                        &params,
+                        parent_signals,
+                        &child_params_lookup,
+                    );
                     let b = match s {
-                        ChildStatus::Unknown if archetype == "metric_baseline" => {
-                            "needs parent context"
+                        ChildStatus::Active if archetype == "metric_baseline" => {
+                            // child_status_in_context returns Active when
+                            // metric_baseline has no citing signal OR all
+                            // signals unmet. Distinguish for clarity.
+                            let any_citing = parent_signals.iter().any(|sig| {
+                                matches!(
+                                    &sig.spec,
+                                    crate::librarian::tools::goal_aggregation::AcceptanceSignalSpec::MetricThreshold { evidence_child_id, .. }
+                                        if evidence_child_id == child_id
+                                )
+                            });
+                            if any_citing {
+                                "deterministic"
+                            } else {
+                                "needs parent context"
+                            }
                         }
+                        ChildStatus::Unknown if archetype.is_empty() => "no augmentation",
                         ChildStatus::Unknown => "unknown archetype",
                         _ => "deterministic",
                     };
@@ -733,7 +769,7 @@ mod tests {
                 "task_list".to_string(),
             ),
         ];
-        let result = gather_goal_children(&ctx, &children).unwrap();
+        let result = gather_goal_children(&ctx, &children, &[]).unwrap();
         let arr = result.as_array().unwrap();
         assert_eq!(arr.len(), 2);
         assert_eq!(arr[0]["child_id"], "C-1");
@@ -755,7 +791,7 @@ mod tests {
             "ghost".to_string(),
             "failure_table".to_string(),
         )];
-        let result = gather_goal_children(&ctx, &children).unwrap();
+        let result = gather_goal_children(&ctx, &children, &[]).unwrap();
         let arr = result.as_array().unwrap();
         assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["status"], "orphan");
@@ -783,9 +819,13 @@ mod tests {
             "metric".to_string(),
             "metric_baseline".to_string(),
         )];
-        let result = gather_goal_children(&ctx, &children).unwrap();
+        // No parent_signals → metric_baseline child is Active (the child
+        // exists, but no acceptance_signal[kind=metric_threshold] cites it).
+        // basis is "needs parent context" to signal the LLM should fall back
+        // to prompt rule 1b for this child.
+        let result = gather_goal_children(&ctx, &children, &[]).unwrap();
         let arr = result.as_array().unwrap();
-        assert_eq!(arr[0]["status"], "unknown");
+        assert_eq!(arr[0]["status"], "active");
         assert_eq!(arr[0]["basis"], "needs parent context");
     }
 
@@ -806,8 +846,93 @@ mod tests {
             "bare".to_string(),
             "failure_table".to_string(),
         )];
-        let result = gather_goal_children(&ctx, &children).unwrap();
+        let result = gather_goal_children(&ctx, &children, &[]).unwrap();
         assert_eq!(result[0]["status"], "unknown");
         assert_eq!(result[0]["basis"], "no augmentation");
+    }
+
+    #[test]
+    fn gather_goal_children_metric_baseline_done_via_signal_context() {
+        // D8 integration: parent goal has a metric_threshold signal citing
+        // C-M; child's current.P@5 satisfies the threshold; child must
+        // resolve to "done" with basis="deterministic".
+        use crate::librarian::catalog::{artifact, augmentation};
+        use crate::librarian::tools::goal_aggregation::{
+            AcceptanceSignal, AcceptanceSignalSpec, ThresholdOp,
+        };
+
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(&tmp);
+        {
+            let cat = ctx.catalog.lock();
+            artifact::upsert(&cat, &sample_artifact("metric")).unwrap();
+            augmentation::upsert(
+                &cat,
+                &sample_augmentation(
+                    "metric",
+                    r#"{"baseline":{"P@5":0.18},"current":{"P@5":0.21}}"#,
+                ),
+            )
+            .unwrap();
+        }
+        let children = vec![(
+            "C-M".to_string(),
+            "metric".to_string(),
+            "metric_baseline".to_string(),
+        )];
+        let parent_signals = vec![AcceptanceSignal {
+            description: "P@5 ≥ 0.20".into(),
+            met: false,
+            evidence: String::new(),
+            spec: AcceptanceSignalSpec::MetricThreshold {
+                evidence_child_id: "C-M".into(),
+                metric_key: "P@5".into(),
+                op: ThresholdOp::Gte,
+                threshold: 0.20,
+            },
+        }];
+        let result = gather_goal_children(&ctx, &children, &parent_signals).unwrap();
+        assert_eq!(result[0]["status"], "done");
+        assert_eq!(result[0]["basis"], "deterministic");
+    }
+
+    #[test]
+    fn gather_goal_children_metric_baseline_in_progress_when_threshold_unmet() {
+        use crate::librarian::catalog::{artifact, augmentation};
+        use crate::librarian::tools::goal_aggregation::{
+            AcceptanceSignal, AcceptanceSignalSpec, ThresholdOp,
+        };
+
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(&tmp);
+        {
+            let cat = ctx.catalog.lock();
+            artifact::upsert(&cat, &sample_artifact("metric")).unwrap();
+            augmentation::upsert(
+                &cat,
+                &sample_augmentation("metric", r#"{"current":{"P@5":0.15}}"#),
+            )
+            .unwrap();
+        }
+        let children = vec![(
+            "C-M".to_string(),
+            "metric".to_string(),
+            "metric_baseline".to_string(),
+        )];
+        let parent_signals = vec![AcceptanceSignal {
+            description: "P@5 ≥ 0.20".into(),
+            met: false,
+            evidence: String::new(),
+            spec: AcceptanceSignalSpec::MetricThreshold {
+                evidence_child_id: "C-M".into(),
+                metric_key: "P@5".into(),
+                op: ThresholdOp::Gte,
+                threshold: 0.20,
+            },
+        }];
+        let result = gather_goal_children(&ctx, &children, &parent_signals).unwrap();
+        // Single citing signal, unmet → active (per child_status_in_context fold).
+        assert_eq!(result[0]["status"], "active");
+        assert_eq!(result[0]["basis"], "deterministic");
     }
 }

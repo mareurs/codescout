@@ -86,7 +86,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             })
             .unwrap_or_default();
         if !children_tuples.is_empty() {
-            let det = crate::librarian::tools::gather::gather_goal_children(ctx, &children_tuples)?;
+            let parent_signals: Vec<crate::librarian::tools::goal_aggregation::AcceptanceSignal> =
+                params
+                    .get("acceptance_signals")
+                    .and_then(|s| serde_json::from_value(s.clone()).ok())
+                    .unwrap_or_default();
+            let det = crate::librarian::tools::gather::gather_goal_children(
+                ctx,
+                &children_tuples,
+                &parent_signals,
+            )?;
             context.insert("deterministic_child_statuses".to_string(), det);
         }
     }
