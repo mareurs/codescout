@@ -11,7 +11,7 @@
 | 1 | `pika_observations` exists after first scan | ✓ (smoke test verified table_present == 1) |
 | 2 | Bootstrap idempotent | ✓ (test-bootstrap-idempotent.sh) |
 | 3 | Real-time whistle unchanged (no DB write on chat-only violation) | ✓ (Phase 2a in SKILL.md is the existing flow renamed; no behavior change) |
-| 4 | `scan my usage` resolves bound, runs predicates, writes rows | _manual verify next session — Phase 2b method documented in SKILL.md_ |
+| 4 | `scan my usage` resolves bound, runs predicates, writes rows | ✓ (2026-05-17 second session — scoped scan to `cc_session_id=753e9a4a…` wrote 50 IL3 slip rows; bootstrap idempotent; summary emitted) |
 | 5 | `sqlite3 .codescout/usage.db "SELECT * FROM pika_observations"` works | ✓ (table created against real DB during smoke) |
 | 6 | Three CC instances in sync | ✓ (diff -r returned 0 lines for both `.claude-sdd` and `.claude-kat`) |
 | 7 | All 10 predicate-correctness fixtures pass | ✓ (test-predicates.sh — actually 11 grep + run-time assertions across 4 Iron Laws + tool-bug candidate) |
@@ -65,10 +65,10 @@ Findings the final reviewer surfaced but were judged non-blocking for Phase 1:
   → hookify promotion candidate.
 ## Status
 
-Phase 1: **DONE** (criteria 1, 2, 3, 5, 6, 7 verified at ship; criterion 4
-verified on first user-asked scan in next session — the runtime path that
-exercises the Phase 2b workflow is gated behind a user-issued
-"scan my usage" trigger).
+Phase 1: **DONE** (all 7 criteria verified; criterion 4 closed on
+2026-05-17 in the second session — Pika summon → user-issued scan
+trigger → 50 IL3 `slip` rows written against
+`cc_session_id=753e9a4a-a81f-4cf2-aeaa-a3877d35d1ce`).
 
 Next: Phase 2 — judgment kinds (`tool_bug`, `misusage`, `pattern`). See
 spec § Rollout for the Phase 2 plan trigger.
@@ -77,10 +77,8 @@ spec § Rollout for the Phase 2 plan trigger.
 
 This tracker becomes wrong when **any** of the following hold:
 
-- Criterion 4 ("`scan my usage` resolves bound, runs predicates, writes
-  rows") is empirically verified by a live Pika scan against a real
-  `pika_observations`-bearing project. At that point: update criterion 4's
-  cell from "_manual verify next session_" to ✓ + smoke-output snippet.
+- Criterion 4 (live Pika scan writes rows). _Fired 2026-05-17 second
+  session — see criterion table row 4._
 - Phase 2 ships. At that point: archive this tracker (move to
   `docs/trackers/archive/`) and link from the Phase 2 validation tracker as
   the predecessor.
