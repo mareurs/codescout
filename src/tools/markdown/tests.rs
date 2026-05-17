@@ -1635,14 +1635,41 @@ fn frontmatter_set_and_delete_combined_atomic() {
 }
 
 #[test]
-fn frontmatter_on_file_without_frontmatter_errors_with_hint() {
+fn frontmatter_set_bootstraps_block_on_file_without_frontmatter() {
     use super::edit_markdown::apply_frontmatter_mutation;
     let src = "# Title\n\nbody\n";
+    let param = json!({"set": {"status": "fixed", "kind": "bug"}});
+    let out = apply_frontmatter_mutation(src, &param).unwrap();
+    let a = "---\nstatus: fixed\nkind: bug\n---\n\n# Title\n\nbody\n";
+    let b = "---\nkind: bug\nstatus: fixed\n---\n\n# Title\n\nbody\n";
+    assert!(out == a || out == b, "got: {out:?}");
+}
+
+#[test]
+fn frontmatter_bootstrap_does_not_double_blank_when_body_already_blank_first() {
+    use super::edit_markdown::apply_frontmatter_mutation;
+    let src = "\nbody\n";
     let param = json!({"set": {"status": "fixed"}});
-    let err = apply_frontmatter_mutation(src, &param)
-        .unwrap_err()
-        .to_string();
-    assert!(err.contains("no frontmatter block"), "got: {err}");
+    let out = apply_frontmatter_mutation(src, &param).unwrap();
+    assert_eq!(out, "---\nstatus: fixed\n---\n\nbody\n");
+}
+
+#[test]
+fn frontmatter_bootstrap_on_empty_file_produces_block_only() {
+    use super::edit_markdown::apply_frontmatter_mutation;
+    let src = "";
+    let param = json!({"set": {"status": "fixed"}});
+    let out = apply_frontmatter_mutation(src, &param).unwrap();
+    assert_eq!(out, "---\nstatus: fixed\n---\n");
+}
+
+#[test]
+fn frontmatter_delete_only_on_file_without_frontmatter_is_noop() {
+    use super::edit_markdown::apply_frontmatter_mutation;
+    let src = "# Title\n\nbody\n";
+    let param = json!({"delete": ["legacy_field"]});
+    let out = apply_frontmatter_mutation(src, &param).unwrap();
+    assert_eq!(out, "# Title\n\nbody\n");
 }
 
 #[test]

@@ -302,22 +302,17 @@ pub(crate) fn perform_scoped_edit(
 /// object with optional `set` (object: key → JSON value) and `delete` (array of
 /// strings) sub-fields. At least one of the two must be non-empty.
 ///
+/// When the file has no existing frontmatter block, `set:` operations
+/// synthesize a new block at the head of the file; `delete:`-only operations
+/// are an idempotent no-op (nothing to delete from a non-existent block).
+///
 /// Returns the rewritten file content with the frontmatter block updated and
-/// the body preserved verbatim. Errors if the file has no frontmatter or if
-/// the request is empty / shaped wrong.
+/// the body preserved verbatim.
 pub(super) fn apply_frontmatter_mutation(content: &str, param: &Value) -> Result<String> {
     let obj = param.as_object().ok_or_else(|| {
         RecoverableError::with_hint(
             "frontmatter param must be an object",
             "Pass `frontmatter: {set: {key: value}, delete: [keys]}`.",
-        )
-    })?;
-
-    let fm = frontmatter::extract_frontmatter(content)?.ok_or_else(|| {
-        RecoverableError::with_hint(
-            "file has no frontmatter block (must start with `---`)",
-            "frontmatter editing is only valid on files with a `---`-delimited \
-             YAML block at the start of the file.",
         )
     })?;
 
@@ -344,8 +339,29 @@ pub(super) fn apply_frontmatter_mutation(content: &str, param: &Value) -> Result
         .into());
     }
 
-    let new_block = frontmatter::apply_ops(&fm.lines, &set, &delete)?;
-    Ok(frontmatter::splice_back(content, &new_block, &fm))
+    match frontmatter::extract_frontmatter(content)? {
+        Some(fm) => {
+            let new_block = frontmatter::apply_ops(&fm.lines, &set, &delete)?;
+            Ok(frontmatter::splice_back(content, &new_block, &fm))
+        }
+        None => {
+            if set.is_empty() {
+                return Ok(content.to_string());
+            }
+            let new_block = frontmatter::apply_ops(&[], &set, &delete)?;
+            let mut out = String::from("---\n");
+            for line in &new_block {
+                out.push_str(line);
+                out.push('\n');
+            }
+            out.push_str("---\n");
+            if !content.is_empty() && !content.starts_with('\n') {
+                out.push('\n');
+            }
+            out.push_str(content);
+            Ok(out)
+        }
+    }
 }
 
 pub struct EditMarkdown;
