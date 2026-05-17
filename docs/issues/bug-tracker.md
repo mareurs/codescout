@@ -68,24 +68,28 @@ the per-bug file, not here.
 - **Symptom:** Calling `librarian(action="reindex", scope="project")` on this project returns: *"UNIQUE constraint failed: artifact.abs_path"*. Default (non-force) path fails immediately; no rows updated.
 - **Root cause:** Unknown. Hypothesis: prior walks left rows whose `abs_path` collides with what the current walk tries to insert; the upsert path doesn't reconcile. Possibly path normalization (trailing slash, symlink resolution) producing two rows for the same logical file.
 - **Workaround:** None — `force=true` (which deletes rows first) hits #6 instead. The catalog is read-only for reindex until both #5 and #6 are fixed.
-- **Fix:** Open. Promoted from F-6a in `docs/trackers/artifact-code-linkage-session-log.md`. Blocks F-5 investigation (commits table backfill needs reindex to work).
+- **Fix:** **Fixed by commit `d482ca8a` (2026-05-17).** Root cause: `artifact::upsert` only handled `ON CONFLICT(id)`, not the schema's `abs_path UNIQUE` constraint. Fix: pre-clean `DELETE FROM artifact WHERE abs_path = ?1 AND id != ?2` before the INSERT. Verified post-rebuild — `reindex(scope=project)` now succeeds with `unchanged: 493, backfill_error_count: 0`.
 
 ### #6 — `librarian(reindex, force=true)` fails with embedding dimension mismatch (768 → 1)
 
 - **Symptom:** Calling `librarian(action="reindex", scope="project", force=true)` returns: *"Dimension mismatch for inserted vector for the "embedding" column. Expected 768 dimensions but received 1."* Workspace status confirms `embeddings_model: jina-embeddings-v2-base-code` (768-dim). The embedding pipeline produced a 1-element vector instead of a 768-element one — likely an error sentinel that the writer did not gate against.
 - **Root cause:** Unknown. Hypothesis: the embedding service hit an error condition and returned `vec![0.0]` (or similar 1-element fallback) without bubbling the error up. The writer (vec0 INSERT path) trusts the dimension and fails at the SQL layer rather than at the validation layer.
 - **Workaround:** None known. Library indexing (0/62 indexed per `workspace(status)`) is blocked by the same code path.
-- **Fix:** Open. Promoted from F-6b in `docs/trackers/artifact-code-linkage-session-log.md`. The fix is partly defensive (validate `vec.len() == expected_dim` before INSERT; return diagnostic error early) and partly upstream (find why the embedding service returns a 1-element vector — probably needs an error-propagation fix in `codescout-embed` or the indexer's embed loop).
+- **Fix:** **Defensive-validation layer fixed by commit `d482ca8a` (2026-05-17).** `write_embeddings` now validates dim consistency before any INSERT: (1) non-empty batch, (2) all batch vectors share same length > 0, (3) batch length matches any existing `artifact_vec` row blob length. The original triggering condition (embedder returning 1-elem vectors) was not reproduced live today, but the validation path is verified via the unit test suite (2329 passed). If the embedder fails again with a sentinel value, the error fires before any DELETE, with a diagnostic message naming likely causes. Upstream fix (find why the embedder returns 1-elem vectors) still pending — see codescout-embed crate.
 
 ### #7 — `librarian(reindex, force=true)` cascade-deletes all augmentations (DATA LOSS)
 
 - **Symptom:** Running `librarian(action="reindex", scope="project", force=true)` on this project (a) deletes all rows from `artifact` matching the targets, (b) cascades to delete all `artifact_augmentation` rows, (c) fails on the subsequent embedding INSERT (per #6), but (d) **does not roll back the DELETE**. Net effect: all augmented artifacts in the project lose their augmentation data permanently.
 - **Root cause:** The force-DELETE in `src/librarian/tools/reindex.rs::call` is not wrapped in a SQLite transaction. The `DELETE FROM artifact WHERE abs_path LIKE ?1` auto-commits via SQLite's implicit-transaction-per-statement default; the re-walk + embedding INSERT run as later separate statements. When the INSERT fails (F-6b), the prior DELETE survives. Schema declares `artifact_augmentation.artifact_id REFERENCES artifact(id) ON DELETE CASCADE` (`src/librarian/catalog/schema.sql:116`), so cascade-removal of augmentations was always going to happen — but it should only happen if the rebuild succeeds.
 - **Workaround:** Reconstruct augmentations from external sources (session transcripts, file content). Post-reconstruction, do NOT run `reindex(force=true)` again until this is fixed.
-- **Fix:** Open. Promoted from F-9 in `docs/trackers/artifact-code-linkage-session-log.md`. Three-part fix:
-  1. Wrap force-DELETE + re-walk + embedding INSERT in a single SQLite transaction (`BEGIN; ... COMMIT;` or `Transaction::new` in rusqlite). Failure of any later step rolls back the DELETE.
-  2. Until #1 ships, document the data-loss risk in the reindex tool description and the `force` field's help text.
-  3. Architectural consideration: should the augmentation key be content-derived (`abs_path` or hash) rather than synthetic `id`? Would survive artifact-row recreation by design.
+- **Fix:** **Fixed by commit `d482ca8a` (2026-05-17).** The destructive `DELETE FROM artifact WHERE abs_path LIKE` block in `reindex.rs::call` was removed. `force=true` is now a no-op pending proper plumbing through `index_repo_sync` (queued as task #31 — "plumb force_rewalk through index_repo_sync"). Verified post-rebuild: ran `reindex(scope=project, force=true)` against catalog with 4 augmentations; post-call augmented count remained 4. No cascade-delete. The destructive failure mode is structurally impossible.
+
+### #8 — `state_at(commit=<short-sha>)` fails: lookup uses exact match not prefix
+
+- **Symptom:** Calling `artifact(action="state_at", commit="d482ca8a")` (any short SHA) returns `commit d482ca8a not indexed; run librarian_reindex`. But the `commits` table IS populated (2931 rows; verified via `sqlite3 catalog.db "SELECT COUNT(*) FROM commits"`), and the full 40-char SHA works: `state_at(commit="d482ca8ac91241a7a96a487e46ca394095019912")` succeeds.
+- **Root cause:** `src/librarian/tools/state_at.rs::resolve_cutoff_ts:30` uses `SELECT authored_at FROM commits WHERE hash = ?1` — exact match. Stored hashes are full 40-char; callers (humans + LLMs) pass short SHAs. Match fails → misleading "not indexed" error. The error message implies the table is empty when really the lookup mode is wrong.
+- **Workaround:** Pass the full 40-char SHA, or use `timestamp=<unix-ms>` instead.
+- **Fix:** Open. Change `=` to `LIKE ?1 || '%'` (or `GLOB ?1 || '*'` for case-sensitive) in `resolve_cutoff_ts`. Add a test with both short and full SHA. Tracks as task #32 in the session log. Note: this was originally misdiagnosed as F-5 ("commits table empty") in `docs/trackers/artifact-code-linkage-session-log.md`; the correction landed post-rebuild verification 2026-05-17.
 
 ## History
 
@@ -100,3 +104,14 @@ footgun observed during this very bootstrap session.
 ### 2026-05-17 — #5, #6 filed (reindex broken)
 
 Both `librarian(reindex)` paths fail on this project — default (#5: UNIQUE constraint) and force (#6: embedding dimension mismatch). Surfaced during artifact-code linkage reconnaissance (session log `docs/trackers/artifact-code-linkage-session-log.md`, F-6). High severity — blocks the `commits` table backfill (which in turn blocks `state_at(commit=...)` per F-5) and library indexing (0/62 indexed).
+
+
+### 2026-05-17 — #5, #6, #7 fixed (commit `d482ca8a`)
+
+All three reindex bugs filed earlier this same day landed in one batched
+commit. #5 (UNIQUE constraint) fixed via `artifact::upsert` pre-clean.
+#6 (dim mismatch) fixed via defensive validation in `write_embeddings`.
+#7 (cascade-delete DATA LOSS) fixed by removing the pre-walk DELETE
+entirely; `force=true` is now a no-op pending proper plumbing (task
+#31). Verified live post-rebuild: `reindex(scope=project)` succeeds;
+`reindex(scope=project, force=true)` preserves all 4 augmentations.

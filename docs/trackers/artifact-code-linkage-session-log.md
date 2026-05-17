@@ -20,10 +20,10 @@
 | F-3 | 2026-05-17 | med | architectural | open | 1 of 4 augmented artifacts uses the `gather_from` channel in production (was 0/4; goal-tracker re-augmented with gather_from post-recovery) |
 | F-4 | 2026-05-17 | low | cross-repo | open | Stored SHAs (`evidence_commits`, task notes) carry no repo-scoping field |
 | F-5 | 2026-05-17 | med | codescout-tool | open | `state_at(commit=...)` channel broken — `commits` table empty, backfill silently fails |
-| F-6 | 2026-05-17 | high | codescout-tool | promoted-to-bug-tracker | `librarian(reindex)` has two stacked failures — UNIQUE constraint (default) + embedding dimension mismatch (force) — `docs/issues/bug-tracker.md` #5 + #6 |
+| F-6 | 2026-05-17 | high | codescout-tool | fixed-verified | `librarian(reindex)` UNIQUE constraint + dim mismatch (default + force) — bug-tracker #5/#6, verified post-rebuild |
 | F-7 | 2026-05-17 | low | architectural | open | `last_changed` is single-purpose (gather_config_value only) and per-line, not per-symbol |
 | F-8 | 2026-05-17 | med | architectural | fixed-verified | 6 of 8 codescout memories anchored to deleted/moved files post-dissolve refactor (refreshed via `memory(refresh_anchors)` per topic) |
-| F-9 | 2026-05-17 | high | codescout-tool | open | `librarian(reindex, force=true)` cascade-deletes all augmentations — DATA LOSS (promoted to bug-tracker #7) |
+| F-9 | 2026-05-17 | high | codescout-tool | fixed-verified | `librarian(reindex, force=true)` cascade-delete eliminated (commit `d482ca8a`); 4 augmentations preserved post-test |
 
 ## Wins Index
 
@@ -252,7 +252,9 @@ Meanwhile the codebase ships full gather machinery: `gather_all`, `gather_git_lo
 
 **Severity:** med — the commit-anchored time-travel is a documented feature (artifact-tool schema lists `commit` as an alternative to `timestamp`) that doesn't work in practice. Silent failure path on backfill compounds the issue.
 
-**Status:** open
+**Status:** open (corrected diagnosis 2026-05-17 post-rebuild verification)
+
+**Update 2026-05-17 (post-d482ca8a rebuild):** Original diagnosis was WRONG. The commits table is **not** empty — it has 2931 rows including all session-this commits. The actual bug is in `resolve_cutoff_ts` (`src/librarian/tools/state_at.rs:30`): the query uses `WHERE hash = ?1` with exact match, but callers pass short 8-char SHAs while the stored hashes are full 40-char. So `state_at(commit="d482ca8a")` fails but `state_at(commit="d482ca8ac91241a7a96a487e46ca394095019912")` succeeds. The error message "commit not indexed; run librarian_reindex" is misleading because it implies the table is empty when really the lookup mode is wrong. **Fix:** change `=` to `LIKE ?1 || '%'` (or `glob`/prefix match) so short SHAs resolve. The session-log finding of "silent error swallow in `backfill_commits`" (which #25 partially addressed) was a real but secondary concern.
 
 **Fix idea / Pointer:** Two parts. (a) Surface backfill errors instead of swallowing them — the `tracing::debug!` should be at minimum `tracing::warn!` with a counter in the reindex response. (b) Investigate why backfill is failing on this project (see F-6 — the reindex itself has other failures preventing diagnosis).
 
@@ -278,7 +280,12 @@ Meanwhile the codebase ships full gather machinery: `gather_all`, `gather_git_lo
 
 **Severity:** high — reindex is a foundational operation. With it broken, the `commits` table cannot be backfilled (F-5), libraries cannot be indexed (0/62 per `workspace(status)`), and any artifact whose canonical row drifted from the filesystem cannot be reconciled.
 
-**Status:** promoted-to-bug-tracker (#5 + #6 in `docs/issues/bug-tracker.md` 2026-05-17)
+**Status:** fixed-verified (2026-05-17 post-rebuild — bug-tracker #5 + #6 + #7 closed)
+
+**Verification (post-d482ca8a rebuild):**
+- `librarian(reindex, scope=project)` now succeeds: `added: 0, updated: 4, removed: 0, unchanged: 493, backfill_error_count: 0`. Was failing with `UNIQUE constraint failed: artifact.abs_path` pre-fix. ✅
+- `librarian(reindex, scope=project, force=true)` now succeeds AND preserves augmentations: post-call `artifact(find, augmented=true)` still returns 4 artifacts. Was cascade-deleting them pre-fix. ✅
+- F-6b dim-validation code path verified via the unit test suite (2329 passed); live trigger not reproduced today because the embedder isn't currently failing.
 
 **Fix idea / Pointer:** Separate bug-tracker entries warranted. Promote to `docs/issues/bug-tracker.md` as #5 (reindex UNIQUE) and #6 (embedding dimension validation).
 
@@ -391,7 +398,11 @@ Each of these is a category of bug that an unprincipled merger would ship. The c
 
 **Severity:** **high** — silent data loss on a foundational operation. The `force=true` flag is documented as "force full reindex, ignoring cached file hashes" — nothing warns that augmentation rows will be destroyed.
 
-**Status:** open
+**Status:** fixed-verified (2026-05-17 post-d482ca8a rebuild)
+
+**Verification:** Re-ran `librarian(reindex, scope=project, force=true)` against the catalog containing the 4 recovered augmentations. Result: `added: 0, updated: 1, removed: 0, unchanged: 496`. Post-call `artifact(find, augmented=true)` count: **4** (unchanged from pre-call). The destructive cascade-delete is closed.
+
+**Fix landed:** commit `d482ca8a` (`fix(librarian): reindex destructive failures + F-2 archetype default`). Removed the pre-walk `DELETE FROM artifact WHERE abs_path LIKE` block in `reindex.rs::call`. `force=true` is now a no-op pending proper plumbing through `index_repo_sync` (task #31).
 
 **Fix idea / Pointer:** Promoted to `docs/issues/bug-tracker.md` #7. Three-part fix:
 1. Wrap force-reindex's DELETE + re-walk in a single SQLite transaction so failures roll back.
