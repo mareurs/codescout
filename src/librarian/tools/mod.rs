@@ -104,6 +104,7 @@ pub mod context;
 
 pub mod audit_doc_refs;
 pub mod augment;
+pub mod goal_aggregation;
 pub mod refresh;
 pub mod refresh_stale;
 pub mod render;
