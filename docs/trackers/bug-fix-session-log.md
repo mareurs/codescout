@@ -37,7 +37,7 @@
 | F-1 | 2026-05-17 | low | plan-prose | fixed-verified | Bug-file Resume paths cite non-existent layout |
 | F-2 | 2026-05-17 | med | self-friction | fixed-verified | 2 of 3 buffer bugs likely stale — code reads correct |
 | F-3 | 2026-05-18 | med | plan-prose | fixed-verified | Plan test assertions cited non-existent `RecoverableError.hint` field |
-| F-4 | 2026-05-18 | med | codescout-tool | promoted-to-bug-tracker | `edit_markdown action="replace"` with a heading clobbers the whole section body |
+| F-4 | 2026-05-18 | med | codescout-tool | fixed-via-bug-tracker | `edit_markdown action="replace"` with a heading clobbers the whole section body |
 | F-5 | 2026-05-18 | high | release-pipeline | open | HEAD detached from `experiments` without `git checkout` in this session |
 ## Wins Index
 
@@ -309,9 +309,9 @@ turn before any subagent dispatch. Awaiting promotion criterion.
 
 **Severity:** med — data loss within session, fully recovered, but easy to miss without verify-after-edit.
 
-**Status:** promoted-to-bug-tracker (this session); see `docs/issues/2026-05-18-edit-markdown-replace-clobber.md`.
+**Status:** fixed-via-bug-tracker (Option A shipped this session); see `docs/issues/2026-05-18-edit-markdown-replace-clobber.md` (status: fixed, closed 2026-05-18).
 
-**Fix idea / Pointer:** `docs/issues/2026-05-18-edit-markdown-replace-clobber.md` carries the bug-tracker entry. Two fix options drafted there: (a) foreground the destructive scope in the tool description (lighter), (b) refuse `action="replace"` when `len(new) < 0.2 * len(old)` unless a `force=true` flag is set (substrate-level safety). Option (a) ships first; option (b) only if (a) doesn't reduce frequency.
+**Fix idea / Pointer:** Option A shipped — destructive-scope warning added to `long_docs()` and per-variant action descriptions in the schema for `EditMarkdown` in `src/tools/markdown/edit_markdown.rs`. Top-level `description()` stays under the 300-char budget (caught by `server::tests::tool_descriptions_stay_under_budget` on first attempt). Option B (force flag + size threshold) deferred until Option A is observed to be insufficient — bug-tracker entry retains the Option B sketch and three regression tests it would need.
 
 ---
 

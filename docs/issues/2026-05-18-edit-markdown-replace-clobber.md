@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-05-18
-closed:
+closed: 2026-05-18
 severity: medium
 owner: marius
 related: []
@@ -96,18 +96,29 @@ N/A — root cause is by-design tool semantic, not unknown.
 
 ## Fix
 
-Plan options (not yet implemented):
+Option A shipped (commit pending on `experiments`).
 
-**Option A (description-level, lighter):** Foreground the destructive scope in the tool description and the `action` parameter docs:
+**Three surfaces touched in `src/tools/markdown/edit_markdown.rs`:**
 
-> `action="replace"`: replaces the entire body of the section named by `heading` (from the line after the heading until the next sibling heading) with `content`. Use `action="insert_after"` to add adjacent sections without replacing the existing body. Use `action="edit"` with `old_string`/`new_string` for surgical text replacement within a section.
+1. **`description()` (line 363-367)** — kept short (under the 300-char cap enforced by `server::tests::tool_descriptions_stay_under_budget`). Top-level tool listing stays clean.
 
-This is a tool-description change. Per `CLAUDE.md § Prompt Surface Consistency` it requires review of all three prompt surfaces (`server_instructions.md`, `onboarding_prompt.md`, `build_system_prompt_draft()` in `src/prompts/builders.rs`), but the affected text is likely only in the tool's own description.
+2. **`long_docs()` (line 369-394)** — added an *Action semantics — pick the right verb* table foregrounding the destructive scope of `replace` (OVERWRITES entire body) and listing the right verb per use case (`insert_after` for adjacent sections, `edit` for surgical mods, `remove` for whole deletion). Closes with a "Common footgun" callout naming the exact mental-model error caught by this bug — reaching for `replace` when meaning `insert_after`. `long_docs` has no budget cap, so the warning lives in full.
 
-**Option B (substrate-level safety):** Refuse `action="replace"` when `len(new_body) < N * len(existing_body)` (e.g. `N = 0.2`) unless an explicit `force: true` flag is set on the call. Adds a `force: Option<bool>` to the schema; default `false`. Catches unintended clobbers without changing existing legitimate uses where the new body is at least 20 % the size of the old one. Returns a `RecoverableError::with_hint` pointing the caller at `insert_after` or `force=true` as appropriate.
+3. **Schema action descriptions (top-level at line 392-395, batch-mode inner at line 431-432)** — per-variant docs in the enum's `description` field now spell out what each action does. Agents picking actions from the MCP schema see the destructive-scope warning at the point of choice, not just in long_docs. The `content` field description also got a "REPLACES the entire existing section body" note for `replace`.
 
-**Recommendation:** ship Option A first. Observe whether the footgun recurs across sessions. Promote to Option B only if Option A does not reduce frequency — Option B adds a parameter to a heavily-used tool and the threshold is a magic number that will need tuning.
+**Why not Option B (force flag + size threshold):** Per the bug file's own recommendation. Option A is cheap, observation-only — no schema parameter inflation, no magic threshold. If the footgun recurs across sessions with Option A live, escalate to Option B. Two-concretes discipline: ship the lighter intervention first, gather evidence.
 
+**Gates passed:**
+- `cargo fmt --check` ✅
+- `cargo clippy --all-targets -- -D warnings` ✅
+- `cargo test --lib --bins` → 2383 passed, 0 failed, 7 ignored (was 2382 + 1 failed when description exceeded the 300-char budget; reverted to short description and pushed warning to long_docs)
+- `server::tests::prompt_surfaces_reference_only_real_tools` ✅
+- `server::tests::tool_descriptions_stay_under_budget` ✅ (re-tightened the budget caught the first attempt — sibling guard worked as designed)
+- BUG-043 regression tests still pass (`replace` subsection-consumption refusal unchanged).
+
+**No `ONBOARDING_VERSION` bump.** The change is to live tool description/schema (refreshed every MCP connect via the tool registration), not to `onboarding_prompt.md` or `build_system_prompt_draft()`. Per `CLAUDE.md § Onboarding Version`, those are the only surfaces that require a version bump.
+
+**No source-of-truth changes to `src/prompts/*.md`.** A grep across the prompt directory found 5 mentions of `edit_markdown`; two of them use `action="replace"` on `## codescout Memories`, which is the legitimate "refresh stale memory table" use case — those examples model the safe path, not the footgun. No edits needed.
 ## Tests added
 
 N/A — no fix shipped yet. When Option A lands, no test needed (description-only). When Option B lands, three regression tests required:

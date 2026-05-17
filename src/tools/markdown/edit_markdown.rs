@@ -376,7 +376,15 @@ impl Tool for EditMarkdown {
              | 3a | `edit_markdown(path, heading, action, content)` | Whole-section: replace (body only — heading preserved), insert, remove |\n\
              | 3b | `edit_markdown(path, heading, action=\"edit\", old_string, new_string)` | Surgical: scoped string replacement within a section |\n\
              | 3c | `edit_markdown(path, edits=[...])` | Batch: multiple edits across sections, atomic |\n\
-             | 3d | `edit_markdown(path, frontmatter={set: {status: \"fixed\"}})` | Mutate the YAML frontmatter block (status flips, closed dates, etc.) without sed. Combinable with any body edit above — one atomic write covers both. |"
+             | 3d | `edit_markdown(path, frontmatter={set: {status: \"fixed\"}})` | Mutate the YAML frontmatter block (status flips, closed dates, etc.) without sed. Combinable with any body edit above — one atomic write covers both. |\n\n\
+             ### Action semantics — pick the right verb\n\n\
+             | Action | Effect on target section | Use when |\n\
+             |---|---|---|\n\
+             | `replace` | **OVERWRITES the entire body** (from line after the heading until next sibling heading). Heading preserved; subsections refused unless `include_subsections=true`. | The whole section body should be rewritten from scratch (e.g. refreshing a stale memory table). |\n\
+             | `insert_before` / `insert_after` | Adds a new sibling section before/after the target. Target body **preserved**. `at=\"end-of-section\"` (default) or `\"after-heading-line\"` for `insert_after`. | Adding adjacent sections without touching the target's body. |\n\
+             | `remove` | Deletes target section (heading + body). | Removing a section entirely. |\n\
+             | `edit` | Surgical text replacement within the section via `old_string` / `new_string`. Surrounding body preserved. | Fixing a typo, updating a single line, scoped substring change. |\n\n\
+             **Common footgun:** reaching for `action=\"replace\"` when you meant `action=\"insert_after\"`. `replace` destroys the existing body; `insert_after` adds adjacent without loss. Verify-after-edit with `read_markdown(path, heading=\"...\")` on any non-trivial mutation."
         )
     }
 
@@ -390,9 +398,9 @@ impl Tool for EditMarkdown {
                 "action": {
                     "type": "string",
                     "enum": ["replace", "insert_before", "insert_after", "remove", "edit"],
-                    "description": "Operation to perform. Required unless using edits[] batch mode."
+                    "description": "Operation to perform. 'replace' OVERWRITES the entire body of the named section (heading preserved; body from the line after the heading until the next sibling heading is destroyed) — choose 'insert_after' to add an adjacent section, or 'edit' with old_string/new_string for in-section surgical replacement. 'insert_before' / 'insert_after' add a new sibling section before/after the target (target body preserved). 'remove' deletes the target section (heading + body). 'edit' performs scoped text replacement within the target section. Required unless using edits[] batch mode."
                 },
-                "content": { "type": "string", "description": "New content for replace/insert actions (body only — heading preserved on replace)" },
+                "content": { "type": "string", "description": "New content for replace/insert actions (body only — heading preserved on replace). For 'replace', this REPLACES the entire existing section body — read the section first if unsure." },
                 "at": {
                     "type": "string",
                     "enum": ["end-of-section", "after-heading-line"],
@@ -425,8 +433,8 @@ impl Tool for EditMarkdown {
                         "required": ["heading", "action"],
                         "properties": {
                             "heading": { "type": "string" },
-                            "action": { "type": "string", "enum": ["replace", "insert_before", "insert_after", "remove", "edit"] },
-                            "content": { "type": "string" },
+                            "action": { "type": "string", "enum": ["replace", "insert_before", "insert_after", "remove", "edit"], "description": "Per-edit operation. 'replace' OVERWRITES the entire body of the named section (see top-level `action` for full semantics) — prefer 'insert_after' for adjacent sections, 'edit' with old_string/new_string for in-section surgical mods." },
+                            "content": { "type": "string", "description": "Per-edit content (body only — heading preserved on replace). For 'replace', this REPLACES the entire existing section body." },
                             "at": { "type": "string", "enum": ["end-of-section", "after-heading-line"] },
                             "old_string": { "type": "string" },
                             "new_string": { "type": "string" },
