@@ -41,10 +41,12 @@ for audit trail.
 
 ### Open findings (need code/spec/style work)
 
-- **#1 — H-8** *(open, med)*: `evidence_commits` since-last-refresh anchoring undefined.
-  Prompt rule 3 says "commits added since last refresh that touched goal paths"
-  but never tells the model how to identify "last refresh" or "goal paths".
-  Defer: needs spec edit once `refresh_meta.last_refresh_at` lands (T9 unlocks).
+- **#1 — H-8** *(open, med, partial-mitigation)*: `evidence_commits`
+  since-last-refresh anchoring partially landed. T9 added
+  `refresh_meta.last_refresh_at` + `refresh_meta.commit_count_since_last`
+  (live-verified — see W-8). The mechanism exists; the prompt still lacks
+  an explicit "fill `evidence_commits` with commits touching goal paths
+  since `refresh_meta.last_refresh_at`" instruction. Follow-up: prompt edit.
 
 - **#2 — H-9** *(open, med)*: `date: today` has no resolution mechanism.
   Prompt mentions `today` but no placeholder syntax; model guesses.
@@ -57,9 +59,11 @@ for audit trail.
 - **#4 — S-3** *(open, low)*: Stop hook active-branch surfaces only first
   unmet signal, no count. Reader cannot tell "1 of 4 left" from "1 of 1 left".
 
-- **#5 — S-4** *(open, med)*: Done-branch reason has no gate evidence.
-  If model hallucinated done, the user has no signal. Partially addressed
-  by T12 verdict events; surface text TBD.
+- **#5 — S-4** *(open, med, partial-mitigation)*: Done-branch reason has no
+  gate evidence on the *Stop hook surface*. The underlying `note` event with
+  `tag: gate_check` now carries `text` + structured `evidence` (T12 +
+  D11, live-verified — see W-9). The hook still doesn't read these events
+  to populate done-branch reason text. Follow-up: hook edit in companion repo.
 
 - **#6 — W-2** *(open, low)*: `when_to_use` field includes "survives across
   sessions" — decoration, doesn't discriminate goal from other trackers.
@@ -134,4 +138,3 @@ Hamsa S-1 + S-2 (issues #23 + #24) closed by commit `0b75991` in
 `codescout-companion`. Stop hook now surfaces `last refreshed: <ts>`
 in every reason branch + distinguishes malformed-status from active.
 Matrix test extended 7 → 8 branches; all green.
-
