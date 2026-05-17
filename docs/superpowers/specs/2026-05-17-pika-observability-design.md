@@ -433,3 +433,22 @@ None at design time. Implementation may surface follow-ups about:
 - Buddy state protocol (judges, currently disabled): `docs/state-protocol.md` §"plan-judge / cs-judge"
 - Snow Lion OP-4 (two-concretes rule) — applied to defer slash commands
 - Hamsa OP-1 (read-as-stranger) — applied mid-brainstorm to catch native-tool detection drift
+
+## Stale-when
+
+This spec becomes wrong when **any** of the following hold:
+
+- Phase 2 ships and supersedes the schema (a `pika_schema_version > 1` row
+  appears in `.codescout/usage.db`). At that point: re-read this spec and
+  produce a successor at `docs/superpowers/specs/<date>-pika-observability-phase-2-design.md`.
+- The buddy plugin's `cs-judge` worker is re-enabled (`docs/state-protocol.md`
+  declares it active again). The "Writer" decision in this spec defers to
+  Pika-only because the judge is disabled; that defer becomes wrong on
+  re-enablement.
+- codescout's `tool_calls` table schema changes (column rename, FK semantics,
+  rotation policy). The four Iron Law predicates and the tool-bug candidate
+  query all depend on the current column names and the 30-day pruning window.
+- The companion plugin stops hard-blocking native `Read`/`Edit`/`Bash` on
+  source files. If that gate softens, the "all Iron Law violations live in
+  `tool_calls`" claim in §Architecture stops holding and native-tool
+  detection must be added.

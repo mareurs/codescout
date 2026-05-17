@@ -72,3 +72,19 @@ exercises the Phase 2b workflow is gated behind a user-issued
 
 Next: Phase 2 — judgment kinds (`tool_bug`, `misusage`, `pattern`). See
 spec § Rollout for the Phase 2 plan trigger.
+
+## Stale-when
+
+This tracker becomes wrong when **any** of the following hold:
+
+- Criterion 4 ("`scan my usage` resolves bound, runs predicates, writes
+  rows") is empirically verified by a live Pika scan against a real
+  `pika_observations`-bearing project. At that point: update criterion 4's
+  cell from "_manual verify next session_" to ✓ + smoke-output snippet.
+- Phase 2 ships. At that point: archive this tracker (move to
+  `docs/trackers/archive/`) and link from the Phase 2 validation tracker as
+  the predecessor.
+- The IL3 count drops below ~1000 (codescout-side enforcement of Iron Law 3
+  via PreToolUse hook, or sustained behavior change). At that point the
+  "44% of all run_command calls violate Iron Law 3" framing is stale and
+  Phase 2's H-N promotion case weakens.

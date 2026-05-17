@@ -55,6 +55,9 @@ existing stderr INFO layer.
 
 ```bash
 cat .codescout/diagnostic-*.log
+# or tail the most recent:
+ls -t .codescout/diagnostic-*.log | head -1 | xargs tail -f
+```
 
 ## When to use it
 
@@ -117,9 +120,7 @@ Records are pruned after 30 days alongside normal usage records.
 - `project_sha` is captured once at `workspace(action: activate)`. If HEAD moves mid-session
   (e.g. a commit lands while the server is running), the stored SHA reflects the
   state at activation, not at call time — still a valid reproduction point.
-# or tail the most recent:
-ls -t .codescout/diagnostic-*.log | head -1 | xargs tail -f
-```
+## Querying failed calls
 
 To query failed calls with captured inputs from `usage.db`:
 
@@ -130,3 +131,24 @@ sqlite3 .codescout/usage.db \
    WHERE outcome != 'success' AND input_json IS NOT NULL
    ORDER BY called_at DESC LIMIT 10;"
 ```
+
+## Sibling tables (non-codescout writers)
+
+Other tools may add their own tables to your project's `.codescout/usage.db`.
+codescout does not write to or depend on them — they are sibling
+observability surfaces that read `tool_calls`.
+
+If you use the **codescout-pika** buddy specialist (a `buddy` plugin
+specialist that watches codescout tool usage for Iron Law violations,
+misuse, tool bugs, and recurring patterns), you will see a
+`pika_observations` table created lazily on the first user-asked scan.
+Schema, predicate matrix, and rationale are documented in
+[`docs/superpowers/specs/2026-05-17-pika-observability-design.md`](../../../superpowers/specs/2026-05-17-pika-observability-design.md).
+
+The table is FK-anchored to `tool_calls.id` with `ON DELETE CASCADE`,
+so observations die with their parent tool-call rows during the normal
+30-day pruning — codescout requires no orphan cleanup.
+
+**Stale-when:** Phase 2 of Pika observability ships a new schema version
+(`pika_schema_version > 1`); update this section's link to point at the
+new spec.
