@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-05-17
-closed:
+closed: 2026-05-18
 severity: low
 owner: marius
 related: ["2026-05-09-read-file-json-path-array-elements.md"]
@@ -70,12 +70,25 @@ Surfaced by Pika scan 2026-05-17 (Phase 2b, scope `cc_session_id=42874b1a-…`).
    **Evidence link:** See Evidence below; same error shape as the original `[-3:]` case.
 ## Fix
 
-Plan: either (a) implement Python-style negative slice in `resolve_json_segment` (least surprise — matches jsonpath dialects like jsonpath-rust 0.5+), or (b) reject the syntax with a clearer error ("unsupported json_path syntax: slices are not supported, use start_line/end_line or a bounded index"). Option (b) is the smaller change and matches the project's "explicit failure mode" pattern.
+Shipped on `experiments` 2026-05-18 across 4 commits:
 
+- `59f6b53c` — `feat(file_summary): add Segment enum for typed json_path grammar`
+- `ff4c3301` — `feat(file_summary): add parse_segments_v2 returning Vec<Segment>`
+- `932eb443` — `feat(file_summary): add resolve_segment_v2 + extract_json_path_v2 scaffold`
+- `f6eb7ed1` — `refactor(file_summary): cut over to typed Segment grammar`
+
+Implementation in `src/tools/file_summary/file_summary.rs`. The stringly-typed segment parser was replaced with a typed `enum Segment { Key, Index, NegIndex, NegSliceFrom }`. Resolver returns `Result<Cow<'a, Value>, RecoverableError>`. Walk in `extract_json_path` threads `Cow` through the segment chain, flipping to owned on first slice.
+
+Live MCP verification (2026-05-18): 4/4 probes pass against `src/server.rs` symbols buffer — `[-1]` returns last symbol, `[-3:]` returns array of 3, `[1:3]` rejects with `"unsupported json_path segment '[1:3]'"`, `[-9999]` rejects with `"index -9999 out of bounds for array of length 23"`.
 ## Tests added
 
-None yet. Regression test target on fix: `tools::read_file::tests::read_file_buffer_json_path_negative_slice_returns_clear_error` (or `_returns_last_n_elements` if implementing).
+In `src/tools/file_summary/tests.rs`:
 
+**Parser (13 tests):** `parse_empty_path_returns_empty_segments`, `parse_root_only`, `parse_negative_single_index`, `parse_negative_slice_from`, `parse_chained_negative_after_positive`, `parse_top_level_negative_index`, `parse_rejects_positive_slice`, `parse_rejects_slice_with_step`, `parse_rejects_open_end_positive`, `parse_rejects_negative_zero`, `parse_rejects_non_integer_bracket`, `parse_rejects_negative_zero_slice`, `parse_rejects_positive_sign`.
+
+**Resolver (8 tests):** `extract_root_returns_parsed`, `extract_top_level_negative_index`, `extract_negative_index_returns_last_element`, `extract_negative_slice_returns_tail`, `extract_negative_index_oob_returns_clear_error`, `extract_negative_slice_oob_returns_clear_error`, `extract_mid_path_slice_then_index`, `extract_unsupported_syntax_distinguished_from_not_found`.
+
+**Regression pin (existing, kept green):** `read_file_buffer_json_path_array_element_returns_value` at `src/tools/read_file.rs:1003` continues to pass — positive index + property access (`$.symbols[0].body`) is unchanged.
 ## Workarounds
 
 - Bound the slice manually given known array length: for a 83-element array, use `$.symbols[80]`, `$.symbols[81]`, `$.symbols[82]` in three calls — or fetch full array and pick in the agent.
@@ -83,7 +96,7 @@ None yet. Regression test target on fix: `tools::read_file::tests::read_file_buf
 
 ## Resume
 
-Probe complete (2026-05-17). Negative index AND slice both unsupported — single axis, not two. Decision point: option (a) implement negative-index + slice in `resolve_json_segment`, or option (b) reject with a clearer error message (`"unsupported json_path syntax: negative indices and slices not supported"`). Option (b) is the smaller change; option (a) matches jsonpath-rust 0.5+ semantics. Code lives in `src/tools/file_summary/file_summary.rs` near `parse_json_path_segments` and `resolve_json_segment`.
+Fixed and verified. No further action on `experiments`. Standard Ship Sequence next: cherry-pick the 4 commits (`59f6b53c`, `ff4c3301`, `932eb443`, `f6eb7ed1`) to `master`, then `git mv` this file to `docs/issues/archive/`.
 ## References
 
 - Related: `docs/issues/2026-05-09-read-file-json-path-array-elements.md` (wontfix; covers positive-index + property — distinct feature).
