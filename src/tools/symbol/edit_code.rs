@@ -651,28 +651,25 @@ impl EditCode {
             _ => match editing_end_line_strict(&sym) {
                 Some(end) => (end as usize + 1).min(lines.len()),
                 None => {
-                    // BUG-051 residual: AST cannot pinpoint the symbol's end
-                    // (severe syntax errors broke the parse, ambiguous match,
-                    // etc.). The lenient fallback to LSP's `end_line` is only
-                    // safe when the parent-clamp below can bound the result —
-                    // for a top-level symbol there is no safety net, so refuse
-                    // rather than risk splicing new code mid-function.
-                    if find_parent_symbol(&symbols, &sym.name_path).is_some() {
-                        (editing_end_line(&sym) as usize + 1).min(lines.len())
-                    } else {
-                        return Err(RecoverableError::with_hint(
-                            format!(
-                                "cannot determine end of '{}' for insert-after — AST \
-                                 parse failed and the symbol has no parent to bound \
-                                 the LSP fallback",
-                                sym.name
-                            ),
-                            "The file likely has syntax errors that broke tree-sitter's parse, \
-                             or the symbol has duplicate-name siblings without a clear name_path. \
-                             Fix the syntax errors first, or use edit_file with explicit context.",
-                        )
-                        .into());
-                    }
+                    // BUG-051 residual closure (2026-05-17): refuse universally
+                    // when AST cannot pinpoint the symbol's end. The earlier
+                    // parented-fallback path used the lenient `editing_end_line`
+                    // (which falls back to LSP's `end_line`), but the parent
+                    // body-end clamp below only catches over-extension — under-
+                    // extension still landed inserts mid-body. Refusing in both
+                    // top-level and parented cases prevents silent file
+                    // corruption; the BUG-029 happy path is unaffected because
+                    // it relies on AST returning Some, which strict still does.
+                    return Err(RecoverableError::with_hint(
+                        format!(
+                            "cannot determine end of '{}' for insert-after — AST parse failed",
+                            sym.name
+                        ),
+                        "The file likely has syntax errors that broke tree-sitter's parse, \
+                         or the symbol has duplicate-name siblings without a clear name_path. \
+                         Fix the syntax errors first, or use edit_file with explicit context.",
+                    )
+                    .into());
                 }
             },
         };

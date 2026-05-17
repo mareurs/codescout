@@ -1,7 +1,7 @@
 ---
-status: mitigated
+status: fixed
 opened: 2026-05-02
-closed:
+closed: 2026-05-17
 severity: high
 owner: marius
 related: ["BUG-029", "BUG-031", "BUG-036"]
@@ -66,8 +66,7 @@ Confirmed 2026-05-02: `editing_end_line` in `src/symbol/edit.rs` had an early re
 
 **Residual closed 2026-05-09:** Even after the AST-trust fix, when AST extraction itself succeeded but `find_ast_end_line_in` returned `None` (severely broken parse, ambiguous match, etc.), `editing_end_line` silently fell back to LSP's `end_line`. For top-level symbols with no parent in the symbol tree, the parent-clamp safety net in `do_insert` couldn't recover. Added `editing_end_line_strict` (returns `Option<u32>`, `None` on any AST resolution failure) and wired it into `do_insert`'s "after" branch: when AST cannot pinpoint the end AND the symbol has no parent, the call now returns a `RecoverableError` with actionable guidance instead of corrupting the source. When a parent exists, the existing lenient path runs and the parent clamp keeps the result bounded — preserving the BUG-029/036 recovery path.
 
-**Smaller residual (documented, not fixed):** When the file has syntax errors AND the symbol has a parent AND LSP under-extends `end_line` into the symbol's body, both the AST-trust fix and the strict guard still allow the lenient `editing_end_line` fallback (since the parent clamp can't detect under-extension). The parent clamp protects against over-extension only. This last sliver is rare in practice — most under-extension cases are caught by the 2026-05-02 AST-trust fix.
-
+**Last residual closed 2026-05-17:** The parented + syntax-error + LSP under-extension case. The parent-clamp in `do_insert` only catches over-extension (LSP value past the parent's `}`); under-extension (LSP value before the target symbol's `}` but still inside the parent body) was unbounded. `do_insert`'s "after" branch now refuses universally when `editing_end_line_strict` returns `None`, not just for top-level symbols. The BUG-029 happy path is preserved because it relies on AST succeeding, and `editing_end_line_strict` still returns `Some` whenever AST resolves the symbol.
 ## Tests added
 
 - `editing_end_line_with_syntax_errors_uses_ast_not_lsp_fallback` (`src/tools/symbol/tests.rs`)
@@ -83,8 +82,7 @@ For the residual case (parented symbol + syntax errors + LSP under-extension): p
 
 ## Resume
 
-If the residual ever materializes in a session, capture the file state (`git diff`), the `symbols(name=..., include_body=true)` output, and the failing `edit_code` invocation in a fresh evidence subsection here. The next escalation is making `editing_end_line` strict universally (also under parented + syntax-error case), accepting the BUG-029 regression risk.
-
+Closed. If a session ever hits the refusal error (`cannot determine end of '<name>' for insert-after — AST parse failed`), the file has severe syntax errors that broke tree-sitter. The error hint already names the workaround: fix the syntax first, or use `edit_file` with explicit context. No further escalation planned — strict-everywhere is the strongest available guarantee without inventing AST.
 ## References
 
 - Originally tracked as **BUG-051** in `docs/TODO-tool-misbehaviors.md` (deprecated 2026-05-09; superseded by per-file system).
