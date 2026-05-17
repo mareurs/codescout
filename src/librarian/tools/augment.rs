@@ -116,6 +116,29 @@ impl Tool for ArtifactAugment {
                 let post_status = current.get("status").and_then(|s| s.as_str());
                 let is_goal_tracker = current.get("acceptance_signals").is_some()
                     && current.get("children").is_some();
+
+                // D10 — scope-growth cap. Fires on any goal-tracker merge
+                // touching children. Initial seed is exempt (prior empty).
+                if is_goal_tracker {
+                    use crate::librarian::tools::goal_aggregation::validate_scope_growth;
+                    let pre_existing: Value = serde_json::from_str(&existing.params)
+                        .unwrap_or(Value::Object(Default::default()));
+                    let empty_vec: Vec<Value> = Vec::new();
+                    let prior_children: &[Value] = pre_existing
+                        .get("children")
+                        .and_then(|c| c.as_array())
+                        .map(Vec::as_slice)
+                        .unwrap_or(&empty_vec);
+                    let submitted_children: &[Value] = current
+                        .get("children")
+                        .and_then(|c| c.as_array())
+                        .map(Vec::as_slice)
+                        .unwrap_or(&empty_vec);
+                    if let Err(e) = validate_scope_growth(prior_children, submitted_children) {
+                        return Err(RecoverableError::new(format!("{e}")));
+                    }
+                }
+
                 if is_goal_tracker
                     && pre_status.as_deref() != Some("done")
                     && post_status == Some("done")

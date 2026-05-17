@@ -741,6 +741,78 @@ pub fn evaluate_gate(params: &Value) -> GateOutcome {
     GateOutcome::AutoClose
 }
 
+// =====================================================================
+// Scope-growth cap (D10) — refuse more than 1 new child per refresh
+// =====================================================================
+
+/// Verdict from a passing `validate_scope_growth` call.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScopeGrowthVerdict {
+    pub added_count: usize,
+    pub added_ids: Vec<String>,
+}
+
+/// Why scope-growth was rejected.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ScopeGrowthError {
+    /// More than 1 new `children[].id` introduced in this refresh.
+    TooManyNewChildren { count: usize, ids: Vec<String> },
+}
+
+impl std::fmt::Display for ScopeGrowthError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ScopeGrowthError::TooManyNewChildren { count, ids } => write!(
+                f,
+                "scope-growth cap: {count} new children in one refresh ({}); D10 allows at most 1. Defer the rest to a follow-up refresh.",
+                ids.join(", ")
+            ),
+        }
+    }
+}
+
+/// Enforce D10: at most 1 new `children[].id` may appear between the prior
+/// children list and the submitted-post-merge children list.
+///
+/// Initial seed (`prior_children` empty) is exempt — the cap targets growth
+/// during refreshes, not creation. Same-id, status-only changes are not
+/// counted as growth.
+pub fn validate_scope_growth(
+    prior_children: &[Value],
+    submitted_children: &[Value],
+) -> Result<ScopeGrowthVerdict, ScopeGrowthError> {
+    if prior_children.is_empty() {
+        // Initial seed — not a growth event.
+        return Ok(ScopeGrowthVerdict {
+            added_count: submitted_children.len(),
+            added_ids: submitted_children
+                .iter()
+                .filter_map(|c| c.get("id").and_then(|i| i.as_str()).map(String::from))
+                .collect(),
+        });
+    }
+    let prior_ids: std::collections::HashSet<&str> = prior_children
+        .iter()
+        .filter_map(|c| c.get("id").and_then(|i| i.as_str()))
+        .collect();
+    let new_ids: Vec<String> = submitted_children
+        .iter()
+        .filter_map(|c| c.get("id").and_then(|i| i.as_str()))
+        .filter(|id| !prior_ids.contains(id))
+        .map(String::from)
+        .collect();
+    if new_ids.len() > 1 {
+        return Err(ScopeGrowthError::TooManyNewChildren {
+            count: new_ids.len(),
+            ids: new_ids,
+        });
+    }
+    Ok(ScopeGrowthVerdict {
+        added_count: new_ids.len(),
+        added_ids: new_ids,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1477,5 +1549,72 @@ mod tests {
             ]
         });
         assert_eq!(evaluate_gate(&params), GateOutcome::AutoClose);
+    }
+
+    // =================================================================
+    // D10 — scope-growth cap tests
+    // =================================================================
+
+    #[test]
+    fn scope_growth_allows_initial_seed_with_many_children() {
+        use crate::librarian::tools::goal_aggregation::validate_scope_growth;
+        let prior = vec![];
+        let submitted = vec![
+            json!({"id":"C-1","status":"active"}),
+            json!({"id":"C-2","status":"pending"}),
+            json!({"id":"C-3","status":"done"}),
+        ];
+        let verdict = validate_scope_growth(&prior, &submitted).unwrap();
+        assert_eq!(verdict.added_count, 3);
+    }
+
+    #[test]
+    fn scope_growth_allows_one_new_child_per_refresh() {
+        use crate::librarian::tools::goal_aggregation::validate_scope_growth;
+        let prior = vec![
+            json!({"id":"C-1","status":"done"}),
+            json!({"id":"C-2","status":"active"}),
+        ];
+        let submitted = vec![
+            json!({"id":"C-1","status":"done"}),
+            json!({"id":"C-2","status":"active"}),
+            json!({"id":"C-3","status":"pending"}),
+        ];
+        let verdict = validate_scope_growth(&prior, &submitted).unwrap();
+        assert_eq!(verdict.added_count, 1);
+        assert_eq!(verdict.added_ids, vec!["C-3".to_string()]);
+    }
+
+    #[test]
+    fn scope_growth_rejects_two_new_children() {
+        use crate::librarian::tools::goal_aggregation::{validate_scope_growth, ScopeGrowthError};
+        let prior = vec![json!({"id":"C-1","status":"done"})];
+        let submitted = vec![
+            json!({"id":"C-1","status":"done"}),
+            json!({"id":"C-2","status":"active"}),
+            json!({"id":"C-3","status":"pending"}),
+        ];
+        match validate_scope_growth(&prior, &submitted).unwrap_err() {
+            ScopeGrowthError::TooManyNewChildren { count, ids } => {
+                assert_eq!(count, 2);
+                assert!(ids.contains(&"C-2".to_string()));
+                assert!(ids.contains(&"C-3".to_string()));
+            }
+        }
+    }
+
+    #[test]
+    fn scope_growth_allows_status_only_change_no_new_ids() {
+        use crate::librarian::tools::goal_aggregation::validate_scope_growth;
+        let prior = vec![
+            json!({"id":"C-1","status":"active"}),
+            json!({"id":"C-2","status":"pending"}),
+        ];
+        let submitted = vec![
+            json!({"id":"C-1","status":"done"}),
+            json!({"id":"C-2","status":"done"}),
+        ];
+        let verdict = validate_scope_growth(&prior, &submitted).unwrap();
+        assert_eq!(verdict.added_count, 0);
     }
 }
