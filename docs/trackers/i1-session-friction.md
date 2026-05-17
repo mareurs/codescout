@@ -54,9 +54,9 @@ say what to change.
 | F-2 | 2026-05-17 | low | codescout-tool | promoted-to-bug-tracker | `read_file(@buf_id, start_line=N, end_line=M)` empty when N is past midpoint (see bug-tracker.md #3) |
 | F-3 | 2026-05-17 | low | self-friction | wontfix-false-alarm | Predicted `cargo test -p codescout` would fail — actually works fine |
 | F-4 | 2026-05-17 | low | self-friction | wontfix-false-alarm | Predicted plan's `src/librarian/...` path was wrong — actually correct |
-| F-5 | 2026-05-17 | low | subagent      | open | T-1 subagent placed cross-check test at module-level scope, not inside `mod tests` block as plan said |
-| F-6 | 2026-05-17 | low | plan-prose     | open | T-2 Step 3 says "18 tests" but Step 1 fixture has 20 |
-| F-7 | 2026-05-17 | med  | plan-prose     | open | T-3 title says `GatherSource::GoalChildren variant` but body adds a standalone fn, not an enum variant |
+| F-5 | 2026-05-17 | low | subagent      | fixed-verified | T-1 subagent placed cross-check test at module-level scope, not inside `mod tests` block as plan said |
+| F-6 | 2026-05-17 | low | plan-prose     | fixed-verified | T-2 Step 3 says "18 tests" but Step 1 fixture has 20 |
+| F-7 | 2026-05-17 | med  | plan-prose     | fixed-verified | T-3 title says `GatherSource::GoalChildren variant` but body adds a standalone fn, not an enum variant |
 | F-8 | 2026-05-17 | high | plan-prose     | open | T-3's code snippet uses `cat.get(id).augmentation.archetype` — three field accesses that don't compile against actual structs |
 | F-9 | 2026-05-17 | med  | architectural | open | Augmentation prompt stored per-artifact at creation; `archetype_goal().prompt_template` edits don't propagate to existing trackers without explicit re-augment |
 | F-10 | 2026-05-17 | high | rust-serde    | mitigated | Serde `flatten + default` doesn't handle missing internally-tagged discriminator — custom `Deserialize` impl required |
@@ -561,7 +561,7 @@ with explicit `symbol="tests"` insertion target.
 relocate the test — it works, and the file already passes clippy.
 Pin this for the eventual plan-prose corrections commit.
 
-**Status:** open (deferred — cosmetic).
+**Status:** fixed-verified 2026-05-17 second session — plan Task 1 Step 1 comment now anchors with `edit_code(symbol="tests", action="insert")` so future subagents land the test inside `mod tests`. Existing test stays at module-level (Rust idiom allows both; relocation unnecessary).
 
 ---
 
@@ -591,7 +591,7 @@ estimate). Subagent silently accepted the higher count.
 
 **Recommendation:** Option 2 in the plan-corrections commit.
 
-**Status:** open (deferred — cosmetic).
+**Status:** fixed-verified 2026-05-17 second session — plan Task 2 Step 3 now reads "all tests in Step 1's fixture pass" (Option 2, robust to fixture growth).
 
 ---
 
@@ -624,7 +624,7 @@ when the body says don't.
 **Recommendation:** Option 1 in the plan-corrections commit. The
 function approach is sound.
 
-**Status:** open (deferred — will be patched alongside other plan-prose fixes).
+**Status:** fixed-verified 2026-05-17 second session — plan Task 3 title now reads `gather_goal_children helper + refresh dispatch` (matches the body's standalone-fn implementation). Three stale `GoalChildren variant` references remain in the document's Architecture summary (line 7) and File map (lines 23–24); flagged for a future plan-corrections pass.
 
 ---
 
