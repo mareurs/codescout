@@ -179,6 +179,17 @@ the server. Returns `{"status": "cancelled"}` or `{"status": "no_active_sync"}`.
 3. If **regular artifact**: `artifact(action=create)` directly (fails if path exists — `artifact(action=find)` guards this)
 4. `artifact(action=link, source, target)` to connect related artifacts
 
+**Archive workflow** — when a tracker reaches terminal state:
+
+A tracker (a markdown file in `docs/trackers/` with F-N / T-N entries or `[x]` phase checkboxes) is **terminal** when every entry is closed (`fixed-verified`, `mitigated`, `wontfix`, or `promoted to <other>`) or every checkbox is `[x]`. Then:
+
+1. `artifact(action="find", filter={"rel_path": {"contains": "<name>"}})` — check librarian-indexed status. If indexed → `artifact(action="move", new_rel_path="docs/trackers/archive/<name>.md")` preserves the artifact id across the rename. If unindexed → `git mv` is enough.
+2. Grep inbound references; rewrite `docs/trackers/<name>.md` → `docs/trackers/archive/<name>.md`. One atomic commit covers the rename plus all rewires.
+3. Self-references inside the archived file stay — narrative prose, not active links.
+4. **Before commit:** `git diff --stat` must show 100% rename detection AND symmetric N insertions / N deletions across sibling files. Asymmetry means scope creep — **stop and ask the user; do not commit.**
+
+Eval baseline: `docs/evals/archive-tracker-rule.md` — v0.1 = 4/5 PASS.
+
 **Other key tools:**
 - `artifact(action=graph)` — relationships and dependencies between artifacts
 - `artifact_event(action=list)` — chronological history of an artifact

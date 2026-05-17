@@ -1475,6 +1475,7 @@ mod tests {
             "json_path",
             "limit",
             "max_depth",
+            "mitigated",
             "model",
             "model_options",
             "next",
@@ -1488,6 +1489,7 @@ mod tests {
             "struct",
             "untracked",
             "url",
+            "wontfix",
         ];
         let allowlist: HashSet<&str> = allowlist_entries.iter().copied().collect();
         let mut allowlist_hits: HashMap<&str, usize> = allowlist_entries
