@@ -651,6 +651,96 @@ pub fn child_status_from_str(s: &str) -> ChildStatus {
     }
 }
 
+// =====================================================================
+// Auto-close gate (D6) — Rust enforces rule 4 / rule 6 NEVER conditions
+// =====================================================================
+
+/// Result of `evaluate_gate` over goal-tracker params.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GateOutcome {
+    /// All conditions satisfied — the goal may flip status to "done".
+    AutoClose,
+    /// One condition unmet — the caller should refuse the status flip.
+    Block(GateBlockReason),
+}
+
+/// Why the auto-close gate refused to flip status to "done".
+#[derive(Debug, Clone, PartialEq)]
+pub enum GateBlockReason {
+    /// `children.len() < 2` (amendment D9).
+    TooFewChildren { count: usize },
+    /// One or more children have `status != "done"`.
+    ChildrenIncomplete { incomplete: Vec<String> },
+    /// One or more `acceptance_signals[].met` is false.
+    SignalsUnmet { unmet: Vec<String> },
+}
+
+impl std::fmt::Display for GateBlockReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GateBlockReason::TooFewChildren { count } => write!(
+                f,
+                "goal has {count} children; auto-close requires \u{2265}2 (amendment D9)"
+            ),
+            GateBlockReason::ChildrenIncomplete { incomplete } => {
+                write!(f, "children not all done: {}", incomplete.join(", "))
+            }
+            GateBlockReason::SignalsUnmet { unmet } => {
+                write!(f, "acceptance_signals unmet: {}", unmet.join("; "))
+            }
+        }
+    }
+}
+
+/// Evaluate the goal-tracker auto-close gate against the supplied params.
+///
+/// Returns `GateOutcome::AutoClose` when ALL of:
+///   - `params.children.len() >= 2` (D9)
+///   - every `children[].status == "done"`
+///   - every `acceptance_signals[].met` is true
+///
+/// Otherwise returns `GateOutcome::Block` with the first failing condition.
+/// This is the Rust enforcement of what was formerly prompt rule 6's NEVER
+/// list and rule 4's gate (D6).
+pub fn evaluate_gate(params: &Value) -> GateOutcome {
+    let children: &[Value] = params
+        .get("children")
+        .and_then(|c| c.as_array())
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    if children.len() < 2 {
+        return GateOutcome::Block(GateBlockReason::TooFewChildren {
+            count: children.len(),
+        });
+    }
+    let incomplete: Vec<String> = children
+        .iter()
+        .filter(|c| c.get("status").and_then(|s| s.as_str()) != Some("done"))
+        .filter_map(|c| c.get("id").and_then(|i| i.as_str()).map(String::from))
+        .collect();
+    if !incomplete.is_empty() {
+        return GateOutcome::Block(GateBlockReason::ChildrenIncomplete { incomplete });
+    }
+    let unmet: Vec<String> = params
+        .get("acceptance_signals")
+        .and_then(|s| s.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter(|s| s.get("met").and_then(|m| m.as_bool()) != Some(true))
+                .filter_map(|s| {
+                    s.get("description")
+                        .and_then(|d| d.as_str())
+                        .map(String::from)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if !unmet.is_empty() {
+        return GateOutcome::Block(GateBlockReason::SignalsUnmet { unmet });
+    }
+    GateOutcome::AutoClose
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1307,5 +1397,85 @@ mod tests {
         let m1 = compute_refresh_meta(None, &prior_statuses, &fresh, vec![], fixed_now(), None, 0);
         let m2 = compute_refresh_meta(None, &prior_statuses, &fresh, vec![], fixed_now(), None, 0);
         assert_eq!(m1, m2);
+    }
+
+    // =================================================================
+    // D6 — auto-close gate tests
+    // =================================================================
+
+    #[test]
+    fn gate_blocks_too_few_children() {
+        use crate::librarian::tools::goal_aggregation::{
+            evaluate_gate, GateBlockReason, GateOutcome,
+        };
+        let params = json!({
+            "children": [
+                {"id":"C-1","status":"done"}
+            ],
+            "acceptance_signals": []
+        });
+        match evaluate_gate(&params) {
+            GateOutcome::Block(GateBlockReason::TooFewChildren { count }) => assert_eq!(count, 1),
+            other => panic!("expected TooFewChildren, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gate_blocks_children_incomplete() {
+        use crate::librarian::tools::goal_aggregation::{
+            evaluate_gate, GateBlockReason, GateOutcome,
+        };
+        let params = json!({
+            "children": [
+                {"id":"C-1","status":"done"},
+                {"id":"C-2","status":"active"}
+            ],
+            "acceptance_signals": []
+        });
+        match evaluate_gate(&params) {
+            GateOutcome::Block(GateBlockReason::ChildrenIncomplete { incomplete }) => {
+                assert_eq!(incomplete, vec!["C-2".to_string()]);
+            }
+            other => panic!("expected ChildrenIncomplete, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gate_blocks_signals_unmet() {
+        use crate::librarian::tools::goal_aggregation::{
+            evaluate_gate, GateBlockReason, GateOutcome,
+        };
+        let params = json!({
+            "children": [
+                {"id":"C-1","status":"done"},
+                {"id":"C-2","status":"done"}
+            ],
+            "acceptance_signals": [
+                {"description":"A","met":true},
+                {"description":"B","met":false}
+            ]
+        });
+        match evaluate_gate(&params) {
+            GateOutcome::Block(GateBlockReason::SignalsUnmet { unmet }) => {
+                assert_eq!(unmet, vec!["B".to_string()]);
+            }
+            other => panic!("expected SignalsUnmet, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gate_passes_when_all_conditions_met() {
+        use crate::librarian::tools::goal_aggregation::{evaluate_gate, GateOutcome};
+        let params = json!({
+            "children": [
+                {"id":"C-1","status":"done"},
+                {"id":"C-2","status":"done"}
+            ],
+            "acceptance_signals": [
+                {"description":"A","met":true},
+                {"description":"B","met":true}
+            ]
+        });
+        assert_eq!(evaluate_gate(&params), GateOutcome::AutoClose);
     }
 }

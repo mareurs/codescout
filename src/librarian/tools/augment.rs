@@ -91,10 +91,15 @@ impl Tool for ArtifactAugment {
                 .cloned()
                 .unwrap_or(Value::Object(Default::default()));
             if let Some(existing) = augmentation::get(&cat, &a.id)? {
+                let mut current: Value = serde_json::from_str(&existing.params)
+                    .unwrap_or(Value::Object(Default::default()));
+                let pre_status = current
+                    .get("status")
+                    .and_then(|s| s.as_str())
+                    .map(String::from);
+                augmentation::apply_merge_patch(&mut current, &patch);
+
                 if let Some(schema_text) = existing.params_schema.as_deref() {
-                    let mut current: Value = serde_json::from_str(&existing.params)
-                        .unwrap_or(Value::Object(Default::default()));
-                    augmentation::apply_merge_patch(&mut current, &patch);
                     crate::librarian::tools::schema_validate::validate_against_stored(
                         schema_text,
                         &current,
@@ -102,6 +107,28 @@ impl Tool for ArtifactAugment {
                     .map_err(|e| {
                         RecoverableError::new(format!("merged params violate params_schema: {e}"))
                     })?;
+                }
+
+                // D6 — Rust enforces the auto-close gate. Only fires when
+                // (1) the artifact is structurally a goal-tracker (has
+                // acceptance_signals + children), and (2) the merge flips
+                // status from non-done to "done". Other merges pass through.
+                let post_status = current.get("status").and_then(|s| s.as_str());
+                let is_goal_tracker = current.get("acceptance_signals").is_some()
+                    && current.get("children").is_some();
+                if is_goal_tracker
+                    && pre_status.as_deref() != Some("done")
+                    && post_status == Some("done")
+                {
+                    use crate::librarian::tools::goal_aggregation::{evaluate_gate, GateOutcome};
+                    match evaluate_gate(&current) {
+                        GateOutcome::AutoClose => {}
+                        GateOutcome::Block(reason) => {
+                            return Err(RecoverableError::new(format!(
+                                "goal auto-close gate blocked: {reason}"
+                            )));
+                        }
+                    }
                 }
             }
             let found = augmentation::merge_params(&cat, &a.id, &patch)?;
