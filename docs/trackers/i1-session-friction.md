@@ -58,7 +58,7 @@ say what to change.
 | F-6 | 2026-05-17 | low | plan-prose     | fixed-verified | T-2 Step 3 says "18 tests" but Step 1 fixture has 20 |
 | F-7 | 2026-05-17 | med  | plan-prose     | fixed-verified | T-3 title says `GatherSource::GoalChildren variant` but body adds a standalone fn, not an enum variant |
 | F-8 | 2026-05-17 | high | plan-prose     | fixed-verified | T-3's code snippet uses `cat.get(id).augmentation.archetype` — three field accesses that don't compile against actual structs |
-| F-9 | 2026-05-17 | med  | architectural | open | Augmentation prompt stored per-artifact at creation; `archetype_goal().prompt_template` edits don't propagate to existing trackers without explicit re-augment |
+| F-9 | 2026-05-17 | med  | architectural | mitigated | Augmentation prompt stored per-artifact at creation; `archetype_goal().prompt_template` edits don't propagate to existing trackers without explicit re-augment |
 | F-10 | 2026-05-17 | high | rust-serde    | mitigated | Serde `flatten + default` doesn't handle missing internally-tagged discriminator — custom `Deserialize` impl required |
 | F-11 | 2026-05-17 | med  | codescout-tool | promoted-to-bug-tracker | `grep` on `@tool_*` buffer false-negatives on a string present in the buffer (see bug-tracker.md #4) |
 | F-12 | 2026-05-17 | low  | plan-prose   | mitigated | T-12 plan payload sketch omitted required `note.text` field; event_create rejects silently if `let _ = ...await` swallows the error |
@@ -736,7 +736,7 @@ prompt=<new from tracker_design output>)`). Without that step:
 post-Phase-1 for the L1 goal-tracker; defer option 2/3 to a later
 architectural pass.
 
-**Status:** open (deferred — workaround documented).
+**Status:** mitigated 2026-05-17 second session — Option 1 (manual re-augment) shipped for L1 dogfood (`d2cd00fc837e53f2`) during the H-8 close in the prior session; see W-10 for scouting evidence. The architectural concern (Options 2 and 3) is promoted out of this friction log into `docs/trackers/augmentation-prompt-template-resolution.md` (status `scoping`), with explicit Promote-when criteria for when it should graduate to an ADR + plan.
 
 ---
 
