@@ -128,7 +128,7 @@ returns an order-preserving map. Zero new dependency.
 - Full `cargo test --lib` — 2387 passed, 0 failed, 7 ignored.
 - `cargo clippy --lib --tests` clean.
 
-**Commit:** `<tba>` on `experiments`.
+**Commit:** `6d804455` on `experiments`.
 
 ## Tests added
 
