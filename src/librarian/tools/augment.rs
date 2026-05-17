@@ -35,6 +35,11 @@ impl Tool for ArtifactAugment {
     fn description(&self) -> &'static str {
         "Attach or replace a persistent prompt + params on any artifact (merge=false, default), \
          or RFC 7396 merge-patch params only without changing the prompt (merge=true). \
+         On merge=false ALL six caller-controlled fields — prompt, params, render_template, \
+         params_schema, append_mode, history_cap — are overwritten with the call's values; \
+         fields you omit silently reset to None / false on the stored row. To preserve sibling \
+         fields across a re-augment, either pass them back in the call, or use merge=true \
+         (which patches params only and leaves the other five fields untouched). \
          Idempotent — safe to call on already-augmented artifacts. \
          Replaces artifact_update_params."
     }
@@ -55,11 +60,11 @@ impl Tool for ArtifactAugment {
                 },
                 "render_template": {
                     "type": "string",
-                    "description": "Optional MiniJinja template projecting `params` into a markdown snippet rendered into librarian_context output. Decouples live state from prose body."
+                    "description": "Optional MiniJinja template projecting `params` into a markdown snippet rendered into librarian_context output. Decouples live state from prose body. On merge=false this field is overwritten with the call's value (None if omitted) — pass the existing template back to preserve it."
                 },
                 "params_schema": {
                     "type": "object",
-                    "description": "Optional JSON Schema validating params on every merge. Initial params are also validated."
+                    "description": "Optional JSON Schema validating params on every merge. Initial params are also validated. On merge=false this field is overwritten with the call's value (None if omitted) — pass the existing schema back to preserve it."
                 },
                 "merge": {
                     "type": "boolean",
@@ -68,12 +73,12 @@ impl Tool for ArtifactAugment {
                 "append_mode": {
                     "type": "boolean",
                     "default": false,
-                    "description": "When true, artifact_update prepends a new dated section instead of replacing the body. Prompt should instruct the LLM to write only the new delta block."
+                    "description": "When true, artifact_update prepends a new dated section instead of replacing the body. Prompt should instruct the LLM to write only the new delta block. On merge=false this field is overwritten with the call's value (false if omitted) — pass the existing value back to preserve append behaviour."
                 },
                 "history_cap": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "Max number of dated ## YYYY-MM-DD sections to retain. Oldest sections beyond cap are dropped on each append."
+                    "description": "Max number of dated ## YYYY-MM-DD sections to retain. Oldest sections beyond cap are dropped on each append. On merge=false this field is overwritten with the call's value (None if omitted) — pass the existing cap back to preserve it."
                 }
             }
         })

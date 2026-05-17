@@ -65,7 +65,7 @@ say what to change.
 | F-13 | 2026-05-17 | high | multi-agent  | mitigated | `git reset --soft HEAD~1` on stale HEAD during concurrent work blew away parallel agent's T-13 commit; recovered via reflog SHA |
 | F-14 | 2026-05-17 | med  | multi-agent  | open      | F-N namespace shared across concurrent sessions — parallel session's W-6 references "F-11" but their friction was renumbered to F-12 after mine landed first |
 | F-15 | 2026-05-17 | high | codescout-tool | mitigated | `artifact_augment` schema description says `params` is "gather config"; actually it's the data params — calling `merge=false, params={}` wiped live tracker state (acceptance_signals, children, criterion, progress_log) |
-| F-16 | 2026-05-17 | med  | codescout-tool | open      | `artifact_augment(merge=false)` also overwrites `render_template` / `params_schema` / `append_mode` / `history_cap` with `excluded.*` in `augmentation::upsert`'s `ON CONFLICT DO UPDATE` — schema description (post-F-15) still doesn't warn callers; passing them as None silently wipes them |
+| F-16 | 2026-05-17 | med  | codescout-tool | fixed-verified | `artifact_augment(merge=false)` also overwrites `render_template` / `params_schema` / `append_mode` / `history_cap` with `excluded.*` in `augmentation::upsert`'s `ON CONFLICT DO UPDATE` — schema description (post-F-15) still doesn't warn callers; passing them as None silently wipes them |
 
 
 ## Wins Index
@@ -990,4 +990,4 @@ Recovered by `git reset --soft d8b38f26` — quoting the explicit SHA, not a rel
 
 **Severity:** med — silent state loss for any tracker with a non-default render_template, schema, append_mode, or history_cap. Doesn't fire on the common case (most trackers don't set them), but a re-augment on the wrong tracker shape is hard to detect after the fact.
 
-**Status:** open — description-only fix is straightforward but I'm not stacking it on this commit; H-8's close is the focused work. F-16 is the next-session candidate alongside H-9 / H-10 / S-4 follow-ups.
+**Status:** fixed-verified 2026-05-17 second session — widened the `artifact_augment` tool's `description()` to spell out that ALL six caller-controlled fields (prompt, params, render_template, params_schema, append_mode, history_cap) get overwritten on merge=false, with explicit "omit → None/false" wording. Per-field schema descriptions for `render_template`, `params_schema`, `append_mode`, `history_cap` each got an appended sentence ("On merge=false this field is overwritten… pass it back to preserve"). Verified by `cargo test --lib librarian::tools::augment` (12/12) + `cargo test --lib prompt_surfaces_reference_only_real_tools`. Re-augment safety improvement (b) from the workaround — restructure upsert to only overwrite caller-named fields — still deferred; description-only narrowing is sufficient for the documentation gap.
