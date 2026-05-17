@@ -60,11 +60,16 @@ impl GlobalConfig {
                 return Ok(None);
             }
         };
-        if !path.exists() {
-            return Ok(None);
-        }
-        let metadata = std::fs::metadata(&path)
-            .with_context(|| format!("reading global config {}", path.display()))?;
+        // Race-tolerant: under parallel test runs another tempdir may delete
+        // the path between an exists()-check and a subsequent read. Always
+        // attempt the I/O and treat ENOENT as Ok(None) at each step.
+        let metadata = match std::fs::metadata(&path) {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => {
+                return Err(e).with_context(|| format!("reading global config {}", path.display()));
+            }
+        };
         if metadata.len() > 1024 * 1024 {
             anyhow::bail!(
                 "global config {} exceeds 1 MiB limit ({} bytes)",
@@ -72,8 +77,13 @@ impl GlobalConfig {
                 metadata.len()
             );
         }
-        let text = std::fs::read_to_string(&path)
-            .with_context(|| format!("reading global config {}", path.display()))?;
+        let text = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => {
+                return Err(e).with_context(|| format!("reading global config {}", path.display()));
+            }
+        };
         let config: GlobalConfig = toml::from_str(&text)
             .with_context(|| format!("parsing global config {}", path.display()))?;
         Ok(Some(config))

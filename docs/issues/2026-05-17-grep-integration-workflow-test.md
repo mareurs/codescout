@@ -95,7 +95,7 @@ of the old `matches.len()` assertion.
 **Verification:**
 - `cargo test --test integration workflow_read_search_replace` — passes.
 
-**Commit:** `<tba>` on `experiments`.
+**Commit:** `1c6f3969` on `experiments`.
 
 ## Tests added
 

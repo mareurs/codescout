@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-05-17
-closed:
+closed: 2026-05-18
 severity: low
 owner: marius
 related: []
@@ -80,19 +80,53 @@ Unconfirmed. Two leading hypotheses:
 
 ## Fix
 
-Not yet applied. Two viable paths:
 
-1. **Loosen `agent/mod.rs:1771`** to treat ENOENT as `Ok(default_config)`.
-   Most natural fix; preserves test isolation.
-2. **Ensure the test seeds an empty config file** in its tmpdir before
-   activating an agent. More invasive; only fixes this one test.
+**Root cause:** TOCTOU race in `GlobalConfig::load` at
+`src/config/global.rs:55-80`. Old shape:
 
-Recommend option 1 — code shouldn't crash on absent config files anywhere
-else either.
+```rust
+if !path.exists() { return Ok(None); }       // window 1
+let metadata = std::fs::metadata(&path)...?; // racy: ENOENT here panics
+let text = std::fs::read_to_string(&path)...?;  // window 2
+```
+
+Under parallel test runs, another test sets `HOME=/tmp/.tmpXXX/`,
+this test's `path.exists()` returns true while the file is briefly
+present, then the other test's `TempDir` drops, the path disappears,
+and `metadata()` fails with ENOENT — bubbled as the global config
+read error.
+
+**Fix:** removed the `path.exists()` short-circuit and added explicit
+`std::io::ErrorKind::NotFound → Ok(None)` arms on both `metadata()` and
+`read_to_string()`. Each I/O call now race-tolerantly returns `Ok(None)`
+when the file vanishes mid-load. Other errors (permission, IO) still
+bubble with the original context message.
+
+The fix is consistent with the function's contract — `load()` returns
+`Result<Option<Self>>`, with `None` meaning "no usable global config".
+"File deleted out from under us" is functionally identical to "file
+never existed" for the caller, so the broader `None` interpretation
+is correct.
+
+**Verification:**
+- Isolated: `cargo test --lib workspace_summary_returns_none_for_single_project` → pass
+- Parallel: `cargo test --workspace` → both `workspace_summary_*` tests
+  pass. Only failures are 2 unrelated retrieval_integration HTTP-mock
+  tests (501 Not Implemented at localhost:36501).
+- Total: 2443 passed / 2 failed (unrelated) / 41 ignored.
+
+**Commit:** `<tba>` on `experiments`.
 
 ## Tests added
 
-N/A — this bug *is* about a failing test.
+
+The pre-existing `workspace_summary_returns_none_for_single_project`
+test now exercises the race-tolerant path implicitly — it runs in
+parallel with other tempdir-using tests and no longer panics. No
+new dedicated test added; the race is hard to reproduce
+deterministically (depends on test scheduling + tempdir lifecycle),
+and the existing test in parallel-suite mode is the load-bearing
+regression check.
 
 ## Workarounds
 
