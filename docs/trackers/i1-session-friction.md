@@ -1,0 +1,830 @@
+---
+title: I1 Refactor — Session Friction Log
+date: 2026-05-17
+parent: docs/trackers/goal-tracker-cross-pollination.md
+purpose: Lightweight scratch surface for frictions observed while working through the I1 refactor plan. Cheap to append; promotable to formal bug files later.
+---
+
+# I1 Refactor — Session Friction Log
+
+Living log of observations during I1 refactor work
+(`docs/superpowers/plans/2026-05-17-i1-refactor.md`).
+
+**Two entry types — both wanted:**
+- `F-N` — **Friction.** What we did, expected, got, root cause, fix pointer.
+  Add immediately when something surprises in a bad way.
+- `W-N` — **Wins.** A pattern, instinct, or tool combo that paid off — especially
+  when it prevented a worse outcome that would otherwise have stayed invisible.
+  Add when you notice "we just caught X because of Y" or "this would have
+  silently bitten us without Z".
+
+**Why both:** A log that only catalogs failures slowly retires the practices
+that prevented failures. Positive entries are the *control group*. When we
+refactor the prompts/skills/tooling, W-N entries say what to keep; F-N entries
+say what to change.
+
+**Distinct from:**
+- `docs/trackers/goal-tracker-dogfood-log.md` — `DF-N` for goal-tracker
+  **pipeline** behavior (gather/refresh/synth pipeline frictions)
+- `docs/issues/<date>-<slug>.md` — formal codescout MCP tool bug trackers
+  (heavyweight, one per file). Promote F-N codescout entries to formal
+  trackers when fix work begins.
+- `docs/trackers/skill-frictions.md` — superpowers skill frictions
+- `docs/trackers/tool-usage-patterns.md` — tool-selection quality (T-N)
+
+**Severity scale (F-N only):**
+- `low` — annoying, easy workaround, no data loss
+- `med` — slowed work meaningfully; workaround exists but is ugly
+- `high` — blocked progress until worked around; risk of silent bad output
+- `crit` — silent corruption / lost work
+
+**Impact scale (W-N only):**
+- `low` — small efficiency gain
+- `med` — caught something we'd plausibly have missed
+- `high` — caught a problem that would have been expensive to debug later
+- `prevented-disaster` — would have shipped a real bug without this pattern
+
+---
+
+## Index
+
+| ID | Date | Severity | Category | Status | Title |
+|----|------|---------:|----------|--------|-------|
+| F-1 | 2026-05-17 | low | codescout-tool | open | `read_file(@buf_id, json_path="$.symbols[0].body")` returns 0 lines |
+| F-2 | 2026-05-17 | low | codescout-tool | open | `read_file(@buf_id, start_line=N, end_line=M)` empty when N is past midpoint |
+| F-3 | 2026-05-17 | low | self-friction | wontfix-false-alarm | Predicted `cargo test -p codescout` would fail — actually works fine |
+| F-4 | 2026-05-17 | low | self-friction | wontfix-false-alarm | Predicted plan's `src/librarian/...` path was wrong — actually correct |
+| F-5 | 2026-05-17 | low | subagent      | open | T-1 subagent placed cross-check test at module-level scope, not inside `mod tests` block as plan said |
+| F-6 | 2026-05-17 | low | plan-prose     | open | T-2 Step 3 says "18 tests" but Step 1 fixture has 20 |
+| F-7 | 2026-05-17 | med  | plan-prose     | open | T-3 title says `GatherSource::GoalChildren variant` but body adds a standalone fn, not an enum variant |
+| F-8 | 2026-05-17 | high | plan-prose     | open | T-3's code snippet uses `cat.get(id).augmentation.archetype` — three field accesses that don't compile against actual structs |
+| F-9 | 2026-05-17 | med  | architectural | open | Augmentation prompt stored per-artifact at creation; `archetype_goal().prompt_template` edits don't propagate to existing trackers without explicit re-augment |
+| F-10 | 2026-05-17 | high | rust-serde    | mitigated | Serde `flatten + default` doesn't handle missing internally-tagged discriminator — custom `Deserialize` impl required |
+| F-11 | 2026-05-17 | med  | codescout-tool | open | `grep` on `@tool_*` buffer false-negatives on a string present in the buffer |
+| F-12 | 2026-05-17 | low  | plan-prose   | mitigated | T-12 plan payload sketch omitted required `note.text` field; event_create rejects silently if `let _ = ...await` swallows the error |
+
+
+## Wins Index
+
+| ID | Date | Impact | Title |
+|----|------|-------:|-------|
+| W-1 | 2026-05-17 | high   | Friction tracker forced externalization of T-3 plan-shape errors *before* subagent dispatch — F-8 caught by reading code, not by failing tests |
+| W-2 | 2026-05-17 | med    | F-5 lesson absorbed into T-2 subagent prompt; T-2 ran first-try clean (test placement correct) |
+| W-3 | 2026-05-17 | high   | Inline-vs-subagent decision made per-task (not per-skill-default) — T-3 inline saved ~25 min and eliminated re-dispatch risk |
+| W-4 | 2026-05-17 | high   | Attempting end-to-end verification (live gather) caught release-binary deployment gap *before* declaring Phase 1 "shipped" — MCP runs release, dev builds invisible to live tools |
+| W-5 | 2026-05-17 | high   | Post-MCP-reload gather returned populated `deterministic_child_statuses` array (3/3 children deterministic) + new "3 items gathered from..." hint — DF-1 empirically verified, not just structurally fixed |
+| W-6 | 2026-05-17 | high   | Integration test for T-12 immediately caught F-11 (silent failure from swallowed event_create error) — `let _ = ...await` is dangerous without the test sandwiching it |
+
+## W-1 — F-8 caught before subagent dispatch via mandatory "log the friction first" discipline
+
+**Observed:** 2026-05-17, T-3 reconnaissance.
+
+**What happened:**
+Per the workflow ("watch for friction or misses"), I scouted the actual struct
+shapes for `ArtifactRow`/`AugmentationRow` before crafting the T-3 subagent
+prompt. That scouting surfaced **three compile-breaking errors in the plan's
+code snippet** — `cat.get(id).augmentation.archetype` chains through fields
+that don't exist on any of the three real structs.
+
+**Counterfactual (what would have happened without the tracker):**
+If I'd dispatched a haiku subagent with the plan's literal code, it would have
+hit ~10 compile errors mid-implementation, likely:
+1. Burned 30-60s spinning on `archetype: field not found on AugmentationRow`
+2. Either reported BLOCKED or invented a wrong workaround (e.g. fabricating
+   a method, or guessing at SQL-derived archetype lookup)
+3. Required a follow-up dispatch with corrected code, doubling token cost
+4. Friction surface would have been the subagent's confused output, harder to
+   read than a plan-text gap
+
+**Why the tracker helped:**
+The friction tracker (1) made "what's the actual shape?" a deliberate
+pre-dispatch step rather than implicit faith, and (2) forced me to externalize
+the discrepancy as F-8 with corrected shapes — which then became reference
+material for the inline implementation.
+
+**Pattern to keep:**
+- Always scout the seams before delegating. Especially for tasks where the
+  plan's code is more than ~30 LOC, or touches structs the plan author may
+  not have re-verified.
+- Externalize the discrepancy as a friction entry *before* implementing.
+  The act of writing it down disciplines the reading.
+- The user's "lets watch for friction" framing isn't ceremony — it's load-bearing.
+
+**Status:** ongoing — keep applying to T-4..T-13.
+
+---
+
+## W-2 — Plan-lesson absorbed into next subagent prompt; pattern recurrence prevented
+
+**Observed:** 2026-05-17, T-2 dispatch.
+
+**What happened:**
+T-1's subagent (F-5) placed the new cross-check test at module-level scope,
+not inside the existing `mod tests` block. Plan said "In tests module" but
+didn't anchor with explicit symbol insertion target. T-2's prompt was
+amended with a "F-5 lesson" paragraph explicitly telling the subagent
+"put the unit tests inside the `#[cfg(test)] mod tests { ... }` block exactly
+as written in the plan. Don't promote, don't split."
+
+**Counterfactual:**
+Without the F-5 entry to refer to, the T-2 prompt would have been a copy of
+the T-1 prompt with the same "In tests module" vague phrasing. T-2's
+subagent would likely have repeated the same placement choice.
+
+**What we observed:**
+T-2 subagent placed all 20 tests inside `mod tests` as instructed.
+First-try clean. No re-dispatch needed.
+
+**Pattern to keep:**
+- After each subagent run, scan for placement / scope / structural drifts
+  from the plan, log them as F-N entries.
+- Cite the F-N entry in the *next* subagent's prompt as a specific
+  "don't repeat this" instruction.
+- Frictions become prompt material. The log isn't just documentation — it's
+  active load for prompt engineering across the session.
+
+**Status:** validated; reuse for T-4, T-5 prompts.
+
+---
+
+
+
+## W-3 — Inline implementation chosen for T-3 paid off: clean first-compile, all tests green
+
+**Observed:** 2026-05-17, T-3 implementation.
+
+**What happened:**
+After F-8 caught the plan's compile-breaking code, I had a choice: rewrite the
+plan and dispatch a subagent on the corrected text, or implement T-3 inline.
+I asked the user (AskUserQuestion) and they chose inline. The result:
+
+- Function compiled clean on first `cargo build` (4s)
+- 4 unit tests pass first-run
+- 2 integration tests pass first-run
+- clippy `-D warnings`: clean
+- All 424 librarian tests pass
+
+Total time from F-8 discovery to commit `c968391a`: ~5 minutes of focused
+inline edits. **No iteration loops.**
+
+**Counterfactual:**
+The patch-plan-then-dispatch alternative would have meant:
+1. Rewrite Task 3 in the plan (~10 min): replace ~50 LOC of broken code with
+   ~50 LOC of correct code, update prose, add F-7/F-8 references
+2. Commit the plan patch as its own change
+3. Craft a subagent prompt re-quoting the corrected task (~5 min)
+4. Dispatch (haiku model: ~3-5 min; sonnet: ~5-8 min)
+5. Verify subagent output (~3 min)
+6. Possible re-dispatch if subagent strayed (~10 min) — F-5-class risk
+Total: 25-40 min, with re-dispatch risk.
+
+Inline cost ~5 min; no re-work risk because the cost of an inline mistake is
+my own next edit, not a subagent re-run.
+
+**When inline wins:**
+- Plan code is wrong in non-trivial ways (multiple compile errors, type-shape
+  mismatches) — at that point the "corrected prompt" approaches "I'm
+  implementing it anyway"
+- The task touches <3 files and has clear architectural shape from
+  reconnaissance
+- Reconnaissance already happened — the data shapes are loaded into the
+  controller's context, throwing them out to a subagent costs re-discovery
+- The task is on the critical path (Phase 1 architectural pivot) and downstream
+  tasks (T-4, T-5) depend on it being right
+
+**When subagent dispatch wins:**
+- Plan is reliable; cognitive cost is in execution not design
+- Task is mechanical (boilerplate / fixture / config edit)
+- Cost of mistake is bounded (test fails locally, retry cheap)
+- Controller's context bandwidth is more valuable than the agent dispatch cost
+- T-1, T-2, T-13 were good subagent candidates; T-3 wasn't
+
+**Pattern to keep:**
+Make the inline-vs-subagent call **per task**, anchored to plan quality + task
+shape, not by default. The skill says "fresh subagent per task" but skill
+principles aren't iron law when the task is the architectural pivot and the
+plan has fictional code.
+
+**Status:** validated as a heuristic. T-4 and T-5 should be subagent
+candidates again (T-4 is prompt-text replacement, T-5 is a test addition).
+
+---
+
+
+## W-4 — Live verification attempt caught release-binary deployment gap pre-ship
+
+**Observed:** 2026-05-17, post-T-5 end-to-end verification.
+
+**What happened:**
+After Phase 1 landed (all 5 commits, 424 tests pass), I called
+`mcp__codescout__artifact_refresh(action=gather, id=d2cd00fc837e53f2)` on
+the live L1 goal-tracker to confirm DF-1 was empirically resolved. The
+response showed:
+- The OLD pre-T-4 prompt (7-clause rule 1, not 1a/1b/1c)
+- `context: {}` — still empty
+
+**Counterfactual (the silent-failure path I almost took):**
+Without attempting live verification, the natural next step would have
+been to say "Phase 1 ships" and move to Phase 2. Future sessions would
+have observed:
+- `mcp__codescout__artifact_refresh(gather)` returning empty context
+- Confusion: "the tests passed, why is gather still broken?"
+- A potential spiral of trying to debug the code, missing the
+  binary-deployment angle entirely
+
+**Root cause (already documented in CLAUDE.md):**
+> "To test changes via the live MCP server, always run `cargo build --release`
+> first, then restart the server with `/mcp`. The MCP server runs the
+> release binary — dev builds are not picked up."
+
+The dev tests prove correctness; live MCP needs release binary + reload.
+
+**Pattern to keep:**
+- For any change that touches MCP tool behavior, run dev tests AND attempt
+  one live tool call to confirm deployment path. The dev-vs-release gap
+  is a known footgun; verification surfaces it cheaply.
+- For complex multi-task work like Phase 1, build release at the end of
+  the phase, not at each task. Bundle the deployment cost.
+- Mention `/mcp` reload to the user explicitly — the tool's docs don't
+  call it out and it's not auto-detected.
+
+**Status:** validated — apply at the end of Phase 2 and beyond.
+
+---
+
+
+## W-5 — Live verification confirmed DF-1 empirically fixed after MCP reload
+
+**Observed:** 2026-05-17, post-`/mcp` reload by user.
+
+**What happened:**
+`artifact_refresh(action=gather, id=L1)` returned:
+```json
+"context": {
+  "deterministic_child_statuses": [
+    {"child_id": "C-1", "archetype": "audit_issues",  "status": "active",      "basis": "deterministic"},
+    {"child_id": "C-2", "archetype": "reflective",    "status": "done",        "basis": "deterministic"},
+    {"child_id": "C-3", "archetype": "task_list",     "status": "in-progress", "basis": "deterministic"}
+  ]
+},
+"hints": ["3 items gathered from deterministic_child_statuses"]
+```
+
+Compared to DF-6 pre-fix baseline (`context: {}`, `hints: []`), this is
+the predicted post-fix shape. **All three children resolve deterministically
+via the Rust kernel.** The hints array surfaces the count.
+
+**Bonus observation (F-9 surfaced):** The `prompt` field in the same
+response still shows pre-T-4 rule 1 because augmentation prompts are
+stored per-artifact at creation. Without manual re-augmentation, the LLM
+reads the old prompt — but the new context key still populates. Half-fix
+is empirically visible; full fix needs the L1's prompt re-augmented.
+
+**Closing the dogfood loop:**
+DF-1's status flipped through three stages:
+1. **Observed** 2026-05-17 — `context: {}` at goal creation
+2. **Structurally fixed** by commit c968391a (T-3 wiring + 6 tests)
+3. **Empirically verified** by this gather call after MCP reload
+
+The eval signal is real: pre/post-fix diff of the gather response is
+quantifiable and reproducible. The friction tracker's purpose paid off.
+
+**Pattern to keep:**
+- Always close the verification loop after a release-binary deployment.
+- A "structural fix passes tests" is a smaller claim than "live MCP
+  observation matches predicted shape." Both checks belong in the dogfood
+  cycle.
+
+**Status:** validated; archive when Phase 4 wraps and the audit issue
+linked to DF-1 (if any) gets marked fixed.
+
+**Independent confirming run (2026-05-17, continuation session after
+compaction):** Re-ran `artifact_refresh(gather)` on the same L1 after a
+fresh `/mcp` reload. Same shape, all three children resolve
+deterministic, same statuses. **This is a second confirming data point
+on independent infrastructure** (different conversation, post-compaction
+context). The W-5 pattern (verification-after-deployment) reproduced
+cleanly.
+
+---
+## F-1 — `read_file(@buf_id, json_path="$.symbols[0].body")` returns 0 lines
+
+**Observed:** 2026-05-17, T-1 prep. Tried to extract the `archetype_goal`
+function body via the symbols-tool's suggested follow-up call.
+
+**Steps:**
+```
+symbols(path="src/librarian/tools/tracker_design.rs", symbol="archetype_goal", include_body=true)
+→ summary says "76-line body — use json_path=\"$.symbols[0].body\" to extract"
+→ output_id: @tool_34c4435e
+read_file(path="@tool_34c4435e", json_path="$.symbols[0].body")
+→ "0 lines\n"
+```
+
+**Expected:** 76-line body returned per the summary hint.
+
+**Got:** Empty (`0 lines`).
+
+**Workaround used:** Re-ran `symbols(..., detail_level="full", include_body=true)`.
+That one returned the body inline in the summary up to ~line 34, but
+tail still inaccessible (see F-2). Final workaround: read the raw source
+file with `read_file(path=..., force=true, start_line, end_line)`.
+
+**Root cause hypothesis:** The summary's hint references a json_path
+shape that the buffer encoder doesn't actually populate, or it does
+populate but `$.symbols[0].body` isn't the right JSONPath. The hint is
+generated from the symbols-tool side; the buffer query goes through
+read_file's JSON dispatch which may use a different reader.
+
+**Fix pointer:** Promote to `docs/issues/2026-05-17-symbols-body-json_path-empty.md` when ready to investigate. For now: don't trust the json_path hint; use `force=true` + line range.
+
+**Status:** open (mitigated via workaround).
+
+---
+
+## F-2 — `read_file(@buf_id, start_line=N, end_line=M)` empty when N is past midpoint
+
+**Observed:** 2026-05-17, T-1 prep. After hitting F-1, fell back to
+`read_file(path=@buf_id, start_line=35, end_line=76)`.
+
+**Steps:**
+```
+symbols(path="src/librarian/tools/tracker_design.rs", symbol="archetype_goal", include_body=true)
+→ output_id: @tool_34c4d80f (76-line body, but summary only shows ~34 lines)
+read_file(path="@tool_34c4d80f", start_line=35, end_line=76)
+→ {"content": "", "total_lines": 4}
+```
+
+**Expected:** Lines 35–76 of the buffered body.
+
+**Got:** Empty string + `total_lines: 4` (which is wrong — the buffer should be 76 lines).
+
+**Workaround used:** Re-read directly from the source file:
+`read_file(path="src/librarian/tools/tracker_design.rs", force=true, start_line=300, end_line=340)`.
+
+**Root cause hypothesis:** The output buffer for `symbols` truncates
+body display to fit a token budget but reports the truncated tail-line
+count when queried via start_line. The buffer is effectively only the
+first N lines of the 76-line body, and `total_lines: 4` reports
+remaining-after-N — not total.
+
+**Fix pointer:** Same future bug tracker as F-1 (related).
+
+**Status:** open (mitigated).
+
+---
+
+## F-3 — Plan's `cargo test -p codescout` invocation didn't match crate layout
+
+**Observed:** 2026-05-17, T-1 execution by haiku subagent.
+
+**Predicted symptom:** Plan text says `cargo test -p codescout --lib ...`
+and the workspace `Cargo.toml` lists `members = [".", "crates/codescout-embed"]`
+so I assumed `-p codescout` would fail.
+
+**Actual observation when ran manually:**
+```
+$ cargo test -p codescout --lib librarian::tools::tracker_design::tests
+running 6 tests
+... all 6 pass, finished in 0.22s
+```
+
+**Reality:** The workspace root package is **named** `codescout` (the
+`[package] name = "codescout"` in `Cargo.toml`), even though the
+binary is in `src/main.rs`. So `-p codescout` IS the right package
+specifier. The plan was correct; my prediction was wrong.
+
+**Lesson:** Verify cargo metadata before guessing — `cargo metadata --format-version 1 | jq '.packages[].name'` would have caught this in seconds.
+
+**Status:** wontfix-false-alarm. Keeping for the self-friction signal — pre-execution
+friction predictions need evidence, not assumptions.
+## F-4 — Plan referenced `src/librarian/...` paths; codescout reports `source: lib:librarian_mcp`
+
+**Observed:** 2026-05-17, T-1 prep.
+
+**Predicted symptom:** Plan path `src/librarian/tools/tracker_design.rs`
+contradicted codescout's response carrying `"source": "lib:librarian_mcp"`.
+I concluded the file must live at `crates/librarian-mcp/src/tools/...` and that
+the plan was wrong.
+
+**Actual observation:**
+```
+$ find . -name "tracker_design.rs" -not -path "./target/*" -not -path "./.worktrees/*"
+./src/librarian/tools/tracker_design.rs
+```
+**One file. Project root. Exactly where the plan said.**
+
+The `source: lib:librarian_mcp` annotation is codescout's *registered library*
+metadata for cross-project semantic search — the file is **registered as part of
+a library named librarian_mcp** for indexing purposes, but its on-disk path is
+`src/librarian/tools/tracker_design.rs`. Other branches in `.worktrees/`
+have a separate `crates/librarian-mcp/` extraction in progress; that's not
+the current branch.
+
+**Reality:** Plan was correct. Codescout's `lib:` label confused me.
+
+**Lesson:** When codescout returns `source: lib:X`, treat as cross-project
+indexing metadata, not as a path hint. Confirm path with `tree` or `find`.
+
+**Status:** wontfix-false-alarm. Keeping for the codescout-tool UX signal —
+`source: lib:X` is a known confusion point worth surfacing in tool docs.
+## F-5 — T-1 subagent placed cross-check test at module-level scope, not inside `mod tests`
+
+**Observed:** 2026-05-17, T-1 post-execution review. Cargo test filter
+`librarian::tools::tracker_design::tests` returned 6 tests, not the
+expected 7. Hunting found `archetype_goal_prompt_contains_all_rule_1_constants`
+at file lines 531-554, *outside* `mod tests` (which spans 558-761).
+
+**Plan text said:** "In src/librarian/tools/tracker_design.rs tests module:"
+
+**Got:** Test at the top-level of the parent module, with `#[test]`
+annotation. Uses bare `archetype_goal()` and bare const names (no
+`super::` prefix) since it's already in the parent scope.
+
+**Steps to reproduce the spec-compliance gap:**
+```
+symbols(path="src/librarian/tools/tracker_design.rs") shows:
+  Function 531-554 archetype_goal_prompt_contains_all_rule_1_constants
+  Module   558-761 tests
+                   tests/{6 children, new test NOT among them}
+```
+
+**Functional impact:** None. Rust accepts `#[test]` at any module scope.
+Test runs correctly with `cargo test --lib librarian::tools::tracker_design::archetype_goal_prompt_contains_all_rule_1_constants`
+(omit `tests::` from the path).
+
+**Spec-compliance impact:** Subagent claimed "All 7 tracker_design
+tests pass" implying the new test joined the existing 6 inside
+`mod tests`. The truthful count is 6 in `mod tests` + 1 sibling.
+Two-stage review would have caught this on a `find_in_module_tests`
+assertion.
+
+**Root cause hypothesis:** Subagent's `edit_code(insert)` placed the
+new function relative to `archetype_goal`'s symbol, not inside the
+`tests` module symbol. Plan said "tests module" but didn't anchor
+with explicit `symbol="tests"` insertion target.
+
+**Fix candidates:**
+1. Relocate the test inside `mod tests` (cosmetic only — adds `super::` prefixes)
+2. Leave it — Rust idiom allows both, and the test reads cleaner without prefixes
+3. Update plan to be precise about insertion target for future subagents
+
+**Recommendation:** Option 3 (update plan template wording). Don't
+relocate the test — it works, and the file already passes clippy.
+Pin this for the eventual plan-prose corrections commit.
+
+**Status:** open (deferred — cosmetic).
+
+---
+
+## F-6 — Plan Task 2 Step 3 says "all 18 tests pass" but Step 1 fixture has 20 tests
+
+**Observed:** 2026-05-17, T-2 verification.
+
+**Plan text:**
+- Step 1 fixture defines 20 `#[test]` functions (counted by hand and via codescout `symbols`)
+- Step 3 text reads: "Expected: all 18 tests pass."
+
+**Got:** Cargo runs 20 tests. Off-by-2.
+
+**Root cause hypothesis:** Plan author wrote Step 3 first with an
+estimate ("about 18 tests"), then expanded Step 1's fixture to 20 but
+didn't update Step 3.
+
+**Impact:** Harmless — the 2 extra tests are `failure_table_done_when_all_pass`
+and `failure_table_active_when_any_fail` (added rigour beyond the rough
+estimate). Subagent silently accepted the higher count.
+
+**Fix candidates:**
+1. Update plan Step 3 to read "all 20 tests pass" — accurate but cosmetic
+2. Replace count with "all tests in Step 1's fixture pass" — robust to
+   future fixture growth
+3. Leave alone; this kind of drift is expected
+
+**Recommendation:** Option 2 in the plan-corrections commit.
+
+**Status:** open (deferred — cosmetic).
+
+---
+
+## F-7 — T-3 plan title says `GatherSource::GoalChildren variant` but body adds a standalone fn
+
+**Observed:** 2026-05-17, T-3 reconnaissance.
+
+**Plan text:**
+- Section title: `### Task 3: GatherSource::GoalChildren variant + dispatch`
+- Implementation in Step 3: `pub fn gather_goal_children(ctx: &ToolContext, children: &[(...)]) -> Result<Value>` — a standalone function, NOT a new enum variant.
+
+**Got:** Architecturally simpler than the title suggests — no enum-variant
+plumbing through `gather_all`'s `match` dispatch. The function is called
+directly from `refresh.rs::call` after `gather_all` returns.
+
+**Root cause hypothesis:** Plan was iterated mid-write. Early sketch
+proposed a `GatherSource::GoalChildren { children: Vec<...> }` enum
+variant, then was simplified to a sibling function. Title wasn't updated.
+
+**Impact:** Subagents reading only the title would invest effort
+extending the enum (touching `gather_all`'s match, `Args` deser, etc.)
+when the body says don't.
+
+**Fix candidates:**
+1. Update plan title to `### Task 3: gather_goal_children helper + refresh dispatch`
+2. Restore the enum-variant approach (more uniform but heavier — needs a way
+   to inject children into the gather sources list from outside the
+   refresh-call path)
+
+**Recommendation:** Option 1 in the plan-corrections commit. The
+function approach is sound.
+
+**Status:** open (deferred — will be patched alongside other plan-prose fixes).
+
+---
+
+## F-8 — T-3 plan code snippet uses `cat.get(id).augmentation.archetype` — wrong on three counts
+
+**Observed:** 2026-05-17, T-3 reconnaissance. Verified actual struct shapes via codescout `symbols(name=..., include_body=true)`.
+
+**Plan code:**
+```rust
+let row = cat.get(artifact_id);
+let archetype = r.augmentation
+    .as_ref()
+    .and_then(|a| a.archetype.clone())
+    .unwrap_or_default();
+let params = r.augmentation
+    .as_ref()
+    .map(|a| a.params.clone())
+    .unwrap_or(Value::Null);
+```
+
+**Actual struct shapes:**
+
+`ArtifactRow` (`src/librarian/catalog/artifact.rs:8-24`):
+```rust
+pub struct ArtifactRow {
+    pub id, abs_path, kind, status, title, owners, tags,
+    pub topic, time_scope, source, created_at, updated_at,
+    pub file_mtime, file_sha256, confidence,
+}
+// NO `augmentation` field. Augmentation lives in a separate SQL table.
+```
+
+`AugmentationRow` (`src/librarian/catalog/augmentation.rs:6-24`):
+```rust
+pub struct AugmentationRow {
+    pub artifact_id, prompt, params (raw JSON String),
+    pub last_refreshed_at, refresh_count, created_at, updated_at,
+    pub render_template, params_schema, append_mode, history_cap,
+}
+// NO `archetype` field. Params is a raw JSON String, not Value.
+```
+
+**Three errors in the plan code:**
+1. `cat.get(id)` returns `Option<ArtifactRow>` — no `.augmentation` field.
+2. Correct path: `augmentation::get(&cat, artifact_id)` returns `Option<AugmentationRow>`.
+3. `AugmentationRow.archetype` doesn't exist. The archetype must come from elsewhere — the plan's own fallback hint says "infer from the goal's own `children[].archetype` field" — so the **caller** (refresh.rs) extracts archetype from the goal's params and passes it in.
+
+**Correct signature:**
+```rust
+pub fn gather_goal_children(
+    ctx: &ToolContext,
+    children: &[(String, String, String)], // (child_id, artifact_id, archetype)
+) -> Result<Value>
+```
+
+**Inside the function:**
+```rust
+let aug_row = augmentation::get(&cat, artifact_id)?;
+let params: Value = aug_row
+    .as_ref()
+    .map(|a| serde_json::from_str(&a.params).unwrap_or(Value::Null))
+    .unwrap_or(Value::Null);
+let status = child_status_pure(archetype, &params);
+```
+
+**Impact:** A subagent following the plan literally would generate ~10 compile errors before discovering the truth. With this F-8 entry on file, future subagent prompts can cite "see F-8 for correct shapes" or include the corrected code inline.
+
+**Status:** open — will be fixed when T-3 implementation lands (inline,
+since the corrections are too involved to delegate without a fully
+rewritten prompt).
+
+---
+
+## F-9 — Augmentation prompt stored per-artifact; template edits don't propagate
+
+**Observed:** 2026-05-17, post-T-4 live verification.
+
+**Symptom:** Phase 1 commits landed. Release binary rebuilt. MCP reloaded.
+Re-ran `artifact_refresh(action=gather, id=L1)` expecting new 1a/1b/1c prompt.
+Got: **OLD pre-T-4 prompt** (7-clause rule 1) in the response, even though
+`context.deterministic_child_statuses` now populates correctly (the T-3
+half of the fix is live).
+
+**Root cause:** `artifact_augment(id, prompt=...)` writes the prompt string
+into the `artifact_augmentation` SQL row at creation time. The string is
+stored verbatim — there's no template-resolution at refresh time. When
+`archetype_goal()` in tracker_design.rs changes, it only affects **future**
+trackers created via `librarian(action="tracker_design", intent="goal: ...")`
++ `artifact(create, augment=...)`. Existing trackers keep their original
+prompt.
+
+**Impact:** Live verification of prompt changes for an existing goal-tracker
+requires explicit re-augmentation (`artifact_augment(id, merge=false,
+prompt=<new from tracker_design output>)`). Without that step:
+- The pipeline correctly injects deterministic_child_statuses (T-3)
+- But the LLM reads the OLD prompt and doesn't know to consult that context
+- Net effect: the new context key is invisible to the LLM through the
+  old prompt's rule 1 phrasing
+
+**Fix candidates:**
+1. **Manual refresh per tracker** — call `artifact_augment(id=L1, merge=false,
+   prompt=<fresh>)` after every relevant `archetype_goal()` edit. Tedious;
+   easy to forget.
+2. **Template field** — store the archetype name on the augmentation row,
+   re-resolve prompt at refresh time from `archetype_goal()` if it matches.
+   Architectural change; bigger.
+3. **Bump trigger** — add a "prompt_version" field; refresh detects mismatch
+   and offers re-augmentation. Middle ground.
+
+**Recommendation:** Document in F-9 for now; ship option 1 manually
+post-Phase-1 for the L1 goal-tracker; defer option 2/3 to a later
+architectural pass.
+
+**Status:** open (deferred — workaround documented).
+
+---
+
+## F-10 — Serde `flatten + default` doesn't handle missing internally-tagged discriminator
+
+**Observed:** 2026-05-17, T-6 implementation.
+
+**Symptom:** Plan code:
+```rust
+#[serde(default = "default_freeform")]
+#[serde(flatten)]
+pub kind: AcceptanceSignalKind,
+```
+Combined with `#[serde(tag = "kind", rename_all = "snake_case")] enum AcceptanceSignalKind { Freeform, ... }`.
+
+Backward-compat test (legacy signal `{"description":"x","met":true}` without
+`kind` field) failed with:
+```
+Error("missing field `kind`", line: 1, column: 45)
+```
+
+**Expected:** Plan's design suggests when `kind` is absent, `default_freeform()`
+fires and the signal deserializes as `Freeform`.
+
+**Got:** Serde's internally-tagged enum handling looks for the `kind` tag
+BEFORE checking defaults. Missing tag = hard error, regardless of
+`#[serde(default)]` on the field.
+
+**Root cause:** Known serde limitation. `#[serde(flatten)]` on a field
+typed as an internally-tagged enum means the discriminator is read
+from the parent struct's JSON object. If the discriminator is absent,
+serde dispatches "no variant matched" before any field-level default
+kicks in.
+
+**Fix applied:** Replaced derive with a custom `Deserialize` impl on
+`AcceptanceSignal` that probes for `kind` and falls back to
+`AcceptanceSignalSpec::Freeform` when absent:
+
+```rust
+impl<'de> Deserialize<'de> for AcceptanceSignal {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = Value::deserialize(d)?;
+        // ... probe each field, fall back to Freeform if kind missing
+    }
+}
+```
+
+Now both `{"description":"x","met":true}` and
+`{"description":"x","met":true,"kind":"freeform"}` parse identically as
+Freeform.
+
+**Pattern to keep:**
+- Serde derive shortcuts work great until they don't. For backward-compat
+  on tagged enums, expect to write a custom Deserialize when the legacy
+  JSON shape predates the tag.
+- 16 unit tests including the legacy-shape test caught this immediately
+  — adding the contract test in the same commit prevented silent shipping.
+
+**Status:** mitigated (custom impl ships). Could be reopened if a future
+Rust version of serde supports the combo natively.
+
+---
+
+## F-11 — `grep` on `@tool_*` buffer false-negatives on a string present in the buffer
+
+**Observed:** 2026-05-17, continuation session, during W-5 re-verification.
+
+**When:** After `artifact_refresh(gather)` returned `@tool_351afcd6` (10007
+bytes), tried to confirm presence of the new context key via:
+
+```
+grep(pattern="deterministic_child_statuses", path="@tool_351afcd6", context_lines=15)
+```
+
+**Expected:** ≥1 match (the buffer contains the key — verified via
+subsequent `read_file` showing it at ~line 78).
+
+**Got:** `{"matches": [], "total": 0}` plus a suggestion to use
+`symbols(name='deterministic_child_statuses')` since "Pattern looks like
+a symbol name."
+
+**Probable cause:** Either `grep` on `@tool_*` buffers doesn't operate on
+the raw buffer text the way it does on filesystem paths, OR the
+pattern's `_` boundary tripped a tokenizer-style match heuristic, OR
+the suggestion routing intercepted the search before it ran. Falling
+back to `read_file(path=@tool_, json_path=...)` worked correctly on the
+same buffer — so the data IS reachable, just not via `grep`.
+
+**Workaround:** Use `read_file(path=@tool_, json_path="$.field")` or
+`read_file(path=@tool_, start_line=N, end_line=M)` for buffer
+inspection. Reserve `grep` for filesystem paths.
+
+**Severity:** med — silently mis-routes verification queries; the
+false-negative cost is potentially expensive ("Oh, the fix didn't
+land!") if the user doesn't re-check via another tool.
+
+**Status:** open — codescout tool friction; candidate for
+`docs/TODO-tool-misbehaviors.md` promotion.
+
+**Fix idea:** Either `grep` on `@tool_*` should run on raw text and not
+emit the "looks like a symbol" suggestion (the suggestion is
+filesystem-context advice misapplied to a JSON buffer), OR the docs
+should explicitly say `grep` is filesystem-only — `read_file` is the
+buffer-inspection tool.
+
+---
+
+## F-12 — Plan T-12 payload sketch omitted required `note.text` field; silent failure
+
+**Observed:** 2026-05-17, T-12 implementation.
+
+**Plan sketch:**
+```rust
+artifact_event::create(ctx, &goal_id, EventKind::Note, json!({
+    "tag": "gate_check",
+    "gate_passed": ...,
+    "evidence": {...},
+    "refresh_at": now.to_rfc3339(),
+}))
+```
+
+**Got after first run:** `gate_check_note_event_emitted_on_autoclose` test
+asserted exactly one gate_check note in the timeline. Saw zero.
+
+**Root cause:** `event_create::validate_payload` requires every `note`
+kind payload to carry a `text` string field. Plan sketch's payload
+shape passed `tag/gate_passed/evidence/refresh_at` but no `text`.
+Validator rejected with `RecoverableError("note.text required")`.
+
+**Silent failure path:** I'd used `let _ = event_create::call(...).await;`
+to make emission best-effort (don't fail the augment if audit emission
+fails). The discarded error masked the validation rejection — the
+gate_check audit was silently dropped on every passing gate.
+
+**Fix:** Added `text` field with a human-readable summary:
+```rust
+"text": format!("auto-close gate passed: {}/{} children done, {}/{} signals met", ...)
+```
+Test now passes; payload validates.
+
+**Pattern to keep:**
+- Integration tests catch silent-failure bugs that unit tests can't.
+  The unit test would have proven evaluate_gate works; only the
+  integration test surfaces that the downstream event emission also
+  works.
+- `let _ = .await` is dangerous for any tool call that has a validator
+  upstream — the error is the only signal. Replace with explicit
+  match-and-log when the failure mode matters.
+- When adapting plan-sketch payloads, scan the receiving validator's
+  required-fields list before assuming the sketch is complete.
+
+**Status:** mitigated (text field shipped; W-6 logs the test sandwich
+that caught it).
+
+---
+
+## Template for new entries
+
+```markdown
+## F-N — <one-line title>
+
+**Observed:** YYYY-MM-DD, <during what task>.
+
+**Steps / Symptom:** <verbatim, no paraphrasing>
+
+**Expected:** <what should have happened>
+
+**Got:** <what happened, in code fence if it's output>
+
+**Workaround used:** <if any>
+
+**Root cause hypothesis:** <mechanism, not symptom>
+
+**Fix pointer:** <plan task / future bug file / "needs investigation">
+
+**Status:** open | mitigated | fixed | wontfix
+```

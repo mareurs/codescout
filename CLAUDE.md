@@ -79,6 +79,43 @@ edit_markdown("docs/trackers/tool-usage-patterns.md",
 rendered at the top by the librarian. Prompt improvement candidates are at the bottom —
 these are the direct inputs to `src/prompts/server_instructions.md` edits.
 
+### Ad-Hoc Session Logs — `docs/trackers/<topic>-session-log.md`
+
+Per-work-stream observation log used during multi-session efforts (reviews, multi-task
+plans, refactors). Two-sided: frictions (F-N) and wins (W-N). Distinct from **Skill
+Frictions** (durable across projects) and **Tool Usage Patterns** (a librarian artifact) —
+session logs are scoped to a single work stream and archived when it wraps.
+
+The canonical template lives at `docs/templates/session-log.md`. Copy it to
+`docs/trackers/<topic>-session-log.md` on the first reconnaissance pass of a
+multi-session work stream. The Status vocabulary and category conventions are pinned in
+the template so they mean the same thing across sessions and across agents.
+
+This surface is driven by the **reconnaissance** skill (codescout-companion). Any agent
+that can read markdown can use the template — no plugin required. Claude Code users get
+slash-command access via `/codescout-companion:reconnaissance`.
+
+**Claude — append when:**
+- A scout discovers drift between plan and reality (→ F-N entry)
+- A practice prevented a worse outcome and you can name the counterfactual (→ W-N entry)
+- A friction surfaces during reconnaissance Phase 2 (compare reality to plan)
+
+**How to append (Claude):**
+```
+edit_markdown("docs/trackers/<topic>-session-log.md",
+  action="insert_before", heading="## Template for new entries",
+  content="## F-N — <title>\n**Observed:** ...\n**Got:** ...")
+# Also append a row to the Index / Wins Index table at the top of the file.
+```
+
+**User — browse:** open `docs/trackers/<topic>-session-log.md`. Index tables at the top
+show all entries; full body holds evidence. Promote `Status: validated` wins to
+permanent surfaces (CLAUDE.md, ADRs, skills) when their `Promote-when` criterion fires.
+
+**Eval (Claude only):** the trigger string for the reconnaissance skill is scored
+against `docs/evals/reconnaissance-trigger.md`. Re-score before any future SKILL.md
+description change — empirical baseline (2026-05-17) is 6/7 at threshold.
+
 ## Git Workflow
 
 **This is a public repo.** Do not push incomplete or untested work.
