@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: retrieval_integration embedder tests fail with HTTP 501 against mock server
 owners: []
 tags:
@@ -8,6 +8,7 @@ tags:
   - tests
   - mock-server
 opened: 2026-05-18
+closed: 2026-05-18
 ---
 
 ## Symptom
@@ -56,6 +57,42 @@ None applied. Marked as known pre-existing breakage in the 2026-05-18 merge
 notes. Cherry-pick / FF merge of experiments → master does not change this
 state — same failure before and after.
 
+## Root cause
+
+The user's `.env` sets `CODESCOUT_EMBEDDER_PROTOCOL=openai` for the live MCP
+server. `EmbedderHttp::new()` reads that env var at construction time and
+selects `DenseProtocol::OpenAi` — which posts to `/v1/embeddings`, not the
+TEI `/embed` path that the test mock was registered for. mockito's
+unmatched-route default is HTTP 501 ("not implemented"), hence the symptom.
+
+The defect was test isolation: `EmbedderHttp::new` reads process env on
+every construction, so any caller's environment leaks into every test.
+The mock-server URL was correct; the protocol selection was not.
+
+## Fix
+
+Landed on experiments in <PENDING_SHA>.
+
+Added `EmbedderHttp::with_protocol(...)` — explicit constructor taking
+protocol, model name, and query prefix as arguments, with no env reads.
+`EmbedderHttp::new` is preserved as the env-reading convenience for
+production callers; it now delegates to `with_protocol` for field
+construction. The two integration tests switched to `with_protocol(...,
+DenseProtocol::Tei, "", "")`, making them hermetic.
+
+## Tests added
+
+The existing `tests/retrieval_integration.rs::embedder_returns_dense_and_sparse`
+and `embedder_dim_mismatch_errors` now serve as the regression tests — they
+were the symptom and are the verification.
+
+## Resume
+
+If env-var-leak surfaces again in other tests, prefer adding similar
+explicit-constructor escape hatches over locking. Mutex-based env locking
+(`lock_env_for_tests`) is `pub(crate)`-only and not reachable from
+integration tests under `tests/`, so it cannot fix this class of defect
+without leaking internals.
 ## Resume
 
 When picking this up:

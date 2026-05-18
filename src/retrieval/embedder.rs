@@ -75,7 +75,6 @@ impl EmbedderHttp {
         sparse_base: impl Into<String>,
         expected_dim: usize,
     ) -> Self {
-        crate::install_default_crypto_provider();
         let dense_protocol = match std::env::var("CODESCOUT_EMBEDDER_PROTOCOL")
             .unwrap_or_default()
             .to_ascii_lowercase()
@@ -86,13 +85,37 @@ impl EmbedderHttp {
         };
         let dense_model_name = std::env::var("CODESCOUT_EMBEDDER_MODEL_NAME").unwrap_or_default();
         let query_prefix = std::env::var("CODESCOUT_QUERY_PREFIX").unwrap_or_default();
+        Self::with_protocol(
+            dense_base,
+            sparse_base,
+            expected_dim,
+            dense_protocol,
+            dense_model_name,
+            query_prefix,
+        )
+    }
+
+    /// Construct without reading process env vars.
+    ///
+    /// Use this from tests and any caller that wants explicit control over
+    /// the dense protocol, model name, and query prefix. `new()` is the env-
+    /// reading convenience for production callers.
+    pub fn with_protocol(
+        dense_base: impl Into<String>,
+        sparse_base: impl Into<String>,
+        expected_dim: usize,
+        dense_protocol: DenseProtocol,
+        dense_model_name: impl Into<String>,
+        query_prefix: impl Into<String>,
+    ) -> Self {
+        crate::install_default_crypto_provider();
         Self {
             dense_base: dense_base.into(),
             sparse_base: sparse_base.into(),
             expected_dim,
             dense_protocol,
-            dense_model_name,
-            query_prefix,
+            dense_model_name: dense_model_name.into(),
+            query_prefix: query_prefix.into(),
             client: reqwest::Client::new(),
         }
     }

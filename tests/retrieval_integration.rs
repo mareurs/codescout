@@ -1,4 +1,4 @@
-use codescout::retrieval::embedder::EmbedderHttp;
+use codescout::retrieval::embedder::{DenseProtocol, EmbedderHttp};
 
 #[tokio::test]
 
@@ -20,7 +20,14 @@ async fn embedder_returns_dense_and_sparse() {
         .create_async()
         .await;
 
-    let eb = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+    let eb = EmbedderHttp::with_protocol(
+        dense_server.url(),
+        sparse_server.url(),
+        3,
+        DenseProtocol::Tei,
+        "",
+        "",
+    );
     let out = eb.embed("hello").await.expect("embed");
 
     assert_eq!(out.dense, vec![0.1_f32, 0.2, 0.3]);
@@ -49,7 +56,14 @@ async fn embedder_dim_mismatch_errors() {
         .create_async()
         .await;
 
-    let eb = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 1024);
+    let eb = EmbedderHttp::with_protocol(
+        dense_server.url(),
+        sparse_server.url(),
+        1024,
+        DenseProtocol::Tei,
+        "",
+        "",
+    );
     let err = eb.embed("hi").await.unwrap_err();
     assert!(err.to_string().contains("dim"), "got: {err}");
 }
