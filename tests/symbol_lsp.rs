@@ -1424,15 +1424,16 @@ async fn insert_code_after_rejects_truncated_end_in_nested_fn() {
     );
 }
 
-/// BUG-029/036 regression for the parent clamp on `insert_code`.
+/// Regression for the strict-refuse path on `insert_code(position="after")`.
 ///
-/// Scenario: LSP reports a nested method's `end_line` as overshooting past the
-/// parent `impl` block's closer (stale or wrong range). Without the parent
-/// clamp, `insert_code(position="after", symbol="impl Foo/alpha")` would land
-/// *outside* the `impl Foo { ... }` block. With the clamp, it lands at
-/// `parent.end_line` — i.e., just before the impl's closing `}`.
+/// Scenario: LSP reports a stale name (`a` instead of the AST's `alpha`) so
+/// `editing_end_line_strict` returns None. Before fix `201dcb5b`, a parented
+/// symbol would silently fall back to LSP's overshoot and then rely on the
+/// parent clamp — but the clamp only catches *over*-extension, not
+/// *under*-extension into the same body. The fix removes that fallback;
+/// insert-after now refuses with a RecoverableError naming the workarounds.
 #[tokio::test]
-async fn insert_code_after_clamps_to_parent_body_end() {
+async fn insert_code_after_refuses_when_ast_cannot_pin_symbol_end() {
     let src = "\
 struct Foo;
 
@@ -1440,18 +1441,9 @@ impl Foo {
     fn alpha(&self) {}
 }
 ";
-    // Line indices (0-based):
-    //   0 struct Foo;
-    //   1
-    //   2 impl Foo {
-    //   3     fn alpha(&self) {}
-    //   4 }
 
     let (dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
         let file = root.join("src/lib.rs");
-        // Stale LSP: alpha's end_line overshoots to line 10 (well past the impl).
-        // Use a name the AST can't match ("a" vs real "alpha") so editing_end_line
-        // falls back to LSP's overshoot.
         let alpha = SymbolInfo {
             name: "a".to_string(),
             name_path: "impl Foo/a".to_string(),
@@ -1480,7 +1472,7 @@ impl Foo {
     })
     .await;
 
-    EditCode
+    let err = EditCode
         .call(
             json!({
                 "path": "src/lib.rs",
@@ -1492,16 +1484,18 @@ impl Foo {
             &ctx,
         )
         .await
-        .unwrap();
+        .expect_err("insert-after must refuse when AST cannot pin the symbol's end");
 
-    let result = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
-    // The insertion must be inside the impl block — i.e., before the impl's `}`
-    // line, not after it.
-    let beta_pos = result.find("fn beta").expect("beta must be inserted");
-    let impl_closer = result.rfind("\n}\n").expect("impl closer must be present");
+    let msg = err.to_string();
     assert!(
-        beta_pos < impl_closer,
-        "insertion must land inside `impl Foo`, before its closing brace; got:\n{result}"
+        msg.contains("cannot determine end") && msg.contains("AST parse failed"),
+        "error must explain why it refused; got: {msg}"
+    );
+
+    let unchanged = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
+    assert_eq!(
+        unchanged, src,
+        "refused insert-after must leave the file unchanged"
     );
 }
 
