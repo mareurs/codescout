@@ -77,6 +77,66 @@ The hook fix (shipped 2026-05-18) is the **read-side** half — pipes that start
    ✗ pipeline 2/3 — stage 1 (grep FAILED) exit 1  (query @cmd_b for err)
    ```
 
+## Architectural review (Snow Lion, 2026-05-18)
+
+`run_command_inner` is currently a 9-mode dispatcher (interactive · ack-redispatch · resolve_refs · dangerous-cmd gate · source-file block · shell-mode check · background spawn · tee injection · foreground exec). The original Strategy A added a 10th. Architectural concerns:
+
+### Concern 1 — `inject_tee` is a parallel stage-buffering mechanism
+
+`inject_tee` (`src/tools/run_command/inner.rs:145-186`, called at `:288`) already rewrites `... | grep FAILED` into `... | tee /tmp/unfiltered | grep FAILED`, capturing the pre-filter stream as a buffer. That is one-stage-deep pipeline buffering, in production today. Strategy A as drafted ignores this and builds a parallel mechanism — two systems for the same shape of input.
+
+**Decision (proposed):** `pipeline=` rewrites stages into a single shell pipeline with per-stage tee taps; reuses the existing foreground-exec path. `inject_tee` generalizes from "tee the penultimate stage" to "tee every stage."
+
+**Alternatives:**
+- Strategy A (`run_command_inner` per stage) — rejected: two pipeline-buffering mechanisms in tree.
+- Strategy B (greenfield `run_pipeline_inner` with own spawn) — rejected: duplicates killpg/SIGPIPE/timeout machinery.
+
+**Consequences:**
+- now easier: per-stage tee already debugged on Unix (process groups, SIGPIPE reset). Pipefail = `set -o pipefail` in shell wrapper, no Rust state machine.
+- now harder: per-stage timeout impossible (single shell process); only total via existing `tokio::time::timeout`. Per-stage cancellation impossible.
+
+**Change scenarios absorbed:** per-stage cwd (`(cd <dir> && <stage>) | tee ...`); pipefail policy change (drop `set -o pipefail` from wrapper).
+
+**Revisit-when:** streaming-output requirement lands (`stream_tail` / live `@bg_*` peek) — breaks the single-shell-process assumption.
+
+**Confidence:** medium. Bash-ism risk (`set -o pipefail` is not POSIX sh); per-stage control is impossible by construction.
+
+### Concern 2 — extract `exec_one_stage` before adding any 10th mode
+
+Nine dispatch modes in one function is past the "argues about where new features belong" heuristic. Before pipeline= goes anywhere, extract the foreground-exec block (current `inner.rs:251-394`, ~140 LOC: spawn + killpg + timeout + SIGPIPE reset + buffer-store) as `exec_one_stage`. Both current foreground path and pipeline= delegate to it.
+
+**Confidence:** medium. Have not read the full block; coupling to surrounding `inject_tee` flow may force a larger refactor than 140 LOC.
+
+### Concern 3 — companion hook is `command`-blind to a `command + pipeline` schema
+
+If schema lands as `command = stage 0, pipeline = [stages 1..N]`, the IL3 hook reads `tool_input.command`, sees only "cargo test," and allows. Actual behavior is a pipeline with a log-trimmer. **IL3 enforcement becomes blind to pipelines.**
+
+**Decision (proposed):** schema is `stages: [str]` XOR `command: str`. Top-level, mutually exclusive.
+
+**Alternatives:**
+- `command` + `pipeline` (additional stages) — rejected: semantic overload, hook blindness, every downstream consumer must learn the overload.
+
+**Consequences:**
+- now easier: contract is "one of {command, stages}"; hook + telemetry + format_compact branch once on field presence.
+- now harder: caller cannot append stages incrementally — must structure as `stages` from the start.
+
+**Change scenarios absorbed:** hook enforces IL3 on pipelines (sees `stages` directly); telemetry distinguishes single-cmd vs pipeline.
+
+**Confidence:** high.
+
+### Concern 4 — hook coupling-across-repos is a load-bearing signal
+
+The companion hook (`claude-plugins/codescout-companion/hooks/il3-{deny,warn}-hook.sh`) and codescout's `run_command` schema have now co-changed twice in 48h (buffer-op whitelist 2026-05-18, this design). The "two modules always change together" heuristic says they may be one module wearing two names. If a third co-change lands, the IL3 enforcement contract probably belongs **in codescout itself** (as a built-in pre-execution gate emitting `RecoverableError` with the same hint), not in a sibling repo where it drifts.
+
+Not a decision for this tracker — flagged for the next IL3 evolution.
+
+## Tracker updates
+
+- Open #1 (schema) — leans `stages` XOR `command`, not `command + pipeline`. (Concern 3.)
+- Open #7 (strategy) — add **Strategy C: shell-pipeline rewrite with per-stage tee taps**. Lean C unless per-stage timeout requirement emerges. (Concern 1.)
+- New open #9 — extract `exec_one_stage` from `run_command_inner` before adding any new mode. Prerequisite for any strategy. (Concern 2.)
+- New open #10 — companion hook must read `tool_input.stages` if schema lands as `stages`. (Concern 3.)
+
 ## Tests needed
 
 - Happy: 3-stage `seq 1 100 | grep ^5 | wc -l` produces 11 (one "5", "50"-"59", "5"; 11 matches).
@@ -96,4 +156,3 @@ The hook fix (shipped 2026-05-18) is the **read-side** half — pipes that start
 Hook smartening shipped 2026-05-18 (see commit on `experiments`). IL3 prompt rewrite shipped same day. Pipeline= design tracker opened, implementation pending its own dedicated session.
 
 Open the next session with: read this tracker → resolve open items 1, 3, 6 → write `run_pipeline_inner` per strategy A → tests → prompt update.
-
