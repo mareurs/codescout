@@ -283,6 +283,20 @@ path / link / line references across all markdown surfaces.
 - When iterating on a fix, keep working locally until the fix is confirmed, then commit the final state — not every intermediate attempt.
 
 
+### Chained Git Commands — End With a State-Check (added 2026-05-18)
+
+When chaining 4+ git operations with `&&` (e.g. `checkout master && cherry-pick X && push && checkout experiments && rebase && push`), the output stream interleaves all the intermediate results — the final-state confirmation lines (the `..` push outputs) can scroll past mid-output and look like in-progress steps.
+
+**Rule:** end any 4+ step git chain with:
+
+```bash
+git rev-parse master experiments origin/master origin/experiments
+```
+
+Four identical SHAs prove the ship completed; divergent SHAs catch a silent partial failure (e.g. push rejected, rebase paused on conflict you missed).
+
+This is bookkeeping — does not change behavior — but it converts "scan the output stream for success" into "read four lines at the bottom." Encountered 2026-05-18 when a user re-asked "did we cherry-pick to master?" because the success line was buried mid-output.
+
 ### Concurrent-Work Rules (added 2026-05-17 after F-13 incident)
 
 When working on a shared branch alongside another active agent or session:
