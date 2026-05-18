@@ -94,7 +94,63 @@ Pass `detail_level: "full"` to any tool that supports it:
   }
 }
 ```
+
+## Text Form (Ripgrep-Style)
+
+> **Status:** experimental — see [Experimental Features](../experimental/index.md).
+
+Some locator tools — `grep`, `references`, `tree`, `symbols`, and
+`call_graph` — emit **ripgrep-faithful plain text** instead of JSON when the
+result fits inline. The wire form is selected by the tool (declared as
+`OutputForm::Text` in the `Tool` trait), not by a parameter.
+
+The format follows ripgrep's conventions so it is immediately legible to any
+reader familiar with `rg`:
+
+- A per-file `(count)` header before each block.
+- `N:` separator on lines that matched the query.
+- `N-` separator on context lines (when `context_lines > 0`).
+- `--` between non-adjacent match blocks within the same file.
+
+**Example — `grep` over a small result set:**
+
+```text
+src/services/auth.rs (2)
+   52- /// Soft error returned when the token is malformed.
+   54:     pub error: String,
+   55-     pub code: u16,
+--
+   88:     fn verify_token(token: &str) -> Result<Claims> {
+
+src/api/handlers.rs (1)
+   23: use crate::services::auth::verify_token;
 ```
+
+The same query returns JSON when the result overflows the inline budget and
+spills into a `@cmd_*` buffer — buffered output keeps the original JSON shape
+for downstream tooling. You do not pick the form; the tool picks it for you
+based on size.
+
+### Why the change
+
+JSON for a handful of grep hits costs roughly 3-5× the tokens of the
+equivalent ripgrep text and adds zero information — the reader's eye parses
+`file:line:content` faster than a `{"path": ..., "line": ..., "content":
+...}` envelope. Routing small, locator-shaped results through text frees
+context for the actual work.
+
+### Tools currently opted in
+
+| Tool | Text form available | Notes |
+|---|---|---|
+| `grep` | yes | Includes `context_lines` formatting |
+| `references` | yes | One line per reference |
+| `tree` (with glob) | yes | One path per line |
+| `symbols` | yes | Name + kind + file:line |
+| `call_graph` | yes | File-grouped edge tree, top-20 files with `… N more` |
+
+`semantic_search`, `memory(list|recall)`, and `IndexStatus` are queued to
+opt in — see `docs/ROADMAP.md` *What's Next*.
 
 ## Overflow Messages
 
