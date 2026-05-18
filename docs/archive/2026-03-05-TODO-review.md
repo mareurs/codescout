@@ -1,7 +1,7 @@
 ---
 id: null
-kind: null
-status: done
+kind: tracker
+status: archived
 title: null
 owners: []
 tags: []

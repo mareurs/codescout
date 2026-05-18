@@ -1,3 +1,7 @@
+---
+status: archived
+---
+
 # Phase 6 — Deferred Provider Lifts
 
 **Parent plan:** `docs/plans/2026-04-22-codescout-refactoring-plan.md` (Phase 6)

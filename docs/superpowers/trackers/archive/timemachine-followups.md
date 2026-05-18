@@ -1,7 +1,7 @@
 ---
 id: null
 kind: tracker
-status: done
+status: archived
 title: TimeMachine v1 — should-fix-soon backlog
 owners: []
 tags:
