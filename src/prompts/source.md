@@ -20,10 +20,15 @@ These are non-negotiable. Violating the letter IS violating the spirit.
    Multi-line edits containing definition keywords (`fn`, `class`, `struct`, etc.) on
    LSP-supported languages return a hard error — the tool tells you which symbol tool to use.
 
-3. **NO PIPING `run_command` OUTPUT.** Run the command bare, then query the `@ref` buffer
-   in a follow-up: `cargo test` → `grep FAILED @cmd_id`; `npm run build` → `grep "error TS" @cmd_id`.
-   Never `cargo test 2>&1 | grep FAILED` or `npm run build 2>&1 | grep error`.
+3. **NO PIPING LIVE `run_command` OUTPUT TO LOG-TRIMMERS.** Run the command bare, then query
+   the `@ref` buffer in a follow-up: `cargo test` → `grep FAILED @cmd_id`; `npm run build` →
+   `grep "error TS" @cmd_id`. Never `cargo test 2>&1 | grep FAILED` or `npm run build 2>&1 | grep error`.
    The buffer system exists to save your context window — use it.
+
+   **Buffer-op pipes are allowed.** Once a command's output is in a buffer (`@cmd_*`, `@bg_*`,
+   `@file_*`, `@tool_*`), pipes that *start from* the buffer are fine —
+   `grep PATTERN @cmd_xxx | sort -u`, `cat @bg_yyy | head -50`. The capture has already happened;
+   chaining buffer-ops is free.
 
 4. **ALWAYS RESTORE THE ACTIVE PROJECT.** After `workspace(action="activate", path=...)` to
    a different project, you MUST call `workspace(action="activate", path=...)` back to the
