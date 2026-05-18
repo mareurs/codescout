@@ -1688,6 +1688,115 @@ async fn read_file_gates_markdown_files() {
 }
 
 #[tokio::test]
+async fn edit_file_replace_all_on_markdown_passes_through() {
+    // Regression for docs/issues/2026-05-18-edit-file-replace-all-on-markdown-rejected.md
+    // The .md gate must allow replace_all=true (file-wide find/replace), since
+    // edit_markdown's heading-scoped editor adds friction without safety for that case.
+    let (dir, ctx) = project_ctx().await;
+    let md_file = dir.path().join("doc.md");
+    std::fs::write(&md_file, "# Doc\n\nold-id\n\n## Section\n\nold-id again\n").unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": md_file.to_str().unwrap(),
+                "old_string": "old-id",
+                "new_string": "new-id",
+                "replace_all": true,
+            }),
+            &ctx,
+        )
+        .await;
+    assert!(
+        result.is_ok(),
+        "edit_file(replace_all=true) on .md must pass through: {:?}",
+        result
+    );
+    let body = std::fs::read_to_string(&md_file).unwrap();
+    assert!(!body.contains("old-id"), "old-id should be gone: {body}");
+    assert_eq!(body.matches("new-id").count(), 2);
+}
+
+#[tokio::test]
+async fn edit_file_single_replace_on_markdown_still_gated() {
+    // Negation of the regression above: a single-occurrence edit (no replace_all)
+    // on .md must still route to edit_markdown.
+    let (dir, ctx) = project_ctx().await;
+    let md_file = dir.path().join("doc.md");
+    std::fs::write(&md_file, "# Doc\n\nold-id\n").unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": md_file.to_str().unwrap(),
+                "old_string": "old-id",
+                "new_string": "new-id",
+            }),
+            &ctx,
+        )
+        .await;
+    assert!(
+        result.is_err(),
+        "edit_file without replace_all on .md should be gated: {:?}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn edit_file_batch_all_replace_all_on_markdown_passes_through() {
+    // Batch mode: gate must allow when every entry sets replace_all=true.
+    let (dir, ctx) = project_ctx().await;
+    let md_file = dir.path().join("doc.md");
+    std::fs::write(&md_file, "alpha alpha bravo bravo\n").unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": md_file.to_str().unwrap(),
+                "edits": [
+                    { "old_string": "alpha", "new_string": "A", "replace_all": true },
+                    { "old_string": "bravo", "new_string": "B", "replace_all": true },
+                ]
+            }),
+            &ctx,
+        )
+        .await;
+    assert!(
+        result.is_ok(),
+        "edit_file batch with every replace_all=true on .md must pass through: {:?}",
+        result
+    );
+    let body = std::fs::read_to_string(&md_file).unwrap();
+    assert_eq!(body, "A A B B\n");
+}
+
+#[tokio::test]
+async fn edit_file_batch_mixed_replace_all_on_markdown_still_gated() {
+    // Batch mode: gate must reject when any entry omits replace_all=true.
+    let (dir, ctx) = project_ctx().await;
+    let md_file = dir.path().join("doc.md");
+    std::fs::write(&md_file, "alpha bravo\n").unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": md_file.to_str().unwrap(),
+                "edits": [
+                    { "old_string": "alpha", "new_string": "A", "replace_all": true },
+                    { "old_string": "bravo", "new_string": "B" },
+                ]
+            }),
+            &ctx,
+        )
+        .await;
+    assert!(
+        result.is_err(),
+        "edit_file mixed batch (some replace_all=false) on .md should be gated: {:?}",
+        result
+    );
+}
+
+#[tokio::test]
 async fn read_file_allows_unknown_extensions() {
     let (dir, ctx) = project_ctx().await;
     let csv_file = dir.path().join("data.csv");

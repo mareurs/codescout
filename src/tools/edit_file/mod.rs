@@ -173,13 +173,33 @@ impl Tool for EditFile {
         let path = super::require_str_param(&input, "path")?;
         let new_string = input["new_string"].as_str().unwrap_or("");
 
-        // Gate: redirect .md files to edit_markdown (except prepend/append)
+        // Gate: redirect .md files to edit_markdown (except prepend/append
+        // boundary inserts, and replace_all global swaps). The replace_all
+        // exception covers the "rename an ID / date / brand across the
+        // whole file" case where edit_markdown's heading-scoped editor
+        // adds friction without adding safety. Single non-replace_all
+        // edits and mixed-batch edits stay routed to edit_markdown.
         if path.ends_with(".md") || path.ends_with(".markdown") {
             let insert_mode = input["insert"].as_str();
-            if insert_mode != Some("prepend") && insert_mode != Some("append") {
+            let single_replace_all = input["replace_all"].as_bool().unwrap_or(false);
+            let batch_all_replace_all = input["edits"].as_array().and_then(|edits| {
+                if edits.is_empty() {
+                    None
+                } else {
+                    Some(
+                        edits
+                            .iter()
+                            .all(|e| e["replace_all"].as_bool().unwrap_or(false)),
+                    )
+                }
+            });
+            let allowed = matches!(insert_mode, Some("prepend") | Some("append"))
+                || single_replace_all
+                || batch_all_replace_all.unwrap_or(false);
+            if !allowed {
                 return Err(super::RecoverableError::with_hint(
                     "Use edit_markdown for markdown files",
-                    "edit_markdown provides heading-based editing for .md files. edit_file with insert='prepend'/'append' is still allowed.",
+                    "edit_markdown provides heading-based editing for .md files. edit_file is still allowed with insert='prepend'/'append' or replace_all=true (file-wide find/replace).",
                 ).into());
             }
         }
