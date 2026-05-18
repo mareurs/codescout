@@ -2336,8 +2336,8 @@ async fn search_pattern_context_lines_single_match() {
     let matches = result["matches"].as_array().unwrap();
     assert_eq!(matches.len(), 1);
     assert_eq!(
-        matches[0]["match_line"], 3,
-        "match_line should be 1-indexed line of TARGET"
+        matches[0]["match_lines"][0], 3,
+        "match_lines[0] should be 1-indexed line of TARGET"
     );
     assert_eq!(
         matches[0]["start_line"], 1,
@@ -2491,8 +2491,8 @@ async fn search_pattern_context_lines_non_adjacent_matches_separate() {
         2,
         "non-overlapping windows should produce two separate blocks"
     );
-    assert_eq!(matches[0]["match_line"], 2);
-    assert_eq!(matches[1]["match_line"], 18);
+    assert_eq!(matches[0]["match_lines"][0], 2);
+    assert_eq!(matches[1]["match_lines"][0], 18);
 }
 
 #[tokio::test]
@@ -3856,7 +3856,7 @@ fn search_context_mode() {
         "matches": [
             {
                 "file": "src/tools/mod.rs",
-                "match_line": 54,
+                "match_lines": [54],
                 "start_line": 52,
                 "content": "/// Soft error\npub struct RecoverableError {\n    pub error: String,"
             }
@@ -3865,10 +3865,10 @@ fn search_context_mode() {
     });
     let result = format_grep(&val);
     assert!(result.starts_with("1 match\n"));
-    assert!(result.contains("src/tools/mod.rs"));
-    assert!(result.contains("52   /// Soft error"));
-    assert!(result.contains("53   pub struct RecoverableError {"));
-    assert!(result.contains("54       pub error: String,"));
+    assert!(result.contains("src/tools/mod.rs (1)"));
+    assert!(result.contains("   52- /// Soft error"));
+    assert!(result.contains("   53- pub struct RecoverableError {"));
+    assert!(result.contains("   54:     pub error: String,"));
 }
 
 #[test]
@@ -3922,13 +3922,13 @@ fn search_context_mode_multiple_files() {
         "matches": [
             {
                 "file": "src/a.rs",
-                "match_line": 10,
+                "match_lines": [10],
                 "start_line": 9,
                 "content": "// context\nfn foo() {"
             },
             {
                 "file": "src/b.rs",
-                "match_line": 5,
+                "match_lines": [5],
                 "start_line": 4,
                 "content": "// other\nfn bar() {"
             }
@@ -3937,12 +3937,12 @@ fn search_context_mode_multiple_files() {
     });
     let result = format_grep(&val);
     assert!(result.contains("2 matches"));
-    assert!(result.contains("src/a.rs"));
-    assert!(result.contains("src/b.rs"));
-    assert!(result.contains("9    // context"));
-    assert!(result.contains("10   fn foo() {"));
-    assert!(result.contains("4    // other"));
-    assert!(result.contains("5    fn bar() {"));
+    assert!(result.contains("src/a.rs (1)"));
+    assert!(result.contains("src/b.rs (1)"));
+    assert!(result.contains("    9- // context"));
+    assert!(result.contains("   10: fn foo() {"));
+    assert!(result.contains("    4- // other"));
+    assert!(result.contains("    5: fn bar() {"));
 }
 
 #[test]

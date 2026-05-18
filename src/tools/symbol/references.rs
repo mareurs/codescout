@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 
 use crate::ast;
 use crate::tools::output::OutputGuard;
-use crate::tools::{require_str_param, Tool, ToolContext};
+use crate::tools::{require_str_param, OutputForm, Tool, ToolContext};
 
 use crate::fs::{
     classify_reference_path, get_lsp_client, path_in_excluded_dir, require_path_param,
@@ -176,6 +176,10 @@ impl Tool for References {
         };
 
         Some(render_grouped(&groups, total, files, noun, render_item))
+    }
+
+    fn output_form(&self) -> OutputForm {
+        OutputForm::Text
     }
 
     fn availability(&self, _caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {

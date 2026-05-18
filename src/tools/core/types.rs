@@ -298,6 +298,22 @@ pub enum Availability {
     RequiresLibraries,
 }
 
+/// Wire-format preference for `Tool::call_content`.
+///
+/// `Json` (default): inline output is pretty-printed JSON; only buffered
+/// overflow uses `format_compact`. Right for tools whose result has named
+/// fields callers want to access (`output_id`, `summary`, etc).
+///
+/// `Text`: inline AND buffered output use `format_compact`. Right for bulk
+/// locator tools (grep, references, tree glob) where the compact text form
+/// is ripgrep-style `file\n  N: content` — strictly more compact than the
+/// equivalent JSON and trivially parseable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputForm {
+    Json,
+    Text,
+}
+
 impl Availability {
     pub fn is_available(self, c: &ToolCapabilities) -> bool {
         match self {
@@ -363,6 +379,16 @@ pub trait Tool: Send + Sync {
         Availability::Always
     }
 
+    /// Wire-format preference for `call_content`.
+    ///
+    /// Defaults to `OutputForm::Json` (pretty-printed inline, compact summary only on
+    /// buffered overflow). Override to `OutputForm::Text` for bulk-locator tools
+    /// (grep, references, tree glob) whose `format_compact` output is strictly
+    /// more compact than the equivalent JSON.
+    fn output_form(&self) -> OutputForm {
+        OutputForm::Json
+    }
+
     /// Returns true if this tool call will mutate project state and therefore
     /// must acquire the cross-process write lock before dispatch.
     ///
@@ -388,10 +414,13 @@ pub trait Tool: Send + Sync {
     /// Returns MCP content blocks for this tool call.
     ///
     /// Large output (> threshold) is stored in the output buffer and a compact
-    /// summary is returned. Small output is returned as pretty-printed JSON.
+    /// summary is returned. Small output is returned as pretty-printed JSON
+    /// (`OutputForm::Json`, default) or as the compact text form
+    /// (`OutputForm::Text`, for bulk locators like grep/references/tree-glob).
     /// Override directly for full control over content blocks.
     async fn call_content(&self, input: Value, ctx: &ToolContext) -> Result<Vec<Content>> {
         let val = self.call(input, ctx).await?;
+        let form = self.output_form();
         let json = serde_json::to_string(&val).unwrap_or_else(|_| val.to_string());
 
         if exceeds_inline_limit(&json) {
@@ -426,8 +455,14 @@ pub trait Tool: Send + Sync {
             )]);
         }
 
-        // Small output — return pretty JSON to the assistant.
+        // Small output — return either pretty JSON or the compact text form,
+        // depending on the tool's wire-format preference.
         // TODO(#13600/#3174): emit self.format_for_user_channel(&val) to user channel here.
+        if form == OutputForm::Text {
+            if let Some(text) = self.format_compact(&val) {
+                return Ok(vec![Content::text(text)]);
+            }
+        }
         Ok(vec![Content::text(
             serde_json::to_string_pretty(&val).unwrap_or_else(|_| val.to_string()),
         )])

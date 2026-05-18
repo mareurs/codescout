@@ -4,7 +4,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use super::format::format_overflow;
-use super::{optional_u64_param, RecoverableError, Tool, ToolContext};
+use super::{optional_u64_param, OutputForm, RecoverableError, Tool, ToolContext};
 
 // ── grep ───────────────────────────────────────────────────────
 
@@ -120,8 +120,8 @@ impl Tool for Grep {
                 // Context mode: merge overlapping windows into blocks
                 let file_lines: Vec<&str> = text.lines().collect();
                 let n = file_lines.len();
-                // (block_start_idx, first_match_idx, block_end_idx) — all 0-indexed
-                let mut current: Option<(usize, usize, usize)> = None;
+                // (block_start_idx, match_indices, block_end_idx) — all 0-indexed
+                let mut current: Option<(usize, Vec<usize>, usize)> = None;
 
                 for (i, line) in file_lines.iter().enumerate() {
                     if !re.is_match(line) {
@@ -131,24 +131,27 @@ impl Tool for Grep {
                     let ctx_start = i.saturating_sub(context_lines);
                     let ctx_end = (i + context_lines).min(n.saturating_sub(1));
 
-                    match current {
+                    match current.take() {
                         None => {
-                            current = Some((ctx_start, i, ctx_end));
+                            current = Some((ctx_start, vec![i], ctx_end));
                         }
-                        Some((blk_start, blk_first, blk_end)) => {
+                        Some((blk_start, mut blk_matches, blk_end)) => {
                             if ctx_start <= blk_end + 1 {
-                                // Overlapping or adjacent: extend the current block
-                                current = Some((blk_start, blk_first, ctx_end.max(blk_end)));
+                                // Overlapping or adjacent: extend block, append match
+                                blk_matches.push(i);
+                                current = Some((blk_start, blk_matches, ctx_end.max(blk_end)));
                             } else {
                                 // Non-overlapping: emit finished block, start new one
                                 let content = file_lines[blk_start..=blk_end].join("\n");
+                                let match_lines: Vec<u64> =
+                                    blk_matches.iter().map(|&m| (m + 1) as u64).collect();
                                 matches.push(json!({
                                     "file": entry.path().display().to_string(),
-                                    "match_line": blk_first + 1,
+                                    "match_lines": match_lines,
                                     "start_line": blk_start + 1,
                                     "content": content,
                                 }));
-                                current = Some((ctx_start, i, ctx_end));
+                                current = Some((ctx_start, vec![i], ctx_end));
                             }
                         }
                     }
@@ -160,11 +163,13 @@ impl Tool for Grep {
                 }
 
                 // Emit the last in-flight block
-                if let Some((blk_start, blk_first, blk_end)) = current {
+                if let Some((blk_start, blk_matches, blk_end)) = current {
                     let content = file_lines[blk_start..=blk_end].join("\n");
+                    let match_lines: Vec<u64> =
+                        blk_matches.iter().map(|&m| (m + 1) as u64).collect();
                     matches.push(json!({
                         "file": entry.path().display().to_string(),
-                        "match_line": blk_first + 1,
+                        "match_lines": match_lines,
                         "start_line": blk_start + 1,
                         "content": content,
                     }));
@@ -241,6 +246,10 @@ impl Tool for Grep {
     fn format_compact(&self, result: &Value) -> Option<String> {
         Some(format_grep(result))
     }
+
+    fn output_form(&self) -> OutputForm {
+        OutputForm::Text
+    }
 }
 
 // ── format helpers ──────────────────────────────────────────────────────
@@ -292,23 +301,53 @@ fn format_search_simple_mode(out: &mut String, file_groups: &[Value], total: usi
 }
 
 fn format_search_context_mode(out: &mut String, matches: &[Value]) {
+    use std::collections::HashMap;
+
+    // Precompute per-file match totals so the header can show `file (N)`,
+    // matching the simple-mode format for at-a-glance density.
+    let mut per_file_total: HashMap<&str, u64> = HashMap::new();
+    for m in matches {
+        let file = m["file"].as_str().unwrap_or("?");
+        let n = m["match_lines"]
+            .as_array()
+            .map(|a| a.len() as u64)
+            .unwrap_or(0);
+        *per_file_total.entry(file).or_insert(0) += n;
+    }
+
     let mut current_file: Option<&str> = None;
 
     for m in matches {
         let file = m["file"].as_str().unwrap_or("?");
         let start_line = m["start_line"].as_u64().unwrap_or(1);
         let content = m["content"].as_str().unwrap_or("");
+        let match_lines: std::collections::HashSet<u64> = m["match_lines"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_u64()).collect())
+            .unwrap_or_default();
 
-        if current_file != Some(file) {
+        let same_file = current_file == Some(file);
+        if !same_file {
+            let count = per_file_total.get(file).copied().unwrap_or(0);
             out.push_str("\n  ");
             out.push_str(file);
-            out.push('\n');
+            out.push_str(&format!(" ({count})\n"));
             current_file = Some(file);
+        } else {
+            // Separator between non-overlapping blocks in the same file —
+            // ripgrep uses `--` for the same purpose.
+            out.push_str("  --\n");
         }
 
         for (i, line) in content.lines().enumerate() {
             let line_num = start_line + i as u64;
-            out.push_str(&format!("  {:<4} {}\n", line_num, line));
+            // Ripgrep convention: `N:` for match line, `N-` for context.
+            let sep = if match_lines.contains(&line_num) {
+                ':'
+            } else {
+                '-'
+            };
+            out.push_str(&format!("  {line_num:>5}{sep} {line}\n"));
         }
     }
 
@@ -405,7 +444,7 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
     } else {
         let file_lines: Vec<&str> = text.lines().collect();
         let n = file_lines.len();
-        let mut current: Option<(usize, usize, usize)> = None;
+        let mut current: Option<(usize, Vec<usize>, usize)> = None;
 
         for (i, line) in file_lines.iter().enumerate() {
             if !re.is_match(line) {
@@ -415,20 +454,23 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
             let ctx_start = i.saturating_sub(context_lines);
             let ctx_end = (i + context_lines).min(n.saturating_sub(1));
 
-            match current {
-                None => current = Some((ctx_start, i, ctx_end)),
-                Some((blk_start, blk_first, blk_end)) => {
+            match current.take() {
+                None => current = Some((ctx_start, vec![i], ctx_end)),
+                Some((blk_start, mut blk_matches, blk_end)) => {
                     if ctx_start <= blk_end + 1 {
-                        current = Some((blk_start, blk_first, ctx_end.max(blk_end)));
+                        blk_matches.push(i);
+                        current = Some((blk_start, blk_matches, ctx_end.max(blk_end)));
                     } else {
                         let content = file_lines[blk_start..=blk_end].join("\n");
+                        let match_lines: Vec<u64> =
+                            blk_matches.iter().map(|&m| (m + 1) as u64).collect();
                         matches.push(json!({
                             "file": raw_path,
-                            "match_line": blk_first + 1,
+                            "match_lines": match_lines,
                             "start_line": blk_start + 1,
                             "content": content,
                         }));
-                        current = Some((ctx_start, i, ctx_end));
+                        current = Some((ctx_start, vec![i], ctx_end));
                     }
                 }
             }
@@ -439,11 +481,12 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
             }
         }
 
-        if let Some((blk_start, blk_first, blk_end)) = current {
+        if let Some((blk_start, blk_matches, blk_end)) = current {
             let content = file_lines[blk_start..=blk_end].join("\n");
+            let match_lines: Vec<u64> = blk_matches.iter().map(|&m| (m + 1) as u64).collect();
             matches.push(json!({
                 "file": raw_path,
-                "match_line": blk_first + 1,
+                "match_lines": match_lines,
                 "start_line": blk_start + 1,
                 "content": content,
             }));
@@ -568,6 +611,42 @@ mod tests {
             result["files"].as_u64().unwrap() >= 2,
             "files must be >= 2, got {}",
             result["files"]
+        );
+    }
+
+    #[tokio::test]
+    async fn grep_call_content_returns_ripgrep_style_text_not_json() {
+        // Regression: small grep results used to serialize as pretty JSON via the
+        // default Tool::call_content path. Now Grep declares OutputForm::Text, so
+        // even sub-threshold results come through as the compact ripgrep-style
+        // form ("file\n  N: content"), saving ~60% tokens on bulk locator output.
+        use serde_json::json;
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn foo() {}\nfn foo_bar() {}\n").unwrap();
+
+        let ctx = test_ctx().await;
+        let tool = Grep;
+        let content = tool
+            .call_content(
+                json!({ "pattern": "foo", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(content.len(), 1, "expected exactly 1 content block");
+        let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+        assert!(
+            !text.trim_start().starts_with('{'),
+            "small grep output must NOT be JSON, got: {text}"
+        );
+        assert!(
+            text.contains("a.rs"),
+            "text must reference matched file, got: {text}"
+        );
+        assert!(
+            text.contains(": fn foo"),
+            "text must use ripgrep-style `N: content` lines, got: {text}"
         );
     }
 

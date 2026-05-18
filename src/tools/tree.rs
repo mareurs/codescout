@@ -8,7 +8,9 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use super::format::format_overflow;
-use super::{optional_u64_param, parse_bool_param, RecoverableError, Tool, ToolContext};
+use super::{
+    optional_u64_param, parse_bool_param, OutputForm, RecoverableError, Tool, ToolContext,
+};
 
 // ── tree ────────────────────────────────────────────────────────────────────
 
@@ -55,6 +57,10 @@ impl Tool for Tree {
         } else {
             Some(format_list_dir(result))
         }
+    }
+
+    fn output_form(&self) -> OutputForm {
+        OutputForm::Text
     }
 }
 
@@ -373,7 +379,17 @@ pub(crate) fn format_glob(result: &Value) -> String {
     } else {
         ""
     };
-    format!("{total} files{cap_note}")
+    let mut out = String::new();
+    if let Some(files) = result["files"].as_array() {
+        for f in files {
+            if let Some(s) = f.as_str() {
+                out.push_str(s);
+                out.push('\n');
+            }
+        }
+    }
+    out.push_str(&format!("{total} files{cap_note}"));
+    out
 }
 
 #[cfg(test)]
@@ -450,5 +466,35 @@ mod tests {
         let files = result["files"].as_array().unwrap();
         assert_eq!(files.len(), 2);
         assert!(files.iter().all(|f| f.as_str().unwrap().ends_with(".rs")));
+    }
+
+    #[tokio::test]
+    async fn tree_call_content_returns_text_not_json() {
+        // Regression: small tree results used to serialize as pretty JSON via the
+        // default Tool::call_content path. Now Tree declares OutputForm::Text, so
+        // both list_dir and glob shapes come through as their compact text form.
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("foo.rs"), "").unwrap();
+        std::fs::write(dir.path().join("bar.rs"), "").unwrap();
+
+        let content = Tree
+            .call_content(
+                json!({ "glob": "*.rs", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(content.len(), 1, "expected exactly 1 content block");
+        let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+        assert!(
+            !text.trim_start().starts_with('{'),
+            "small tree output must NOT be JSON, got: {text}"
+        );
+        assert!(
+            text.contains("foo.rs") && text.contains("bar.rs"),
+            "text must list both matched files, got: {text}"
+        );
     }
 }

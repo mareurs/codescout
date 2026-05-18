@@ -4822,6 +4822,17 @@ fn find_references_basic() {
 }
 
 #[test]
+fn references_declares_output_form_text() {
+    // Pinned wire contract: small `references` results render as the compact
+    // ripgrep-style text via Tool::call_content (not pretty JSON). Full
+    // integration through call_content needs an LSP fixture; asserting the
+    // declared OutputForm is the cheap, durable contract check.
+    use crate::tools::symbol::references::References;
+    use crate::tools::{OutputForm, Tool};
+    assert_eq!(References.output_form(), OutputForm::Text);
+}
+
+#[test]
 fn find_references_empty() {
     use crate::tools::symbol::references::References;
     use crate::tools::Tool;
