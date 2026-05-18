@@ -15,7 +15,13 @@ BUG TRACKER TEMPLATE — do not edit content; copy this file.
 To open a bug:
   1. Copy this file to docs/issues/$(date -I)-<slug>.md
   2. Replace this comment block with the bug content.
-  3. Append a row to docs/issues/INDEX.md ## Active in the SAME response.
+  3. Done — the librarian discovers the file on next reindex via its
+     `kind: bug` frontmatter. List active bugs with:
+       artifact(action="find", kind="bug", status="open")
+     No manual index file. (Pre-2026-05-18 there was a docs/issues/INDEX.md
+     to maintain by hand; that workflow was retired when bug files gained
+     `kind: bug` frontmatter and the librarian classifier started picking
+     them up automatically — see CLAUDE.md "Querying active trackers".)
 
 Trigger rules — open a tracker for ANY bug noticed during work:
   ✓ User explicitly asks ("log this", "open a tracker")
