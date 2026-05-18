@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use crate::tools::symbol::call_edges::cache::EdgeCache;
 use crate::tools::symbol::call_edges::resolver::{resolve_one_hop, Direction, Edge, EdgeSource};
 use crate::tools::symbol::call_graph::traversal::{EdgeWithDepth, OneHopResolver, TraversalResult};
-use crate::tools::{Tool, ToolContext};
+use crate::tools::{OutputForm, Tool, ToolContext};
 
 /// Cache-checking one-hop resolver.
 ///
@@ -462,22 +462,92 @@ impl Tool for CallGraph {
 
     fn format_compact(&self, result: &Value) -> Option<String> {
         let sym = result.get("symbol")?.as_str()?;
-        let mut parts = vec![format!("call_graph for `{}`", sym)];
+        let mut out = format!("call_graph for `{sym}`");
+
         for key in &["callers", "callees"] {
-            if let Some(v) = result.get(key) {
-                if let Some(count) = v.get("count").and_then(|c| c.as_u64()) {
-                    let n_files = v
-                        .get("by_file")
-                        .and_then(|f| f.as_object())
-                        .map(|m| m.len())
-                        .unwrap_or(0);
-                    parts.push(format!("{}: {} across {} files", key, count, n_files));
-                } else if let Some(arr) = v.as_array() {
-                    parts.push(format!("{}: {}", key, arr.len()));
+            let v = match result.get(*key) {
+                Some(v) => v,
+                None => continue,
+            };
+
+            if let Some(edges) = v.as_array() {
+                // Full mode: edges[]. Group by file → ripgrep-style listing.
+                use std::collections::BTreeMap;
+                let mut by_file: BTreeMap<&str, Vec<&Value>> = BTreeMap::new();
+                for e in edges {
+                    let file = e.get("file").and_then(|f| f.as_str()).unwrap_or("?");
+                    by_file.entry(file).or_default().push(e);
+                }
+                out.push_str(&format!(
+                    "\n  {}: {} edges across {} files",
+                    key,
+                    edges.len(),
+                    by_file.len()
+                ));
+                for (file, file_edges) in &by_file {
+                    out.push_str(&format!("\n    {} ({})", file, file_edges.len()));
+                    for e in file_edges {
+                        let line = e.get("line").and_then(|l| l.as_u64()).unwrap_or(0);
+                        let caller = e.get("caller").and_then(|c| c.as_str()).unwrap_or("?");
+                        let callee = e.get("callee").and_then(|c| c.as_str()).unwrap_or("?");
+                        let depth = e.get("depth").and_then(|d| d.as_u64()).unwrap_or(0);
+                        let source = e.get("source").and_then(|s| s.as_str()).unwrap_or("?");
+                        out.push_str(&format!(
+                            "\n      {line:>5}: {caller} → {callee} (depth={depth}, {source})"
+                        ));
+                    }
+                }
+            } else if let Some(obj) = v.as_object() {
+                // Compact aggregate: count + by_file + by_depth.
+                let count = obj.get("count").and_then(|c| c.as_u64()).unwrap_or(0);
+                let by_file = obj.get("by_file").and_then(|f| f.as_object());
+                let n_files = by_file.map(|m| m.len()).unwrap_or(0);
+                out.push_str(&format!("\n  {key}: {count} across {n_files} files"));
+                if let Some(map) = by_file {
+                    let mut entries: Vec<_> = map
+                        .iter()
+                        .filter_map(|(p, c)| c.as_u64().map(|n| (p.as_str(), n)))
+                        .collect();
+                    entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+                    for (path, n) in entries.iter().take(20) {
+                        out.push_str(&format!("\n    {path}: {n}"));
+                    }
+                    if entries.len() > 20 {
+                        out.push_str(&format!("\n    … {} more files", entries.len() - 20));
+                    }
+                }
+                if let Some(by_depth) = obj.get("by_depth").and_then(|d| d.as_object()) {
+                    let parts: Vec<String> = by_depth
+                        .iter()
+                        .filter_map(|(d, c)| c.as_u64().map(|n| format!("{d}={n}")))
+                        .collect();
+                    if !parts.is_empty() {
+                        out.push_str(&format!("\n    by_depth: {}", parts.join(" ")));
+                    }
                 }
             }
+
+            let truncated_key = format!("{key}_truncated_at_depth");
+            if let Some(d) = result.get(&truncated_key).and_then(|x| x.as_u64()) {
+                out.push_str(&format!("\n    (truncated at depth {d})"));
+            }
         }
-        Some(parts.join("; "))
+
+        if result
+            .get("auto_promoted")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            out.push_str("\n  (auto-promoted to full detail — small result)");
+        }
+        if let Some(d) = result.get("max_depth_reached").and_then(|v| v.as_u64()) {
+            out.push_str(&format!("\n  max_depth_reached: {d}"));
+        }
+        Some(out)
+    }
+
+    fn output_form(&self) -> OutputForm {
+        OutputForm::Text
     }
 
     fn availability(&self, _caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
@@ -641,6 +711,39 @@ mod tests {
         assert!(compact.contains("callers"), "missing key: {compact}");
         assert!(compact.contains("7"), "missing count: {compact}");
         assert!(compact.contains("2 files"), "missing file count: {compact}");
+    }
+
+
+    /// `format_compact` renders the full-mode (edges array) shape as a
+    /// ripgrep-style listing: `file (count)\n  L: caller → callee (depth=D, source)`.
+    #[test]
+    fn format_compact_renders_full_mode_edges() {
+        let result = json!({
+            "symbol": "my_fn",
+            "callers": [
+                { "caller": "a::caller_one", "callee": "my_fn",
+                  "file": "src/a.rs", "line": 12, "depth": 1, "source": "lsp", "paths": [] },
+                { "caller": "a::caller_two", "callee": "my_fn",
+                  "file": "src/a.rs", "line": 30, "depth": 2, "source": "ts",  "paths": [] },
+                { "caller": "b::caller_three", "callee": "my_fn",
+                  "file": "src/b.rs", "line": 7,  "depth": 1, "source": "lsp", "paths": [] }
+            ],
+            "max_depth_reached": 2
+        });
+        let compact = CallGraph.format_compact(&result).unwrap();
+        assert!(compact.contains("call_graph for `my_fn`"));
+        assert!(compact.contains("callers: 3 edges across 2 files"));
+        assert!(compact.contains("src/a.rs (2)"));
+        assert!(compact.contains("src/b.rs (1)"));
+        assert!(compact.contains("12: a::caller_one → my_fn (depth=1, lsp)"));
+        assert!(compact.contains("30: a::caller_two → my_fn (depth=2, ts)"));
+        assert!(compact.contains("max_depth_reached: 2"));
+    }
+
+    #[test]
+    fn call_graph_declares_output_form_text() {
+        use crate::tools::OutputForm;
+        assert_eq!(CallGraph.output_form(), OutputForm::Text);
     }
 
     /// LIMIT-001 Phase A: when LSP `workspace_symbols` returns empty (no LSP, or
