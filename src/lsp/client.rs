@@ -82,6 +82,22 @@ fn is_idempotent_lsp_method(method: &str) -> bool {
     )
 }
 
+/// Transient LSP error codes that warrant an automatic retry.
+///
+/// - `-32800` `RequestCancelled` — server cancelled mid-request (typically
+///   workspace lock contention or cold-start indexing).
+/// - `-32801` `ContentModified` — server's analysis snapshot advanced
+///   between request issue and response (typical during indexer warmup
+///   right after `/mcp` reconnect; rust-analyzer publishes new diagnostics
+///   and cancels any in-flight requests against the stale snapshot).
+///
+/// Both are explicitly "retry on the new snapshot" signals per the LSP
+/// spec. We treat them identically — same backoff, same idempotency guard.
+fn is_retryable_lsp_error(err: &anyhow::Error) -> bool {
+    let s = err.to_string();
+    s.contains("code -32800") || s.contains("code -32801")
+}
+
 /// Return true if cold-start's extended retry budget makes sense for `method`.
 ///
 /// Most LSP queries that return `-32800 RequestCancelled` during cold start
@@ -545,9 +561,10 @@ impl LspClient {
             (MAX_RETRIES_WARM, RETRY_DELAY_WARM_MS)
         };
 
-        // Only retry idempotent methods on -32800 (RequestCancelled). Retrying
-        // a non-idempotent method like textDocument/rename risks double-applying
-        // an edit if the server cancelled AFTER performing the operation.
+        // Only retry idempotent methods on transient LSP errors (-32800
+        // RequestCancelled, -32801 ContentModified). Retrying a non-idempotent
+        // method like textDocument/rename risks double-applying an edit if
+        // the server cancelled AFTER performing the operation.
         let retry_on_cancel = is_idempotent_lsp_method(method);
         let effective_max_retries = if retry_on_cancel { max_retries } else { 0 };
 
@@ -557,7 +574,7 @@ impl LspClient {
                 let delay = std::time::Duration::from_millis(retry_delay_ms * attempt as u64);
                 tokio::time::sleep(delay).await;
                 tracing::debug!(
-                    "LSP request cancelled, retrying {}/{}: {} (cold_start={})",
+                    "LSP transient error, retrying {}/{}: {} (cold_start={})",
                     attempt,
                     effective_max_retries,
                     method,
@@ -569,7 +586,7 @@ impl LspClient {
                 .await
             {
                 Ok(result) => return Ok(result),
-                Err(e) if e.to_string().contains("code -32800") => {
+                Err(e) if is_retryable_lsp_error(&e) => {
                     if !retry_on_cancel {
                         // Surface as RecoverableError so sibling tool calls
                         // survive and the caller can retry at a higher level
@@ -1512,6 +1529,28 @@ mod tests {
         assert!(uses_cold_start_retry_budget("textDocument/hover"));
         // workspace/symbol must still be idempotent so warm-path retry works.
         assert!(is_idempotent_lsp_method("workspace/symbol"));
+    }
+
+    #[test]
+    fn is_retryable_lsp_error_matches_both_transient_codes() {
+        // Both -32800 (RequestCancelled) and -32801 (ContentModified) are
+        // explicit LSP "retry on new snapshot" signals. They share a retry
+        // path here; this test pins both codes against the matcher.
+        let cancelled = anyhow::anyhow!("LSP error (code -32800): cancelled");
+        let modified = anyhow::anyhow!("LSP error (code -32801): content modified");
+        let internal = anyhow::anyhow!("LSP error (code -32603): internal error");
+        let timeout = anyhow::anyhow!("LSP request timed out after 30s");
+
+        assert!(is_retryable_lsp_error(&cancelled), "-32800 must retry");
+        assert!(is_retryable_lsp_error(&modified), "-32801 must retry");
+        assert!(
+            !is_retryable_lsp_error(&internal),
+            "-32603 is a real fault — must NOT retry"
+        );
+        assert!(
+            !is_retryable_lsp_error(&timeout),
+            "timeouts are surfaced as RecoverableError separately — must NOT match"
+        );
     }
 
     #[test]

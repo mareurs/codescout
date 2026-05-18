@@ -713,7 +713,6 @@ mod tests {
         assert!(compact.contains("2 files"), "missing file count: {compact}");
     }
 
-
     /// `format_compact` renders the full-mode (edges array) shape as a
     /// ripgrep-style listing: `file (count)\n  L: caller → callee (depth=D, source)`.
     #[test]

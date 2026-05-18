@@ -856,19 +856,33 @@ fn route_tool_error(e: anyhow::Error) -> CallToolResult {
         }
         let text = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
         CallToolResult::success(vec![Content::text(text)])
-    } else if e.to_string().contains("code -32800") {
-        // LSP RequestCancelled — treat as recoverable so sibling parallel tool calls are not aborted.
+    } else if e.to_string().contains("code -32800") || e.to_string().contains("code -32801") {
+        // Transient LSP errors:
+        // - -32800 RequestCancelled: server cancelled (workspace lock, cold indexing).
+        // - -32801 ContentModified: server's analysis snapshot advanced mid-request
+        //   (typical post-/mcp warmup; rust-analyzer publishes diagnostics and
+        //   cancels requests against the stale snapshot).
+        // Treat both as recoverable so sibling parallel tool calls are not aborted.
         // Log at WARN so this is visible in diagnostic logs (otherwise it appears as ok=true).
-        tracing::warn!("LSP RequestCancelled (-32800): {}", e);
+        let code = if e.to_string().contains("code -32801") {
+            "-32801"
+        } else {
+            "-32800"
+        };
+        tracing::warn!("LSP transient error ({}): {}", code, e);
         let body = serde_json::json!({
             "error": e.to_string(),
-            "hint": "The LSP server cancelled this request (code -32800). Common causes:\n\
-                     (1) Another process holds the workspace lock — e.g. another codescout instance \
-                     or an editor (VS Code, IntelliJ) running a language server for the same project. \
-                     For kotlin-lsp, each instance needs a separate --system-path to avoid lock \
-                     contention on the IntelliJ platform's .app.lock file.\n\
-                     (2) The server just started and is still running background indexing \
-                     (can take 1-5 minutes on first run). Wait and retry the call."
+            "hint": "The LSP server returned a transient error (RequestCancelled -32800 or \
+                     ContentModified -32801). The client already auto-retries idempotent \
+                     methods on these codes; this surfaces only when the retry budget is \
+                     exhausted or the method is non-idempotent. Common causes:\n\
+                     (1) Cold indexing window — server still building its workspace index \
+                     (can take 1-5 minutes after `/mcp` reconnect or fresh launch).\n\
+                     (2) Workspace lock contention — another codescout instance or editor \
+                     LSP holds the workspace. For kotlin-lsp, each instance needs a separate \
+                     --system-path to avoid contention on the IntelliJ platform's .app.lock.\n\
+                     Wait and retry; or for non-idempotent methods (rename, applyEdit) \
+                     re-issue manually after confirming server state."
         });
         let text = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
         CallToolResult::success(vec![Content::text(text)])
@@ -1806,6 +1820,29 @@ mod tests {
         let text = &result.content[0].as_text().unwrap().text;
         let body: serde_json::Value = serde_json::from_str(text).unwrap();
         assert!(body.get("hint").is_some(), "must include retry hint");
+    }
+
+    #[test]
+    fn lsp_content_modified_routes_to_recoverable_not_fatal() {
+        // Code -32801 (ContentModified) — rust-analyzer cancels in-flight
+        // requests when its analysis snapshot advances (typical during
+        // post-restart indexer warmup). Must NOT produce isError:true,
+        // same as -32800 RequestCancelled.
+        let err = anyhow::anyhow!("LSP error (code -32801): content modified");
+        let result = route_tool_error(err);
+        assert!(
+            result.is_error != Some(true),
+            "LSP ContentModified must not set isError:true"
+        );
+        let text = &result.content[0].as_text().unwrap().text;
+        let body: serde_json::Value = serde_json::from_str(text).unwrap();
+        assert!(body.get("hint").is_some(), "must include retry hint");
+        assert!(
+            body["hint"].as_str().unwrap().contains("-32801")
+                || body["hint"].as_str().unwrap().contains("ContentModified"),
+            "hint should mention -32801 / ContentModified, got: {}",
+            body["hint"]
+        );
     }
 
     #[test]
