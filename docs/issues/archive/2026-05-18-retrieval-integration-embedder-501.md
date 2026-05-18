@@ -71,7 +71,7 @@ The mock-server URL was correct; the protocol selection was not.
 
 ## Fix
 
-Landed on experiments in <PENDING_SHA>.
+Landed on experiments in 58133ae7.
 
 Added `EmbedderHttp::with_protocol(...)` — explicit constructor taking
 protocol, model name, and query prefix as arguments, with no env reads.
