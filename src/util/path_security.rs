@@ -531,6 +531,58 @@ pub fn is_dangerous_command(command: &str, config: &PathSecurityConfig) -> Optio
     None
 }
 
+/// Detect Iron Law 3 violation: piping a live command's output to a log-trimmer
+/// (`tail`/`head`/`grep`/`wc`/`sed`/`awk`/`cut`/`sort`/`uniq`/`tr`/`fmt`/`less`).
+///
+/// IL3 exists because piping destroys the `@cmd_*` buffer: filtered text reaches
+/// the agent, but the full output is gone. Re-running just to grep wastes a tool
+/// call. Server-side enforcement covers all MCP clients (Claude Code, Copilot,
+/// Gemini, …) — companion-plugin hooks are Claude-Code-specific and miss
+/// subagent contexts (see `docs/issues/2026-05-18-il3-pipe-violation-subagent.md`).
+///
+/// **Buffer-op pipes are allowed.** If the pre-pipe segment references a buffer
+/// handle (`@cmd_*`, `@bg_*`, `@file_*`, `@tool_*`, `@ack_*`), the LHS is
+/// operating on already-captured data — `grep PATTERN @cmd_xxx | sort -u` is
+/// fine.
+///
+/// Returns `Some(hint)` when the command violates IL3; `None` otherwise.
+/// Mirrors the regex in `codescout-companion/hooks/il3-deny-hook.sh`.
+pub fn detect_il3_violation(command: &str) -> Option<String> {
+    static IL3_LHS: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    static IL3_BUFFER_REF: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+
+    let lhs_re = IL3_LHS.get_or_init(|| {
+        Regex::new(
+            r"^\s*(cargo|npm|pnpm|yarn|python|pytest|go|mvn|gradle|git|find|ls|grep|cat|diff|du|stat|rg|fd)\s.*\|\s*(tail|head|grep|less|wc|sed|awk|cut|sort|uniq|tr|fmt)\b",
+        )
+        .expect("IL3_LHS regex compiles")
+    });
+    let buf_re = IL3_BUFFER_REF.get_or_init(|| {
+        Regex::new(r"@(cmd|bg|file|tool|ack)_[A-Za-z0-9_]+")
+            .expect("IL3_BUFFER_REF regex compiles")
+    });
+
+    // Allow buffer-ops: pre-pipe segment references a buffer handle.
+    let pre_pipe = command.split('|').next().unwrap_or("");
+    if buf_re.is_match(pre_pipe) {
+        return None;
+    }
+
+    if !lhs_re.is_match(command) {
+        return None;
+    }
+
+    let lead = pre_pipe.trim();
+    Some(format!(
+        "IL3 violation — piped `{command}` to a log-trimmer. BLOCKED.\n\n\
+         The @cmd_* buffer system saves context tokens:\n  \
+         1. run_command(\"{lead}\")               — full output stored as @cmd_xxx\n  \
+         2. grep PATTERN @cmd_xxx                 — query the buffer at any granularity\n  \
+                                                    (also: tail -20 @cmd_xxx, head -50 @cmd_xxx)\n\n\
+         Rerun the command bare and query the returned @cmd_* buffer."
+    ))
+}
+
 /// Source file extensions that should be accessed via codescout tools,
 /// not raw shell commands. Mirrors `crate::ast::detect_language()` minus markdown.
 const SOURCE_EXTENSIONS: &str = r"\.(rs|py|ts|tsx|js|cjs|mjs|jsx|go|java|kt|kts|c|cpp|cc|cxx|cs|rb|php|swift|scala|ex|exs|hs|lua|sh|bash)\b";
@@ -1827,4 +1879,70 @@ mod tests {
         assert!(!is_identifier_pattern("foo[0-9]"));
         assert!(!is_identifier_pattern("||")); // empty parts
     }
+
+    // -----------------------------------------------------------------
+    // IL3 detection — server-side enforcement of "no piping live output
+    // to log-trimmers". Mirrors codescout-companion/hooks/il3-deny-hook.test.sh.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn il3_blocks_cargo_test_pipe_grep() {
+        let hint = detect_il3_violation("cargo test | grep FAILED").expect("should block");
+        assert!(hint.contains("IL3 violation"));
+        assert!(hint.contains("cargo test"));
+    }
+
+    #[test]
+    fn il3_allows_buffer_op_grep_cmd_sort() {
+        assert!(detect_il3_violation("grep -c EnterWorktree @cmd_3b8e6cc5 | sort -u").is_none());
+    }
+
+    #[test]
+    fn il3_allows_buffer_op_cat_bg_head() {
+        assert!(detect_il3_violation("cat @bg_abc123 | head -50").is_none());
+    }
+
+    #[test]
+    fn il3_allows_buffer_op_grep_tool_sort() {
+        assert!(detect_il3_violation("grep error @tool_xyz | sort").is_none());
+    }
+
+    #[test]
+    fn il3_allows_buffer_op_file_ref() {
+        assert!(detect_il3_violation("grep TODO @file_abc | wc -l").is_none());
+    }
+
+    #[test]
+    fn il3_allows_no_pipe() {
+        assert!(detect_il3_violation("cargo test").is_none());
+    }
+
+    #[test]
+    fn il3_allows_pipe_to_jq() {
+        assert!(detect_il3_violation("cargo metadata | jq .packages").is_none());
+    }
+
+    #[test]
+    fn il3_blocks_when_ref_only_on_rhs() {
+        let hint = detect_il3_violation("cargo test | grep FAIL @cmd_abc").expect("should block");
+        assert!(hint.contains("IL3 violation"));
+    }
+
+    #[test]
+    fn il3_blocks_similar_shape_without_buffer_ref() {
+        assert!(detect_il3_violation("grep -oE 'pat' src/lib.rs | sort -u").is_some());
+    }
+
+    #[test]
+    fn il3_friction_repro_allowed() {
+        let cmd = r#"grep -oE "\"cwd\":\"[^\"]*\"" @cmd_3b8e6cc5 | sort -u"#;
+        assert!(detect_il3_violation(cmd).is_none());
+    }
+
+    #[test]
+    fn il3_allows_unknown_lhs_command() {
+        // awk is not in LHS_COMMANDS; conservative list keeps false positives low.
+        assert!(detect_il3_violation("awk '{print $1}' file.txt | head").is_none());
+    }
+
 }

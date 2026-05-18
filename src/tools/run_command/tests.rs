@@ -2589,38 +2589,18 @@ async fn run_command_buffered_output_has_output_id_before_stdout() {
 #[tokio::test]
 async fn piped_grep_returns_unfiltered_ref() {
     let (dir, ctx) = project_ctx().await;
-    // Create a file with several lines; grep for just one
     std::fs::write(
         dir.path().join("items.txt"),
-        "apple\nbanana\ncherry\ndates\nelderberry\n",
+        "apple\nbanana\ncherry\n",
     )
     .unwrap();
-    let result = RunCommand
+    let err = RunCommand
         .call(json!({ "command": "cat items.txt | grep apple" }), &ctx)
         .await
-        .unwrap();
-
-    // unfiltered_output ref should be present
-    assert!(
-        result["unfiltered_output"].is_string(),
-        "expected unfiltered_output field, got: {result}"
-    );
-    let ref_id = result["unfiltered_output"].as_str().unwrap();
-
-    // Query the buffer: full content should include banana (filtered out by grep)
-    let full = RunCommand
-        .call(json!({ "command": format!("cat {ref_id}") }), &ctx)
-        .await
-        .unwrap();
-    let stdout = full["stdout"].as_str().unwrap_or("");
-    assert!(
-        stdout.contains("banana"),
-        "unfiltered output missing 'banana': {stdout}"
-    );
-    assert!(
-        stdout.contains("apple"),
-        "unfiltered output missing 'apple': {stdout}"
-    );
+        .expect_err("IL3 should block live `cat | grep`");
+    let msg = err.to_string();
+    assert!(msg.contains("IL3 violation"), "missing IL3 marker: {msg}");
+    assert!(msg.contains("buffer system"), "missing rewrite hint: {msg}");
 }
 
 #[tokio::test]
@@ -2640,46 +2620,20 @@ async fn non_filter_pipe_no_unfiltered_ref() {
 #[tokio::test]
 async fn grep_no_match_suppresses_unfiltered_ref() {
     let (dir, ctx) = project_ctx().await;
-    std::fs::write(dir.path().join("items.txt"), "apple\nbanana\ncherry\n").unwrap();
-
-    // `cat | grep | head`: tee is injected before `head`, capturing grep's output.
-    // When grep matches nothing, the tee file is empty → unfiltered_output should be
-    // suppressed (no value in surfacing a handle to an empty buffer).
-    let result = RunCommand
+    std::fs::write(dir.path().join("items.txt"), "apple\nbanana\n").unwrap();
+    let err = RunCommand
         .call(
-            json!({ "command": "cat items.txt | grep zzz_no_match | head -5" }),
+            json!({ "command": "cat items.txt | grep zzz | head -5" }),
             &ctx,
         )
         .await
-        .unwrap();
-    assert!(
-        result.get("unfiltered_output").is_none(),
-        "unfiltered_output should be absent when middle filter matches nothing, got: {result}"
-    );
-    assert!(
-        result.get("stdout").is_none(),
-        "stdout should be absent when grep matches nothing, got: {result}"
-    );
-
-    // Contrast: single-pipe `cat | grep` puts the tee before grep, capturing the full
-    // cat output — that IS useful even when grep finds nothing.
-    let result2 = RunCommand
-        .call(
-            json!({ "command": "cat items.txt | grep zzz_no_match" }),
-            &ctx,
-        )
-        .await
-        .unwrap();
-    assert!(
-            result2["unfiltered_output"].is_string(),
-            "unfiltered_output should be present for single-pipe grep (tee captures cat output): {result2}"
-        );
+        .expect_err("IL3 should block live `cat | grep | head`");
+    assert!(err.to_string().contains("IL3 violation"));
 }
 
 #[tokio::test]
 async fn unfiltered_truncated_when_over_threshold() {
     let (dir, ctx) = project_ctx().await;
-    // Write content exceeding MAX_INLINE_TOKENS token budget; grep for just one line
     let over_bytes = crate::tools::MAX_INLINE_TOKENS * 4 + 1000;
     let mut content = String::new();
     for i in 0.. {
@@ -2689,16 +2643,11 @@ async fn unfiltered_truncated_when_over_threshold() {
         }
     }
     std::fs::write(dir.path().join("big.txt"), &content).unwrap();
-    let result = RunCommand
+    let err = RunCommand
         .call(json!({ "command": "cat big.txt | grep line0" }), &ctx)
         .await
-        .unwrap();
-    // truncated flag should be set (content exceeds token budget)
-    assert_eq!(
-        result["unfiltered_truncated"],
-        json!(true),
-        "expected truncated flag: {result}"
-    );
+        .expect_err("IL3 should block regardless of payload size");
+    assert!(err.to_string().contains("IL3 violation"));
 }
 
 #[test]

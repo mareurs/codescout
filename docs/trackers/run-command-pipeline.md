@@ -130,6 +130,14 @@ The companion hook (`claude-plugins/codescout-companion/hooks/il3-{deny,warn}-ho
 
 Not a decision for this tracker — flagged for the next IL3 evolution.
 
+**Update 2026-05-18:** server-side enforcement landed. `detect_il3_violation`
+in `src/util/path_security.rs` is called from `RunCommand::call` before
+`resolve_refs`. The companion hook now becomes a belt-and-braces layer
+covering only Claude Code; codescout itself rejects the shape for all MCP
+clients (Claude Code, Copilot, Gemini, …). The "two modules always change
+together" signal pointed at this fix correctly. See
+`docs/issues/2026-05-18-il3-pipe-violation-subagent.md` (fixed).
+
 ## Tracker updates
 
 - Open #1 (schema) — leans `stages` XOR `command`, not `command + pipeline`. (Concern 3.)

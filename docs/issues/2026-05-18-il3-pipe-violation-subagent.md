@@ -1,10 +1,10 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: IL3 pipe-violation in subagent context
 slug: il3-pipe-violation-subagent
 opened: 2026-05-18
-closed:
+closed: 2026-05-18
 last_observed: 2026-05-18
 ---
 
@@ -72,8 +72,11 @@ None yet.
 
 ## Fix
 
-TBD.
+Server-side IL3 enforcement landed in `run_command_inner` via `detect_il3_violation` (`src/util/path_security.rs`, called from `RunCommand::call` before `resolve_refs`). The check fires regardless of caller (top-level session, subagent, future MCP clients). Companion `PreToolUse` hook remains as a Claude-Code-specific belt-and-braces layer; can be sunset once telemetry confirms parity.
 
+Live verification: `cat items.txt | grep apple` now returns `RecoverableError` with the IL3 hint. Tests in `src/util/path_security.rs::tests::il3_*` (11 cases) and three rewrites in `src/tools/run_command/tests.rs` (live pipes now assert IL3 rejection, not `inject_tee` capture).
+
+The `inject_tee` mechanism remains for buffer-op pipes (`grep PATTERN @cmd_xxx | sort`) — IL3 allows those, and `inject_tee` still tees the intermediate stage.
 ## Tests added
 
 None yet. A regression test would spawn a subagent and assert the hook

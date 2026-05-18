@@ -1501,6 +1501,7 @@ mod tests {
             "sed",
             "start_line",
             "struct",
+            "timeout_secs",
             "untracked",
             "url",
             "wontfix",
