@@ -25,6 +25,12 @@ These are non-negotiable. Violating the letter IS violating the spirit.
    `grep "error TS" @cmd_id`. Never `cargo test 2>&1 | grep FAILED` or `npm run build 2>&1 | grep error`.
    The buffer system exists to save your context window — use it.
 
+   For long-running commands (builds, indexers, dev servers, watchers) use
+   `run_in_background=true` instead of bumping `timeout_secs`. Returns
+   `{output_id: "@bg_*", hint, stdout: <tail-50 if any>}` immediately; the
+   process keeps writing to the buffer. Inspect with `tail -50 @bg_*` or
+   `grep PATTERN @bg_*`.
+
    **Buffer-op pipes are allowed.** Once a command's output is in a buffer (`@cmd_*`, `@bg_*`,
    `@file_*`, `@tool_*`), pipes that *start from* the buffer are fine —
    `grep PATTERN @cmd_xxx | sort -u`, `cat @bg_yyy | head -50`. The capture has already happened;
