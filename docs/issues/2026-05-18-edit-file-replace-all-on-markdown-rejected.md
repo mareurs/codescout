@@ -143,7 +143,7 @@ The hint message also updated to mention the `replace_all` exception.
 - `cargo clippy --lib --tests` clean.
 - `cargo fmt` clean.
 
-**Commit:** `<tba>` on `experiments`.
+**Commit:** `80c81692` on `experiments`.
 
 ## Tests added
 
