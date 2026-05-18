@@ -4380,15 +4380,19 @@ fn symbols_with_body() {
 }
 
 #[test]
-fn symbols_with_long_body_shows_hint_not_truncated_body() {
-    // A body > 500 chars should not be inlined — it would get truncated by
-    // COMPACT_SUMMARY_MAX_BYTES mid-function, misleading agents into thinking
-    // the body is incomplete. Instead, show a navigation hint.
+fn symbols_with_long_body_inlines_full_content() {
+    // Bodies > 500 bytes must be inlined verbatim in compact text form.
+    // Path 2 (`OutputForm::Text`, JSON ≤ 10 KB) returns this text directly with no
+    // buffering — eliding the body here strands the agent because no `@tool_*` ref
+    // is created for `json_path` to address. Path 1 (buffered, JSON > 10 KB)
+    // truncates this summary at `COMPACT_SUMMARY_HARD_MAX_BYTES` with a
+    // `… (truncated)` marker AND emits a `read_file("@tool_xxx", json_path=...)`
+    // hint via call_content — so the truncation is recoverable in the buffered
+    // case while the inline case stays self-sufficient.
+    // Regression for docs/issues/2026-05-18-symbols-body-hint-unreachable.md.
+    // (Test name kept for git history; previous behavior was the bug.)
     let long_body = "fun convert() {\n".to_string() + &"    val x = 1\n".repeat(50) + "}";
-    assert!(
-        long_body.len() > 500,
-        "test body should exceed INLINE_BODY_LIMIT"
-    );
+    assert!(long_body.len() > 500, "test body should be > 500 bytes");
     let val = serde_json::json!({
         "symbols": [
             {
@@ -4401,19 +4405,20 @@ fn symbols_with_long_body_shows_hint_not_truncated_body() {
         "total": 1
     });
     let result = format_search_symbols(&val);
-    // Must mention the line count and the extraction path
+    // Body lines must appear inline — the agent can read them without a json_path hop.
     assert!(
-        result.contains("52-line body"),
-        "expected line count in hint, got: {result}"
+        result.contains("      fun convert() {"),
+        "expected first body line inlined, got:\n{result}"
     );
     assert!(
-        result.contains("$.symbols[0].body"),
-        "expected json_path hint, got: {result}"
+        result.contains("      val x = 1"),
+        "expected repeated body content inlined, got:\n{result}"
     );
-    // Must NOT inline the body content
+    // The misleading "use json_path" elision hint must be gone.
     assert!(
-        !result.contains("val x = 1"),
-        "body content must not appear inline"
+        !result.contains("use json_path"),
+        "compact text must not reference json_path — the outer call_content hint owns that, \
+         got:\n{result}"
     );
 }
 

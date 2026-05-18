@@ -156,17 +156,17 @@ pub fn format_search_symbols(val: &Value) -> String {
             .unwrap_or("?");
         let mut row = format!("  {kind}  {range}  {name_path}");
         if let Some(body) = item["body"].as_str() {
-            const INLINE_BODY_LIMIT: usize = 500;
-            if body.len() <= INLINE_BODY_LIMIT {
-                for line in body.lines() {
-                    row.push_str("\n      ");
-                    row.push_str(line);
-                }
-            } else {
-                let line_count = body.lines().count();
-                row.push_str(&format!(
-                    "\n      ({line_count}-line body — use json_path=\"$.symbols[0].body\" to extract)"
-                ));
+            // Inline the body unconditionally. The buffered path
+            // (`call_content` > 10 KB JSON) applies `truncate_compact` to this
+            // summary with a `… (truncated)` marker and emits a
+            // `read_file("@tool_xxx", json_path=...)` hint for full retrieval,
+            // so large bodies are still reachable. The inline path
+            // (`OutputForm::Text`, ≤ 10 KB JSON) returns this text verbatim
+            // with no `@tool_*` ref — eliding here strands the agent.
+            // See docs/issues/2026-05-18-symbols-body-hint-unreachable.md.
+            for line in body.lines() {
+                row.push_str("\n      ");
+                row.push_str(line);
             }
         }
         row
