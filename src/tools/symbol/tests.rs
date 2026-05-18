@@ -4833,6 +4833,15 @@ fn references_declares_output_form_text() {
 }
 
 #[test]
+fn symbols_declares_output_form_text() {
+    // Pinned wire contract: small `symbols` results render via the compact
+    // text form (file overview / search result tree), not pretty JSON.
+    use crate::tools::symbol::symbols::Symbols;
+    use crate::tools::{OutputForm, Tool};
+    assert_eq!(Symbols.output_form(), OutputForm::Text);
+}
+
+#[test]
 fn find_references_empty() {
     use crate::tools::symbol::references::References;
     use crate::tools::Tool;

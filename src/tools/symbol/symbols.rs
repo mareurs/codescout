@@ -12,7 +12,8 @@ use crate::ast;
 use crate::lsp::SymbolInfo;
 use crate::tools::output::{OutputGuard, OutputMode};
 use crate::tools::{
-    is_regex_like, optional_bool_param, optional_u64_param, RecoverableError, Tool, ToolContext,
+    is_regex_like, optional_bool_param, optional_u64_param, OutputForm, RecoverableError, Tool,
+    ToolContext,
 };
 
 use super::display::{format_overview_symbols, format_search_symbols};
@@ -574,6 +575,10 @@ impl Tool for Symbols {
         } else {
             Some(format_search_symbols(result))
         }
+    }
+
+    fn output_form(&self) -> OutputForm {
+        OutputForm::Text
     }
 
     fn json_path_hint(&self, val: &Value) -> String {
