@@ -50,7 +50,15 @@ See [`FEATURES.md`](FEATURES.md) for the full feature reference. Summary:
 - Additional LSP server configurations
 - Configurable LSP idle TTL via `project.toml`
 - GitHub tools: `github_issue`, `github_pr` method parity with `github_repo`
-
+- Extend `OutputForm::Text` (ripgrep-style wire format) to remaining bulk-result
+  tools — `semantic_search` first (`file:Lstart-Lend (score)\n  preview` shape;
+  format_compact already exists at `src/tools/semantic/semantic_search.rs:218`),
+  then `memory(action="list"|"recall")` and `IndexStatus`. Pattern established by
+  `OutputForm` commits `71c0e90f` / `9c12c404` / `a00c94cb` on `experiments`:
+  for each tool, audit `format_compact` for field-loss vs JSON, upgrade the
+  formatter if needed (precedent: `format_glob` path-listing patch), then add
+  `output_form() = Text` override + regression test. Marginal cost ≈ 30 LOC per
+  tool once `format_compact` is complete.
 ## Future Improvements
 
 Implemented features have been moved to [`FEATURES.md`](FEATURES.md).
