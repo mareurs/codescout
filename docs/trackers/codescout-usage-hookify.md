@@ -53,7 +53,28 @@ MCP `run_command` output instead of using the `@cmd_*` buffer system.
 - The `warn` rule has shipped and run for ≥1 session without false-positive
   complaints on script-internal pipes; then promote `warn` → `deny`.
 
-**Status:** proposed.
+**Status:** **shipped (deny) — 2026-05-18.**
+
+**Promotion evidence:**
+- U-1: 45 strikes in one session (session `753e9a4a`), warn-mode caught all.
+- U-3: 9 strikes across this session (2026-05-18) despite explicit Pika
+  warnings on each. Warn-mode failed to change behavior within a single
+  long session — the buffer-query habit did not stick.
+- Cumulative ≥50 slip rows across 3 sessions matches the strict
+  ≥10-cross-session-rows criterion (52 > 10). FP rate under warn:
+  zero documented complaints over multiple weeks of shipping.
+- Deny hook tested locally before swap: positive case emits
+  `permissionDecision: "deny"`, jq/yq pipes silently allowed,
+  no-pipe commands silently allowed.
+
+**Hook details:**
+- File: `claude-plugins/codescout-companion/hooks/il3-deny-hook.sh`
+  (copy of the warn variant with `additionalContext` → `permissionDecision:
+  "deny" + permissionDecisionReason`).
+- `hooks.json` PreToolUse matcher `mcp__.*__run_command` now points at
+  the deny script.
+- Warn variant (`il3-warn-hook.sh`) preserved in git history for
+  emergency revert; not registered in `hooks.json`.
 
 **Notes:**
 - The 45-row evidence covers 8 command families (`git`, `find`, `cargo`,

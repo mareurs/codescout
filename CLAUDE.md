@@ -117,7 +117,7 @@ Observed tool calls from real sessions judged against the ideal — our internal
 tool selection quality. Entries are T-NNN with tool, verdict (legitimate / debatable /
 wrong-tool), and prompt gap. Feeds Iron Law and Anti-Patterns updates.
 
-This file is a **librarian artifact** (id: `abc513d3ee0f0b50`). Params hold the structured
+This file is a **librarian artifact** (id: `b3fa993849ac83ab`). Params hold the structured
 T-N table; body holds full per-observation analysis.
 
 **Claude — append when:**
@@ -127,7 +127,7 @@ T-N table; body holds full per-observation analysis.
 **How to append (Claude):**
 ```
 # 1. Add structured entry to params
-artifact_augment(id="abc513d3ee0f0b50", merge=true,
+artifact_augment(id="b3fa993849ac83ab", merge=true,
   params={observations: [...existing..., {id:"T-NNN", tool:"...", verdict:"...", ...}]})
 
 # 2. Add analysis prose to body

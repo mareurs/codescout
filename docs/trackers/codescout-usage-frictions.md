@@ -123,7 +123,7 @@ variation as with U-1.
 
 
 
-### U-3 — IL3 piped `run_command`, session 2026-05-18 (×4)
+### U-3 — IL3 piped `run_command`, session 2026-05-18 (×7)
 
 **When:** Tracker backfill + jsonpath ship-prep session, 2026-05-18.
 Bound: this conversation (continued from compacted 2026-05-17 fix work).
@@ -132,20 +132,24 @@ Bound: this conversation (continued from compacted 2026-05-17 fix work).
 filter (`| head`, `| tail`, `| sort | uniq -c`, `&&`-chained `cat` →
 `grep`) instead of running bare and querying the `@cmd_*` buffer.
 
-**Confirming data:** four strikes in a single session, all flagged by
-Pika's PreToolUse warning:
+**Confirming data:** seven strikes in a single session, all flagged by
+Pika's PreToolUse warning. First four were captured during the tracker
+backfill + jsonpath ship-prep work; three more landed during the
+librarian-misclassification fix + IL3-hook scout (this same session):
 
 1. `git log --all --oneline | grep -E "^(808fe4b|a70816b5|66bee623)"`
-   — looking up short SHAs. Fix: `git log --all --oneline -200` →
-   `grep PATTERN @cmd_xxx`.
-2. `diff trackers/X.md trackers/archive/X.md | head -20` — comparing
-   two files. Fix: run `diff` bare, slice via buffer.
-3. `cat .codescout/.../@tool_X | grep ... | sort | uniq -c` — counting
-   status values in a JSON tool buffer. Fix: `grep PATTERN @tool_X`
-   directly (the @tool_* handle works the same as @cmd_*).
+2. `diff trackers/X.md trackers/archive/X.md | head -20`
+3. `cat .codescout/.../@tool_X | grep ... | sort | uniq -c`
 4. `cat _TEMPLATE.md && echo "---" && grep -oE "..." trackers/X.md | tail -3`
-   — fetching template + a small grep slice in one shot. Fix: run each
-   read bare, query separately.
+5. `ls docs/issues/*.md docs/issues/archive/*.md | wc -l` (count files)
+6. `cargo test --release classify 2>&1 | tail -20` (test output bound)
+7. `grep -A2 serde_json Cargo.lock | head -30` (Cargo.lock probe)
+
+Plus two more during the H-1 promotion scout itself:
+8. `grep -rn "iron.law.3..." | head -40` (settings sweep)
+9. `grep -rln "run_command\|iron.law" ... | head -20` (hooks sweep)
+
+Cumulative: 9 strikes this session.
 
 **Severity:** med — each strike added ~200-500 tokens of pipe output to
 my context vs. the bounded buffer-query path. Cumulative drift over a
