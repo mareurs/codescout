@@ -115,7 +115,7 @@ Two-part change in the same commit:
    branch in `route_tool_error`. Unified hint mentions both codes and notes
    the auto-retry already happens at the client layer.
 
-Commit SHA: `<TBD-on-commit>` on `experiments`.
+Commit SHA: `21c70936` on `experiments`.
 
 ## Tests added
 
