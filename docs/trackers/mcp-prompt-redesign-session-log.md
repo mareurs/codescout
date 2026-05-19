@@ -34,11 +34,13 @@
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-05-19 | med | plan-prose | open | Plan Task 11 underspecifies tests broken by source.md rewrite |
 | F-2 | 2026-05-19 | med | architectural | open | Pre-dispatch scout missed `SYMBOL_NAV_TOKEN` dead path + cross-file test |
+| F-3 | 2026-05-19 | med | architectural | mitigated | Scout undercounted `ToolContext` sites by ~2.5×; compiler-driven loop fixed it |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-05-19 | med | Pre-dispatch scout enumerated SERVER_INSTRUCTIONS-asserting tests | Would have failed ≥4 unplanned tests inside subagent | validated |
+| W-2 | 2026-05-19 | med | Compiler-driven enumeration for struct-field threading | Grep-only would have missed ~17 sites | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -214,6 +216,50 @@ There's also a latent issue: `src/prompts/source.md:645` contains a literal `{{i
 **Status:** mitigated — U4 fix-up dispatch addresses both items; entry stays open until U4 lands clean.
 
 **Fix idea / Pointer:** Future pre-rewrite scout for `include_str!`'d content should grep three patterns, not one: `<CONST>.contains`/`.find`/snapshot, `<CONST>.replace` (token writes), and any test referencing tokens from the file by basename. Also widen scope from the prompts crate to the workspace (`grep -r <surface-name>`), since cross-crate asserts exist.
+
+---
+
+## F-3 — Scout undercounted `ToolContext` construction sites by ~2.5×
+
+**Observed:** 2026-05-19, U8 pre-dispatch reconnaissance + post-implementer summary.
+
+**When:** Scouting before dispatching U8 (Plan Task 20: thread `guide_hints_emitted` through every `ToolContext` construction site).
+
+**Expected (scout):** `grep -E "ToolContext\s*\{|ToolContext::new"` on `src/` + `tests/` returned ~13 sites. I dispatched U8 with that enumeration.
+
+**Got (implementer):** Required ~30 sites. The compiler-driven discovery (`cargo build` errors out on every missing field) found them all, but the implementer fell back to a `perl -i -0pe` bulk substitution to keep up. Two files double-inserted (`tests/call_graph_live.rs`, `tests/e2e/edit_eval/runner.rs` — their `section_coverage:` field was on a single line that matched both regex passes); deduped manually.
+
+After landing: `mcp__codescout__grep guide_hints_emitted src/` shows 50+ matches across 13 files in `src/` alone, plus the test trees. Single test file `src/tools/symbol/tests.rs` had 24 separate construction sites.
+
+**Probable cause:** The grep pattern matched only single-line construction openings. Multi-line `ToolContext {\n  field1: ...,\n  ...\n}` constructions where the opener is just `ToolContext {` plus newline did still match — so the undercount is something else. Most likely: the regex matches per-file once when many of those tests use the field-construction inside macros / per-test helpers / nested scopes that the grep tool reports as fewer hits than actual usages. Subsequent verification confirmed `guide_hints_emitted` insertions number ~50 across the workspace.
+
+**Workaround:** Compiler-driven enumeration is more reliable than grep-driven for struct-field additions. The implementer's bulk-substitution-plus-cargo-build loop converged correctly. No regressions: `2408 pass, 2 pre-existing fails` after the field threading.
+
+**Severity:** med — would have caused implementer to grind through many compile errors had they only addressed the 13 sites I enumerated. They were unblocked by the perl pass; concerning is the double-insertion risk if the dedupe was missed.
+
+**Status:** mitigated — implementer absorbed the cost; the work landed clean. Entry stays open as a recon-quality lesson.
+
+**Fix idea / Pointer:** For struct-field additions, scout via `cargo build` after a no-op edit, not via grep on construction patterns. The compiler enumerates exhaustively; grep is for *finding* sites, not *counting* them.
+
+---
+
+## W-2 — Compiler-driven enumeration trumped grep-driven for struct-field threading
+
+**Observed:** 2026-05-19, U8 implementation.
+
+**Pattern:** When adding a non-`Option` field to a struct that's constructed in many sites, use the compiler as the enumerator: add the field, run `cargo build`, fix each "missing field" error in turn. This is exhaustive by construction. Grep-driven enumeration is approximate and may undercount.
+
+**Counterfactual:** Without compiler-driven enumeration, the implementer dispatched with a 13-site list would have hit 17 "missing field" errors, retried, hit more, and either run out of patience or skipped multiple files thinking they were done.
+
+**Confirming data points:**
+1. F-3 (this session) — 13 sites enumerated, ~30+ actually needed touching; compiler caught the gap.
+2. Pending — a future struct-field addition that uses the same loop.
+
+**Impact:** med — saves multi-iteration rework cost for any wide struct-field threading.
+
+**Promote-when:** A second project task uses this loop and confirms its reliability. At 2 datapoints, promote to CLAUDE.md as "Adding a required field to a widely-constructed struct: trust `cargo build`, not grep."
+
+**Status:** validated — single datapoint, will mature with reuse.
 
 ---
 

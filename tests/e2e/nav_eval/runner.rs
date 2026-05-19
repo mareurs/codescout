@@ -46,6 +46,7 @@ pub async fn nav_eval_context() -> Arc<ToolContext> {
         section_coverage: Arc::new(Mutex::new(
             codescout::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     })
 }
 

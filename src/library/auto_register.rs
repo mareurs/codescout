@@ -920,6 +920,7 @@ dependencies {
             section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
         };
 
         let registered = auto_register_deps(root, &ctx).await;
@@ -967,6 +968,7 @@ dependencies {
             section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
         };
 
         let first = auto_register_deps(root, &ctx).await;

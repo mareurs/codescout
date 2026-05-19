@@ -21,6 +21,7 @@ async fn activate_and_get_config() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     // No project initially
@@ -68,6 +69,7 @@ async fn activate_surfaces_project_hints_from_cargo_toml() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = ActivateProject
@@ -105,6 +107,7 @@ async fn activate_hints_empty_for_unrecognised_project() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = ActivateProject
@@ -130,6 +133,7 @@ async fn activate_nonexistent_path_errors() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let result = ActivateProject
         .call(
@@ -158,6 +162,7 @@ async fn activate_replaces_previous_project() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     // Activate dir2
@@ -190,6 +195,7 @@ async fn project_status_returns_all_sections() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let tool = ProjectStatus;
     let result = tool.call(json!({}), &ctx).await.unwrap();
@@ -220,6 +226,7 @@ async fn project_status_compact_shape() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let result = ProjectStatus.call(json!({}), &ctx).await.unwrap();
 
@@ -262,6 +269,7 @@ async fn project_status_includes_memory_staleness() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     // Create memories dir and a memory file
@@ -318,6 +326,7 @@ async fn activate_includes_cwd_hint() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let input = json!({ "path": dir.path().to_str().unwrap() });
     let result = ActivateProject.call(input, &ctx).await.unwrap();
@@ -345,6 +354,7 @@ async fn activate_hint_shows_switched_when_away_from_home() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let input = json!({ "path": dir2.path().to_str().unwrap() });
     let result = ActivateProject.call(input, &ctx).await.unwrap();
@@ -380,6 +390,7 @@ async fn activate_hint_shows_returned_when_back_home() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     // Switch away
     ActivateProject
@@ -445,6 +456,7 @@ depends_on = ["test"]
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = ProjectStatus
@@ -481,6 +493,7 @@ async fn activate_project_switches_focus_by_id() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     // Initially focused on root project
@@ -515,6 +528,7 @@ async fn activate_project_unknown_id_with_no_slash_returns_error() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     // "unknown-project" has no slash and does not exist as a project ID or a path
@@ -543,6 +557,7 @@ async fn post_compact_flushes_lsp_clients_and_returns_flushed() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     // post_compact=true should return flushed:true without the normal status fields
@@ -719,6 +734,7 @@ async fn activate_project_rw_includes_security_fields() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let result = ActivateProject
         .call(
@@ -754,6 +770,7 @@ async fn activate_project_ro_excludes_security_fields() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     // Now activate another project as RO
     let result = ActivateProject
@@ -787,6 +804,7 @@ async fn activate_project_includes_memories_and_index() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let result = ActivateProject
         .call(json!({"path": dir.path().to_str().unwrap()}), &ctx)
@@ -816,6 +834,7 @@ async fn activate_project_rw_hint_promotes_project_status() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let result = ActivateProject
         .call(
@@ -844,6 +863,7 @@ async fn activate_project_single_project_no_workspace() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let result = ActivateProject
         .call(json!({"path": dir.path().to_str().unwrap()}), &ctx)
@@ -878,6 +898,7 @@ async fn activate_project_focus_switch_returns_full_response() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     // Focus-switch by ID
@@ -923,6 +944,7 @@ async fn activate_project_workspace_includes_depends_on() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = ActivateProject
@@ -956,6 +978,7 @@ async fn activate_project_ro_hint_warns_switch_back() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     // Activate home first
@@ -1013,6 +1036,7 @@ async fn activate_project_memories_graceful_on_error() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let result = ActivateProject
         .call(json!({"path": dir.path().to_str().unwrap()}), &ctx)
@@ -1038,6 +1062,7 @@ async fn workspace_action_activate_dispatches_to_activate_project() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let result = Workspace
         .call(
@@ -1067,6 +1092,7 @@ async fn workspace_action_status_dispatches_to_project_status() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     ActivateProject
         .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
@@ -1094,6 +1120,7 @@ async fn workspace_action_list_projects_returns_workspace_field() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     ActivateProject
         .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
@@ -1123,6 +1150,7 @@ async fn workspace_action_unknown_errors() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let err = Workspace
         .call(json!({ "action": "wat" }), &ctx)
@@ -1148,6 +1176,7 @@ async fn activation_response_includes_stale_warning_when_no_stored_version() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let result = ActivateProject
         .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
@@ -1187,6 +1216,7 @@ async fn activation_response_emits_legacy_index_when_db_present() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let result = ActivateProject
         .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
@@ -1220,6 +1250,7 @@ async fn activation_response_omits_legacy_index_when_db_absent() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let result = ActivateProject
         .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
@@ -1254,6 +1285,7 @@ async fn activation_response_no_stale_warning_when_version_current() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let result = ActivateProject
         .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
@@ -1288,6 +1320,7 @@ async fn activation_response_includes_stale_warning_when_version_outdated() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let result = ActivateProject
         .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)

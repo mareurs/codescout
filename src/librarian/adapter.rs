@@ -79,6 +79,10 @@ impl crate::tools::Tool for LibrarianAdapter {
                 | "librarian_reindex"
         )
     }
+
+    fn relevant_guide_topic(&self) -> Option<&str> {
+        Some("librarian")
+    }
 }
 
 impl LibrarianAdapter {

@@ -114,6 +114,7 @@ fn new(x: f64, y: f64) -> Self {
             section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
         },
     ))
 }
@@ -557,6 +558,7 @@ async fn get_symbols_overview_accepts_detail_level() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     // Should error because no project, but NOT because of unknown param
     let err = Symbols
@@ -584,6 +586,7 @@ async fn path_not_found_is_recoverable_error() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let err = Symbols
@@ -613,6 +616,7 @@ async fn path_not_found_hint_mentions_list_dir() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let err = Symbols
@@ -644,6 +648,7 @@ async fn glob_no_match_is_recoverable_error() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let err = Symbols
@@ -670,6 +675,7 @@ async fn tools_error_without_project() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     assert!(Symbols.call(json!({"path": "x"}), &ctx).await.is_err());
     assert!(Symbols.call(json!({"query": "x"}), &ctx).await.is_err());
@@ -729,6 +735,7 @@ async fn symbols_project_wide_treesitter_fallback() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     // Project-wide search (no relative_path) — LSP will fail/return empty,
@@ -788,6 +795,7 @@ async fn get_symbols_overview_finds_nested_files() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     // Project-wide (no path) — should find both root and nested files
@@ -836,6 +844,7 @@ async fn symbols_overview_small_tree_recurses_fully() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     // Target "src" specifically — small tree (2 files) → full recursive symbol mode
@@ -1331,6 +1340,7 @@ println!("{} {}", x, y);
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     // rust-analyzer needs time to load the Cargo project and build its index
@@ -1593,6 +1603,7 @@ async fn rich_project_ctx() -> (tempfile::TempDir, ToolContext) {
             section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
         },
     )
 }
@@ -4042,6 +4053,7 @@ async fn references_returns_grouped_shape() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let tool = crate::tools::symbol::references::References;
@@ -4656,6 +4668,7 @@ async fn symbols_overview_falls_back_to_treesitter_when_lsp_returns_empty() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = Symbols
@@ -4703,6 +4716,7 @@ async fn symbols_overview_returns_empty_for_empty_file_via_treesitter() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = Symbols
@@ -4976,6 +4990,7 @@ async fn symbols_falls_back_to_document_symbols_on_bad_workspace_range() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = Symbols
@@ -5045,6 +5060,7 @@ async fn symbol_at_def_uses_col_param_over_identifier() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = SymbolAt
@@ -5091,6 +5107,7 @@ async fn symbol_at_hover_returns_ok_with_null_content_when_lsp_empty() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = SymbolAt
@@ -5138,6 +5155,7 @@ async fn symbol_at_hover_col_zero_rejected() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let err = SymbolAt
@@ -5180,6 +5198,7 @@ async fn symbol_at_hover_retries_once_on_mux_disconnect() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = SymbolAt
@@ -5222,6 +5241,7 @@ async fn symbol_at_hover_does_not_retry_non_disconnect_errors() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let err = SymbolAt
@@ -5284,6 +5304,7 @@ async fn symbol_at_returns_both_fields_by_default() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = SymbolAt
@@ -5436,6 +5457,7 @@ async fn symbols_propagates_error_when_fallback_also_fails() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = Symbols
@@ -5687,6 +5709,7 @@ fn test_ctx_with_agent(agent: Agent) -> ToolContext {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     }
 }
 
@@ -5955,6 +5978,7 @@ async fn symbols_with_multiple_matches_returns_all() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = Symbols

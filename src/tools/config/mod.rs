@@ -112,6 +112,7 @@ impl Tool for ActivateProject {
         })
     }
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
+        ctx.guide_hints_emitted.lock().clear();
         let path = super::require_str_param(&input, "path")?;
         let read_only = optional_bool_param(&input, "read_only");
 

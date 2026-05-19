@@ -56,6 +56,9 @@ pub struct CodeScoutServer {
     /// `refresh_instructions()` write-locks after each `activate_project`.
     instructions: Arc<parking_lot::RwLock<String>>,
     section_coverage: Arc<std::sync::Mutex<crate::tools::section_coverage::SectionCoverage>>,
+    /// Session-scoped set of guide topics already hinted to the model.
+    /// Reset on workspace(action="activate").
+    guide_hints_emitted: Arc<parking_lot::Mutex<std::collections::HashSet<String>>>,
     session_id: String,
     debug: bool,
     /// Last capabilities snapshot that was broadcast to the client via
@@ -137,6 +140,7 @@ impl CodeScoutServer {
         let section_coverage = Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         ));
+        let guide_hints_emitted = Arc::new(parking_lot::Mutex::new(Default::default()));
         let resources = Arc::new(tokio::sync::RwLock::new(Arc::new(
             build_resource_registry(&agent, Arc::clone(&lsp), &tools).await,
         )));
@@ -157,6 +161,7 @@ impl CodeScoutServer {
             tools,
             instructions: Arc::new(parking_lot::RwLock::new(instructions)),
             section_coverage,
+            guide_hints_emitted,
             session_id: uuid::Uuid::new_v4().to_string(),
             debug,
             last_broadcast_caps: Arc::new(parking_lot::Mutex::new(None)),
@@ -210,6 +215,7 @@ impl CodeScoutServer {
             progress,
             peer,
             section_coverage: self.section_coverage.clone(),
+            guide_hints_emitted: self.guide_hints_emitted.clone(),
         }
     }
 
@@ -2232,6 +2238,180 @@ mod tests {
         assert!(!server.is_write_call("memory", &json!({"action": "list"})));
         assert!(!server.is_write_call("memory", &json!({"action": "recall"})));
         assert!(!server.is_write_call("memory", &json!({})));
+    }
+}
+
+#[cfg(test)]
+mod guide_hint_tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    async fn make_server() -> (tempfile::TempDir, CodeScoutServer) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server = CodeScoutServer::new(agent).await;
+        (dir, server)
+    }
+
+    fn tool_by_name(server: &CodeScoutServer, name: &str) -> Arc<dyn crate::tools::Tool> {
+        server
+            .tools
+            .iter()
+            .find(|t| t.name() == name)
+            .unwrap_or_else(|| panic!("tool '{}' not registered", name))
+            .clone()
+    }
+
+    fn shared_ctx(server: &CodeScoutServer) -> crate::tools::ToolContext {
+        crate::tools::ToolContext {
+            agent: server.agent.clone(),
+            lsp: server.lsp.clone(),
+            output_buffer: server.output_buffer.clone(),
+            progress: None,
+            peer: None,
+            section_coverage: server.section_coverage.clone(),
+            guide_hints_emitted: server.guide_hints_emitted.clone(),
+        }
+    }
+
+    fn extract_hint(content: &[rmcp::model::Content]) -> Option<String> {
+        let text = content.first()?.as_text()?.text.clone();
+        let v: Value = serde_json::from_str(&text).ok()?;
+        v.get("_guide_hint")
+            .and_then(|h| h.as_str())
+            .map(String::from)
+    }
+
+    #[tokio::test]
+    async fn first_artifact_call_emits_librarian_hint() {
+        let (_dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        let tool = tool_by_name(&server, "artifact");
+        let result = tool
+            .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            extract_hint(&result)
+                .unwrap_or_default()
+                .contains("librarian"),
+            "expected _guide_hint mentioning 'librarian' on first artifact call"
+        );
+    }
+
+    #[tokio::test]
+    async fn second_artifact_call_no_hint() {
+        let (_dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        let tool = tool_by_name(&server, "artifact");
+        let _ = tool
+            .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
+            .await
+            .unwrap();
+        let result = tool
+            .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            extract_hint(&result).is_none(),
+            "second call must not re-emit the hint"
+        );
+    }
+
+    #[tokio::test]
+    async fn artifact_event_after_artifact_no_hint() {
+        let (_dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        let artifact = tool_by_name(&server, "artifact");
+        let event = tool_by_name(&server, "artifact_event");
+        let _ = artifact
+            .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
+            .await
+            .unwrap();
+        let result = event
+            .call_content(
+                json!({"action": "list", "artifact_id": "nonexistent"}),
+                &ctx,
+            )
+            .await;
+        if let Ok(content) = result {
+            assert!(
+                extract_hint(&content).is_none(),
+                "subsequent librarian-topic tool must not re-emit hint"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn activate_project_resets_hints() {
+        let (dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        let artifact = tool_by_name(&server, "artifact");
+        let workspace = tool_by_name(&server, "workspace");
+        let _ = artifact
+            .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
+            .await
+            .unwrap();
+        let _ = workspace
+            .call_content(
+                json!({"action": "activate", "path": dir.path().to_str().unwrap()}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let result = artifact
+            .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            extract_hint(&result)
+                .unwrap_or_default()
+                .contains("librarian"),
+            "activate should reset emitted set; first post-activate call should re-emit"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_command_without_overflow_no_progressive_hint() {
+        let (_dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        let tool = tool_by_name(&server, "run_command");
+        let result = tool
+            .call_content(json!({"command": "echo small"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            extract_hint(&result).is_none(),
+            "small output should not trigger progressive-disclosure hint"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_command_with_overflow_emits_progressive_hint_once() {
+        let (_dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        let tool = tool_by_name(&server, "run_command");
+        let big = tool
+            .call_content(json!({"command": "yes filler | head -2000"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            extract_hint(&big)
+                .unwrap_or_default()
+                .contains("progressive-disclosure"),
+            "overflowing output should emit progressive-disclosure hint"
+        );
+        let second = tool
+            .call_content(json!({"command": "yes filler | head -2000"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            extract_hint(&second).is_none(),
+            "second overflow must not re-emit the hint"
+        );
     }
 }
 
