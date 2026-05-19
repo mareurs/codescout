@@ -83,13 +83,7 @@ impl CodeScoutServer {
     /// Create a server with an existing LspManager (used for HTTP multi-session).
     pub async fn from_parts(agent: Agent, lsp: Arc<dyn LspProvider>, debug: bool) -> Self {
         let status = agent.project_status().await;
-        #[cfg_attr(not(feature = "librarian"), allow(unused_mut))]
-        let mut instructions = crate::prompts::build_server_instructions(status.as_ref());
-        #[cfg(feature = "librarian")]
-        if librarian_enabled_at_runtime(status.as_ref().map(|s| s.path.as_str())) {
-            instructions.push_str("\n\n");
-            instructions.push_str(crate::librarian::INSTRUCTIONS);
-        }
+        let instructions = crate::prompts::build_server_instructions(status.as_ref());
         #[cfg_attr(not(feature = "librarian"), allow(unused_mut))]
         let mut tools: Vec<Arc<dyn Tool>> = vec![
             // File tools (fully implemented)
@@ -373,13 +367,7 @@ impl CodeScoutServer {
     /// (e.g. memories written by a just-completed onboarding run).
     async fn refresh_instructions(&self) {
         let status = self.agent.project_status().await;
-        #[cfg_attr(not(feature = "librarian"), allow(unused_mut))]
-        let mut new_instructions = crate::prompts::build_server_instructions(status.as_ref());
-        #[cfg(feature = "librarian")]
-        if librarian_enabled_at_runtime(status.as_ref().map(|s| s.path.as_str())) {
-            new_instructions.push_str("\n\n");
-            new_instructions.push_str(crate::librarian::INSTRUCTIONS);
-        }
+        let new_instructions = crate::prompts::build_server_instructions(status.as_ref());
         *self.instructions.write() = new_instructions;
     }
 
@@ -1493,57 +1481,15 @@ mod tests {
         // Grow this list as prompts evolve; the unused-entry tripwire below will
         // tell you when to shrink it. Keep entries sorted.
         let allowlist_entries: &[&str] = &[
-            "acknowledge_risk",
             "architecture",
-            "awk",
-            "both",
-            "by_file",
-            "callees",
-            "callers",
-            "cargo",
-            "cat",
-            "class",
             "conventions",
-            "cwd",
-            "diff",
-            "direction",
-            "end_line",
-            "features_md",
-            "file_id",
-            "files",
-            "find",
-            "git",
             "gotchas",
-            "gradle",
             "hardware",
-            "head",
-            "json_path",
-            "limit",
-            "max_depth",
-            "mitigated",
             "model",
             "model_options",
-            "mvn",
-            "next",
-            "npm",
-            "offset",
-            "output_id",
-            "pattern",
-            "pnpm",
             "protected_memories",
-            "pytest",
-            "python",
-            "run_in_background",
-            "sed",
-            "sort",
-            "start_line",
-            "stat",
-            "struct",
-            "timeout_secs",
             "untracked",
             "url",
-            "wontfix",
-            "yarn",
         ];
         let allowlist: HashSet<&str> = allowlist_entries.iter().copied().collect();
         let mut allowlist_hits: HashMap<&str, usize> = allowlist_entries
@@ -1607,19 +1553,20 @@ mod tests {
             messages.join("\n  ")
         );
     }
-
-    #[test]
-    fn server_instructions_documents_goal_tracker_discovery() {
-        let s = crate::prompts::SERVER_INSTRUCTIONS;
+    #[tokio::test]
+    async fn every_tool_description_under_cap() {
+        const CAP: usize = 1800;
+        let (_dir, server) = make_server().await;
+        let over: Vec<(String, usize)> = server
+            .tools
+            .iter()
+            .map(|t| (t.name().to_string(), t.description().len()))
+            .filter(|(_, n)| *n > CAP)
+            .collect();
         assert!(
-            s.contains("goal-tracker") || s.contains("Goal-tracker"),
-            "server_instructions.md should document the goal-tracker discovery pattern \
-             (expected the string `goal-tracker` or `Goal-tracker` to appear)"
-        );
-        assert!(
-            s.contains(r#"tags":{"in":["goal"]}"#) || s.contains(r#"tags: ["goal"]"#),
-            "server_instructions.md should show the goal-tracker tag discovery query \
-             (expected one of: `tags\":{{\"in\":[\"goal\"]}}` or `tags: [\"goal\"]`)"
+            over.is_empty(),
+            "tool descriptions over the {CAP}-char cap: {:?}",
+            over
         );
     }
 

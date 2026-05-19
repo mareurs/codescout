@@ -32,15 +32,10 @@ impl LibrarianServer {
     }
 }
 
-/// Server instructions surfaced over MCP. Re-exported so embedders (e.g. the
-/// codescout binary) can append it to their own instructions block when the
-/// librarian subsystem is active.
-pub const INSTRUCTIONS: &str = include_str!("prompts/server_instructions.md");
-
 impl ServerHandler for LibrarianServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_instructions(INSTRUCTIONS)
+            .with_instructions("Librarian — artifact + tracker + memory management for the active workspace. See `get_guide(\"librarian\")` when used inside codescout, or the tool descriptions for standalone usage.")
     }
 
     async fn list_tools(

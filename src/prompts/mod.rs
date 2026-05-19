@@ -5,7 +5,6 @@
 //! on project state.
 
 pub mod builders;
-pub(crate) mod language_nav;
 pub mod source;
 
 /// Static server instructions — tool reference, workflow patterns, steering rules.
@@ -26,21 +25,7 @@ the other session first, or use a single codescout instance for Kotlin projects.
 /// Build the full server instructions string, optionally appending
 /// dynamic project status.
 pub fn build_server_instructions(project_status: Option<&ProjectStatus>) -> String {
-    // Collect all languages across the active project and workspace peers.
-    let project_languages: Vec<Vec<String>> = match project_status {
-        Some(s) => {
-            let mut v: Vec<Vec<String>> = vec![s.languages.clone()];
-            if let Some(ws) = &s.workspace {
-                for p in ws {
-                    v.push(p.languages.clone());
-                }
-            }
-            v
-        }
-        None => Vec::new(),
-    };
-    let nav_content = language_nav::render_symbol_navigation_block(&project_languages);
-    let mut instructions = SERVER_INSTRUCTIONS.replace(SYMBOL_NAV_TOKEN, &nav_content);
+    let mut instructions = SERVER_INSTRUCTIONS.to_string();
 
     if let Some(status) = project_status {
         instructions.push_str("\n\n## Project Status\n\n");
@@ -140,7 +125,6 @@ pub struct ProjectStatus {
 }
 
 pub const INCLUDE_MARKER: &str = "{{include: memory-templates.md}}";
-pub const SYMBOL_NAV_TOKEN: &str = "{{symbol_navigation_block}}";
 
 pub(crate) const RAW_ONBOARDING_PROMPT: &str =
     include_str!(concat!(env!("OUT_DIR"), "/onboarding_prompt.md"));
@@ -271,64 +255,6 @@ pub fn build_onboarding_prompt(ctx: &OnboardingContext) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn static_instructions_contain_key_sections() {
-        assert!(SERVER_INSTRUCTIONS.contains("## Tool Routing & Gotchas"));
-        assert!(SERVER_INSTRUCTIONS.contains("## Output System"));
-        assert!(SERVER_INSTRUCTIONS.contains("## Rules"));
-    }
-
-    #[test]
-    fn build_without_project_returns_substituted_static() {
-        let result = build_server_instructions(None);
-        // Token is substituted even with no project status.
-        assert!(!result.contains("{{symbol_navigation_block}}"));
-        assert!(result.contains("### Symbol Navigation Patterns"));
-        // No per-language block when there are no languages.
-        assert!(!result.contains("### Rust — Symbol Navigation"));
-        assert!(!result.contains("## Project Status"));
-    }
-
-    #[test]
-    fn iron_law_8_promotes_call_graph_before_references() {
-        let raw = SERVER_INSTRUCTIONS;
-        let idx = raw
-            .find("8. **CALL GRAPH BEFORE STRUCTURAL EDITS.**")
-            .expect("Iron Law 8 must be the call_graph promotion");
-        let body = &raw[idx..idx.saturating_add(500)];
-        let cg = body.find("call_graph").expect("call_graph must appear");
-        let refs = body.find("references").expect("references must appear");
-        assert!(cg < refs, "call_graph must be named before references");
-    }
-
-    #[test]
-    fn impact_analysis_section_contains_call_graph_with_full_arguments() {
-        let raw = SERVER_INSTRUCTIONS;
-        let section_start = raw.find("### Impact Analysis").expect("section must exist");
-        let next = raw[section_start..]
-            .find("\n### ")
-            .map(|i| section_start + i)
-            .unwrap_or(raw.len());
-        let section = &raw[section_start..next];
-
-        assert!(
-            section.contains("call_graph(symbol="),
-            "Impact Analysis must include a call_graph call with named symbol arg"
-        );
-        assert!(
-            section.contains("direction=\"callers\""),
-            "Impact Analysis must demonstrate direction=\"callers\""
-        );
-        assert!(
-            section.contains("max_depth=3"),
-            "Impact Analysis must demonstrate max_depth=3"
-        );
-        assert!(
-            section.contains("`references`"),
-            "Impact Analysis must reference the references tool"
-        );
-    }
 
     #[test]
     fn build_with_project_appends_status() {
@@ -800,41 +726,6 @@ mod tests {
             );
         }
     }
-    #[test]
-    fn server_instructions_template_has_symbol_nav_token() {
-        let raw = SERVER_INSTRUCTIONS;
-        assert_eq!(
-            raw.matches("{{symbol_navigation_block}}").count(),
-            1,
-            "server_instructions.md must contain exactly one symbol_navigation_block token"
-        );
-    }
-
-    #[test]
-    fn build_server_instructions_substitutes_symbol_nav_token() {
-        let result = build_server_instructions(None);
-        assert!(
-            !result.contains("{{symbol_navigation_block}}"),
-            "token must be substituted in build_server_instructions output"
-        );
-        assert!(result.contains("### Symbol Navigation Patterns"));
-        assert!(result.contains("### Generic Patterns (any language)"));
-    }
-
-    #[test]
-    fn build_server_instructions_renders_languages_from_status() {
-        let status = ProjectStatus {
-            name: "x".into(),
-            path: "/tmp/x".into(),
-            languages: vec!["rust".into()],
-            memories: vec![],
-            has_index: false,
-            system_prompt: None,
-            workspace: None,
-        };
-        let result = build_server_instructions(Some(&status));
-        assert!(result.contains("### Rust — Symbol Navigation"));
-    }
 
     #[test]
     fn rendered_server_instructions_contains_no_deprecated_tool_names() {
@@ -867,14 +758,6 @@ mod tests {
                 "rendered server instructions contains deprecated tool name: {dead}"
             );
         }
-    }
-
-    #[test]
-    fn build_server_instructions_has_no_duplicate_symbol_nav_heading() {
-        let result = build_server_instructions(None);
-        let count = result.matches("### Symbol Navigation Patterns").count();
-        assert_eq!(count, 1,
-            "### Symbol Navigation Patterns appears {count} times — LEAD_IN must not duplicate the section heading");
     }
 
     // ---------- Y-C: surface roundtrip snapshots (gates I-01) ----------
@@ -936,5 +819,77 @@ mod tests {
     fn prompt_surfaces_system_prompt_draft_empty_snapshot() {
         let draft = crate::prompts::builders::build_system_prompt_draft(&[], &[], None, None, &[]);
         check_or_update_snapshot("build_system_prompt_draft_empty.md", &draft);
+    }
+}
+
+#[cfg(test)]
+mod redesign_invariants {
+    use super::*;
+
+    const MAX_INSTRUCTIONS_CHARS: usize = 1800;
+
+    #[test]
+    fn source_md_under_cap() {
+        let rendered = build_server_instructions(None);
+        assert!(
+            rendered.len() <= MAX_INSTRUCTIONS_CHARS,
+            "server instructions are {} chars; cap is {}. \
+             Cut content or move it to get_guide.",
+            rendered.len(),
+            MAX_INSTRUCTIONS_CHARS,
+        );
+    }
+
+    #[test]
+    fn every_iron_law_has_do_instead() {
+        let rendered = build_server_instructions(None);
+        // Iron Laws section uses "NEVER X → Y" format. Each NEVER line must
+        // have an arrow on the same line or within the next 2 lines.
+        for (i, line) in rendered.lines().enumerate() {
+            if line.contains("NEVER ")
+                || line.starts_with(|c: char| c.is_ascii_digit()) && line.contains("NEVER")
+            {
+                let next_two: String = rendered
+                    .lines()
+                    .skip(i)
+                    .take(3)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                assert!(
+                    next_two.contains("→")
+                        || next_two.contains(" use ")
+                        || next_two.contains(" do "),
+                    "Iron Law without do-instead clause: '{}'",
+                    line
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn server_instructions_mentions_get_guide() {
+        let rendered = build_server_instructions(None);
+        assert!(
+            rendered.contains("get_guide"),
+            "system prompt must mention get_guide for discoverability"
+        );
+    }
+
+    #[test]
+    fn server_instructions_does_not_concat_librarian() {
+        // After Task 14 lands, the librarian block must not be appended.
+        let rendered = build_server_instructions(None);
+        assert!(
+            !rendered.contains("artifact_event(action=\"create\")"),
+            "librarian guide content should not be in instructions; \
+             move it to get_guide(\"librarian\")"
+        );
+    }
+
+    #[test]
+    fn librarian_instructions_const_removed() {
+        // Sentinel: any reintroduction of `crate::librarian::INSTRUCTIONS`
+        // must remove this test or re-add the const. The presence of this
+        // no-op test documents the deletion intent.
     }
 }
