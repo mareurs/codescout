@@ -32,9 +32,9 @@
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
-| F-1 | 2026-05-19 | med | plan-prose | open | Plan Task 11 underspecifies tests broken by source.md rewrite |
-| F-2 | 2026-05-19 | med | architectural | open | Pre-dispatch scout missed `SYMBOL_NAV_TOKEN` dead path + cross-file test |
-| F-3 | 2026-05-19 | med | architectural | mitigated | Scout undercounted `ToolContext` sites by ~2.5×; compiler-driven loop fixed it |
+| F-1 | 2026-05-19 | med | plan-prose | fixed-verified | Plan Task 11 underspecifies tests broken by source.md rewrite |
+| F-2 | 2026-05-19 | med | architectural | fixed-verified | Pre-dispatch scout missed `SYMBOL_NAV_TOKEN` dead path + cross-file test |
+| F-3 | 2026-05-19 | med | architectural | fixed-verified | Scout undercounted `ToolContext` sites by ~2.5×; compiler-driven loop fixed it |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
