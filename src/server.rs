@@ -120,6 +120,17 @@ impl CodeScoutServer {
             // Library tools
             Arc::new(Library),
         ];
+        if std::env::var("CODESCOUT_PROBE")
+            .ok()
+            .filter(|v| !v.is_empty() && v != "0")
+            .is_some()
+        {
+            tools.push(Arc::new(crate::tools::probe::ProbeTool));
+            tracing::warn!(
+                "CODESCOUT_PROBE=1 — registering __probe_description_cap__ \
+                 (debug-only; ~8.8KB description with sentinel markers)"
+            );
+        }
         #[cfg(feature = "librarian")]
         if librarian_enabled_at_runtime(status.as_ref().map(|s| s.path.as_str())) {
             if let Some(lib_ctx) = crate::librarian::try_build_runtime().await {
@@ -826,6 +837,15 @@ async fn build_resource_registry(
         tools.to_vec(),
     ))));
 
+    // Probe — debug-only, gated on CODESCOUT_PROBE=1.
+    if std::env::var("CODESCOUT_PROBE")
+        .ok()
+        .filter(|v| !v.is_empty() && v != "0")
+        .is_some()
+    {
+        let _ = rr.try_register(Box::new(crate::mcp_resources::probe::ProbeProvider));
+    }
+
     rr
 }
 
@@ -1472,39 +1492,55 @@ mod tests {
         let allowlist_entries: &[&str] = &[
             "acknowledge_risk",
             "architecture",
+            "awk",
             "both",
             "by_file",
             "callees",
             "callers",
+            "cargo",
+            "cat",
             "class",
             "conventions",
             "cwd",
+            "diff",
             "direction",
             "end_line",
             "features_md",
             "file_id",
             "files",
+            "find",
+            "git",
             "gotchas",
+            "gradle",
             "hardware",
+            "head",
             "json_path",
             "limit",
             "max_depth",
             "mitigated",
             "model",
             "model_options",
+            "mvn",
             "next",
+            "npm",
             "offset",
             "output_id",
             "pattern",
+            "pnpm",
             "protected_memories",
+            "pytest",
+            "python",
             "run_in_background",
             "sed",
+            "sort",
             "start_line",
+            "stat",
             "struct",
             "timeout_secs",
             "untracked",
             "url",
             "wontfix",
+            "yarn",
         ];
         let allowlist: HashSet<&str> = allowlist_entries.iter().copied().collect();
         let mut allowlist_hits: HashMap<&str, usize> = allowlist_entries

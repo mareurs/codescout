@@ -28,6 +28,7 @@ pub use usage::GetUsageStats;
 pub mod markdown;
 pub mod onboarding;
 pub mod read_file;
+pub mod probe;
 pub mod run_command;
 pub mod section_coverage;
 pub mod tree;
