@@ -24,6 +24,36 @@ here as a `get_guide` topic, not in the global prompt. The global prompt
 stays small (Iron Laws + tool inventory + decision tree); guides ship
 long-form content only to sessions that ask.
 
+## Live topics
+
+Shipped in Commit A (`e68f3a94`):
+
+| Topic | Source file | Hint trigger |
+|---|---|---|
+| `librarian` | `src/prompts/guides/librarian.md` | Any librarian-adapter call (unconditional) |
+| `tracker-conventions` | `src/prompts/guides/tracker-conventions.md` | — (manual `get_guide` only) |
+| `progressive-disclosure` | `src/prompts/guides/progressive-disclosure.md` | `run_command` / `symbols` buffer overflow |
+| `error-handling` | `src/prompts/guides/error-handling.md` | — (manual `get_guide` only) |
+
+## Mechanism
+
+First-call hint shipped in Commit C (U8+U9). Behavior:
+
+- Each `Tool` may override `relevant_guide_topic() -> Option<&'static str>`.
+  Default `None` — no hint emission.
+- `Tool::call_content` checks `ctx.guide_hints_emitted` (a session-scoped
+  `HashSet<String>` shared across all tools via `ToolContext`). If the topic
+  has not yet been emitted, inject a `_guide_hint` field on the response.
+- Dedup is **session-wide by topic**: calling a different tool with the same
+  topic (e.g. another librarian adapter) does NOT re-emit.
+- Reset: `workspace(action="activate")` clears the set as its first
+  statement, so a new project starts fresh.
+- For `progressive-disclosure`, the hint only fires when the tool returns
+  overflow (`exceeds_inline_limit` OR an `output_id` field is present —
+  the latter catches `run_command`'s pre-buffered envelope shape).
+
+Tests live in `src/server.rs::guide_hint_tests` (6 cases).
+
 ## Candidates
 
 | # | Topic slug | Source | Notes |
@@ -48,6 +78,8 @@ long-form content only to sessions that ask.
 
 ## Status
 
+
 - Last updated: 2026-05-19
-- Owner: U7 implementer (Surface D delivery)
-- Blocking: Plan Task 18 (get_guide tool wiring)
+- Owner: U7 (Surface D delivery) → U10 (mechanism update after U8+U9 landed)
+- Status: **shipped** — 4 live topics, first-call hint mechanism active.
+  Candidates table remains as the promotion backlog.

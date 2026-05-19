@@ -45,6 +45,8 @@ pub async fn edit_eval_context() -> EditEvalCtx {
         progress: None,
         peer: None,
         section_coverage: Arc::new(Mutex::new(SectionCoverage::new())),
+
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     });
 
     EditEvalCtx {

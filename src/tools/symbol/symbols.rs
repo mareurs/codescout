@@ -67,6 +67,11 @@ impl Tool for Symbols {
     fn name(&self) -> &str {
         "symbols"
     }
+
+    fn relevant_guide_topic(&self) -> Option<&str> {
+        Some("progressive-disclosure")
+    }
+
     fn description(&self) -> &str {
         "Symbol navigation. Path only \u{2192} file/dir overview. name/query/symbol \u{2192} search across project. Both \u{2192} scoped search."
     }

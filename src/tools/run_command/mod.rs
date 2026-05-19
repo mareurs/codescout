@@ -91,6 +91,11 @@ impl Tool for RunCommand {
     fn name(&self) -> &str {
         "run_command"
     }
+
+    fn relevant_guide_topic(&self) -> Option<&str> {
+        Some("progressive-disclosure")
+    }
+
     fn description(&self) -> &str {
         "Run a shell command in the project root. Large output is buffered as @cmd_* refs."
     }

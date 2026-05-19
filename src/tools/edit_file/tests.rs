@@ -47,6 +47,7 @@ async fn test_ctx() -> ToolContext {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     }
 }
 
@@ -65,6 +66,7 @@ async fn project_ctx() -> (tempfile::TempDir, ToolContext) {
             section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
         },
     )
 }
@@ -2575,6 +2577,7 @@ async fn search_pattern_accepts_library_path() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     // search_pattern with a path pointing into the library — the walker must
@@ -2992,6 +2995,7 @@ async fn edit_file_blocked_on_source_file_when_debug_enforce_symbol_tools() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let src_file = dir.path().join("src/lib.rs");
@@ -3045,6 +3049,7 @@ async fn edit_file_allows_literal_substitution_when_debug_enforce_symbol_tools()
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let src_file = dir.path().join("src/lib.rs");
@@ -4415,6 +4420,7 @@ async fn read_file_large_content_returns_file_id_not_inline() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let file = dir.path().join("big.txt");
     // Create a file > 10 KB (exceeds MAX_INLINE_TOKENS)
