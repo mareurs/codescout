@@ -21,7 +21,6 @@ pub mod workspace;
 pub mod current_project;
 
 pub mod server;
-pub use server::INSTRUCTIONS;
 pub mod tools;
 
 use anyhow::Result;
