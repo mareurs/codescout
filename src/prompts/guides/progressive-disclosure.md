@@ -1,0 +1,67 @@
+# Progressive Disclosure
+
+How codescout handles results too big to inline, and how the model
+should respond to them.
+
+## Output budgets
+
+Tool output is capped to keep the model's context window healthy.
+Results exceeding the inline budget are stored in a server-side
+`@tool_*` buffer and a compact summary is returned in their place.
+
+| Constant | Value | Source |
+|---|---|---|
+| `MAX_INLINE_TOKENS` | 2,500 tokens (~10 KB) | `src/tools/core/types.rs` |
+| `TOOL_OUTPUT_BUFFER_THRESHOLD` | 10,000 bytes | derived: `MAX_INLINE_TOKENS * 4` |
+| `INLINE_BYTE_BUDGET` | 9,000 bytes | derived: 90% of threshold |
+| `COMPACT_SUMMARY_MAX_BYTES` | 2,000 bytes | summary soft cap |
+| `COMPACT_SUMMARY_HARD_MAX_BYTES` | 3,000 bytes | summary hard cap |
+| `LINE_SOFT_CAP` | 150 lines | markdown read nudge |
+| `HEADINGS_HARD_CAP` | 40 headings | markdown map-shape escalation |
+
+Token estimate is `bytes / 4`. Above `MAX_INLINE_TOKENS`, the full
+result is buffered and the response shrinks to `{output_id, summary,
+hint, …}`.
+
+## The @ref buffer
+
+When a tool returns an overflow envelope (typical fields: `output_id`,
+`summary`, `hint`, `complete`, `next`):
+
+- `output_id` is a handle like `@cmd_abc` or `@tool_xyz` pointing to
+  the server-side buffer holding the full result.
+- `summary` is the compact form — capped at ~2 KB.
+- `hint` shows the most useful follow-up call for that tool.
+
+Query the buffer instead of re-running the tool:
+
+```
+grep PATTERN @cmd_abc                       # search the buffer
+read_file("@tool_xyz", json_path="$.foo")   # extract a JSON field
+read_file("@tool_xyz", start_line=N, end_line=M)  # slice lines
+```
+
+`@cmd_*` buffers come from `run_command`. `@tool_*` buffers come from
+other tools. Both are addressable by any tool that accepts a path.
+`@file_*` and `@ack_*` are sibling handle kinds — same mechanics.
+
+## Anti-patterns
+
+- **Re-running a tool because the result was "too long".** Query the
+  buffer instead. The full result is sitting on the server; pulling
+  one slice costs no extra tool latency and no extra LLM tokens.
+- **Asking the user to paste content from a buffered result.** The
+  buffer is server-side — you can read it directly with the `@ref`.
+- **Treating `output_id` as a filename.** It's an opaque handle;
+  `read_file("@tool_xyz")` works, filesystem paths derived from it
+  do not.
+- **Piping unbounded `run_command` output to log-trimmers** (`cargo
+  test 2>&1 | grep FAILED`). Server-side enforcement blocks this.
+  Run bare, then `grep FAILED @cmd_id` against the buffer.
+- **Treating the summary as authoritative.** It's a preview, not the
+  whole result. Pull from the buffer before drawing conclusions.
+
+## Related
+
+- Tool authoring patterns: `docs/PROGRESSIVE_DISCOVERABILITY.md`
+- Error routing for inputs that overflow: `get_guide("error-handling")`

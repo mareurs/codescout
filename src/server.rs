@@ -119,6 +119,8 @@ impl CodeScoutServer {
             Arc::new(Workspace),
             // Library tools
             Arc::new(Library),
+            // Deep-guidance tool — see docs/architecture/mcp-channel-caps.md
+            Arc::new(crate::tools::guide::GetGuide::new()),
         ];
         if std::env::var("CODESCOUT_PROBE")
             .ok()
@@ -1390,6 +1392,7 @@ mod tests {
             "index",
             "workspace",
             "library",
+            "get_guide",
         ];
         let core_count = server
             .tools
@@ -1423,8 +1426,8 @@ mod tests {
             .count();
         assert_eq!(
             core_count,
-            20,
-            "L3 target is 20 core tools; got {}: {:?}",
+            21,
+            "L3 target is 21 core tools; got {}: {:?}",
             core_count,
             server.tools.iter().map(|t| t.name()).collect::<Vec<_>>()
         );
