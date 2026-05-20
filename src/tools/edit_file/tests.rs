@@ -4512,3 +4512,71 @@ async fn read_file_large_token_count_is_buffered() {
         serde_json::to_string_pretty(&result).unwrap()
     );
 }
+
+#[tokio::test]
+async fn edit_file_batch_mixed_structural_lists_safe_indices_in_hint() {
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("app.py");
+    std::fs::write(
+        &path,
+        "MARKER = 'old'\n\ndef greet():\n    print('hello')\n",
+    )
+    .unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": "app.py",
+                "edits": [
+                    { "old_string": "MARKER = 'old'", "new_string": "MARKER = 'new'" },
+                    {
+                        "old_string": "def greet():\n    print('hello')",
+                        "new_string": "def greet():\n    print('hi')",
+                    },
+                ]
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    let recoverable = err
+        .downcast_ref::<RecoverableError>()
+        .expect("should be RecoverableError");
+    let msg = err.to_string();
+    let hint = recoverable.hint().unwrap_or("");
+
+    assert!(msg.contains("edit[1]"), "got: {msg}");
+    assert!(msg.contains("symbol definition"), "got: {msg}");
+    assert!(hint.contains("[1]"), "got: {hint}");
+    assert!(hint.contains("[0]"), "got: {hint}");
+    assert!(hint.contains("split"), "got: {hint}");
+
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(body, "MARKER = 'old'\n\ndef greet():\n    print('hello')\n");
+}
+
+#[tokio::test]
+async fn edit_file_batch_all_safe_passes_through() {
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("app.py");
+    std::fs::write(&path, "alpha bravo charlie\n").unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": "app.py",
+                "edits": [
+                    { "old_string": "alpha", "new_string": "ALPHA" },
+                    { "old_string": "bravo", "new_string": "BRAVO" },
+                ]
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(result.is_ok(), "all-safe batch must pass: {result:?}");
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(body, "ALPHA BRAVO charlie\n");
+}

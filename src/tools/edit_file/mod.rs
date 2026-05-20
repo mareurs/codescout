@@ -244,6 +244,57 @@ impl Tool for EditFile {
             )?;
             let mut content = std::fs::read_to_string(&resolved)?;
 
+            // Pre-pass: identify structural edits before applying any. When the
+            // batch mixes safe edits with structural ones, the caller benefits
+            // from knowing *which* edits would have been safe so they can split
+            // the call (safe ones via `edit_file`, structural ones via
+            // `edit_code`). Failing on the first structural edit alone leaves
+            // the caller to discover the split heuristically.
+            let mut structural_failures: Vec<(usize, String)> = Vec::new();
+            let mut safe_indices: Vec<usize> = Vec::new();
+            for (i, edit) in edits_arr.iter().enumerate() {
+                let old_s = edit["old_string"].as_str().unwrap_or("");
+                let new_s = edit["new_string"].as_str().unwrap_or("");
+                if old_s.is_empty() {
+                    // Empty old_string is caught in the application loop below
+                    // with its own error message — skip here so the structural
+                    // taxonomy stays clean.
+                    continue;
+                }
+                match guard_structural_rewrite(path, old_s, new_s) {
+                    Ok(()) => safe_indices.push(i),
+                    Err(e) => structural_failures.push((i, e.message)),
+                }
+            }
+            if !structural_failures.is_empty() {
+                let (first_idx, first_msg) = &structural_failures[0];
+                let structural_list = structural_failures
+                    .iter()
+                    .map(|(i, _)| i.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let safe_list = if safe_indices.is_empty() {
+                    String::from("none")
+                } else {
+                    safe_indices
+                        .iter()
+                        .map(|i| i.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
+                return Err(super::RecoverableError::with_hint(
+                    format!("edit[{first_idx}]: {first_msg}"),
+                    format!(
+                        "Batch aborted — structural edits at index(es) [{structural_list}] \
+                         must use edit_code. Edits that would have applied safely at \
+                         index(es) [{safe_list}]. To proceed: split the batch — call \
+                         edit_file with only [{safe_list}], then use edit_code for the \
+                         structural edit(s)."
+                    ),
+                )
+                .into());
+            }
+
             for (i, edit) in edits_arr.iter().enumerate() {
                 let old_s = edit["old_string"].as_str().ok_or_else(|| {
                     super::RecoverableError::new(format!("edit[{i}]: old_string is required"))
@@ -257,11 +308,6 @@ impl Tool for EditFile {
                         "Each edit must have a non-empty old_string.",
                     )
                     .into());
-                }
-
-                if let Err(mut e) = guard_structural_rewrite(path, old_s, new_s) {
-                    e.message = format!("edit[{i}]: {}", e.message);
-                    return Err(e.into());
                 }
 
                 let match_count = content.matches(old_s).count();
