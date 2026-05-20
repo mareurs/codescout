@@ -378,6 +378,7 @@ async fn project_ctx() -> (tempfile::TempDir, ToolContext) {
             section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
         },
     )
 }
@@ -397,6 +398,7 @@ async fn project_ctx_at(root: &std::path::Path) -> ToolContext {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     }
 }
 
@@ -534,6 +536,7 @@ async fn onboarding_errors_without_project() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     assert!(Onboarding.call(json!({}), &ctx).await.is_err());
 }
@@ -839,6 +842,7 @@ async fn onboarded_project_ctx() -> (tempfile::TempDir, ToolContext) {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     // Run full onboarding to write config + onboarding memory
     Onboarding.call(json!({}), &ctx).await.unwrap();
@@ -1030,6 +1034,7 @@ async fn project_ctx_with_progress(
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     (dir, ctx, sink)
 }
@@ -1203,6 +1208,7 @@ async fn onboarding_returns_gathered_context_fields() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let result = Onboarding.call(json!({}), &ctx).await.unwrap();
 
@@ -1235,6 +1241,7 @@ async fn onboarding_includes_system_prompt_draft_in_subagent_prompt() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let result = Onboarding.call(json!({}), &ctx).await.unwrap();
 
@@ -2361,6 +2368,7 @@ async fn onboarding_discovers_sub_projects() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = Onboarding
@@ -2587,17 +2595,15 @@ async fn run_command_buffered_output_has_output_id_before_stdout() {
 }
 
 #[tokio::test]
-async fn piped_grep_returns_unfiltered_ref() {
-    let (dir, ctx) = project_ctx().await;
-    std::fs::write(
-        dir.path().join("items.txt"),
-        "apple\nbanana\ncherry\n",
-    )
-    .unwrap();
+async fn il3_blocks_cargo_pipe_grep_via_run_command() {
+    // Integration check that the IL3 gate fires through the full run_command
+    // path (not just the unit fn). cat|grep is now bounded-LHS and allowed —
+    // use cargo as the canonical unbounded LHS sentinel.
+    let (_dir, ctx) = project_ctx().await;
     let err = RunCommand
-        .call(json!({ "command": "cat items.txt | grep apple" }), &ctx)
+        .call(json!({ "command": "cargo test | grep FAILED" }), &ctx)
         .await
-        .expect_err("IL3 should block live `cat | grep`");
+        .expect_err("IL3 should block live `cargo test | grep`");
     let msg = err.to_string();
     assert!(msg.contains("IL3 violation"), "missing IL3 marker: {msg}");
     assert!(msg.contains("buffer system"), "missing rewrite hint: {msg}");
@@ -2618,33 +2624,29 @@ async fn non_filter_pipe_no_unfiltered_ref() {
 }
 
 #[tokio::test]
-async fn grep_no_match_suppresses_unfiltered_ref() {
-    let (dir, ctx) = project_ctx().await;
-    std::fs::write(dir.path().join("items.txt"), "apple\nbanana\n").unwrap();
+async fn il3_blocks_chained_unbounded_pipe() {
+    // Chained pipes off an unbounded LHS still block (was originally
+    // cat|grep|head; cat is now bounded — substitute cargo).
+    let (_dir, ctx) = project_ctx().await;
     let err = RunCommand
         .call(
-            json!({ "command": "cat items.txt | grep zzz | head -5" }),
+            json!({ "command": "cargo test | grep zzz | head -5" }),
             &ctx,
         )
         .await
-        .expect_err("IL3 should block live `cat | grep | head`");
+        .expect_err("IL3 should block live `cargo test | grep | head`");
     assert!(err.to_string().contains("IL3 violation"));
 }
 
 #[tokio::test]
-async fn unfiltered_truncated_when_over_threshold() {
-    let (dir, ctx) = project_ctx().await;
-    let over_bytes = crate::tools::MAX_INLINE_TOKENS * 4 + 1000;
-    let mut content = String::new();
-    for i in 0.. {
-        content.push_str(&format!("line{i}\n"));
-        if content.len() > over_bytes {
-            break;
-        }
-    }
-    std::fs::write(dir.path().join("big.txt"), &content).unwrap();
+async fn il3_blocks_unbounded_pipe_pre_exec() {
+    // IL3 fires before exec — verifies the gate does not depend on actual
+    // output size. (Original test built a >MAX_INLINE_TOKENS file behind
+    // `cat big.txt | grep`; cat is now bounded-LHS, so we use cargo as the
+    // unconditionally-unbounded LHS.)
+    let (_dir, ctx) = project_ctx().await;
     let err = RunCommand
-        .call(json!({ "command": "cat big.txt | grep line0" }), &ctx)
+        .call(json!({ "command": "cargo test | grep line0" }), &ctx)
         .await
         .expect_err("IL3 should block regardless of payload size");
     assert!(err.to_string().contains("IL3 violation"));
@@ -3054,6 +3056,7 @@ async fn onboarding_creates_workspace_toml_for_multi_project() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     Onboarding
@@ -3096,6 +3099,7 @@ async fn onboarding_skips_workspace_toml_for_single_project() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     Onboarding
@@ -3608,6 +3612,7 @@ async fn onboarding_triggers_refresh_when_version_stale() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = Onboarding.call(json!({}), &ctx).await.unwrap();
@@ -3664,6 +3669,7 @@ async fn onboarding_fast_path_when_version_current() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = Onboarding.call(json!({}), &ctx).await.unwrap();
