@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-05-20
-closed:
+closed: 2026-05-20
 severity: low
 owner: marius
 related: []
@@ -88,18 +88,34 @@ None — friction is observable and reproducible on demand; no investigation req
 
 ## Fix
 
-Plan-stage. Three viable directions:
+Shipped as **`claude-plugins:958c0b9`** (codescout-companion 1.11.1).
 
-1. **Companion hook becomes path-aware.** Allow `Bash` through when the command's `cd` target is a known sibling project (configured list, or detected via `claude mcp list` projects). Lowest blast radius; fix lives in the hook.
-2. **codescout `run_command` adds an `external_cwd` mode.** Explicit opt-in, separate parameter from `cwd`, only honored for known workspace projects, audit-logged. Keeps the sandbox safe by default and adds a documented escape hatch.
-3. **Document the workspace-switch dance.** Lowest-cost: add a section to `CLAUDE.md` and the companion plugin's docs explaining when the workspace switch is the intended path. No code change.
+The pre-tool-guard Bash branch now extracts an effective cwd from a leading `cd <dir>` (absolute / quoted / tilde-expanded / relative), canonicalizes via `realpath -m`, and exits 0 (allow) when the result lies outside the announced `$CWD` subtree. Symmetric with the existing Read/Edit/Grep/Glob/Write workspace-scoping pattern. `is_in_workspace` could not be reused because `WORKSPACE_ROOT` is empty by default — fail-closed there is correct for source-file scoping but wrong for cross-repo cd.
 
-Recommend option 3 immediately, options 1 or 2 as a follow-up if the friction recurs across sessions.
+Change lives at `codescout-companion/hooks/pre-tool-guard.sh` (Bash branch, ~13 new lines after `CMD=$(...)`).
 
+**Option 2 (codescout `run_command` external_cwd opt-in) deferred** — not needed for the common shape (`cd /path && cmd` via native Bash now bypasses the companion hook cleanly). Reopen if someone needs codescout's smart-summary / `@cmd_*` buffer routing for sibling-repo work; without that, plain Bash is sufficient.
+
+**Note on archival:** the fix shipped to `claude-plugins/main`, not `code-explorer/master`. The standard CLAUDE.md archive rule ("move to `docs/issues/archive/` AFTER the fix ships to master") was written for in-repo fixes. This file stays in `docs/issues/` until a comparable cross-repo archival convention is settled.
 ## Tests added
 
-N/A — no fix shipped yet.
+`codescout-companion/hooks/pre-tool-guard.test.sh` — 9-case matrix following the `il3-deny-hook.test.sh` shape:
 
+| Case | Command | Expected |
+|---|---|---|
+| cd-sibling-abs | `cd /home/marius/work/claude/claude-plugins && git status` | allow |
+| cd-sibling-quoted | `cd "/home/marius/work/mirela/backend-kotlin" && git status` | allow |
+| cd-sibling-tilde | `cd ~/work/claude/claude-plugins && git log -1` | allow |
+| cd-sibling-relative | `cd ../claude-plugins && git status` | allow |
+| cd-tmp | `cd /tmp && ls` | allow |
+| bare-cargo-test | `cargo test` | deny |
+| cd-subdir-in-ws | `cd src && ls` | deny |
+| cd-abs-back-into-ws | `cd $CWD/src && ls` | deny |
+| grep-on-source | `grep foo src/main.rs` | deny |
+
+Run: `bash codescout-companion/hooks/pre-tool-guard.test.sh`. All 9 pass.
+
+The test sources the real `pre-tool-guard.sh` and lets `detect-tools.sh → detect.py` resolve the environment from the announced `$CWD` (code-explorer in this matrix). No env stubs — black-box.
 ## Workarounds
 
 Pick the right shape for the situation:
@@ -110,13 +126,7 @@ Pick the right shape for the situation:
 
 ## Resume
 
-If/when this friction recurs in a third session, escalate to option 1 or 2:
-
-- Inspect `~/work/claude/claude-plugins/codescout-companion/hooks/pre-tool-guard.sh` to scope where path-aware allowlist would slot in.
-- For option 2, the codescout source is `src/tools/run_command/` — read the cwd-escape check and consider an `external_cwd` parameter gated by an allowlist.
-
-This session opted for workspace activation + restore as a one-off.
-
+N/A — fixed in `claude-plugins:958c0b9`. If the friction recurs (third datapoint), escalate to option 2: add an `external_cwd` parameter to codescout's `run_command` so the smart-summary / `@cmd_*` buffer machinery works for sibling-repo shells too. Source location: `src/tools/run_command/` (cwd-escape check).
 ## References
 
 - `~/work/claude/claude-plugins/codescout-companion/hooks/pre-tool-guard.sh` — companion Bash deny hook.
