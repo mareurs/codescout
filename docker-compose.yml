@@ -231,7 +231,7 @@ services:
       dockerfile: Dockerfile
       args:
         TEI_REF: 1588129f932125a780ab97ccb300e7774b02d230
-        PYTORCH_ROCM_ARCH: gfx1100
+        PYTORCH_ROCM_ARCH: gfx1101
     image: codescout/sparse-amd:tei-1588129f93
     container_name: codescout-sparse-amd
     restart: unless-stopped
