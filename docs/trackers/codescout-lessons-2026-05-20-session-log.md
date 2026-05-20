@@ -59,6 +59,7 @@ tags: ["foreign-session-feedback", "bugs", "agentic-surface", "hints"]
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-05-20 | med | Scout existing `docs/issues/` before drafting new F-N for a foreign-reported bug | Without recon, would have re-investigated `symbols(include_body=true)` from scratch — ~30 min on a fix that landed 2 commits ago; would have written a duplicate fix proposal | validated |
+| W-2 | 2026-05-20 | high | After shipping any codescout fix, verify the running MCP binary actually contains the fix — don't trust `cargo build --release` alone | Without the post-`/mcp`-reconnect IL3 probe (`ls docs/issues \| head`), would have claimed F-2 + F-3 + IL3 fixes were live and told the user to test against a binary still at `/home/marius/xxx/codescout` (mtime 2026-05-19 20:18, 1 day stale). User would have re-reported the bugs as still-broken and the cycle would have wasted another session debugging "why is the fix not working" | validated |
 | W-2 | 2026-05-20 | high | Catalog SQLite dump trumps schema inspection — query `sqlite3 ~/.local/share/librarian/catalog.db 'SELECT kind, COUNT(*) FROM artifact GROUP BY kind ORDER BY 2 DESC'` before proposing a schema extension | Without this query I would have shipped the 5-axis `shape`/`authoring` proposal; `kind` already has 13 values covering ~80% of the proposed `shape` enum. Saved: 1 redundant column + 1 schema migration PR + per-file backfill | validated |
 | W-3 | 2026-05-20 | high | Snow Lion Phase 3 self-revision (iterate 3+ times when confidence is high) — overturned 3-axis → 4-axis → 5-axis → kind-extension across 5 turns | Without iterative Phase 3, the 5-axis proposal would have opened this tracker as a tracker-wide ground truth; 6-9 entries would have cited the wrong schema and required rewriting after W-2's catalog dump landed | validated |
 
@@ -693,6 +694,45 @@ One row count distinguishes "field exists and is load-bearing" (`active: 96`) fr
 **Promote-when:** A second multi-turn analysis where iterative Phase 3 validate flips a high-confidence proposal in a measurable way. At 2 datapoints, promote to CLAUDE.md as: "Snow Lion proposals carrying schema or architecture changes require at least one Phase 3 validation against production distribution data (catalog dump, import graph, or call-graph sample) BEFORE tracker-opening or PR-drafting. High-confidence claims that have not faced validation are guesses dressed as findings."
 
 **Status:** validated
+
+---
+
+## W-2 — Verify the running MCP binary contains the fix; build alone is not enough
+
+**Observed:** 2026-05-20, after cherry-picking 3 fix commits to master + pushing + force-pushing experiments. User did `/mcp` reconnect and asked me to verify. First test (`ls docs/issues | head -3`) tripped the OLD IL3 logic — the fix that should have allowed bounded-LHS pipes still blocked them. Inspection found `~/.cargo/bin/codescout` mtime was 2026-05-19 20:18 (1 day stale), and the binary had been installed from a stale clone path `/home/marius/xxx/codescout` rather than this working tree.
+
+**Pattern:** After shipping any codescout fix that should be observable through the MCP surface (IL3 rule change, new tool, new hint string, error-message rewording, response-shape change), run a one-line probe through the live MCP that exercises the change BEFORE claiming the fix is live. If the probe behaves the old way, three layers can be stale:
+
+1. **`target/release/codescout`** — stale if `cargo build --release` hasn't run since the change landed in `HEAD`.
+2. **`~/.cargo/bin/codescout`** — stale if `cargo install --path . --force` hasn't run since `target/release` was rebuilt. (Often points at a stale clone path, not the active working tree.)
+3. **The running MCP server process** — stale if `/mcp` reconnect happened BEFORE the binary update at layers 1 or 2.
+
+The canonical sequence to ship a fix to the live session is:
+
+```
+git commit (or cherry-pick) on the source
+→ cargo build --release          (refreshes target/release/codescout)
+→ cargo install --path . --force (refreshes ~/.cargo/bin/codescout from this tree)
+→ /mcp reconnect                 (the running server re-spawns from the new binary)
+→ one-line MCP probe that exercises the change
+```
+
+None of layers 1–3 surface an error if you skip them — the system silently runs the stale binary. The probe is the only verifier.
+
+**Counterfactual:** Without this probe step, I would have written the W-1 "foreign session blocked until release" claim under the assumption that THIS session's MCP host was already running the fix. The user's next action would have been to test F-2 (mixed-batch edit_file) against a binary still missing the pre-pass, observed the old all-or-nothing rejection, and re-reported it as a regression. Concrete evidence: IL3 fired on `ls | head` immediately after `/mcp` reconnect — a fix that has been on `experiments` for 2 days (`dffaaf84`, 2026-05-18) and on `master` for 0 days had not yet reached the running server. The mtime check (`stat ~/.cargo/bin/codescout`) named the gap in 1 command. Without it, debugging "why doesn't the fix work" would have taken ≥1 session round-trip.
+
+**Confirming data points:**
+
+1. W-2 (this session) — IL3 probe tripped old binary post-reconnect; `stat ~/.cargo/bin/codescout` showed mtime 1 day stale and install-from-path pointing at `/home/marius/xxx/codescout` instead of code-explorer. `cargo install --path . --force` resolved it.
+2. Pending: any future fix where the verify-by-probe step catches a stale running binary.
+
+**Impact:** high — prevents a re-report-bug cycle that costs at least one session round-trip. Compounds every time a fix lands. The post-ship probe takes <10 seconds.
+
+**Promote-when:** A second data point confirms the probe step caught a stale-binary case other than the IL3 one. At 2 datapoints, promote to CLAUDE.md "Standard Ship Sequence" as a new step 5 (or to the existing post-cherry-pick instructions):
+
+> *After cherry-pick lands on `master` and push completes, but BEFORE telling the user the fix is live, run `cargo install --path . --force` and a one-line MCP probe that exercises the change. If the probe behaves the old way, the running binary is stale — the `/mcp` reconnect alone is not enough.*
+
+**Status:** validated — single datapoint, observable failure caught + fixed before any user re-report. Awaiting promotion criterion. Related artifact: the surprise install-source path (`/home/marius/xxx/codescout`) suggests a separate F-N for "cargo install --path . --force should be re-run from the canonical project root after any branch/repo move"; deferred until that friction reproduces.
 
 ---
 
