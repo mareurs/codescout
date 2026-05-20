@@ -62,14 +62,68 @@ pub fn perform_section_edit_ext(
                 .map(|l| heading_level(l.trim_end()).is_some())
                 .unwrap_or(false);
 
+            // F-3: a trailing horizontal-rule separator (`---`, `***`, `___`)
+            // immediately before the next sibling heading is structurally a
+            // between-sections separator, not the current section's content.
+            // Wholesale-body replace silently destroys it. Shrink the replace
+            // range to exclude that trailing HR so it survives the edit.
+            // Only applies when the HR is preceded by at least one line of
+            // real body content (a section whose entire body is just an HR
+            // legitimately has that HR replaced).
+            let body_start = heading_idx + 1;
+            let replace_end_idx = {
+                let mut walk = end_idx;
+                while walk > body_start && lines[walk - 1].trim().is_empty() {
+                    walk -= 1;
+                }
+                if walk <= body_start {
+                    end_idx
+                } else {
+                    let hr_idx = walk - 1;
+                    let line = lines[hr_idx];
+                    let is_hr = !line.starts_with("    ") && {
+                        let trimmed = line.trim();
+                        match trimmed.chars().next() {
+                            Some(marker @ ('-' | '*' | '_')) => {
+                                let mut count = 0usize;
+                                let mut ok = true;
+                                for c in trimmed.chars() {
+                                    if c == marker {
+                                        count += 1;
+                                    } else if c != ' ' {
+                                        ok = false;
+                                        break;
+                                    }
+                                }
+                                ok && count >= 3
+                            }
+                            _ => false,
+                        }
+                    };
+                    if !is_hr {
+                        end_idx
+                    } else {
+                        let mut before_hr = hr_idx;
+                        while before_hr > body_start && lines[before_hr - 1].trim().is_empty() {
+                            before_hr -= 1;
+                        }
+                        if before_hr <= body_start {
+                            end_idx
+                        } else {
+                            hr_idx
+                        }
+                    }
+                }
+            };
+
             let result = if replace_heading {
                 let before = join_lines(&lines[..heading_idx]);
-                let after = join_lines_tail(&lines[end_idx..]);
+                let after = join_lines_tail(&lines[replace_end_idx..]);
                 format!("{}{}{}", before, ensure_trailing_newline(new), after)
             } else {
                 let heading_line_str = lines[heading_idx];
                 let before = join_lines(&lines[..heading_idx]);
-                let after = join_lines_tail(&lines[end_idx..]);
+                let after = join_lines_tail(&lines[replace_end_idx..]);
                 let separator = if new.starts_with('\n') { "\n" } else { "\n\n" };
                 format!(
                     "{}{}{}{}{}",

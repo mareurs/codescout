@@ -1693,3 +1693,101 @@ fn frontmatter_param_not_object_rejected() {
         .to_string();
     assert!(err.contains("must be an object"), "got: {err}");
 }
+
+#[test]
+fn replace_preserves_trailing_horizontal_rule_separator() {
+    // F-3: a `---` separator between two same-level sections must survive a
+    // wholesale-body `replace` on the section above it. The HR belongs to
+    // neither section; it is a between-sections separator.
+    let content = "## Scan state\n\nold body line\n\n---\n\n## How to use\n\ndetails\n";
+    let result = perform_section_edit(
+        content,
+        "Scan state",
+        "replace",
+        Some("new table content\n"),
+    )
+    .unwrap();
+
+    assert!(
+        result.contains("new table content"),
+        "new body must be present: {result:?}"
+    );
+    assert!(
+        result.contains("---"),
+        "trailing horizontal-rule separator must survive replace: {result:?}"
+    );
+    // The HR must still sit between the two headings (not be re-injected
+    // somewhere else by accident).
+    let hr_pos = result.find("---").unwrap();
+    let next_heading_pos = result.find("## How to use").unwrap();
+    assert!(
+        hr_pos < next_heading_pos,
+        "HR must precede the next heading: {result:?}"
+    );
+    assert!(
+        result.find("new table content").unwrap() < hr_pos,
+        "new content must precede the HR: {result:?}"
+    );
+}
+
+#[test]
+fn replace_does_not_preserve_hr_when_body_is_only_hr() {
+    // Edge case: section body is *only* an HR (no real content before it).
+    // In that case the HR is the body — replace should consume it like any
+    // other body content. Otherwise we would preserve content the caller
+    // explicitly asked to overwrite.
+    let content = "## Divider\n\n---\n\n## Next\n\ndetails\n";
+    let result =
+        perform_section_edit(content, "Divider", "replace", Some("real content\n")).unwrap();
+
+    assert!(result.contains("real content"));
+    // The HR that used to BE the body is gone. (The trailing-`---` heuristic
+    // only fires when there's body content BEFORE the HR.)
+    let divider_pos = result.find("## Divider").unwrap();
+    let next_pos = result.find("## Next").unwrap();
+    let between = &result[divider_pos..next_pos];
+    assert!(
+        !between.contains("---"),
+        "HR-only body must be replaced, not preserved: {between:?}"
+    );
+}
+
+#[test]
+fn replace_preserves_hr_separator_with_trailing_blank_lines() {
+    // Variant: `---` followed by multiple blank lines before the next heading.
+    // Must still be detected and preserved.
+    let content = "## A\n\nbody A\n\n---\n\n\n## B\n\nbody B\n";
+    let result = perform_section_edit(content, "A", "replace", Some("new A\n")).unwrap();
+
+    assert!(result.contains("new A"));
+    assert!(
+        result.contains("---"),
+        "HR with multiple trailing blank lines must survive: {result:?}"
+    );
+}
+
+#[test]
+fn replace_does_not_misdetect_emphasis_as_hr() {
+    // Sanity: `***` is also a CommonMark HR marker, but a single `*` is not.
+    // Ensure the detector doesn't trigger on lines containing emphasis markers
+    // that aren't true HRs.
+    let content = "## A\n\nbody with *emphasis* end\n\n## B\n\nbody B\n";
+    let result = perform_section_edit(content, "A", "replace", Some("new A\n")).unwrap();
+    assert!(result.contains("new A"));
+    assert!(
+        !result.contains("*emphasis*"),
+        "original body must be fully replaced when no HR is present: {result:?}"
+    );
+}
+
+#[test]
+fn replace_preserves_asterisk_hr_separator() {
+    // CommonMark supports `***` and `___` as HR markers too. Confirm.
+    let content = "## A\n\nbody A\n\n***\n\n## B\n\nbody B\n";
+    let result = perform_section_edit(content, "A", "replace", Some("new A\n")).unwrap();
+    assert!(result.contains("new A"));
+    assert!(
+        result.contains("***"),
+        "`***` HR must survive replace: {result:?}"
+    );
+}
