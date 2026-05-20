@@ -440,25 +440,24 @@ pub fn list_git_worktrees(project_root: &Path) -> Vec<PathBuf> {
 /// Returns Ok(()) if allowed, or an error message explaining how to enable it.
 pub fn check_tool_access(tool_name: &str, config: &PathSecurityConfig) -> Result<()> {
     match tool_name {
-        "run_command"
-            if !config.shell_enabled => {
-                bail!(
+        "run_command" if !config.shell_enabled => {
+            bail!(
                     "Shell commands are disabled. Set security.shell_enabled = true in .codescout/project.toml to enable."
                 );
-            }
+        }
         "approve_write" | "create_file" | "edit_file" | "edit_code" | "library"
         | "edit_markdown"
-            if !config.file_write_enabled => {
-                bail!(
+            if !config.file_write_enabled =>
+        {
+            bail!(
                     "File writes are disabled for this project. If this project was activated in read-only mode, call workspace(action='activate', read_only: false) to enable writes."
                 );
-            }
-        "semantic_search" | "index"
-            if !config.indexing_enabled => {
-                bail!(
+        }
+        "semantic_search" | "index" if !config.indexing_enabled => {
+            bail!(
                     "Indexing tools are disabled. Set security.indexing_enabled = true in .codescout/project.toml to enable."
                 );
-            }
+        }
         _ => {} // All other tools are always allowed
     }
     Ok(())
