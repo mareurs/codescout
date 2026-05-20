@@ -100,7 +100,11 @@ mod tests {
     #[test]
     fn description_contains_sentinels() {
         let d = PROBE_DESC.as_str();
-        for m in ["SENTINEL_0200_AA", "SENTINEL_2000_EE", "SENTINEL_END_C0FFEE"] {
+        for m in [
+            "SENTINEL_0200_AA",
+            "SENTINEL_2000_EE",
+            "SENTINEL_END_C0FFEE",
+        ] {
             assert!(d.contains(m), "missing {m}");
         }
     }
