@@ -495,6 +495,17 @@ The `PreToolUse` hook will **block** any attempt to use the native `Read`, `Grep
 - `mcp__codescout__semantic_search(query)` — concept-level search
 - `mcp__codescout__read_file(path)` — for non-source files (markdown, toml, json)
 
+**Cross-repo work (companion ≥ 1.11.1):**
+The Bash branch of `pre-tool-guard.sh` is workspace-scoped. A leading `cd <dir>` resolving outside the active project's `$CWD` (absolute, quoted, tilde-expanded, or relative `../sibling`) passes through, so cross-repo git ops work natively. Out-of-shape commands (`pushd`, `bash -c '...'`, no `cd` prefix) still hit the default block — for those, switch the codescout workspace explicitly:
+
+```
+workspace(action="activate", path="/path/to/sibling", read_only=false)
+# ...do the work...
+workspace(action="activate", path="/home/marius/work/claude/code-explorer", read_only=false)
+```
+
+Per Iron Law 4, restore the original workspace before turn end. The MCP server is shared state — leaving it pointed at a sibling project pollutes the next session. Bug history at `docs/issues/2026-05-20-cross-repo-git-ops-friction.md`.
+
 **Configuration:**
 - Auto-detects codescout from `.mcp.json` or `~/.claude/settings.json`
 - Can be overridden via `.claude/codescout-companion.json`
