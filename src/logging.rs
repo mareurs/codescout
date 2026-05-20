@@ -63,7 +63,7 @@ pub fn rotate_diagnostic_logs(dir: &Path) {
     }
 
     // Sort newest first
-    entries.sort_by(|a, b| b.1.cmp(&a.1));
+    entries.sort_by_key(|b| std::cmp::Reverse(b.1));
 
     // Remove everything beyond the 6th
     for (path, _) in &entries[KEEP..] {

@@ -35,7 +35,7 @@ pub fn group_by_file(items: &[Value]) -> Vec<FileGroup<'_>> {
         .collect();
     // Stable: BTreeMap iteration is path-asc; sort_by with reverse on count
     // preserves alphabetical order among ties.
-    groups.sort_by(|a, b| b.items.len().cmp(&a.items.len()));
+    groups.sort_by_key(|b| std::cmp::Reverse(b.items.len()));
     groups
 }
 

@@ -171,7 +171,7 @@ impl crate::retrieval::client::RetrievalClient {
                 crate::retrieval::embedder::EmbedOutput,
             )> = to_upsert
                 .iter()
-                .zip(embeds.into_iter())
+                .zip(embeds)
                 .map(|((p, _), e)| (p.chunk_id.clone(), payload_to_map(p), e))
                 .collect();
             self.qdrant

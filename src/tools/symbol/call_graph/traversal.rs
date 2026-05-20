@@ -83,7 +83,7 @@ pub async fn bfs<R: OneHopResolver>(
         all_edges.extend(level_edges);
         max_depth_reached = depth;
 
-        current_level.extend(next_symbols.into_iter());
+        current_level.extend(next_symbols);
         if current_level.is_empty() {
             break;
         }

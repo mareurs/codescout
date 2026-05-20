@@ -48,7 +48,7 @@ pub fn perform_section_edit_ext(
         resolve_section_range(content, heading_query).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     let lines: Vec<&str> = content.split('\n').collect();
-    let heading_idx = (range.heading_line - 1) as usize;
+    let heading_idx = range.heading_line - 1;
     let end_idx = compute_section_end(&lines, heading_idx + 1, range.level);
 
     match action {
@@ -225,7 +225,7 @@ pub fn find_consumed_subsections(content: &str, heading_query: &str) -> Result<V
         resolve_section_range(content, heading_query).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     let lines: Vec<&str> = content.split('\n').collect();
-    let heading_idx = (range.heading_line - 1) as usize;
+    let heading_idx = range.heading_line - 1;
     let end_idx = compute_section_end(&lines, heading_idx + 1, range.level);
 
     let mut in_code_block = false;
@@ -320,7 +320,7 @@ pub(crate) fn perform_scoped_edit(
         resolve_section_range(content, heading_query).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     let lines: Vec<&str> = content.split('\n').collect();
-    let heading_idx = (range.heading_line - 1) as usize;
+    let heading_idx = range.heading_line - 1;
     let end_idx = compute_section_end(&lines, heading_idx + 1, range.level);
 
     // Extract the section content (heading + body) with trailing newline

@@ -13,7 +13,7 @@ pub fn extract(row: &ArtifactRow, body: &str, ctx: &ToolContext) -> Value {
     let cat = ctx.catalog.lock();
     let mut obs = observations::list_for_artifact(&cat, &row.id).unwrap_or_default();
     let observation_count = obs.len();
-    obs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    obs.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     obs.truncate(LATEST_OBSERVATIONS);
 
     let latest: Vec<Value> = obs
