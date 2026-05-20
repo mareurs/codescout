@@ -7,6 +7,8 @@ tags:
   - lancedb
   - deps
   - watching
+topic: LanceDB upgrade path — monitoring upstream for breaking changes and watchpoints
+time_scope: open-ended
 ---
 
 # Tracker: LanceDB Upgrade Path

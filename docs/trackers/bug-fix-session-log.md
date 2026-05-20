@@ -6,6 +6,8 @@ owners: []
 tags:
   - session-log
   - bug-fix
+topic: Multi-session bug-fix work stream — frictions and wins from closing open buffer/markdown bugs in docs/issues/
+time_scope: open-ended
 ---
 
 # Session Log — Bug-Fix Work Stream
