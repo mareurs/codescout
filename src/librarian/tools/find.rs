@@ -10,7 +10,7 @@ use crate::librarian::filter::FilterNode;
 
 const MAX_LIMIT: usize = 500;
 const MAX_OFFSET: usize = 100_000;
-const HIDDEN_STATUSES: &[&str] = &["archived", "superseded"];
+const HIDDEN_STATUSES: &[&str] = &["archived", "superseded", "retired"];
 
 #[derive(Deserialize)]
 struct Args {
@@ -31,8 +31,12 @@ struct Args {
     semantic: Option<String>,
     #[serde(default)]
     scope: Option<Scope>,
-    /// Include archived/superseded rows. Ignored when the user filter
+    /// Include archived/superseded/retired rows. Ignored when the user filter
     /// already constrains `status`.
+    /// `retired` covers the in-place redirect pattern (MRV `2-lane-strategy.md`):
+    /// the file stays at its original path with `status: retired` and a body
+    /// that forwards to the canonical successor, so incoming links keep
+    /// resolving while the tracker stops showing in active listings.
     #[serde(default)]
     include_archived: bool,
     /// Filter to augmented (true) or non-augmented (false) artifacts. Omit to return all.
