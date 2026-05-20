@@ -440,28 +440,25 @@ pub fn list_git_worktrees(project_root: &Path) -> Vec<PathBuf> {
 /// Returns Ok(()) if allowed, or an error message explaining how to enable it.
 pub fn check_tool_access(tool_name: &str, config: &PathSecurityConfig) -> Result<()> {
     match tool_name {
-        "run_command" => {
-            if !config.shell_enabled {
+        "run_command"
+            if !config.shell_enabled => {
                 bail!(
                     "Shell commands are disabled. Set security.shell_enabled = true in .codescout/project.toml to enable."
                 );
             }
-        }
         "approve_write" | "create_file" | "edit_file" | "edit_code" | "library"
-        | "edit_markdown" => {
-            if !config.file_write_enabled {
+        | "edit_markdown"
+            if !config.file_write_enabled => {
                 bail!(
                     "File writes are disabled for this project. If this project was activated in read-only mode, call workspace(action='activate', read_only: false) to enable writes."
                 );
             }
-        }
-        "semantic_search" | "index" => {
-            if !config.indexing_enabled {
+        "semantic_search" | "index"
+            if !config.indexing_enabled => {
                 bail!(
                     "Indexing tools are disabled. Set security.indexing_enabled = true in .codescout/project.toml to enable."
                 );
             }
-        }
         _ => {} // All other tools are always allowed
     }
     Ok(())
@@ -531,7 +528,8 @@ pub fn is_dangerous_command(command: &str, config: &PathSecurityConfig) -> Optio
     None
 }
 
-/// Detect Iron Law 3 violation: piping a live command's output to a log-trimmer
+/// Detect Iron Law 3 violation: piping a **live, potentially-unbounded**
+/// command's output to a log-trimmer
 /// (`tail`/`head`/`grep`/`wc`/`sed`/`awk`/`cut`/`sort`/`uniq`/`tr`/`fmt`/`less`).
 ///
 /// IL3 exists because piping destroys the `@cmd_*` buffer: filtered text reaches
@@ -540,35 +538,51 @@ pub fn is_dangerous_command(command: &str, config: &PathSecurityConfig) -> Optio
 /// Gemini, …) — companion-plugin hooks are Claude-Code-specific and miss
 /// subagent contexts (see `docs/issues/2026-05-18-il3-pipe-violation-subagent.md`).
 ///
-/// **Buffer-op pipes are allowed.** If the pre-pipe segment references a buffer
-/// handle (`@cmd_*`, `@bg_*`, `@file_*`, `@tool_*`, `@ack_*`), the LHS is
-/// operating on already-captured data — `grep PATTERN @cmd_xxx | sort -u` is
-/// fine.
+/// **Bounded LHS is allowed.** The original rule blocked any allowlisted LHS
+/// piped to a log-trimmer; this over-triggered on ad-hoc finite probes
+/// (`ls <dir> | head`, `grep <pat> <one-file> | wc`, `cat <file> | grep`) —
+/// see `docs/issues/2026-05-18-il3-overtriggers-bounded-lhs.md`. Only LHS
+/// shapes known to produce arbitrarily large output are blocked now:
+///
+///   - **Unbounded prefixes:** `cargo`, `npm`, `pnpm`, `yarn`, `python`,
+///     `pytest`, `go`, `mvn`, `gradle`, `git`, `rg`, `fd`. Always block.
+///   - **Recursive grep:** `grep` with `-r` / `-R` / `--recursive`. Block.
+///   - **Bare find:** `find` without `-maxdepth`. Block.
+///   - **Everything else** (`ls`, `cat`, `stat`, `du`, `diff`, `awk`, `sed`,
+///     non-recursive `grep`, `find` with `-maxdepth`): allow.
+///
+/// **Buffer-op pipes are also allowed.** If the pre-pipe segment references a
+/// buffer handle (`@cmd_*`, `@bg_*`, `@file_*`, `@tool_*`, `@ack_*`), the LHS
+/// is operating on already-captured data — `grep PATTERN @cmd_xxx | sort -u`
+/// is fine.
 ///
 /// Returns `Some(hint)` when the command violates IL3; `None` otherwise.
 /// Mirrors the regex in `codescout-companion/hooks/il3-deny-hook.sh`.
 pub fn detect_il3_violation(command: &str) -> Option<String> {
-    static IL3_LHS: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    static IL3_RHS: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     static IL3_BUFFER_REF: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
 
-    let lhs_re = IL3_LHS.get_or_init(|| {
-        Regex::new(
-            r"^\s*(cargo|npm|pnpm|yarn|python|pytest|go|mvn|gradle|git|find|ls|grep|cat|diff|du|stat|rg|fd)\s.*\|\s*(tail|head|grep|less|wc|sed|awk|cut|sort|uniq|tr|fmt)\b",
-        )
-        .expect("IL3_LHS regex compiles")
+    let rhs_re = IL3_RHS.get_or_init(|| {
+        Regex::new(r"\|\s*(tail|head|grep|less|wc|sed|awk|cut|sort|uniq|tr|fmt)\b")
+            .expect("IL3_RHS regex compiles")
     });
     let buf_re = IL3_BUFFER_REF.get_or_init(|| {
-        Regex::new(r"@(cmd|bg|file|tool|ack)_[A-Za-z0-9_]+")
-            .expect("IL3_BUFFER_REF regex compiles")
+        Regex::new(r"@(cmd|bg|file|tool|ack)_[A-Za-z0-9_]+").expect("IL3_BUFFER_REF regex compiles")
     });
 
-    // Allow buffer-ops: pre-pipe segment references a buffer handle.
+    // Cheap reject: no log-trimmer on the RHS of any pipe → never IL3.
+    if !rhs_re.is_match(command) {
+        return None;
+    }
+
     let pre_pipe = command.split('|').next().unwrap_or("");
+
+    // Allow buffer-ops: pre-pipe segment references a buffer handle.
     if buf_re.is_match(pre_pipe) {
         return None;
     }
 
-    if !lhs_re.is_match(command) {
+    if !is_unbounded_lhs(pre_pipe) {
         return None;
     }
 
@@ -579,8 +593,51 @@ pub fn detect_il3_violation(command: &str) -> Option<String> {
          1. run_command(\"{lead}\")               — full output stored as @cmd_xxx\n  \
          2. grep PATTERN @cmd_xxx                 — query the buffer at any granularity\n  \
                                                     (also: tail -20 @cmd_xxx, head -50 @cmd_xxx)\n\n\
+         Bounded LHS (ls, cat, stat, du, diff, awk, sed, non-recursive grep, find -maxdepth) is allowed —\n\
+         only unbounded LHS (cargo, npm, pytest, git, rg, fd, grep -r, bare find, ...) is blocked.\n\n\
          Rerun the command bare and query the returned @cmd_* buffer."
     ))
+}
+
+/// Classify an LHS shell command as unbounded (arbitrarily-large output) for
+/// IL3 purposes. Conservative: when shape parsing is ambiguous, treat as
+/// bounded (allow the pipe) — false negatives cost a buffer dance, false
+/// positives cost user friction.
+fn is_unbounded_lhs(lhs: &str) -> bool {
+    let trimmed = lhs.trim();
+    let head = match trimmed.split_whitespace().next() {
+        Some(h) => h,
+        None => return false,
+    };
+
+    // Always-unbounded executables: project-scale tools, package managers,
+    // language runtimes, fast recursive searchers (rg/fd default-recurse).
+    const UNBOUNDED_PREFIXES: &[&str] = &[
+        "cargo", "npm", "pnpm", "yarn", "python", "python3", "pytest", "go", "mvn", "gradle",
+        "git", "rg", "fd",
+    ];
+    if UNBOUNDED_PREFIXES.contains(&head) {
+        return true;
+    }
+
+    // grep is bounded by its file args unless promoted to recursive.
+    if head == "grep" {
+        return has_recursive_flag(trimmed);
+    }
+
+    // find defaults to recursive; -maxdepth bounds it.
+    if head == "find" {
+        return !trimmed.contains(" -maxdepth ") && !trimmed.contains(" -maxdepth=");
+    }
+
+    false
+}
+
+/// True if the command line carries a `-r` / `-R` / `--recursive` flag as a
+/// standalone token (avoids matching `-rich` or paths containing `-r`).
+fn has_recursive_flag(cmd: &str) -> bool {
+    cmd.split_whitespace()
+        .any(|tok| tok == "-r" || tok == "-R" || tok == "--recursive")
 }
 
 /// Source file extensions that should be accessed via codescout tools,
@@ -1929,8 +1986,69 @@ mod tests {
     }
 
     #[test]
-    fn il3_blocks_similar_shape_without_buffer_ref() {
-        assert!(detect_il3_violation("grep -oE 'pat' src/lib.rs | sort -u").is_some());
+    fn il3_allows_grep_single_file_pipe_sort() {
+        // Bounded LHS — single file arg, no recursive flag. Allowed per
+        // docs/issues/2026-05-18-il3-overtriggers-bounded-lhs.md.
+        assert!(detect_il3_violation("grep -oE 'pat' src/lib.rs | sort -u").is_none());
+    }
+
+    #[test]
+    fn il3_blocks_grep_recursive() {
+        let hint = detect_il3_violation("grep -r FAILED src/ | head").expect("should block");
+        assert!(hint.contains("IL3 violation"));
+    }
+
+    #[test]
+    fn il3_blocks_grep_capital_recursive() {
+        assert!(detect_il3_violation("grep -R pat src/ | wc -l").is_some());
+    }
+
+    #[test]
+    fn il3_blocks_grep_long_recursive() {
+        assert!(detect_il3_violation("grep --recursive pat src/ | sort").is_some());
+    }
+
+    #[test]
+    fn il3_blocks_find_no_maxdepth() {
+        assert!(detect_il3_violation("find / -name '*.rs' | head").is_some());
+    }
+
+    #[test]
+    fn il3_allows_find_with_maxdepth() {
+        assert!(detect_il3_violation("find . -maxdepth 2 -name '*.rs' | head").is_none());
+    }
+
+    #[test]
+    fn il3_allows_cat_pipe_grep() {
+        // Single-file cat is bounded. Was over-blocked before the
+        // 2026-05-18 bounded-LHS fix.
+        assert!(detect_il3_violation("cat items.txt | grep apple").is_none());
+    }
+
+    #[test]
+    fn il3_allows_ls_pipe_head() {
+        assert!(detect_il3_violation("ls /some/dir | head -20").is_none());
+    }
+
+    #[test]
+    fn il3_allows_awk_file_pipe_sort() {
+        assert!(detect_il3_violation("awk '{print $1}' file.log | sort -u").is_none());
+    }
+
+    #[test]
+    fn il3_allows_sed_file_pipe_head() {
+        assert!(detect_il3_violation("sed 's/foo/bar/' file.txt | head").is_none());
+    }
+
+    #[test]
+    fn il3_blocks_rg_pipe_head() {
+        // rg defaults to recursive — treated as unbounded.
+        assert!(detect_il3_violation("rg pattern | head").is_some());
+    }
+
+    #[test]
+    fn il3_blocks_fd_pipe_wc() {
+        assert!(detect_il3_violation("fd .rs | wc -l").is_some());
     }
 
     #[test]
@@ -1944,5 +2062,4 @@ mod tests {
         // awk is not in LHS_COMMANDS; conservative list keeps false positives low.
         assert!(detect_il3_violation("awk '{print $1}' file.txt | head").is_none());
     }
-
 }
