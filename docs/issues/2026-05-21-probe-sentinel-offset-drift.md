@@ -102,7 +102,7 @@ by 7 bytes per `"filler "`, `s.len()` lands at 184 just before the
 first sentinel is appended (target 200, observed 184, abs_diff 16 — well
 under the 20-byte tolerance).
 
-Commit SHA: TBD.
+Commit SHA: `7f863260`.
 ## Tests added
 
 N/A — the failing test (`tools::probe::tests::sentinels_at_expected_offsets`)
