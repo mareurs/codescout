@@ -168,7 +168,7 @@ Verified: `cargo test --lib` passes 2437/2437 (0 failures, 7 ignored).
 Probe-sentinel fix in commit `7f863260` cleared the 5th remaining
 failure earlier in the same session.
 
-Commit SHA: TBD.
+Commit SHA: `385c0536`.
 ## Tests added
 N/A — this bug is *about* tests. Fix lands by editing the test fixture
 itself, not by adding more tests.
