@@ -7,6 +7,7 @@ owner: marius
 related: []
 tags: [references, call_graph, lsp, navigation]
 kind: bug
+last_observed: 2026-05-21
 ---
 
 # BUG: references undercounts call sites that call_graph and grep both find
@@ -66,8 +67,18 @@ codescout v0.13.0 (release, via `~/.cargo/bin/codescout` symlink →
 
 ## Root cause
 
-**Proximate cause (confirmed):** the two tools use different LSP requests at the
-same correct identifier position.
+**CORRECTED (see Hypothesis #9):** the undercount is rust-analyzer index-STATE
+dependent and TRANSIENT — a fresh RA process returns the complete set for the
+same symbol. It is NOT the symbol-shape quirk theorized below; that theory was an
+artifact of observing all controls inside one degraded RA process. The mechanism
+detail below still holds (references uses `textDocument/references`; call_graph
+uses `callHierarchy/incomingCalls` + a persisted cache, which is why call_graph
+stayed complete while RA's live reference index was stale).
+
+---
+
+**Proximate cause (mechanism, still valid):** the two tools use different LSP
+requests at the same correct identifier position.
 - `references` (`src/tools/symbol/references.rs:57`) → `client.references()` →
   **`textDocument/references`** (`src/lsp/client.rs:1032-1058`).
 - `call_graph` callers → `resolve_one_hop` (`src/tools/symbol/call_edges/resolver.rs:47`)
@@ -143,6 +154,19 @@ two LSP-backed tools disagree, and the literal text search sides with call_graph
    prefix-colliding sibling identifiers} — a rust-analyzer `textDocument/references` quirk for that
    shape. Distinguishing the two is RA-internal and not pursued. references is reliable for the
    overwhelming majority of symbols; this is a rare edge case, NOT a systemic failure.
+9. **CORRECTION — the symbol-shape theory (#6/#8) was wrong.** After a `/mcp` reconnect
+   (which spawns a FRESH rust-analyzer process), `references(format_read_file)` returned
+   the COMPLETE set (20: 17 test calls + import + def + src caller) — the exact symbol
+   that was stuck at 3 earlier. Nothing about the symbol changed; only the RA process did.
+   **Verdict:** the undercount is rust-analyzer index-STATE-dependent and TRANSIENT, not a
+   stable property of `pub(super)` free fns / prefix-colliding names. The 5 control symbols
+   in #7/#8 were all observed inside the SAME degraded RA process — a shared confound. Most
+   likely trigger: `read_file.rs` had just been edited (the OutputForm::Text flip) and
+   repeated `cargo build`/`test`/`clippy` churned RA's watched files, leaving a stale
+   partial reference index for that symbol that didn't recover in-session; call_graph masked
+   it via its persisted EdgeCache. The completeness guard remains correct as defense-in-depth
+   (it keys on the symptom — call sites > references — not on the disproven cause), and was
+   verified live to stay silent when references is complete (20 refs ≥ 17 call sites).
 ## Fix
 
 **Mitigation shipped (the root cause is in rust-analyzer, not fixable here).**
