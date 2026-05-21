@@ -328,9 +328,9 @@ impl CodeScoutServer {
     /// Agents work exclusively within the project directory; relative paths
     /// carry all necessary information. The full root (e.g. /home/user/project)
     /// is a long repeated prefix that appears in every "file" field and error
-    /// message. Buffer content (@tool_xxx refs) is covered here too: it only
-    /// re-enters the pipeline through run_command, which also passes through
-    /// call_tool.
+    /// message. `run_command` is exempt — its stdout is raw shell output where
+    /// stripping would corrupt path literals (see the path-literals bug file),
+    /// so @tool_xxx buffer content surfaced via run_command is left verbatim.
     async fn post_process(&self, call_result: CallToolResult, tool_name: &str) -> CallToolResult {
         let root_prefix = self
             .agent
@@ -339,14 +339,28 @@ impl CodeScoutServer {
             .map(|p| format!("{}/", p.display()))
             .unwrap_or_default();
 
-        let (mut call_result, stripped) = strip_project_root_from_result(call_result, &root_prefix);
+        // `run_command` returns raw, byte-faithful shell stdout. Stripping the
+        // project-root prefix there silently rewrites absolute path *literals*
+        // (e.g. `readlink`, `ls -l <symlink>`, `realpath`, `pwd` output) into
+        // strings that read as relative, changing their meaning — see
+        // docs/issues/2026-05-21-run-command-strips-project-root-from-path-literals.md.
+        // Restrict stripping to tools whose output is codescout's own structured
+        // content (file/path fields, error messages), where the prefix is
+        // genuinely redundant noise.
+        let should_strip = tool_name != "run_command";
+        let (mut call_result, stripped) = if should_strip {
+            strip_project_root_from_result(call_result, &root_prefix)
+        } else {
+            (call_result, false)
+        };
 
-        // "Low hint": for tools that echo raw content (file contents, shell output),
-        // append a one-liner so agents can distinguish stripped absolute paths from
-        // genuine relative path values in file content. Capped at PATH_NOTE_MAX per
-        // session — after that the agent has seen it enough times to remember.
+        // "Low hint": for tools that echo raw content (file contents), append a
+        // one-liner so agents can distinguish stripped absolute paths from
+        // genuine relative path values in file content. Capped at PATH_NOTE_MAX
+        // per session — after that the agent has seen it enough times to
+        // remember.
         const PATH_NOTE_MAX: usize = 3;
-        const PATH_NOTE_TOOLS: &[&str] = &["read_file", "run_command"];
+        const PATH_NOTE_TOOLS: &[&str] = &["read_file"];
         if stripped && PATH_NOTE_TOOLS.contains(&tool_name) {
             let prev = self
                 .path_note_count
@@ -1901,6 +1915,39 @@ mod tests {
         assert!(
             !text.contains(&root),
             "Expected absolute root to be stripped, but found it in output:\n{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_command_output_keeps_absolute_project_paths() {
+        // Regression: docs/issues/2026-05-21-run-command-strips-project-root-from-path-literals.md
+        // run_command stdout is raw shell output; an absolute path literal under
+        // the project root (e.g. from readlink/realpath) must be returned
+        // verbatim, not silently rewritten to a relative-looking string.
+        let (dir, server) = make_server().await;
+        let root = dir.path().to_string_lossy().to_string();
+        let abs = format!("{root}/some/nested/path");
+
+        let req = CallToolRequestParams::new("run_command").with_arguments(
+            serde_json::from_value(serde_json::json!({
+                "command": format!("echo '{abs}'"),
+            }))
+            .unwrap(),
+        );
+        let result = server
+            .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+            .await
+            .unwrap();
+
+        let text = result
+            .content
+            .iter()
+            .find_map(|c| c.as_text().map(|t| t.text.as_str()))
+            .unwrap_or("");
+
+        assert!(
+            text.contains(&abs),
+            "run_command output must keep the absolute project path verbatim, got:\n{text}"
         );
     }
 
