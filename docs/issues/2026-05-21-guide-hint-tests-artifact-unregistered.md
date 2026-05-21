@@ -1,7 +1,7 @@
 ---
-status: investigating
+status: fixed
 opened: 2026-05-21
-closed:
+closed: 2026-05-21
 severity: medium
 owner: marius
 related: []
@@ -129,46 +129,46 @@ the librarian DB isn't initializable.
 3. **Hypothesis:** test fixture lacks librarian state (DB, schema, etc).
    **Test:** seed `~/.config/librarian/workspace.toml` and re-run.
    **Verdict:** partially confirmed — `cargo test --lib guide_hint_tests`
-   now passes in isolation. But full suite still fails, so this isn't
-   the full story.
-4. **Hypothesis:** parallel test execution races against `set_var` in
-   `src/config/{project,global}.rs` sibling tests, polluting `HOME` /
-   `XDG_CONFIG_HOME` for the duration of those tests.
-   **Test:** `grep set_var.*HOME` finds 29 call sites; cargo's default
-   `--test-threads` is `>1`; `dirs::config_dir()` reads env at call time.
-   **Verdict:** confirmed — root cause.
+   passes in isolation but full suite still fails. Not the full story.
+4. **Hypothesis:** parallel `set_var("HOME"|"XDG_CONFIG_HOME")` race
+   against `dirs::config_dir()` reads in `guide_hint_tests`.
+   **Test:** run with `--test-threads=1` to remove parallelism.
+   **Verdict:** rejected — failure still reproduces sequentially, so
+   the race is not thread-concurrency but env-state ordering.
+5. **Hypothesis:** `LIBRARIAN_WORKSPACE` / `LIBRARIAN_DB` env vars set by
+   `src/librarian/mod.rs` tests leak (no restore on test end), pointing
+   at dropped tempdirs. `build_tool_context()` checks these env vars
+   first and fails when they reference non-existent files.
+   **Test:** grep for the set_var sites; confirm they have no Drop
+   restore; add `EnvGuard` RAII; rerun suite.
+   **Verdict:** **confirmed — root cause.**
 ## Fix
 
-Root cause is **concurrent `std::env::set_var` pollution**, not a missing
-librarian state. Three options ordered by preference:
+**Applied 2026-05-21.** Refined root cause: the failures are NOT a parallel
+`HOME` race — running the suite with `--test-threads=1` still reproduces
+the panic. The real culprit is **env-var leakage**. `src/librarian/mod.rs`
+test functions `imports_codescout_projects` and `reindex_cli_indexes_repo`
+called `std::env::set_var("LIBRARIAN_WORKSPACE", ...)` and
+`set_var("LIBRARIAN_DB", ...)` with no restore. Their tempdir got dropped
+at test end, but the env vars stuck for the rest of the process —
+pointing at non-existent paths. `build_tool_context()` (which checks
+`LIBRARIAN_WORKSPACE` *first*, before the default config path) then failed
+for every later test, including `guide_hint_tests::*`.
 
-**Option A (preferred) — serialize the env-mutating tests.** Add the
-`serial_test` crate (`Cargo.toml` dev-dependency) and annotate every
-test in `src/config/project.rs` + `src/config/global.rs` that calls
-`set_var("HOME", ...)` or `set_var("XDG_CONFIG_HOME", ...)` with
-`#[serial(env_home)]`. Also annotate `guide_hint_tests::*` so they
-share the same serial gate. Zero changes to product code; clean fix.
+Fix: introduced an `EnvGuard` RAII helper in
+`src/librarian/mod.rs:340-368` (test module). It saves the current env
+value on construction, sets the new one, and restores on Drop. Both
+librarian tests now use it for `CODESCOUT_REGISTRY`, `LIBRARIAN_WORKSPACE`,
+and `LIBRARIAN_DB`. `#[serial]` annotations are kept — they remain useful
+for guarding the shared catalog DB and registry-file mutations against
+concurrent access *during* a test, even though the leakage path is now
+closed.
 
-**Option B — RAII env guard.** Introduce a `EnvGuard` test helper that
-saves the current `HOME`/`XDG_CONFIG_HOME`, sets the test value, and
-restores on Drop. Wrap every set_var site. Cheaper than adding a
-dependency, but doesn't prevent two guards from racing concurrently —
-the underlying problem is parallelism, not restoration. Should be
-paired with `--test-threads=1` for the affected modules, which negates
-half the benefit.
+Verified: `cargo test --lib` passes 2437/2437 (0 failures, 7 ignored).
+Probe-sentinel fix in commit `7f863260` cleared the 5th remaining
+failure earlier in the same session.
 
-**Option C — make librarian fixture self-contained.** Have
-`make_server()` set `LIBRARIAN_WORKSPACE` to a per-test tempfile path
-before constructing the server, bypassing `dirs::config_dir()` entirely.
-Robust against env pollution. Mechanical to implement
-(`std::env::set_var("LIBRARIAN_WORKSPACE", &ws_path)` already used in
-`src/librarian/mod.rs:362`). But the set_var hop reintroduces the same
-parallelism risk — adopting this requires combining with Option A
-anyway.
-
-Recommend **A**. `serial_test` is the standard remedy for this class
-of bug in Rust; the env-mutating tests are the offenders and they're
-already a known footgun.
+Commit SHA: TBD.
 ## Tests added
 N/A — this bug is *about* tests. Fix lands by editing the test fixture
 itself, not by adding more tests.
@@ -179,16 +179,7 @@ None for the codebase. Operationally, you can run `cargo test --lib
 
 ## Resume
 
-Add `serial_test = "3"` to `[dev-dependencies]` in `Cargo.toml`. In
-`src/config/project.rs` and `src/config/global.rs`, decorate every
-`#[test]` / `#[tokio::test]` that calls `std::env::set_var("HOME", ...)`
-or `set_var("XDG_CONFIG_HOME", ...)` with `#[serial(env_home)]`. In
-`src/server.rs` `guide_hint_tests` mod, do the same. Run
-`cargo test --lib` and confirm all 6 `guide_hint_tests::*` pass.
-
-Optional follow-up: change `try_build_runtime()` to log the swallowed
-error at `warn!` instead of `info!` — silent disablement made this
-class of bug hard to find. See `src/librarian/adapter.rs:20-28`.
+N/A — fixed.
 ## References
 
 - `src/server.rs:127-138` — librarian registration gate
