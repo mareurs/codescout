@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-05-21
-closed:
+closed: 2026-05-21
 severity: low
 owner: marius
 related: []
@@ -91,34 +91,31 @@ no shrink/rewrite path exists.
    **Verdict:** rejected.
 
 ## Fix
-Two options:
 
-**Option A (trim intro):** shorten the `push_str("PROBE_BEGIN: ...")`
-block to ≤ ~180 bytes so the first sentinel's forward-padding loop
-has room to run. Simplest, preserves all existing sentinel targets.
+**Applied 2026-05-21 (option A):** trimmed the intro paragraph in
+`src/tools/probe.rs:35-39` from 319 bytes to 156 bytes. New intro
+preserves the diagnostic intent (instruct the model to recite
+SENTINEL_NNNN_XX markers it sees) but drops the verbose framing.
 
-**Option B (raise first target):** move the first sentinel from 200 to
-400 (or wherever fits after the intro plus a few padding tokens).
-Changes the public-ish meaning of the test (probe at 200 bytes proves
-the model saw the first ~200 chars — that's deliberately near the
-context-window start). Avoid unless A is awkward.
+Mechanics: with intro length 156 and forward-padding loop incrementing
+by 7 bytes per `"filler "`, `s.len()` lands at 184 just before the
+first sentinel is appended (target 200, observed 184, abs_diff 16 — well
+under the 20-byte tolerance).
 
-Recommend **A** — the intro's role is decorative framing, not data;
-trimming it preserves the test's diagnostic intent.
-
+Commit SHA: TBD.
 ## Tests added
-N/A — the failing test *is* the regression test for this kind of drift.
-Fix the intro and the existing assertion passes.
 
+N/A — the failing test (`tools::probe::tests::sentinels_at_expected_offsets`)
+*is* the regression test. It detects intro-paragraph drift past the first
+sentinel's tolerance window. Future edits to the intro that exceed ~170
+bytes will trip this same assertion.
 ## Workarounds
 `cargo test --lib --skip sentinels_at_expected_offsets` to bypass while
 running the real suite.
 
 ## Resume
-Edit the intro in `src/tools/probe.rs:24-30` to ≤ 180 bytes. Re-run
-`cargo test --lib sentinels_at_expected_offsets`; should pass with
-the marker landing within 20 bytes of 200.
 
+N/A — fixed.
 ## References
 - `src/tools/probe.rs:18-55` — `build_probe_description`
 - `src/tools/probe.rs:108-124` — failing test

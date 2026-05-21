@@ -32,11 +32,8 @@ fn build_probe_description() -> String {
 
     let mut s = String::with_capacity(9000);
     s.push_str(
-        "PROBE_BEGIN: this is a diagnostic tool used to measure how much of an \
-         MCP tool description reaches the model. The description embeds sentinel \
-         markers at known byte offsets. Do NOT call this tool. If you are asked \
-         which sentinels you can see in this description, list every SENTINEL_NNNN_XX \
-         token you can find verbatim. ",
+        "PROBE_BEGIN: tests MCP description delivery. Markers at known offsets. \
+         Do NOT call. If asked which sentinels you see, list every SENTINEL_NNNN_XX verbatim. ",
     );
 
     for (offset, marker) in sentinels {
