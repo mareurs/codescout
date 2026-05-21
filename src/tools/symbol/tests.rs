@@ -4852,6 +4852,59 @@ fn references_declares_output_form_text() {
 }
 
 #[test]
+fn references_completeness_hint_warns_only_when_calls_exceed_refs() {
+    use crate::tools::symbol::references::references_completeness_hint;
+    // The pathological case: references undercounts (3) vs call sites (17).
+    assert!(references_completeness_hint(3, 17).is_some());
+    // Worst silent failure: references returns 0 but callers exist.
+    assert!(references_completeness_hint(0, 5).is_some());
+    // references complete: it counts non-call refs too, so refs >= call sites.
+    assert!(references_completeness_hint(198, 109).is_none());
+    assert!(references_completeness_hint(12, 11).is_none());
+    // Equal counts are not proof of incompleteness.
+    assert!(references_completeness_hint(5, 5).is_none());
+}
+
+#[test]
+fn references_format_compact_appends_completeness_warning() {
+    use crate::tools::symbol::references::References;
+    use crate::tools::Tool;
+    let result = serde_json::json!({
+        "file_groups": [
+            {"file": "src/a.rs", "count": 1, "items": [{"line": 1, "column": 0, "context": ""}]}
+        ],
+        "total": 1,
+        "files": 1,
+        "completeness_warning": "references found 1, but call-hierarchy found 9 call sites — use call_graph"
+    });
+    let text = References.format_compact(&result).unwrap();
+    assert!(
+        text.contains("call-hierarchy found 9"),
+        "warning must render in normal branch: {text}"
+    );
+}
+
+#[test]
+fn references_format_compact_appends_warning_on_zero_refs() {
+    use crate::tools::symbol::references::References;
+    use crate::tools::Tool;
+    // The dangerous case: references returns 0 but there ARE callers — the
+    // warning must still surface so the 0 isn't taken at face value.
+    let result = serde_json::json!({
+        "file_groups": [],
+        "total": 0,
+        "files": 0,
+        "completeness_warning": "references found 0, but call-hierarchy found 4 call sites — use call_graph"
+    });
+    let text = References.format_compact(&result).unwrap();
+    assert!(text.contains('0'), "should still say 0 references: {text}");
+    assert!(
+        text.contains("call-hierarchy found 4"),
+        "warning must render even on zero refs: {text}"
+    );
+}
+
+#[test]
 fn symbols_declares_output_form_text() {
     // Pinned wire contract: small `symbols` results render via the compact
     // text form (file overview / search result tree), not pretty JSON.

@@ -594,6 +594,16 @@ fn format_read_memory_shows_content() {
     );
 }
 
+#[test]
+fn memory_declares_output_form_text() {
+    // Pinned wire contract: small `memory` results (topic lists / read content)
+    // render via the compact text form, not pretty JSON. Both helpers are
+    // lossless (all topic names, full content verbatim), so the small path is
+    // safe to flip.
+    use crate::tools::{OutputForm, Tool};
+    assert_eq!(Memory.output_form(), OutputForm::Text);
+}
+
 #[tokio::test]
 async fn memory_write_and_read_via_dispatch() {
     let (dir, ctx) = test_ctx_with_project().await;
