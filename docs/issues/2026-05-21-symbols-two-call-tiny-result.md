@@ -1,7 +1,7 @@
 ---
-status: investigating
+status: fixed
 opened: 2026-05-21
-closed:
+closed: 2026-05-21
 severity: low
 owner: marius
 related: []
@@ -90,10 +90,10 @@ before per-file hoisting):
 Symmetric to the existing `BODY_CAP = 5` (which strips bodies past 5 on
 explicit-true). New inverse cap *attaches* bodies up to 2 on default-false.
 
-Commit SHA: TBD.
+Commit SHA: `ded1d4b1`.
 
 ## Tests added
-TBD — added in same commit as fix. Will assert:
+Added in `ded1d4b1` (`src/tools/symbol/tests.rs`):
 - 1-symbol, 11-line match → body present without `include_body=true`.
 - 1-symbol, 200-line match → body absent (over LOC cap).
 - 3-symbol match → bodies absent (over match cap).
