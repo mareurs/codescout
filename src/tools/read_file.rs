@@ -679,24 +679,18 @@ pub(super) fn format_read_file(val: &Value) -> String {
         return format_read_file_summary(val, file_type);
     }
 
-    // Auto-chunked response: shown_lines present means partial read with content
-    if let Some(shown) = val.get("shown_lines").and_then(|v| v.as_array()) {
-        let start = shown.first().and_then(|v| v.as_u64()).unwrap_or(1) as usize;
-        let end = shown.last().and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    // Auto-chunked response: shown_lines present means partial read with content.
+    // Line numbers are intentionally NOT prefixed — the caller supplied the range,
+    // so per-line numbers are redundant noise (and were slice-relative/wrong here
+    // before). See docs/issues/2026-05-21-read-file-slice-relative-line-numbers.md.
+    if val.get("shown_lines").and_then(|v| v.as_array()).is_some() {
         let total = val["total_lines"].as_u64().unwrap_or(0);
         let complete = val["complete"].as_bool().unwrap_or(true);
-
         let content = val["content"].as_str().unwrap_or("");
-        let lines: Vec<&str> = content.lines().collect();
-        let lines_shown = lines.len();
-        let lineno_width = end.to_string().len();
+        let lines_shown = content.lines().count();
 
-        let mut out = format!("{total} lines\n");
-        for (i, line) in lines.iter().enumerate() {
-            let lineno = start + i;
-            out.push('\n');
-            out.push_str(&format!("{:>width$}| {line}", lineno, width = lineno_width));
-        }
+        let mut out = format!("{total} lines\n\n");
+        out.push_str(content);
 
         if let Some(file_id) = val["file_id"].as_str() {
             out.push_str(&format!("\n\n  Buffer: {file_id}"));
@@ -741,19 +735,11 @@ pub(super) fn format_read_file(val: &Value) -> String {
         return out;
     }
 
+    // Raw content, no per-line number prefixes (caller-supplied ranges make them
+    // redundant; full-file reads can re-derive line numbers trivially).
     let line_word = if total_lines == 1 { "line" } else { "lines" };
-    let mut out = format!("{total_lines} {line_word}\n");
-
-    // Line-numbered content with right-aligned line numbers
-    let lines: Vec<&str> = content.lines().collect();
-    let max_lineno = total_lines as usize;
-    let lineno_width = max_lineno.to_string().len();
-
-    for (i, line) in lines.iter().enumerate() {
-        let lineno = i + 1;
-        out.push('\n');
-        out.push_str(&format!("{:>width$}| {line}", lineno, width = lineno_width));
-    }
+    let mut out = format!("{total_lines} {line_word}\n\n");
+    out.push_str(content);
 
     // Overflow
     if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
@@ -1031,9 +1017,10 @@ mod tests {
     async fn read_file_call_content_returns_line_numbered_text_not_json() {
         // Regression: small read_file results used to serialize as pretty JSON via
         // the default Tool::call_content path because ReadFile did not declare
-        // OutputForm::Text. The format_read_file renderer (full content + `N|`
-        // line numbers, lossless) only fired on the buffered axis. Now both axes
-        // reach it, so sub-threshold reads come through as line-numbered text.
+        // OutputForm::Text. Now both axes reach format_read_file, so sub-threshold
+        // reads come through as raw text. Line-number prefixes were removed
+        // (docs/issues/2026-05-21-read-file-slice-relative-line-numbers.md), so the
+        // content is shown verbatim with no `N| ` prefixes.
         let content = "alpha\nbeta\ngamma".to_string();
         let ctx = test_ctx().await;
         let buf_id = ctx.output_buffer.store_tool("cmd", content);
@@ -1049,8 +1036,12 @@ mod tests {
         assert_eq!(blocks.len(), 1, "expected exactly 1 content block");
         let text = blocks[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
         assert!(
-            text.contains("1| alpha") && text.contains("3| gamma"),
-            "expected line-numbered text form, got: {text}"
+            text.contains("alpha\nbeta\ngamma"),
+            "expected raw text content, got: {text}"
+        );
+        assert!(
+            !text.contains("1| ") && !text.contains("3| "),
+            "line-number prefixes must be dropped, got: {text}"
         );
         assert!(
             !text.trim_start().starts_with('{'),

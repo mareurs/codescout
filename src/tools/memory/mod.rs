@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::{parse_bool_param, RecoverableError, Tool, ToolContext};
+use super::{parse_bool_param, OutputForm, RecoverableError, Tool, ToolContext};
 use serde_json::{json, Value};
 
 #[cfg(test)]
@@ -925,6 +925,10 @@ impl Tool for Memory {
             )
             .into()),
         }
+    }
+
+    fn output_form(&self) -> OutputForm {
+        OutputForm::Text
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use super::{Tool, ToolContext};
+use super::{OutputForm, Tool, ToolContext};
 
 pub struct ListLibraries;
 
@@ -311,6 +311,10 @@ impl Tool for Library {
         }
     }
 
+    fn output_form(&self) -> OutputForm {
+        OutputForm::Text
+    }
+
     fn format_compact(&self, result: &Value) -> Option<String> {
         if result.get("libraries").is_some() {
             ListLibraries.format_compact(result)
@@ -441,6 +445,16 @@ mod tests {
             out.contains("indexed"),
             "should show index status, got: {out}"
         );
+    }
+
+    #[test]
+    fn library_declares_output_form_text() {
+        // Pinned wire contract: small `library` results (lib list with status)
+        // render via the compact text form, not pretty JSON. format_list_libraries
+        // is lossless (every lib + indexed/stale flags, no cap), so the small path
+        // is safe to flip.
+        use crate::tools::{OutputForm, Tool};
+        assert_eq!(Library.output_form(), OutputForm::Text);
     }
 
     #[tokio::test]

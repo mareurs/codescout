@@ -474,6 +474,58 @@ Promote to CLAUDE.md as a permanent rule:
 
 ---
 
+## F-7 — `references` undercounts vs `call_graph`; root is live-incomplete-LSP vs persistent edge-cache, NOT position
+
+**Observed:** 2026-05-21, debugging the references-undercount bug
+(`docs/issues/2026-05-21-references-undercounts-vs-call-graph.md`). Live
+`references(symbol="format_read_file", path="src/tools/read_file.rs")` returned 3;
+`call_graph(direction="callers")` returned 17; `grep` ground-truth = 17 call sites
+in `src/tools/edit_file/tests.rs`.
+
+**When:** Phase-1 root-cause scout of the two tools' resolution paths, before any fix.
+
+**Expected (initial hypothesis):** `references` queries LSP at the *item* start
+(column of `pub`) instead of the identifier, so rust-analyzer misfires and
+underreports. (Plausible because a wrong-token reference query returns garbage.)
+
+**Got (scouted reality):**
+- `references` (`src/tools/symbol/references.rs:54-59`) resolves position via
+  `find_unique_symbol_by_name_path` → `sym.start_line/start_col`, then calls
+  `client.references()` (`textDocument/references`, `include_declaration: true`,
+  no truncation — `src/lsp/client.rs:1032-1058`).
+- `SymbolInfo.start_line/start_col` come from **`selection_range.start`** (the
+  identifier), NOT `range.start` (`src/lsp/client.rs:159-161`; pinned by test
+  `convert_document_symbols_uses_selection_range`). **Position is correct** →
+  position-bug hypothesis REJECTED.
+- references' build-dir + scope filters dropped 0 here (`excluded=0`), so the live
+  `textDocument/references` itself returned only 3 — the undercount is upstream of
+  all our code.
+- `call_graph` (`src/tools/symbol/call_graph/mod.rs:222-234`) reads a **persistent
+  SQLite `EdgeCache.lookup_callers(symbol)` by name**; on cache hit it returns the
+  17 edges with **no live LSP call**. The cache was populated earlier by
+  `resolve_one_hop` when the set was complete.
+
+**Probable cause:** `references` is at the mercy of rust-analyzer's *live* index
+state for the queried symbol's references; for the large `cfg(test)` file
+`edit_file/tests.rs` (~4400 lines) RA returned an incomplete set (3 of 17) at query
+time. `call_graph` masks this by serving a complete persisted cache. NOT YET
+CONFIRMED — pending the warming + non-test-symbol experiments below.
+
+**Workaround:** use `call_graph(direction="callers")` for "who calls X"; fall back
+to `grep` for non-call references. Treat a low `references` count as suspect.
+
+**Severity:** high — a navigation tool silently returning ~18% of real callers will
+mislead any refactor that trusts it.
+
+**Status:** open — root mechanism (live-RA incompleteness) needs the confirming
+experiment. Bug tracker: `docs/issues/2026-05-21-references-undercounts-vs-call-graph.md`.
+
+**Fix idea / Pointer:** if confirmed RA-incompleteness, references needs either a
+warmth/completeness guard (re-query until stable, or `did_open`+settle) or should
+consult the same EdgeCache call_graph uses. Investigate `resolve_one_hop`
+(`src/tools/symbol/call_edges/resolver.rs`) — does it use callHierarchy or
+references? If callHierarchy is more complete than textDocument/references on RA,
+references could switch to it.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
