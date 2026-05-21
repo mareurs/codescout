@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-05-21
-closed:
+closed: 2026-05-21
 severity: low
 owner: marius
 related: []
@@ -51,12 +51,19 @@ edit path uses its own heading enumeration/range logic — that is the suspected
 divergence point.
 
 ## Root cause
-Unknown — under investigation. Hypothesis: `edit_markdown`'s heading-range
-parser drops the final heading (likely an off-by-one or EOF-boundary condition
-where the last section has no following sibling to delimit it), while
-`read_markdown`/`parse_all_headings` includes it. Needs a side-by-side of the
-two heading enumerators.
 
+`parse_all_headings` (and the parallel `compute_section_end` in `edit_markdown.rs`) used a naive
+fence-toggle: every line starting with ``` flipped `in_code_block`. When a batch `edit_markdown`
+call's intermediate buffer contained an **unmatched** ``` (e.g. an `insert_after` whose
+`new_string` opened a fence without closing it), the toggle stayed `true` to EOF, hiding every
+heading that followed — including the final `## Resume`. CommonMark-conformant, but brittle for
+an editor tool whose in-flight buffer can transiently hold unbalanced fences between batched
+edits.
+
+The bug file's original "EOF off-by-one in heading enumeration" hypothesis was wrong. The two
+markdown tools really do share `parse_all_headings`; the divergence was in the **input**:
+`read_markdown` re-reads from disk (balanced fences); `edit_markdown` parses the in-memory
+buffer after each batch step (potentially unbalanced).
 ## Evidence
 The error string above (edit_markdown) vs the concurrent read_markdown result
 on `docs/trackers/output-form-text-compaction.md`:
@@ -69,24 +76,46 @@ read_markdown counts 7 sections (incl. `## Resume`); edit_markdown's hint lists
 only 6 (omits `## Resume`).
 
 ## Hypotheses tried
-1. **Hypothesis:** stale heading cache in edit_markdown. **Test:** re-read with
-   read_markdown (fresh), retried edit_markdown batch. **Verdict:** rejected —
-   second attempt failed identically; read showed the heading present.
-2. **Hypothesis:** `## Done log` section range absorbs the `## Resume` body, so a
-   scoped `edit` on "Done log" could reach it. **Test:** `edit` on "Done log"
-   with old_string = Resume paragraph. **Verdict:** rejected — "old_string not
-   found in section 'Done log'", so Done log is correctly bounded before Resume;
-   Resume is genuinely unreachable.
 
+1. **Hypothesis:** stale heading cache in edit_markdown. **Test:** re-read with read_markdown
+   (fresh), retried edit_markdown batch. **Verdict:** rejected.
+2. **Hypothesis:** `## Done log` section range absorbs the `## Resume` body. **Test:** scoped
+   `edit` on "Done log" with old_string = Resume paragraph. **Verdict:** rejected (Done log
+   correctly bounded).
+3. **Hypothesis:** EOF off-by-one in heading enumeration; edit_markdown's heading parser drops
+   the final heading. **Test:** invoked edit_markdown live against the on-disk file with 7
+   balanced headings. **Verdict:** rejected — last heading resolved fine. This was the bug
+   file's stated root cause; it was wrong.
+4. **Hypothesis:** the bug surfaced on a transient mid-batch buffer where an earlier edit
+   left an unmatched ``` fence open. **Test:** unit test with explicit unbalanced fence +
+   trailing heading. **Verdict:** confirmed — every heading after the open fence disappears.
+   Real root cause.
 ## Fix
-Not yet fixed. Likely in the edit_markdown heading-enumeration/range code
-(`src/tools/markdown/` — the editor path, distinct from `read_markdown.rs`).
-Align it with `parse_all_headings` so the last heading is always addressable.
 
+Two-line pre-scan in both `parse_all_headings` (`src/tools/file_summary/file_summary.rs`) and
+`compute_section_end` (`src/tools/markdown/edit_markdown.rs`): count ``` lines first; if the
+count is odd, treat every ``` line as plain text instead of as a fence boundary. The fence
+toggle path is only active when fences are balanced.
+
+Trade-off: a file with a genuinely unclosed code fence + a heading-shaped line below it
+(`# looks like heading`) now exposes that line as a real heading. For an editor tool this
+is the right call — silent heading-hiding is the worse failure mode (was: invisible
+last-heading; now: surfaceable real heading the user can then close the fence around).
+
+Commit SHA: `0e73ebbb`.
 ## Tests added
-N/A — not yet fixed. When fixed, add a regression: a file whose last section is
-an H2, assert `edit_markdown(heading=<last>, action="edit", ...)` succeeds.
 
+`src/tools/file_summary/tests.rs`:
+
+- `resolve_section_range_last_h2_in_multi_heading_doc` — the bug-file shape (7 headings, last
+  is `## Resume`); confirms the last heading resolves both with and without the `## ` prefix.
+- `resolve_section_range_last_heading_with_unbalanced_code_fence` — the actual repro: an
+  unmatched ``` followed by `## Hidden` and `## Resume`. All 4 headings must be visible.
+- `resolve_section_range_balanced_code_fence_still_masks_inner_headings` — regression guard
+  for the balanced case (don't surface heading-shaped lines inside real fenced blocks).
+
+`src/tools/markdown/tests.rs::unclosed_code_fence` — updated to assert the new editor-friendly
+behavior with an explanatory comment recording the behavior change.
 ## Workarounds
 Rewrite the whole file via `create_file(overwrite=true)` (used this session), or
 ensure the section you need to edit is never the last one (append a trailing
