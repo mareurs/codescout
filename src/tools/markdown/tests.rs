@@ -1127,6 +1127,40 @@ async fn many_headings_escalates_to_map_shape_even_when_bytes_fit() {
 }
 
 #[tokio::test]
+async fn read_markdown_call_content_returns_text_map_not_json() {
+    // Regression: small heading-map (ToC) results used to serialize as pretty
+    // JSON via the default Tool::call_content path because ReadMarkdown did not
+    // declare OutputForm::Text. The MAP renderer existed in format_compact but
+    // only fired on the buffered (large-byte) axis. Now both axes reach it, so
+    // a sub-threshold ToC comes through as the indented `# Heading  Ln` form.
+    let body = synth_md(205, 41); // > HEADINGS_HARD_CAP, ~1.8 KB → small path, MAP shape
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("toc.md");
+    std::fs::write(&path, &body).unwrap();
+
+    let ctx = test_ctx().await;
+    let content = super::ReadMarkdown
+        .call_content(serde_json::json!({"path": path.to_str().unwrap()}), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(content.len(), 1, "expected exactly 1 content block");
+    let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+    assert!(
+        text.contains("lines") && text.contains('L'),
+        "expected text MAP form with line markers, got: {text}"
+    );
+    assert!(
+        !text.trim_start().starts_with('{'),
+        "MAP output must be text, not JSON, got: {text}"
+    );
+    assert!(
+        !text.contains("\"headings\""),
+        "MAP output must not carry the raw JSON headings key, got: {text}"
+    );
+}
+
+#[tokio::test]
 async fn line_range_past_eof_returns_recoverable_error() {
     let body = "# Tiny\n\nbody\n";
     let dir = tempfile::tempdir().unwrap();

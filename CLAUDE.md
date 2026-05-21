@@ -10,7 +10,15 @@ See codescout memory `development-commands` for the full command reference.
 
 **Always run `cargo fmt`, `cargo clippy`, and `cargo test` before completing any task.**
 
-**To test changes via the live MCP server, always run `cargo build --release` first**, then restart the server with `/mcp`. The MCP server runs the release binary — dev builds are not picked up.
+**To test changes via the live MCP server, run `cargo build --release`, then restart the server with `/mcp`.** The MCP server launches `~/.cargo/bin/codescout` (see the `command` in `~/.claude/.claude.json`), which is a **symlink → `target/release/codescout`**, so a release build alone updates the live binary — no `cargo install` needed. Dev builds (`cargo test`/`cargo build`) are a separate artifact and are NOT picked up.
+
+If the symlink is missing (e.g. after `cargo clean` removed `target/`, or a fresh checkout), recreate it once:
+
+```bash
+ln -sf "$(pwd)/target/release/codescout" ~/.cargo/bin/codescout
+```
+
+Without the symlink, `~/.cargo/bin/codescout` is a stale installed copy and `/mcp` reconnects keep loading old code even after a successful build. (Symlink, not hardlink: `cargo build` rename-replaces the file, so a hardlink would resolve to the old inode.)
 
 ## Bug Tracking
 

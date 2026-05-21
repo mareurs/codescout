@@ -4861,6 +4861,36 @@ fn symbols_declares_output_form_text() {
 }
 
 #[test]
+fn symbol_at_declares_output_form_text() {
+    // Pinned wire contract: small `symbol_at` results (def + hover) render via
+    // the compact text form, not pretty JSON. format_compact is lossless
+    // (full def context + hover content), so the small path is safe to flip.
+    use crate::tools::symbol::symbol_at::SymbolAt;
+    use crate::tools::{OutputForm, Tool};
+    assert_eq!(SymbolAt.output_form(), OutputForm::Text);
+}
+
+#[test]
+fn symbol_at_format_compact_preserves_def_and_hover() {
+    use crate::tools::symbol::symbol_at::SymbolAt;
+    use crate::tools::Tool;
+    use serde_json::json;
+    let result = json!({
+        "def": { "definitions": [{ "file": "src/a.rs", "line": 42, "context": "fn alpha()" }] },
+        "hover": { "content": "fn alpha() -> i32", "location": "src/a.rs:42" },
+    });
+    let text = SymbolAt
+        .format_compact(&result)
+        .expect("def+hover should render");
+    assert!(text.contains("src/a.rs:42"), "def location lost: {text}");
+    assert!(text.contains("fn alpha()"), "def context lost: {text}");
+    assert!(
+        text.contains("fn alpha() -> i32"),
+        "hover content lost: {text}"
+    );
+}
+
+#[test]
 fn find_references_empty() {
     use crate::tools::symbol::references::References;
     use crate::tools::Tool;

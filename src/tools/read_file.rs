@@ -4,7 +4,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use super::format::format_overflow;
-use super::{optional_u64_param, RecoverableError, Tool, ToolContext};
+use super::{optional_u64_param, OutputForm, RecoverableError, Tool, ToolContext};
 use crate::util::text::extract_lines;
 
 pub struct ReadFile;
@@ -110,6 +110,10 @@ impl Tool for ReadFile {
             );
         }
         read_full_file(path, &text, &resolved, &input, &source_tag, ctx)
+    }
+
+    fn output_form(&self) -> OutputForm {
+        OutputForm::Text
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
@@ -1020,6 +1024,37 @@ mod tests {
         assert!(
             body.contains("fn alpha"),
             "json_path $.symbols[0].body should return the body string, got: {result}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_file_call_content_returns_line_numbered_text_not_json() {
+        // Regression: small read_file results used to serialize as pretty JSON via
+        // the default Tool::call_content path because ReadFile did not declare
+        // OutputForm::Text. The format_read_file renderer (full content + `N|`
+        // line numbers, lossless) only fired on the buffered axis. Now both axes
+        // reach it, so sub-threshold reads come through as line-numbered text.
+        let content = "alpha\nbeta\ngamma".to_string();
+        let ctx = test_ctx().await;
+        let buf_id = ctx.output_buffer.store_tool("cmd", content);
+
+        let blocks = ReadFile
+            .call_content(
+                json!({ "path": buf_id, "start_line": 1, "end_line": 3 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(blocks.len(), 1, "expected exactly 1 content block");
+        let text = blocks[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+        assert!(
+            text.contains("1| alpha") && text.contains("3| gamma"),
+            "expected line-numbered text form, got: {text}"
+        );
+        assert!(
+            !text.trim_start().starts_with('{'),
+            "read_file output must be text, not JSON, got: {text}"
         );
     }
 }
