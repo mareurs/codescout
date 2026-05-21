@@ -217,8 +217,8 @@ impl Tool for Symbols {
             input["kind"].as_str()
         };
 
-        let include_body = optional_bool_param(&input, "include_body")
-            .unwrap_or_else(|| guard.should_include_body());
+        let include_body_explicit = optional_bool_param(&input, "include_body");
+        let include_body = include_body_explicit.unwrap_or_else(|| guard.should_include_body());
         let depth = optional_u64_param(&input, "depth").unwrap_or(0) as usize;
         let scope = crate::library::scope::Scope::parse(input["scope"].as_str());
 
@@ -548,6 +548,10 @@ impl Tool for Symbols {
             }
         }
 
+        if include_body_explicit.is_none() && !include_body {
+            auto_inline_small_bodies(&mut matches, &root);
+        }
+
         // Per-file presentation: when every match shares the same `file`,
         // hoist it to the top level and strip the per-symbol field. Cuts
         // redundant repetition when the caller scoped to one file.
@@ -606,5 +610,86 @@ impl Tool for Symbols {
         } else {
             "$.symbols".to_string()
         }
+    }
+}
+
+/// Hydrate bodies for small result sets when the caller didn't pass `include_body`.
+///
+/// Symmetric inverse of the `BODY_CAP=5` strip-on-overflow path: saves a second
+/// MCP round-trip on the dominant `name=Foo` lookup against a single small symbol.
+/// Conservative thresholds — match cap 2, total LOC 40 — keep us from bloating
+/// responses where the agent didn't ask for bodies.
+///
+/// Slice is [start_line..end_line] (1-indexed → 0-indexed). We skip the
+/// attr/doc-comment backward-scan in `editing_start_line`, so a Rust `#[...]`
+/// or Python `@decorator` above the declaration won't be included. Callers who
+/// need canonical attr-aware bodies can still pass `include_body=true`.
+pub(crate) fn auto_inline_small_bodies(matches: &mut [Value], root: &std::path::Path) {
+    const AUTO_INLINE_MAX_MATCHES: usize = 2;
+    const AUTO_INLINE_MAX_LINES: u64 = 40;
+
+    if matches.is_empty() || matches.len() > AUTO_INLINE_MAX_MATCHES {
+        return;
+    }
+
+    let total_lines: u64 = matches
+        .iter()
+        .map(|m| {
+            let start = m.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
+            let end = m.get("end_line").and_then(|v| v.as_u64()).unwrap_or(0);
+            if end >= start && start > 0 {
+                end - start + 1
+            } else {
+                u64::MAX
+            }
+        })
+        .sum();
+    if total_lines > AUTO_INLINE_MAX_LINES {
+        return;
+    }
+
+    let mut file_cache: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for item in matches.iter_mut() {
+        let Some(obj) = item.as_object_mut() else {
+            continue;
+        };
+        if obj.contains_key("body") {
+            continue;
+        }
+        let Some(file) = obj.get("file").and_then(|v| v.as_str()).map(str::to_string) else {
+            continue;
+        };
+        if file.starts_with("lib:") {
+            continue;
+        }
+        let start = obj.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
+        let end = obj.get("end_line").and_then(|v| v.as_u64()).unwrap_or(0);
+        if start == 0 || end < start {
+            continue;
+        }
+        let src = match file_cache.get(&file) {
+            Some(s) => s.clone(),
+            None => {
+                let abs = if std::path::Path::new(&file).is_absolute() {
+                    std::path::PathBuf::from(&file)
+                } else {
+                    root.join(&file)
+                };
+                let Ok(content) = std::fs::read_to_string(&abs) else {
+                    continue;
+                };
+                file_cache.insert(file.clone(), content.clone());
+                content
+            }
+        };
+        let lines: Vec<&str> = src.lines().collect();
+        let s = (start as usize).saturating_sub(1);
+        let e = (end as usize).min(lines.len());
+        if s >= lines.len() || e <= s {
+            continue;
+        }
+        let body = lines[s..e].join("\n");
+        obj.insert("body".to_string(), json!(body));
     }
 }
