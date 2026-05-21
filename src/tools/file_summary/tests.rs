@@ -539,6 +539,83 @@ fn resolve_section_range_last_section() {
 }
 
 #[test]
+fn resolve_section_range_last_h2_in_multi_heading_doc() {
+    // Bug-shape: 7 headings (1 H1 + 6 H2), last section is "## Resume" with body
+    // and trailing blank line. Regression for
+    // docs/issues/2026-05-21-edit-markdown-last-heading-unaddressable.md.
+    let content = "# Title\n\
+                   intro\n\
+                   ## Root cause\n\
+                   a\n\
+                   ## Classification rule\n\
+                   b\n\
+                   ## Candidates\n\
+                   c\n\
+                   ## Proposed guard\n\
+                   d\n\
+                   ## Done log\n\
+                   e\n\
+                   ## Resume\n\
+                   final body\n";
+    let headings = parse_all_headings(content);
+    assert_eq!(
+        headings.len(),
+        7,
+        "expected 7 headings, got {}: {:?}",
+        headings.len(),
+        headings.iter().map(|h| h.text.as_str()).collect::<Vec<_>>()
+    );
+    let range = resolve_section_range(content, "## Resume").unwrap();
+    assert_eq!(range.heading_text, "## Resume");
+    assert_eq!(range.level, 2);
+
+    // Same query without the `## ` prefix (the form the bug report used).
+    let range_stripped = resolve_section_range(content, "Resume").unwrap();
+    assert_eq!(range_stripped.heading_text, "## Resume");
+}
+
+#[test]
+fn resolve_section_range_last_heading_with_unbalanced_code_fence() {
+    // Regression for docs/issues/2026-05-21-edit-markdown-last-heading-unaddressable.md.
+    // If an earlier batch edit leaves an unmatched ``` fence open, the naive
+    // toggle-on-every-``` parser flips in_code_block and hides every heading
+    // after the unclosed fence. parse_all_headings now detects unbalanced
+    // fences (odd count) and treats them as plain text instead.
+    let content = "# Title\n\
+                   ## A\n\
+                   ```\n\
+                   open fence with no close\n\
+                   ## Hidden\n\
+                   ## Resume\n\
+                   tail\n";
+    let headings = parse_all_headings(content);
+    assert_eq!(
+        headings.len(),
+        4,
+        "expected all 4 headings to be visible despite unbalanced ``` fence, got {:?}",
+        headings.iter().map(|h| h.text.as_str()).collect::<Vec<_>>()
+    );
+    let range = resolve_section_range(content, "## Resume").unwrap();
+    assert_eq!(range.heading_text, "## Resume");
+}
+
+#[test]
+fn resolve_section_range_balanced_code_fence_still_masks_inner_headings() {
+    // Don't regress the balanced-fence case: a properly closed code block
+    // must still mask `# heading-looking` lines inside it.
+    let content = "# Title\n\
+                   ## A\n\
+                   ```\n\
+                   ## Not a real heading\n\
+                   ```\n\
+                   ## B\n\
+                   body\n";
+    let headings = parse_all_headings(content);
+    let texts: Vec<&str> = headings.iter().map(|h| h.text.as_str()).collect();
+    assert_eq!(texts, vec!["# Title", "## A", "## B"]);
+}
+
+#[test]
 fn resolve_section_range_not_found() {
     let content = "# Title\n## Setup\ntext";
     let err = resolve_section_range(content, "## Nonexistent").unwrap_err();

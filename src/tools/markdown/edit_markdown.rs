@@ -189,9 +189,18 @@ pub fn perform_section_edit_ext(
 /// that starts at `start_idx` (0-based) and has heading level `level`.
 /// Skips headings inside fenced code blocks (``` ... ```).
 fn compute_section_end(lines: &[&str], start_idx: usize, level: usize) -> usize {
+    // Mirror parse_all_headings: if ``` fences in the slice are unbalanced,
+    // treat them as plain text so an unclosed fence in the section's body
+    // doesn't swallow the next sibling heading.
+    let fence_count = lines[start_idx..]
+        .iter()
+        .filter(|l| l.starts_with("```"))
+        .count();
+    let fences_balanced = fence_count % 2 == 0;
+
     let mut in_code_block = false;
     for (i, &line) in lines[start_idx..].iter().enumerate() {
-        if line.starts_with("```") {
+        if fences_balanced && line.starts_with("```") {
             in_code_block = !in_code_block;
             continue;
         }

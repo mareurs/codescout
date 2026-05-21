@@ -750,15 +750,21 @@ fn code_block_at_end_of_file() {
     assert!(result.ends_with('\n'));
 }
 
-/// Unclosed code fence — everything after ``` to EOF is "inside" the code block.
-/// The section boundary should extend to EOF since no real heading follows.
+/// Unclosed code fence — historically (CommonMark-conformant) everything from
+/// ``` to EOF was treated as inside the code block, so `# looks like heading`
+/// was masked and `## Broken`'s section extended to EOF. As of the
+/// last-heading-unaddressable fix (docs/issues/2026-05-21-edit-markdown-last-heading-unaddressable.md),
+/// unbalanced ``` is treated as plain text — otherwise an unmatched fence
+/// dropped into a batch edit silently hides every subsequent heading. With
+/// the new rule, `# looks like heading` is parsed as a real H1, so it
+/// terminates `## Broken`'s section and survives the replace.
 #[test]
 fn unclosed_code_fence() {
     let content = "# Title\n## Broken\ntext\n```\n# looks like heading\ncode\n";
     let result = perform_section_edit(content, "## Broken", "replace", Some("fixed\n")).unwrap();
     assert!(result.contains("fixed"));
-    // The unclosed fence content is part of the section — gets replaced
-    assert!(!result.contains("# looks like heading"));
+    // Unbalanced fence is treated as plain text, so the H1 below it survives.
+    assert!(result.contains("# looks like heading"));
 }
 
 /// Multiple `#` levels inside a single code block — none should act as boundaries.
