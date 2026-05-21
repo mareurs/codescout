@@ -6592,3 +6592,112 @@ fn format_search_symbols_single_file_no_global_header() {
     );
     assert!(out.starts_with("a.rs (1)\n"), "got:\n{out}");
 }
+
+// ---------- auto_inline_small_bodies ----------
+
+fn fixture_with_class(dir: &std::path::Path, lines: usize) -> std::path::PathBuf {
+    let path = dir.join("models.py");
+    let mut body = String::from("# header line 1\n# header line 2\n");
+    body.push_str("class DocumentChunk:\n");
+    for i in 0..lines {
+        body.push_str(&format!("    field_{i}: int = 0\n"));
+    }
+    std::fs::write(&path, body).unwrap();
+    path
+}
+
+#[test]
+fn auto_inline_attaches_body_when_one_small_match() {
+    let dir = tempdir().unwrap();
+    let _ = fixture_with_class(dir.path(), 8);
+    let mut matches = vec![json!({
+        "name": "DocumentChunk",
+        "kind": "Class",
+        "file": "models.py",
+        "start_line": 3,
+        "end_line": 11,
+    })];
+    super::symbols::auto_inline_small_bodies(&mut matches, dir.path());
+    let body = matches[0]
+        .get("body")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(
+        body.contains("class DocumentChunk:"),
+        "expected body to start at class declaration, got: {body:?}"
+    );
+    assert!(
+        body.contains("field_0: int = 0"),
+        "expected body to include first field, got: {body:?}"
+    );
+}
+
+#[test]
+fn auto_inline_skips_when_match_too_large() {
+    let dir = tempdir().unwrap();
+    let _ = fixture_with_class(dir.path(), 60);
+    let mut matches = vec![json!({
+        "name": "BigClass",
+        "kind": "Class",
+        "file": "models.py",
+        "start_line": 3,
+        "end_line": 63,
+    })];
+    super::symbols::auto_inline_small_bodies(&mut matches, dir.path());
+    assert!(
+        matches[0].get("body").is_none(),
+        "61-line match exceeds AUTO_INLINE_MAX_LINES (40); body should not be attached"
+    );
+}
+
+#[test]
+fn auto_inline_skips_when_too_many_matches() {
+    let dir = tempdir().unwrap();
+    let _ = fixture_with_class(dir.path(), 4);
+    // Three tiny matches — over the 2-match cap even though total LOC is fine.
+    let mut matches = vec![
+        json!({"name": "a", "file": "models.py", "start_line": 1, "end_line": 1}),
+        json!({"name": "b", "file": "models.py", "start_line": 2, "end_line": 2}),
+        json!({"name": "c", "file": "models.py", "start_line": 3, "end_line": 3}),
+    ];
+    super::symbols::auto_inline_small_bodies(&mut matches, dir.path());
+    for m in &matches {
+        assert!(
+            m.get("body").is_none(),
+            "3 matches exceeds AUTO_INLINE_MAX_MATCHES (2); no bodies should be attached"
+        );
+    }
+}
+
+#[test]
+fn auto_inline_skips_library_matches() {
+    let dir = tempdir().unwrap();
+    let mut matches = vec![json!({
+        "name": "Foo",
+        "kind": "Class",
+        "file": "lib:numpy/core.py",
+        "start_line": 1,
+        "end_line": 5,
+    })];
+    super::symbols::auto_inline_small_bodies(&mut matches, dir.path());
+    assert!(
+        matches[0].get("body").is_none(),
+        "lib: prefix should be skipped (no library-root resolution here)"
+    );
+}
+
+#[test]
+fn auto_inline_preserves_existing_body() {
+    let dir = tempdir().unwrap();
+    let path = fixture_with_class(dir.path(), 4);
+    let _ = path;
+    let mut matches = vec![json!({
+        "name": "DocumentChunk",
+        "file": "models.py",
+        "start_line": 3,
+        "end_line": 7,
+        "body": "ALREADY SET",
+    })];
+    super::symbols::auto_inline_small_bodies(&mut matches, dir.path());
+    assert_eq!(matches[0]["body"], "ALREADY SET");
+}
