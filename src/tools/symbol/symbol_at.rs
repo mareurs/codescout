@@ -5,7 +5,7 @@
 use serde_json::{json, Value};
 
 use crate::ast;
-use crate::tools::{require_u64_param, RecoverableError, Tool, ToolContext};
+use crate::tools::{require_u64_param, OutputForm, RecoverableError, Tool, ToolContext};
 
 use super::display::{format_goto_definition, format_hover};
 use crate::fs::{
@@ -389,6 +389,10 @@ impl Tool for SymbolAt {
             out.insert("hover".to_string(), hov);
         }
         Ok(Value::Object(out))
+    }
+
+    fn output_form(&self) -> OutputForm {
+        OutputForm::Text
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
