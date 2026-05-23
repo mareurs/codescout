@@ -195,9 +195,12 @@ H-1 has 2 sessions of evidence (the U-1 baseline + this U-3 follow-up)
 
 **Severity:** low — current copies are *consistent in content*; the cost is token bloat (~30 redundant lines in every session prefix) plus drift risk for future edits. Drift already realized in U-5, U-6.
 
-**Status:** open. Promotion candidate to **H-4** (drop companion compression-reminder once main-session server-instructions are proven to survive compaction).
+**Status:** **by-design, not drift (revised 2026-05-23).** The three copies serve three lifecycle stages:
+1. Canonical `source.md::server_instructions` — primary at MCP session init; cut at ~2 KB by Claude Code's instructions channel.
+2. Companion compression-reminder (SessionStart hook) — post-`/compact` safety net; refires on session resume.
+3. Buddy `gates.md` — per-specialist defense-in-depth (U-11 reduced this from full-prose to a pointer + at-a-glance cheat sheet, which is what the layer actually needs).
 
-**Notes:** the buddy `gates.md` copy is the easier kill — it's pure prose narration with no compaction-survival role. The companion copy *does* serve a real purpose (subagent inheritance, compaction-survival), so it stays as the most-likely-to-survive copy if any is dropped.
+The triplication is correctly layered; the failure mode I worried about (drift between copies) is now substrate-prevented by **H-3** (companion-surface lint, shipped 2026-05-23). The buddy copy was simplified by **U-11** (gates.md rewrite). The remaining cost is bloat, not contradiction, and the bloat is paid in exchange for compaction-survival.
 
 
 

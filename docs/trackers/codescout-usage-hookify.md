@@ -182,37 +182,20 @@ Both fixed in claude-plugins:c95adee. The companion side is now caught up; futur
 
 ### H-4 — Drop companion compression-reminder once server-instructions survive compaction
 
-**Pattern:** the companion `SessionStart` hook duplicates Iron Laws content already canonical in `src/prompts/source.md::server_instructions`. Multiple copies in context — three by U-4's count — produce drift (U-5, U-6), token bloat, and an inversion of "canonical is the source of truth" (the *weakest* derived copy is the most compaction-resilient).
+**Pattern (original framing):** the companion `SessionStart` hook duplicates Iron Laws content already canonical in `src/prompts/source.md::server_instructions`. Multiple copies in context — three by U-4's count — looked like drift (U-5, U-6), token bloat, and an inversion of "canonical is the source of truth."
 
-**Confirming data:**
+**Confirming data (preserved for history):**
 - **U-4** (triplication: canonical + companion + buddy).
-- **U-5** (compression-reminder drops the bounded-LHS carve-out for Law 3 — derived surface loses precision).
-- **U-6** (compression-reminder cites stale tool names — derived surface drifts faster than canonical).
+- **U-5** (compression-reminder dropped the bounded-LHS carve-out for Law 3 — derived surface lost precision).
+- **U-6** (compression-reminder cited stale tool names — derived surface drifted faster than canonical).
 
-The three failures stem from the same root cause: maintaining a derived copy by hand. Drop the copy, drop the drift.
+**Status:** **wontfix — measurement disproved the original predicate (2026-05-23).**
 
-**Proposed hookify rule:**
+Per `docs/architecture/mcp-channel-caps.md`, the canonical `server_instructions` is delivered ONCE at MCP `initialize` and capped at ~2 KB. After `/compact`, the client does not re-send `initialize`; it reuses the existing session, so the initial response is **not re-served**. The summarized post-compact context contains only whatever the harness compressed.
 
-- **Predicate:** if `server_instructions` is rebroadcast at every CC MCP session start *and* survives `/compact` events (i.e. is re-injected when the user resumes a compacted session), then the companion compression-reminder is duplicate-by-design and should be removed from main-session `SessionStart`.
-- **Decision:** deferred until measurement.
-- **Reason text:** *"compression-reminder duplicates canonical server-instructions; codescout MCP injects them at every session-start. Companion's main-session copy is redundant if injection happens on resume too."*
-- **Counterpoint to test:** subagents may NOT inherit MCP server-instructions automatically (they only see the parent's context). If subagents miss the canonical Iron Laws, the compression-reminder still earns its keep — but **only on `SubagentStart` hooks**, not on main-session `SessionStart`. Keep one, drop the other.
+That makes the companion compression-reminder load-bearing as the **post-compact safety net** — the SessionStart hook re-fires on resume, restoring the Iron Laws in a compact-friendly bullet form. Dropping it would leave the post-compact model without a tool-rules anchor.
 
-**Promote-when:** one targeted experiment confirms two facts:
-1. `server_instructions` is re-injected at session resume after `/compact` (measure by triggering compaction and inspecting the next assistant turn's system prompt).
-2. Subagents do NOT inherit MCP server-instructions on `SubagentStart` (measure by reading a subagent's system prompt).
-
-Outcomes:
-- Both confirmed → drop from `SessionStart`, keep on `SubagentStart`.
-- Only (1) → drop from `SessionStart`, also drop from `SubagentStart`.
-- Only (2) → keep both; Pika lives with the triplication.
-
-**Status:** proposed (blocked on the two measurements).
-
-**Notes:** the buddy `gates.md` prose narration (U-11) is the easier first kill — it has no compaction-survival role. Drop that first regardless of how this experiment resolves; H-4 is the harder, evidence-gated promotion.
-
-
-
+**Revised verdict:** keep the companion compression-reminder. The triplication identified in U-4 is correctly layered defense, not redundancy. To prevent drift between the three copies, **H-3 now provides the lint** (companion-surface tool-name check, shipped code-explorer:257d1236) — drift in the companion copy surfaces as a CI failure rather than silent inconsistency.
 ### H-5 — Wire `audit_doc_refs` into CI for CLAUDE.md and docs/**/*.md
 
 **Pattern:** doc surfaces (CLAUDE.md, trackers, READMEs) cite code paths that have since been renamed, moved, or removed. The project already has a tool — `librarian(action="audit_doc_refs")` — built specifically to detect this; it's just not wired into automated enforcement.
@@ -232,7 +215,7 @@ Outcomes:
 - **warn ship:** 3 documented `audit_doc_refs` findings of severity≥med in repo doc surfaces across two months.
 - **warn → deny promotion:** zero warn-stage CI false positives across one month.
 
-**Status:** proposed; FP-filter precursor **shipped** (code-explorer:0425b8ef, 2026-05-23).
+**Status:** proposed; FP-filter precursor **shipped** (code-explorer:0425b8ef, 2026-05-23). CI plumbing **deferred** — needs a CLI subcommand (`codescout audit-doc-refs --paths ... --fail-on med`) before a CI job can invoke it cleanly, and the documented warn-stage observation period (≥1 month of clean runs before deny) means there's no pressure to ship the gate immediately. The manual gate is already documented in CLAUDE.md § Standard Ship Sequence step 5; that's the minimum-viable surface until CI plumbing is built. Re-open this item when either (a) someone wants to land the CLI subcommand or (b) a doc-drift incident lands on `master` that the manual gate missed.
 
 **Notes:**
 - The audit tool already classifies findings as `verdict ∈ {missing, ambiguous_basename, resolved_basename}`. CI should only fail on `verdict=missing severity≥med`; `ambiguous_basename` is informational (could be a basename collision; not necessarily wrong); `resolved_basename` is OK.
