@@ -301,14 +301,17 @@ impl Tool for Symbols {
                 // Fast path: workspace/symbol — one LSP request per language instead of
                 // one textDocument/documentSymbol request per file.
                 let mut languages = std::collections::HashSet::new();
+                let mut accepted_files = std::collections::HashSet::<PathBuf>::new();
                 let walker = ignore::WalkBuilder::new(&root)
                     .hidden(true)
                     .git_ignore(true)
                     .build();
                 for entry in walker.flatten() {
                     if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                        if let Some(lang) = ast::detect_language(entry.path()) {
+                        let path = entry.path().to_path_buf();
+                        if let Some(lang) = ast::detect_language(&path) {
                             languages.insert(lang);
+                            accepted_files.insert(path);
                         }
                     }
                 }
@@ -366,7 +369,13 @@ impl Tool for Symbols {
                         // from stdlib/dependency crates whose path lies outside the root.
                         let in_root = scope != crate::library::scope::Scope::Project
                             || sym.file.starts_with(&root);
-                        if name_ok && kind_ok && in_root {
+                        // LSP workspace_symbol doesn't honour .gitignore (e.g. pyright
+                        // indexes target/build/ Python files); reuse the walker's
+                        // accepted-files set as the source of truth for what's
+                        // visible to the agent under Project scope.
+                        let in_walk = scope != crate::library::scope::Scope::Project
+                            || accepted_files.contains(&sym.file);
+                        if name_ok && kind_ok && in_root && in_walk {
                             // When include_body is requested, validate the range. If
                             // workspace/symbol returned a degenerate range, fall back to
                             // document_symbols for the file to get the correct range.
