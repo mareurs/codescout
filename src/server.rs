@@ -1579,6 +1579,177 @@ mod tests {
         );
     }
 
+    /// Companion plugin surfaces (`../claude-plugins/codescout-companion/hooks/*`)
+    /// reference codescout tool names as plain text in matcher regexes, case
+    /// statements, and message bodies. They drift independently of the codescout
+    /// repo — the existing `prompt_surfaces_reference_only_real_tools` test does
+    /// not cover them. This catches two kinds of drift:
+    ///
+    /// 1. **Positive match (matcher shape):** every `mcp__codescout__<name>` token
+    ///    in companion hook scripts or `hooks.json` must name a real tool. Catches
+    ///    PreToolUse matchers and case-statement filters.
+    /// 2. **Stale-name sentinel:** known-removed names (`replace_symbol`,
+    ///    `insert_code`, `remove_symbol`, `edit_lines`, `create_or_update_file`)
+    ///    must not appear in live (non-comment) code in companion hook files.
+    ///    Catches the wider text drift — message bodies that list nonexistent
+    ///    tools to the model on SessionStart, BLOCKED notices, etc.
+    ///
+    /// Filters:
+    /// - `*.test.sh` files: skip entirely — those exercise stale names on purpose
+    ///   as regression sentinels for matcher coverage.
+    /// - Shell comments (`#`-prefixed lines): scrub before stale-name check so
+    ///   header comments can document consolidation history ("replace_symbol/
+    ///   insert_code/remove_symbol were consolidated into edit_code") without
+    ///   tripping the lint. Matcher-shape positive checks still run on full text.
+    /// - `non_codescout_tools` allowlist: host-harness tools the companion
+    ///   legitimately matches alongside codescout's own (e.g. `activate_project`
+    ///   is the host equivalent of codescout's `workspace`).
+    ///
+    /// Skips gracefully when the sibling repo isn't present (e.g. sandbox builds
+    /// of just codescout). Originating evidence: U-6 (text drift) and U-14
+    /// (matcher drift causing silent worktree-write-guard failure). H-3 in the
+    /// hookify ledger covers the lint extension itself.
+    #[tokio::test]
+    async fn companion_surfaces_reference_only_real_tools() {
+        use std::collections::HashSet;
+        use std::path::PathBuf;
+
+        let hooks_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .map(|p| p.join("claude-plugins/codescout-companion/hooks"));
+        let hooks_dir = match hooks_dir {
+            Some(p) if p.is_dir() => p,
+            _ => {
+                eprintln!(
+                    "companion_surfaces_reference_only_real_tools: skipping — \
+                 ../claude-plugins/codescout-companion/hooks not present"
+                );
+                return;
+            }
+        };
+
+        let (_dir, server) = make_server().await;
+        let real_tools: HashSet<&str> = server.tools.iter().map(|t| t.name()).collect();
+
+        let non_codescout_tools: HashSet<&str> = ["activate_project"].into_iter().collect();
+
+        let stale_names = &[
+            "replace_symbol",
+            "insert_code",
+            "remove_symbol",
+            "edit_lines",
+            "create_or_update_file",
+        ];
+
+        let positive_re = regex::Regex::new(r"mcp__codescout__\(?([a-z_|]+)\)?").unwrap();
+        let case_re = regex::Regex::new(r"\*__([a-z_]+)").unwrap();
+
+        let mut stale_regexes: Vec<(&str, regex::Regex)> = Vec::new();
+        for name in stale_names {
+            let re = regex::Regex::new(&format!(r"\b{}\b", regex::escape(name))).unwrap();
+            stale_regexes.push((name, re));
+        }
+
+        fn scrub_shell_comments(content: &str) -> String {
+            content
+                .lines()
+                .map(|l| {
+                    let trimmed = l.trim_start();
+                    if trimmed.starts_with('#') {
+                        ""
+                    } else {
+                        l
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
+        let mut drift = Vec::<String>::new();
+        let entries: Vec<_> = std::fs::read_dir(&hooks_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+
+        for entry in entries {
+            let path = entry.path();
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if !matches!(ext, "sh" | "json") {
+                continue;
+            }
+            let fname = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("?")
+                .to_string();
+            if fname.ends_with(".test.sh") {
+                continue;
+            }
+            let content = match std::fs::read_to_string(&path) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            // Positive matcher-shape check runs on full text (matchers in shebang
+            // lines and JSON keys don't live inside shell `#` comments).
+            for cap in positive_re.captures_iter(&content) {
+                let group = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+                for name in group.split('|') {
+                    if name.is_empty() || real_tools.contains(name) {
+                        continue;
+                    }
+                    drift.push(format!(
+                        "{fname}: matcher references nonexistent tool \
+                     `mcp__codescout__{name}` — update to a registered \
+                     tool name or remove the alternation branch"
+                    ));
+                }
+            }
+
+            if ext == "sh" {
+                for cap in case_re.captures_iter(&content) {
+                    let name = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+                    if name.is_empty()
+                        || real_tools.contains(name)
+                        || non_codescout_tools.contains(name)
+                    {
+                        continue;
+                    }
+                    drift.push(format!(
+                        "{fname}: case-statement branch `*__{name}` cannot \
+                     fire — no codescout tool named `{name}` is registered \
+                     (add to non_codescout_tools allowlist if it is a \
+                     host-harness tool)"
+                    ));
+                }
+            }
+
+            // Stale-name sentinel runs on comment-scrubbed text so header
+            // documentation explaining consolidation history doesn't false-trip.
+            let scrubbed = if ext == "sh" {
+                scrub_shell_comments(&content)
+            } else {
+                content.clone()
+            };
+            for (stale, re) in &stale_regexes {
+                if re.is_match(&scrubbed) {
+                    drift.push(format!(
+                        "{fname}: contains stale tool name `{stale}` in live \
+                     (non-comment) code — replace with the live equivalent \
+                     (e.g. `edit_code` consolidated \
+                     replace_symbol/insert_code/remove_symbol)"
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            drift.is_empty(),
+            "companion-surface drift detected:\n  {}",
+            drift.join("\n  ")
+        );
+    }
+
     #[tokio::test]
     async fn static_doc_sources_all_readable() {
         use crate::mcp_resources::{doc::DocProvider, ResourceProvider};
