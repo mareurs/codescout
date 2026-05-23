@@ -23,4 +23,4 @@ The system prompt references librarian tools but cannot include the full filter 
 
 ## Source
 
-`src/prompts/librarian-guide.md` — served directly from disk, always current.
+`src/prompts/guides/librarian.md` — embedded at compile time via `include_str!`, so the bundled content always matches the running binary.
