@@ -171,3 +171,225 @@ long session is the real cost; individual strikes look free.
 **Pointer:** Promotes H-1's warn→deny criterion. With ×4 in one session,
 H-1 has 2 sessions of evidence (the U-1 baseline + this U-3 follow-up)
 — close to deny-threshold.
+
+
+
+---
+
+### U-4 — Iron Laws triplicated in context (canonical + companion + buddy)
+
+**When:** 2026-05-23, user-requested prompt-surface self-reflection during a `/buddy:summon pika` session. Discovered by reading `src/prompts/source.md`, `claude-plugins/codescout-companion/hooks/session-start.sh` output, and `claude-plugins/buddy/data/gates.md` side-by-side.
+
+**Iron Law / pattern:** surface design — single-source principle. The same five Iron Laws appear in three places in the loaded context:
+1. `src/prompts/source.md::server_instructions` (canonical, build-sliced — 44 lines, terse 5-bullet table).
+2. `claude-plugins/codescout-companion/hooks/session-start.sh` "CODESCOUT RULES (compression-resilient reminder)" (~10 lines, bulleted; *intentionally* designed to survive compaction).
+3. `claude-plugins/buddy/data/gates.md` `## Tool gates — codescout Iron Laws` (~20 lines, prose narration).
+
+**Tool called (surface):** all three surfaces re-state the same five rules.
+
+**Should have called:** one canonical copy. The two derived surfaces should be *pointers* ("see Iron Laws in MCP server instructions") unless they add information canonical doesn't have. Whichever copy is most likely to survive `/compact` should be the only one — currently the weakest (compression-reminder) is most compaction-resilient because SessionStart rebroadcasts on resume, which inverts the design intent of "canonical is the source of truth."
+
+**Whistle delivered:** yes (chat U-1 in this session; promoted to this tracker entry).
+
+**Recurrence:** 1st observed and recorded.
+
+**Severity:** low — current copies are *consistent in content*; the cost is token bloat (~30 redundant lines in every session prefix) plus drift risk for future edits. Drift already realized in U-5, U-6.
+
+**Status:** open. Promotion candidate to **H-4** (drop companion compression-reminder once main-session server-instructions are proven to survive compaction).
+
+**Notes:** the buddy `gates.md` copy is the easier kill — it's pure prose narration with no compaction-survival role. The companion copy *does* serve a real purpose (subagent inheritance, compaction-survival), so it stays as the most-likely-to-survive copy if any is dropped.
+
+
+
+### U-5 — Compression-reminder drops bounded-LHS carve-out for Iron Law 3
+
+**When:** 2026-05-23, line-by-line comparison of canonical Law 3 against the SessionStart compression-reminder.
+
+**Iron Law / pattern:** Iron Law 3 — no piping unbounded `run_command` output.
+
+**Tool called (surface):** companion `hooks/session-start.sh` line:
+> *"Never pipe run_command output — query @ref buffers instead"*
+
+**Should have called:** preserve the canonical exception text from `source.md`:
+> *"NEVER pipe unbounded run_command output → run bare, query the @cmd_* buffer (grep "ERROR" @cmd_abc). **Bounded LHS (`ls`, `cat`, `awk`, `sed`, `find -maxdepth N`) is OK.**"*
+
+The companion compression-reminder dropped the bolded clause. Post-compaction this becomes the dominant interpretation, and the model will refuse legitimate bounded-output pipes like `ls -la | awk '{print $9}'` — wasting round-trips on commands designed to produce bounded output.
+
+**Whistle delivered:** yes (chat U-2 → this tracker entry).
+
+**Recurrence:** 1st observed. Note: cross-references with U-3 (IL3 strikes in this session) — the model already has a pre-existing IL3 instinct problem; an over-narrowed rule makes it *worse*, not better.
+
+**Severity:** med — actively wrong post-compaction interpretation, not just bloat.
+
+**Status:** open. Fix is a two-line edit to `hooks/session-start.sh`: restore the bounded-LHS exception text.
+
+
+
+### U-6 — Compression-reminder cites stale codescout tool names
+
+**When:** 2026-05-23, comparing companion SessionStart text to the live MCP tool registry.
+
+**Iron Law / pattern:** project prompt-surface consistency rule (CLAUDE.md § "Prompt Surface Consistency"). Direct repeat of the "distance-from-change" failure mode documented in that section.
+
+**Tool called (surface):** companion `hooks/session-start.sh` line:
+> *"Code edits: replace_symbol/insert_code/remove_symbol, NOT edit_file/Edit for structural changes"*
+
+**Should have called:** `edit_code` (single consolidated tool with `action="replace"|"insert"|"remove"|"rename"`). The three named handles (`replace_symbol`, `insert_code`, `remove_symbol`) do **not** exist as MCP tool handles in the current binary. Confirmed against the tool registry available in this session — only `mcp__codescout__edit_code` is registered.
+
+**Whistle delivered:** yes (chat U-3 → this tracker entry).
+
+**Recurrence:** 1st observed in this surface; pattern-wise it's the second documented instance of "distance-from-change" tool-name drift (the first lived in repo-side surfaces and was caught by `server::tests::prompt_surfaces_reference_only_real_tools`, prompting the lint).
+
+**Severity:** **high** — the model will attempt to call non-existent tools. Each call hits "unknown tool", forcing recovery and round-trip waste. Worst-failure variety of prompt drift; exactly what the project's lint exists to prevent — except the lint does not cover companion-plugin hooks (companion lives in a sibling repo).
+
+**Status:** open. Two fixes needed:
+1. Edit `hooks/session-start.sh` to cite `edit_code` (single name).
+2. Promote **H-3** to extend the lint to cover companion-hook output.
+
+
+
+### U-7 — Project CLAUDE.md references renamed prompt files
+
+**When:** 2026-05-23, attempted to read the canonical server-instructions text by the path CLAUDE.md cited; got `file not found`.
+
+**Iron Law / pattern:** doc-vs-code drift; `librarian(action="audit_doc_refs")` exists to catch this exact failure.
+
+**Tool called (surface):** project `CLAUDE.md` § "Prompt Surface Consistency" cites:
+- `src/prompts/server_instructions.md`
+- `src/prompts/onboarding_prompt.md`
+
+**Should have called:** `src/prompts/source.md` — single source-of-truth file, sliced at build time via `<!-- @surface server_instructions -->` / `<!-- @surface onboarding_prompt -->` markers. See `src/prompts/README.md`:
+> *"`src/prompts/source.md` — the **single editable document** for the next two surfaces. `build.rs` slices it into `OUT_DIR` at compile time; `src/prompts/source.rs::extract_surface` is the matching runtime parser."*
+
+Old paths return "file not found" via both `read_file` and `read_markdown`.
+
+**Whistle delivered:** yes (chat U-4 → this tracker entry).
+
+**Recurrence:** 1st observed.
+
+**Severity:** med — contributors (human or LLM) following the stale CLAUDE.md guidance look for files that don't exist; the surface that's supposed to *prevent* prompt-surface drift has itself drifted. Self-referential.
+
+**Status:** open. Fix: edit CLAUDE.md § Prompt Surface Consistency to cite `source.md` plus the surface-marker mechanism. Run `librarian(action="audit_doc_refs", paths=["CLAUDE.md", "docs/**/*.md"], fail_on="med")` in the same pass to surface any other drift. Cross-reference **H-5** for CI promotion.
+
+
+
+### U-8 — "Available shared memories" line truncates mid-name
+
+**When:** 2026-05-23, scanning the codescout MCP `## Project Status` block delivered at session start.
+
+**Iron Law / pattern:** progressive-disclosure design — overflow hints must be informative.
+
+**Tool called (surface):** codescout's own `## Project Status` injection:
+> *"Available shared memories: architecture, cargo-test-lib-skips-integration, conventions, development-commands, domain-glossary, gotchas, language-patterns, on… [truncated]"*
+
+**Should have called:** either (a) full list — only ~10 memories exist, well within any reasonable budget; or (b) truncate at a comma boundary and emit `… +N more` so the model knows total count + that something remains. Mid-name `on…` discards information without naming it (the next memory is presumably `onboarding`).
+
+**Whistle delivered:** yes (chat U-5 → this tracker entry).
+
+**Recurrence:** 1st observed in tracker; visible at every session start.
+
+**Severity:** low — model can recover with `memory(action="list")`, but only if it notices the truncation.
+
+**Status:** open. Locate the emitter by `grep "Available shared memories"` in `src/`; likely in `src/server/...` Project Status assembly. Two-line fix.
+
+
+
+### U-9 — Caveman SessionStart payload injected twice
+
+**When:** 2026-05-23, session start of this conversation.
+
+**Iron Law / pattern:** hook coalescing / harness dedup.
+
+**Tool called (surface):** caveman plugin's SessionStart payload appears as two consecutive `<system-reminder>` blocks at session start, content near-identical (level: full both times).
+
+**Should have called:** one copy. Either the hook runs twice (likely two SessionStart hooks registered in different profile dirs — see U-10 cross-CC-profile config drift) or the harness fails to dedupe identical SessionStart payloads.
+
+**Whistle delivered:** yes (chat U-6 → this tracker entry).
+
+**Recurrence:** 1st observed this session; needs cross-session confirmation.
+
+**Severity:** low — bloat only, no semantic harm.
+
+**Status:** open. Out of scope for codescout repo; file against caveman plugin or CC harness. Note: same root cause may underlie U-10's contradictory CLAUDE.md content (config drift between `~/.claude/`, `~/.claude-kat/`, `~/.claude-sdd/`).
+
+
+
+### U-10 — Two global CLAUDE.md files disagree on CC instance count
+
+**When:** 2026-05-23, both global CLAUDE.md files loaded into session context.
+
+**Iron Law / pattern:** internal consistency across user-global config.
+
+**Tool called (surface):**
+- `~/.claude-kat/CLAUDE.md`: *"This machine runs **two separate Claude Code instances**"* — lists `~/.claude/` and `~/.claude-sdd/`.
+- `~/.claude/CLAUDE.md`: *"This machine runs **three separate Claude Code instances**"* — lists `~/.claude/`, `~/.claude-sdd/`, `~/.claude-kat/`.
+
+**Should have called:** sync the kat copy to mention the third instance, or drop the count entirely and just list. The kat one is stale — it predates the creation of `~/.claude-kat/` (the file's own host).
+
+**Whistle delivered:** yes (chat U-7 → this tracker entry).
+
+**Recurrence:** 1st.
+
+**Severity:** low — minor model confusion; no principled tiebreak from the model side.
+
+**Status:** open. Two-line edit to `~/.claude-kat/CLAUDE.md`. Cross-reference U-9 (same root cause: cross-profile config drift).
+
+
+
+### U-11 — Buddy `gates.md` re-narrates Iron Laws in prose
+
+**When:** 2026-05-23, Pika summon loaded `claude-plugins/buddy/data/gates.md` per the summon protocol.
+
+**Iron Law / pattern:** redundancy with canonical surfaces (see U-4).
+
+**Tool called (surface):** `claude-plugins/buddy/data/gates.md` § "Tool gates — codescout Iron Laws" — ~20 lines of prose narration of the same five laws already canonical in `source.md::server_instructions`.
+
+**Should have called:** be a *pointer* — "see canonical Iron Laws in MCP server instructions" — and add only what canonical doesn't cover: workspace gate semantics, hooks behavior, role-gate context. Prose narration of rules that already exist in tabular form a few hundred tokens away is pure cost.
+
+**Whistle delivered:** yes (chat U-8 → this tracker entry).
+
+**Recurrence:** 1st.
+
+**Severity:** low — bloat only; no contradiction with canonical.
+
+**Status:** open. Drift-prevention edit to buddy plugin (`buddy/data/gates.md`). Easier kill than U-4's companion copy because buddy's gates have no compaction-survival role.
+
+
+
+### U-12 — Recon SKILL body inline-pasted instead of lazy-loaded
+
+**When:** 2026-05-23, user invoked `/codescout-companion:reconnaissance` early in session (turn 1 of this conversation, before the Pika summon).
+
+**Iron Law / pattern:** static-prefix budget — every line in slash-command output joins the cached session prefix.
+
+**Tool called (surface):** the slash command pastes ~300 lines of `reconnaissance/SKILL.md` inline into the user-message turn.
+
+**Should have called:** debatable — slash commands trade lazy-load (Skill tool) for "always visible". For a *frequently invoked* skill like reconnaissance during a multi-task session, inline-paste is the right call (the body is referenced repeatedly). For a one-shot acknowledgment without follow-up scout work, lazy-load wins.
+
+**Whistle delivered:** yes (chat U-9 → this tracker entry).
+
+**Recurrence:** 1st.
+
+**Severity:** low — design call, not a defect. Listed for awareness; not for immediate fix.
+
+**Status:** open. Defer until usage data accumulates: query `.codescout/usage.db` for how often the recon body content gets actively referenced vs sits idle in the prefix. If reference rate is low, lazy-load wins.
+
+
+
+### U-13 — Per-turn re-injection of output-style anchor
+
+**When:** 2026-05-23, every assistant turn in this session.
+
+**Iron Law / pattern:** per-turn hook design.
+
+**Tool called (surface):** the CC harness re-injects `"Explanatory output style is active. Remember to follow the specific guidelines for this style."` as a `<system-reminder>` on every turn.
+
+**Should have called:** by design — re-anchoring prevents style drift mid-session, especially under voice stacking (currently three layers in this session: Pika voice + Caveman + Explanatory output style). Listed only as a surface to be aware of when designing future hooks; the design tradeoff is "always anchored" vs "per-turn token cost".
+
+**Whistle delivered:** yes (chat U-10 → this tracker entry).
+
+**Recurrence:** every turn (by design).
+
+**Severity:** info, not friction.
+
+**Status:** open as design note. No fix expected.
