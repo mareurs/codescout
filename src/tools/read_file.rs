@@ -123,18 +123,22 @@ impl Tool for ReadFile {
 
 /// Strip surrounding quotes from buffer ref paths.
 ///
-/// LLMs sometimes wrap @ref paths in extra quotes, e.g. `"@tool_abc"`.
-/// Stripping them here lets the ref resolve correctly.
+/// LLMs often wrap @ref paths in extra quoting — double quotes (`"@tool_abc"`),
+/// single quotes (`'@tool_abc'`), or markdown-style backticks (`` `@tool_abc` ``).
+/// Stripping any matched pair here lets the ref resolve correctly.
 fn strip_buffer_ref_quotes(path: &str) -> &str {
-    path.strip_prefix('"')
-        .and_then(|s| s.strip_suffix('"'))
-        .filter(|s| {
-            s.starts_with("@file_")
-                || s.starts_with("@cmd_")
-                || s.starts_with("@tool_")
-                || s.starts_with("@ack_")
-        })
-        .unwrap_or(path)
+    for q in ['"', '\'', '`'] {
+        if let Some(inner) = path.strip_prefix(q).and_then(|s| s.strip_suffix(q)) {
+            if inner.starts_with("@file_")
+                || inner.starts_with("@cmd_")
+                || inner.starts_with("@tool_")
+                || inner.starts_with("@ack_")
+            {
+                return inner;
+            }
+        }
+    }
+    path
 }
 
 /// Read from an output buffer ref (`@file_*`, `@cmd_*`, `@tool_*`).
