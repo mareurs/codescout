@@ -92,9 +92,7 @@ to the Evidence subsection). Append; never delete rejected ones — they
 are how future-me avoids re-walking dead ends.*
 
 ## Fix
-*Plan first, implementation second. When implemented, list commit SHAs and
-where the actual change lives (e.g. `src/server.rs:202-358`). If "Fix" is
-just a workaround, say so explicitly and keep status `mitigated`, not `fixed`.*
+*Plan first, implementation second. When implemented, list **master-side** commit SHAs (after cherry-pick, run `git rev-parse HEAD` on master — NOT the experiments-side original, which orphans after rebase; see CLAUDE.md § "After cherry-pick"). Include where the actual change lives (e.g. `src/server.rs:202-358`). If "Fix" is just a workaround, say so explicitly and keep status `mitigated`, not `fixed`.*
 
 ## Tests added
 *Regression test name + `path:line`. If the test is intentionally absent,
