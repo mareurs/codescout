@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-05-20
-closed:
+closed: 2026-05-23
 severity: medium
 owner: marius
 related: ["docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md"]
@@ -167,47 +167,31 @@ the moment the component was installed. No codescout restart needed.
 
 ## Fix
 
-Two layers, both worth doing.
+Two layers, both worth doing. **Fix-1 shipped 2026-05-23 (code-explorer:47bbc8db).** Fix-2 deferred — Fix-1 alone closes the agentic-surface gap for the rustup-shim case.
 
-**Fix-1 — Diagnose at launch time.** When the LSP child exits before the
-initialize handshake completes, capture the last ~1 KB of stderr and
-include it in the error returned to the caller. The current
-`LspError::ServerDisconnected` (or whatever the type is) becomes
-`LspError::LaunchFailed { stderr: String }` for the
-"died-before-initialize" subcase. Caller-facing message becomes:
+**Fix-1 (SHIPPED 47bbc8db) — Diagnose at launch time.** Added the rustup `Unknown binary 'rust-analyzer'` pattern to `detect_fatal_stderr` in `src/lsp/client.rs`. The infrastructure was already in place: `stderr_lines` captures the rustup error line (matches `.contains("error")`), `initialize()` calls `fatal_stderr_hint()` pre-attempt and after each failed attempt, and `RecoverableError::with_hint` is the surface format. Only the pattern was missing.
+
+The fix produces this caller-facing error instead of `"LSP server disconnected"`:
 
 ```
-LSP server failed to launch.
-rust-analyzer exited (code 1) before completing the initialize handshake.
-Last stderr:
-  error: Unknown binary 'rust-analyzer' in official toolchain 'stable-x86_64-unknown-linux-gnu'.
-Hint: run `rustup component add rust-analyzer` if you use rustup.
+rust-analyzer is unreachable. The rustup shim is on PATH but the component is not
+installed: "error: Unknown binary 'rust-analyzer' in official toolchain"
+
+(hint: Run `rustup component add rust-analyzer` to install it for the active
+toolchain, or install rust-analyzer outside rustup (https://rust-analyzer.github.io).
+Rust LSP tools (edit_code, symbols, references, call_graph on .rs files) will keep
+returning this error until rust-analyzer launches successfully.)
 ```
 
-The rustup-specific hint is gated on detecting the rustup-shim path
-substring or the literal `Unknown binary` text in stderr. Default hint
-for non-rustup launch failures: `Verify rust-analyzer is on PATH and
-executable.`
+Test: `detect_fatal_stderr_flags_rustup_missing_component` in `src/lsp/client.rs::tests`.
 
-**Fix-2 — Pre-flight check.** On first LSP-requiring call per session per
-language, invoke `rust-analyzer --version` (timeout 2s) before the full
-launch. If it exits non-zero, fail fast with the same actionable error
-**without** trying to maintain a doomed LSP child. This is cheaper than
-re-attempting the full launch on every failed tool call.
-
-Snow Lion note: Fix-1 alone would close the agentic-surface gap
-(`[[agentic-surface-as-moat]]`) — the error becomes self-documenting.
-Fix-2 is an optimization on top of Fix-1, not a substitute for it.
+**Fix-2 (deferred) — Pre-flight check.** Originally proposed (`rust-analyzer --version` with 2s timeout on first LSP-requiring call per session). Not implemented; Fix-1's pattern-match-on-actual-launch-failure path achieves the same user-facing outcome without an extra spawn per session. Re-open if a different rustup-shim'd LSP misbehaves in a way the captured-stderr path can't see (e.g. exits via SIGKILL with no stderr output).
 
 ## Tests added
 
-None yet. Pre-fix, the test fixture would need:
-- A `RUSTUP_TOOLCHAIN` override that points at a toolchain without
-  `rust-analyzer`, OR
-- A mock `Command` that returns the rustup error on `--version` /
-  on spawn.
+`detect_fatal_stderr_flags_rustup_missing_component` in `src/lsp/client.rs::tests` (added 2026-05-23, code-explorer:47bbc8db). Asserts the helper recognizes the literal rustup error line and that the produced hint includes both "rust-analyzer" and `rustup component add rust-analyzer`.
 
-Either is feasible. Defer test authoring until the fix lands.
+The test uses the pure-helper shape (passes a `Vec<String>` directly to `detect_fatal_stderr`), so no real LSP server is spun up. The kotlin-multi-session test next to it follows the same shape — extend `detect_fatal_stderr` and add a sibling test when a new LSP-launch fatal pattern is encountered in the wild.
 
 ## Workarounds
 
