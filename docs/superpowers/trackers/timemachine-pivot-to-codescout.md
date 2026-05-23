@@ -1,9 +1,15 @@
 ---
-title: TimeMachine pivot — artifacts → unified docs+code KG
-status: active
-date: 2026-04-29
+id: null
 kind: tracker
-tags: [librarian-mcp, timemachine, pivot-tracker]
+status: active
+title: TimeMachine pivot — artifacts → unified docs+code KG
+owners: []
+tags:
+- librarian-mcp
+- timemachine
+- pivot-tracker
+topic: timemachine-pivot-watch
+time_scope: null
 ---
 
 # TimeMachine pivot to docs+code KG
