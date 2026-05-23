@@ -61,7 +61,7 @@ pub fn parse_refs(text: &str, md_path: &Path) -> (Vec<RefCandidate>, Vec<ParseWa
 fn classify(s: &str, in_code_context: bool) -> Option<RefKind> {
     // Try Rust-style `path::symbol` first so the trailing colon doesn't leak
     // into the path part. Fall back to single `:` for python-style and line
-    // refs (file.py:cmd, file.rs:42).
+    // refs (file.py:cmd, file.rs:42, file.rs:42-99).
     if let Some((path_part, suffix)) = s.rsplit_once("::") {
         if looks_like_path(path_part) && is_symbol_suffix(suffix) {
             return Some(RefKind::FileSymbol);
@@ -69,7 +69,7 @@ fn classify(s: &str, in_code_context: bool) -> Option<RefKind> {
     }
     if let Some((path_part, suffix)) = s.rsplit_once(':') {
         if looks_like_path(path_part) {
-            if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+            if is_line_or_range(suffix) {
                 return Some(RefKind::FileLine);
             }
             if is_symbol_suffix(suffix) {
@@ -93,6 +93,23 @@ fn is_symbol_suffix(s: &str) -> bool {
             .next()
             .map(|c| !c.is_ascii_digit())
             .unwrap_or(false)
+}
+
+fn is_line_or_range(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    if s.chars().all(|c| c.is_ascii_digit()) {
+        return true;
+    }
+    // path:N-M line range — both ends must be non-empty digit-only.
+    if let Some((start, end)) = s.split_once('-') {
+        return !start.is_empty()
+            && !end.is_empty()
+            && start.chars().all(|c| c.is_ascii_digit())
+            && end.chars().all(|c| c.is_ascii_digit());
+    }
+    false
 }
 
 fn tokenize_code_span(s: &str) -> impl Iterator<Item = &str> + '_ {
@@ -493,5 +510,17 @@ mod tests {
                 "bare ext '{ext}' must not classify as FilePath, got: {cands:?}"
             );
         }
+    }
+
+    #[test]
+    fn parser_classifies_file_line_range() {
+        // `path:N-M` should be FileLine, not FilePath. Before the range parser
+        // landed, classify() rsplit_once(':') saw a non-digit suffix and fell
+        // through to FilePath, which then resolved as Missing because no file
+        // literally named `path:N-M` exists.
+        let (cands, _) = parse("See `src/tools/core/types.rs:238-246` for the impl.");
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].ref_kind, RefKind::FileLine);
+        assert_eq!(cands[0].raw_ref, "src/tools/core/types.rs:238-246");
     }
 }

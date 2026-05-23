@@ -101,11 +101,18 @@ fn resolve_file_line(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     if !path.exists() {
         return verdict_with_drops(Verdict::Missing, Path::new(&c.md_file), ctx.memory_globs);
     }
-    let line: u32 = line_str.parse().unwrap_or(0);
+    // Parse `N` (single line) or `N-M` (line range). Range covers two checks:
+    // both endpoints in bounds, and start <= end.
+    let (start, end): (u32, u32) = if let Some((a, b)) = line_str.split_once('-') {
+        (a.parse().unwrap_or(0), b.parse().unwrap_or(0))
+    } else {
+        let n: u32 = line_str.parse().unwrap_or(0);
+        (n, n)
+    };
     let total = std::fs::read_to_string(&path)
         .map(|s| s.lines().count() as u32)
         .unwrap_or(0);
-    if line == 0 || line > total {
+    if start == 0 || end == 0 || start > end || end > total {
         verdict_with_drops(Verdict::LineOob, Path::new(&c.md_file), ctx.memory_globs)
     } else {
         Resolution {
@@ -647,5 +654,39 @@ mod tests {
         );
         assert_eq!(r.verdict, Verdict::Missing);
         assert_eq!(r.severity, Severity::High);
+    }
+
+    #[test]
+    fn resolver_resolved_for_in_bounds_line_range() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("foo.rs"), "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n").unwrap();
+        let r = resolve_ref(
+            &cand("foo.rs:3-7", "docs/spec.md", RefKind::FileLine),
+            &ctx(tmp.path(), &[]),
+        );
+        assert_eq!(r.verdict, Verdict::Resolved);
+    }
+
+    #[test]
+    fn resolver_line_oob_for_range_past_eof() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("foo.rs"), "1\n2\n3\n").unwrap();
+        let r = resolve_ref(
+            &cand("foo.rs:50-60", "docs/spec.md", RefKind::FileLine),
+            &ctx(tmp.path(), &[]),
+        );
+        assert_eq!(r.verdict, Verdict::LineOob);
+    }
+
+    #[test]
+    fn resolver_line_oob_for_inverted_range() {
+        // start > end should be LineOob, not silently accepted.
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("foo.rs"), "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n").unwrap();
+        let r = resolve_ref(
+            &cand("foo.rs:7-3", "docs/spec.md", RefKind::FileLine),
+            &ctx(tmp.path(), &[]),
+        );
+        assert_eq!(r.verdict, Verdict::LineOob);
     }
 }
