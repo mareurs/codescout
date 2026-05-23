@@ -606,10 +606,18 @@ impl Tool for Symbols {
             .map(|s| s["body"].is_string())
             .unwrap_or(false);
         if has_body {
-            "$.symbols[0].body".to_string()
-        } else {
-            "$.symbols".to_string()
+            return "$.symbols[0].body".to_string();
         }
+        if val["symbols"].is_array() {
+            return "$.symbols".to_string();
+        }
+        if val["files"].is_array() {
+            return "$.files".to_string();
+        }
+        if val["subdirectories"].is_array() {
+            return "$.subdirectories".to_string();
+        }
+        "$".to_string()
     }
 }
 
