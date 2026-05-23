@@ -537,3 +537,63 @@ The 1 remaining hi-sev finding is a cross-repo reference to the sibling `claude-
 The cursor.md delta is run-state, not code-state: pre-fix audit ran with `emit_tracker=true` (merger applies lifecycle dedup), post-fix audit ran with `emit_tracker=false` (raw findings). The 3 cursor.md refs were likely suppressed by merger logic in the first run and surfaced in the second.
 
 **Hookify candidate:** see H-N tracker — propose H-6 (placeholder-prefix + reader-side classifier extensions).
+
+### U-18 — Iron Law slips persist under deny-mode, session 2026-05-23 (×4)
+
+**When:** audit_doc_refs noise investigation session, 2026-05-23 (this conversation).
+Bound: continued from compacted cs-hint tracker session earlier the same day.
+
+**Iron Law / pattern:** Mixed — Iron Law 1 (grep on source files) and Iron Law 3
+(piped unbounded `run_command` output). Both caught by codescout-companion
+PreToolUse hook in **deny mode**. Earlier U-3 (2026-05-18) was the warn-mode
+baseline that promoted H-1 to deny; this is the first multi-strike post-deny
+data point.
+
+**Confirming data:** four strikes in a single session, all hook-blocked
+and rerouted within the same turn:
+
+1. `grep -rEn 'with_hint\b' src | wc -l` — recursive grep + pipe, blocked
+   by source-file gate. Reroute → codescout `grep(pattern, path='src')`.
+2. `grep -rEn 'to_string\(\)\.contains' src --include='*.rs' | grep ...`
+   — recursive grep with file-type filter, blocked by source-file gate.
+   Reroute → codescout `grep(pattern, path='src')`.
+3. `cargo test --lib librarian::tools::audit_doc_refs:: 2>&1 | tail -30`
+   — pipe to log-trimmer, blocked by IL3 gate. Reroute → run bare,
+   `tail @cmd_xxx` on buffer.
+4. `git log --oneline -- docs/trackers/doc-ref-audit.md 2>&1 | head -5; ...`
+   — pipe to log-trimmer in chained command, blocked by IL3 gate.
+   Reroute → run bare, `head @cmd_xxx` on buffer.
+
+**Severity:** low — hook denied all 4 before any context cost. Each
+recovery added one round-trip (~5-15s wall-clock). No cumulative drift
+this session, in contrast to U-3's warn-mode 9-strike cost.
+
+**Status:** open — the deny-mode substrate works as designed (zero
+context bloat), but the reflex itself did not extinguish across 5+ days
+since U-3. Habit persists; only the consequence changed.
+
+**Diagnosis (introspection):**
+
+- **Slips 1 and 2** (recursive grep): muscle memory from shell-first
+  workflows. `grep -r` is a single token in mental shorthand for
+  "search the tree"; codescout's `grep(pattern)` requires unpacking
+  that into a tool-name. Under load (long investigation, many files to
+  search), the unpack step gets skipped. Same root cause as U-3's
+  "single round-trip" instinct, but the failure mode is *tool selection*,
+  not output bounding.
+- **Slips 3 and 4** (pipe to head/tail): exactly U-3's pattern, still
+  active. Knowing the buffer exists doesn't override the reflex of
+  bounding output at emission time. Tail-on-buffer requires two thoughts
+  ("run bare" → "tail the buffer") where pipe-tail requires one ("just
+  trim it inline").
+
+**Pointer:** Deny-mode is the right substrate — it prevents context
+bloat with zero ambiguity. The reflex persisting is bounded-cost (one
+extra round-trip per slip) and arguably acceptable given habit-extinction
+across sessions is slow. Open question for the H-N tracker: is there a
+proactive nudge (per-turn first-call reminder, or skill-style "before
+your first run_command this turn, consider …") that could shift the
+reflex faster? Not blocking; capture as candidate, not priority.
+
+
+---
