@@ -174,7 +174,9 @@ impl Tool for Symbols {
             })?;
         let mut guard = OutputGuard::from_input(&input);
         // Search uses a tighter exploring cap than the default 200.
-        if matches!(guard.mode, OutputMode::Exploring) {
+        // Skip the clobber when caller passed an explicit limit — from_input already
+        // honors it (max_results = limit), and overwriting here would discard it.
+        if matches!(guard.mode, OutputMode::Exploring) && input.get("limit").is_none() {
             guard.max_results = FIND_SYMBOL_MAX_RESULTS;
         }
 
