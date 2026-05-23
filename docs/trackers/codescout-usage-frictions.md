@@ -221,7 +221,7 @@ The companion compression-reminder dropped the bolded clause. Post-compaction th
 
 **Severity:** med — actively wrong post-compaction interpretation, not just bloat.
 
-**Status:** open. Fix is a two-line edit to `hooks/session-start.sh`: restore the bounded-LHS exception text.
+**Status:** fixed-shipped (claude-plugins:bd20a8a, 2026-05-23). The bounded-LHS exception text was restored in both `hooks/session-start.sh` and `hooks/subagent-guidance.sh` (the latter caught during fix-time grep — same drift, second file).
 
 
 
@@ -242,9 +242,7 @@ The companion compression-reminder dropped the bolded clause. Post-compaction th
 
 **Severity:** **high** — the model will attempt to call non-existent tools. Each call hits "unknown tool", forcing recovery and round-trip waste. Worst-failure variety of prompt drift; exactly what the project's lint exists to prevent — except the lint does not cover companion-plugin hooks (companion lives in a sibling repo).
 
-**Status:** open. Two fixes needed:
-1. Edit `hooks/session-start.sh` to cite `edit_code` (single name).
-2. Promote **H-3** to extend the lint to cover companion-hook output.
+**Status:** fixed-shipped (claude-plugins:bd20a8a, 2026-05-23). Stale handles replaced with `edit_code` in both `hooks/session-start.sh` and `hooks/subagent-guidance.sh`. The matching lint extension (H-3) remains open — see U-14 for the runtime-impact follow-up discovered during fix-time grep (worktree-write-guard matcher cites same nonexistent handles).
 
 
 
@@ -269,7 +267,7 @@ Old paths return "file not found" via both `read_file` and `read_markdown`.
 
 **Severity:** med — contributors (human or LLM) following the stale CLAUDE.md guidance look for files that don't exist; the surface that's supposed to *prevent* prompt-surface drift has itself drifted. Self-referential.
 
-**Status:** open. Fix: edit CLAUDE.md § Prompt Surface Consistency to cite `source.md` plus the surface-marker mechanism. Run `librarian(action="audit_doc_refs", paths=["CLAUDE.md", "docs/**/*.md"], fail_on="med")` in the same pass to surface any other drift. Cross-reference **H-5** for CI promotion.
+**Status:** fixed-shipped (code-explorer:c37bcea7, 2026-05-23). All 11 stale references updated to cite `src/prompts/source.md` plus surface names (`server_instructions`, `onboarding_prompt`). `audit_doc_refs` re-run on CLAUDE.md confirms zero matches for the old filenames. Same commit also retired the pre-archive `docs/TODO-tool-misbehaviors.md` reference in the Bug Tracking trigger rules. Audit also surfaced 20 false-positive findings (globs, template placeholders, home-paths, comma-trailing snippets) — noted as input to H-5's promotion plan (CI needs extractor FP filters before `--fail-on med`).
 
 
 
@@ -332,7 +330,7 @@ Old paths return "file not found" via both `read_file` and `read_markdown`.
 
 **Severity:** low — minor model confusion; no principled tiebreak from the model side.
 
-**Status:** open. Two-line edit to `~/.claude-kat/CLAUDE.md`. Cross-reference U-9 (same root cause: cross-profile config drift).
+**Status:** fixed-shipped (in-place edit to `~/.claude-kat/CLAUDE.md`, 2026-05-23). The kat copy now matches the main copy: heading renamed to "Three Claude Code Instances", body lists all three profiles, applies-to instruction now says "ALL THREE", plus the 2026-05-16 cross-profile `installPath` note was synced over. File is not in any git repo (its own first line states this), so no SHA — the edit lives only in the user's home dir.
 
 
 
@@ -352,7 +350,7 @@ Old paths return "file not found" via both `read_file` and `read_markdown`.
 
 **Severity:** low — bloat only; no contradiction with canonical.
 
-**Status:** open. Drift-prevention edit to buddy plugin (`buddy/data/gates.md`). Easier kill than U-4's companion copy because buddy's gates have no compaction-survival role.
+**Status:** fixed-shipped (claude-plugins:3588d9b, 2026-05-23). `## Tool gates — codescout Iron Laws` was rewritten as a pointer + 6-bullet at-a-glance cheat sheet + the unique non-codescout fallback paragraph. As a bonus, the bounded-LHS exception (same as U-5) was restored on rule 5 in the rewrite — the prior prose had dropped it too.
 
 
 

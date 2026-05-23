@@ -142,8 +142,11 @@ a row in `tool_calls`. Hookify catches it pre-call.
 **Pattern:** any token in `claude-plugins/codescout-companion/hooks/*.sh` (or other companion text surfaces) that *looks like* a codescout tool name must resolve to a real tool in the current binary. The project's existing `prompt_surfaces_reference_only_real_tools` lint covers `source.md` + `builders.rs` but **not** the companion-plugin surfaces — companion lives in a sibling repo and is rendered into context via hook output at session start.
 
 **Confirming data:**
-- **U-6** — companion `hooks/session-start.sh` cites `replace_symbol` / `insert_code` / `remove_symbol`, none of which are registered tool handles. Real handle is `edit_code` (consolidated). Direct drift caused by the gap in lint coverage.
+- **U-6** — companion `hooks/session-start.sh` cites `replace_symbol` / `insert_code` / `remove_symbol`, none of which are registered tool handles. Real handle is `edit_code` (consolidated). Direct drift caused by the gap in lint coverage. **Fixed in claude-plugins:bd20a8a (2026-05-23)** for the text-drift surface only; the lint extension that would have prevented this remains unbuilt.
+- **U-14** — same root cause, second surface: `hooks/hooks.json:25` matcher + `hooks/worktree-write-guard.sh:19` case statement alternate over four nonexistent tool handles. Runtime safety failure (modern write tools slip past the worktree-write-guard silently). **Open** — pending matcher-fix commit + worktree test coverage.
 - **Cross-reference:** project CLAUDE.md § "Prompt Surface Consistency" already documents the "distance-from-change" problem this lint exists to prevent. The lint just hasn't followed the surface to the companion repo yet.
+
+**Promote-when criterion now satisfied (2026-05-23):** two confirmed instances of companion-side stale-tool-name drift in two different surface types (text + matcher). The lint extension should be drafted and landed.
 
 **Proposed hookify rule:**
 
