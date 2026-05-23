@@ -288,7 +288,9 @@ Old paths return "file not found" via both `read_file` and `read_markdown`.
 
 **Severity:** low — model can recover with `memory(action="list")`, but only if it notices the truncation.
 
-**Status:** open. Locate the emitter by `grep "Available shared memories"` in `src/`; likely in `src/server/...` Project Status assembly. Two-line fix.
+**Status:** fixed-shipped (code-explorer:2c4be270, 2026-05-23). Root cause confirmed via ADR `docs/architecture/mcp-channel-caps.md`: Claude Code's MCP client caps `initialize.instructions` at ~2 KB and appends `… [truncated]`. The line landed in the cut zone because (a) it followed the static `SERVER_INSTRUCTIONS` constant (~1.8 KB) and (b) the line itself was ~350 chars due to a wordy action-hint suffix. Fix in `src/prompts/mod.rs::build_server_instructions`: label shortened to `Memories`, action-hint suffix dropped (the memory tool's own description already documents how to call it). Bare list now fits within cap for typical projects. 2443/2443 tests still pass.
+
+**Note for U-4 / future work:** the broader architectural issue is that the entire Project Status block lives in the cut zone. Workspace tables, custom instructions, and language warnings currently land in the dead 95% of the channel. That's Snow-Lion-class — see the ADR Open Decision for the structural recommendation.
 
 
 
@@ -432,12 +434,6 @@ Proposed corrected matcher:
 
 **Severity:** **high** — runtime safety failure. The worktree-write-guard exists to block silent wrong-file writes when a worktree is `.cs-worktree-pending` (workspace not yet `activate`d). With the current matcher, the guard fires only on `create_file`; `edit_code`, `edit_file`, and `edit_markdown` writes in a pending worktree are **silently unguarded**, exactly the failure mode the guard was built to prevent.
 
-**Status:** open. Fix requires:
-1. Edit `hooks/hooks.json` matcher (line 25).
-2. Edit `hooks/worktree-write-guard.sh` case statement (line 19).
-3. Add or update worktree test coverage (the repo already has `worktree-write-guard.test.sh` per the earlier `tree` listing — verify it asserts firing on `edit_code`).
-4. Re-confirm via a deliberate trigger scenario (set `.cs-worktree-pending`, attempt an `edit_code` call, confirm hook fires + blocks).
+**Status:** fixed-shipped (claude-plugins:4efb7d3, 2026-05-23). Both `hooks/hooks.json:25` (PreToolUse matcher) and `hooks/worktree-write-guard.sh:19` (case statement) updated to fire on the live write surface — `mcp__codescout__(edit_code|edit_file|edit_markdown|create_file)`. Also fixed model-facing message text in `worktree-activate.sh:60` and `cs-activate-project.sh:42` (both listed nonexistent tool names in their BLOCKED/unblocked messages). Added `hooks/worktree-write-guard.test.sh` with 16 black-box tests covering modern handles (deny), read-only handles (allow), no-marker (allow), non-worktree (allow), and stale-handle regression sentinels (allow — would flip to deny if drift recurs). 16/16 PASS.
 
-Deferred from the U-5/U-6 commit because the risk shape differs: text fixes are non-functional; matcher fixes are runtime-behavioral and warrant their own commit + test verification.
-
-**Cross-reference:** root cause is the same gap as **H-3** (companion-side tool-name lint missing). Filing U-14 reinforces H-3's promotion criterion — this is the second confirmed instance of companion-side stale-tool-name drift, which trips H-3's promote-when threshold.
+Design note: the old matcher used a wildcard `mcp__.*__` across MCP servers; narrowed to `mcp__codescout__` because the guard only protects local worktree writes, which only codescout performs. github MCP writes go through the API to a remote, not local files.

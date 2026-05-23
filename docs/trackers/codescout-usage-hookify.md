@@ -161,7 +161,20 @@ a row in `tool_calls`. Hookify catches it pre-call.
 
 **Promote-when:** lint extension is drafted and ready to land; OR a second instance of companion-side stale-tool-name drift surfaces (whichever comes first). Current threshold: 1 confirmed (U-6); a second instance would force the issue.
 
-**Status:** proposed.
+**Status:** **shipped (deny) — 2026-05-23.** Test landed at `src/server.rs::tests::companion_surfaces_reference_only_real_tools` (code-explorer:257d1236) with three layers: positive `mcp__codescout__<name>` matcher check, `*__<name>` case-statement filter check, and known-stale-name sentinel. Walks `../claude-plugins/codescout-companion/hooks/*.sh` + `hooks.json`; skips gracefully when the sibling repo is missing.
+
+**Architectural decision (Snow Lion):** lint lives in codescout, reads companion via stable `../claude-plugins/` relative path. Chosen over alternatives (lint-in-companion, shared tool-list artifact) because the read is opt-in with graceful skip, the runtime dependency direction stays clean (companion → codescout), and a single CI run catches both surfaces.
+
+**Caught latent drift on first run** (validates the design):
+- `hooks.json:70` — pre-edit-hint matcher still cited `replace_symbol` (missed by U-14 fix)
+- `pre-edit-hint.sh` — header comment + hint text still cited `replace_symbol`
+
+Both fixed in claude-plugins:c95adee. The companion side is now caught up; future drift surfaces immediately in CI.
+
+**Filters added** (lint-FP control, similar to H-5 precursor work):
+- Skip `*.test.sh` files (regression sentinels that intentionally cite stale names)
+- Allowlist `activate_project` as a host-harness equivalent of codescout's `workspace`
+- Scrub shell `#` comments before stale-name check (lets header docs explain consolidation history)
 
 **Notes:** the existing repo-side lint (`prompt_surfaces_reference_only_real_tools`) has a per-token allowlist for non-tool identifiers (param names, etc.). Companion-side lint must mirror that allowlist or expose it as configuration to prevent false positives on legitimate non-tool tokens.
 
@@ -219,7 +232,7 @@ Outcomes:
 - **warn ship:** 3 documented `audit_doc_refs` findings of severity≥med in repo doc surfaces across two months.
 - **warn → deny promotion:** zero warn-stage CI false positives across one month.
 
-**Status:** proposed.
+**Status:** proposed; FP-filter precursor **shipped** (code-explorer:0425b8ef, 2026-05-23).
 
 **Notes:**
 - The audit tool already classifies findings as `verdict ∈ {missing, ambiguous_basename, resolved_basename}`. CI should only fail on `verdict=missing severity≥med`; `ambiguous_basename` is informational (could be a basename collision; not necessarily wrong); `resolved_basename` is OK.
