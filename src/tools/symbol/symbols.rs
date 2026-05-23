@@ -179,6 +179,11 @@ impl Tool for Symbols {
         if matches!(guard.mode, OutputMode::Exploring) && input.get("limit").is_none() {
             guard.max_results = FIND_SYMBOL_MAX_RESULTS;
         }
+        // Search-pool ceiling decoupled from output cap: a small user-supplied
+        // `limit` must not throttle the search itself, or the `by_file` total
+        // and "showing N of M" hint misreport. Floor at FIND_SYMBOL_MAX_RESULTS
+        // (50), grow if caller explicitly asked for more.
+        let search_pool_cap = guard.max_results.max(FIND_SYMBOL_MAX_RESULTS);
 
         // kind filter only applies to pattern-based searches, not exact name_path lookups.
         let is_name_path = input["symbol"].is_string() || input["name_path"].is_string();
@@ -431,8 +436,10 @@ impl Tool for Symbols {
                                 kind_filter,
                             );
                         }
-                        // Early cap to avoid scanning entire huge projects
-                        if matches.len() > guard.max_results {
+                        // Early cap to avoid scanning entire huge projects.
+                        // Uses the decoupled search-pool ceiling, not guard.max_results,
+                        // so a small user-supplied limit doesn't shrink the pool.
+                        if matches.len() > search_pool_cap {
                             break;
                         }
                     }
@@ -501,7 +508,7 @@ impl Tool for Symbols {
                         }
                     }
 
-                    if matches.len() > guard.max_results * 2 {
+                    if matches.len() > search_pool_cap * 2 {
                         break;
                     }
                 }
