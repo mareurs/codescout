@@ -501,36 +501,36 @@ impl Tool for Index {
         input.get("action").and_then(Value::as_str) == Some("build")
     }
 
-        fn description(&self) -> &str {
-            "Semantic index operations. Actions: \
+    fn description(&self) -> &str {
+        "Semantic index operations. Actions: \
              `build` (build/update the project's semantic index; pass `scope='lib:<name>'` to index a registered library), \
              `status` (show index stats), \
              `cancel` (abort an in-flight reindex — no-op if nothing is running)."
-        }
+    }
 
-        fn input_schema(&self) -> Value {
-            json!({
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "enum": ["build", "status", "cancel"],
-                        "description": "Operation to perform."
-                    },
-                    "force": {
-                        "type": "boolean",
-                        "default": false,
-                        "description": "For action='build': force full reindex, ignoring cached file hashes."
-                    },
-                    "scope": {
-                        "type": "string",
-                        "default": "project",
-                        "description": "For action='build': 'project' (default) or 'lib:<name>' to index a registered library."
-                    }
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["build", "status", "cancel"],
+                    "description": "Operation to perform."
                 },
-                "required": ["action"]
-            })
-        }
+                "force": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "For action='build': force full reindex, ignoring cached file hashes."
+                },
+                "scope": {
+                    "type": "string",
+                    "default": "project",
+                    "description": "For action='build': 'project' (default) or 'lib:<name>' to index a registered library."
+                }
+            },
+            "required": ["action"]
+        })
+    }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         let action = input

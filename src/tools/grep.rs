@@ -552,7 +552,6 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
     Ok(result)
 }
 
-
 /// Strip surrounding quotes/backticks from @ref paths the same way read_file
 /// does. Lets buffer-ref greps survive LLM quoting habits.
 fn strip_buffer_ref_quotes(path: &str) -> &str {
