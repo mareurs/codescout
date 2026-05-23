@@ -77,11 +77,11 @@ Running log of rough edges found while using project skills. Feed into refactor 
 **Fix idea:** cc.py should verify the reconstructed path exists; if not, try heuristics (longest existing prefix). Also document the ambiguity in skill docs so users know to verify before using a `--project` path from `--all` output.  
 **Status: FIXED 2026-05-03** — `project_key_to_path` now uses filesystem-guided bitmask decode: tries all `-`-vs-`/` splits ordered by most separators first, picks first path that exists on disk
 
-### F-010 — artifact(update, rel_path) updates metadata but doesn't rename file on disk
+### F-010 — artifact(update, rel_path) updates metadata but doesn't rename file on disk (FIXED 2026-05-23, code-explorer:1cb123d1)
 **When:** `artifact(action="update", patch={rel_path: "new/path.md"})` after manually moving a file  
 **Got:** Artifact metadata updated (confirmed `"updated": true`), but file stays at old path  
 **Impact:** Subsequent `edit_markdown(path="new/path.md")` fails with "No such file or directory"  
-**Fix idea:** artifact update of `rel_path` should either (a) rename the file atomically, or (b) document that the caller must `mv` the file manually first — currently it silently diverges
+**Fix:** `update` now rejects `patch.rel_path` with a RecoverableError hinting at `artifact(action="move", id=..., new_rel_path=...)`. Two-call APIs must reject the wrong input shape explicitly, not accept silently — silent divergence is the worst failure mode here because `updated: true` reads as proof of action. Test: `update_rejects_rel_path_with_move_hint` in `src/librarian/tools/update.rs`. The `move` action (`src/librarian/tools/mv.rs`) covers the file-rename use case atomically.
 
 ## `/analyze-usage`
 
