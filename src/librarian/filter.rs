@@ -1,4 +1,5 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
+use crate::tools::RecoverableError;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -104,7 +105,11 @@ pub fn compile(node: &FilterNode) -> Result<SqlFragment> {
 
 fn compile_composition(op: &str, children: &[FilterNode]) -> Result<SqlFragment> {
     if children.is_empty() {
-        bail!("empty composition `{op}`");
+        return Err(RecoverableError::with_hint(
+            format!("empty composition `{op}`"),
+            "`and` / `or` / `not` require at least one child filter — drop the composition or add children.",
+        )
+        .into());
     }
     let mut parts = Vec::new();
     let mut params = Vec::new();
@@ -121,12 +126,20 @@ fn compile_composition(op: &str, children: &[FilterNode]) -> Result<SqlFragment>
 
 fn compile_leaf(map: &serde_json::Map<String, Value>) -> Result<SqlFragment> {
     if map.len() != 1 {
-        bail!("leaf must have exactly one field, got {}", map.len());
+        return Err(RecoverableError::with_hint(
+            format!("leaf must have exactly one field, got {}", map.len()),
+            "Each leaf has shape `{field: {op: value}}`. Wrap multiple fields with `and`/`or`.",
+        )
+        .into());
     }
     let (field, ops) = map.iter().next().unwrap();
 
     if !ALLOWED_FIELDS.contains(&field.as_str()) {
-        bail!("unknown field `{}`; allowed: {:?}", field, ALLOWED_FIELDS);
+        return Err(RecoverableError::with_hint(
+            format!("unknown field `{}`", field),
+            format!("allowed fields: {:?}", ALLOWED_FIELDS),
+        )
+        .into());
     }
 
     // rel_path was dropped in schema v6; abs_path is the DB column now.
@@ -139,14 +152,18 @@ fn compile_leaf(map: &serde_json::Map<String, Value>) -> Result<SqlFragment> {
 
     let ops = ops
         .as_object()
-        .ok_or_else(|| anyhow::anyhow!("ops must be object"))?;
+        .ok_or_else(|| RecoverableError::with_hint("ops must be an object", "Leaf op shape is `{field: {op: value}}`, e.g. `{\"kind\": {\"eq\": \"tracker\"}}`."))?;
     if ops.len() != 1 {
-        bail!("exactly one op per leaf, got {}", ops.len());
+        return Err(RecoverableError::with_hint(
+            format!("exactly one op per leaf, got {}", ops.len()),
+            "Wrap multiple ops on the same field with `and`/`or`, e.g. {\"and\":[{\"f\":{\"gt\":1}},{\"f\":{\"lt\":9}}]}.",
+        )
+        .into());
     }
     let (op_name, value) = ops.iter().next().unwrap();
     let op = op_name
         .parse::<LeafOp>()
-        .map_err(|_| anyhow::anyhow!("unknown op `{op_name}`"))?;
+        .map_err(|_| RecoverableError::with_hint(format!("unknown op `{op_name}`"), "valid ops: eq, ne, in, nin, gt, lt, gte, lte, contains, prefix"))?;
 
     let is_array_col = matches!(field.as_str(), "tags" | "owners");
     if op == LeafOp::Contains && is_array_col {
@@ -161,9 +178,13 @@ fn compile_leaf(map: &serde_json::Map<String, Value>) -> Result<SqlFragment> {
         LeafOp::In | LeafOp::Nin => {
             let arr = value
                 .as_array()
-                .ok_or_else(|| anyhow::anyhow!("IN expects array"))?;
+                .ok_or_else(|| RecoverableError::with_hint("`in` expects an array", "Provide a JSON array, e.g. `{\"in\": [\"a\", \"b\"]}`."))?;
             if arr.is_empty() {
-                bail!("IN expects non-empty array");
+                return Err(RecoverableError::with_hint(
+                    "`in` expects a non-empty array",
+                    "Provide at least one value, e.g. `{\"in\": [\"a\", \"b\"]}`.",
+                )
+                .into());
             }
             let placeholders = std::iter::repeat_n("?", arr.len())
                 .collect::<Vec<_>>()
@@ -180,7 +201,7 @@ fn compile_leaf(map: &serde_json::Map<String, Value>) -> Result<SqlFragment> {
         LeafOp::Contains => {
             let s = value
                 .as_str()
-                .ok_or_else(|| anyhow::anyhow!("contains expects string"))?;
+                .ok_or_else(|| RecoverableError::with_hint("`contains` expects a string", "Provide a string value, e.g. `{\"contains\": \"docs/trackers\"}`."))?;
             Ok(SqlFragment {
                 sql: format!("{sql_field} LIKE ?"),
                 params: vec![rusqlite::types::Value::Text(format!("%{s}%"))],
@@ -189,7 +210,7 @@ fn compile_leaf(map: &serde_json::Map<String, Value>) -> Result<SqlFragment> {
         LeafOp::Prefix => {
             let s = value
                 .as_str()
-                .ok_or_else(|| anyhow::anyhow!("prefix expects string"))?;
+                .ok_or_else(|| RecoverableError::with_hint("`prefix` expects a string", "Provide a string value, e.g. `{\"prefix\": \"docs/\"}`."))?;
             let escaped = s
                 .replace('\\', "\\\\")
                 .replace('%', "\\%")
@@ -216,11 +237,21 @@ fn json_value_to_sql(v: &Value) -> Result<rusqlite::types::Value> {
             } else if let Some(f) = n.as_f64() {
                 rusqlite::types::Value::Real(f)
             } else {
-                bail!("unrepresentable number: {n}")
+                return Err(RecoverableError::with_hint(
+                    format!("unrepresentable number: {n}"),
+                    "Filter values must be finite integers or floats.",
+                )
+                .into())
             }
         }
         Value::String(s) => rusqlite::types::Value::Text(s.clone()),
-        _ => bail!("arrays/objects not allowed in leaf op"),
+        _ => {
+            return Err(RecoverableError::with_hint(
+                "arrays/objects not allowed in leaf op",
+                "Leaf-op values must be scalars (string, number, bool, null). Use `in`/`nin` for arrays.",
+            )
+            .into())
+        }
     })
 }
 
