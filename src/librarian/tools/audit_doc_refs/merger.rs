@@ -29,6 +29,7 @@ pub fn merge_into_tracker(
                     existing.notes = format!("auto-resolved at {commit}");
                 } else if !resolved_now
                     && f.resolution.verdict != Verdict::External
+                    && f.resolution.verdict != Verdict::Unknown
                     && existing.status == "fixed"
                 {
                     existing.status = "open".to_string();
@@ -42,6 +43,7 @@ pub fn merge_into_tracker(
             }
         } else if !is_resolved_verdict(f.resolution.verdict)
             && f.resolution.verdict != Verdict::External
+            && f.resolution.verdict != Verdict::Unknown
         {
             // New finding — append with next n
             let next_n = out.issues.iter().map(|i| i.n).max().unwrap_or(0) + 1;
@@ -219,6 +221,57 @@ mod tests {
         assert_eq!(
             r2.issues[0].extra.get("custom"),
             Some(&serde_json::json!("user-edit"))
+        );
+    }
+
+    #[test]
+    fn unknown_verdict_does_not_create_new_finding() {
+        // Verdict::Unknown means "resolver could not form an opinion" — it
+        // must not produce a new tracker issue. (Stub resolvers like
+        // resolve_module_path_v1 return Unknown for every candidate.)
+        let a = finding("a.md", "0.3", Verdict::Unknown);
+        let r1 = merge_into_tracker(vec![a], &TrackerParams::default(), now(), "c1");
+        assert!(
+            r1.issues.is_empty(),
+            "Unknown verdict must not create issues, got: {:?}",
+            r1.issues
+        );
+    }
+
+    #[test]
+    fn unknown_verdict_does_not_regress_fixed_entry() {
+        // Once a finding is auto-resolved (status=fixed), losing the ability
+        // to determine its state (Unknown) must not flip it back to open.
+        let a_missing = finding("a.md", "x.py", Verdict::Missing);
+        let r1 = merge_into_tracker(vec![a_missing], &TrackerParams::default(), now(), "c1");
+
+        let a_resolved = finding("a.md", "x.py", Verdict::Resolved);
+        let r2 = merge_into_tracker(vec![a_resolved], &r1, now(), "c2");
+        assert_eq!(r2.issues[0].status, "fixed");
+
+        let a_unknown = finding("a.md", "x.py", Verdict::Unknown);
+        let r3 = merge_into_tracker(vec![a_unknown], &r2, now(), "c3");
+        assert_eq!(
+            r3.issues[0].status, "fixed",
+            "Unknown verdict must not regress a fixed entry"
+        );
+    }
+
+    #[test]
+    fn unknown_verdict_bumps_last_verified_at_for_existing() {
+        // Even though Unknown doesn't create or transition status, it still
+        // bumps last_verified_at on an existing entry — the ref is still in
+        // source, we just can't decide its state.
+        let a_missing = finding("a.md", "x.py", Verdict::Missing);
+        let r1 = merge_into_tracker(vec![a_missing], &TrackerParams::default(), now(), "c1");
+        let original_lva = r1.issues[0].last_verified_at.clone();
+
+        let later = chrono::Utc.timestamp_opt(60, 0).unwrap();
+        let a_unknown = finding("a.md", "x.py", Verdict::Unknown);
+        let r2 = merge_into_tracker(vec![a_unknown], &r1, later, "c2");
+        assert_ne!(
+            r2.issues[0].last_verified_at, original_lva,
+            "Unknown verdict on existing entry must still bump last_verified_at"
         );
     }
 }
