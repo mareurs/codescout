@@ -229,7 +229,7 @@ That makes the companion compression-reminder load-bearing as the **post-compact
 2. **Reader-side repo paths** — agent-onboarding docs cite `.github/skills/`, `.github/agents/`, `.github/hooks/`, `.vscode/mcp.json` as paths to create in the *reader's* repo, not codescout's. Same structural shape as a real local path; resolver reports missing.
 
 **Confirming data:**
-- **U-17** — 39 of 40 hi-sev findings across the whole doc tree concentrated in `docs/agents/copilot.md` (25) + `docs/agents/claude-code.md` (14). Manual inspection of every flagged ref in copilot.md confirmed all are reader-side or placeholders. Bug is in the audit, not in the docs.
+- **U-17** — Post-fix (faa77dd7) measurement: hi-sev concentrated in `docs/agents/copilot.md` (20), `docs/agents/claude-code.md` (14), `docs/agents/cursor.md` (3). The `path/to/` filter dropped 5 placeholder FPs in copilot.md; the residual ~37 are reader-side paths (`.github/...`, `.vscode/mcp.json`, `.cursor/mcp.json`, `.cursor/rules/`) across all three agent-onboarding docs. Bug is in the audit, not in the docs.
 - **U-15** — prior FP class of the same family (`origin/master` git refs misclassified as paths). Established the pattern: `looks_like_path` accumulates reject-prefix rules.
 
 **Proposed hookify rule:** layered fix, ship cheapest first.
