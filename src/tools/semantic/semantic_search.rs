@@ -131,6 +131,13 @@ impl Tool for SemanticSearch {
         use crate::tools::output::OutputGuard;
 
         let query = crate::tools::require_str_param(&input, "query")?;
+        if query.trim().is_empty() {
+            return Err(crate::tools::RecoverableError::with_hint(
+                "'query' must be a non-empty string",
+                "Provide a natural-language phrase or code snippet describing what to search for (e.g. query=\"how does the embedding cache evict entries\").",
+            )
+            .into());
+        }
         let limit = optional_u64_param(&input, "limit").unwrap_or(10) as usize;
         let _guard = OutputGuard::from_input(&input);
 
