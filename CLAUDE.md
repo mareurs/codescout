@@ -275,6 +275,23 @@ keeps `docs/issues/` showing only bugs whose fix is unreleased — see `_TEMPLAT
 *"Archive moves happen after the fix has shipped to master, not when status flips to fixed."*
 Step 5 is the drift-detection step — `audit_doc_refs` is the canonical lint for stale
 path / link / line references across all markdown surfaces.
+
+
+#### After cherry-pick: cite the master SHA, not the experiments-side original
+
+When tracking a multi-fix shipping session (running tally in chat, notes in a tracker, F-N entries citing evidence), record the **master-side SHA** assigned by `cherry-pick` — not the original SHA on `experiments`. After the subsequent `git rebase master`, the experiments-side originals become orphans (rebase detects cherry-picks and drops them via `--reapply-cherry-picks` default-off). `git branch --contains <orphan-sha>` then returns empty for every fix, and the running tally fails the "are they all on master?" audit even though every fix shipped.
+
+**Concrete:**
+
+```bash
+# 2. Cherry-pick — capture the new SHA, do not just use the original
+master_sha=$(git rev-parse HEAD)   # immediately after `git cherry-pick`
+echo "$master_sha"                  # record this in the tally, not the pre-cherry-pick SHA
+```
+
+Or, after the fact: `git log master --oneline --grep="<subject prefix>"` to recover the master SHA by commit message.
+
+Lesson source: 2026-05-23 batched-bug session — 12 fixes shipped, running tally cited the 12 experiments-side SHAs, none survived the rebase. Recovery took a `git log --grep` sweep on master to rebuild the SHA mapping for the user's "are they all done?" check.
 ### Commit Discipline
 
 - **Batch related changes** into a single well-tested commit rather than committing every incremental step.
