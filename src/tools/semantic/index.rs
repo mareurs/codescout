@@ -374,27 +374,12 @@ impl Tool for IndexStatus {
         "index_status"
     }
     fn description(&self) -> &str {
-        "Show index stats: file count, chunk count, model, last update. \
-         Optionally query semantic drift scores when threshold or path is provided."
+        "Show index stats: file count, chunk count, model, last update."
     }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
-            "properties": {
-                "threshold": {
-                    "type": "number",
-                    "description": "Minimum avg_drift to include (default: 0.1). Range 0.0-1.0. When provided, includes drift data in response."
-                },
-                "path": {
-                    "type": "string",
-                    "description": "Glob pattern to filter drift files (e.g. 'src/tools/%'). Uses SQL LIKE syntax."
-                },
-                "detail_level": {
-                    "type": "string",
-                    "enum": ["exploring", "full"],
-                    "description": "Output detail for drift: 'exploring' (default) shows scores only, 'full' includes most-drifted chunk content."
-                }
-            }
+            "properties": {}
         })
     }
     async fn call(&self, _input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
@@ -516,49 +501,36 @@ impl Tool for Index {
         input.get("action").and_then(Value::as_str) == Some("build")
     }
 
-    fn description(&self) -> &str {
-        "Semantic index operations. Actions: \
-         `build` (build/update the project's semantic index; pass `scope='lib:<name>'` to index a registered library), \
-         `status` (show index stats and optional drift scores), \
-         `cancel` (abort an in-flight reindex — no-op if nothing is running)."
-    }
+        fn description(&self) -> &str {
+            "Semantic index operations. Actions: \
+             `build` (build/update the project's semantic index; pass `scope='lib:<name>'` to index a registered library), \
+             `status` (show index stats), \
+             `cancel` (abort an in-flight reindex — no-op if nothing is running)."
+        }
 
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "action": {
-                    "type": "string",
-                    "enum": ["build", "status", "cancel"],
-                    "description": "Operation to perform."
+        fn input_schema(&self) -> Value {
+            json!({
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["build", "status", "cancel"],
+                        "description": "Operation to perform."
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "For action='build': force full reindex, ignoring cached file hashes."
+                    },
+                    "scope": {
+                        "type": "string",
+                        "default": "project",
+                        "description": "For action='build': 'project' (default) or 'lib:<name>' to index a registered library."
+                    }
                 },
-                "force": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "For action='build': force full reindex, ignoring cached file hashes."
-                },
-                "scope": {
-                    "type": "string",
-                    "default": "project",
-                    "description": "For action='build': 'project' (default) or 'lib:<name>' to index a registered library."
-                },
-                "threshold": {
-                    "type": "number",
-                    "description": "For action='status': minimum avg_drift to include (range 0.0-1.0). When provided, includes drift data."
-                },
-                "path": {
-                    "type": "string",
-                    "description": "For action='status': glob pattern to filter drift files (SQL LIKE syntax)."
-                },
-                "detail_level": {
-                    "type": "string",
-                    "enum": ["exploring", "full"],
-                    "description": "For action='status': output detail for drift entries."
-                }
-            },
-            "required": ["action"]
-        })
-    }
+                "required": ["action"]
+            })
+        }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         let action = input
