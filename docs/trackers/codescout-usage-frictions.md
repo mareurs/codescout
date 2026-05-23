@@ -526,11 +526,14 @@ The 1 remaining hi-sev finding is a cross-repo reference to the sibling `claude-
 **Status:** partially-shipped (code-explorer:faa77dd7, 2026-05-23) — placeholder `path/to/` reject landed in `looks_like_path`, catches ~6 of 39 FPs. Reader-side path scoping (`.github/skills/`, `.vscode/mcp.json` etc., ~33 residual FPs) deferred to design call between H-6 options (B) per-doc frontmatter opt-out and (C) default scope exclusion of `docs/agents/**`.
 
 **Measurement** (audit on docs/**/*.md, hi-sev counts):
-| Source | Hi-sev count | Real? |
-|---|---|---|
-| `docs/agents/copilot.md` | 25 | FP — instructional placeholders + reader-side paths |
-| `docs/agents/claude-code.md` | 14 | FP — same shape |
-| `docs/adrs/2026-05-13-semantic-anchors-qdrant-payload.md` | 1 | historical ADR drift (`src/embed/index.rs` renamed/moved) |
-| **Total** | **40** | 39 FP + 1 real-but-historical |
+| File | Pre-fix (61bc678b) | Post-fix (faa77dd7) | Notes |
+|---|---|---|---|
+| `docs/agents/copilot.md` | 25 | 20 | `path/to/` filter dropped 5 placeholder FPs |
+| `docs/agents/claude-code.md` | 14 | 14 | no `path/to/` refs; reader-side `.github/...` paths still FP |
+| `docs/agents/cursor.md` | 0 | 3 | reader-side `.cursor/mcp.json`, `.cursor/rules/` surfaced (4th affected file) |
+| `docs/adrs/2026-05-13-semantic-anchors-qdrant-payload.md` | 1 | 1 | historical ADR drift (`src/embed/index.rs` renamed/moved) |
+| **Total** | **40** | **38** | net −2 (placeholder −5, cursor.md visibility +3) |
+
+The cursor.md delta is run-state, not code-state: pre-fix audit ran with `emit_tracker=true` (merger applies lifecycle dedup), post-fix audit ran with `emit_tracker=false` (raw findings). The 3 cursor.md refs were likely suppressed by merger logic in the first run and surfaced in the second.
 
 **Hookify candidate:** see H-N tracker — propose H-6 (placeholder-prefix + reader-side classifier extensions).
