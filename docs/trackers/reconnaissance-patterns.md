@@ -26,7 +26,7 @@ skill).
 |----|------|---------|---------|------------------------|
 | R-1 | 2026-05-19 | hit | Pre-dispatch grep for asserts on `include_str!`'d constants | mcp-prompt-redesign F-1 + W-1 |
 | R-2 | 2026-05-19 | miss | Scout missed constant-write patterns (`.replace(TOKEN, ...)`) | mcp-prompt-redesign F-2 |
-| R-3 | 2026-05-19 | miss | Scout limited grep to one file/crate; cross-file asserts slipped | mcp-prompt-redesign F-2 |
+| R-3 | 2026-05-19 | miss → promoted | Scout limited grep to one file/crate; cross-file asserts slipped | mcp-prompt-redesign F-2 |
 | R-4 | 2026-05-19 | miss | Grep undercounts struct-field construction sites by 2-3× | mcp-prompt-redesign F-3 + W-2 |
 | R-5 | 2026-05-19 | proposal | Add "compiler as scout" as a Phase-1 tool alongside grep | covers R-4 |
 
@@ -124,6 +124,8 @@ their callers cross crate / module boundaries; assertion sites do too.
 **Promote-when:** R-3 already validated as a needed default. Cheap
 fix: add a sentence to `SKILL.md § Phase 1 — Scout` — "Grep scope
 defaults to workspace root, not the file being modified."
+
+**Status:** promoted to SKILL.md (claude-plugins:787cdec0, 2026-05-23). Added as a 4th bullet under Phase 1 — Scout, citing this R-3 row by name. Promote-when criterion fired with 1/1 datapoint, per the tracker's note ("already validated as a needed default").
 
 ---
 

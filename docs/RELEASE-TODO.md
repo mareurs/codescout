@@ -13,11 +13,10 @@ Tracking remaining work items for the first public release of codescout.
 - [x] **Tool access controls** — Per-category enable/disable in `[security]` config (shell disabled by default)
 - [x] **Librarian project-model redesign (schema v6)** — Catalog now keys artifacts by absolute path instead of `(repo, rel_path)`. First launch on an existing catalog triggers an automatic migration that backfills `abs_path`/`git_root` and creates a `catalog.db.pre-v6-bak.<ts>` backup before dropping legacy columns. `workspace.toml` `[[roots]]` is deprecated (still parsed for the migration; emits a boot warning). New scope ladder: `scope=project|repo|umbrella|all` resolves against the host's active project path. See `docs/superpowers/specs/2026-05-08-librarian-project-model-redesign.md`.
 
-## High Priority
+- [x] **CreateFile overwrite protection** — `create_file` rejects existing paths unless `overwrite: true` is passed (default `false`). Schema documents the param; tool description says *"Refuses to overwrite an existing file unless `overwrite: true` is passed."* Implementation at `src/tools/create_file.rs::call` checks `if !overwrite && resolved.exists() { return Err(...) }`.## High Priority
 
 - [ ] **CI pipeline** — GitHub Actions workflow running `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test` on every PR. Single biggest protection against bad contributions.
 - [ ] **Integration test: path security through MCP** — End-to-end test via `call_tool` flow (server → tool → path validation → error). Current tests validate the path_security module in isolation; need to confirm wiring through the server layer.
-- [ ] **CreateFile overwrite protection** — Add `overwrite: bool` param (default false) so the LLM can't silently clobber existing files. Currently `create_file` overwrites without warning.
 - [ ] **Error message path sanitization** — Error messages leak full filesystem paths (home dirs, mount points) back to the LLM. Relativize paths to project root in tool error responses.
 
 ## Medium Priority
