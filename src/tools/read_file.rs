@@ -441,6 +441,21 @@ fn read_with_line_range(
     }
 
     let content = extract_lines(text, start as usize, end as usize);
+    let file_total_lines = text.lines().count();
+
+    if content.is_empty() && (start as usize) > file_total_lines {
+        return Err(RecoverableError::with_hint(
+            format!(
+                "line range {}-{} is past end of file ({} lines)",
+                start, end, file_total_lines
+            ),
+            format!(
+                "File has {} lines. Use a range within 1..={}.",
+                file_total_lines, file_total_lines
+            ),
+        )
+        .into());
+    }
 
     let is_md = path.ends_with(".md") || path.ends_with(".markdown");
     let md_cov = if is_md {
