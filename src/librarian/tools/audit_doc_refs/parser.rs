@@ -87,8 +87,26 @@ fn is_symbol_suffix(s: &str) -> bool {
             .unwrap_or(false)
 }
 
-fn tokenize_code_span(s: &str) -> impl Iterator<Item = &str> {
-    s.split_whitespace()
+fn tokenize_code_span(s: &str) -> impl Iterator<Item = &str> + '_ {
+    // Split on whitespace AND on punctuation that wraps path-like tokens in
+    // realistic code shapes — function-call parens, quotes, commas, backticks.
+    // Without this, a fenced-block line like
+    //   read_markdown("docs/trackers/foo.md",
+    // would be a single whitespace-separated token with the function-call
+    // prefix attached, producing a missing-FilePath false positive on the
+    // wrong string. Splitting on `(`, `)`, `"`, `,`, etc. lets the real path
+    // surface as its own token.
+    s.split(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | '"' | '\'' | ',' | ';' | '`'))
+        .map(trim_token_edges)
+        .filter(|t| !t.is_empty())
+}
+
+/// Trim trailing sentence punctuation (period, brackets, braces) that often
+/// sticks to a path-like token in prose: `See foo.md.` → `foo.md`.
+/// Does NOT trim `:` (significant for FileLine refs like `file.rs:42`) or `/`.
+fn trim_token_edges(s: &str) -> &str {
+    s.trim_matches(|c: char| matches!(c, '[' | ']' | '{' | '}'))
+        .trim_end_matches('.')
 }
 
 fn is_module_path(s: &str) -> bool {
@@ -107,6 +125,28 @@ fn looks_like_path(s: &str) -> bool {
     // Reject URI schemes (doc://, http://, file://, etc.) — they're handled
     // as links, not as filesystem paths.
     if has_uri_scheme(s) {
+        return false;
+    }
+    // Reject obvious non-paths embedded in path-shaped strings — these are
+    // common in documentation and produce noisy false positives when treated
+    // as filesystem refs.
+    if s.starts_with('~') {
+        // Home-relative paths (~/.cargo/bin/foo, ~/.claude/config.json)
+        // cannot be resolved against the project root.
+        return false;
+    }
+    if s.contains('*') {
+        // Glob patterns (docs/**/*.md, *.rs, foo/*.txt) describe a shape, not
+        // a concrete path.
+        return false;
+    }
+    if s.contains('<') || s.contains('>') {
+        // Template placeholders (<date>-<slug>.md, <topic>-session-log.md,
+        // YYYY-MM-DD-<slug>.md) are documentation, not real paths.
+        return false;
+    }
+    if s.contains('$') {
+        // Shell expressions ($(pwd), ${VAR}, $HOME/foo).
         return false;
     }
     if s.contains('/') {
@@ -291,5 +331,90 @@ mod tests {
             "expected at least one parse_warning for unterminated fence"
         );
         assert!(warns[0].reason.contains("fence") || warns[0].reason.contains("unterminated"));
+    }
+
+    #[test]
+    fn parser_rejects_home_relative_paths() {
+        // ~/.cargo/bin/foo cannot be resolved against the project root —
+        // treat as informational text, not a missing ref.
+        let (cands, _) = parse("See `~/.cargo/bin/codescout` for the binary.");
+        assert!(
+            cands.is_empty(),
+            "home-relative path must not classify as FilePath, got {cands:?}"
+        );
+    }
+
+    #[test]
+    fn parser_rejects_glob_patterns() {
+        // `docs/**/*.md`, `docs/issues/*.md`, `**/*.rs` etc. describe a shape,
+        // not a real path. Common in documentation; do not flag as missing.
+        let cases = [
+            "Default scope: `docs/**/*.md`.",
+            "Run audit over `docs/trackers/*.md` once a week.",
+            "All `**/*.rs` files in the workspace.",
+        ];
+        for case in cases {
+            let (cands, _) = parse(case);
+            assert!(
+                cands.iter().all(|c| c.ref_kind != RefKind::FilePath),
+                "expected no FilePath candidate for {case:?}, got {cands:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parser_rejects_template_placeholders() {
+        // `<date>`, `<slug>`, `YYYY-MM-DD` are documentation placeholders —
+        // even if the surrounding shape looks like a real path, the value
+        // is symbolic.
+        let cases = [
+            "Open `docs/issues/<date>-<slug>.md`.",
+            "Template at `docs/issues/YYYY-MM-DD-<slug>.md`.",
+            "Append to `docs/trackers/<topic>-session-log.md`.",
+        ];
+        for case in cases {
+            let (cands, _) = parse(case);
+            assert!(
+                cands.iter().all(|c| c.ref_kind != RefKind::FilePath),
+                "expected no FilePath candidate for {case:?}, got {cands:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parser_rejects_shell_expressions() {
+        // $(pwd), ${VAR}, $HOME/x are shell-eval shapes, not paths to verify.
+        let (cands, _) = parse("Run `ln -sf \"$(pwd)/target/release/codescout\" foo`.");
+        assert!(
+            cands
+                .iter()
+                .all(|c| !c.raw_ref.contains('$') || c.ref_kind != RefKind::FilePath),
+            "shell expression must not classify as FilePath, got {cands:?}"
+        );
+    }
+
+    #[test]
+    fn parser_strips_wrapping_punctuation_from_code_block_tokens() {
+        // Code fences often have call-site shapes like
+        //   read_markdown("docs/foo.md")
+        // The whitespace tokenizer used to keep the trailing `,` / quotes
+        // attached, producing a missing FilePath finding on the wrong string.
+        // After the trim, the bare path inside resolves correctly.
+        let text = "```\nread_markdown(\"docs/trackers/skill-frictions.md\",\n  action=\"insert_after\")\n```\n";
+        let (cands, _) = parse(text);
+        assert!(
+            cands
+                .iter()
+                .any(|c| c.raw_ref == "docs/trackers/skill-frictions.md"
+                    && c.ref_kind == RefKind::FilePath),
+            "expected the bare path to be extracted from the code-block call shape, got {cands:?}"
+        );
+        // And nothing should retain the wrapping `,` or `"`.
+        assert!(
+            cands.iter().all(|c| !c.raw_ref.ends_with(',')
+                && !c.raw_ref.starts_with('"')
+                && !c.raw_ref.ends_with('"')),
+            "tokens must be trimmed of wrapping punctuation, got {cands:?}"
+        );
     }
 }
