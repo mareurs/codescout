@@ -148,6 +148,11 @@ fn looks_like_path(s: &str) -> bool {
         // command examples in markdown — not filesystem paths.
         return false;
     }
+    if s.starts_with("path/to/") {
+        // Documentation placeholder ("clone to `path/to/foo`, then ...").
+        // Common in setup / agent-onboarding docs.
+        return false;
+    }
     if s.contains('*') {
         // Glob patterns (docs/**/*.md, *.rs, foo/*.txt) describe a shape, not
         // a concrete path.
@@ -458,5 +463,23 @@ mod tests {
         assert_eq!(cands[0].ref_kind, RefKind::FileSymbol);
         // raw_ref retains the original form; resolver re-parses it
         assert_eq!(cands[0].raw_ref, "src/prompts/source.rs::extract_surface");
+    }
+
+    #[test]
+    fn parser_rejects_path_to_placeholder() {
+        // "path/to/X" is a documentation placeholder, not a filesystem path.
+        // Common shape in agent-onboarding docs: "clone to `path/to/foo`".
+        let (cands, _) = parse("Replace `path/to/copilot-codescout` with your clone location.");
+        assert!(
+            cands.iter().all(|c| c.ref_kind != RefKind::FilePath),
+            "expected no FilePath candidate for placeholder, got {cands:?}"
+        );
+        let (cands, _) = parse("Run `cp path/to/codescout/Skills/* .github/skills/`.");
+        assert!(
+            cands
+                .iter()
+                .all(|c| c.raw_ref != "path/to/codescout/Skills"),
+            "expected no FilePath candidate for placeholder prefix, got {cands:?}"
+        );
     }
 }
