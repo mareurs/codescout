@@ -59,6 +59,14 @@ pub fn parse_refs(text: &str, md_path: &Path) -> (Vec<RefCandidate>, Vec<ParseWa
     (candidates, warnings)
 }
 fn classify(s: &str, in_code_context: bool) -> Option<RefKind> {
+    // Try Rust-style `path::symbol` first so the trailing colon doesn't leak
+    // into the path part. Fall back to single `:` for python-style and line
+    // refs (file.py:cmd, file.rs:42).
+    if let Some((path_part, suffix)) = s.rsplit_once("::") {
+        if looks_like_path(path_part) && is_symbol_suffix(suffix) {
+            return Some(RefKind::FileSymbol);
+        }
+    }
     if let Some((path_part, suffix)) = s.rsplit_once(':') {
         if looks_like_path(path_part) {
             if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
@@ -133,6 +141,11 @@ fn looks_like_path(s: &str) -> bool {
     if s.starts_with('~') {
         // Home-relative paths (~/.cargo/bin/foo, ~/.claude/config.json)
         // cannot be resolved against the project root.
+        return false;
+    }
+    if s.starts_with("origin/") || s.starts_with("upstream/") {
+        // Git refs (origin/master, upstream/main). Common inside `git`
+        // command examples in markdown — not filesystem paths.
         return false;
     }
     if s.contains('*') {
@@ -416,5 +429,34 @@ mod tests {
                 && !c.raw_ref.ends_with('"')),
             "tokens must be trimmed of wrapping punctuation, got {cands:?}"
         );
+    }
+
+    #[test]
+    fn parser_rejects_git_refs() {
+        // origin/master, upstream/main are git refs (common in `git` command
+        // examples) — not filesystem paths.
+        let (cands, _) =
+            parse("Run `git rev-parse master experiments origin/master origin/experiments`.");
+        assert!(
+            cands.iter().all(|c| c.ref_kind != RefKind::FilePath),
+            "expected no FilePath candidate for git refs, got {cands:?}"
+        );
+        let (cands, _) = parse("Push to `upstream/main` not `origin/main`.");
+        assert!(
+            cands.iter().all(|c| c.ref_kind != RefKind::FilePath),
+            "expected no FilePath candidate for git refs, got {cands:?}"
+        );
+    }
+
+    #[test]
+    fn parser_handles_rust_double_colon_symbol_separator() {
+        // src/foo.rs::symbol should produce path="src/foo.rs", suffix="symbol".
+        // Pre-fix used rsplit_once(':') which left a trailing colon on the
+        // path part, causing resolver to look for a nonexistent file.
+        let (cands, _) = parse("see `src/prompts/source.rs::extract_surface` for the parser.");
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].ref_kind, RefKind::FileSymbol);
+        // raw_ref retains the original form; resolver re-parses it
+        assert_eq!(cands[0].raw_ref, "src/prompts/source.rs::extract_surface");
     }
 }

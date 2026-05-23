@@ -184,10 +184,14 @@ fn resolve_module_path_v1(_c: &RefCandidate, _ctx: &ResolveCtx<'_>) -> Resolutio
     }
 }
 fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
+    // Accept both `path::symbol` (Rust-style) and `path:symbol` (Python-style)
+    // separators. Try `::` first so a trailing colon doesn't leak into the
+    // path part on Rust refs like `src/foo.rs::extract_surface`.
     let (path_str, name) = c
         .raw_ref
-        .rsplit_once(':')
-        .expect("file_symbol invariant: raw_ref must be 'path:symbol'");
+        .rsplit_once("::")
+        .or_else(|| c.raw_ref.rsplit_once(':'))
+        .expect("file_symbol invariant: raw_ref must contain a `::` or `:` separator");
     let path = ctx.repo_root.join(path_str);
     if !path.exists() {
         return verdict_with_drops(
