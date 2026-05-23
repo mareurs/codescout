@@ -59,7 +59,7 @@ pub(crate) async fn resolve_read_path(
         return Err(RecoverableError::with_hint(
             format!("path not found: {}", full.display()),
             "Use tree to explore the directory structure, \
-             or get_symbols_overview on a directory path.",
+             or symbols(path) to list symbols in a file or directory.",
         )
         .into());
     }
