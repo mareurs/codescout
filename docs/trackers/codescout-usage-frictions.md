@@ -393,3 +393,53 @@ Old paths return "file not found" via both `read_file` and `read_markdown`.
 **Severity:** info, not friction.
 
 **Status:** open as design note. No fix expected.
+
+
+
+---
+
+### U-14 — Worktree-write-guard matcher cites nonexistent tools (silent safety failure)
+
+**When:** 2026-05-23, discovered while fixing U-5 + U-6 in companion `session-start.sh`. Broad grep for stale tool names surfaced 31 matches across 15 files; most are historical doc plans, but two are **live runtime configs**.
+
+**Iron Law / pattern:** project prompt-surface consistency, same root cause as U-6 — stale tool names in companion-plugin surfaces drifting from the live codescout MCP tool registry. Where U-6 was *text drift in display surfaces*, U-14 is **matcher drift in runtime hook configs**: the affected lines pattern-match on tool name to gate execution.
+
+**Tool called (surface):**
+1. `claude-plugins/codescout-companion/hooks/hooks.json:25` — PreToolUse matcher:
+   ```
+   "matcher": "mcp__.*__(edit_lines|replace_symbol|insert_code|create_file|create_or_update_file)"
+   ```
+2. `claude-plugins/codescout-companion/hooks/worktree-write-guard.sh:19` — case statement filter:
+   ```
+   *__edit_lines|*__replace_symbol|*__insert_code|*__create_file|*__create_or_update_file)
+   ```
+
+Both alternations list four nonexistent tool handles (`edit_lines`, `replace_symbol`, `insert_code`, `create_or_update_file`) and one real handle (`create_file`).
+
+**Should have called:** matchers must cover the **live** write-tool surface:
+- `mcp__codescout__edit_code` (consolidated structural edits)
+- `mcp__codescout__edit_file` (text edits)
+- `mcp__codescout__edit_markdown` (markdown edits)
+- `mcp__codescout__create_file` (already covered)
+
+Proposed corrected matcher:
+```
+"matcher": "mcp__codescout__(edit_code|edit_file|edit_markdown|create_file)"
+```
+(with matching case-statement adjustment in `worktree-write-guard.sh`.)
+
+**Whistle delivered:** yes (this entry; companion commit `bd20a8a` cited it forward).
+
+**Recurrence:** 1st observed.
+
+**Severity:** **high** — runtime safety failure. The worktree-write-guard exists to block silent wrong-file writes when a worktree is `.cs-worktree-pending` (workspace not yet `activate`d). With the current matcher, the guard fires only on `create_file`; `edit_code`, `edit_file`, and `edit_markdown` writes in a pending worktree are **silently unguarded**, exactly the failure mode the guard was built to prevent.
+
+**Status:** open. Fix requires:
+1. Edit `hooks/hooks.json` matcher (line 25).
+2. Edit `hooks/worktree-write-guard.sh` case statement (line 19).
+3. Add or update worktree test coverage (the repo already has `worktree-write-guard.test.sh` per the earlier `tree` listing — verify it asserts firing on `edit_code`).
+4. Re-confirm via a deliberate trigger scenario (set `.cs-worktree-pending`, attempt an `edit_code` call, confirm hook fires + blocks).
+
+Deferred from the U-5/U-6 commit because the risk shape differs: text fixes are non-functional; matcher fixes are runtime-behavioral and warrant their own commit + test verification.
+
+**Cross-reference:** root cause is the same gap as **H-3** (companion-side tool-name lint missing). Filing U-14 reinforces H-3's promotion criterion — this is the second confirmed instance of companion-side stale-tool-name drift, which trips H-3's promote-when threshold.
