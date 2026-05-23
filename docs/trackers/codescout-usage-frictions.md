@@ -475,3 +475,62 @@ Design note: the old matcher used a wildcard `mcp__.*__` across MCP servers; nar
 | Post-this-fix (61bc678b) | **1** (the cross-repo `claude-plugins/` ref) |
 
 The 1 remaining hi-sev finding is a cross-repo reference to the sibling `claude-plugins/` directory. Resolving it would require either an "external roots" config on the audit, or recognizing that paths ending in `/` are dir-intent and tolerating not-locally-present. Design call for a future audit improvement, not drift to fix.
+
+
+### U-16 — Pika invoker hit IL3 on first survey move (substrate caught)
+
+**When:** 2026-05-23, post-/compact reload of the codescout-pika specialist. First exploratory git log of the new session was piped: `git log --oneline master..experiments | head -20`. The `pre-tool-guard.sh` (or its codescout-server counterpart) blocked it with the standard IL3 message; required a re-run as `git log --oneline master..experiments` (bare) followed by `grep`/`tail` on the returned `@cmd_*` buffer.
+
+**Iron Law / pattern:** Iron Law 3 — `run_command` output piped to a log-trimmer (`| head -20`). `git log` is an unbounded-LHS command.
+
+**Tool called (surface):** `run_command(command="git log --oneline master..experiments | head -20")` — invoked from the main Claude Code agent operating as Pika.
+
+**Should have called:**
+1. `run_command("git log --oneline master..experiments")` — bare, full output stored in `@cmd_*`.
+2. `grep PATTERN @cmd_*` or `read_file(@cmd_*, start_line=..., end_line=...)` for trimming.
+
+**Whistle delivered:** yes — self-whistle, recorded inline ("→ pika whistles: own IL3 slip on first move"). Self-correction acknowledged in the same turn.
+
+**Recurrence:** 3rd observed IL3 slip in this tracker (after U-1, U-3). Notable that the slip came from the Pika operator itself — the agent watching for IL3 violations was the one that committed the violation. **Update: 2nd self-slip same session** — operator subsequently piped `cargo build --release 2>&1 | tail -5` later in the same exploration loop. Substrate held both times. Pattern: even after the first whistle, the watcher slipped again ≤30 turns later on a structurally identical shape (unbounded-LHS command + log-trimmer pipe). Reinforces severity assessment: discipline alone is insufficient.
+
+**Severity:** low — substrate held. The gate caught the slip; cost was one wasted tool call + a "BLOCKED" reply turn. No code change reached disk.
+
+**Status:** substrate-caught — no code fix required. The IL3 gate (companion `pre-tool-guard.sh` + codescout server-side check) worked as designed.
+
+**Lesson / counterfactual (W-N material):** the IL3 substrate is now demonstrably robust against the actor that should know it best. This is evidence that gate-by-substrate beats gate-by-discipline — the rule "always whistle on IL3 violations" doesn't prevent the watcher from violating IL3; the substrate does. Reinforces the rationale for H-3 (companion-surface lint) and the worktree-write-guard test pattern: durable behavior comes from gates, not prompts.
+
+**Note on observability:** the slip would have been invisible to the user without the BLOCKED error message in the tool result. There is no separate "Iron Law violation log" surface — the gate's deny path doubles as the observability mechanism. If the deny message were silent (e.g. swallowed by an auto-retry), this U-16 entry would not exist.
+
+
+### U-17 — audit_doc_refs classifies instructional placeholder + reader-side paths as missing files (39 FPs)
+
+**When:** 2026-05-23, same exploratory pass that produced U-16. Ran `librarian audit_doc_refs` across the full doc tree (551 files); hi-sev count was 40 — but breakdown showed 39 of them concentrated in two files: `docs/agents/copilot.md` (25) and `docs/agents/claude-code.md` (14). Only 1 was in a historical ADR.
+
+**Iron Law / pattern:** audit-tool correctness — same family as U-15, but a new false-positive class. H-5 (audit_doc_refs CI gate) cannot promote past warn-stage while these FPs dominate the hi-sev signal.
+
+**Tool called (surface):** `src/librarian/tools/audit_doc_refs/parser.rs::looks_like_path` + `classify`. They match strings like `path/to/copilot-codescout`, `.github/skills/`, `.github/agents/`, `.vscode/mcp.json` as `file_path` then resolve against `git_root` → `missing` → hi-sev.
+
+**Reality check (Conclude-Last save):** read `docs/agents/copilot.md` line 22 — the doc explicitly says *"The commands use `path/to/copilot-codescout` as a placeholder for wherever you cloned it."* `.github/skills/`, `.github/agents/`, `.github/hooks/` are paths in the **reader's** repo (Copilot user setting up VS Code), not codescout's repo. `.vscode/mcp.json` is the reader's per-project MCP config. These are correct instructional content, not drift.
+
+**Should have called:**
+1. **Placeholder filter** — reject `path/to/`-prefixed refs in `looks_like_path` (same shape as the existing `~/`, `origin/`, `upstream/` rejections from U-15). One-line addition.
+2. **Reader-side scope** (optional, broader fix) — allow per-doc frontmatter opt-out: `audit_reader_side_paths: true` on agent-onboarding docs would skip path resolution entirely. Cleaner long-term but more design surface.
+3. **Or scope exclusion** — extend the `paths` glob default to exclude `docs/agents/**` (these docs are agent-onboarding, not codescout-internal). Cheapest fix but loses coverage for any *real* drift in those files.
+
+**Whistle delivered:** yes (this entry). Fix not yet shipped — pending design call between (1), (2), (3).
+
+**Recurrence:** 2nd FP class in audit (after U-15's two classes). Suggests the audit's classifier needs an extensible reject-list mechanism rather than per-FP-class one-off filters.
+
+**Severity:** med — was about to mis-report 39 hi-sev findings as drift in a Pika exploration pass (Conclude-Last caught the misread). For real CI use, H-5 deny-stage promotion would falsely fail the build on every change. The bug is in the audit, not in the docs.
+
+**Status:** partially-shipped (code-explorer:faa77dd7, 2026-05-23) — placeholder `path/to/` reject landed in `looks_like_path`, catches ~6 of 39 FPs. Reader-side path scoping (`.github/skills/`, `.vscode/mcp.json` etc., ~33 residual FPs) deferred to design call between H-6 options (B) per-doc frontmatter opt-out and (C) default scope exclusion of `docs/agents/**`.
+
+**Measurement** (audit on docs/**/*.md, hi-sev counts):
+| Source | Hi-sev count | Real? |
+|---|---|---|
+| `docs/agents/copilot.md` | 25 | FP — instructional placeholders + reader-side paths |
+| `docs/agents/claude-code.md` | 14 | FP — same shape |
+| `docs/adrs/2026-05-13-semantic-anchors-qdrant-payload.md` | 1 | historical ADR drift (`src/embed/index.rs` renamed/moved) |
+| **Total** | **40** | 39 FP + 1 real-but-historical |
+
+**Hookify candidate:** see H-N tracker — propose H-6 (placeholder-prefix + reader-side classifier extensions).
