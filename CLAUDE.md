@@ -34,7 +34,7 @@ Without the symlink, `~/.cargo/bin/codescout` is a stale installed copy and `/mc
 - ✓ Bug blocking the current task (fix-now or parking-lot)
 - ✓ Incidental bug we won't fix in the current session
 - ✓ Just-fixed bug whose investigation is worth preserving
-- ✓ Tool quirks / misbehaviors (formerly the BUG-XXX log in `docs/TODO-tool-misbehaviors.md`, retired 2026-05-17)
+- ✓ Tool quirks / misbehaviors (formerly the BUG-XXX log, retired 2026-05-17 — archived at `docs/archive/old-trackers/TODO-tool-misbehaviors.md`)
 - ✗ Pure typos / one-token corrections — commit message is enough
 - ✗ Feature ideas / refactors — those go in `docs/trackers/` or `docs/plans/`
 - ✗ Subjective dislikes that aren't bugs
@@ -146,7 +146,7 @@ edit_markdown("docs/trackers/tool-usage-patterns.md",
 
 **User — browse:** open `docs/trackers/tool-usage-patterns.md`; the live params table is
 rendered at the top by the librarian. Prompt improvement candidates are at the bottom —
-these are the direct inputs to `src/prompts/server_instructions.md` edits.
+these are the direct inputs to `src/prompts/source.md` (the `server_instructions` surface slice) edits.
 
 ### Ad-Hoc Session Logs — `docs/trackers/<topic>-session-log.md`
 
@@ -430,10 +430,14 @@ Load-bearing rules I keep getting wrong otherwise:
 
 ## Prompt Surface Consistency
 
-The project has **three prompt surfaces** that reference tool names:
-- `src/prompts/server_instructions.md` — injected every MCP request
-- `src/prompts/onboarding_prompt.md` — one-time onboarding
+The project has **three prompt surfaces** that reference tool names. Two are sliced out of a single editable file via `<!-- @surface NAME -->` markers; the third is code-generated:
+
+- `src/prompts/source.md` — single editable doc, sliced at build time (`build.rs` + `src/prompts/source.rs::extract_surface`) into:
+  - **`server_instructions` surface** — injected once at every MCP session start (not per-request)
+  - **`onboarding_prompt` surface** — one-time onboarding when a project is first activated
 - `build_system_prompt_draft()` in `src/prompts/builders.rs` — generated per-project
+
+See `src/prompts/README.md` for the surface contract + editing rules.
 
 **When tools get renamed/consolidated, all three need coordinated updates.** Files
 closer to the change get updated; distant ones accumulate stale refs ("distance
@@ -452,31 +456,31 @@ update all three surfaces in the same commit.
 ### Onboarding Version
 
 Bump `ONBOARDING_VERSION` in `src/tools/onboarding.rs` when changing prompt surfaces
-that produce the **stored per-project system prompt** — i.e. `onboarding_prompt.md` or
-`build_system_prompt_draft()` in `builders.rs`. The bump triggers automatic system prompt
+that produce the **stored per-project system prompt** — i.e. the `onboarding_prompt` surface
+of `source.md` or `build_system_prompt_draft()` in `builders.rs`. The bump triggers automatic system prompt
 regeneration for all projects onboarded with the previous version.
 
-**Do NOT bump for `server_instructions.md` changes.** That file is injected fresh at
-every MCP session start (each `/mcp` connect re-reads it from disk). There is no cached
+**Do NOT bump for `server_instructions` surface changes.** That surface is injected fresh at
+every MCP session start (each `/mcp` connect re-reads the sliced text). There is no cached
 copy — changes take effect immediately on the next connect without any version bump.
 
 ### Which surface needs a bump?
 
 | Surface | How delivered | Bump needed? |
 |---|---|---|
-| `server_instructions.md` | Loaded fresh at every MCP session start | **No** — live on next connect |
-| `onboarding_prompt.md` | Drives stored system prompt generation | **Yes** — cached per project |
+| `server_instructions` surface (slice of `source.md`) | Loaded fresh at every MCP session start | **No** — live on next connect |
+| `onboarding_prompt` surface (slice of `source.md`) | Drives stored system prompt generation | **Yes** — cached per project |
 | `build_system_prompt_draft()` in `builders.rs` | Same — generates stored system prompt | **Yes** — cached per project |
 
 ### Bump when
 
 - Tool names change (rename, consolidate)
-- Tool parameter semantics change in `onboarding_prompt.md` or `builders.rs`
+- Tool parameter semantics change in the `onboarding_prompt` surface of `source.md` or in `builders.rs`
 - Onboarding prompt templates change in ways that affect the generated system prompt
 
 ### Do NOT bump for
 
-- Any change to `server_instructions.md` (no matter how significant)
+- Any change to the `server_instructions` surface of `source.md` (no matter how significant)
 - Bug fixes that don't change tool behavior
 - Internal refactors
 - Memory template changes (memories are re-read during refresh anyway)
