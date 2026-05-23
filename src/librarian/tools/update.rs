@@ -34,6 +34,13 @@ struct Args {
     commit_refresh: bool,
 }
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    if args.get("patch").and_then(|p| p.get("rel_path")).is_some() {
+        return Err(super::RecoverableError::with_hint(
+            "artifact(action=\"update\") cannot change `rel_path` — the file location is owned by the `move` action",
+            "Use artifact(action=\"move\", id=..., new_rel_path=...) to rename the backing file and update the catalog atomically. `update` only modifies frontmatter fields (status, title, owners, tags, topic, body, params).",
+        ));
+    }
+
     let a: Args = serde_json::from_value(args)?;
     let cat = ctx.catalog.lock();
     let row =
@@ -276,6 +283,45 @@ mod tests {
         assert!(content.contains("title: New"), "file should have new title");
         let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
         assert_eq!(row.title.as_deref(), Some("New"));
+    }
+
+    #[tokio::test]
+    async fn update_rejects_rel_path_with_move_hint() {
+        // F-010: passing rel_path in the update patch used to silently no-op
+        // (returns updated:true while the file location was never changed).
+        // Now: explicit rejection pointing at the `move` action.
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "doc.md",
+                "kind": "spec", "title": "T", "body": "b"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        let err = call(
+            &ctx,
+            serde_json::json!({
+                "id": id,
+                "patch": {"rel_path": "new/path.md"}
+            }),
+        )
+        .await
+        .expect_err("update with patch.rel_path should error");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("rel_path"),
+            "error must mention rel_path; got: {msg}"
+        );
+        assert!(
+            msg.contains("move"),
+            "error must point at the move action; got: {msg}"
+        );
     }
 
     #[tokio::test]
