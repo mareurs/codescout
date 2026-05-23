@@ -68,11 +68,11 @@ Tests live in `src/server.rs::guide_hint_tests` (6 cases).
 
 ## Next steps
 
-1. Implement the `get_guide(topic)` tool (Plan Task 18+).
+1. Implement the `get_guide(topic)` tool (Plan Task 18+). **Done** — Commit A `e68f3a94` + mechanism in Commit C.
 2. For each candidate above, decide: extract verbatim, rewrite for the
    LLM consumer, or split into multiple sub-topics.
 3. Add an integration test that every advertised topic resolves to a
-   non-empty body.
+   non-empty body. **Done** — `every_topic_has_non_empty_body` + `schema_enum_matches_registered_topics` in `src/tools/guide.rs` (code-explorer:4c6f4b03). The schema-drift sibling catches "added topic to map but forgot the schema enum" — a class of silent-invisibility drift not covered by step 3 alone.
 4. Once `get_guide` ships, prune the source sections that are pure
    duplicates of the loaded content in `server_instructions.md`.
 
