@@ -300,6 +300,17 @@ echo "$master_sha"                  # record this in the tally, not the pre-cher
 Or, after the fact: `git log master --oneline --grep="<subject prefix>"` to recover the master SHA by commit message.
 
 Lesson source: 2026-05-23 batched-bug session — 12 fixes shipped, running tally cited the 12 experiments-side SHAs, none survived the rebase. Recovery took a `git log --grep` sweep on master to rebuild the SHA mapping for the user's "are they all done?" check.
+
+**Applies to every SHA-citing surface, not just chat:**
+
+- **Tracker entries** — F-N / W-N / U-N / H-N / R-N — any `**Status:**`, `**Fix idea:**`, or evidence-citing line that names a SHA. After the cherry-pick lands on master, update the citation to the master SHA before committing the tracker entry.
+- **`artifact_event` calls** — `anchor_commit` and `also_mutates` SHAs are written into the catalog DB and outlive rebases. Cite the master SHA.
+- **`docs/issues/<bug>.md` Fix sections** — `_TEMPLATE.md` § "## Fix" mandates the master SHA. New bug files inherit this; older ones may still cite experiments-side SHAs — update opportunistically when touching the file.
+- **ADRs / design docs** citing the implementation commit — same rule.
+
+**Anti-pattern:** writing `Fixed in commit abc1234 on experiments` immediately after committing on experiments. After cherry-pick + rebase, that SHA orphans. Capture the master SHA AFTER the cherry-pick lands and cite that instead. If forensic context matters, prefix explicitly: `experiments-side abc1234, master-side def5678` — never let bare SHAs default to "whichever branch I happened to be on."
+
+**Cross-repo callsites** — when a tracker entry in codescout cites a fix that landed in `codescout-companion` (or vice-versa), use the `<repo>:<sha>` prefix from the "Cross-Repo Commit References" section below: `codescout-companion:0b75991`. A bare SHA implies the current repo.
 ### Commit Discipline
 
 - **Batch related changes** into a single well-tested commit rather than committing every incremental step.
