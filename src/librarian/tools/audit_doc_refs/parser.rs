@@ -192,21 +192,17 @@ fn has_uri_scheme(s: &str) -> bool {
 }
 
 fn has_known_ext(s: &str) -> bool {
+    let Some((prefix, ext)) = s.rsplit_once('.') else {
+        return false;
+    };
+    if prefix.is_empty() {
+        // Bare extension like ".rs" or ".py" — a documentation token
+        // ("touch a `.rs` file"), not a filesystem path. Reject.
+        return false;
+    }
     matches!(
-        s.rsplit_once('.').map(|(_, ext)| ext),
-        Some(
-            "rs" | "py"
-                | "ts"
-                | "js"
-                | "kt"
-                | "java"
-                | "go"
-                | "md"
-                | "toml"
-                | "yaml"
-                | "yml"
-                | "json"
-        )
+        ext,
+        "rs" | "py" | "ts" | "js" | "kt" | "java" | "go" | "md" | "toml" | "yaml" | "yml" | "json"
     )
 }
 
@@ -481,5 +477,21 @@ mod tests {
                 .all(|c| c.raw_ref != "path/to/codescout/Skills"),
             "expected no FilePath candidate for placeholder prefix, got {cands:?}"
         );
+    }
+
+    #[test]
+    fn parser_rejects_bare_extension_as_path() {
+        // Inline code spans containing only a file extension (`.rs`, `.py`)
+        // are documentation tokens ("touch a `.rs` file"), not file paths.
+        for ext in [
+            ".rs", ".py", ".ts", ".js", ".md", ".toml", ".yaml", ".yml", ".json",
+        ] {
+            let text = format!("Edit a `{ext}` file.");
+            let (cands, _) = parse(&text);
+            assert!(
+                cands.iter().all(|c| c.ref_kind != RefKind::FilePath),
+                "bare ext '{ext}' must not classify as FilePath, got: {cands:?}"
+            );
+        }
     }
 }
