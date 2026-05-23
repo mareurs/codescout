@@ -368,7 +368,7 @@ impl CodeScoutServer {
             if prev < PATH_NOTE_MAX {
                 let root = root_prefix.trim_end_matches('/');
                 call_result.content.push(Content::text(format!(
-                    "[codescout] paths are relative to {root}"
+                    "\n[codescout] paths are relative to {root}"
                 )));
             }
         }
@@ -769,6 +769,37 @@ impl ServerHandler for CodeScoutServer {
     }
 }
 
+/// Static documentation resources whose bodies ship inside the binary.
+///
+/// Bodies are embedded via `include_str!` so doc URIs (`doc://...`) resolve
+/// identically regardless of the active project root. A regression test
+/// (`static_doc_sources_all_readable`) asserts every URI in this list is
+/// readable so a stale path here turns into a compile-time `include_str!`
+/// failure rather than a runtime `-32603` at call time.
+fn static_doc_sources() -> Vec<crate::mcp_resources::doc::DocSource> {
+    use crate::mcp_resources::doc::DocSource;
+    vec![
+        DocSource {
+            uri: "doc://progressive-disclosure".into(),
+            name: "progressive-disclosure".into(),
+            description: Some(
+                "Output sizing, overflow hints, agent guidance for codescout tools.".into(),
+            ),
+            content: include_str!("../docs/PROGRESSIVE_DISCOVERABILITY.md"),
+        },
+        DocSource {
+            uri: "doc://librarian-guide".into(),
+            name: "librarian-guide".into(),
+            description: Some(
+                "Full reference: artifact model, filter syntax, tracker workflow, \
+                 augmentation lifecycle, librarian actions."
+                    .into(),
+            ),
+            content: include_str!("prompts/guides/librarian.md"),
+        },
+    ]
+}
+
 /// Build a fresh [`crate::mcp_resources::ResourceRegistry`] from the current agent state.
 ///
 /// Called at server construction and again after each `activate_project` to pick up
@@ -784,7 +815,7 @@ async fn build_resource_registry(
     tools: &[Arc<dyn Tool>],
 ) -> crate::mcp_resources::ResourceRegistry {
     use crate::mcp_resources::{
-        doc::{DocProvider, DocSource},
+        doc::DocProvider,
         memory::MemoryProvider,
         project_summary::{AgentSummarySource, ProjectSummaryProvider},
         tool_guide::ToolGuideProvider,
@@ -794,35 +825,9 @@ async fn build_resource_registry(
 
     let mut rr = ResourceRegistry::new();
 
-    // Static docs — register only when the project root is known so the paths exist.
-    if let Some(project_root) = agent.project_root().await {
-        let _ = rr.try_register(Box::new(DocProvider::new(vec![
-            DocSource {
-                uri: "doc://progressive-disclosure".into(),
-                name: "progressive-disclosure".into(),
-                description: Some(
-                    "Output sizing, overflow hints, agent guidance for codescout tools.".into(),
-                ),
-                path: project_root.join("docs/PROGRESSIVE_DISCOVERABILITY.md"),
-            },
-            DocSource {
-                uri: "doc://tool-misbehaviors".into(),
-                name: "tool-misbehaviors".into(),
-                description: Some("Living log of observed codescout tool bugs.".into()),
-                path: project_root.join("docs/TODO-tool-misbehaviors.md"),
-            },
-            DocSource {
-                uri: "doc://librarian-guide".into(),
-                name: "librarian-guide".into(),
-                description: Some(
-                    "Full reference: artifact model, filter syntax, tracker workflow, \
-                     augmentation lifecycle, librarian actions."
-                        .into(),
-                ),
-                path: project_root.join("src/prompts/librarian-guide.md"),
-            },
-        ])));
-    }
+    // Static docs — always available; bodies are embedded via include_str! so
+    // they resolve identically regardless of the active project root.
+    let _ = rr.try_register(Box::new(DocProvider::new(static_doc_sources())));
 
     // Memory dir — derived from the active project's MemoryStore.
     if let Ok(memory_dir) = agent
@@ -1573,6 +1578,32 @@ mod tests {
             messages.join("\n  ")
         );
     }
+
+    #[tokio::test]
+    async fn static_doc_sources_all_readable() {
+        use crate::mcp_resources::{doc::DocProvider, ResourceProvider};
+        let sources = super::static_doc_sources();
+        assert!(
+            !sources.is_empty(),
+            "static_doc_sources() should register at least one doc URI"
+        );
+        let provider = DocProvider::new(sources.clone());
+        for src in &sources {
+            let res = provider.read(&src.uri).await;
+            assert!(
+                res.is_ok(),
+                "doc:// URI {} failed to read: {:?}",
+                src.uri,
+                res.err()
+            );
+            assert!(
+                !src.content.is_empty(),
+                "doc:// URI {} embedded content is empty",
+                src.uri
+            );
+        }
+    }
+
     #[tokio::test]
     async fn every_tool_description_under_cap() {
         const CAP: usize = 1800;
