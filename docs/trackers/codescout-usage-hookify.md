@@ -132,3 +132,92 @@ a row in `tool_calls`. Hookify catches it pre-call.
   not cross-session count. The model did not learn from the first
   in-server rejection within the turn — memory route too slow;
   substrate route required.
+
+
+
+---
+
+### H-3 — Lint must cover companion plugin surfaces for stale tool names
+
+**Pattern:** any token in `claude-plugins/codescout-companion/hooks/*.sh` (or other companion text surfaces) that *looks like* a codescout tool name must resolve to a real tool in the current binary. The project's existing `prompt_surfaces_reference_only_real_tools` lint covers `source.md` + `builders.rs` but **not** the companion-plugin surfaces — companion lives in a sibling repo and is rendered into context via hook output at session start.
+
+**Confirming data:**
+- **U-6** — companion `hooks/session-start.sh` cites `replace_symbol` / `insert_code` / `remove_symbol`, none of which are registered tool handles. Real handle is `edit_code` (consolidated). Direct drift caused by the gap in lint coverage.
+- **Cross-reference:** project CLAUDE.md § "Prompt Surface Consistency" already documents the "distance-from-change" problem this lint exists to prevent. The lint just hasn't followed the surface to the companion repo yet.
+
+**Proposed hookify rule:**
+
+- **Predicate:** post-build CI step that captures the rendered output of companion hooks (`session-start.sh`, `subagent-guidance.sh`, `semantic-tool-router.sh`) and lints any token matching the regex `\b[a-z_]+(_symbol|_code|_file|_markdown)\b` against the live MCP tool registry.
+- **Decision:** `deny` (CI fails on unknown handle).
+- **Reason text:** *"companion hook references nonexistent codescout tool `<name>` — confirm against the live MCP tool registry (`cargo run -- list-tools` or equivalent) or update the hook to cite a real handle."*
+- **Implementation paths:**
+  1. *In codescout repo*: extend `server::tests::prompt_surfaces_reference_only_real_tools` to ALSO read companion hook scripts from a configured path (env var `COMPANION_PATH` or workspace sibling lookup). Best place to run: pre-publish.
+  2. *In companion repo*: add a CI step that clones codescout, builds it, dumps tool names, and lints `hooks/*.sh` against the dump. Best place to run: pre-merge in companion.
+
+  Both are valid; (2) is more decoupled (companion owns its own lint) but requires companion CI to build codescout. (1) is more centralized but couples the two repos.
+
+**Promote-when:** lint extension is drafted and ready to land; OR a second instance of companion-side stale-tool-name drift surfaces (whichever comes first). Current threshold: 1 confirmed (U-6); a second instance would force the issue.
+
+**Status:** proposed.
+
+**Notes:** the existing repo-side lint (`prompt_surfaces_reference_only_real_tools`) has a per-token allowlist for non-tool identifiers (param names, etc.). Companion-side lint must mirror that allowlist or expose it as configuration to prevent false positives on legitimate non-tool tokens.
+
+
+
+### H-4 — Drop companion compression-reminder once server-instructions survive compaction
+
+**Pattern:** the companion `SessionStart` hook duplicates Iron Laws content already canonical in `src/prompts/source.md::server_instructions`. Multiple copies in context — three by U-4's count — produce drift (U-5, U-6), token bloat, and an inversion of "canonical is the source of truth" (the *weakest* derived copy is the most compaction-resilient).
+
+**Confirming data:**
+- **U-4** (triplication: canonical + companion + buddy).
+- **U-5** (compression-reminder drops the bounded-LHS carve-out for Law 3 — derived surface loses precision).
+- **U-6** (compression-reminder cites stale tool names — derived surface drifts faster than canonical).
+
+The three failures stem from the same root cause: maintaining a derived copy by hand. Drop the copy, drop the drift.
+
+**Proposed hookify rule:**
+
+- **Predicate:** if `server_instructions` is rebroadcast at every CC MCP session start *and* survives `/compact` events (i.e. is re-injected when the user resumes a compacted session), then the companion compression-reminder is duplicate-by-design and should be removed from main-session `SessionStart`.
+- **Decision:** deferred until measurement.
+- **Reason text:** *"compression-reminder duplicates canonical server-instructions; codescout MCP injects them at every session-start. Companion's main-session copy is redundant if injection happens on resume too."*
+- **Counterpoint to test:** subagents may NOT inherit MCP server-instructions automatically (they only see the parent's context). If subagents miss the canonical Iron Laws, the compression-reminder still earns its keep — but **only on `SubagentStart` hooks**, not on main-session `SessionStart`. Keep one, drop the other.
+
+**Promote-when:** one targeted experiment confirms two facts:
+1. `server_instructions` is re-injected at session resume after `/compact` (measure by triggering compaction and inspecting the next assistant turn's system prompt).
+2. Subagents do NOT inherit MCP server-instructions on `SubagentStart` (measure by reading a subagent's system prompt).
+
+Outcomes:
+- Both confirmed → drop from `SessionStart`, keep on `SubagentStart`.
+- Only (1) → drop from `SessionStart`, also drop from `SubagentStart`.
+- Only (2) → keep both; Pika lives with the triplication.
+
+**Status:** proposed (blocked on the two measurements).
+
+**Notes:** the buddy `gates.md` prose narration (U-11) is the easier first kill — it has no compaction-survival role. Drop that first regardless of how this experiment resolves; H-4 is the harder, evidence-gated promotion.
+
+
+
+### H-5 — Wire `audit_doc_refs` into CI for CLAUDE.md and docs/**/*.md
+
+**Pattern:** doc surfaces (CLAUDE.md, trackers, READMEs) cite code paths that have since been renamed, moved, or removed. The project already has a tool — `librarian(action="audit_doc_refs")` — built specifically to detect this; it's just not wired into automated enforcement.
+
+**Confirming data:**
+- **U-7** — CLAUDE.md cites `src/prompts/server_instructions.md` and `src/prompts/onboarding_prompt.md`, both renamed into `src/prompts/source.md`. The project's own self-referential surface ("Prompt Surface Consistency") drifted; nothing automatic caught it.
+- **Cross-reference:** the project's `## Standard Ship Sequence` in CLAUDE.md (step 5) already documents running `audit_doc_refs` *post-cherry-pick*. CI promotion just makes that automatic per-PR rather than per-release.
+
+**Proposed hookify rule:**
+
+- **Predicate:** CI step `cargo run -- librarian audit_doc_refs --paths CLAUDE.md docs/**/*.md README.md --fail-on med` on every pre-merge build.
+- **Decision:** `warn` initially (start lenient — existing drift may produce noise); escalate to `deny` once a one-time cleanup of existing drift is complete.
+- **Reason text:** *"doc references a path / symbol / link target that no longer exists in the codebase. Either fix the doc or update the reference. See `librarian audit_doc_refs` output for the finding details and severity."*
+- **Implementation note:** the audit tool already supports `--fail-on` thresholds and emits a tracker artifact when `emit_tracker=true`. For CI, run with `--fail-on med` and skip the tracker emit (tracker mode is for manual investigation sessions, not CI).
+
+**Promote-when:** one more doc-vs-code drift incident lands on `master` (current count: 1 confirmed via U-7; possibly 2+ if prior unfixed instances exist in the audit history). Concrete threshold for promotion from `proposed` to `active`:
+- **warn ship:** 3 documented `audit_doc_refs` findings of severity≥med in repo doc surfaces across two months.
+- **warn → deny promotion:** zero warn-stage CI false positives across one month.
+
+**Status:** proposed.
+
+**Notes:**
+- The audit tool already classifies findings as `verdict ∈ {missing, ambiguous_basename, resolved_basename}`. CI should only fail on `verdict=missing severity≥med`; `ambiguous_basename` is informational (could be a basename collision; not necessarily wrong); `resolved_basename` is OK.
+- Once active, this hook closes the loop on U-7 by making the failure mode loud at PR time instead of session time. The companion to H-3 (which catches tool-name drift in companion surfaces): H-5 catches path/link/symbol drift in doc surfaces.
