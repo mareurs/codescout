@@ -156,4 +156,69 @@ mod tests {
         assert!(rec.message.contains("unknown topic"));
         assert!(rec.hint().unwrap().contains("librarian"));
     }
+
+    #[tokio::test]
+    async fn every_topic_has_non_empty_body() {
+        // Drift guard: every topic registered in GetGuide::new() must point at
+        // an include_str! that yields a non-empty (substantive) body. Catches
+        // the "add a topic, point it at the wrong/empty file" mistake at test
+        // time rather than at session time when an LLM gets back "".
+        let g = GetGuide::new();
+        let list = g.call(json!({}), &ctx().await).await.unwrap();
+        let topics = list["topics"]
+            .as_array()
+            .expect("topics array in no-arg response");
+        assert!(
+            !topics.is_empty(),
+            "GetGuide must register at least one topic"
+        );
+
+        for topic in topics {
+            let name = topic.as_str().unwrap();
+            let result = g
+                .call(json!({"topic": name}), &ctx().await)
+                .await
+                .unwrap_or_else(|e| panic!("topic '{name}' failed: {e}"));
+            let body = result["body"]
+                .as_str()
+                .unwrap_or_else(|| panic!("topic '{name}' returned no body field"));
+            assert!(
+                body.len() > 100,
+                "topic '{name}' body suspiciously short ({} bytes) — likely empty or wrong include_str! target",
+                body.len()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn schema_enum_matches_registered_topics() {
+        // Drift guard: the input_schema's `topic` enum must list exactly the
+        // topics in GetGuide::topics. Otherwise a new topic works at runtime
+        // but isn't advertised in the schema (silent invisibility to clients
+        // that validate against the schema), or vice versa.
+        use std::collections::BTreeSet;
+        let g = GetGuide::new();
+
+        let schema = g.input_schema();
+        let enum_arr = schema["properties"]["topic"]["enum"]
+            .as_array()
+            .expect("schema must have properties.topic.enum");
+        let schema_topics: BTreeSet<String> = enum_arr
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+
+        let list = g.call(json!({}), &ctx().await).await.unwrap();
+        let registered_topics: BTreeSet<String> = list["topics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+
+        assert_eq!(
+            schema_topics, registered_topics,
+            "input_schema enum drifted from GetGuide::topics map — add the new topic to both or neither"
+        );
+    }
 }
