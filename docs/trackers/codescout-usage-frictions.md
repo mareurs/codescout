@@ -40,7 +40,7 @@ observed; 5 self-matches retroactively removed 2026-05-17 — see
 
 **Severity:** low (all rows are observational; none blocked progress).
 
-**Status:** open — promoted to H-1.
+**Status:** closed via H-1 (deny hook shipped 2026-05-18). The 45-row evidence here was the baseline that drove H-1 from `proposed` → `warn` → `deny`. Substrate enforcement now blocks the predicate at PreToolUse; subsequent same-shape slips (e.g. U-16 in this session) hit the deny path and never reach the tool. See H-1 in `docs/trackers/codescout-usage-hookify.md` for the live hook + promotion evidence.
 
 **Backing rows:** `pika_observations.id ∈ {1..50} \ {35, 36, 48, 49, 50}`,
 `tool_call_id ∈ [20255, 20823]`, `subkind='iron_law_3'`, `verdict='slip'`,
@@ -155,7 +155,7 @@ Cumulative: 9 strikes this session.
 my context vs. the bounded buffer-query path. Cumulative drift over a
 long session is the real cost; individual strikes look free.
 
-**Status:** open — pattern recurs across sessions despite Pika warnings.
+**Status:** closed via H-1 (deny hook shipped 2026-05-18). U-3's 9 strikes in one session despite explicit Pika warnings WAS the H-1 warn→deny promotion evidence ("warn-mode failed to change behavior within a single long session — the buffer-query habit did not stick" — H-1 Promotion evidence). Substrate now hard-blocks the predicate at PreToolUse.
 
 **Diagnosis (introspection):** the four strikes break down as:
 - 2× reaching for `| head` / `| tail` to bound output size before
