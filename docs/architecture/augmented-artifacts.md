@@ -1,0 +1,194 @@
+# Augmented Artifacts
+
+A pattern for storing structured data alongside human-readable markdown, with
+auto-maintained synthesis between them. Used by `audit_doc_refs`,
+`tool-usage-patterns`, goal trackers, and any "the markdown reflects live
+state I cannot summarize in prose" surface.
+
+This page is the mental model. The implementation lives in
+`src/librarian/catalog/augmentation.rs` (catalog DB row, merge_params
+validation) and `src/cli/mod.rs::artifact_augment` (CLI entry); the tool
+surfaces are `artifact_augment`, `artifact_refresh`, and
+`artifact(action="update", commit_refresh=true)`.
+
+## Why this exists
+
+Plain markdown trackers work fine until the data shape outgrows what a human
+wants to maintain by hand. A 12,000-entry audit table, a structured T-N
+observation set with cross-referenced verdicts, a goal-tracker's progress
+log — these are *data* the LLM (or a tool) maintains, but rendering them as
+prose for human reading is still useful. Two problems:
+
+1. **Data + prose in one markdown file** — the file becomes unreadable.
+   Humans see 12K JSON-ish lines; the librarian sees 12K low-signal nodes.
+2. **Data in a separate JSON file** — the markdown loses its grounding
+   ("see the JSON for state") and the librarian can't index the data.
+
+Augmented artifacts decouple the two without divorcing them: data lives in
+the catalog DB as structured `params`; the markdown body holds prose; an
+optional `render_template` can project params into the body whenever the
+artifact refreshes.
+
+## The body / params / prompt split
+
+An augmented artifact has **three controllable channels**:
+
+| Channel | Where it lives | Lifecycle | Edited by |
+|---|---|---|---|
+| **Body** | The `.md` file on disk | Re-rendered when artifact refreshes (if `render_template` set) | Auto-render OR human via `edit_markdown` |
+| **Params** | Catalog DB row (`augmentations.params`) | Mutated via `artifact_augment(merge=true, ...)` or by the producing tool | Programmatic only — never hand-edit a managed file's params via filesystem |
+| **Prompt** | Catalog DB row (`augmentations.prompt`) | Set once at augmentation; carries the LLM-facing instruction for `artifact_refresh(gather)` | `artifact_augment(merge=false, prompt=..., params=...)` to replace |
+
+Plus four optional fields stored alongside the prompt:
+
+- `render_template` — MiniJinja template that projects `params` into a
+  markdown snippet, used to keep the body in sync with the data.
+- `params_schema` — JSON Schema that validates `params` on every merge.
+- `append_mode` — if true, refreshes prepend a dated section instead of
+  replacing the body. The prompt should produce only the new delta.
+- `history_cap` — max number of `## YYYY-MM-DD` sections to retain in
+  append-mode bodies.
+
+## Why some markdown is "managed" (refuses direct read/edit)
+
+When an artifact has an augmentation, `read_markdown` and `edit_markdown`
+refuse to touch the file directly. The rationale: the body is **not the
+source of truth** — params are. A direct edit would either be silently
+overwritten by the next refresh, or would create a body that doesn't
+match the params (leading to confusion about which is canonical).
+
+The error redirects to the artifact tools:
+
+```
+'docs/trackers/doc-ref-audit.md' is a librarian-managed artifact —
+do not read or edit it directly
+
+Use artifact tools instead:
+• Read:   artifact(action="get", id="<id>")
+• Find:   artifact(action="find", semantic="<topic>")
+• Edit:   artifact(action="update", id="<id>", patch={...})
+```
+
+The gate is intentional friction — it forces you through a path that
+respects the params/body distinction.
+
+## The artifact_augment lifecycle
+
+`artifact_augment` controls the prompt + params + ancillary fields:
+
+| Call shape | What happens |
+|---|---|
+| `artifact_augment(id, prompt=..., params=...)` (merge=false, default) | **Full replace.** Overwrites ALL six caller-controlled fields: prompt, params, render_template, params_schema, append_mode, history_cap. Fields you omit silently reset to None / false. |
+| `artifact_augment(id, merge=true, params={...})` | **Params-only patch.** RFC 7396 merge-patch into existing params. Prompt and other fields unchanged. |
+| `artifact_augment(id, merge=true, params={key: null})` | **Delete a params key.** RFC 7396 semantics: null deletes. |
+| `artifact_refresh(action="gather", id)` | **Read-only gather** — collects context for an LLM to synthesize. Does NOT write. The caller must follow up with `artifact(update, commit_refresh=true)`. |
+| `artifact(update, id, commit_refresh=true)` | Records that a refresh cycle completed. Updates `last_refreshed_at` and optionally bumps body. |
+
+The `merge=false` overwrite semantics are a foot-gun: if you mean to update
+only the prompt but call `artifact_augment(id, prompt="new")` without
+passing the existing params, params silently reset to `{}`. **Use
+`merge=true` when patching one field.** Use `merge=false` only when
+deliberately replacing the entire augmentation.
+
+## How render_template works
+
+When set, `render_template` is a MiniJinja template that runs every time
+the artifact body refreshes. It receives `params` as input and produces
+the markdown snippet that becomes (or merges into) the body.
+
+Example shape from a goal tracker:
+
+```jinja2
+## Progress
+
+{% for entry in progress_log -%}
+- **{{ entry.date }}** ({{ entry.commit }}) — {{ entry.note }}
+{% endfor %}
+```
+
+The body's `## Progress` section is auto-managed; the rest of the markdown
+is hand-written prose that explains what the artifact is for and why.
+
+**Without `render_template`**, the body is whatever the prompt + LLM
+produces during `artifact_refresh(gather) → artifact(update)`. With it,
+the body is mechanically derived from params and the LLM's job is just to
+update params correctly.
+
+## Worked examples
+
+### `doc-ref-audit` — id `fc97be512112fea4`
+
+- **Body** (`docs/trackers/doc-ref-audit.md`): 187 bytes. Just the auto-
+  managed message "Auto-managed by `librarian(audit_doc_refs)`."
+- **Params**: 5.4 MB. Holds the `issues` array (12,753 entries as of
+  2026-05-23) plus audit metadata.
+- **Prompt**: Tells the audit tool how to merge new findings into the
+  issues array (lifecycle, n-allocation, severity escalation).
+- **No `render_template`**: the body is a stable one-liner; nothing
+  needs synthesizing from params.
+
+Inspect:
+
+```text
+artifact(action="get", id="fc97be512112fea4", full=true)
+read_file("@tool_*", json_path="$.augmentation.params")
+```
+
+### `tool-usage-patterns` — id `b3fa993849ac83ab`
+
+- **Body** (`docs/trackers/tool-usage-patterns.md`): full markdown prose,
+  ~200+ lines. Per-observation analysis.
+- **Params**: structured `observations` array — id, tool, verdict, prompt
+  gap, status — per T-N entry.
+- **Prompt**: refreshes the top-of-body table from `observations`.
+- **`render_template`**: projects `observations[]` into a "live params
+  table" that's rendered at the top of the file on refresh.
+
+The split is **structured-at-top, prose-at-bottom** — humans grok the
+prose, the LLM updates params, the table auto-syncs.
+
+## Common gotchas
+
+- **Silent param wipe** (the `merge=false` foot-gun) — see lifecycle table
+  above. Always prefer `merge=true` when patching.
+- **The body file looks unchanged after a params update** — render_template
+  hasn't run. Force a refresh: `artifact_refresh(gather)` → synthesize →
+  `artifact(update, commit_refresh=true)`.
+- **`read_markdown` rejects the file** — managed artifact gate is firing.
+  Route through `artifact(get, full=true)` then `read_file` with
+  `json_path` to extract the field you need.
+- **Params field is 5+ MB** — your `read_file` will route the result to a
+  `@file_*` buffer. Use `json_path` to extract specific fields rather than
+  scanning the whole blob. Example:
+  `read_file("@tool_*", json_path="$.augmentation.params.issues[0]")`.
+- **Params keys don't appear in indexes** — the librarian indexes
+  `(id, kind, status, tags, title, abs_path, owners, topic)` but NOT
+  params content. If you want to query by params (e.g. "find all
+  goal-trackers with status_log entries past 2026-04"), you need to
+  augment the librarian or post-filter after `artifact(find)`.
+
+## When to augment vs. when not to
+
+Augment when:
+
+- The artifact carries structured state that's mutated programmatically
+  (audit findings, observation rows, progress log entries)
+- The data shape exceeds 10-20 entries — past that, hand-maintained
+  markdown breaks down
+- You want the markdown body to auto-sync with the data via a template
+
+Do NOT augment when:
+
+- The tracker is purely narrative (recon session logs, design proposals)
+- The "data" is just a handful of fields better expressed as frontmatter
+- You'd be the only producer/consumer of the params — keep it as prose
+
+## Pointers
+
+- Tool surfaces: `artifact_augment`, `artifact_refresh`, `artifact(update, commit_refresh=true)`
+- Implementation: `src/librarian/catalog/augmentation.rs` (row + merge + schema validation)
+- Schema: `params_schema` is enforced on every merge via `merge_params`
+  (see `src/librarian/catalog/augmentation.rs::merge_params`)
+- Templates: MiniJinja syntax with `params` as the sole top-level binding
+- Two reference artifacts: `fc97be512112fea4` (doc-ref-audit),
+  `b3fa993849ac83ab` (tool-usage-patterns)
