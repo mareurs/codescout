@@ -128,7 +128,10 @@ tool selection quality. Entries are T-NNN with tool, verdict (legitimate / debat
 wrong-tool), and prompt gap. Feeds Iron Law and Anti-Patterns updates.
 
 This file is a **librarian artifact** (id: `b3fa993849ac83ab`). Params hold the structured
-T-N table; body holds full per-observation analysis.
+T-N table; body holds full per-observation analysis. For the deep-dive on the
+augmented-artifact pattern (body / params / render_template, the `merge=false`
+foot-gun, why managed files refuse direct `read_markdown`), see
+[`docs/architecture/augmented-artifacts.md`](docs/architecture/augmented-artifacts.md).
 
 **Claude — append when:**
 - Analyzing a session and a tool choice is noteworthy (right or wrong)

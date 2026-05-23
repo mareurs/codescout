@@ -8,6 +8,12 @@ The accumulated rules are spread across `CLAUDE.md`, individual tracker
 templates, and skill SKILL.md files. This page is the index, not the spec —
 follow the links for the controlling convention.
 
+> **Note** — Some trackers below are *augmented artifacts* (the T-N row is
+> the canonical example: data in catalog DB params, prose in markdown body,
+> auto-synced via a render template). The body/params split changes how you
+> append. See [`architecture/augmented-artifacts.md`](architecture/augmented-artifacts.md)
+> for the mental model.
+
 ## Main taxonomy
 
 | Prefix | Lives in | Captures | Append tool | Promotes to |
