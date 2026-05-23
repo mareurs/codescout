@@ -40,10 +40,12 @@ pub fn build_server_instructions(project_status: Option<&ProjectStatus>) -> Stri
             ));
         }
         if !status.memories.is_empty() {
-            instructions.push_str(&format!(
-                "- **Available shared memories:** {} — use `memory(action=\"read\", topic=...)` to read relevant ones as needed for your current task\n",
-                status.memories.join(", ")
-            ));
+            // Bare list — the action verb is documented on the `memory` tool
+            // itself. Keeping this short matters because the whole Project
+            // Status block lands in Claude Code's ~2 KB instructions cut zone
+            // (see docs/architecture/mcp-channel-caps.md); a long action-hint
+            // suffix here would push the tail of the memory list off the cliff.
+            instructions.push_str(&format!("- **Memories:** {}\n", status.memories.join(", ")));
         } else {
             instructions.push_str(
                 "- **Memories:** None yet — run `onboarding` to create project memories\n",
