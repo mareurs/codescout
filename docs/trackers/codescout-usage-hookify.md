@@ -220,3 +220,34 @@ That makes the companion compression-reminder load-bearing as the **post-compact
 **Notes:**
 - The audit tool already classifies findings as `verdict ∈ {missing, ambiguous_basename, resolved_basename}`. CI should only fail on `verdict=missing severity≥med`; `ambiguous_basename` is informational (could be a basename collision; not necessarily wrong); `resolved_basename` is OK.
 - Once active, this hook closes the loop on U-7 by making the failure mode loud at PR time instead of session time. The companion to H-3 (which catches tool-name drift in companion surfaces): H-5 catches path/link/symbol drift in doc surfaces.
+
+
+### H-6 — Audit classifier: reader-side / placeholder path FP class
+
+**Pattern:** `audit_doc_refs` treats every path-shaped string as a candidate for resolution against the project's `git_root`. Two doc surfaces violate that assumption:
+1. **Instructional placeholders** — `path/to/copilot-codescout`, `path/to/codescout/Skills` etc. The doc explicitly tells the reader these are placeholders (line 22 of `docs/agents/copilot.md`: *"as a placeholder for wherever you cloned it"*). Resolver can't know that, reports `missing → hi-sev`.
+2. **Reader-side repo paths** — agent-onboarding docs cite `.github/skills/`, `.github/agents/`, `.github/hooks/`, `.vscode/mcp.json` as paths to create in the *reader's* repo, not codescout's. Same structural shape as a real local path; resolver reports missing.
+
+**Confirming data:**
+- **U-17** — 39 of 40 hi-sev findings across the whole doc tree concentrated in `docs/agents/copilot.md` (25) + `docs/agents/claude-code.md` (14). Manual inspection of every flagged ref in copilot.md confirmed all are reader-side or placeholders. Bug is in the audit, not in the docs.
+- **U-15** — prior FP class of the same family (`origin/master` git refs misclassified as paths). Established the pattern: `looks_like_path` accumulates reject-prefix rules.
+
+**Proposed hookify rule:** layered fix, ship cheapest first.
+
+- **(A) Placeholder prefix reject** — extend `looks_like_path` to reject `path/to/` prefix (catches ~6 of 39 FPs in agent docs). One-line addition in `src/librarian/tools/audit_doc_refs/parser.rs`, next to the existing `origin/` / `upstream/` rejections. **Shipped** with this entry — code-explorer:faa77dd7.
+- **(B) Per-doc opt-out via frontmatter** — recognize `audit_file_paths: false` in markdown frontmatter to skip path resolution for that file. Cleanest long-term: lets each doc owner declare reader-side intent. Requires parser to read frontmatter, schema docs, and a per-finding suppression mechanism.
+- **(C) Default scope exclusion** — exclude `docs/agents/**` from `DEFAULT_AUDIT_GLOBS` (currently `["docs/**/*.md", "CLAUDE.md", "**/CLAUDE.md", "**/README.md"]`). Cheapest catch-the-rest fix but loses coverage for any *real* drift inside agent docs.
+
+**Recommendation:** ship (A) now (small, same shape as U-15 fixes, low risk). Defer (B) vs (C) to a design call — (B) is more principled but more code; (C) is one-line but lossy. Empirical input needed: are there any *real* drift findings in `docs/agents/*.md` that (C) would silence? If no, (C) is safe; if yes, (B) is required.
+
+**Promote-when:**
+- **(A) → shipped** when the parser test `parser_rejects_path_to_placeholder` lands on `master`.
+- **(B) or (C) → shipped** when one of:
+  - A third reader-side / placeholder FP class lands in U-N (suggests the reject-prefix list approach won't scale).
+  - The hi-sev count from agent docs blocks H-5's deny-stage promotion in practice (i.e. clean CI is otherwise within reach but agent-doc FPs are the residual).
+
+**Status:** (A) **shipped-pending-commit** (the parser change in this turn). (B) and (C) **proposed**, awaiting design call.
+
+**Notes:**
+- This is the third FP class identified in the audit. First two (U-15: Rust `::` separator + git refs) shipped 61bc678b. Pattern is clear: classifier needs an extensible reject mechanism. Could justify a refactor into a single `REJECT_PREFIXES: &[&str]` constant + iter check; not done now to minimize blast radius.
+- The classifier-can't-model-intent diagnosis is the **persistent** root cause. Each FP class is a symptom; the deeper question is whether `audit_doc_refs` should ever resolve paths it didn't explicitly recognize as local-intent. An "allowlist" approach (only resolve paths matching `^(src|docs|tests|scripts|target|Cargo)/`) would invert the current default — would need its own design call.
