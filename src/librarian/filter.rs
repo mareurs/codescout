@@ -1,5 +1,5 @@
-use anyhow::Result;
 use crate::tools::RecoverableError;
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -150,9 +150,12 @@ fn compile_leaf(map: &serde_json::Map<String, Value>) -> Result<SqlFragment> {
         field.as_str()
     };
 
-    let ops = ops
-        .as_object()
-        .ok_or_else(|| RecoverableError::with_hint("ops must be an object", "Leaf op shape is `{field: {op: value}}`, e.g. `{\"kind\": {\"eq\": \"tracker\"}}`."))?;
+    let ops = ops.as_object().ok_or_else(|| {
+        RecoverableError::with_hint(
+            "ops must be an object",
+            "Leaf op shape is `{field: {op: value}}`, e.g. `{\"kind\": {\"eq\": \"tracker\"}}`.",
+        )
+    })?;
     if ops.len() != 1 {
         return Err(RecoverableError::with_hint(
             format!("exactly one op per leaf, got {}", ops.len()),
@@ -161,9 +164,12 @@ fn compile_leaf(map: &serde_json::Map<String, Value>) -> Result<SqlFragment> {
         .into());
     }
     let (op_name, value) = ops.iter().next().unwrap();
-    let op = op_name
-        .parse::<LeafOp>()
-        .map_err(|_| RecoverableError::with_hint(format!("unknown op `{op_name}`"), "valid ops: eq, ne, in, nin, gt, lt, gte, lte, contains, prefix"))?;
+    let op = op_name.parse::<LeafOp>().map_err(|_| {
+        RecoverableError::with_hint(
+            format!("unknown op `{op_name}`"),
+            "valid ops: eq, ne, in, nin, gt, lt, gte, lte, contains, prefix",
+        )
+    })?;
 
     let is_array_col = matches!(field.as_str(), "tags" | "owners");
     if op == LeafOp::Contains && is_array_col {
@@ -176,9 +182,12 @@ fn compile_leaf(map: &serde_json::Map<String, Value>) -> Result<SqlFragment> {
 
     match op {
         LeafOp::In | LeafOp::Nin => {
-            let arr = value
-                .as_array()
-                .ok_or_else(|| RecoverableError::with_hint("`in` expects an array", "Provide a JSON array, e.g. `{\"in\": [\"a\", \"b\"]}`."))?;
+            let arr = value.as_array().ok_or_else(|| {
+                RecoverableError::with_hint(
+                    "`in` expects an array",
+                    "Provide a JSON array, e.g. `{\"in\": [\"a\", \"b\"]}`.",
+                )
+            })?;
             if arr.is_empty() {
                 return Err(RecoverableError::with_hint(
                     "`in` expects a non-empty array",
@@ -199,18 +208,24 @@ fn compile_leaf(map: &serde_json::Map<String, Value>) -> Result<SqlFragment> {
             })
         }
         LeafOp::Contains => {
-            let s = value
-                .as_str()
-                .ok_or_else(|| RecoverableError::with_hint("`contains` expects a string", "Provide a string value, e.g. `{\"contains\": \"docs/trackers\"}`."))?;
+            let s = value.as_str().ok_or_else(|| {
+                RecoverableError::with_hint(
+                    "`contains` expects a string",
+                    "Provide a string value, e.g. `{\"contains\": \"docs/trackers\"}`.",
+                )
+            })?;
             Ok(SqlFragment {
                 sql: format!("{sql_field} LIKE ?"),
                 params: vec![rusqlite::types::Value::Text(format!("%{s}%"))],
             })
         }
         LeafOp::Prefix => {
-            let s = value
-                .as_str()
-                .ok_or_else(|| RecoverableError::with_hint("`prefix` expects a string", "Provide a string value, e.g. `{\"prefix\": \"docs/\"}`."))?;
+            let s = value.as_str().ok_or_else(|| {
+                RecoverableError::with_hint(
+                    "`prefix` expects a string",
+                    "Provide a string value, e.g. `{\"prefix\": \"docs/\"}`.",
+                )
+            })?;
             let escaped = s
                 .replace('\\', "\\\\")
                 .replace('%', "\\%")
