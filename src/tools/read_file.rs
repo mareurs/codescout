@@ -171,25 +171,27 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
             let (content, type_name, count) =
                 crate::tools::file_summary::extract_json_path(&text, jp)?;
             let mut result = if crate::tools::exceeds_inline_limit(&content) {
+                let line_count = content.lines().count().max(1);
                 let file_id = ctx
                     .output_buffer
                     .store_file(format!("{path}:{jp}"), content);
                 json!({
                     "file_id": file_id,
                     "path": jp,
-                    "type": type_name,
+                    "value_type": type_name,
                     "format": "json",
+                    "total_lines": line_count,
                     "hint": format!(
-                        "Content stored as plain-text @file_* ref. \
-                         run_command(\"grep pattern {file_id}\") to search, \
-                         or read_file(\"{file_id}\", start_line=N, end_line=M) to browse."
+                        "Extracted value at {jp} ({line_count} lines). \
+                         read_file(\"{file_id}\", start_line=N, end_line=M) to browse, \
+                         or run_command(\"grep pattern {file_id}\") to search."
                     ),
                 })
             } else {
                 json!({
                     "content": content,
                     "path": jp,
-                    "type": type_name,
+                    "value_type": type_name,
                     "format": "json",
                 })
             };
@@ -350,7 +352,7 @@ fn read_json_path_nav(text: &str, resolved: &std::path::Path, jp: &str) -> Resul
     let mut result = json!({
         "content": content,
         "path": jp,
-        "type": type_name,
+        "value_type": type_name,
         "format": "json",
     });
     if let Some(c) = count {
