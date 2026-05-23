@@ -104,6 +104,11 @@ fn looks_like_path(s: &str) -> bool {
     if s.contains(char::is_whitespace) {
         return false;
     }
+    // Reject URI schemes (doc://, http://, file://, etc.) — they're handled
+    // as links, not as filesystem paths.
+    if has_uri_scheme(s) {
+        return false;
+    }
     if s.contains('/') {
         // `/foo` with no further structure (no second segment, no extension)
         // is almost always a slash-command or shell shorthand in prose, not a
@@ -115,6 +120,17 @@ fn looks_like_path(s: &str) -> bool {
         return true;
     }
     has_known_ext(s)
+}
+
+fn has_uri_scheme(s: &str) -> bool {
+    if let Some(colon) = s.find(':') {
+        let scheme = &s[..colon];
+        !scheme.is_empty()
+            && scheme.chars().all(|c| c.is_ascii_alphabetic() || c == '-')
+            && s[colon..].starts_with("://")
+    } else {
+        false
+    }
 }
 
 fn has_known_ext(s: &str) -> bool {
