@@ -44,6 +44,8 @@ Without the symlink, `~/.cargo/bin/codescout` is a stale installed copy and `/mc
 **Don't add to retired surfaces.** `docs/archive/old-trackers/TODO-tool-misbehaviors.md` and `docs/archive/old-trackers/bug-tracker.md` are historical reference only — do not append. Open a new `docs/issues/<date>-<slug>.md` instead.
 ## Session Intelligence Trackers
 
+**One-page index of every ID prefix** (F-N / W-N / R-N / U-N / H-N / T-N / BUG) — file, scope, append tool, promotion path — lives in [`docs/TAXONOMY.md`](docs/TAXONOMY.md). Start there when you're not sure which tracker takes an observation.
+
 ### Querying active trackers (librarian)
 
 
