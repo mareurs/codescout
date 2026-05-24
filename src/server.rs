@@ -2552,6 +2552,10 @@ mod guide_hint_tests {
             .map(String::from)
     }
 
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "intermittent 'tool artifact not registered' on Windows — flakes alternate between guide_hint tests across runs, suggesting SQLite mandatory-locking race on the shared LIBRARIAN_DB (Windows file locks are mandatory; POSIX are advisory). Needs per-test EnvGuard-style DB isolation OR --test-threads 1 on Windows. See docs/issues/2026-05-24-ci-windows-default-feature-failures.md"
+    )]
     #[tokio::test]
     async fn first_artifact_call_emits_librarian_hint() {
         let (_dir, server) = make_server().await;
@@ -2569,6 +2573,10 @@ mod guide_hint_tests {
         );
     }
 
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "shares the guide_hint cluster's intermittent 'tool artifact not registered' race on Windows. See docs/issues/2026-05-24-ci-windows-default-feature-failures.md"
+    )]
     #[tokio::test]
     async fn second_artifact_call_no_hint() {
         let (_dir, server) = make_server().await;
@@ -2588,6 +2596,10 @@ mod guide_hint_tests {
         );
     }
 
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "shares the guide_hint cluster's intermittent 'tool artifact not registered' race on Windows. See docs/issues/2026-05-24-ci-windows-default-feature-failures.md"
+    )]
     #[tokio::test]
     async fn artifact_event_after_artifact_no_hint() {
         let (_dir, server) = make_server().await;
