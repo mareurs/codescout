@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-05-24
-closed:
+closed: 2026-05-24
 severity: medium
 owner: marius
 related: [docs/issues/2026-05-24-tool-docs-manual-drift.md, docs/issues/2026-05-24-symbols-auto-inline-test-contract-drift.md]

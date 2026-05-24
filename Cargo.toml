@@ -42,7 +42,6 @@ name = "codescout"
 path = "src/main.rs"
 
 [dependencies]
-tikv-jemallocator = "0.6"
 fs4 = "0.12"
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -147,6 +146,13 @@ futures        = { version = "0.3",    optional = true }
 ulid           = { version = "1",      optional = true }
 minijinja      = { version = "2", default-features = false, features = ["builtins", "serde"], optional = true }
 jsonschema     = { version = "0.30", default-features = false, optional = true }
+
+# jemalloc is a unix-only C library — autoconf-based build script fails on
+# Windows MSVC. Gated so cargo only resolves it on unix targets; Windows
+# falls back to the default system allocator (see #[cfg(unix)] on GLOBAL in
+# src/main.rs).
+[target.'cfg(unix)'.dependencies]
+tikv-jemallocator = "0.6"
 
 [features]
 default = ["remote-embed", "http", "librarian"]

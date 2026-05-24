@@ -33,13 +33,13 @@ jobs:
       - run: cargo clippy -- -D warnings
 
   test:
-    name: Test (${{ matrix.os }} / ${{ matrix.name }})
+    name: Test (${{ matrix.os }} / ${{ matrix.config.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        include:
+        config:
           - name: default
             flags: ""
           - name: local-embed
@@ -49,13 +49,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-analyzer
       - if: runner.os == 'Linux'
         uses: rui314/setup-mold@v1
       - uses: mozilla-actions/sccache-action@v0.0.7
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.os }}-${{ matrix.name }}
-      - run: cargo test ${{ matrix.flags }}
+          key: ${{ matrix.os }}-${{ matrix.config.name }}
+      - run: cargo test ${{ matrix.config.flags }}
 
   tool-docs-sync:
     name: Tool Docs Sync
