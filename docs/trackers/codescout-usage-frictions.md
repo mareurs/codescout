@@ -270,7 +270,9 @@ Old paths return "file not found" via both `read_file` and `read_markdown`.
 
 **Severity:** med — contributors (human or LLM) following the stale CLAUDE.md guidance look for files that don't exist; the surface that's supposed to *prevent* prompt-surface drift has itself drifted. Self-referential.
 
-**Status:** fixed-shipped (code-explorer:c37bcea7, 2026-05-23). All 11 stale references updated to cite `src/prompts/source.md` plus surface names (`server_instructions`, `onboarding_prompt`). `audit_doc_refs` re-run on CLAUDE.md confirms zero matches for the old filenames. Same commit also retired the pre-archive `docs/TODO-tool-misbehaviors.md` reference in the Bug Tracking trigger rules. Audit also surfaced 20 false-positive findings (globs, template placeholders, home-paths, comma-trailing snippets) — noted as input to H-5's promotion plan (CI needs extractor FP filters before `--fail-on med`).
+**Status:** fixed-shipped to experiments (`experiments:70b25e2f`, 2026-05-23; not-yet-on-master — awaiting cherry-pick). All 11 stale references updated to cite `src/prompts/source.md` plus surface names (`server_instructions`, `onboarding_prompt`). `audit_doc_refs` re-run on CLAUDE.md confirms zero matches for the old filenames. Same commit also retired the pre-archive `docs/TODO-tool-misbehaviors.md` reference in the Bug Tracking trigger rules. Audit also surfaced 20 false-positive findings (globs, template placeholders, home-paths, comma-trailing snippets) — noted as input to H-5's promotion plan (CI needs extractor FP filters before `--fail-on med`).
+
+*Citation history:* original orphaned SHA `c37bcea7` (rebased away 2026-05-24); re-assigned to `70b25e2f` on the current experiments branch. T11 reconciliation (2026-05-24).
 
 
 
@@ -291,7 +293,9 @@ Old paths return "file not found" via both `read_file` and `read_markdown`.
 
 **Severity:** low — model can recover with `memory(action="list")`, but only if it notices the truncation.
 
-**Status:** fixed-shipped (code-explorer:2c4be270, 2026-05-23). Root cause confirmed via ADR `docs/architecture/mcp-channel-caps.md`: Claude Code's MCP client caps `initialize.instructions` at ~2 KB and appends `… [truncated]`. The line landed in the cut zone because (a) it followed the static `SERVER_INSTRUCTIONS` constant (~1.8 KB) and (b) the line itself was ~350 chars due to a wordy action-hint suffix. Fix in `src/prompts/mod.rs::build_server_instructions`: label shortened to `Memories`, action-hint suffix dropped (the memory tool's own description already documents how to call it). Bare list now fits within cap for typical projects. 2443/2443 tests still pass.
+**Status:** fixed-shipped to experiments (`experiments:22fa98b2`, 2026-05-23; not-yet-on-master — awaiting cherry-pick). Root cause confirmed via ADR `docs/architecture/mcp-channel-caps.md`: Claude Code's MCP client caps `initialize.instructions` at ~2 KB and appends `… [truncated]`. The line landed in the cut zone because (a) it followed the static `SERVER_INSTRUCTIONS` constant (~1.8 KB) and (b) the line itself was ~350 chars due to a wordy action-hint suffix. Fix in `src/prompts/mod.rs::build_server_instructions`: label shortened to `Memories`, action-hint suffix dropped (the memory tool's own description already documents how to call it). Bare list now fits within cap for typical projects. 2443/2443 tests still pass.
+
+*Citation history:* original orphaned SHA `2c4be270` (rebased away 2026-05-24); re-assigned to `22fa98b2` on the current experiments branch. T11 reconciliation (2026-05-24).
 
 **Note for U-4 / future work:** the broader architectural issue is that the entire Project Status block lives in the cut zone. Workspace tables, custom instructions, and language warnings currently land in the dead 95% of the channel. That's Snow-Lion-class — see the ADR Open Decision for the structural recommendation.
 
@@ -465,14 +469,16 @@ Design note: the old matcher used a wildcard `mcp__.*__` across MCP servers; nar
 
 **Severity:** med — was producing 3-of-4 hi-sev FPs blocking H-5's deny-stage promotion. After fix: 1 hi-sev remains (`claude-plugins/` cross-repo dir ref, a legitimate sibling-repo reference the local audit can't resolve — structural limitation, not drift).
 
-**Status:** fixed-shipped (code-explorer:61bc678b, 2026-05-23). Two new tests added (`parser_rejects_git_refs`, `parser_handles_rust_double_colon_symbol_separator`).
+**Status:** fixed-shipped to experiments (`experiments:f17c063d`, 2026-05-23; not-yet-on-master — awaiting cherry-pick). Two new tests added (`parser_rejects_git_refs`, `parser_handles_rust_double_colon_symbol_separator`).
+
+*Citation history:* original orphaned SHA `61bc678b` (rebased away 2026-05-24); re-assigned to `f17c063d` on the current experiments branch. T11 reconciliation (2026-05-24).
 
 **Measurement** (CLAUDE.md audit, hi-sev finding counts):
 | State | Hi-sev count |
 |---|---|
 | Pre-FP-filter (initial discovery) | 21 |
 | Post-FP-filter (0425b8ef) | 4 |
-| Post-this-fix (61bc678b) | **1** (the cross-repo `claude-plugins/` ref) |
+| Post-this-fix (f17c063d) | **1** (the cross-repo `claude-plugins/` ref) |
 
 The 1 remaining hi-sev finding is a cross-repo reference to the sibling `claude-plugins/` directory. Resolving it would require either an "external roots" config on the audit, or recognizing that paths ending in `/` are dir-intent and tolerating not-locally-present. Design call for a future audit improvement, not drift to fix.
 
@@ -524,22 +530,22 @@ The 1 remaining hi-sev finding is a cross-repo reference to the sibling `claude-
 **Severity:** med — was about to mis-report 39 hi-sev findings as drift in a Pika exploration pass (Conclude-Last caught the misread). For real CI use, H-5 deny-stage promotion would falsely fail the build on every change. The bug is in the audit, not in the docs.
 
 **Status:** **closed — fully shipped 2026-05-24.** Three patches landed:
-- `code-explorer:faa77dd7` — `path/to/` placeholder filter (caught Class C of the FP breakdown, ~6 refs).
-- `code-explorer:68840b4b` — Class B resolver fix: `../`-relative links now anchor at `md_file.parent()` instead of `repo_root` (8 cross-doc refs in agent docs flipped from `missing/high` to `resolved/low`).
-- `code-explorer:9fa04f0b` — H-6 (C) shipped: `docs/agents/**` excluded from `DEFAULT_AUDIT_EXCLUDES` (handles Class A reader-side paths + Class D tool-method-name-mis-classification, ~30 refs).
-- `code-explorer:01ec2890` — docs/agents/*.md content refresh: stale `list_symbols` / `find_symbol` / `search_pattern` / `find_file` tool names replaced; multi-project example updated to use `workspace(activate, ...)` + `symbols(name=...)`. (Real drift surfaced once the audit was cleared of FPs.)
+- `experiments:956c080f` — `path/to/` placeholder filter (caught Class C of the FP breakdown, ~6 refs).
+- `experiments:7a1f2a11` — Class B resolver fix: `../`-relative links now anchor at `md_file.parent()` instead of `repo_root` (8 cross-doc refs in agent docs flipped from `missing/high` to `resolved/low`).
+- `experiments:0ad00251` — H-6 (C) shipped: `docs/agents/**` excluded from `DEFAULT_AUDIT_EXCLUDES` (handles Class A reader-side paths + Class D tool-method-name-mis-classification, ~30 refs).
+- `experiments:5c51f01d` — docs/agents/*.md content refresh: stale `list_symbols` / `find_symbol` / `search_pattern` / `find_file` tool names replaced; multi-project example updated to use `workspace(activate, ...)` + `symbols(name=...)`. (Real drift surfaced once the audit was cleared of FPs.)
 
 **Measurement** (audit on docs/**/*.md, hi-sev counts):
 | State | Hi-sev count | Notes |
 |---|---|---|
 | Pre-fix (initial discovery) | 40 | 39 in agent docs + 1 ADR |
-| Post-`path/to/` filter (faa77dd7) | 38 | 5 placeholder FPs filtered in copilot.md |
-| Post-Class-B fix (68840b4b) | 30 | 8 `../manual/...` refs now resolve correctly |
+| Post-`path/to/` filter (956c080f) | 38 | 5 placeholder FPs filtered in copilot.md |
+| Post-Class-B fix (7a1f2a11) | 30 | 8 `../manual/...` refs now resolve correctly |
 | Post-doc refactor (01ec2890) | 30 | Real drift fixed; no new FPs introduced |
 | Post-H-6 (C) (9fa04f0b) | **1** | Only the ADR historical drift remains; agent docs excluded by default |
 
 **Measurement** (audit on docs/**/*.md, hi-sev counts):
-| File | Pre-fix (61bc678b) | Post-fix (faa77dd7) | Notes |
+| File | Pre-fix (f17c063d) | Post-fix (956c080f) | Notes |
 |---|---|---|---|
 | `docs/agents/copilot.md` | 25 | 20 | `path/to/` filter dropped 5 placeholder FPs |
 | `docs/agents/claude-code.md` | 14 | 14 | no `path/to/` refs; reader-side `.github/...` paths still FP |
