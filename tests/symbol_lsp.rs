@@ -22,16 +22,21 @@ async fn ctx_with_mock(
     build_mock: impl FnOnce(&std::path::Path) -> MockLspClient,
 ) -> (tempfile::TempDir, ToolContext) {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    // Canonicalize the project root so mock-keyed symbol paths match what
+    // production code looks up after its own canonicalize() pass. On macOS
+    // tempdir() returns `/var/folders/...` but Agent canonicalizes to
+    // `/private/var/folders/...`; without this the mock lookup misses.
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    std::fs::create_dir_all(root.join(".codescout")).unwrap();
     for (name, content) in files {
-        let path = dir.path().join(name);
+        let path = root.join(name);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
         std::fs::write(path, content).unwrap();
     }
-    let mock = build_mock(dir.path());
-    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let mock = build_mock(&root);
+    let agent = Agent::new(Some(root.clone())).await.unwrap();
     let ctx = ToolContext {
         agent,
         lsp: MockLspProvider::with_client(mock),

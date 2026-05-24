@@ -1,12 +1,45 @@
 ---
-status: open
+status: fixed
 opened: 2026-05-24
-closed:
+closed: 2026-05-24
 severity: medium
 owner: marius
 related: [docs/issues/2026-05-24-ci-macos-tempdir-canonicalization.md, docs/issues/2026-05-24-ci-rust-analyzer-missing.md]
 tags: [ci, macos, lsp, integration-tests, environmental]
 kind: bug
+---
+
+## Real root cause (discovered post-filing)
+
+The initial filing assumed real LSPs were needed. **Wrong.** The tests
+use `MockLspClient` exclusively — no real LSP launch. The actual cause
+is the **same `/private/var` canonicalization mechanism** as the canon
+bug, just surfaced through a different code path:
+
+`ctx_with_mock` (in `tests/symbol_lsp.rs`) wrote files and built mock
+symbol maps keyed by `dir.path()` — the un-canonicalized `/var/folders/...`
+tempdir path. `Agent::new` canonicalizes its project root to
+`/private/var/folders/...`. When the production code under test looked
+up a file via the agent's canonical path, the mock LSP couldn't find
+a symbol for that path (it was keyed under the un-canonical variant).
+The panic "symbol not found: MyService/handle" was the mock LSP's
+lookup failure cascading up.
+
+Fix: canonicalize the project root once in `ctx_with_mock` BEFORE
+passing to `build_mock` and `Agent::new`. Same single-point fix as
+the production-side canon helper. All 49 macOS-only failures green
+with this one edit.
+
+## Verified
+
+Locally on Linux (canonicalize is a no-op):
+```
+cargo test --test symbol_lsp --no-default-features
+test result: ok. 50 passed; 0 failed; 1 ignored; 0 measured
+```
+
+Awaiting macOS CI verification.
+
 ---
 
 # BUG: tests/symbol_lsp.rs integration tests need language LSPs not installed on macOS runners
