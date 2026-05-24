@@ -2154,10 +2154,19 @@ mod tests {
             .find_map(|c| c.as_text().map(|t| t.text.as_str()))
             .unwrap_or("");
 
+        // Parse the JSON response and inspect `stdout` directly — this avoids
+        // matching against JSON-escaped backslashes that the serialized `text`
+        // contains on Windows (`C:\\Users` in JSON is two chars per `\`).
+        let parsed: serde_json::Value =
+            serde_json::from_str(text).expect("run_command result should be JSON");
+        let stdout = parsed["stdout"]
+            .as_str()
+            .expect("run_command result should expose `stdout` as a string");
+
         assert!(
-            text.contains(&abs),
-            "run_command output must keep the absolute project path verbatim, got:\n{text}"
-        );
+        stdout.contains(&abs),
+        "run_command stdout must keep the absolute project path verbatim.\n  expected substring: {abs}\n  actual stdout: {stdout}"
+    );
     }
 
     #[tokio::test]

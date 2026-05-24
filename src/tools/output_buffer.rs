@@ -792,9 +792,16 @@ mod tests {
         let (resolved, files, _, _refreshed) =
             buf.resolve_refs(&format!("grep hello {}", id)).unwrap();
         assert!(!resolved.contains('@'), "got: {}", resolved);
+        assert!(resolved.starts_with("grep hello "));
+        let after = &resolved["grep hello ".len()..];
+        // The substituted token should be an absolute path. On Unix it starts
+        // with the separator; on Windows it starts with a drive letter (`C:\`).
+        let is_absolute_path = after.starts_with(std::path::MAIN_SEPARATOR)
+            || (after.len() >= 2
+                && after.as_bytes()[0].is_ascii_alphabetic()
+                && after.as_bytes()[1] == b':');
         assert!(
-            resolved.starts_with("grep hello ")
-                && resolved.chars().nth("grep hello ".len()) == Some(std::path::MAIN_SEPARATOR),
+            is_absolute_path,
             "expected path-substituted prefix, got: {}",
             resolved
         );
