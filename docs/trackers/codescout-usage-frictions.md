@@ -523,7 +523,20 @@ The 1 remaining hi-sev finding is a cross-repo reference to the sibling `claude-
 
 **Severity:** med — was about to mis-report 39 hi-sev findings as drift in a Pika exploration pass (Conclude-Last caught the misread). For real CI use, H-5 deny-stage promotion would falsely fail the build on every change. The bug is in the audit, not in the docs.
 
-**Status:** partially-shipped (code-explorer:faa77dd7, 2026-05-23) — placeholder `path/to/` reject landed in `looks_like_path`, catches ~6 of 39 FPs. Reader-side path scoping (`.github/skills/`, `.vscode/mcp.json` etc., ~33 residual FPs) deferred to design call between H-6 options (B) per-doc frontmatter opt-out and (C) default scope exclusion of `docs/agents/**`.
+**Status:** **closed — fully shipped 2026-05-24.** Three patches landed:
+- `code-explorer:faa77dd7` — `path/to/` placeholder filter (caught Class C of the FP breakdown, ~6 refs).
+- `code-explorer:68840b4b` — Class B resolver fix: `../`-relative links now anchor at `md_file.parent()` instead of `repo_root` (8 cross-doc refs in agent docs flipped from `missing/high` to `resolved/low`).
+- `code-explorer:9fa04f0b` — H-6 (C) shipped: `docs/agents/**` excluded from `DEFAULT_AUDIT_EXCLUDES` (handles Class A reader-side paths + Class D tool-method-name-mis-classification, ~30 refs).
+- `code-explorer:01ec2890` — docs/agents/*.md content refresh: stale `list_symbols` / `find_symbol` / `search_pattern` / `find_file` tool names replaced; multi-project example updated to use `workspace(activate, ...)` + `symbols(name=...)`. (Real drift surfaced once the audit was cleared of FPs.)
+
+**Measurement** (audit on docs/**/*.md, hi-sev counts):
+| State | Hi-sev count | Notes |
+|---|---|---|
+| Pre-fix (initial discovery) | 40 | 39 in agent docs + 1 ADR |
+| Post-`path/to/` filter (faa77dd7) | 38 | 5 placeholder FPs filtered in copilot.md |
+| Post-Class-B fix (68840b4b) | 30 | 8 `../manual/...` refs now resolve correctly |
+| Post-doc refactor (01ec2890) | 30 | Real drift fixed; no new FPs introduced |
+| Post-H-6 (C) (9fa04f0b) | **1** | Only the ADR historical drift remains; agent docs excluded by default |
 
 **Measurement** (audit on docs/**/*.md, hi-sev counts):
 | File | Pre-fix (61bc678b) | Post-fix (faa77dd7) | Notes |
