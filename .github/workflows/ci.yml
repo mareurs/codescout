@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master, experiments]
   pull_request:
 
 env:
@@ -75,3 +75,21 @@ jobs:
         with:
           key: msrv
       - run: cargo check
+
+  audit-doc-refs:
+    name: Audit Doc Refs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: audit-doc-refs
+      - run: cargo build --release --bin codescout
+      # `--fail-on never` keeps the gate informational while
+      # docs/adrs/2026-05-13-semantic-anchors-qdrant-payload.md still
+      # references a since-refactored path (1 known hi-sev as of
+      # 2026-05-24). Flip to `--fail-on high` once that ADR is reconciled
+      # — see H-5 in docs/trackers/codescout-usage-hookify.md.
+      - name: Audit markdown for stale code references
+        run: ./target/release/codescout audit-doc-refs --no-emit-tracker --fail-on never --json --project .
