@@ -80,7 +80,7 @@ pub(super) fn backfill(conn: &Connection, ws: &WorkspaceConfig, drop_orphans: bo
             let abs = root.join(&rel_path);
             conn.execute(
                 "UPDATE artifact SET abs_path = ?1 WHERE id = ?2",
-                rusqlite::params![abs.to_string_lossy(), id],
+                rusqlite::params![crate::util::fs::to_forward_slash(&abs), id],
             )?;
         }
     }
@@ -95,7 +95,7 @@ pub(super) fn backfill(conn: &Connection, ws: &WorkspaceConfig, drop_orphans: bo
             if let Some(root) = lookup.get(repo.as_str()) {
                 conn.execute(
                     "UPDATE commits SET git_root = ?1 WHERE hash = ?2",
-                    rusqlite::params![root.to_string_lossy(), hash],
+                    rusqlite::params![crate::util::fs::to_forward_slash(root), hash],
                 )?;
             }
         }

@@ -200,7 +200,10 @@ pub fn index_repo_sync(
     }
 
     // Delete rows under abs_root that were not seen in this walk.
-    let root_prefix = format!("{}/", abs_root.to_string_lossy().replace('\'', "''"));
+    let root_prefix = format!(
+        "{}/",
+        crate::util::fs::to_forward_slash(abs_root).replace('\'', "''")
+    );
     let removed = if seen_ids.is_empty() {
         cat.conn.execute(
             "DELETE FROM artifact WHERE abs_path LIKE ?1",

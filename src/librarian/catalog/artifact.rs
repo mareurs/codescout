@@ -36,9 +36,10 @@ pub fn upsert(cat: &Catalog, row: &ArtifactRow) -> Result<()> {
     // abs_path; the id is a derived hash. When the two diverge, the
     // abs_path wins (file content survives across id-algorithm changes;
     // the old id-based row is stale).
+    let abs_path_str = crate::util::fs::to_forward_slash(&row.abs_path);
     cat.conn.execute(
         "DELETE FROM artifact WHERE abs_path = ?1 AND id != ?2",
-        params![row.abs_path.to_string_lossy().as_ref(), row.id],
+        params![abs_path_str, row.id],
     )?;
 
     cat.conn.execute(
@@ -55,7 +56,7 @@ pub fn upsert(cat: &Catalog, row: &ArtifactRow) -> Result<()> {
             confidence=excluded.confidence",
         params![
             row.id,
-            row.abs_path.to_string_lossy().as_ref(),
+            abs_path_str,
             row.kind,
             row.status,
             row.title,

@@ -76,6 +76,22 @@ pub fn write_utf8(path: &Path, content: &str) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to write {}: {}", path.display(), e))
 }
 
+/// Convert a path to a forward-slash-separated string.
+///
+/// On Unix this is equivalent to `to_string_lossy().into_owned()`; on Windows
+/// it additionally replaces `\` separators with `/`. Used at the boundary
+/// between filesystem paths and string representations stored in the catalog
+/// DB or returned in MCP responses, so path strings stay consistent across
+/// host platforms (and across DBs migrated between them).
+pub fn to_forward_slash(p: &std::path::Path) -> String {
+    let s = p.to_string_lossy();
+    if std::path::MAIN_SEPARATOR == '/' {
+        s.into_owned()
+    } else {
+        s.replace('\\', "/")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
