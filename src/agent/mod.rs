@@ -1225,6 +1225,13 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    /// Canonicalize a path. On macOS this resolves the `/var` → `/private/var`
+    /// symlink that `tempfile::tempdir` returns un-canonicalized but production
+    /// code paths canonicalize via `std::fs::canonicalize`.
+    fn canonical(p: &std::path::Path) -> std::path::PathBuf {
+        std::fs::canonicalize(p).expect("path canonicalizes")
+    }
+
     #[tokio::test]
     async fn new_without_project() {
         let agent = Agent::new(None).await.unwrap();
@@ -1238,7 +1245,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
         let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
         let root = agent.require_project_root().await.unwrap();
-        assert_eq!(root, dir.path());
+        assert_eq!(root, canonical(dir.path()));
     }
 
     #[tokio::test]
@@ -1254,7 +1261,7 @@ mod tests {
             .unwrap();
 
         let root = agent.require_project_root().await.unwrap();
-        assert_eq!(root, dir.path());
+        assert_eq!(root, canonical(dir.path()));
     }
 
     #[tokio::test]
@@ -1265,13 +1272,19 @@ mod tests {
         std::fs::create_dir_all(dir2.path().join(".codescout")).unwrap();
 
         let agent = Agent::new(Some(dir1.path().to_path_buf())).await.unwrap();
-        assert_eq!(agent.require_project_root().await.unwrap(), dir1.path());
+        assert_eq!(
+            agent.require_project_root().await.unwrap(),
+            canonical(dir1.path())
+        );
 
         agent
             .activate(dir2.path().to_path_buf(), None)
             .await
             .unwrap();
-        assert_eq!(agent.require_project_root().await.unwrap(), dir2.path());
+        assert_eq!(
+            agent.require_project_root().await.unwrap(),
+            canonical(dir2.path())
+        );
     }
 
     #[tokio::test]
@@ -1322,7 +1335,8 @@ mod tests {
         assert!(status.is_some());
         let status = status.unwrap();
         assert!(!status.name.is_empty());
-        assert!(status.path.contains(dir.path().to_str().unwrap()));
+        let canonical_dir = canonical(dir.path());
+        assert!(status.path.contains(canonical_dir.to_str().unwrap()));
     }
 
     #[tokio::test]
@@ -1339,7 +1353,7 @@ mod tests {
             .unwrap();
         // Clone should see the activation
         let root = agent2.require_project_root().await.unwrap();
-        assert_eq!(root, dir.path());
+        assert_eq!(root, canonical(dir.path()));
     }
 
     #[tokio::test]
@@ -1457,7 +1471,7 @@ mod tests {
         let dir = tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
         let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
-        assert_eq!(agent.home_root().await, Some(dir.path().to_path_buf()));
+        assert_eq!(agent.home_root().await, Some(canonical(dir.path())));
     }
 
     #[tokio::test]
@@ -1475,7 +1489,7 @@ mod tests {
             .activate(dir.path().to_path_buf(), None)
             .await
             .unwrap();
-        assert_eq!(agent.home_root().await, Some(dir.path().to_path_buf()));
+        assert_eq!(agent.home_root().await, Some(canonical(dir.path())));
     }
 
     #[tokio::test]
@@ -1489,7 +1503,7 @@ mod tests {
             .activate(dir2.path().to_path_buf(), None)
             .await
             .unwrap();
-        assert_eq!(agent.home_root().await, Some(dir1.path().to_path_buf()));
+        assert_eq!(agent.home_root().await, Some(canonical(dir1.path())));
     }
 
     #[tokio::test]

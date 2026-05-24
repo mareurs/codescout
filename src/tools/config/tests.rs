@@ -475,7 +475,7 @@ depends_on = ["test"]
 #[tokio::test]
 async fn activate_project_switches_focus_by_id() {
     let dir = tempdir().unwrap();
-    let root = dir.path();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
 
     // Create multi-project structure
     std::fs::write(root.join("build.gradle.kts"), "").unwrap();
@@ -483,7 +483,7 @@ async fn activate_project_switches_focus_by_id() {
     std::fs::create_dir_all(&mcp).unwrap();
     std::fs::write(mcp.join("package.json"), r#"{"scripts":{"build":"tsc"}}"#).unwrap();
 
-    let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+    let agent = Agent::new(Some(root.clone())).await.unwrap();
     let ctx = ToolContext {
         agent,
         lsp: lsp(),
@@ -498,7 +498,7 @@ async fn activate_project_switches_focus_by_id() {
 
     // Initially focused on root project
     let root_path = ctx.agent.require_project_root().await.unwrap();
-    assert_eq!(root_path, root.to_path_buf());
+    assert_eq!(root_path, root);
 
     // Switch focus to mcp-server by ID
     let result = ActivateProject
@@ -1204,8 +1204,9 @@ async fn activation_response_includes_stale_warning_when_no_stored_version() {
 #[tokio::test]
 async fn activation_response_emits_legacy_index_when_db_present() {
     let dir = tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".codescout/embeddings")).unwrap();
-    let legacy_db = dir.path().join(".codescout/embeddings/project.db");
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    std::fs::create_dir_all(root.join(".codescout/embeddings")).unwrap();
+    let legacy_db = root.join(".codescout/embeddings/project.db");
     std::fs::write(&legacy_db, b"-- sqlite placeholder").unwrap();
     let ctx = ToolContext {
         agent: Agent::new(None).await.unwrap(),
@@ -1219,7 +1220,7 @@ async fn activation_response_emits_legacy_index_when_db_present() {
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let result = ActivateProject
-        .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
+        .call(json!({ "path": root.to_str().unwrap() }), &ctx)
         .await
         .unwrap();
     let legacy = &result["legacy_semantic_index"];
