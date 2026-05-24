@@ -123,6 +123,7 @@ async fn project_ctx() -> (tempfile::TempDir, ToolContext) {
             section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
         },
     )
 }
@@ -181,6 +182,7 @@ async fn tools_error_without_project() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     assert!(SemanticSearch
         .call(json!({ "query": "test" }), &ctx)
@@ -595,6 +597,7 @@ async fn project_ctx_with_progress(
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     (dir, ctx, sink)
 }

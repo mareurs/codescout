@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 pub mod doc;
 pub mod memory;
+pub mod probe;
 pub mod project_hints;
 pub mod project_summary;
 pub mod tool_guide;

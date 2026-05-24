@@ -118,7 +118,10 @@ pub fn apply_scope(
 }
 
 fn path_prefix_clause(p: &std::path::Path) -> FilterNode {
-    let s = p.to_string_lossy().to_string();
+    // Forward-slash normalize so the filter matches catalog rows (which are
+    // stored in forward-slash form via artifact::upsert), regardless of which
+    // platform built the path.
+    let s = crate::util::fs::to_forward_slash(p);
     let prefix = format!("{s}/");
     FilterNode::Or {
         or: vec![

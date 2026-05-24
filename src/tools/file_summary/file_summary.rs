@@ -134,10 +134,21 @@ pub struct SectionRange {
 /// Skips headings inside fenced code blocks.
 pub fn parse_all_headings(content: &str) -> Vec<HeadingInfo> {
     let line_count = content.lines().count();
+
+    // Pre-scan: an odd number of ``` fence markers means the file has an
+    // unclosed code block (typical during in-flight batch edits whose
+    // intermediate new_string contains a half-fence). CommonMark would
+    // extend that fence to EOF, hiding every heading after it. For an
+    // editor tool, that's brittle: we'd rather treat unbalanced fences
+    // as plain text and still find the headings. Bug:
+    // docs/issues/2026-05-21-edit-markdown-last-heading-unaddressable.md
+    let fence_count = content.lines().filter(|l| l.starts_with("```")).count();
+    let fences_balanced = fence_count % 2 == 0;
+
     let mut in_code_block = false;
     let mut raw: Vec<(String, usize, usize)> = Vec::new();
     for (idx, line) in content.lines().enumerate() {
-        if line.starts_with("```") {
+        if fences_balanced && line.starts_with("```") {
             in_code_block = !in_code_block;
             continue;
         }

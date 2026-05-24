@@ -48,7 +48,7 @@ fn backfill_commits(
         return Ok(());
     }
 
-    let git_root_str = repo_path.to_string_lossy().into_owned();
+    let git_root_str = crate::util::fs::to_forward_slash(repo_path);
     let rows: anyhow::Result<Vec<_>> = walk
         .enumerate()
         .map(|(order, oid_result)| {
@@ -443,7 +443,10 @@ mod tests {
             "p2 row must survive a project-scoped force reindex of p1"
         );
 
-        let p2_pattern = format!("%{}/p2/%", root.display());
+        // Forward-slash LIKE pattern — catalog stores abs_paths in forward-slash
+        // form (artifact::upsert via to_forward_slash); a native-separator pattern
+        // would not match any rows on Windows.
+        let p2_pattern = format!("%{}/p2/%", crate::util::fs::to_forward_slash(root));
         let p2_count: i64 = ctx_p1
             .catalog
             .lock()
@@ -531,7 +534,7 @@ mod tests {
             cat.conn
                 .query_row(
                     "SELECT COUNT(*) FROM commits WHERE git_root=?1",
-                    rusqlite::params![repo_path.to_string_lossy()],
+                    rusqlite::params![crate::util::fs::to_forward_slash(&repo_path)],
                     |r| r.get(0),
                 )
                 .unwrap()
@@ -544,7 +547,7 @@ mod tests {
             cat.conn
                 .query_row(
                     "SELECT MAX(topo_order) FROM commits WHERE git_root=?1",
-                    rusqlite::params![repo_path.to_string_lossy()],
+                    rusqlite::params![crate::util::fs::to_forward_slash(&repo_path)],
                     |r| r.get(0),
                 )
                 .unwrap()
@@ -557,7 +560,7 @@ mod tests {
             cat.conn
                 .query_row(
                     "SELECT MIN(topo_order) FROM commits WHERE git_root=?1",
-                    rusqlite::params![repo_path.to_string_lossy()],
+                    rusqlite::params![crate::util::fs::to_forward_slash(&repo_path)],
                     |r| r.get(0),
                 )
                 .unwrap()

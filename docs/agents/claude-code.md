@@ -69,8 +69,8 @@ The routing plugin is a Claude Code plugin that **enforces** codescout tool use 
 `Glob` tools — which work but bypass codescout's token-efficient symbol navigation.
 
 **What it blocks:**
-- `Read` on source files (`.rs`, `.ts`, `.py`, etc.) → redirects to `list_symbols` / `find_symbol`
-- `Grep` / `Glob` on source files → redirects to `search_pattern` / `find_file`
+- `Read` on source files (`.rs`, `.ts`, `.py`, etc.) → redirects to `symbols` (`symbols(path=...)` for an overview, `symbols(name=..., include_body=true)` for a specific body)
+- `Grep` / `Glob` on source files → redirects to `grep(pattern=...)` / `tree(glob=...)`
 - `Bash` for shell commands → redirects to `run_command`
 
 **What it allows:**
@@ -92,14 +92,16 @@ disable blocking.
 
 ## Verify
 
-Restart Claude Code, then run `/mcp` — confirm `codescout` appears as connected. Then ask: "What symbols are in src/main.rs?" — Claude should call `mcp__codescout__list_symbols`, not read the file.
-
+Restart Claude Code, then run `/mcp` — confirm `codescout` appears as connected. Then ask: "What symbols are in src/main.rs?" — Claude should call `mcp__codescout__symbols`, not read the file.
 ## Multi-Project Workspaces
 
 codescout supports multi-project workspaces. Register projects in
 `.codescout/workspace.toml`:
 
 ```toml
+[workspace]
+name = "my-monorepo"
+
 [[project]]
 id = "backend"
 root = "services/backend"
@@ -109,15 +111,18 @@ id = "frontend"
 root = "apps/frontend"
 ```
 
-After onboarding, use the `project` parameter to scope tool calls:
+After onboarding, switch the active project before scoped calls:
 
 ```
-find_symbol("UserService", project: "backend")
-memory(action: "read", project: "frontend", topic: "architecture")
+workspace(action="activate", path="services/backend")
+symbols(name="UserService", include_body=true)
 ```
+
+The `workspace(activate)` call switches the codescout server's view; subsequent
+tool calls operate against the activated project. Remember to switch back when
+done — leaving a foreign project active leaks state into the next turn.
 
 See [Multi-Project Workspaces](../manual/src/concepts/multi-project-workspace.md).
-
 ## Day-to-Day Workflow
 
 codescout injects tool guidance automatically into every session via the MCP system prompt. For the full disciplined development workflow, see:

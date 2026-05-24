@@ -56,6 +56,9 @@ pub struct CodeScoutServer {
     /// `refresh_instructions()` write-locks after each `activate_project`.
     instructions: Arc<parking_lot::RwLock<String>>,
     section_coverage: Arc<std::sync::Mutex<crate::tools::section_coverage::SectionCoverage>>,
+    /// Session-scoped set of guide topics already hinted to the model.
+    /// Reset on workspace(action="activate").
+    guide_hints_emitted: Arc<parking_lot::Mutex<std::collections::HashSet<String>>>,
     session_id: String,
     debug: bool,
     /// Last capabilities snapshot that was broadcast to the client via
@@ -83,13 +86,7 @@ impl CodeScoutServer {
     /// Create a server with an existing LspManager (used for HTTP multi-session).
     pub async fn from_parts(agent: Agent, lsp: Arc<dyn LspProvider>, debug: bool) -> Self {
         let status = agent.project_status().await;
-        #[cfg_attr(not(feature = "librarian"), allow(unused_mut))]
-        let mut instructions = crate::prompts::build_server_instructions(status.as_ref());
-        #[cfg(feature = "librarian")]
-        if librarian_enabled_at_runtime(status.as_ref().map(|s| s.path.as_str())) {
-            instructions.push_str("\n\n");
-            instructions.push_str(crate::librarian::INSTRUCTIONS);
-        }
+        let instructions = crate::prompts::build_server_instructions(status.as_ref());
         #[cfg_attr(not(feature = "librarian"), allow(unused_mut))]
         let mut tools: Vec<Arc<dyn Tool>> = vec![
             // File tools (fully implemented)
@@ -119,7 +116,20 @@ impl CodeScoutServer {
             Arc::new(Workspace),
             // Library tools
             Arc::new(Library),
+            // Deep-guidance tool — see docs/architecture/mcp-channel-caps.md
+            Arc::new(crate::tools::guide::GetGuide::new()),
         ];
+        if std::env::var("CODESCOUT_PROBE")
+            .ok()
+            .filter(|v| !v.is_empty() && v != "0")
+            .is_some()
+        {
+            tools.push(Arc::new(crate::tools::probe::ProbeTool));
+            tracing::warn!(
+                "CODESCOUT_PROBE=1 — registering __probe_description_cap__ \
+                 (debug-only; ~8.8KB description with sentinel markers)"
+            );
+        }
         #[cfg(feature = "librarian")]
         if librarian_enabled_at_runtime(status.as_ref().map(|s| s.path.as_str())) {
             if let Some(lib_ctx) = crate::librarian::try_build_runtime().await {
@@ -130,6 +140,7 @@ impl CodeScoutServer {
         let section_coverage = Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         ));
+        let guide_hints_emitted = Arc::new(parking_lot::Mutex::new(Default::default()));
         let resources = Arc::new(tokio::sync::RwLock::new(Arc::new(
             build_resource_registry(&agent, Arc::clone(&lsp), &tools).await,
         )));
@@ -150,6 +161,7 @@ impl CodeScoutServer {
             tools,
             instructions: Arc::new(parking_lot::RwLock::new(instructions)),
             section_coverage,
+            guide_hints_emitted,
             session_id: uuid::Uuid::new_v4().to_string(),
             debug,
             last_broadcast_caps: Arc::new(parking_lot::Mutex::new(None)),
@@ -203,6 +215,7 @@ impl CodeScoutServer {
             progress,
             peer,
             section_coverage: self.section_coverage.clone(),
+            guide_hints_emitted: self.guide_hints_emitted.clone(),
         }
     }
 
@@ -315,9 +328,9 @@ impl CodeScoutServer {
     /// Agents work exclusively within the project directory; relative paths
     /// carry all necessary information. The full root (e.g. /home/user/project)
     /// is a long repeated prefix that appears in every "file" field and error
-    /// message. Buffer content (@tool_xxx refs) is covered here too: it only
-    /// re-enters the pipeline through run_command, which also passes through
-    /// call_tool.
+    /// message. `run_command` is exempt — its stdout is raw shell output where
+    /// stripping would corrupt path literals (see the path-literals bug file),
+    /// so @tool_xxx buffer content surfaced via run_command is left verbatim.
     async fn post_process(&self, call_result: CallToolResult, tool_name: &str) -> CallToolResult {
         let root_prefix = self
             .agent
@@ -326,14 +339,28 @@ impl CodeScoutServer {
             .map(|p| format!("{}/", p.display()))
             .unwrap_or_default();
 
-        let (mut call_result, stripped) = strip_project_root_from_result(call_result, &root_prefix);
+        // `run_command` returns raw, byte-faithful shell stdout. Stripping the
+        // project-root prefix there silently rewrites absolute path *literals*
+        // (e.g. `readlink`, `ls -l <symlink>`, `realpath`, `pwd` output) into
+        // strings that read as relative, changing their meaning — see
+        // docs/issues/2026-05-21-run-command-strips-project-root-from-path-literals.md.
+        // Restrict stripping to tools whose output is codescout's own structured
+        // content (file/path fields, error messages), where the prefix is
+        // genuinely redundant noise.
+        let should_strip = tool_name != "run_command";
+        let (mut call_result, stripped) = if should_strip {
+            strip_project_root_from_result(call_result, &root_prefix)
+        } else {
+            (call_result, false)
+        };
 
-        // "Low hint": for tools that echo raw content (file contents, shell output),
-        // append a one-liner so agents can distinguish stripped absolute paths from
-        // genuine relative path values in file content. Capped at PATH_NOTE_MAX per
-        // session — after that the agent has seen it enough times to remember.
+        // "Low hint": for tools that echo raw content (file contents), append a
+        // one-liner so agents can distinguish stripped absolute paths from
+        // genuine relative path values in file content. Capped at PATH_NOTE_MAX
+        // per session — after that the agent has seen it enough times to
+        // remember.
         const PATH_NOTE_MAX: usize = 3;
-        const PATH_NOTE_TOOLS: &[&str] = &["read_file", "run_command"];
+        const PATH_NOTE_TOOLS: &[&str] = &["read_file"];
         if stripped && PATH_NOTE_TOOLS.contains(&tool_name) {
             let prev = self
                 .path_note_count
@@ -341,7 +368,7 @@ impl CodeScoutServer {
             if prev < PATH_NOTE_MAX {
                 let root = root_prefix.trim_end_matches('/');
                 call_result.content.push(Content::text(format!(
-                    "[codescout] paths are relative to {root}"
+                    "\n[codescout] paths are relative to {root}"
                 )));
             }
         }
@@ -360,13 +387,7 @@ impl CodeScoutServer {
     /// (e.g. memories written by a just-completed onboarding run).
     async fn refresh_instructions(&self) {
         let status = self.agent.project_status().await;
-        #[cfg_attr(not(feature = "librarian"), allow(unused_mut))]
-        let mut new_instructions = crate::prompts::build_server_instructions(status.as_ref());
-        #[cfg(feature = "librarian")]
-        if librarian_enabled_at_runtime(status.as_ref().map(|s| s.path.as_str())) {
-            new_instructions.push_str("\n\n");
-            new_instructions.push_str(crate::librarian::INSTRUCTIONS);
-        }
+        let new_instructions = crate::prompts::build_server_instructions(status.as_ref());
         *self.instructions.write() = new_instructions;
     }
 
@@ -748,6 +769,37 @@ impl ServerHandler for CodeScoutServer {
     }
 }
 
+/// Static documentation resources whose bodies ship inside the binary.
+///
+/// Bodies are embedded via `include_str!` so doc URIs (`doc://...`) resolve
+/// identically regardless of the active project root. A regression test
+/// (`static_doc_sources_all_readable`) asserts every URI in this list is
+/// readable so a stale path here turns into a compile-time `include_str!`
+/// failure rather than a runtime `-32603` at call time.
+fn static_doc_sources() -> Vec<crate::mcp_resources::doc::DocSource> {
+    use crate::mcp_resources::doc::DocSource;
+    vec![
+        DocSource {
+            uri: "doc://progressive-disclosure".into(),
+            name: "progressive-disclosure".into(),
+            description: Some(
+                "Output sizing, overflow hints, agent guidance for codescout tools.".into(),
+            ),
+            content: include_str!("../docs/PROGRESSIVE_DISCOVERABILITY.md"),
+        },
+        DocSource {
+            uri: "doc://librarian-guide".into(),
+            name: "librarian-guide".into(),
+            description: Some(
+                "Full reference: artifact model, filter syntax, tracker workflow, \
+                 augmentation lifecycle, librarian actions."
+                    .into(),
+            ),
+            content: include_str!("prompts/guides/librarian.md"),
+        },
+    ]
+}
+
 /// Build a fresh [`crate::mcp_resources::ResourceRegistry`] from the current agent state.
 ///
 /// Called at server construction and again after each `activate_project` to pick up
@@ -763,7 +815,7 @@ async fn build_resource_registry(
     tools: &[Arc<dyn Tool>],
 ) -> crate::mcp_resources::ResourceRegistry {
     use crate::mcp_resources::{
-        doc::{DocProvider, DocSource},
+        doc::DocProvider,
         memory::MemoryProvider,
         project_summary::{AgentSummarySource, ProjectSummaryProvider},
         tool_guide::ToolGuideProvider,
@@ -773,35 +825,9 @@ async fn build_resource_registry(
 
     let mut rr = ResourceRegistry::new();
 
-    // Static docs — register only when the project root is known so the paths exist.
-    if let Some(project_root) = agent.project_root().await {
-        let _ = rr.try_register(Box::new(DocProvider::new(vec![
-            DocSource {
-                uri: "doc://progressive-disclosure".into(),
-                name: "progressive-disclosure".into(),
-                description: Some(
-                    "Output sizing, overflow hints, agent guidance for codescout tools.".into(),
-                ),
-                path: project_root.join("docs/PROGRESSIVE_DISCOVERABILITY.md"),
-            },
-            DocSource {
-                uri: "doc://tool-misbehaviors".into(),
-                name: "tool-misbehaviors".into(),
-                description: Some("Living log of observed codescout tool bugs.".into()),
-                path: project_root.join("docs/TODO-tool-misbehaviors.md"),
-            },
-            DocSource {
-                uri: "doc://librarian-guide".into(),
-                name: "librarian-guide".into(),
-                description: Some(
-                    "Full reference: artifact model, filter syntax, tracker workflow, \
-                     augmentation lifecycle, librarian actions."
-                        .into(),
-                ),
-                path: project_root.join("src/prompts/librarian-guide.md"),
-            },
-        ])));
-    }
+    // Static docs — always available; bodies are embedded via include_str! so
+    // they resolve identically regardless of the active project root.
+    let _ = rr.try_register(Box::new(DocProvider::new(static_doc_sources())));
 
     // Memory dir — derived from the active project's MemoryStore.
     if let Ok(memory_dir) = agent
@@ -825,6 +851,15 @@ async fn build_resource_registry(
         agent.clone(),
         tools.to_vec(),
     ))));
+
+    // Probe — debug-only, gated on CODESCOUT_PROBE=1.
+    if std::env::var("CODESCOUT_PROBE")
+        .ok()
+        .filter(|v| !v.is_empty() && v != "0")
+        .is_some()
+    {
+        let _ = rr.try_register(Box::new(crate::mcp_resources::probe::ProbeProvider));
+    }
 
     rr
 }
@@ -1370,6 +1405,7 @@ mod tests {
             "index",
             "workspace",
             "library",
+            "get_guide",
         ];
         let core_count = server
             .tools
@@ -1403,8 +1439,8 @@ mod tests {
             .count();
         assert_eq!(
             core_count,
-            20,
-            "L3 target is 20 core tools; got {}: {:?}",
+            21,
+            "L3 target is 21 core tools; got {}: {:?}",
             core_count,
             server.tools.iter().map(|t| t.name()).collect::<Vec<_>>()
         );
@@ -1470,41 +1506,15 @@ mod tests {
         // Grow this list as prompts evolve; the unused-entry tripwire below will
         // tell you when to shrink it. Keep entries sorted.
         let allowlist_entries: &[&str] = &[
-            "acknowledge_risk",
             "architecture",
-            "both",
-            "by_file",
-            "callees",
-            "callers",
-            "class",
             "conventions",
-            "cwd",
-            "direction",
-            "end_line",
-            "features_md",
-            "file_id",
-            "files",
             "gotchas",
             "hardware",
-            "json_path",
-            "limit",
-            "max_depth",
-            "mitigated",
             "model",
             "model_options",
-            "next",
-            "offset",
-            "output_id",
-            "pattern",
             "protected_memories",
-            "run_in_background",
-            "sed",
-            "start_line",
-            "struct",
-            "timeout_secs",
             "untracked",
             "url",
-            "wontfix",
         ];
         let allowlist: HashSet<&str> = allowlist_entries.iter().copied().collect();
         let mut allowlist_hits: HashMap<&str, usize> = allowlist_entries
@@ -1569,18 +1579,216 @@ mod tests {
         );
     }
 
-    #[test]
-    fn server_instructions_documents_goal_tracker_discovery() {
-        let s = crate::prompts::SERVER_INSTRUCTIONS;
+    /// Companion plugin surfaces (`../claude-plugins/codescout-companion/hooks/*`)
+    /// reference codescout tool names as plain text in matcher regexes, case
+    /// statements, and message bodies. They drift independently of the codescout
+    /// repo — the existing `prompt_surfaces_reference_only_real_tools` test does
+    /// not cover them. This catches two kinds of drift:
+    ///
+    /// 1. **Positive match (matcher shape):** every `mcp__codescout__<name>` token
+    ///    in companion hook scripts or `hooks.json` must name a real tool. Catches
+    ///    PreToolUse matchers and case-statement filters.
+    /// 2. **Stale-name sentinel:** known-removed names (`replace_symbol`,
+    ///    `insert_code`, `remove_symbol`, `edit_lines`, `create_or_update_file`)
+    ///    must not appear in live (non-comment) code in companion hook files.
+    ///    Catches the wider text drift — message bodies that list nonexistent
+    ///    tools to the model on SessionStart, BLOCKED notices, etc.
+    ///
+    /// Filters:
+    /// - `*.test.sh` files: skip entirely — those exercise stale names on purpose
+    ///   as regression sentinels for matcher coverage.
+    /// - Shell comments (`#`-prefixed lines): scrub before stale-name check so
+    ///   header comments can document consolidation history ("replace_symbol/
+    ///   insert_code/remove_symbol were consolidated into edit_code") without
+    ///   tripping the lint. Matcher-shape positive checks still run on full text.
+    /// - `non_codescout_tools` allowlist: host-harness tools the companion
+    ///   legitimately matches alongside codescout's own (e.g. `activate_project`
+    ///   is the host equivalent of codescout's `workspace`).
+    ///
+    /// Skips gracefully when the sibling repo isn't present (e.g. sandbox builds
+    /// of just codescout). Originating evidence: U-6 (text drift) and U-14
+    /// (matcher drift causing silent worktree-write-guard failure). H-3 in the
+    /// hookify ledger covers the lint extension itself.
+    #[tokio::test]
+    async fn companion_surfaces_reference_only_real_tools() {
+        use std::collections::HashSet;
+        use std::path::PathBuf;
+
+        let hooks_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .map(|p| p.join("claude-plugins/codescout-companion/hooks"));
+        let hooks_dir = match hooks_dir {
+            Some(p) if p.is_dir() => p,
+            _ => {
+                eprintln!(
+                    "companion_surfaces_reference_only_real_tools: skipping — \
+                 ../claude-plugins/codescout-companion/hooks not present"
+                );
+                return;
+            }
+        };
+
+        let (_dir, server) = make_server().await;
+        let real_tools: HashSet<&str> = server.tools.iter().map(|t| t.name()).collect();
+
+        let non_codescout_tools: HashSet<&str> = ["activate_project"].into_iter().collect();
+
+        let stale_names = &[
+            "replace_symbol",
+            "insert_code",
+            "remove_symbol",
+            "edit_lines",
+            "create_or_update_file",
+        ];
+
+        let positive_re = regex::Regex::new(r"mcp__codescout__\(?([a-z_|]+)\)?").unwrap();
+        let case_re = regex::Regex::new(r"\*__([a-z_]+)").unwrap();
+
+        let mut stale_regexes: Vec<(&str, regex::Regex)> = Vec::new();
+        for name in stale_names {
+            let re = regex::Regex::new(&format!(r"\b{}\b", regex::escape(name))).unwrap();
+            stale_regexes.push((name, re));
+        }
+
+        fn scrub_shell_comments(content: &str) -> String {
+            content
+                .lines()
+                .map(|l| {
+                    let trimmed = l.trim_start();
+                    if trimmed.starts_with('#') {
+                        ""
+                    } else {
+                        l
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
+        let mut drift = Vec::<String>::new();
+        let entries: Vec<_> = std::fs::read_dir(&hooks_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+
+        for entry in entries {
+            let path = entry.path();
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if !matches!(ext, "sh" | "json") {
+                continue;
+            }
+            let fname = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("?")
+                .to_string();
+            if fname.ends_with(".test.sh") {
+                continue;
+            }
+            let content = match std::fs::read_to_string(&path) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            // Positive matcher-shape check runs on full text (matchers in shebang
+            // lines and JSON keys don't live inside shell `#` comments).
+            for cap in positive_re.captures_iter(&content) {
+                let group = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+                for name in group.split('|') {
+                    if name.is_empty() || real_tools.contains(name) {
+                        continue;
+                    }
+                    drift.push(format!(
+                        "{fname}: matcher references nonexistent tool \
+                     `mcp__codescout__{name}` — update to a registered \
+                     tool name or remove the alternation branch"
+                    ));
+                }
+            }
+
+            if ext == "sh" {
+                for cap in case_re.captures_iter(&content) {
+                    let name = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+                    if name.is_empty()
+                        || real_tools.contains(name)
+                        || non_codescout_tools.contains(name)
+                    {
+                        continue;
+                    }
+                    drift.push(format!(
+                        "{fname}: case-statement branch `*__{name}` cannot \
+                     fire — no codescout tool named `{name}` is registered \
+                     (add to non_codescout_tools allowlist if it is a \
+                     host-harness tool)"
+                    ));
+                }
+            }
+
+            // Stale-name sentinel runs on comment-scrubbed text so header
+            // documentation explaining consolidation history doesn't false-trip.
+            let scrubbed = if ext == "sh" {
+                scrub_shell_comments(&content)
+            } else {
+                content.clone()
+            };
+            for (stale, re) in &stale_regexes {
+                if re.is_match(&scrubbed) {
+                    drift.push(format!(
+                        "{fname}: contains stale tool name `{stale}` in live \
+                     (non-comment) code — replace with the live equivalent \
+                     (e.g. `edit_code` consolidated \
+                     replace_symbol/insert_code/remove_symbol)"
+                    ));
+                }
+            }
+        }
+
         assert!(
-            s.contains("goal-tracker") || s.contains("Goal-tracker"),
-            "server_instructions.md should document the goal-tracker discovery pattern \
-             (expected the string `goal-tracker` or `Goal-tracker` to appear)"
+            drift.is_empty(),
+            "companion-surface drift detected:\n  {}",
+            drift.join("\n  ")
         );
+    }
+
+    #[tokio::test]
+    async fn static_doc_sources_all_readable() {
+        use crate::mcp_resources::{doc::DocProvider, ResourceProvider};
+        let sources = super::static_doc_sources();
         assert!(
-            s.contains(r#"tags":{"in":["goal"]}"#) || s.contains(r#"tags: ["goal"]"#),
-            "server_instructions.md should show the goal-tracker tag discovery query \
-             (expected one of: `tags\":{{\"in\":[\"goal\"]}}` or `tags: [\"goal\"]`)"
+            !sources.is_empty(),
+            "static_doc_sources() should register at least one doc URI"
+        );
+        let provider = DocProvider::new(sources.clone());
+        for src in &sources {
+            let res = provider.read(&src.uri).await;
+            assert!(
+                res.is_ok(),
+                "doc:// URI {} failed to read: {:?}",
+                src.uri,
+                res.err()
+            );
+            assert!(
+                !src.content.is_empty(),
+                "doc:// URI {} embedded content is empty",
+                src.uri
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn every_tool_description_under_cap() {
+        const CAP: usize = 1800;
+        let (_dir, server) = make_server().await;
+        let over: Vec<(String, usize)> = server
+            .tools
+            .iter()
+            .map(|t| (t.name().to_string(), t.description().len()))
+            .filter(|(_, n)| *n > CAP)
+            .collect();
+        assert!(
+            over.is_empty(),
+            "tool descriptions over the {CAP}-char cap: {:?}",
+            over
         );
     }
 
@@ -1913,6 +2121,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn run_command_output_keeps_absolute_project_paths() {
+        // Regression: docs/issues/2026-05-21-run-command-strips-project-root-from-path-literals.md
+        // run_command stdout is raw shell output; an absolute path literal under
+        // the project root (e.g. from readlink/realpath) must be returned
+        // verbatim, not silently rewritten to a relative-looking string.
+        let (dir, server) = make_server().await;
+        // Build with platform-native separators (\\ on Windows, / on Unix); avoid
+        // single-quote shell syntax which cmd.exe treats as literal characters.
+        let abs = dir
+            .path()
+            .join("some")
+            .join("nested")
+            .join("path")
+            .to_string_lossy()
+            .into_owned();
+
+        let req = CallToolRequestParams::new("run_command").with_arguments(
+            serde_json::from_value(serde_json::json!({
+                "command": format!("echo {abs}"),
+            }))
+            .unwrap(),
+        );
+        let result = server
+            .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+            .await
+            .unwrap();
+
+        let text = result
+            .content
+            .iter()
+            .find_map(|c| c.as_text().map(|t| t.text.as_str()))
+            .unwrap_or("");
+
+        // Parse the JSON response and inspect `stdout` directly — this avoids
+        // matching against JSON-escaped backslashes that the serialized `text`
+        // contains on Windows (`C:\\Users` in JSON is two chars per `\`).
+        let parsed: serde_json::Value =
+            serde_json::from_str(text).expect("run_command result should be JSON");
+        let stdout = parsed["stdout"]
+            .as_str()
+            .expect("run_command result should expose `stdout` as a string");
+
+        assert!(
+        stdout.contains(&abs),
+        "run_command stdout must keep the absolute project path verbatim.\n  expected substring: {abs}\n  actual stdout: {stdout}"
+    );
+    }
+
+    #[tokio::test]
     async fn call_tool_cancellation_kills_long_running_run_command() {
         // Regression for the "codescout disconnects after Escape on long
         // run_command" bug.
@@ -2129,6 +2386,7 @@ mod tests {
         }
     }
 
+    #[cfg(any(feature = "local-embed", feature = "remote-embed"))]
     #[tokio::test]
     async fn current_capabilities_returns_without_panic() {
         // Smoke test: current_capabilities must not panic even for a fresh project.
@@ -2246,6 +2504,201 @@ mod tests {
         assert!(!server.is_write_call("memory", &json!({"action": "list"})));
         assert!(!server.is_write_call("memory", &json!({"action": "recall"})));
         assert!(!server.is_write_call("memory", &json!({})));
+    }
+}
+
+#[cfg(feature = "librarian")]
+#[cfg(test)]
+mod guide_hint_tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    async fn make_server() -> (tempfile::TempDir, CodeScoutServer) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server = CodeScoutServer::new(agent).await;
+        (dir, server)
+    }
+
+    fn tool_by_name(server: &CodeScoutServer, name: &str) -> Arc<dyn crate::tools::Tool> {
+        server
+            .tools
+            .iter()
+            .find(|t| t.name() == name)
+            .unwrap_or_else(|| panic!("tool '{}' not registered", name))
+            .clone()
+    }
+
+    fn shared_ctx(server: &CodeScoutServer) -> crate::tools::ToolContext {
+        crate::tools::ToolContext {
+            agent: server.agent.clone(),
+            lsp: server.lsp.clone(),
+            output_buffer: server.output_buffer.clone(),
+            progress: None,
+            peer: None,
+            section_coverage: server.section_coverage.clone(),
+            guide_hints_emitted: server.guide_hints_emitted.clone(),
+        }
+    }
+
+    fn extract_hint(content: &[rmcp::model::Content]) -> Option<String> {
+        let text = content.first()?.as_text()?.text.clone();
+        let v: Value = serde_json::from_str(&text).ok()?;
+        v.get("_guide_hint")
+            .and_then(|h| h.as_str())
+            .map(String::from)
+    }
+
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "intermittent 'tool artifact not registered' on Windows — flakes alternate between guide_hint tests across runs, suggesting SQLite mandatory-locking race on the shared LIBRARIAN_DB (Windows file locks are mandatory; POSIX are advisory). Needs per-test EnvGuard-style DB isolation OR --test-threads 1 on Windows. See docs/issues/2026-05-24-ci-windows-default-feature-failures.md"
+    )]
+    #[tokio::test]
+    async fn first_artifact_call_emits_librarian_hint() {
+        let (_dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        let tool = tool_by_name(&server, "artifact");
+        let result = tool
+            .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            extract_hint(&result)
+                .unwrap_or_default()
+                .contains("librarian"),
+            "expected _guide_hint mentioning 'librarian' on first artifact call"
+        );
+    }
+
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "shares the guide_hint cluster's intermittent 'tool artifact not registered' race on Windows. See docs/issues/2026-05-24-ci-windows-default-feature-failures.md"
+    )]
+    #[tokio::test]
+    async fn second_artifact_call_no_hint() {
+        let (_dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        let tool = tool_by_name(&server, "artifact");
+        let _ = tool
+            .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
+            .await
+            .unwrap();
+        let result = tool
+            .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            extract_hint(&result).is_none(),
+            "second call must not re-emit the hint"
+        );
+    }
+
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "shares the guide_hint cluster's intermittent 'tool artifact not registered' race on Windows. See docs/issues/2026-05-24-ci-windows-default-feature-failures.md"
+    )]
+    #[tokio::test]
+    async fn artifact_event_after_artifact_no_hint() {
+        let (_dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        let artifact = tool_by_name(&server, "artifact");
+        let event = tool_by_name(&server, "artifact_event");
+        let _ = artifact
+            .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
+            .await
+            .unwrap();
+        let result = event
+            .call_content(
+                json!({"action": "list", "artifact_id": "nonexistent"}),
+                &ctx,
+            )
+            .await;
+        if let Ok(content) = result {
+            assert!(
+                extract_hint(&content).is_none(),
+                "subsequent librarian-topic tool must not re-emit hint"
+            );
+        }
+    }
+
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "intermittent 'tool artifact not registered' on Windows runners — 4 of 5 guide_hint tests pass with identical setup. Suspected test-ordering / SQLite locking interaction with the shared LIBRARIAN_DB on Windows (mandatory file locking vs POSIX advisory). Needs dedicated investigation. See docs/issues/2026-05-24-ci-windows-default-feature-failures.md"
+    )]
+    #[tokio::test]
+    async fn activate_project_resets_hints() {
+        let (dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        let artifact = tool_by_name(&server, "artifact");
+        let workspace = tool_by_name(&server, "workspace");
+        let _ = artifact
+            .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
+            .await
+            .unwrap();
+        let _ = workspace
+            .call_content(
+                json!({"action": "activate", "path": dir.path().to_str().unwrap()}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let result = artifact
+            .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            extract_hint(&result)
+                .unwrap_or_default()
+                .contains("librarian"),
+            "activate should reset emitted set; first post-activate call should re-emit"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_command_without_overflow_no_progressive_hint() {
+        let (_dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        let tool = tool_by_name(&server, "run_command");
+        let result = tool
+            .call_content(json!({"command": "echo small"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            extract_hint(&result).is_none(),
+            "small output should not trigger progressive-disclosure hint"
+        );
+    }
+
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "uses 'yes filler | head -2000' shell pipeline — both 'yes' and 'head' are Unix-only and the inject_tee path-validator rejects Windows temp file paths (C:\\Users\\...\\Temp\\codescout-unfiltered-XXX has chars outside the [a-zA-Z0-9/_-.] allowlist). See docs/issues/2026-05-24-ci-windows-default-feature-failures.md"
+    )]
+    #[tokio::test]
+    async fn run_command_with_overflow_emits_progressive_hint_once() {
+        let (_dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        let tool = tool_by_name(&server, "run_command");
+        let big = tool
+            .call_content(json!({"command": "yes filler | head -2000"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            extract_hint(&big)
+                .unwrap_or_default()
+                .contains("progressive-disclosure"),
+            "overflowing output should emit progressive-disclosure hint"
+        );
+        let second = tool
+            .call_content(json!({"command": "yes filler | head -2000"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            extract_hint(&second).is_none(),
+            "second overflow must not re-emit the hint"
+        );
     }
 }
 

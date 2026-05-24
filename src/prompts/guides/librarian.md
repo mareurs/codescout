@@ -1,7 +1,9 @@
 # Librarian & Artifact Guide
 
-Fetch this resource when you need depth on artifact/tracker workflows, filter syntax, or
-augmentation. The `server_instructions.md` has the quick-reference; this has the full spec.
+Artifacts are markdown files indexed by the librarian catalog. This guide
+covers the artifact model, filter AST, augmentation lifecycle, event log,
+and runtime caveats. For tracker/bug filesystem conventions, see
+get_guide("tracker-conventions").
 
 ---
 
@@ -102,31 +104,11 @@ The file at `rel_path` must not exist — `artifact(action="find")` first to avo
 
 ## Tracker Workflow
 
-Trackers are augmented artifacts: a persistent prompt auto-refreshes their body
-as the codebase or content evolves.
-
-**When to use a tracker:** multi-entry state — issue lists, ADR logs, experiment records,
-observation tables, anything that grows over time.
-
-**Creation flow:**
-1. `librarian(action="tracker_design", intent="...")` — get archetype library + teaching prompt
-2. Pick an archetype (or compose one) from the returned library
-3. `artifact(action="create", kind="tracker", augment={prompt: "...", params: {...}}, ...)`
-
-**Updating a tracker body:**
-- For append-mode trackers: `artifact_augment(id, append_mode=true, ...)` then write new section
-- For full-replace: `artifact(action="update", id, patch={body: "..."})`
-- To record a completed refresh cycle: `artifact(action="update", id, commit_refresh=true)`
-
-**Reading a tracker:**
-```
-artifact(action="get", id="...", full=true)           ← full body
-artifact(action="get", id="...", heading="## Foo")    ← one section
-artifact(action="get", id="...", headings=["## A", "## B"])  ← multiple sections
-```
-
----
-
+Trackers are artifacts with `kind: tracker`, often augmented to keep a live
+view of project state. For frontmatter shape, status vocabulary, and the
+day-to-day tracker workflow (creating, querying, archiving), see
+get_guide("tracker-conventions"). This guide covers only the artifact-level
+mechanics that apply to all kinds.
 ## Augmentation Lifecycle
 
 Augmentation attaches a persistent prompt to any artifact.
@@ -196,23 +178,9 @@ Returns BFS traversal of linked artifacts up to `depth` (1–3).
 
 ## Archiving / Moving Trackers
 
-**Never `git mv` a tracker file directly.** The catalog still holds the old `rel_path` — the artifact becomes unfindable until the mismatch is resolved, and `reindex` alone won’t fix it because it treats the moved file as a new artifact.
-
-**Preferred: archive in-place**
-```
-artifact(action="update", id="<id>", patch={"status": "archived"})
-```
-The file stays at its original path; `include_archived: true` on `find` still surfaces it.
-
-**If you must move the file** — use the dedicated `move` action:
-```
-artifact(action="move", id="<id>", new_rel_path="docs/archive/foo.md")
-```
-This atomically renames the backing file **and** updates the catalog `rel_path`. Parent directories are created automatically. Fails if the destination already exists.
-
-**Never `git mv` a tracker file directly** without going through `artifact(action="move")`. A bare `git mv` leaves the catalog pointing at the old path — `artifact(get)` returns "file not found" and `reindex` treats the moved file as a new artifact, creating a duplicate.
-
----
+Archive flow (status flip + git mv to docs/trackers/archive/) is covered in
+get_guide("tracker-conventions"). At the artifact layer, `artifact(action="move",
+new_rel_path=...)` is the safe path — it updates the catalog atomically.
 ## Common Mistakes
 
 | Mistake | Fix |
@@ -226,3 +194,97 @@ This atomically renames the backing file **and** updates the catalog `rel_path`.
 | `scope="all"` without umbrella | Use `scope="repo"` to widen beyond current project |
 | Creating without searching first | `artifact(action="find", semantic="...")` — prevent duplicates |
 | Forgetting `commit_refresh=true` after writing a refreshed body | Pass it in the same `artifact(action="update")` call |
+
+---
+
+## Runtime tips
+
+
+Operational details for working against a live librarian — caps, scope
+hints, augmentation gather sources, event-authorship discipline.
+
+### Default scope details
+
+Listing tools (`artifact(find)`, `librarian(context)`) default to the
+active project and hide archived/superseded rows. Responses include a
+`scope` block (applied scope + resolved `abs_path` / `git_root` /
+`umbrella`) and a `hints` block reporting how many extra rows live at
+wider scopes: `more_in_repo`, `more_in_umbrella`, `more_in_workspace`,
+`hidden_archived`. The `expand` list names the exact args to widen.
+
+**Umbrellas are user-declared** in `workspace.toml` `[[umbrella]]`
+blocks. `scope="umbrella"` errors if no umbrella is declared.
+
+### Limits
+
+- `limit` capped at 500, `offset` at 100_000.
+- Default `limit` is 50 for list/find, 20 for links.
+- `artifact(graph)` depth is 1–3.
+- Semantic search requires `LIBRARIAN_EMBED_MODEL` env at server
+  start; otherwise `semantic="..."` falls back to LIKE-match on
+  `title` / `topic`.
+
+### `contains` vs `prefix` SQL semantics
+
+- `contains` on `tags` / `owners` → array membership.
+- `contains` on `title` / scalar columns → substring (`LIKE %v%`).
+- `prefix` → `LIKE 'v%'`. Used by scope filters to pin `rel_path`.
+
+Times are ms-epoch integers, not ISO-8601.
+
+### Writes round-trip
+
+`artifact(create)` / `artifact(update)` modify the on-disk markdown
+file first, then re-index. **The file + frontmatter is the source of
+truth; the catalog is a derived index.** Reindex regenerates the
+catalog from disk — never the other way around.
+
+### Augmentation runtime details
+
+**Gather sources** (used by `artifact_refresh(action="gather")`
+params): `git_log`, `artifacts`, `observations`, `file`, `grep`.
+Unknown sources are skipped with a warning.
+
+**`[LIVE]` header in context bundles:** augmented artifacts surface in
+`librarian(context)` with a `<!-- [LIVE] -->` header and their prompt
+as a blockquote directive — read it as a standing instruction.
+
+**State vs prose split** (`render_template` + `params_schema`):
+- `render_template` — MiniJinja template projecting `params` into a
+  markdown snippet `librarian(context)` injects under `[LIVE]`. Use
+  for status tables, F-N rows — anything mechanical. Body stays prose.
+- `params_schema` — JSON Schema (draft-07+) validating `params` on
+  every `artifact_augment` call. Violations return as recoverable
+  errors before the write lands.
+
+Both fields are optional; legacy augmentations work unchanged.
+
+### When the index is stale
+
+No file watcher — files moved / created outside librarian tools won't
+appear until reindex. On a busy workspace, call
+`librarian(action="reindex")` at session start. `reindex` defaults to
+`scope="project"`; pass `scope="repo" | "umbrella" | "all"` to widen.
+`force=true` wipes only the targeted scope's rows.
+
+### Per-project classifier overrides
+
+A project may ship `<project>/.codescout/librarian.toml` with
+`[[rule]]` entries declaring kinds for its own paths. Precedence:
+project rules > workspace rules (`workspace.toml`) > built-in
+defaults.
+
+### Event authorship discipline
+
+- Before non-trivial artifact work (revising a spec/plan/ADR,
+  supersession, status flip), emit an `intent` event capturing
+  hypothesis + soft `inputs` refs.
+- After the work concludes, emit a paired `verdict` event with
+  `resolves_intent_event_id` set. Outcome ∈
+  `confirmed | refuted | partial | abandoned`.
+- After confirming an artifact still reflects reality, emit a
+  `reviewed` event (freshness ping).
+- Reserve direct user calls for high-stakes events: `superseded_by`,
+  `external_signal`.
+- Skip `intent` for trivial mechanical edits. Threshold: *would a
+  future reader want to know why this changed?*

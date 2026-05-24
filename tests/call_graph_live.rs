@@ -55,6 +55,8 @@ async fn project_with_files(files: &[(&str, &str)]) -> (tempfile::TempDir, ToolC
         progress: None,
         peer: None,
         section_coverage: Arc::new(Mutex::new(SectionCoverage::new())),
+
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     (dir, ctx)
 }

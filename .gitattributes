@@ -1,0 +1,13 @@
+# Normalize all text files to LF on checkout.
+# Without this, Windows runners with core.autocrlf=true convert LF→CRLF,
+# breaking literal-string assertions and snapshot tests.
+* text=auto eol=lf
+
+# Lockfiles and binaries are kept verbatim.
+Cargo.lock binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary

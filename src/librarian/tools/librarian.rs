@@ -64,7 +64,7 @@ impl Tool for Librarian {
                 "paths": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "audit_doc_refs: glob patterns to restrict scan (default: docs/**/*.md, CLAUDE.md, **/README.md)"
+                    "description": "audit_doc_refs: glob patterns to restrict scan (default: docs/**/*.md, CLAUDE.md, **/README.md). Default scan excludes docs/agents/** — pass an explicit list to include those files."
                 },
                 "emit_tracker": { "type": "boolean", "default": true, "description": "audit_doc_refs: create/update an audit_issues tracker artifact with results" },
                 "tracker_id": { "type": "string", "description": "audit_doc_refs: existing tracker id to update (creates new if omitted)" },

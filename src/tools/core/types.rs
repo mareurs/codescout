@@ -67,6 +67,9 @@ pub struct ToolContext {
     /// Session-scoped markdown section read-coverage tracker.
     pub section_coverage:
         std::sync::Arc<std::sync::Mutex<crate::tools::section_coverage::SectionCoverage>>,
+    /// Session-scoped set of guide topics already hinted to the model.
+    /// Reset on workspace(action="activate").
+    pub guide_hints_emitted: Arc<parking_lot::Mutex<std::collections::HashSet<String>>>,
 }
 
 impl ToolContext {
@@ -326,7 +329,6 @@ impl Availability {
     }
 }
 
-/// A single MCP tool exposed to the LLM.
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
     /// Tool name as exposed over MCP (e.g. "symbols")
@@ -423,6 +425,51 @@ pub trait Tool: Send + Sync {
         let form = self.output_form();
         let json = serde_json::to_string(&val).unwrap_or_else(|_| val.to_string());
 
+        // Compute potential hint topic + whether it should fire on this call.
+        let hint_topic: Option<String> = if let Some(topic) = self.relevant_guide_topic() {
+            let mut emitted = ctx.guide_hints_emitted.lock();
+            if emitted.contains(topic) {
+                None
+            } else {
+                let should = match topic {
+                    "progressive-disclosure" => {
+                        // Either the default-path buffering kicked in (large JSON),
+                        // or the tool itself pre-buffered (e.g. run_command storing
+                        // a `@cmd_*` ref and returning a small envelope with
+                        // `output_id`). Both signal the agent should learn the
+                        // progressive-disclosure pattern.
+                        exceeds_inline_limit(&json)
+                            || val
+                                .as_object()
+                                .and_then(|o| o.get("output_id"))
+                                .and_then(|v| v.as_str())
+                                .is_some()
+                    }
+                    _ => true,
+                };
+                if should {
+                    emitted.insert(topic.to_string());
+                    Some(topic.to_string())
+                } else {
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        fn inject_hint(val: &mut Value, topic: &str) {
+            if let Some(obj) = val.as_object_mut() {
+                obj.insert(
+                    "_guide_hint".to_string(),
+                    Value::String(format!(
+                        "First call this session for topic '{topic}'. \
+                         Run get_guide(\"{topic}\") for full guidance."
+                    )),
+                );
+            }
+        }
+
         if exceeds_inline_limit(&json) {
             let json_len = json.len();
             let ref_id = ctx.output_buffer.store_tool(self.name(), json);
@@ -435,29 +482,30 @@ pub trait Tool: Send + Sync {
                 COMPACT_SUMMARY_HARD_MAX_BYTES,
             );
 
-            // Return a *structured* JSON response so agents consistently look for
-            // the `output_id` field — the same field name `run_command` uses for its
-            // `@cmd_*` refs.  The previous prose format ("summary\nFull result: @ref")
-            // caused agents to either miss the ref or confuse it with the summary text.
             let jp = self.json_path_hint(&val);
             let hint = format!(
                 "read_file(\"{ref_id}\", json_path=\"{jp}\") to extract a specific field, \
                  or read_file(\"{ref_id}\", start_line=N, end_line=M) to browse sections"
             );
-            let buffered = serde_json::json!({
+            let mut buffered = serde_json::json!({
                 "output_id": ref_id,
                 "summary": summary,
                 "hint": hint,
             });
+            if let Some(topic) = &hint_topic {
+                inject_hint(&mut buffered, topic);
+            }
             return Ok(vec![Content::text(
                 serde_json::to_string_pretty(&buffered)
                     .unwrap_or_else(|_| format!("{{\"output_id\":\"{ref_id}\"}}")),
             )]);
         }
 
-        // Small output — return either pretty JSON or the compact text form,
-        // depending on the tool's wire-format preference.
-        // TODO(#13600/#3174): emit self.format_for_user_channel(&val) to user channel here.
+        // Small output path.
+        let mut val = val;
+        if let Some(topic) = &hint_topic {
+            inject_hint(&mut val, topic);
+        }
         if form == OutputForm::Text {
             if let Some(text) = self.format_compact(&val) {
                 return Ok(vec![Content::text(text)]);
@@ -466,5 +514,19 @@ pub trait Tool: Send + Sync {
         Ok(vec![Content::text(
             serde_json::to_string_pretty(&val).unwrap_or_else(|_| val.to_string()),
         )])
+    }
+
+    /// Topic name this tool's discipline depends on, for the first-call
+    /// hint mechanism. When the model first calls a tool with
+    /// Some("librarian"), Tool::call_content injects a one-shot
+    /// _guide_hint pointing to get_guide("librarian"). Topic dedup is
+    /// session-wide; calling a different tool with the same topic in
+    /// the same session does NOT re-emit the hint. The set is cleared
+    /// on workspace(action="activate").
+    ///
+    /// Default None — most tools' rules fit in their description and
+    /// don't need the hint.
+    fn relevant_guide_topic(&self) -> Option<&str> {
+        None
     }
 }

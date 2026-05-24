@@ -169,7 +169,9 @@ impl Tool for SemanticSearch {
         if let Some(p) = ctx.progress.as_ref() {
             p.report_text("loading embedding model").await;
         }
-        let project_id = {
+        let project_id = if let Some(pid) = input.get("project_id").and_then(|v| v.as_str()) {
+            pid.to_string()
+        } else {
             let inner = ctx.agent.inner.read().await;
             let p = inner.active_project().ok_or_else(|| {
                 crate::tools::RecoverableError::with_hint(

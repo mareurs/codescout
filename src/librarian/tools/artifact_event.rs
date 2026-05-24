@@ -33,7 +33,7 @@ impl Tool for ArtifactEvent {
                     "type": "string",
                     "description": "create: event kind (note, reviewed, status_change, field_patch, superseded_by, external_signal, intent, verdict)"
                 },
-                "payload": { "description": "create: event payload (any JSON)" },
+                "payload": { "type": "object", "description": "create: event payload (a JSON object)" },
                 "anchor_commit": { "type": "string", "description": "create: git commit to anchor event to" },
                 "head_commit": { "type": "string", "description": "create: HEAD commit at write time" },
                 "parent_event_id": { "type": "string", "description": "create: parent event id for threading" },
@@ -125,5 +125,18 @@ mod tests {
             .unwrap();
         // timeline returns array even for unknown ids
         assert!(v.is_array() || v["events"].is_array());
+    }
+
+    #[test]
+    fn payload_schema_declares_object_type() {
+        // Regression: docs/issues/2026-05-21-artifact-event-create-payload-rejected.md
+        // A `payload` property with no declared type caused MCP clients to
+        // transport the value as a stringified JSON, which the server's
+        // `.as_object()` guard then rejected with "payload must be object".
+        let schema = ArtifactEvent.input_schema();
+        assert_eq!(
+            schema["properties"]["payload"]["type"], "object",
+            "payload must declare type=object so clients send an object, not a JSON string"
+        );
     }
 }

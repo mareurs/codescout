@@ -10,7 +10,15 @@ See codescout memory `development-commands` for the full command reference.
 
 **Always run `cargo fmt`, `cargo clippy`, and `cargo test` before completing any task.**
 
-**To test changes via the live MCP server, always run `cargo build --release` first**, then restart the server with `/mcp`. The MCP server runs the release binary — dev builds are not picked up.
+**To test changes via the live MCP server, run `cargo build --release`, then restart the server with `/mcp`.** The MCP server launches `~/.cargo/bin/codescout` (see the `command` in `~/.claude/.claude.json`), which is a **symlink → `target/release/codescout`**, so a release build alone updates the live binary — no `cargo install` needed. Dev builds (`cargo test`/`cargo build`) are a separate artifact and are NOT picked up.
+
+If the symlink is missing (e.g. after `cargo clean` removed `target/`, or a fresh checkout), recreate it once:
+
+```bash
+ln -sf "$(pwd)/target/release/codescout" ~/.cargo/bin/codescout
+```
+
+Without the symlink, `~/.cargo/bin/codescout` is a stale installed copy and `/mcp` reconnects keep loading old code even after a successful build. (Symlink, not hardlink: `cargo build` rename-replaces the file, so a hardlink would resolve to the old inode.)
 
 ## Bug Tracking
 
@@ -26,7 +34,7 @@ See codescout memory `development-commands` for the full command reference.
 - ✓ Bug blocking the current task (fix-now or parking-lot)
 - ✓ Incidental bug we won't fix in the current session
 - ✓ Just-fixed bug whose investigation is worth preserving
-- ✓ Tool quirks / misbehaviors (formerly the BUG-XXX log in `docs/TODO-tool-misbehaviors.md`, retired 2026-05-17)
+- ✓ Tool quirks / misbehaviors (formerly the BUG-XXX log, retired 2026-05-17 — archived at `docs/archive/old-trackers/TODO-tool-misbehaviors.md`)
 - ✗ Pure typos / one-token corrections — commit message is enough
 - ✗ Feature ideas / refactors — those go in `docs/trackers/` or `docs/plans/`
 - ✗ Subjective dislikes that aren't bugs
@@ -35,6 +43,8 @@ See codescout memory `development-commands` for the full command reference.
 
 **Don't add to retired surfaces.** `docs/archive/old-trackers/TODO-tool-misbehaviors.md` and `docs/archive/old-trackers/bug-tracker.md` are historical reference only — do not append. Open a new `docs/issues/<date>-<slug>.md` instead.
 ## Session Intelligence Trackers
+
+**One-page index of every ID prefix** (F-N / W-N / R-N / U-N / H-N / T-N / BUG) — file, scope, append tool, promotion path — lives in [`docs/TAXONOMY.md`](docs/TAXONOMY.md). Start there when you're not sure which tracker takes an observation.
 
 ### Querying active trackers (librarian)
 
@@ -118,7 +128,10 @@ tool selection quality. Entries are T-NNN with tool, verdict (legitimate / debat
 wrong-tool), and prompt gap. Feeds Iron Law and Anti-Patterns updates.
 
 This file is a **librarian artifact** (id: `b3fa993849ac83ab`). Params hold the structured
-T-N table; body holds full per-observation analysis.
+T-N table; body holds full per-observation analysis. For the deep-dive on the
+augmented-artifact pattern (body / params / render_template, the `merge=false`
+foot-gun, why managed files refuse direct `read_markdown`), see
+[`docs/architecture/augmented-artifacts.md`](docs/architecture/augmented-artifacts.md).
 
 **Claude — append when:**
 - Analyzing a session and a tool choice is noteworthy (right or wrong)
@@ -138,7 +151,7 @@ edit_markdown("docs/trackers/tool-usage-patterns.md",
 
 **User — browse:** open `docs/trackers/tool-usage-patterns.md`; the live params table is
 rendered at the top by the librarian. Prompt improvement candidates are at the bottom —
-these are the direct inputs to `src/prompts/server_instructions.md` edits.
+these are the direct inputs to `src/prompts/source.md` (the `server_instructions` surface slice) edits.
 
 ### Ad-Hoc Session Logs — `docs/trackers/<topic>-session-log.md`
 
@@ -292,6 +305,17 @@ echo "$master_sha"                  # record this in the tally, not the pre-cher
 Or, after the fact: `git log master --oneline --grep="<subject prefix>"` to recover the master SHA by commit message.
 
 Lesson source: 2026-05-23 batched-bug session — 12 fixes shipped, running tally cited the 12 experiments-side SHAs, none survived the rebase. Recovery took a `git log --grep` sweep on master to rebuild the SHA mapping for the user's "are they all done?" check.
+
+**Applies to every SHA-citing surface, not just chat:**
+
+- **Tracker entries** — F-N / W-N / U-N / H-N / R-N — any `**Status:**`, `**Fix idea:**`, or evidence-citing line that names a SHA. After the cherry-pick lands on master, update the citation to the master SHA before committing the tracker entry.
+- **`artifact_event` calls** — `anchor_commit` and `also_mutates` SHAs are written into the catalog DB and outlive rebases. Cite the master SHA.
+- **`docs/issues/<bug>.md` Fix sections** — `_TEMPLATE.md` § "## Fix" mandates the master SHA. New bug files inherit this; older ones may still cite experiments-side SHAs — update opportunistically when touching the file.
+- **ADRs / design docs** citing the implementation commit — same rule.
+
+**Anti-pattern:** writing `Fixed in commit abc1234 on experiments` immediately after committing on experiments. After cherry-pick + rebase, that SHA orphans. Capture the master SHA AFTER the cherry-pick lands and cite that instead. If forensic context matters, prefix explicitly: `experiments-side abc1234, master-side def5678` — never let bare SHAs default to "whichever branch I happened to be on."
+
+**Cross-repo callsites** — when a tracker entry in codescout cites a fix that landed in `codescout-companion` (or vice-versa), use the `<repo>:<sha>` prefix from the "Cross-Repo Commit References" section below: `codescout-companion:0b75991`. A bare SHA implies the current repo.
 ### Commit Discipline
 
 - **Batch related changes** into a single well-tested commit rather than committing every incremental step.
@@ -422,10 +446,14 @@ Load-bearing rules I keep getting wrong otherwise:
 
 ## Prompt Surface Consistency
 
-The project has **three prompt surfaces** that reference tool names:
-- `src/prompts/server_instructions.md` — injected every MCP request
-- `src/prompts/onboarding_prompt.md` — one-time onboarding
+The project has **three prompt surfaces** that reference tool names. Two are sliced out of a single editable file via `<!-- @surface NAME -->` markers; the third is code-generated:
+
+- `src/prompts/source.md` — single editable doc, sliced at build time (`build.rs` + `src/prompts/source.rs::extract_surface`) into:
+  - **`server_instructions` surface** — injected once at every MCP session start (not per-request)
+  - **`onboarding_prompt` surface** — one-time onboarding when a project is first activated
 - `build_system_prompt_draft()` in `src/prompts/builders.rs` — generated per-project
+
+See `src/prompts/README.md` for the surface contract + editing rules.
 
 **When tools get renamed/consolidated, all three need coordinated updates.** Files
 closer to the change get updated; distant ones accumulate stale refs ("distance
@@ -444,31 +472,31 @@ update all three surfaces in the same commit.
 ### Onboarding Version
 
 Bump `ONBOARDING_VERSION` in `src/tools/onboarding.rs` when changing prompt surfaces
-that produce the **stored per-project system prompt** — i.e. `onboarding_prompt.md` or
-`build_system_prompt_draft()` in `builders.rs`. The bump triggers automatic system prompt
+that produce the **stored per-project system prompt** — i.e. the `onboarding_prompt` surface
+of `source.md` or `build_system_prompt_draft()` in `builders.rs`. The bump triggers automatic system prompt
 regeneration for all projects onboarded with the previous version.
 
-**Do NOT bump for `server_instructions.md` changes.** That file is injected fresh at
-every MCP session start (each `/mcp` connect re-reads it from disk). There is no cached
+**Do NOT bump for `server_instructions` surface changes.** That surface is injected fresh at
+every MCP session start (each `/mcp` connect re-reads the sliced text). There is no cached
 copy — changes take effect immediately on the next connect without any version bump.
 
 ### Which surface needs a bump?
 
 | Surface | How delivered | Bump needed? |
 |---|---|---|
-| `server_instructions.md` | Loaded fresh at every MCP session start | **No** — live on next connect |
-| `onboarding_prompt.md` | Drives stored system prompt generation | **Yes** — cached per project |
+| `server_instructions` surface (slice of `source.md`) | Loaded fresh at every MCP session start | **No** — live on next connect |
+| `onboarding_prompt` surface (slice of `source.md`) | Drives stored system prompt generation | **Yes** — cached per project |
 | `build_system_prompt_draft()` in `builders.rs` | Same — generates stored system prompt | **Yes** — cached per project |
 
 ### Bump when
 
 - Tool names change (rename, consolidate)
-- Tool parameter semantics change in `onboarding_prompt.md` or `builders.rs`
+- Tool parameter semantics change in the `onboarding_prompt` surface of `source.md` or in `builders.rs`
 - Onboarding prompt templates change in ways that affect the generated system prompt
 
 ### Do NOT bump for
 
-- Any change to `server_instructions.md` (no matter how significant)
+- Any change to the `server_instructions` surface of `source.md` (no matter how significant)
 - Bug fixes that don't change tool behavior
 - Internal refactors
 - Memory template changes (memories are re-read during refresh anyway)
@@ -494,6 +522,17 @@ The `PreToolUse` hook will **block** any attempt to use the native `Read`, `Grep
 - `mcp__codescout__search_pattern(pattern)` — regex search
 - `mcp__codescout__semantic_search(query)` — concept-level search
 - `mcp__codescout__read_file(path)` — for non-source files (markdown, toml, json)
+
+**Cross-repo work (companion ≥ 1.11.1):**
+The Bash branch of `pre-tool-guard.sh` is workspace-scoped. A leading `cd <dir>` resolving outside the active project's `$CWD` (absolute, quoted, tilde-expanded, or relative `../sibling`) passes through, so cross-repo git ops work natively. Out-of-shape commands (`pushd`, `bash -c '...'`, no `cd` prefix) still hit the default block — for those, switch the codescout workspace explicitly:
+
+```
+workspace(action="activate", path="/path/to/sibling", read_only=false)
+# ...do the work...
+workspace(action="activate", path="/home/marius/work/claude/code-explorer", read_only=false)
+```
+
+Per Iron Law 4, restore the original workspace before turn end. The MCP server is shared state — leaving it pointed at a sibling project pollutes the next session. Bug history at `docs/issues/2026-05-20-cross-repo-git-ops-friction.md`.
 
 **Configuration:**
 - Auto-detects codescout from `.mcp.json` or `~/.claude/settings.json`

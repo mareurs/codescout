@@ -233,6 +233,13 @@ impl Tool for EditFile {
         }
 
         if let Some(edits_arr) = edits {
+            if edits_arr.is_empty() {
+                return Err(super::RecoverableError::with_hint(
+                    "edits array is empty",
+                    "Pass at least one edit object {old_string, new_string} in the edits array, or use the single-edit form with top-level old_string/new_string.",
+                )
+                .into());
+            }
             let root = ctx.agent.require_project_root().await?;
             let security = ctx.agent.security_config().await;
             let session_roots = ctx.agent.session_write_roots_snapshot().await;

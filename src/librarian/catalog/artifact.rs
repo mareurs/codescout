@@ -36,9 +36,10 @@ pub fn upsert(cat: &Catalog, row: &ArtifactRow) -> Result<()> {
     // abs_path; the id is a derived hash. When the two diverge, the
     // abs_path wins (file content survives across id-algorithm changes;
     // the old id-based row is stale).
+    let abs_path_str = crate::util::fs::to_forward_slash(&row.abs_path);
     cat.conn.execute(
         "DELETE FROM artifact WHERE abs_path = ?1 AND id != ?2",
-        params![row.abs_path.to_string_lossy().as_ref(), row.id],
+        params![abs_path_str, row.id],
     )?;
 
     cat.conn.execute(
@@ -55,7 +56,7 @@ pub fn upsert(cat: &Catalog, row: &ArtifactRow) -> Result<()> {
             confidence=excluded.confidence",
         params![
             row.id,
-            row.abs_path.to_string_lossy().as_ref(),
+            abs_path_str,
             row.kind,
             row.status,
             row.title,
@@ -105,9 +106,13 @@ pub fn delete_orphan_repos(cat: &Catalog, active_roots: &[&std::path::Path]) -> 
         "DELETE FROM artifact WHERE NOT ({})",
         keep_clauses.join(" OR ")
     );
+    // Forward-slash normalize to match the form abs_paths are stored in
+    // (artifact::upsert writes forward-slash via to_forward_slash). Without
+    // this, on Windows the LIKE pattern uses backslash and matches NOTHING,
+    // so the DELETE wipes every row.
     let params: Vec<String> = active_roots
         .iter()
-        .map(|p| format!("{}/%", p.to_string_lossy()))
+        .map(|p| format!("{}/%", crate::util::fs::to_forward_slash(p)))
         .collect();
     let param_refs: Vec<&dyn rusqlite::ToSql> =
         params.iter().map(|s| s as &dyn rusqlite::ToSql).collect();

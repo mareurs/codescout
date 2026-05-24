@@ -34,8 +34,16 @@ pub const SOURCE: &str = include_str!("source.md");
 /// string). Returns `None` if the named surface marker is missing or the
 /// closing `<!-- @end -->` tag is absent.
 pub fn extract_surface<'a>(source: &'a str, surface: &str) -> Option<&'a str> {
-    let open = format!("<!-- @surface {surface} -->\n");
-    let start = source.find(&open)? + open.len();
+    let open = format!("<!-- @surface {surface} -->");
+    let marker_end = source.find(&open)? + open.len();
+    let bytes = source.as_bytes();
+    let mut start = marker_end;
+    if bytes.get(start) == Some(&b'\r') {
+        start += 1;
+    }
+    if bytes.get(start) == Some(&b'\n') {
+        start += 1;
+    }
     let rest = &source[start..];
     let end_offset = rest.find("<!-- @end -->")?;
     Some(&rest[..end_offset])
@@ -78,6 +86,12 @@ mod tests {
     fn extract_handles_inline_string() {
         let src = "<!-- @surface foo -->\nbody\n<!-- @end -->\n";
         assert_eq!(extract_surface(src, "foo"), Some("body\n"));
+    }
+
+    #[test]
+    fn extract_handles_crlf_line_endings() {
+        let src = "<!-- @surface foo -->\r\nbody\r\n<!-- @end -->\r\n";
+        assert_eq!(extract_surface(src, "foo"), Some("body\r\n"));
     }
 
     #[test]

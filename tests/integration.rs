@@ -30,6 +30,7 @@ async fn project_with_files(files: &[(&str, &str)]) -> (tempfile::TempDir, ToolC
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             codescout::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     (dir, ctx)
 }
@@ -396,6 +397,7 @@ async fn write_allowed_when_project_provided_at_startup_even_with_worktrees() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             codescout::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     // 3. Write should succeed — worktree guard bypassed because project was

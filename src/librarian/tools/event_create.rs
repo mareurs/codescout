@@ -189,6 +189,25 @@ fn apply_payload_to_frontmatter(
     }
     Ok(())
 }
+/// Generate a monotonic ULID — guarantees strict-monotonic ordering even when
+/// multiple events are created within the same millisecond. Without this,
+/// `ulid::Ulid::new()` uses fresh random bits per ID, and two IDs sharing a
+/// timestamp millisecond would have an unpredictable relative sort order.
+/// The `Generator` increments the random portion when a same-ms collision
+/// would occur, so `id_n > id_{n-1}` always holds.
+fn next_monotonic_id() -> String {
+    use std::cell::RefCell;
+    thread_local! {
+        static GENERATOR: RefCell<ulid::Generator> = const { RefCell::new(ulid::Generator::new()) };
+    }
+    GENERATOR.with(|g| {
+        g.borrow_mut()
+            .generate()
+            .expect("ulid monotonic overflow within single ms — astronomically unlikely")
+            .to_string()
+    })
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args)?;
 
@@ -238,7 +257,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }
 
     let now = chrono::Utc::now().timestamp_millis();
-    let id = ulid::Ulid::new().to_string();
+    let id = next_monotonic_id();
 
     let parent_id = match &a.parent_event_id {
         Some(p) => Some(p.clone()),

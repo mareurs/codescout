@@ -377,8 +377,26 @@ fn gather_observations(
 }
 
 fn guard_relative_path(path: &str) -> Result<()> {
-    if path.contains("..") || std::path::Path::new(path).is_absolute() {
-        anyhow::bail!("path must be relative and must not contain '..'");
+    // Reject absolute paths in BOTH POSIX (leading /) and Windows (leading \ or
+    // drive letter) forms — Path::is_absolute() only checks the current
+    // platform's notion of absolute, but the gather tool must reject any
+    // shape that could escape the project root on any platform.
+    //
+    // Also reject any embedded colon: on Windows the colon is reserved for
+    // drive prefixes (`C:foo`) AND for NTFS alternate data streams
+    // (`legit.txt:hidden`). In legitimate relative paths on either platform
+    // there is no reason to allow colons, so a blanket reject closes the
+    // ADS-read path the drive-letter check alone misses (Ibex S-2).
+    let starts_with_drive =
+        path.len() >= 2 && path.as_bytes()[0].is_ascii_alphabetic() && path.as_bytes()[1] == b':';
+    if path.contains("..")
+        || std::path::Path::new(path).is_absolute()
+        || path.starts_with('/')
+        || path.starts_with('\\')
+        || starts_with_drive
+        || path.contains(':')
+    {
+        anyhow::bail!("path must be relative and must not contain '..' or ':'");
     }
     Ok(())
 }
@@ -548,6 +566,17 @@ mod tests {
     fn guard_relative_path_accepts_normal() {
         assert!(guard_relative_path("src/main.rs").is_ok());
         assert!(guard_relative_path("a/b/c.txt").is_ok());
+    }
+
+    #[test]
+    fn guard_relative_path_rejects_ads_colon() {
+        // NTFS alternate data stream selector: foo.txt:hidden reads a hidden
+        // stream attached to foo.txt on Windows. Ibex S-2 in the rounds 3-8
+        // review found the drive-letter guard alone did not catch this.
+        assert!(guard_relative_path("legit.txt:hidden").is_err());
+        assert!(guard_relative_path("docs/foo.md:stream").is_err());
+        // Drive-letter relative form must remain rejected.
+        assert!(guard_relative_path("C:foo.txt").is_err());
     }
 
     #[test]

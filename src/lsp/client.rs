@@ -128,6 +128,18 @@ fn detect_fatal_stderr(lines: &[String]) -> Option<RecoverableError> {
                  Stop the other session and retry.",
             ));
         }
+        if line.contains("Unknown binary 'rust-analyzer'") {
+            return Some(RecoverableError::with_hint(
+                "rust-analyzer is unreachable. The rustup shim is on PATH but the \
+                 component is not installed: \
+                 \"error: Unknown binary 'rust-analyzer' in official toolchain\"",
+                "Run `rustup component add rust-analyzer` to install it for the active \
+                 toolchain, or install rust-analyzer outside rustup \
+                 (https://rust-analyzer.github.io). Rust LSP tools (edit_code, symbols, \
+                 references, call_graph on .rs files) will keep returning this error \
+                 until rust-analyzer launches successfully.",
+            ));
+        }
     }
     None
 }
@@ -1572,6 +1584,30 @@ mod tests {
     }
 
     #[test]
+    fn detect_fatal_stderr_flags_rustup_missing_component() {
+        // rustup's shim for rust-analyzer prints this to stderr and exits 1
+        // immediately if the component isn't installed for the active toolchain.
+        // Pre-fix the LSP launch path swallowed it and reported the opaque
+        // "LSP server disconnected" instead of pointing at the rustup fix.
+        // See docs/issues/2026-05-20-lsp-launch-opaque-disconnected-error.md.
+        let lines = vec![
+            "error: Unknown binary 'rust-analyzer' in official toolchain \
+                 'stable-x86_64-unknown-linux-gnu'."
+                .to_string(),
+        ];
+        let hint = detect_fatal_stderr(&lines).expect("should detect rustup pattern");
+        let msg = hint.to_string();
+        assert!(
+            msg.contains("rust-analyzer"),
+            "error message should name rust-analyzer: {msg}"
+        );
+        assert!(
+            msg.contains("rustup component add rust-analyzer"),
+            "error message should include the rustup fix command: {msg}"
+        );
+    }
+
+    #[test]
     fn detect_fatal_stderr_ignores_benign_lines() {
         // Noisy but non-fatal lines (warnings, informational) must not trip
         // the fast-fail path — those are normal cold-start chatter.
@@ -1702,9 +1738,11 @@ struct Point {
             .unwrap();
 
         // rust-analyzer indexes in the background after initialize; retry until
-        // workspace/symbol returns results (typically < 2s for a minimal project).
+        // workspace/symbol returns results. Local Linux: typically < 2s, but GHA
+        // runners (especially macOS + Windows) can be I/O-slower under load.
+        // Budget 15s (30 × 500ms) on all platforms.
         let mut symbols = vec![];
-        for _ in 0..10 {
+        for _ in 0..30 {
             symbols = client.workspace_symbols("add").await.unwrap();
             if !symbols.is_empty() {
                 break;
@@ -1714,7 +1752,7 @@ struct Point {
 
         assert!(
             !symbols.is_empty(),
-            "workspace/symbol 'add' should return results within 5s of indexing"
+            "workspace/symbol 'add' should return results within the retry budget"
         );
         assert!(
             symbols.iter().any(|s| s.name == "add"),

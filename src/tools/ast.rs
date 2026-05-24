@@ -237,6 +237,9 @@ mod tests {
                 section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
                     crate::tools::section_coverage::SectionCoverage::new(),
                 )),
+                guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(
+                    Default::default(),
+                )),
             },
         )
     }
@@ -343,6 +346,7 @@ mod tests {
             section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
         };
         let result = ListFunctions
             .call(json!({ "path": "nonexistent.rs" }), &ctx)

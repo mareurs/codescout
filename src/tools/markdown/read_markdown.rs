@@ -3,7 +3,7 @@
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use super::super::{optional_u64_param, RecoverableError, Tool, ToolContext};
+use super::super::{optional_u64_param, OutputForm, RecoverableError, Tool, ToolContext};
 use crate::util::text::extract_lines;
 
 pub struct ReadMarkdown;
@@ -474,6 +474,10 @@ impl Tool for ReadMarkdown {
             ));
         }
         Ok(result)
+    }
+
+    fn output_form(&self) -> OutputForm {
+        OutputForm::Text
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {

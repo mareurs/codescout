@@ -14,6 +14,26 @@ use crate::symbol::query::find_unique_symbol_by_name_path;
 
 pub struct References;
 
+/// Completeness cross-check for `references` results.
+///
+/// Call sites (from `callHierarchy/incomingCalls`) are a strict subset of all
+/// references, so if call-hierarchy finds MORE call sites than
+/// `textDocument/references` returned references, references is provably
+/// incomplete — a known rust-analyzer quirk for some symbol shapes (e.g.
+/// `pub(super)` free fns referenced from a sibling `#[cfg(test)]` module).
+/// See `docs/issues/2026-05-21-references-undercounts-vs-call-graph.md`.
+pub(crate) fn references_completeness_hint(refs_total: usize, call_sites: usize) -> Option<String> {
+    if call_sites > refs_total {
+        Some(format!(
+            "references found {refs_total}, but call-hierarchy found {call_sites} call sites — \
+             rust-analyzer's textDocument/references is incomplete for this symbol. \
+             Use call_graph(symbol, direction=\"callers\") for the authoritative caller set."
+        ))
+    } else {
+        None
+    }
+}
+
 #[async_trait::async_trait]
 impl Tool for References {
     fn name(&self) -> &str {
@@ -149,15 +169,46 @@ impl Tool for References {
             });
             result["overflow"] = overflow;
         }
+
+        // Completeness cross-check (BUG 2026-05-21): rust-analyzer's
+        // textDocument/references can silently undercount for some symbol shapes.
+        // callHierarchy/incomingCalls does not share the gap, and call sites are a
+        // strict subset of references — so more call sites than references found is
+        // proof of an incomplete reference set. Cheap: one prepare_call_hierarchy
+        // (None for non-callable symbols → skipped) plus one incoming_calls.
+        if let Ok(Some(item)) = client
+            .prepare_call_hierarchy(&full_path, sym.start_line, sym.start_col, &lang)
+            .await
+        {
+            if let Ok(incoming) = client.incoming_calls(&item, &lang).await {
+                let call_sites: usize = incoming.iter().map(|c| c.from_ranges.len().max(1)).sum();
+                if let Some(hint) = references_completeness_hint(total, call_sites) {
+                    result["completeness_warning"] = json!(hint);
+                }
+            }
+        }
+
         Ok(result)
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
         use crate::tools::file_group::{groups_from_json, render_grouped};
 
+        // BUG 2026-05-21: surface the completeness warning (if the call-hierarchy
+        // cross-check found more call sites than references did) in both the
+        // zero-refs and the normal branch.
+        let warning = result.get("completeness_warning").and_then(|v| v.as_str());
+        let append_warning = |mut out: String| -> String {
+            if let Some(w) = warning {
+                out.push_str("\n\nwarning: ");
+                out.push_str(w);
+            }
+            out
+        };
+
         let file_groups_arr = result["file_groups"].as_array()?;
         if file_groups_arr.is_empty() {
-            return Some("0 references".to_string());
+            return Some(append_warning("0 references".to_string()));
         }
 
         let groups = groups_from_json(file_groups_arr);
@@ -175,7 +226,13 @@ impl Tool for References {
             format!("  {line:>5}  {context}")
         };
 
-        Some(render_grouped(&groups, total, files, noun, render_item))
+        Some(append_warning(render_grouped(
+            &groups,
+            total,
+            files,
+            noun,
+            render_item,
+        )))
     }
 
     fn output_form(&self) -> OutputForm {

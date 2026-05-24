@@ -10,9 +10,14 @@ pub fn artifact_id(repo: &str, rel_path: &str) -> String {
     hex[..16].into()
 }
 /// Stable artifact id: sha256(abs_path) hex, truncated to 16 chars.
+///
+/// The abs_path is forward-slash-normalized before hashing so paths derived
+/// from native joins (`root.join("docs/foo.md")` → mixed slashes on Windows)
+/// produce the same id as paths derived from forward-slash strings.
 pub fn artifact_id_from_abs(abs_path: &std::path::Path) -> String {
     let mut h = Sha256::new();
-    h.update(abs_path.to_string_lossy().as_bytes());
+    let normalized = crate::util::fs::to_forward_slash(abs_path);
+    h.update(normalized.as_bytes());
     let hex = format!("{:x}", h.finalize());
     hex[..16].into()
 }

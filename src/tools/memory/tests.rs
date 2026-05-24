@@ -35,6 +35,7 @@ async fn test_ctx_with_project() -> (tempfile::TempDir, ToolContext) {
             section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
         },
     )
 }
@@ -49,6 +50,7 @@ async fn test_ctx_no_project() -> ToolContext {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     }
 }
 
@@ -592,6 +594,16 @@ fn format_read_memory_shows_content() {
     );
 }
 
+#[test]
+fn memory_declares_output_form_text() {
+    // Pinned wire contract: small `memory` results (topic lists / read content)
+    // render via the compact text form, not pretty JSON. Both helpers are
+    // lossless (all topic names, full content verbatim), so the small path is
+    // safe to flip.
+    use crate::tools::{OutputForm, Tool};
+    assert_eq!(Memory.output_form(), OutputForm::Text);
+}
+
 #[tokio::test]
 async fn memory_write_and_read_via_dispatch() {
     let (dir, ctx) = test_ctx_with_project().await;
@@ -805,7 +817,10 @@ fn extract_title_multibyte_at_boundary() {
     // Title body (minus the "...") should be valid UTF-8 and <= 80 bytes
     let body = &title[..title.len() - 3];
     assert!(body.len() <= 80);
-    assert!(body.len() % 3 == 0, "should truncate at char boundary");
+    assert!(
+        body.len().is_multiple_of(3),
+        "should truncate at char boundary"
+    );
 }
 
 #[tokio::test]
@@ -967,6 +982,7 @@ async fn memory_write_routes_to_project_dir() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     // Write memory to mcp-server project

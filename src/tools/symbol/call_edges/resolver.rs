@@ -679,7 +679,17 @@ mod tests {
         let fixture = dir.path().join("fixture.rs");
         std::fs::write(&fixture, src).unwrap();
 
-        let fixture_uri = format!("file://{}", fixture.to_string_lossy());
+        let fixture_uri = {
+            // Build file:// URI in a way that works on both Unix and Windows.
+            // Unix: /tmp/foo            → file:///tmp/foo (already starts with /)
+            // Windows: C:\Users\foo    → file:///C:/Users/foo
+            let path_str = fixture.to_string_lossy().replace('\\', "/");
+            if path_str.starts_with('/') {
+                format!("file://{}", path_str)
+            } else {
+                format!("file:///{}", path_str)
+            }
+        };
 
         // Build a reference location pointing at the "foo" identifier inside `bar`
         // "fn bar() { foo(1); }" — "foo" starts at col 11 on line 0

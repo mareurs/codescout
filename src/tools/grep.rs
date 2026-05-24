@@ -35,11 +35,13 @@ impl Tool for Grep {
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
         let pattern = super::require_str_param_or(&input, "pattern", &["query", "regex"])?;
-        let raw_path = input["path"].as_str().unwrap_or(".");
+        let raw_path = strip_buffer_ref_quotes(input["path"].as_str().unwrap_or("."));
 
         // Buffer ref (@tool_*, @cmd_*, @file_*): search the cached content
         // instead of treating the ref as a filesystem path.
         if raw_path.starts_with('@') {
+            let mut input = input.clone();
+            input["path"] = serde_json::json!(raw_path);
             return grep_in_buffer(&input, ctx).await;
         }
 
@@ -550,6 +552,23 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
     Ok(result)
 }
 
+/// Strip surrounding quotes/backticks from @ref paths the same way read_file
+/// does. Lets buffer-ref greps survive LLM quoting habits.
+fn strip_buffer_ref_quotes(path: &str) -> &str {
+    for q in ['"', '\'', '`'] {
+        if let Some(inner) = path.strip_prefix(q).and_then(|s| s.strip_suffix(q)) {
+            if inner.starts_with("@file_")
+                || inner.starts_with("@cmd_")
+                || inner.starts_with("@tool_")
+                || inner.starts_with("@ack_")
+            {
+                return inner;
+            }
+        }
+    }
+    path
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -568,6 +587,7 @@ mod tests {
             section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
         }
     }
 

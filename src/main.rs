@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+#[cfg(unix)]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
@@ -78,6 +79,7 @@ enum Commands {
     },
 
     /// Run the LSP multiplexer (internal — spawned automatically by codescout)
+    #[cfg(unix)]
     #[command(hide = true)]
     Mux {
         /// Path to the Unix socket to listen on
@@ -130,25 +132,36 @@ enum Commands {
     Version,
 
     /// Read and mutate artifacts (find, get, graph, state-at, create, …).
+    #[cfg(feature = "librarian")]
     Artifact {
         #[command(subcommand)]
         verb: codescout::cli::artifact::Verb,
     },
 
     /// Read and write artifact events (list, create).
+    #[cfg(feature = "librarian")]
     ArtifactEvent {
         #[command(subcommand)]
         verb: codescout::cli::artifact_event::Verb,
     },
 
     /// Read and trigger artifact augmentation refreshes.
+    #[cfg(feature = "librarian")]
     ArtifactRefresh {
         #[command(subcommand)]
         verb: codescout::cli::artifact_refresh::Verb,
     },
 
     /// Attach or merge augmentation (prompt + params) on an artifact.
+    #[cfg(feature = "librarian")]
     ArtifactAugment(codescout::cli::artifact_augment::AugmentArgs),
+
+    /// Audit markdown files for stale code references (file paths, symbols,
+    /// line refs, link targets, module paths). Surfaces broken references
+    /// against the current filesystem + LSP symbol index. Used by CI gates
+    /// against `master`/PR docs to catch drift.
+    #[cfg(feature = "librarian")]
+    AuditDocRefs(codescout::cli::audit_doc_refs::AuditArgs),
 }
 
 fn parse_env_kv(s: &str) -> Result<(String, String), String> {
@@ -296,18 +309,27 @@ async fn main() -> Result<()> {
             tracing::info!("Launching dashboard for {}", root.display());
             codescout::dashboard::serve(root, host, port, !no_open).await?;
         }
+        #[cfg(feature = "librarian")]
         Commands::Artifact { verb } => {
             codescout::cli::artifact::dispatch(verb).await?;
         }
+        #[cfg(feature = "librarian")]
         Commands::ArtifactEvent { verb } => {
             codescout::cli::artifact_event::dispatch(verb).await?;
         }
+        #[cfg(feature = "librarian")]
         Commands::ArtifactRefresh { verb } => {
             codescout::cli::artifact_refresh::dispatch(verb).await?;
         }
+        #[cfg(feature = "librarian")]
         Commands::ArtifactAugment(args) => {
             codescout::cli::artifact_augment::run(args).await?;
         }
+        #[cfg(feature = "librarian")]
+        Commands::AuditDocRefs(args) => {
+            codescout::cli::audit_doc_refs::run(args).await?;
+        }
+        #[cfg(unix)]
         Commands::Mux {
             socket,
             lock,

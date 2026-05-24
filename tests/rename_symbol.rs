@@ -37,6 +37,7 @@ async fn project(files: &[(&str, &str)]) -> (tempfile::TempDir, ToolContext) {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             codescout::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     (dir, ctx)
 }

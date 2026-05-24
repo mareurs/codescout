@@ -6,6 +6,8 @@ owners: []
 tags:
   - session-log
   - bug-fix
+topic: Multi-session bug-fix work stream — frictions and wins from closing open buffer/markdown bugs in docs/issues/
+time_scope: open-ended
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -49,6 +51,10 @@ tags:
 | F-3 | 2026-05-18 | med | plan-prose | fixed-verified | Plan test assertions cited non-existent `RecoverableError.hint` field |
 | F-4 | 2026-05-18 | med | codescout-tool | fixed-via-bug-tracker | `edit_markdown action="replace"` with a heading clobbers the whole section body |
 | F-5 | 2026-05-18 | high | release-pipeline | open | HEAD detached from `experiments` without `git checkout` in this session |
+| F-6 | 2026-05-20 | med | release-pipeline | open | HEAD non-compiling + 11 dormant clippy-1.95 lints exposed by toolchain bump |
+| F-8 | 2026-05-23 | med | codescout-tool | fixed-verified | `format_read_file` dispatches on `type`; json_path output collided → rendered `"0 lines"` |
+| F-12 | 2026-05-24 | med | codescout-tool-usage | fixed-verified | Dismissed `references`'s "use call_graph for authoritative callers" warning → shipped half-fix, missed `build.rs` duplicate |
+
 ## Wins Index
 
 
@@ -58,6 +64,8 @@ tags:
 | W-2 | 2026-05-18 | med | Pre-dispatch recon scouts type accessors named in plan assertions | Task 2's first subagent would have failed `cargo check` on `err.hint.as_deref()` (no such field); 1+ wasted round-trip per test, controller drift mid-dispatch | validated |
 | W-3 | 2026-05-18 | high | `git merge --ff-only <sha>` for detached-HEAD recovery under concurrent work | Naive `git branch -f` would silently traverse a parallel session's commit (the F-13 failure mode); `--ff-only` errors loudly on stale tip instead | promotion-eligible |
 | W-4 | 2026-05-18 | high | Pre-fix recon validates filed-bug claims against pinned regression tests | Would have implemented a "fix" that broke the BUG-037 regression test `editing_start_line_does_not_walk_back_to_outer_attribute_on_impl_block`; bug filing itself was inaccurate (claimed attrs not included; actually they ARE via BUG-031) | validated |
+| W-5 | 2026-05-24 | med | Deserialize before asserting: test against semantic data, not serialized text | Round-2 Windows fix asserted on JSON-encoded `text` containing escaped backslashes; passed Linux but broke Windows. Saves ≥1 CI cycle (10-15 min) per cross-platform test fix | validated |
+| W-6 | 2026-05-24 | high | Cross-platform representation choices apply at every read AND write seam | Round 5 normalized writes only; round 6 had to fix 6 separate read-side boundaries (LIKE patterns, scope filters, substring checks). Missed read-side normalization is silent until integration. One miss (delete_orphan_repos LIKE) was destructive — wiped every catalog row. | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -436,6 +444,402 @@ Promote to CLAUDE.md as a permanent rule:
 > committing to a fix direction.
 
 **Status:** validated — promotable; awaiting CLAUDE.md edit.
+
+## F-6 — HEAD non-compiling on `experiments`; clippy 1.95 toolchain bump exposed 11 dormant lints
+
+**Observed:** 2026-05-20, pre-commit recon for a 3-way commit split of uncommitted changes (IL3 narrow, probe sentinels, gfx1101 arch bump). User said `cargo clippy` must pass per CLAUDE.md; clippy failed with 11 errors, raising the question of whether the uncommitted diff introduced them.
+
+**When:** Phase-1 scout: `git stash push -u` + `cargo clippy --all-targets -- -D warnings` against bare HEAD.
+
+**Expected (working assumption):** HEAD `experiments` compiles cleanly. Uncommitted diff might or might not introduce lints; stash-and-reclippy isolates the blame.
+
+**Got (scouted reality):** Two independent problems entangled.
+
+1. **HEAD does not compile.** With uncommitted diff stashed, `cargo clippy` failed with `E0063: missing field guide_hints_emitted in initializer of ToolContext` at `src/tools/run_command/tests.rs:372`. The `guide_hints_emitted` field was added to `ToolContext` in commit `68947c4a feat(prompts): first-call hint mechanism for get_guide topics`, but the run_command test fixtures were not updated in the same commit. The uncommitted `tests.rs` changes (`+guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default()))` × 12 sites) are silently *fixing* this broken state, not adding new functionality. The split-commit plan must keep these test fixture edits paired with the IL3 commit (or be its own commit) — they are load-bearing.
+
+2. **Clippy 1.95 added new lints** (URLs cite `rust-clippy/rust-1.95.0/`). With uncommitted diff applied, compilation passes, and 11 pre-existing lints fire across 6 unrelated files:
+   - `src/librarian/preview/memory.rs:16`, `src/logging.rs:66`, `src/tools/file_group.rs:38` — `unnecessary_sort_by` (3)
+   - `src/retrieval/sync.rs:174`, `src/tools/symbol/call_graph/traversal.rs:86` — `useless_conversion` on `.into_iter()` (2)
+   - `src/tools/markdown/edit_markdown.rs:51, 174, 269` — `unnecessary_cast usize as usize` (3)
+   - `src/util/path_security.rs:444, 452, 459` — `collapsible_match` in tool-name validate arms (3) — NOT in the IL3 functions edited by the uncommitted diff, in the unrelated `validate_tool_for_path` match block.
+
+**Probable cause:**
+- Problem 1: `feat(prompts)` commit landed without `cargo test` against `run_command` test fixtures, OR was tested locally with stale build artifacts that didn't recompile the affected test file. Pre-commit `cargo test` rule (CLAUDE.md) was elided.
+- Problem 2: Rust toolchain auto-updated to 1.95 between last clean clippy run and now. New lints are mechanical.
+
+**Workaround:**
+- Problem 1: keep the `tests.rs` field-init edits in the same commit as the IL3 narrow, or as a precursor compile-fix commit. Don't split them off as "test cleanup."
+- Problem 2: run `cargo clippy --fix --allow-dirty --allow-staged` to auto-apply the 11 fixes, then commit as `chore(clippy): adopt clippy 1.95 suggestions`. Keep it separate from feature commits to keep the lint-bump signal legible in `git log`.
+
+**Severity:** med — Problem 1 means HEAD on a public-facing branch is broken; any developer cloning `experiments` would fail `cargo test` without the uncommitted local edits. Problem 2 is mechanical cleanup but blocks the project's CLAUDE.md "clippy clean before commit" gate.
+
+**Status:** open — pending the cleanup commit + ship to master.
+
+**Fix idea / Pointer:** This recon session — split-commit plan adjusted to (1) clippy 1.95 auto-fix cleanup, (2) IL3 narrow + tests.rs field init + bug doc, (3) probe sentinels, (4) docker-compose gfx1101 + backtick-eof bug doc.
+
+---
+
+## F-7 — `references` undercounts vs `call_graph`; root is live-incomplete-LSP vs persistent edge-cache, NOT position
+
+**Observed:** 2026-05-21, debugging the references-undercount bug
+(`docs/issues/2026-05-21-references-undercounts-vs-call-graph.md`). Live
+`references(symbol="format_read_file", path="src/tools/read_file.rs")` returned 3;
+`call_graph(direction="callers")` returned 17; `grep` ground-truth = 17 call sites
+in `src/tools/edit_file/tests.rs`.
+
+**When:** Phase-1 root-cause scout of the two tools' resolution paths, before any fix.
+
+**Expected (initial hypothesis):** `references` queries LSP at the *item* start
+(column of `pub`) instead of the identifier, so rust-analyzer misfires and
+underreports. (Plausible because a wrong-token reference query returns garbage.)
+
+**Got (scouted reality):**
+- `references` (`src/tools/symbol/references.rs:54-59`) resolves position via
+  `find_unique_symbol_by_name_path` → `sym.start_line/start_col`, then calls
+  `client.references()` (`textDocument/references`, `include_declaration: true`,
+  no truncation — `src/lsp/client.rs:1032-1058`).
+- `SymbolInfo.start_line/start_col` come from **`selection_range.start`** (the
+  identifier), NOT `range.start` (`src/lsp/client.rs:159-161`; pinned by test
+  `convert_document_symbols_uses_selection_range`). **Position is correct** →
+  position-bug hypothesis REJECTED.
+- references' build-dir + scope filters dropped 0 here (`excluded=0`), so the live
+  `textDocument/references` itself returned only 3 — the undercount is upstream of
+  all our code.
+- `call_graph` (`src/tools/symbol/call_graph/mod.rs:222-234`) reads a **persistent
+  SQLite `EdgeCache.lookup_callers(symbol)` by name**; on cache hit it returns the
+  17 edges with **no live LSP call**. The cache was populated earlier by
+  `resolve_one_hop` when the set was complete.
+
+**Probable cause:** `references` is at the mercy of rust-analyzer's *live* index
+state for the queried symbol's references; for the large `cfg(test)` file
+`edit_file/tests.rs` (~4400 lines) RA returned an incomplete set (3 of 17) at query
+time. `call_graph` masks this by serving a complete persisted cache. NOT YET
+CONFIRMED — pending the warming + non-test-symbol experiments below.
+
+**Workaround:** use `call_graph(direction="callers")` for "who calls X"; fall back
+to `grep` for non-call references. Treat a low `references` count as suspect.
+
+**Severity:** high — a navigation tool silently returning ~18% of real callers will
+mislead any refactor that trusts it.
+
+**Status:** open — root mechanism (live-RA incompleteness) needs the confirming
+experiment. Bug tracker: `docs/issues/2026-05-21-references-undercounts-vs-call-graph.md`.
+
+**Fix idea / Pointer:** if confirmed RA-incompleteness, references needs either a
+warmth/completeness guard (re-query until stable, or `did_open`+settle) or should
+consult the same EdgeCache call_graph uses. Investigate `resolve_one_hop`
+(`src/tools/symbol/call_edges/resolver.rs`) — does it use callHierarchy or
+references? If callHierarchy is more complete than textDocument/references on RA,
+references could switch to it.
+## F-8 — `format_read_file` dispatches on `type` field, collided with json_path output
+
+**Observed:** 2026-05-23, debugging "0 lines" output from `read_file(json_path=...)` on both `@tool_*` buffers and real JSON files.
+
+**When:** Two consecutive failures — first reproducing the user-reported friction with `artifact(get, full=true)` → `read_file(@tool_*, json_path="$.body")` returning `"0 lines\n\n  Buffer: @file_*\n  hint..."`. Then auditing for other sites surfaced the same shape in `read_json_path_nav` for plain JSON files.
+
+**Expected:** A valid `json_path` extraction renders with line count + content (small) or line count + buffer ref (large).
+
+**Got:** `"0 lines"` regardless of extracted content size — even when the underlying `@file_*` buffer contained 128 lines of body.
+
+**Root cause:** `format_read_file` (src/tools/read_file.rs:678) dispatches on `val["type"].as_str()` FIRST. Both `read_from_buffer` (line 175) and `read_json_path_nav` (line 354) emitted `"type": type_name` where `type_name` came from `extract_json_path` (values like `"string"`, `"object"`, `"array"`, `"number"`). These all fell through to `format_read_file_summary`'s `_ => {}` fallback case; `line_count` was never written by these paths, defaulted to `0`. Result: `"0 lines\n"` rendered with no content branch ever consulted.
+
+The bug was invisible until a tool returned `type: <a value not in {source, markdown, json, toml, yaml, config, generic}>`. All in-tree summarizers happen to emit one of the seven known types, so test coverage didn't surface the gap.
+
+**Workaround applied:** Renamed `"type"` to `"value_type"` in both emission sites. `format_read_file` no longer dispatches to summary mode for these results; Content mode (small) and "Old no-content buffered mode" (oversized) handle them correctly. Oversized branch also gains `total_lines: line_count` so the buffered-mode formatter renders an accurate count.
+
+**Severity:** med — degrades agent UX on every `read_file(json_path=...)` call extracting a scalar/markdown body. No data loss; the buffered content was still reachable via the `@file_*` ref the formatter printed alongside the misleading "0 lines". User reported it via this session's transcript.
+
+**Status:** fixed-verified — commit `16c5cfd2 fix(read_file): rename json_path output 'type' to 'value_type'`. Verified post-`/mcp` reconnect with `artifact(get, full=true)` → `read_file(@tool_*, json_path="$.body")` → `128 lines\n\n  Buffer: ...`. Also verified inline path with `read_file("scripts/package.json", json_path="$.private")` → `1 line\n\ntrue`.
+
+**Fix idea / Pointer:** Defensive improvement candidate (not done in this commit): make `format_read_file_summary` log/warn on unknown `type` variants rather than fallthrough rendering `"{line_count} lines\n"` with no body branch. Would have caught the collision at first sighting.
+
+## F-9 — `audit_doc_refs` `fail_on` arg silently ignores `med` and `low` despite docs advertising them
+
+**Observed:** 2026-05-24, pre-implementation reconnaissance for the
+`codescout audit-doc-refs` CLI subcommand (H-5 + R-1 shipping).
+
+**When:** About to write the CLI arg parser with `--fail-on` accepting
+`high | med | low | never`, per `CLAUDE.md` § Standard Ship Sequence step 5
+and the librarian schema docstring.
+
+**Expected (docs):** `librarian(action="audit_doc_refs", fail_on="med")`
+returns exit_code=1 when at least one finding has `severity: med`. Same for
+`low`. Documented in two places:
+- `src/librarian/tools/librarian.rs` schema: *"exit_code 1 when findings reach this severity (high | med | low | never)"*
+- `CLAUDE.md` § Standard Ship Sequence step 5 cites `audit_doc_refs --fail-on med`
+
+**Got (scouted reality):** `src/librarian/tools/audit_doc_refs/mod.rs::build_response`
+(line 542+) hard-codes only two truthy arms:
+
+```rust
+let exit_code: i32 = match fail_on {
+    "high" if findings.iter().any(|f| f.resolution.severity == Severity::High
+        && !matches!(f.resolution.verdict, Verdict::Resolved | Verdict::External)) => 1,
+    "any" if n_broken + n_unknown > 0 => 1,
+    _ => 0,
+};
+```
+
+`fail_on="med"` and `fail_on="low"` fall through the wildcard arm and return
+exit_code=0 — silently behaving like `never`. The `Severity` enum has all
+three variants (High/Med/Low at line 65) so the data is there; the gating
+arm just never references Med/Low.
+
+**Probable cause:** Schema/docs were written aspirationally before
+build_response was extended to honor the lower thresholds; the extension
+never happened. CLI shipping is the natural forcing function — a real
+`--fail-on` flag has to either match the docs or silently lie.
+
+**Workaround (this session):** CLI `--fail-on` accepts only the values the
+MCP code actually honors: `high | any | never`. Matches existing behavior;
+docs in `librarian.rs` schema + CLAUDE.md need a follow-up reconciliation
+(either extend build_response or correct the docs).
+
+**Severity:** med — would have produced a CI gate that silently lets `med`
+findings through despite the user believing `--fail-on med` was active.
+A noisy bug (silent no-op gates are the worst kind) but not cascading;
+controller absorbs the divergence by accepting only verified values.
+
+**Status:** mitigated — CLI accepts only verified values for this session.
+Follow-up: decide between extending build_response or rewriting docs;
+either ships in a separate change.
+
+**Fix idea / Pointer:** `src/librarian/tools/audit_doc_refs/mod.rs:542`
+(build_response). Either add `"med" if findings.iter().any(|f| matches!(f.resolution.severity, Severity::Med | Severity::High) && ...)` arms, or downgrade the docs to `high | any | never` to match reality.
+
+## F-10 — RELEASE-TODO advertises "CI pipeline" as unchecked; workflow already exists, push trigger points at nonexistent branch
+
+**Observed:** 2026-05-24, scouting `.github/` directory before writing the CI
+workflow for H-5 + R-1.
+
+**When:** About to `create_file(.github/workflows/ci.yml, ...)` based on
+RELEASE-TODO High Priority item *"CI pipeline — GitHub Actions workflow
+running `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test` on
+every PR. Single biggest protection against bad contributions."*
+
+**Expected (docs):** No CI workflow exists; needs to be created from scratch.
+
+**Got (scouted reality):** `.github/workflows/ci.yml` exists with 5 jobs:
+- `fmt` (cargo fmt --check)
+- `clippy` (cargo clippy -- -D warnings)
+- `test` (3×3 matrix: linux/macos/windows × default/local-embed/no-features)
+- `tool-docs-sync` (lints tools manual stays in sync with `src/tools/*.rs`)
+- `msrv` (cargo check on 1.82)
+
+Two bugs in the existing workflow:
+1. `on.push.branches: [main]` — the repo's protected branch is `master`
+   (per CLAUDE.md § Branch Strategy). Push-trigger is dead.
+2. No `audit-doc-refs` job — the lint that catches doc/code drift on PRs.
+
+**Probable cause:** RELEASE-TODO was authored before CI was built and never
+updated when CI shipped. The `main` vs `master` branch mismatch is a
+copy-from-template artifact (most repos default to `main`).
+
+**Workaround (this session):** Skip the scratch creation; surgically edit
+the existing `ci.yml` to (a) fix the push branches list, (b) add the
+audit-doc-refs job. Update RELEASE-TODO to reflect the partial-shipped
+state.
+
+**Severity:** med — would have produced a duplicate / clobbering workflow
+file. The existing workflow is invisible to a controller that trusts
+RELEASE-TODO, so a from-scratch write was a real risk.
+
+**Status:** mitigated — edits target the existing file this session.
+
+**Fix idea / Pointer:** `.github/workflows/ci.yml`, `docs/RELEASE-TODO.md`
+"High Priority" section.
+
+## F-11 — CI runner missing mold linker required by `.cargo/config.toml`
+
+**Observed:** 2026-05-24, CI smoke test for H-5 + R-1 after sccache fix
+shipped. Audit Doc Refs / Clippy / MSRV jobs fail with
+`collect2: fatal error: cannot find 'ld'` despite sccache now installing
+correctly.
+
+**When:** After mozilla-actions/sccache-action@v0.0.7 fix (7f107d8e) lands;
+investigating "next layer" of pre-existing CI rot. Initially diagnosed as a
+runner-image regression per researcher MCP synthesis on
+`collect2: cannot find 'ld'`. Researcher cited slim-image binutils
+omissions and `-fuse-ld=lld` configuration as causes. Scouted local config
+to verify which applies.
+
+**Expected (assumption):** Either the runner image is missing
+`build-essential`, or the project uses default cc/ld (no special linker
+config). Standard GitHub Actions ubuntu-latest should have `ld` in PATH.
+
+**Got (scouted reality):** `.cargo/config.toml` lines 5-7:
+```toml
+[target.x86_64-unknown-linux-gnu]
+linker = "cc"
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+```
+The project mandates the **mold linker** for x86_64 Linux. `collect2` is
+GCC's internal linker driver; it reports the missing program as `'ld'` in
+its error message regardless of which linker name was actually requested.
+Researcher synthesis pointed at this exact false-positive pattern (their
+note: *"the system fails to locate specific linkers like `ld.lld` when the
+`-fuse-ld=lld` flag is invoked, rather than a total absence of the GNU
+linker"*). Mold has the same shape — `-fuse-ld=mold` requires mold to be on
+PATH.
+
+Same config also mandates `rustc-wrapper = "sccache"` and `jobs = 64`. The
+file looks like a developer's local performance config (mold + sccache +
+64 jobs) but is committed to the repo.
+
+**Probable cause:** `.cargo/config.toml` was authored for local build speed
+(mold is much faster than ld for large Rust projects) and committed
+because it provides project-wide consistency. CI was never updated to
+install mold because CI hasn't successfully run since at least 2026-04-13
+(per F-10 + the historical run count).
+
+**Workaround:** Add `rui314/setup-mold@v1` step before `cargo build`
+invocations in every affected job (clippy, test matrix, msrv,
+audit-doc-refs). Format job unaffected (no compile step). Mirrors the
+sccache install pattern.
+
+Alternative: override the project rustflags in CI via env, e.g.
+`CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS=""`. Less clean —
+diverges CI from local build behavior.
+
+**Severity:** med — would have required a third CI iteration without the
+.cargo/config.toml scout (the researcher MCP correctly pointed at the
+`-fuse-ld=` pattern; scout confirmed which linker). Without the scout I'd
+have tried `apt-get install -y build-essential binutils` (the obvious
+guess) and watched it fail because the real issue isn't binutils.
+
+**Status:** open — fix pending user direction. Two pre-existing items also
+visible behind this one: macos/windows runners don't honor the linux-gnu
+target config so they hit different blockers; tool-docs-sync diff remains
+real drift.
+
+**Fix idea / Pointer:** `.github/workflows/ci.yml` — add
+`uses: rui314/setup-mold@v1` step (after `mozilla-actions/sccache-action`,
+before `Swatinem/rust-cache@v2`) in jobs clippy, test, msrv,
+audit-doc-refs. Also: `.cargo/config.toml` may belong as
+`.cargo/config.toml.example` with a CI-friendly version checked in instead.
+
+## F-12 — Dismissed `references` "use call_graph" warning → shipped half-fix to `extract_surface`, missed build.rs duplicate
+
+**Observed:** 2026-05-24, during CI rot rehab after CI run `26356842338` showed
+Windows builds panicking on `extract_surface` with CRLF source.md.
+
+**When:** Mid-fix scout. About to edit `src/prompts/source.rs::extract_surface`,
+ran `references(symbol="extract_surface", path="src/prompts/source.rs")` to
+verify call sites. Tool returned 3 results AND emitted this warning:
+
+> `warning: references found 3, but call-hierarchy found 5 call sites —
+>  rust-analyzer's textDocument/references is incomplete for this symbol.
+>  Use call_graph(symbol, direction="callers") for the authoritative caller
+>  set.`
+
+**Expected (what I should have done):** Read the warning, run `call_graph` per
+its instruction. The 2 missing call sites would have surfaced `build.rs:71`
+calling its OWN `extract_surface` (duplicate parser declared at `build.rs:86`,
+unreachable from `references` because build.rs lives outside the LSP project
+index — it compiles as a separate unit).
+
+**Got (what I did):** Skimmed the warning, treated the 3 hits as the full set,
+shipped the CRLF fix only in `src/prompts/source.rs`. Pushed commit `c83b5544`,
+verified local tests pass, monitored CI run `26357101302` — Windows tests
+failed with the **exact same panic** as before. Spent another 5–10 minutes
+investigating "why didn't the fix take" before realizing build.rs has a
+duplicate parser the build script actually runs. Shipped follow-up fix in
+`af64c737`.
+
+**Probable cause:** F-7 (same tracker, 2026-05-21) already pinned the root
+mechanism — `references` queries live `textDocument/references` which is
+incomplete on some symbols. The tool surfaces this clearly with a per-call
+warning naming the workaround. I dismissed it as a generic "tool noise" line
+instead of a specific load-bearing pointer.
+
+**Workaround:** When the `references` warning fires, **always** run
+`call_graph(direction="callers")` before assuming the result is exhaustive.
+Especially for: build scripts (build.rs), proc-macros, dev-dependencies,
+doctests, or any code that lives outside the main crate's LSP index. Their
+callers are invisible to live rust-analyzer.
+
+**Severity:** med — cost was one wasted CI cycle (~10 min) + ~5 min of
+investigation. Bigger lesson: any tool that explicitly tells you it's
+incomplete is signalling at exactly the seams where the incompleteness will
+bite. F-7 already documents the *mechanism*; F-12 documents the *cost of
+dismissing the surfaced warning*.
+
+**Status:** fixed-verified — `af64c737` shipped CRLF-tolerance to both
+parsers. CRLF test in `src/prompts/source.rs` pins LF→CRLF byte-equality.
+build.rs has no test surface (it runs at compile time on Windows runners; CI
+matrix is the verification).
+
+**Fix idea / Pointer:** None for the tools themselves — both `references`
+and `call_graph` work as designed. The remediation is **behavioural**: read
+the warning, follow its instruction. Consider promoting this to CLAUDE.md
+under a "Tool warning discipline" section if a third datapoint lands.
+References: F-7 (root mechanism), `docs/issues/2026-05-21-references-undercounts-vs-call-graph.md`.
+## W-5 — Test against semantics, not representation: deserialize before asserting on cross-platform output
+
+**Observed:** 2026-05-24, during Windows CI rehab session — round-2 commit (98907430) shipped 14/16 fixes cleanly but two of them broke on the actual Windows runner despite passing locally on Linux.
+
+**Pattern:** When patching a cross-platform test that asserts on a string containing path or path-like data, do not assert against the serialized text. Parse the response and assert against the deserialized data field instead. Test against the **semantic value**, not the **serialization artifact**.
+
+**Counterfactual:** Without this discipline, round-2's two regressions cost a full CI cycle (~10 min) plus a round-3 fix commit. The specific failures:
+
+1. `run_command_output_keeps_absolute_project_paths` (src/server.rs):
+   - Asserted `text.contains(&abs)` where `text` is the JSON-serialized MCP response and `abs` is a raw filesystem path.
+   - On Unix: forward-slashes don't need JSON escaping → assertion passed locally.
+   - On Windows: JSON-serialized backslashes are doubled (`\` → `\\`) but `abs` has single backslashes → `contains` fails.
+   - Fix: parse the JSON, extract `parsed["stdout"].as_str()`, assert against the deserialized string. Platform-agnostic.
+
+2. `resolve_refs_substitutes_cmd_ref` (src/tools/output_buffer.rs):
+   - Asserted `resolved.chars().nth("grep hello ".len()) == Some(MAIN_SEPARATOR)`.
+   - On Unix: position 11 of `grep hello /tmp/...` is `/` (separator AND absolute-path prefix).
+   - On Windows: position 11 of `grep hello C:\Users\...` is `C` (drive letter). MAIN_SEPARATOR is `\`, found at position 13 not 11.
+   - Fix: accept either a leading separator OR a drive-letter prefix at positions 0-1. Both shapes valid for "absolute path".
+
+The deeper lesson: a single-OS local pass is necessary but **not sufficient** for cross-platform correctness. Asserting against serialized text bakes in platform-specific serialization quirks (JSON escaping, separator characters as path prefixes). Asserting against deserialized data tests the substantive property under test (path roundtrip) rather than the encoding.
+
+**Confirming data points:**
+1. R2026-05-24 Windows CI run 26360060746 — 2 of 5 round-2 fixes regressed on Windows despite Linux pass.
+2. Both failures shared the same root cause: assertion against representation, not semantics.
+
+**Impact:** med — saves ≥1 CI cycle (10-15 min) per cross-platform test fix that touches output/serialization. Higher impact for tests that ship to multi-OS matrices where each cycle costs N×OS.
+
+**Promote-when:** A third cross-platform CI fix that would have benefited from the "deserialize-then-assert" discipline. At 3 datapoints, promote to `CLAUDE.md` under a "Testing Patterns" section: "When asserting on responses that contain platform-varying data (paths, line endings, drive letters), parse and assert against the deserialized data field. The serialized text bakes in JSON escapes, separator characters, and other platform quirks that mask correctness drift."
+
+**Status:** validated — single datapoint (this session), pattern explicitly captured in round-3 commit (bc05c0b3) message and code comments. Awaiting promotion criterion.
+
+## W-6 — Cross-platform representation choices must be applied at every read AND write seam
+
+**Observed:** 2026-05-24, Windows-default CI rehab continuation. Round 5 (6771cc1a) introduced forward-slash normalization for catalog writes (`artifact::upsert`, `artifact_id_from_abs`). This closed 6 of 18 failures but left 12 — including tests whose write path was now normalized but whose **read** path (LIKE patterns, scope filters, contains-substring checks) still used native separators.
+
+**Pattern:** When you choose a normalized representation for storage (forward-slash strings, lowercased, base64, whatever) — apply that normalization at **every** boundary that produces a string compared against the stored form. Read-side normalization is not optional; it's the symmetric half of the choice. Missing read-side normalization is a silent miss because:
+- Unit tests on the writer pass (forward-slash output matches forward-slash assertion).
+- Unit tests on the reader pass (native LIKE pattern matches native stored string — until the writer changes).
+- The cross-cutting bug only surfaces in integration where writes flow into the reader.
+
+**Counterfactual:** Without W-6's discipline, round 5 looked complete (6 fixes shipped, indexer tests green) but 12 of 18 originally-failing tests still failed. Each was a separate boundary I'd missed:
+- `delete_orphan_repos` LIKE pattern (2 tests) — wiped every row because the keep clause matched nothing on Windows.
+- `path_prefix_clause` in scope filter (1 test) — filtered out all rows because the prefix had backslashes but stored rows had forward-slashes.
+- `audit_doc_refs::parser::md_file` (2 tests) — map keys had backslashes; assertion expected forward-slashes.
+- `audit_doc_refs::severity::matches_archive/matches_issues` (no failures yet, but latent) — `path.to_string_lossy().contains("docs/archive/")` returns false on Windows because the stringified path has backslashes.
+
+The cost of missing these in round 5 was a wasted CI cycle (~15 min) and a confusing "we shipped 6, why are 12 still red" investigation.
+
+**Confirming data points:**
+1. Round 5 → Round 6 in this session: 6 boundaries forgot, 1 (delete_orphan_repos) caused total-row-deletion that would have been a destructive bug in production catalog migration.
+2. Pending: any future representation choice in a multi-platform codebase.
+
+**Impact:** high — applies to representation choices broadly (path separator, case normalization, encoding). Saves a CI cycle per missed boundary. Could prevent destructive production bugs (R5 nearly did, on the orphan-cleanup path).
+
+**Promote-when:** A second representation-choice rollout that surfaces missed read-side boundaries. At 2 datapoints, promote to `docs/PROGRESSIVE_DISCOVERABILITY.md` (or a new `docs/conventions/cross-platform-representation.md`) as a checklist for representation rollouts: "list every boundary that produces or compares the representation string; apply normalization at each."
+
+**Concrete checklist (provisional, for future rollouts):**
+1. Write site (DB upsert / serialization output): normalize on write.
+2. ID generation: normalize on hash input.
+3. Query LIKE patterns / IN clauses / WHERE comparisons: normalize on query construction.
+4. In-memory filter clauses that compare against the stored form: normalize on filter construction.
+5. Substring matching against literal forward-slash patterns (`contains("docs/...")`): normalize the path before checking.
+6. Test assertions using the representation: assert against normalized form or normalize both sides before compare.
+
+**Status:** validated — single datapoint (this session), but the pattern is broad enough that the next rollout will validate quickly.
 
 ## Template for new entries
 

@@ -1,12 +1,15 @@
 use super::{ResourceBytes, ResourceDescriptor, ResourceError, ResourceProvider};
-use std::path::PathBuf;
 
+/// A documentation resource whose body is embedded in the binary at compile
+/// time via `include_str!`. Decouples resource availability from the active
+/// project root — doc URIs resolve identically regardless of which project
+/// the agent is currently focused on.
 #[derive(Debug, Clone)]
 pub struct DocSource {
     pub uri: String,
     pub name: String,
     pub description: Option<String>,
-    pub path: PathBuf,
+    pub content: &'static str,
 }
 
 pub struct DocProvider {
@@ -39,10 +42,7 @@ impl ResourceProvider for DocProvider {
             .iter()
             .find(|s| s.uri == uri)
             .ok_or_else(|| ResourceError::NotFound(uri.into()))?;
-        let body = tokio::fs::read_to_string(&src.path)
-            .await
-            .map_err(|e| ResourceError::SourceUnavailable(uri.into(), e.to_string()))?;
-        Ok(ResourceBytes::Text(body))
+        Ok(ResourceBytes::Text(src.content.to_string()))
     }
 }
 
@@ -51,15 +51,12 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn doc_provider_reads_existing_file() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("guide.md");
-        std::fs::write(&path, "# hello").unwrap();
+    async fn doc_provider_returns_embedded_content() {
         let p = DocProvider::new(vec![DocSource {
             uri: "doc://guide".into(),
             name: "guide".into(),
             description: None,
-            path,
+            content: "# hello",
         }]);
         let bytes = p.read("doc://guide").await.unwrap();
         match bytes {
@@ -69,14 +66,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn doc_provider_reports_missing_source() {
+    async fn doc_provider_reports_unknown_uri() {
         let p = DocProvider::new(vec![DocSource {
-            uri: "doc://missing".into(),
-            name: "missing".into(),
+            uri: "doc://known".into(),
+            name: "known".into(),
             description: None,
-            path: PathBuf::from("/nonexistent/path/does/not/exist"),
+            content: "",
         }]);
-        let err = p.read("doc://missing").await.unwrap_err();
-        assert!(matches!(err, ResourceError::SourceUnavailable(_, _)));
+        let err = p.read("doc://unknown").await.unwrap_err();
+        assert!(matches!(err, ResourceError::NotFound(_)));
     }
 }

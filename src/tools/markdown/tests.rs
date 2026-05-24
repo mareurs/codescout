@@ -91,6 +91,7 @@ async fn test_ctx() -> crate::tools::ToolContext {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     }
 }
 
@@ -749,15 +750,21 @@ fn code_block_at_end_of_file() {
     assert!(result.ends_with('\n'));
 }
 
-/// Unclosed code fence — everything after ``` to EOF is "inside" the code block.
-/// The section boundary should extend to EOF since no real heading follows.
+/// Unclosed code fence — historically (CommonMark-conformant) everything from
+/// ``` to EOF was treated as inside the code block, so `# looks like heading`
+/// was masked and `## Broken`'s section extended to EOF. As of the
+/// last-heading-unaddressable fix (docs/issues/2026-05-21-edit-markdown-last-heading-unaddressable.md),
+/// unbalanced ``` is treated as plain text — otherwise an unmatched fence
+/// dropped into a batch edit silently hides every subsequent heading. With
+/// the new rule, `# looks like heading` is parsed as a real H1, so it
+/// terminates `## Broken`'s section and survives the replace.
 #[test]
 fn unclosed_code_fence() {
     let content = "# Title\n## Broken\ntext\n```\n# looks like heading\ncode\n";
     let result = perform_section_edit(content, "## Broken", "replace", Some("fixed\n")).unwrap();
     assert!(result.contains("fixed"));
-    // The unclosed fence content is part of the section — gets replaced
-    assert!(!result.contains("# looks like heading"));
+    // Unbalanced fence is treated as plain text, so the H1 below it survives.
+    assert!(result.contains("# looks like heading"));
 }
 
 /// Multiple `#` levels inside a single code block — none should act as boundaries.
@@ -1122,6 +1129,40 @@ async fn many_headings_escalates_to_map_shape_even_when_bytes_fit() {
     assert!(
         result.get("file_id").is_some(),
         "expected file_id for MAP shape, got: {result}"
+    );
+}
+
+#[tokio::test]
+async fn read_markdown_call_content_returns_text_map_not_json() {
+    // Regression: small heading-map (ToC) results used to serialize as pretty
+    // JSON via the default Tool::call_content path because ReadMarkdown did not
+    // declare OutputForm::Text. The MAP renderer existed in format_compact but
+    // only fired on the buffered (large-byte) axis. Now both axes reach it, so
+    // a sub-threshold ToC comes through as the indented `# Heading  Ln` form.
+    let body = synth_md(205, 41); // > HEADINGS_HARD_CAP, ~1.8 KB → small path, MAP shape
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("toc.md");
+    std::fs::write(&path, &body).unwrap();
+
+    let ctx = test_ctx().await;
+    let content = super::ReadMarkdown
+        .call_content(serde_json::json!({"path": path.to_str().unwrap()}), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(content.len(), 1, "expected exactly 1 content block");
+    let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+    assert!(
+        text.contains("lines") && text.contains('L'),
+        "expected text MAP form with line markers, got: {text}"
+    );
+    assert!(
+        !text.trim_start().starts_with('{'),
+        "MAP output must be text, not JSON, got: {text}"
+    );
+    assert!(
+        !text.contains("\"headings\""),
+        "MAP output must not carry the raw JSON headings key, got: {text}"
     );
 }
 

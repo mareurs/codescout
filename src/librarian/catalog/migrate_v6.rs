@@ -1,3 +1,27 @@
+//! Schema v6 migration: replace legacy `(repo, rel_path)` columns with
+//! `abs_path`; rename `commits.repo` → `commits.git_root`. See
+//! `docs/superpowers/specs/2026-05-08-librarian-project-model-redesign.md`.
+//!
+//! ## Implicit migration of `artifact_id_from_abs` hash input form
+//!
+//! Round 5 of the Windows CI rehab changed `ids::artifact_id_from_abs` to
+//! hash the forward-slash-normalized path form (previously hashed the OS-native
+//! form). This is a breaking ID change for any Windows catalog DB built
+//! before that commit — same `abs_path` produces a new `id`.
+//!
+//! **There is no explicit migration here.** The change is absorbed by
+//! `artifact::upsert`'s pre-existing pre-DELETE clause
+//! (`DELETE FROM artifact WHERE abs_path = ?1 AND id != ?2`), which was
+//! added for a different reason (F-6a, see commit history) but happens to
+//! cover this case too: on the first post-upgrade walk, the new-id row
+//! displaces the old-id row at the same `abs_path`, and the `link` table's
+//! ON DELETE CASCADE keeps referential integrity. External citations to
+//! the old IDs go stale — that's the documented user-visible cost.
+//!
+//! Reviewer note (Ibex M-1, rounds 3-8): if `artifact_id_from_abs`'s hash
+//! input ever changes again, do NOT rely on this implicit safety net —
+//! add an explicit migration step here.
+
 use anyhow::Result;
 use rusqlite::Connection;
 
@@ -80,7 +104,7 @@ pub(super) fn backfill(conn: &Connection, ws: &WorkspaceConfig, drop_orphans: bo
             let abs = root.join(&rel_path);
             conn.execute(
                 "UPDATE artifact SET abs_path = ?1 WHERE id = ?2",
-                rusqlite::params![abs.to_string_lossy(), id],
+                rusqlite::params![crate::util::fs::to_forward_slash(&abs), id],
             )?;
         }
     }
@@ -95,7 +119,7 @@ pub(super) fn backfill(conn: &Connection, ws: &WorkspaceConfig, drop_orphans: bo
             if let Some(root) = lookup.get(repo.as_str()) {
                 conn.execute(
                     "UPDATE commits SET git_root = ?1 WHERE hash = ?2",
-                    rusqlite::params![root.to_string_lossy(), hash],
+                    rusqlite::params![crate::util::fs::to_forward_slash(root), hash],
                 )?;
             }
         }

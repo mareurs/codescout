@@ -4,7 +4,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use super::format::format_overflow;
-use super::{optional_u64_param, RecoverableError, Tool, ToolContext};
+use super::{optional_u64_param, OutputForm, RecoverableError, Tool, ToolContext};
 use crate::util::text::extract_lines;
 
 pub struct ReadFile;
@@ -112,6 +112,10 @@ impl Tool for ReadFile {
         read_full_file(path, &text, &resolved, &input, &source_tag, ctx)
     }
 
+    fn output_form(&self) -> OutputForm {
+        OutputForm::Text
+    }
+
     fn format_compact(&self, result: &Value) -> Option<String> {
         Some(format_read_file(result))
     }
@@ -119,18 +123,22 @@ impl Tool for ReadFile {
 
 /// Strip surrounding quotes from buffer ref paths.
 ///
-/// LLMs sometimes wrap @ref paths in extra quotes, e.g. `"@tool_abc"`.
-/// Stripping them here lets the ref resolve correctly.
+/// LLMs often wrap @ref paths in extra quoting — double quotes (`"@tool_abc"`),
+/// single quotes (`'@tool_abc'`), or markdown-style backticks (`` `@tool_abc` ``).
+/// Stripping any matched pair here lets the ref resolve correctly.
 fn strip_buffer_ref_quotes(path: &str) -> &str {
-    path.strip_prefix('"')
-        .and_then(|s| s.strip_suffix('"'))
-        .filter(|s| {
-            s.starts_with("@file_")
-                || s.starts_with("@cmd_")
-                || s.starts_with("@tool_")
-                || s.starts_with("@ack_")
-        })
-        .unwrap_or(path)
+    for q in ['"', '\'', '`'] {
+        if let Some(inner) = path.strip_prefix(q).and_then(|s| s.strip_suffix(q)) {
+            if inner.starts_with("@file_")
+                || inner.starts_with("@cmd_")
+                || inner.starts_with("@tool_")
+                || inner.starts_with("@ack_")
+            {
+                return inner;
+            }
+        }
+    }
+    path
 }
 
 /// Read from an output buffer ref (`@file_*`, `@cmd_*`, `@tool_*`).
@@ -167,25 +175,27 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
             let (content, type_name, count) =
                 crate::tools::file_summary::extract_json_path(&text, jp)?;
             let mut result = if crate::tools::exceeds_inline_limit(&content) {
+                let line_count = content.lines().count().max(1);
                 let file_id = ctx
                     .output_buffer
                     .store_file(format!("{path}:{jp}"), content);
                 json!({
                     "file_id": file_id,
                     "path": jp,
-                    "type": type_name,
+                    "value_type": type_name,
                     "format": "json",
+                    "total_lines": line_count,
                     "hint": format!(
-                        "Content stored as plain-text @file_* ref. \
-                         run_command(\"grep pattern {file_id}\") to search, \
-                         or read_file(\"{file_id}\", start_line=N, end_line=M) to browse."
+                        "Extracted value at {jp} ({line_count} lines). \
+                         read_file(\"{file_id}\", start_line=N, end_line=M) to browse, \
+                         or run_command(\"grep pattern {file_id}\") to search."
                     ),
                 })
             } else {
                 json!({
                     "content": content,
                     "path": jp,
-                    "type": type_name,
+                    "value_type": type_name,
                     "format": "json",
                 })
             };
@@ -346,7 +356,7 @@ fn read_json_path_nav(text: &str, resolved: &std::path::Path, jp: &str) -> Resul
     let mut result = json!({
         "content": content,
         "path": jp,
-        "type": type_name,
+        "value_type": type_name,
         "format": "json",
     });
     if let Some(c) = count {
@@ -435,6 +445,21 @@ fn read_with_line_range(
     }
 
     let content = extract_lines(text, start as usize, end as usize);
+    let file_total_lines = text.lines().count();
+
+    if content.is_empty() && (start as usize) > file_total_lines {
+        return Err(RecoverableError::with_hint(
+            format!(
+                "line range {}-{} is past end of file ({} lines)",
+                start, end, file_total_lines
+            ),
+            format!(
+                "File has {} lines. Use a range within 1..={}.",
+                file_total_lines, file_total_lines
+            ),
+        )
+        .into());
+    }
 
     let is_md = path.ends_with(".md") || path.ends_with(".markdown");
     let md_cov = if is_md {
@@ -675,24 +700,18 @@ pub(super) fn format_read_file(val: &Value) -> String {
         return format_read_file_summary(val, file_type);
     }
 
-    // Auto-chunked response: shown_lines present means partial read with content
-    if let Some(shown) = val.get("shown_lines").and_then(|v| v.as_array()) {
-        let start = shown.first().and_then(|v| v.as_u64()).unwrap_or(1) as usize;
-        let end = shown.last().and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    // Auto-chunked response: shown_lines present means partial read with content.
+    // Line numbers are intentionally NOT prefixed — the caller supplied the range,
+    // so per-line numbers are redundant noise (and were slice-relative/wrong here
+    // before). See docs/issues/2026-05-21-read-file-slice-relative-line-numbers.md.
+    if val.get("shown_lines").and_then(|v| v.as_array()).is_some() {
         let total = val["total_lines"].as_u64().unwrap_or(0);
         let complete = val["complete"].as_bool().unwrap_or(true);
-
         let content = val["content"].as_str().unwrap_or("");
-        let lines: Vec<&str> = content.lines().collect();
-        let lines_shown = lines.len();
-        let lineno_width = end.to_string().len();
+        let lines_shown = content.lines().count();
 
-        let mut out = format!("{total} lines\n");
-        for (i, line) in lines.iter().enumerate() {
-            let lineno = start + i;
-            out.push('\n');
-            out.push_str(&format!("{:>width$}| {line}", lineno, width = lineno_width));
-        }
+        let mut out = format!("{total} lines\n\n");
+        out.push_str(content);
 
         if let Some(file_id) = val["file_id"].as_str() {
             out.push_str(&format!("\n\n  Buffer: {file_id}"));
@@ -737,19 +756,11 @@ pub(super) fn format_read_file(val: &Value) -> String {
         return out;
     }
 
+    // Raw content, no per-line number prefixes (caller-supplied ranges make them
+    // redundant; full-file reads can re-derive line numbers trivially).
     let line_word = if total_lines == 1 { "line" } else { "lines" };
-    let mut out = format!("{total_lines} {line_word}\n");
-
-    // Line-numbered content with right-aligned line numbers
-    let lines: Vec<&str> = content.lines().collect();
-    let max_lineno = total_lines as usize;
-    let lineno_width = max_lineno.to_string().len();
-
-    for (i, line) in lines.iter().enumerate() {
-        let lineno = i + 1;
-        out.push('\n');
-        out.push_str(&format!("{:>width$}| {line}", lineno, width = lineno_width));
-    }
+    let mut out = format!("{total_lines} {line_word}\n\n");
+    out.push_str(content);
 
     // Overflow
     if let Some(overflow) = val.get("overflow").filter(|o| o.is_object()) {
@@ -971,6 +982,7 @@ mod tests {
             section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
         }
     }
 
@@ -1019,6 +1031,42 @@ mod tests {
         assert!(
             body.contains("fn alpha"),
             "json_path $.symbols[0].body should return the body string, got: {result}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_file_call_content_returns_line_numbered_text_not_json() {
+        // Regression: small read_file results used to serialize as pretty JSON via
+        // the default Tool::call_content path because ReadFile did not declare
+        // OutputForm::Text. Now both axes reach format_read_file, so sub-threshold
+        // reads come through as raw text. Line-number prefixes were removed
+        // (docs/issues/2026-05-21-read-file-slice-relative-line-numbers.md), so the
+        // content is shown verbatim with no `N| ` prefixes.
+        let content = "alpha\nbeta\ngamma".to_string();
+        let ctx = test_ctx().await;
+        let buf_id = ctx.output_buffer.store_tool("cmd", content);
+
+        let blocks = ReadFile
+            .call_content(
+                json!({ "path": buf_id, "start_line": 1, "end_line": 3 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(blocks.len(), 1, "expected exactly 1 content block");
+        let text = blocks[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+        assert!(
+            text.contains("alpha\nbeta\ngamma"),
+            "expected raw text content, got: {text}"
+        );
+        assert!(
+            !text.contains("1| ") && !text.contains("3| "),
+            "line-number prefixes must be dropped, got: {text}"
+        );
+        assert!(
+            !text.trim_start().starts_with('{'),
+            "read_file output must be text, not JSON, got: {text}"
         );
     }
 }

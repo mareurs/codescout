@@ -21,7 +21,6 @@ pub mod workspace;
 pub mod current_project;
 
 pub mod server;
-pub use server::INSTRUCTIONS;
 pub mod tools;
 
 use anyhow::Result;
@@ -300,7 +299,10 @@ pub(crate) async fn reindex_cli(repo: Option<&str>, force: bool) -> Result<()> {
         for root in &roots {
             cat.conn.execute(
                 "DELETE FROM artifact WHERE abs_path LIKE ?1",
-                rusqlite::params![format!("{}/", root.path.to_string_lossy())],
+                rusqlite::params![format!(
+                    "{}/",
+                    crate::util::fs::to_forward_slash(&root.path)
+                )],
             )?;
         }
     }
@@ -340,6 +342,35 @@ mod tests {
     use super::*;
     use serial_test::serial;
 
+    /// RAII guard: save current value of an env var, set new value, restore on drop.
+    /// Without this, tests that mutate LIBRARIAN_WORKSPACE / LIBRARIAN_DB /
+    /// CODESCOUT_REGISTRY leak their values into the rest of the process — e.g.
+    /// `build_tool_context()` later picks up a stale tempdir path that no longer
+    /// exists, and unrelated tests (e.g. `server::guide_hint_tests::*`) fail with
+    /// "tool 'artifact' not registered". `#[serial]` only serializes tests against
+    /// each other; it does not undo env mutations.
+    struct EnvGuard {
+        key: &'static str,
+        original: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set<V: AsRef<std::ffi::OsStr>>(key: &'static str, value: V) -> Self {
+            let original = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match self.original.take() {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
     #[test]
     #[serial]
     fn imports_codescout_projects() {
@@ -359,8 +390,8 @@ path = "/tmp/proj-b"
         )
         .unwrap();
         let ws_path = tmp.path().join("workspace.toml");
-        std::env::set_var("CODESCOUT_REGISTRY", &registry);
-        std::env::set_var("LIBRARIAN_WORKSPACE", &ws_path);
+        let _registry_env = EnvGuard::set("CODESCOUT_REGISTRY", &registry);
+        let _ws_env = EnvGuard::set("LIBRARIAN_WORKSPACE", &ws_path);
         import_codescout().unwrap();
         let cfg = workspace::load(&ws_path).unwrap();
         assert_eq!(cfg.roots.len(), 2);
@@ -378,6 +409,9 @@ path = "/tmp/proj-b"
         std::fs::write(repo_root.join("docs/specs/a.md"), "# a\n").unwrap();
 
         let ws_path = tmp.path().join("workspace.toml");
+        // Forward-slash form for the TOML literal — Windows backslashes in a
+        // bare double-quoted TOML string trigger escape parsing (e.g. \U is an
+        // 8-hex-digit Unicode escape sequence) and the load fails.
         let ws_content = format!(
             r#"
 [[roots]]
@@ -388,13 +422,13 @@ path = "{}"
 glob = "**/docs/specs/*.md"
 kind = "spec"
 "#,
-            repo_root.display()
+            crate::util::fs::to_forward_slash(&repo_root)
         );
         std::fs::write(&ws_path, ws_content).unwrap();
 
         let db_path = tmp.path().join("catalog.db");
-        std::env::set_var("LIBRARIAN_WORKSPACE", &ws_path);
-        std::env::set_var("LIBRARIAN_DB", &db_path);
+        let _ws_env = EnvGuard::set("LIBRARIAN_WORKSPACE", &ws_path);
+        let _db_env = EnvGuard::set("LIBRARIAN_DB", &db_path);
 
         reindex_cli(None, false).await.unwrap();
         // Second call is idempotent.

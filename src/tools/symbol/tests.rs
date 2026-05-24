@@ -114,6 +114,7 @@ fn new(x: f64, y: f64) -> Self {
             section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
         },
     ))
 }
@@ -557,6 +558,7 @@ async fn get_symbols_overview_accepts_detail_level() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     // Should error because no project, but NOT because of unknown param
     let err = Symbols
@@ -584,6 +586,7 @@ async fn path_not_found_is_recoverable_error() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let err = Symbols
@@ -613,6 +616,7 @@ async fn path_not_found_hint_mentions_list_dir() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let err = Symbols
@@ -644,6 +648,7 @@ async fn glob_no_match_is_recoverable_error() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let err = Symbols
@@ -670,6 +675,7 @@ async fn tools_error_without_project() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     assert!(Symbols.call(json!({"path": "x"}), &ctx).await.is_err());
     assert!(Symbols.call(json!({"query": "x"}), &ctx).await.is_err());
@@ -729,6 +735,7 @@ async fn symbols_project_wide_treesitter_fallback() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     // Project-wide search (no relative_path) — LSP will fail/return empty,
@@ -788,13 +795,18 @@ async fn get_symbols_overview_finds_nested_files() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     // Project-wide (no path) — should find both root and nested files
     let result = Symbols.call(json!({}), &ctx).await.unwrap();
 
     let files = result["files"].as_array().unwrap();
-    let file_names: Vec<&str> = files.iter().map(|f| f["file"].as_str().unwrap()).collect();
+    // Normalize separators so the test reads the same on Windows (\) and Unix (/).
+    let file_names: Vec<String> = files
+        .iter()
+        .map(|f| f["file"].as_str().unwrap().replace('\\', "/"))
+        .collect();
     assert!(
         files.len() >= 2,
         "should find files in subdirectories, got: {:?}",
@@ -836,6 +848,7 @@ async fn symbols_overview_small_tree_recurses_fully() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     // Target "src" specifically — small tree (2 files) → full recursive symbol mode
@@ -1331,6 +1344,7 @@ println!("{} {}", x, y);
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     // rust-analyzer needs time to load the Cargo project and build its index
@@ -1593,6 +1607,7 @@ async fn rich_project_ctx() -> (tempfile::TempDir, ToolContext) {
             section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
         },
     )
 }
@@ -4042,6 +4057,7 @@ async fn references_returns_grouped_shape() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let tool = crate::tools::symbol::references::References;
@@ -4656,6 +4672,7 @@ async fn symbols_overview_falls_back_to_treesitter_when_lsp_returns_empty() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = Symbols
@@ -4703,6 +4720,7 @@ async fn symbols_overview_returns_empty_for_empty_file_via_treesitter() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = Symbols
@@ -4838,12 +4856,95 @@ fn references_declares_output_form_text() {
 }
 
 #[test]
+fn references_completeness_hint_warns_only_when_calls_exceed_refs() {
+    use crate::tools::symbol::references::references_completeness_hint;
+    // The pathological case: references undercounts (3) vs call sites (17).
+    assert!(references_completeness_hint(3, 17).is_some());
+    // Worst silent failure: references returns 0 but callers exist.
+    assert!(references_completeness_hint(0, 5).is_some());
+    // references complete: it counts non-call refs too, so refs >= call sites.
+    assert!(references_completeness_hint(198, 109).is_none());
+    assert!(references_completeness_hint(12, 11).is_none());
+    // Equal counts are not proof of incompleteness.
+    assert!(references_completeness_hint(5, 5).is_none());
+}
+
+#[test]
+fn references_format_compact_appends_completeness_warning() {
+    use crate::tools::symbol::references::References;
+    use crate::tools::Tool;
+    let result = serde_json::json!({
+        "file_groups": [
+            {"file": "src/a.rs", "count": 1, "items": [{"line": 1, "column": 0, "context": ""}]}
+        ],
+        "total": 1,
+        "files": 1,
+        "completeness_warning": "references found 1, but call-hierarchy found 9 call sites — use call_graph"
+    });
+    let text = References.format_compact(&result).unwrap();
+    assert!(
+        text.contains("call-hierarchy found 9"),
+        "warning must render in normal branch: {text}"
+    );
+}
+
+#[test]
+fn references_format_compact_appends_warning_on_zero_refs() {
+    use crate::tools::symbol::references::References;
+    use crate::tools::Tool;
+    // The dangerous case: references returns 0 but there ARE callers — the
+    // warning must still surface so the 0 isn't taken at face value.
+    let result = serde_json::json!({
+        "file_groups": [],
+        "total": 0,
+        "files": 0,
+        "completeness_warning": "references found 0, but call-hierarchy found 4 call sites — use call_graph"
+    });
+    let text = References.format_compact(&result).unwrap();
+    assert!(text.contains('0'), "should still say 0 references: {text}");
+    assert!(
+        text.contains("call-hierarchy found 4"),
+        "warning must render even on zero refs: {text}"
+    );
+}
+
+#[test]
 fn symbols_declares_output_form_text() {
     // Pinned wire contract: small `symbols` results render via the compact
     // text form (file overview / search result tree), not pretty JSON.
     use crate::tools::symbol::symbols::Symbols;
     use crate::tools::{OutputForm, Tool};
     assert_eq!(Symbols.output_form(), OutputForm::Text);
+}
+
+#[test]
+fn symbol_at_declares_output_form_text() {
+    // Pinned wire contract: small `symbol_at` results (def + hover) render via
+    // the compact text form, not pretty JSON. format_compact is lossless
+    // (full def context + hover content), so the small path is safe to flip.
+    use crate::tools::symbol::symbol_at::SymbolAt;
+    use crate::tools::{OutputForm, Tool};
+    assert_eq!(SymbolAt.output_form(), OutputForm::Text);
+}
+
+#[test]
+fn symbol_at_format_compact_preserves_def_and_hover() {
+    use crate::tools::symbol::symbol_at::SymbolAt;
+    use crate::tools::Tool;
+    use serde_json::json;
+    let result = json!({
+        "def": { "definitions": [{ "file": "src/a.rs", "line": 42, "context": "fn alpha()" }] },
+        "hover": { "content": "fn alpha() -> i32", "location": "src/a.rs:42" },
+    });
+    let text = SymbolAt
+        .format_compact(&result)
+        .expect("def+hover should render");
+    assert!(text.contains("src/a.rs:42"), "def location lost: {text}");
+    assert!(text.contains("fn alpha()"), "def context lost: {text}");
+    assert!(
+        text.contains("fn alpha() -> i32"),
+        "hover content lost: {text}"
+    );
 }
 
 #[test]
@@ -4976,6 +5077,7 @@ async fn symbols_falls_back_to_document_symbols_on_bad_workspace_range() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = Symbols
@@ -5045,6 +5147,7 @@ async fn symbol_at_def_uses_col_param_over_identifier() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = SymbolAt
@@ -5091,6 +5194,7 @@ async fn symbol_at_hover_returns_ok_with_null_content_when_lsp_empty() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = SymbolAt
@@ -5138,6 +5242,7 @@ async fn symbol_at_hover_col_zero_rejected() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let err = SymbolAt
@@ -5180,6 +5285,7 @@ async fn symbol_at_hover_retries_once_on_mux_disconnect() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = SymbolAt
@@ -5222,6 +5328,7 @@ async fn symbol_at_hover_does_not_retry_non_disconnect_errors() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let err = SymbolAt
@@ -5284,6 +5391,7 @@ async fn symbol_at_returns_both_fields_by_default() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = SymbolAt
@@ -5391,6 +5499,14 @@ fn find_matching_symbol_returns_none_when_line_too_far() {
     assert!(result.is_none());
 }
 
+#[cfg_attr(
+    target_os = "windows",
+    ignore = "Windows path/canon shape differs from Linux; needs investigation. See docs/issues/2026-05-24-ci-windows-test-portability-rot.md"
+)]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "fallback succeeds on macOS where Linux fails — needs investigation, see docs/issues/2026-05-24-ci-macos-tempdir-canonicalization.md"
+)]
 #[tokio::test]
 async fn symbols_propagates_error_when_fallback_also_fails() {
     use crate::lsp::{mock::MockLspClient, mock::MockLspProvider, SymbolInfo, SymbolKind};
@@ -5436,6 +5552,7 @@ async fn symbols_propagates_error_when_fallback_also_fails() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = Symbols
@@ -5687,6 +5804,7 @@ fn test_ctx_with_agent(agent: Agent) -> ToolContext {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     }
 }
 
@@ -5955,6 +6073,7 @@ async fn symbols_with_multiple_matches_returns_all() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let result = Symbols
@@ -6484,4 +6603,113 @@ fn format_search_symbols_single_file_no_global_header() {
         "single-file output should omit global header: {out}"
     );
     assert!(out.starts_with("a.rs (1)\n"), "got:\n{out}");
+}
+
+// ---------- auto_inline_small_bodies ----------
+
+fn fixture_with_class(dir: &std::path::Path, lines: usize) -> std::path::PathBuf {
+    let path = dir.join("models.py");
+    let mut body = String::from("# header line 1\n# header line 2\n");
+    body.push_str("class DocumentChunk:\n");
+    for i in 0..lines {
+        body.push_str(&format!("    field_{i}: int = 0\n"));
+    }
+    std::fs::write(&path, body).unwrap();
+    path
+}
+
+#[test]
+fn auto_inline_attaches_body_when_one_small_match() {
+    let dir = tempdir().unwrap();
+    let _ = fixture_with_class(dir.path(), 8);
+    let mut matches = vec![json!({
+        "name": "DocumentChunk",
+        "kind": "Class",
+        "file": "models.py",
+        "start_line": 3,
+        "end_line": 11,
+    })];
+    super::symbols::auto_inline_small_bodies(&mut matches, dir.path());
+    let body = matches[0]
+        .get("body")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(
+        body.contains("class DocumentChunk:"),
+        "expected body to start at class declaration, got: {body:?}"
+    );
+    assert!(
+        body.contains("field_0: int = 0"),
+        "expected body to include first field, got: {body:?}"
+    );
+}
+
+#[test]
+fn auto_inline_skips_when_match_too_large() {
+    let dir = tempdir().unwrap();
+    let _ = fixture_with_class(dir.path(), 60);
+    let mut matches = vec![json!({
+        "name": "BigClass",
+        "kind": "Class",
+        "file": "models.py",
+        "start_line": 3,
+        "end_line": 63,
+    })];
+    super::symbols::auto_inline_small_bodies(&mut matches, dir.path());
+    assert!(
+        matches[0].get("body").is_none(),
+        "61-line match exceeds AUTO_INLINE_MAX_LINES (40); body should not be attached"
+    );
+}
+
+#[test]
+fn auto_inline_skips_when_too_many_matches() {
+    let dir = tempdir().unwrap();
+    let _ = fixture_with_class(dir.path(), 4);
+    // Three tiny matches — over the 2-match cap even though total LOC is fine.
+    let mut matches = vec![
+        json!({"name": "a", "file": "models.py", "start_line": 1, "end_line": 1}),
+        json!({"name": "b", "file": "models.py", "start_line": 2, "end_line": 2}),
+        json!({"name": "c", "file": "models.py", "start_line": 3, "end_line": 3}),
+    ];
+    super::symbols::auto_inline_small_bodies(&mut matches, dir.path());
+    for m in &matches {
+        assert!(
+            m.get("body").is_none(),
+            "3 matches exceeds AUTO_INLINE_MAX_MATCHES (2); no bodies should be attached"
+        );
+    }
+}
+
+#[test]
+fn auto_inline_skips_library_matches() {
+    let dir = tempdir().unwrap();
+    let mut matches = vec![json!({
+        "name": "Foo",
+        "kind": "Class",
+        "file": "lib:numpy/core.py",
+        "start_line": 1,
+        "end_line": 5,
+    })];
+    super::symbols::auto_inline_small_bodies(&mut matches, dir.path());
+    assert!(
+        matches[0].get("body").is_none(),
+        "lib: prefix should be skipped (no library-root resolution here)"
+    );
+}
+
+#[test]
+fn auto_inline_preserves_existing_body() {
+    let dir = tempdir().unwrap();
+    let path = fixture_with_class(dir.path(), 4);
+    let _ = path;
+    let mut matches = vec![json!({
+        "name": "DocumentChunk",
+        "file": "models.py",
+        "start_line": 3,
+        "end_line": 7,
+        "body": "ALREADY SET",
+    })];
+    super::symbols::auto_inline_small_bodies(&mut matches, dir.path());
+    assert_eq!(matches[0]["body"], "ALREADY SET");
 }

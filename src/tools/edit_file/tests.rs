@@ -47,6 +47,7 @@ async fn test_ctx() -> ToolContext {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     }
 }
 
@@ -65,6 +66,7 @@ async fn project_ctx() -> (tempfile::TempDir, ToolContext) {
             section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
         },
     )
 }
@@ -1462,6 +1464,10 @@ async fn read_file_binary_content_does_not_panic() {
     );
 }
 
+#[cfg_attr(
+    target_os = "windows",
+    ignore = "test passes /nonexistent/directory; Tree validates against project root differently on Windows. See docs/issues/2026-05-24-ci-windows-test-portability-rot.md"
+)]
 #[tokio::test]
 async fn tree_nonexistent_path_errors() {
     let ctx = test_ctx().await;
@@ -2575,6 +2581,7 @@ async fn search_pattern_accepts_library_path() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     // search_pattern with a path pointing into the library — the walker must
@@ -2992,6 +2999,7 @@ async fn edit_file_blocked_on_source_file_when_debug_enforce_symbol_tools() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let src_file = dir.path().join("src/lib.rs");
@@ -3045,6 +3053,7 @@ async fn edit_file_allows_literal_substitution_when_debug_enforce_symbol_tools()
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
 
     let src_file = dir.path().join("src/lib.rs");
@@ -4067,9 +4076,11 @@ fn read_file_content_mode_basic() {
     });
     let result = format_read_file(&val);
     assert!(result.starts_with("3 lines\n"));
-    assert!(result.contains("1| fn main() {"));
-    assert!(result.contains("2|     println!(\"hello\");"));
-    assert!(result.contains("3| }"));
+    assert!(result.contains("fn main() {\n    println!(\"hello\");\n}"));
+    assert!(
+        !result.contains("1| "),
+        "line-number prefixes must be dropped; got: {result}"
+    );
 }
 
 #[test]
@@ -4082,7 +4093,11 @@ fn read_file_content_mode_single_line() {
     let result = format_read_file(&val);
     assert!(result.starts_with("1 line\n"));
     assert!(!result.starts_with("1 lines"));
-    assert!(result.contains("1| hello world"));
+    assert!(result.contains("hello world"));
+    assert!(
+        !result.contains("1| hello world"),
+        "no line-number prefix; got: {result}"
+    );
 }
 
 #[test]
@@ -4154,12 +4169,12 @@ fn format_read_file_auto_chunked() {
     });
     let result = format_read_file(&val);
     assert!(
-        result.contains("line 0001"),
-        "should show content; got: {result}"
+        result.contains("line 0001 text\nline 0002 text"),
+        "should show raw content; got: {result}"
     );
     assert!(
-        result.contains("1|"),
-        "should have line numbers; got: {result}"
+        !result.contains("1| "),
+        "line-number prefixes must be dropped; got: {result}"
     );
     assert!(
         result.contains("3 of 300"),
@@ -4177,7 +4192,8 @@ fn format_read_file_auto_chunked() {
 
 #[test]
 fn format_read_file_auto_chunked_mid_file() {
-    // Chunk from the middle of a file — line numbers should start at 50
+    // Chunk from the middle of a file — content is shown raw, with NO per-line
+    // number prefixes (the caller supplied the range).
     let val = serde_json::json!({
         "content": "middle content\nmore content",
         "total_lines": 300,
@@ -4187,10 +4203,17 @@ fn format_read_file_auto_chunked_mid_file() {
     });
     let result = format_read_file(&val);
     assert!(
-        result.contains("50|"),
-        "line numbers should start at 50; got: {result}"
+        result.contains("middle content\nmore content"),
+        "should show raw content; got: {result}"
     );
-    assert!(result.contains("51|"), "should have line 51; got: {result}");
+    assert!(
+        !result.contains("50|") && !result.contains("51|"),
+        "line-number prefixes must be dropped; got: {result}"
+    );
+    assert!(
+        result.contains("start_line=52"),
+        "should still show next hint; got: {result}"
+    );
 }
 
 #[test]
@@ -4313,6 +4336,8 @@ fn read_file_source_summary_empty_symbols() {
 
 #[test]
 fn read_file_lineno_alignment() {
+    // Line numbers were removed from read_file output (caller-supplied ranges make
+    // them redundant). Content is shown raw, with NO `N| ` prefixes.
     let content = (1..=12)
         .map(|i| format!("line {i}"))
         .collect::<Vec<_>>()
@@ -4323,10 +4348,12 @@ fn read_file_lineno_alignment() {
         "source": "project"
     });
     let result = format_read_file(&val);
-    assert!(result.contains(" 1| line 1"));
-    assert!(result.contains(" 9| line 9"));
-    assert!(result.contains("10| line 10"));
-    assert!(result.contains("12| line 12"));
+    assert!(result.contains("line 1\nline 2"));
+    assert!(result.contains("line 12"));
+    assert!(
+        !result.contains(" 1| ") && !result.contains("10| "),
+        "line-number prefixes must be dropped; got: {result}"
+    );
 }
 
 #[test]
@@ -4415,6 +4442,7 @@ async fn read_file_large_content_returns_file_id_not_inline() {
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
     let file = dir.path().join("big.txt");
     // Create a file > 10 KB (exceeds MAX_INLINE_TOKENS)

@@ -4,11 +4,18 @@
 //! like the corresponding librarian-mcp tool's input, calls the tool, and
 //! routes the response through `format::print`.
 
-pub mod artifact;
-pub mod artifact_augment;
-pub mod artifact_event;
-pub mod artifact_refresh;
 pub mod format;
+
+#[cfg(feature = "librarian")]
+pub mod artifact;
+#[cfg(feature = "librarian")]
+pub mod artifact_augment;
+#[cfg(feature = "librarian")]
+pub mod artifact_event;
+#[cfg(feature = "librarian")]
+pub mod artifact_refresh;
+#[cfg(feature = "librarian")]
+pub mod audit_doc_refs;
 
 use anyhow::{anyhow, Context, Result};
 use std::io::Read;
@@ -38,6 +45,7 @@ impl CommonOpts {
 /// threads. The codescout binary runs one command per process, so the racy
 /// window does not exist in practice. If a future refactor moves CLI dispatch
 /// into a long-running context (e.g. a REPL), this must change.
+#[cfg(feature = "librarian")]
 pub async fn open_ctx(opts: &CommonOpts) -> Result<crate::librarian::tools::ToolContext> {
     if let Some(p) = opts.project.as_ref() {
         std::env::set_var("LIBRARIAN_CWD", p);
