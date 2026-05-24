@@ -84,8 +84,16 @@ fn emit_prompt_surfaces() {
 }
 
 fn extract_surface<'a>(source: &'a str, surface: &str) -> Option<&'a str> {
-    let open = format!("<!-- @surface {surface} -->\n");
-    let start = source.find(&open)? + open.len();
+    let open = format!("<!-- @surface {surface} -->");
+    let marker_end = source.find(&open)? + open.len();
+    let bytes = source.as_bytes();
+    let mut start = marker_end;
+    if bytes.get(start) == Some(&b'\r') {
+        start += 1;
+    }
+    if bytes.get(start) == Some(&b'\n') {
+        start += 1;
+    }
     let rest = &source[start..];
     let end_offset = rest.find("<!-- @end -->")?;
     Some(&rest[..end_offset])
