@@ -313,7 +313,7 @@ Old paths return "file not found" via both `read_file` and `read_markdown`.
 
 **Severity:** low — bloat only, no semantic harm.
 
-**Status:** open. Out of scope for codescout repo; file against caveman plugin or CC harness. Note: same root cause may underlie U-10's contradictory CLAUDE.md content (config drift between `~/.claude/`, `~/.claude-kat/`, `~/.claude-sdd/`).
+**Status:** wontfix — user declined to pursue (2026-05-24). Out of scope for codescout repo; would need a bug filed against the caveman plugin or CC harness. Listed for awareness only; not blocking anything.
 
 
 
