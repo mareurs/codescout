@@ -162,8 +162,29 @@ fn resolve_link(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
             ctx.memory_globs,
         );
     }
-    // fs-scheme link → same as file_path
-    let path = ctx.repo_root.join(&c.raw_ref);
+    // fs-scheme link → resolve per markdown convention.
+    //
+    // Refs starting with `./` or `../` are *explicitly* relative to the
+    // file containing the link. Joining them to repo_root would resolve
+    // `docs/agents/foo.md` → `../manual/X.md` against repo_root and miss
+    // the intended `docs/manual/X.md`. Anchor to md_file.parent() so the
+    // OS's `..` lookup walks from the right base.
+    //
+    // Refs that don't carry an explicit `./` or `../` prefix stay rooted
+    // at repo_root — the project convention in this codebase is to write
+    // such refs as repo-root-relative even inside docs that live one
+    // subdirectory deep.
+    let path = if c.raw_ref.starts_with("./") || c.raw_ref.starts_with("../") {
+        let md_dir = ctx
+            .repo_root
+            .join(&c.md_file)
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| ctx.repo_root.to_path_buf());
+        md_dir.join(&c.raw_ref)
+    } else {
+        ctx.repo_root.join(&c.raw_ref)
+    };
     if path.exists() {
         return Resolution {
             verdict: Verdict::Resolved,
@@ -688,5 +709,79 @@ mod tests {
             &ctx(tmp.path(), &[]),
         );
         assert_eq!(r.verdict, Verdict::LineOob);
+    }
+
+    #[test]
+    fn resolver_link_with_dot_dot_resolves_relative_to_md_file_parent() {
+        // Markdown convention: `[text](../path)` is relative to the file
+        // containing the link, not to the project root. Pre-fix the resolver
+        // joined repo_root + raw_ref unconditionally, so `../manual/X.md` from
+        // `docs/agents/foo.md` looked for `<repo>/../manual/X.md` (outside the
+        // repo) instead of `<repo>/docs/manual/X.md` — the file the doc
+        // author actually meant.
+        let tmp = TempDir::new().unwrap();
+        // The md_file's parent dir must exist so the OS can traverse `..`
+        // segments during `Path::exists`. In real audits this is guaranteed
+        // (we're auditing a file that exists). Mirror that here.
+        let agents_dir = tmp.path().join("docs/agents");
+        std::fs::create_dir_all(&agents_dir).unwrap();
+        std::fs::write(agents_dir.join("claude-code.md"), "# agents\n").unwrap();
+        let target_dir = tmp.path().join("docs/manual/src/concepts");
+        std::fs::create_dir_all(&target_dir).unwrap();
+        std::fs::write(target_dir.join("superpowers.md"), "# Superpowers\n").unwrap();
+
+        let r = resolve_ref(
+            &cand(
+                "../manual/src/concepts/superpowers.md",
+                "docs/agents/claude-code.md",
+                RefKind::Link,
+            ),
+            &ctx(tmp.path(), &[]),
+        );
+        assert_eq!(
+            r.verdict,
+            Verdict::Resolved,
+            "../-relative link should resolve against md_file's parent; got {:?}",
+            r
+        );
+    }
+
+    #[test]
+    fn resolver_link_with_dot_slash_resolves_relative_to_md_file_parent() {
+        // Same convention applies to explicit `./` links — relative to the
+        // md_file's parent directory.
+        let tmp = TempDir::new().unwrap();
+        let docs = tmp.path().join("docs/agents");
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::write(docs.join("sibling.md"), "# Sibling\n").unwrap();
+
+        let r = resolve_ref(
+            &cand("./sibling.md", "docs/agents/claude-code.md", RefKind::Link),
+            &ctx(tmp.path(), &[]),
+        );
+        assert_eq!(r.verdict, Verdict::Resolved);
+    }
+
+    #[test]
+    fn resolver_link_without_explicit_relative_prefix_still_repo_root_rooted() {
+        // Regression guard: refs that do NOT start with `./` or `../` continue
+        // to resolve against repo_root, matching the existing project
+        // convention of writing repo-root-relative paths inside docs that
+        // live one subdir deep.
+        let tmp = TempDir::new().unwrap();
+        let src = tmp.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("lib.rs"), "fn main() {}\n").unwrap();
+
+        let r = resolve_ref(
+            &cand("src/lib.rs", "docs/agents/claude-code.md", RefKind::Link),
+            &ctx(tmp.path(), &[]),
+        );
+        assert_eq!(
+            r.verdict,
+            Verdict::Resolved,
+            "repo-root-relative link should keep resolving against repo_root; got {:?}",
+            r
+        );
     }
 }
