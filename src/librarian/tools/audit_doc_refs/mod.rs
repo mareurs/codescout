@@ -147,6 +147,16 @@ fn default_fail_on() -> String {
 pub const DEFAULT_AUDIT_GLOBS: &[&str] =
     &["docs/**/*.md", "CLAUDE.md", "**/CLAUDE.md", "**/README.md"];
 
+/// Patterns matched against rel paths AFTER the include set. Matching files
+/// are dropped from the scan. Used to exclude content that IS path-shaped
+/// markdown but represents reader-side references (agent-onboarding docs
+/// describe files in the *reader's* repo, not codescout's) which would only
+/// produce noise. Applied only when `paths` is left as the default — an
+/// explicit `paths` argument is honoured verbatim so callers can opt back
+/// into auditing excluded subtrees on demand. See H-6 (C) in
+/// docs/trackers/codescout-usage-hookify.md.
+pub const DEFAULT_AUDIT_EXCLUDES: &[&str] = &["docs/agents/**"];
+
 pub const MAX_FILES_DEFAULT: usize = 10_000;
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
@@ -166,12 +176,18 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         .abs_path
         .clone();
 
-    let globs: Vec<String> = args
-        .paths
-        .clone()
-        .unwrap_or_else(|| DEFAULT_AUDIT_GLOBS.iter().map(|s| s.to_string()).collect());
+    let (globs, excludes): (Vec<String>, Vec<String>) = match args.paths.clone() {
+        Some(p) => (p, Vec::new()),
+        None => (
+            DEFAULT_AUDIT_GLOBS.iter().map(|s| s.to_string()).collect(),
+            DEFAULT_AUDIT_EXCLUDES
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        ),
+    };
 
-    let files = collect_markdown_files(&repo_root, &globs)?;
+    let files = collect_markdown_files(&repo_root, &globs, &excludes)?;
 
     let max_files = std::env::var("LIBRARIAN_AUDIT_MAX_FILES")
         .ok()
@@ -490,15 +506,25 @@ async fn find_tracker_path(ctx: &ToolContext, id: &str) -> Option<String> {
 fn collect_markdown_files(
     root: &std::path::Path,
     globs: &[String],
+    excludes: &[String],
 ) -> Result<Vec<std::path::PathBuf>> {
     use ignore::WalkBuilder;
-    let mut set_builder = globset::GlobSetBuilder::new();
+    let mut include_builder = globset::GlobSetBuilder::new();
     for g in globs {
-        set_builder.add(globset::Glob::new(g).map_err(|e| {
+        include_builder.add(globset::Glob::new(g).map_err(|e| {
             RecoverableError::with_hint(format!("bad glob {g}: {e}"), "fix glob syntax")
         })?);
     }
-    let set = set_builder.build()?;
+    let include_set = include_builder.build()?;
+
+    let mut exclude_builder = globset::GlobSetBuilder::new();
+    for g in excludes {
+        exclude_builder.add(globset::Glob::new(g).map_err(|e| {
+            RecoverableError::with_hint(format!("bad exclude glob {g}: {e}"), "fix glob syntax")
+        })?);
+    }
+    let exclude_set = exclude_builder.build()?;
+
     let mut out = Vec::new();
     for entry in WalkBuilder::new(root).build() {
         let entry = entry?;
@@ -506,7 +532,7 @@ fn collect_markdown_files(
             continue;
         }
         let rel = entry.path().strip_prefix(root).unwrap_or(entry.path());
-        if set.is_match(rel) {
+        if include_set.is_match(rel) && !exclude_set.is_match(rel) {
             out.push(entry.path().to_path_buf());
         }
     }
@@ -771,6 +797,64 @@ mod tests {
         assert!(
             format!("{err}").contains("cap") || format!("{err}").contains("files"),
             "error should mention the file cap; got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn default_scan_excludes_docs_agents() {
+        // H-6 (C): docs/agents/** lives in DEFAULT_AUDIT_EXCLUDES because the
+        // files there describe reader-side paths (in the reader's repo) and
+        // produce only FPs against the audited project. The default scan
+        // must skip them.
+        let tmp = TempDir::new().unwrap();
+        let agents = tmp.path().join("docs/agents");
+        std::fs::create_dir_all(&agents).unwrap();
+        std::fs::write(agents.join("copilot.md"), "# Copilot\n").unwrap();
+        let other = tmp.path().join("docs/other");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("guide.md"), "# Guide\n").unwrap();
+
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let result = call(&ctx, serde_json::json!({"emit_tracker": false}))
+            .await
+            .unwrap();
+        let n_scanned = result["n_files_scanned"].as_u64().unwrap();
+        assert_eq!(
+                n_scanned, 1,
+                "default scan should exclude docs/agents/** — only docs/other/guide.md should be scanned"
+            );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn explicit_paths_override_default_exclude() {
+        // An explicit `paths` argument bypasses DEFAULT_AUDIT_EXCLUDES so
+        // callers can opt back into auditing the excluded subtree on demand
+        // (e.g. when a doc-author wants to verify their agent-onboarding
+        // docs).
+        let tmp = TempDir::new().unwrap();
+        let agents = tmp.path().join("docs/agents");
+        std::fs::create_dir_all(&agents).unwrap();
+        std::fs::write(agents.join("copilot.md"), "# Copilot\n").unwrap();
+        let other = tmp.path().join("docs/other");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("guide.md"), "# Guide\n").unwrap();
+
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let result = call(
+            &ctx,
+            serde_json::json!({
+                "paths": ["docs/**/*.md"],
+                "emit_tracker": false
+            }),
+        )
+        .await
+        .unwrap();
+        let n_scanned = result["n_files_scanned"].as_u64().unwrap();
+        assert_eq!(
+            n_scanned, 2,
+            "explicit paths should override the default exclude — both files scanned"
         );
     }
 }
