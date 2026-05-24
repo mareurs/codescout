@@ -257,7 +257,15 @@ That makes the companion compression-reminder load-bearing as the **post-compact
   - A third reader-side / placeholder FP class lands in U-N (suggests the reject-prefix list approach won't scale).
   - The hi-sev count from agent docs blocks H-5's deny-stage promotion in practice (i.e. clean CI is otherwise within reach but agent-doc FPs are the residual).
 
-**Status:** (A) **shipped-pending-commit** (the parser change in this turn). (B) and (C) **proposed**, awaiting design call.
+**Status:** **shipped — 2026-05-24.**
+
+- **(A) Placeholder prefix reject** — **shipped** code-explorer:faa77dd7. Catches `path/to/X` placeholders in `looks_like_path`. Dropped ~5 placeholder FPs.
+- **(C) Default scope exclusion** — **shipped** code-explorer:9fa04f0b. New constant `DEFAULT_AUDIT_EXCLUDES = ["docs/agents/**"]` applied only when `args.paths` is None. Explicit `paths` argument bypasses the exclusion so callers can audit the subtree on demand. Tests: `default_scan_excludes_docs_agents` + `explicit_paths_override_default_exclude`. Dropped ~29 hi-sev refs.
+- **(B) Per-doc frontmatter opt-out** — **not shipped, deferred indefinitely.** Cleaner per-doc design but (C) was sufficient: with `docs/agents/**` excluded by default, the only place the reader-side FP class would resurface is a new sibling directory of agent docs (e.g. `docs/integrations/`). At that point either extend the exclude constant or reconsider (B).
+
+**Adjacent discoveries during the U-17 triage that landed in their own commits:**
+- **Class B resolver fix** (code-explorer:68840b4b) — was NOT in the original H-6 scope. Surfaced during the docs/agents FP categorization: 8 of the 40 hi-sev refs were `../manual/...` cross-doc links that the resolver was joining to repo_root instead of `md_file.parent()`. Real audit bug; benefits the whole project. Tests: `resolver_link_with_dot_dot_resolves_relative_to_md_file_parent` + 2 siblings.
+- **docs/agents/*.md content refresh** (code-explorer:01ec2890) — stale tool-name references (`list_symbols` × 5, `find_symbol` × 3, `search_pattern`, `find_file`) and an incorrect multi-project workspace.toml example. These would have been silent drift if the audit FPs had stayed in the way.
 
 **Notes:**
 - This is the third FP class identified in the audit. First two (U-15: Rust `::` separator + git refs) shipped 61bc678b. Pattern is clear: classifier needs an extensible reject mechanism. Could justify a refactor into a single `REJECT_PREFIXES: &[&str]` constant + iter check; not done now to minimize blast radius.
