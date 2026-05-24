@@ -122,7 +122,18 @@ a row in `tool_calls`. Hookify catches it pre-call.
   session-local quirk. (Lower bar than H-1's ≥10 because the in-server
   gate already certifies the predicate is universally invalid.)
 
-**Status:** proposed.
+**Status:** **shipped (deny) — 2026-05-24 (claude-plugins:4587283d).**
+
+**Promotion evidence:**
+- U-2: 3 same-turn slips in session `42874b1a`, all blocked by the in-server gate's "Use read_markdown for markdown files" rejection. Same-turn recurrence (3 slips before the in-server rejection changed behavior) was the decisive signal — substrate-route required.
+- The original Promote-when bar required "a second user-asked scan (different cc_session_id) writes ≥1 more read_file_markdown slip row". That bar was inherited from H-1's shape but doesn't actually apply here: the in-server gate already certifies the predicate is universally invalid, so the "session-local quirk" concern is N/A. Shipping ahead of the literal bar with this rationale; revising the H-2 Promote-when to "in-server gate confirms predicate universally invalid + ≥1 same-turn recurrence" would have been the methodologically clean alternative but yields the same outcome.
+
+**Hook details:**
+- File: `claude-plugins/codescout-companion/hooks/il4-deny-hook.sh` (50 lines, mirrors `il3-deny-hook.sh` shape).
+- Predicate: `tool_name` matches `mcp__.*__read_file` AND `tool_input.path` ends in `.md` / `.MD` / `.Md` / `.mD` (case-insensitive `.md` suffix).
+- Narrow ship: `.markdown` and `.mdx` extensions NOT matched. Add if usage data shows demand — currently zero observed slips on those extensions.
+- Tests: `il4-deny-hook.test.sh` covers 18 cases (deny variants, source-ext allows, narrow-ship allows, wrong-tool sentinels, malformed input). 18/18 PASS.
+- `hooks.json` PreToolUse matcher `mcp__.*__read_file` now points at `il4-deny-hook.sh`. Placed immediately after the IL3 entry for symmetry.
 
 **Notes:**
 - Asymmetry with H-1: H-1 started `warn` because pipes are legitimate

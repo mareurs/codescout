@@ -103,7 +103,7 @@ Operating Principle 4).
 **Severity:** high (same-turn frequency = the in-server error
 message did not land; three round-trips wasted before correction).
 
-**Status:** open — promotion candidate to H-2.
+**Status:** closed via H-2 (deny hook shipped 2026-05-24, claude-plugins:4587283d). The same-turn 3-slip recurrence here was the decisive signal that pushed H-2 from `proposed` to `shipped (deny direct, no warn stage)`. Substrate now hard-blocks `read_file(*.md)` at PreToolUse — the in-server gate stays in place as defense-in-depth.
 
 **Backing rows:** `pika_observations.id ∈ {2,3,4}`, `tool_call_id ∈
 {21631, 21633, 21634}`, `subkind='read_file_markdown'`,
