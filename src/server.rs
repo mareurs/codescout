@@ -2370,6 +2370,7 @@ mod tests {
         }
     }
 
+    #[cfg(any(feature = "local-embed", feature = "remote-embed"))]
     #[tokio::test]
     async fn current_capabilities_returns_without_panic() {
         // Smoke test: current_capabilities must not panic even for a fresh project.
@@ -2490,6 +2491,7 @@ mod tests {
     }
 }
 
+#[cfg(feature = "librarian")]
 #[cfg(test)]
 mod guide_hint_tests {
     use super::*;
