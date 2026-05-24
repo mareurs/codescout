@@ -65,12 +65,17 @@ jobs:
       # the per-platform dirs::config_dir() differences ($HOME/.config on Linux,
       # $HOME/Library/Application Support on macOS, $APPDATA on Windows). v6
       # catalog tolerates zero roots.
+      #
+      # Use ${{ runner.temp }} (native path on each platform) instead of bash $HOME:
+      # on Windows, bash $HOME is the Git Bash POSIX form (/c/Users/...) which
+      # Rust on Windows cannot read as a file path. runner.temp is D:\a\_temp
+      # on Windows and /home/runner/work/_temp on Linux — always native.
       - name: Seed empty librarian workspace
         shell: bash
         run: |
-          mkdir -p "$HOME/codescout-ci"
-          touch "$HOME/codescout-ci/workspace.toml"
-          echo "LIBRARIAN_WORKSPACE=$HOME/codescout-ci/workspace.toml" >> "$GITHUB_ENV"
+          mkdir -p "${{ runner.temp }}/codescout-ci"
+          touch "${{ runner.temp }}/codescout-ci/workspace.toml"
+          echo "LIBRARIAN_WORKSPACE=${{ runner.temp }}/codescout-ci/workspace.toml" >> "$GITHUB_ENV"
       - run: cargo test ${{ matrix.config.flags }}
 
   tool-docs-sync:

@@ -377,7 +377,18 @@ fn gather_observations(
 }
 
 fn guard_relative_path(path: &str) -> Result<()> {
-    if path.contains("..") || std::path::Path::new(path).is_absolute() {
+    // Reject absolute paths in BOTH POSIX (leading /) and Windows (leading \ or
+    // drive letter) forms — Path::is_absolute() only checks the current
+    // platform's notion of absolute, but the gather tool must reject any
+    // shape that could escape the project root on any platform.
+    let starts_with_drive =
+        path.len() >= 2 && path.as_bytes()[0].is_ascii_alphabetic() && path.as_bytes()[1] == b':';
+    if path.contains("..")
+        || std::path::Path::new(path).is_absolute()
+        || path.starts_with('/')
+        || path.starts_with('\\')
+        || starts_with_drive
+    {
         anyhow::bail!("path must be relative and must not contain '..'");
     }
     Ok(())

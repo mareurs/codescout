@@ -106,9 +106,13 @@ pub fn delete_orphan_repos(cat: &Catalog, active_roots: &[&std::path::Path]) -> 
         "DELETE FROM artifact WHERE NOT ({})",
         keep_clauses.join(" OR ")
     );
+    // Forward-slash normalize to match the form abs_paths are stored in
+    // (artifact::upsert writes forward-slash via to_forward_slash). Without
+    // this, on Windows the LIKE pattern uses backslash and matches NOTHING,
+    // so the DELETE wipes every row.
     let params: Vec<String> = active_roots
         .iter()
-        .map(|p| format!("{}/%", p.to_string_lossy()))
+        .map(|p| format!("{}/%", crate::util::fs::to_forward_slash(p)))
         .collect();
     let param_refs: Vec<&dyn rusqlite::ToSql> =
         params.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
