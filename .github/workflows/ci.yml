@@ -57,6 +57,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.os }}-${{ matrix.config.name }}
+      # Tests with the librarian feature on (default + local-embed configs)
+      # construct CodeScoutServer instances which try to build_tool_context.
+      # That call requires a librarian workspace file; seed an empty one so
+      # the relevant tools register on fresh CI runners. v6 catalog tolerates
+      # zero roots. unix uses XDG_CONFIG_HOME/HOME; Windows uses APPDATA.
+      - name: Seed empty librarian workspace
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            mkdir -p "$APPDATA/librarian"
+            touch "$APPDATA/librarian/workspace.toml"
+          else
+            mkdir -p "$HOME/.config/librarian"
+            touch "$HOME/.config/librarian/workspace.toml"
+          fi
       - run: cargo test ${{ matrix.config.flags }}
 
   tool-docs-sync:
