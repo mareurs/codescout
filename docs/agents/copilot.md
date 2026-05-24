@@ -113,14 +113,18 @@ This installs a `PreToolUse` hook that:
 ## Multi-Project Workspaces
 
 codescout supports multi-project workspaces via `.codescout/workspace.toml`.
-After onboarding, pass `project` to scope tool calls to a specific project:
+After onboarding, switch the active project before scoped calls:
 
 ```json
-{ "tool": "find_symbol", "arguments": { "pattern": "UserService", "project": "backend" } }
+{ "tool": "workspace", "arguments": { "action": "activate", "path": "services/backend" } }
+{ "tool": "symbols", "arguments": { "name": "UserService", "include_body": true } }
 ```
 
-See [Multi-Project Workspaces](../manual/src/concepts/multi-project-workspace.md).
+The `workspace(activate)` call switches the codescout server's view; subsequent
+tool calls operate against the activated project. Remember to switch back when
+done — leaving a foreign project active leaks state into the next chat session.
 
+See [Multi-Project Workspaces](../manual/src/concepts/multi-project-workspace.md).
 ---
 
 ## Always-On Instructions
@@ -144,8 +148,7 @@ Start a new Copilot Chat session and ask:
 
 > "What symbols are in src/main.ts?"
 
-Copilot should call `mcp__codescout__list_symbols` rather than reading the file directly.
-
+Copilot should call `mcp__codescout__symbols` rather than reading the file directly.
 ---
 
 ## Day-to-Day Workflow
