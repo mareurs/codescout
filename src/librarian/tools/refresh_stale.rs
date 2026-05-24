@@ -187,6 +187,25 @@ mod tests {
     }
 
     #[test]
+    fn list_stale_prefix_normalizes_separator() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let mut row = sample_art("a1", "claude", "proj/t1.md");
+        row.abs_path = std::path::PathBuf::from("C:\\roots\\alive\\a.md");
+        artifact::upsert(&cat, &row).unwrap();
+        augmentation::upsert(&cat, &aug_row("a1", None)).unwrap();
+
+        let prefix = std::path::Path::new("C:\\roots\\alive");
+        let entries =
+            augmentation::list_stale(&cat, "9999-01-01T00:00:00Z", 10, Some(prefix)).unwrap();
+        assert_eq!(
+            entries.len(),
+            1,
+            "backslash-form prefix should match forward-slash-stored abs_path"
+        );
+        assert_eq!(entries[0].artifact_id, "a1");
+    }
+
+    #[test]
     fn list_stale_subdir_scope_filters() {
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &sample_art("a1", "claude", "code-explorer/t1.md")).unwrap();

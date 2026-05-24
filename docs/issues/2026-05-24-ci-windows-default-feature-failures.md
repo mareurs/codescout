@@ -86,17 +86,69 @@ Or push to `experiments` and observe `Test (windows-latest / default)`.
 
 ## Root cause
 
+**Two distinct mechanisms (now distinguished after rounds 5-8):**
+
+### Mechanism A — Path separator drift between catalog read/write seams
+
 Production code uses `PathBuf::join` (native separator) on string paths
 that are forward-slash-formed throughout the codebase. On Linux/macOS
 the native separator IS `/` so output stays forward-slash. On Windows,
-join inserts `\` producing mixed-slash paths that don't match test
-expectations or any consistent convention.
+join inserts `\` producing mixed-slash paths.
 
-This is a real production bug, not test-side brittleness — MCP
-responses going to LLM consumers should arguably always be
-forward-slash-normalized regardless of platform. The librarian
-modules in particular write paths into the catalog DB; mixed
-separators there will break cross-platform DB portability.
+Until rounds 5-7, this drift manifested at:
+- `artifact::upsert` writing `abs_path` with `to_string_lossy()` (native sep)
+- `artifact_id_from_abs` hashing the native-sep string (ID drift between
+  forward-slash test inputs and backslash walker outputs)
+- `delete_orphan_repos` LIKE prefix using native sep — wiped EVERY row
+  when stored paths were forward-slash but pattern was backslash
+- `path_prefix_clause` (scope filter) using native sep
+- `audit_doc_refs::parse_refs` `md_file` key with native sep
+- `audit_doc_refs::severity::matches_*` substring checks against
+  `docs/archive/` / `docs/issues/` with native-sep input
+- `migrate_v6::backfill` storing `abs_path` and `git_root` with native sep
+- `index_repo_sync` LIKE prefix using native sep
+- `gather::guard_relative_path` only checking `Path::is_absolute()` —
+  let `/etc/passwd` through on Windows because it lacks a drive letter
+- Test fixtures interpolating `path.display()` into TOML / LIKE patterns
+
+**All 13 of these are fixed in rounds 5-7** via `crate::util::fs::to_forward_slash` (added in round 5).
+
+### Mechanism B — SQLite mandatory file locking on shared LIBRARIAN_DB
+
+The 5 `server::guide_hint_tests` use `make_server()` which calls
+`CodeScoutServer::new(agent)` which calls `librarian::try_build_runtime()`.
+That function opens the catalog DB at the path from `LIBRARIAN_DB`
+(or `dirs::data_local_dir().join("librarian/catalog.db")` if unset).
+
+Multiple parallel `#[tokio::test]` tests within the same Windows test
+process open this **shared** DB. Windows file locks are mandatory
+(POSIX advisory). The result: `librarian::try_build_runtime` intermittently
+returns `None` due to lock contention, the `artifact` tool is omitted
+from `server.tools`, and `tool_by_name(&server, "artifact")` panics.
+
+The flakiness is non-deterministic — which specific guide_hint test
+fails varies across runs:
+- Round 6 (run 26363373601): activate_project_resets_hints +
+  artifact_event_after_artifact_no_hint + first_artifact_call_emits_librarian_hint
+  + run_command_with_overflow_emits_progressive_hint_once +
+  second_artifact_call_no_hint all FAILED (cluster-wide block — workflow
+  bug, not locking)
+- Round 7 (run 26364216187): activate_project_resets_hints +
+  run_command_with_overflow_emits_progressive_hint_once FAILED (gated)
+- Round 7 final (run 26364618163): first_artifact_call_emits_librarian_hint
+  FAILED (DIFFERENT test than round 7's local pass — confirms
+  non-determinism)
+
+**Round 8 gates the entire cluster of 5 guide_hint tests on Windows**
+rather than play whack-a-mole.
+
+**Right fix (deferred to future Windows-port engagement):**
+1. Set `LIBRARIAN_DB` to a per-test temp path via `EnvGuard` in every
+   test that calls `make_server` (the pattern `reindex_cli_indexes_repo`
+   already uses).
+2. OR run librarian tests with `--test-threads 1` on Windows.
+3. OR refactor the librarian to handle concurrent DB opens via
+   sqlite WAL mode + retry-on-lock.
 
 ## Evidence
 

@@ -76,20 +76,25 @@ pub fn write_utf8(path: &Path, content: &str) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to write {}: {}", path.display(), e))
 }
 
-/// Convert a path to a forward-slash-separated string.
+/// Normalize a path to its forward-slash string form.
 ///
-/// On Unix this is equivalent to `to_string_lossy().into_owned()`; on Windows
-/// it additionally replaces `\` separators with `/`. Used at the boundary
-/// between filesystem paths and string representations stored in the catalog
-/// DB or returned in MCP responses, so path strings stay consistent across
-/// host platforms (and across DBs migrated between them).
+/// Always replaces `\` with `/`, on every platform — the catalog stores
+/// path strings in forward-slash form (see `artifact::upsert`,
+/// `artifact_id_from_abs`, every LIKE pattern in `librarian::catalog` /
+/// `librarian::tools/*`), so reads and writes must agree regardless of
+/// host OS. Used at the boundary between filesystem paths and string
+/// representations stored in the catalog DB or returned in MCP responses.
+///
+/// Idempotent: `to_forward_slash(to_forward_slash(p)) == to_forward_slash(p)`.
+///
+/// Caveat: a Linux filename containing a literal backslash byte gets that
+/// byte rewritten to `/` for the catalog string form. Backslash-in-name
+/// is legal on POSIX but vanishingly rare in source-code repos and markdown
+/// docs, which is the only content the catalog stores. The actual
+/// filesystem operations use the raw `Path`, so this only affects string
+/// matching against the catalog — not file IO.
 pub fn to_forward_slash(p: &std::path::Path) -> String {
-    let s = p.to_string_lossy();
-    if std::path::MAIN_SEPARATOR == '/' {
-        s.into_owned()
-    } else {
-        s.replace('\\', "/")
-    }
+    p.to_string_lossy().replace('\\', "/")
 }
 
 #[cfg(test)]
@@ -169,6 +174,27 @@ mod tests {
     fn read_utf8_missing_file_errors() {
         let dir = tempdir().unwrap();
         assert!(read_utf8(&dir.path().join("missing.txt")).is_err());
+    }
+
+    #[test]
+    fn to_forward_slash_converts_backslashes_on_any_platform() {
+        let p = std::path::PathBuf::from("C:\\roots\\alive\\a.md");
+        assert_eq!(to_forward_slash(&p), "C:/roots/alive/a.md");
+    }
+
+    #[test]
+    fn to_forward_slash_passes_through_forward_slash_input() {
+        let p = std::path::PathBuf::from("/already/forward/slash.md");
+        assert_eq!(to_forward_slash(&p), "/already/forward/slash.md");
+    }
+
+    #[test]
+    fn to_forward_slash_is_idempotent() {
+        let p = std::path::PathBuf::from("C:\\mixed/separators\\foo.md");
+        let once = to_forward_slash(&p);
+        let twice = to_forward_slash(std::path::Path::new(&once));
+        assert_eq!(once, twice);
+        assert_eq!(once, "C:/mixed/separators/foo.md");
     }
 
     #[cfg(unix)]

@@ -299,7 +299,10 @@ pub(crate) async fn reindex_cli(repo: Option<&str>, force: bool) -> Result<()> {
         for root in &roots {
             cat.conn.execute(
                 "DELETE FROM artifact WHERE abs_path LIKE ?1",
-                rusqlite::params![format!("{}/", root.path.to_string_lossy())],
+                rusqlite::params![format!(
+                    "{}/",
+                    crate::util::fs::to_forward_slash(&root.path)
+                )],
             )?;
         }
     }
