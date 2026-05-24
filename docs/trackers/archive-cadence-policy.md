@@ -1,6 +1,6 @@
 ---
 kind: tracker
-status: draft
+status: active
 title: Archive cadence policy for usage / friction trackers
 owners: []
 tags:
@@ -25,7 +25,45 @@ The proposal — define a policy that addresses **all three** dimensions:
 2. What does "shipped" actually mean — and how do we cite SHAs that survive rebases?
 3. Where do archived entries live, and how are they recovered for forensic queries?
 
-## Design surfaces (open)
+
+
+## Decision (2026-05-24)
+
+Promoted from draft to active. Lean chosen for each design surface:
+
+**1. Status vocabulary — chosen: A (SHA-citation qualifier).**
+The T11 convention is the canonical format. New U-N / H-N / R-N closures cite as one of:
+- `(master:<sha>)` — fix has shipped to master and is reachable by `git branch --contains <sha>` from master.
+- `(experiments:<sha>, not-yet-on-master)` — fix exists on experiments only; awaiting cherry-pick or release cut. The qualifier is mandatory — bare `<sha>` without branch scope is ambiguous and not allowed.
+- `(claude-plugins:<sha>)` / `<repo>:<sha>` — for cross-repo fixes. The repo prefix carries branch context (master assumed unless qualified).
+- `(in-place)` — for files outside git (e.g. `~/.claude-kat/CLAUDE.md`). No SHA citation needed.
+
+No new status enum values. `fixed-shipped` is retained as the closure label; precision lives in the citation.
+
+**2. Archive trigger — chosen: ii + iii hybrid.**
+- Eligibility: status is closed AND (a) SHA is on master, OR (b) closure is `wontfix` / `by-design` / `substrate-caught` (no SHA dependency), OR (c) cross-repo closure with verified target-branch coverage.
+- Cadence: manual quarterly pass + accelerated by release cuts. Each archive pass moves eligible entries; ineligible entries (e.g. `experiments-only`) stay in the active file until promoted.
+- First pass: today (2026-05-24) — pilot on the unambiguous category (b) cases to validate the flow.
+
+**3. Archive destination — chosen: time-partitioned per-tracker archive files at `docs/trackers/archive/`.**
+- Naming: `docs/trackers/archive/<tracker-basename>-<YYYY>-q<n>.md`. E.g. `docs/trackers/archive/codescout-usage-frictions-2026-q2.md`.
+- Frontmatter on the archive file: `kind: tracker`, `status: archived`, `title: <original title> — archive 2026 Q2`, `tags: [..., archived]`.
+- The active tracker stays at `status: active` and retains the entries that weren't yet eligible.
+
+**4. Recovery — chosen: rely on the librarian's archived-but-indexed model.**
+- `artifact(action="find", kind="tracker", include_archived=true)` returns archived trackers alongside active ones.
+- Cross-references in active entries cite the archive artifact id, not the file path. The librarian's `id` field is durable across renames.
+- No new infra.
+
+### What this changes going forward
+
+- Every new U-N / H-N / R-N closure must use one of the citation shapes above. The T11 convention is now mandatory, not optional.
+- Quarterly archive pass: scheduled for end of Q2 2026 (June 30) and Q3 2026 (September 30). Execute via a focused session.
+- Release-cut acceleration: when a release ships, run an archive pass against the shipped SHA range as part of the release checklist.
+
+### Status of this proposal
+
+Active. Implementation begins with the pilot pass today. Promote-when criterion (one option per surface + a first pass executed) is satisfied on commit.## Design surfaces (open)
 
 ### 1. Status vocabulary — qualifying "shipped"
 

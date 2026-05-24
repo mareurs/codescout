@@ -108,7 +108,29 @@ experiments-side SHAs orphan. Cite the **master SHA** captured immediately after
 For cross-repo citations (e.g. tracker in codescout pointing at a fix in
 codescout-companion), prefix with the repo name: `codescout-companion:0b75991`.
 
-## Status vocabularies (per prefix)
+## Citation format (mandatory)
+
+Every closure that cites a git commit must use one of these shapes — bare SHAs without branch scope are ambiguous and not allowed:
+
+- `(master:<sha>)` — fix has shipped to master, `git branch --contains <sha>` from master returns master.
+- `(experiments:<sha>, not-yet-on-master)` — fix exists on experiments only. The qualifier is mandatory.
+- `(<repo>:<sha>)` — cross-repo fix; repo prefix names which repo's SHA. E.g. `(claude-plugins:bd20a8a)`. Branch context is master unless further qualified.
+- `(in-place)` — for files outside git (e.g. `~/.claude/CLAUDE.md`). No SHA citation.
+
+When a fix shipped only to experiments and later cherry-picks to master, update the citation from `(experiments:<sha>, not-yet-on-master)` to `(master:<new-sha>)`. Both reads remain in the tracker's history via citation-history footnote.
+
+Policy: [`docs/trackers/archive-cadence-policy.md`](trackers/archive-cadence-policy.md) — surface 1.
+
+## Archive cadence
+
+Closed entries graduate to `docs/trackers/archive/<tracker>-<YYYY>-q<n>.md`:
+
+- **Trigger**: status is closed AND (SHA is on master OR closure is `wontfix` / `by-design` / `substrate-caught` / cross-repo verified).
+- **Cadence**: manual quarterly pass + accelerated by release cuts.
+- **Archive file**: per-tracker, time-partitioned. Frontmatter `kind: tracker, status: archived`.
+- **Recovery**: `artifact(action="find", kind="tracker", include_archived=true)`.
+
+Full policy: [`docs/trackers/archive-cadence-policy.md`](trackers/archive-cadence-policy.md).## Status vocabularies (per prefix)
 
 Different prefixes use slightly different status enums:
 
