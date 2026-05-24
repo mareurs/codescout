@@ -106,6 +106,7 @@
   - [Git](tools/git.md)
   - [AST Analysis](tools/ast.md)
   - [Memory](tools/memory.md)
+  - [`get_guide`](tools/get-guide.md)
   - [Workflow & Config](tools/workflow-and-config.md)
     - [Read-Only `workspace`](tools/activate-project-read-only.md)
     - [Tool Workflows](tools/tool-workflows.md)

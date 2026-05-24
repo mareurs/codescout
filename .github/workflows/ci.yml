@@ -139,10 +139,9 @@ jobs:
           mkdir -p "$HOME/codescout-ci"
           touch "$HOME/codescout-ci/workspace.toml"
           echo "LIBRARIAN_WORKSPACE=$HOME/codescout-ci/workspace.toml" >> "$GITHUB_ENV"
-      # `--fail-on never` keeps the gate informational while
-      # docs/adrs/2026-05-13-semantic-anchors-qdrant-payload.md still
-      # references a since-refactored path (1 known hi-sev as of
-      # 2026-05-24). Flip to `--fail-on high` once that ADR is reconciled
-      # — see H-5 in docs/trackers/codescout-usage-hookify.md.
+      # All previously-known hi-sev findings have been reconciled (the
+      # 2026-05-13 semantic-anchors ADR dropped its stale src/embed/index.rs
+      # citation). Gate is now `--fail-on high` so any future hi-sev
+      # reintroduction fails the build.
       - name: Audit markdown for stale code references
-        run: ./target/release/codescout audit-doc-refs --no-emit-tracker --fail-on never --json --project .
+        run: ./target/release/codescout audit-doc-refs --no-emit-tracker --fail-on high --json --project .

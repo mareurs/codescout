@@ -113,9 +113,12 @@ two-leg agreement passes).
 
 **Verification (2026-05-13 smoke test)**: a memory mentioning
 `SemanticMemoryStore`, `QdrantWrap`, and `create_semantic_anchors` produced
-exactly one anchor: `src/embed/index.rs` at single-leg rank-2 (~0.33), all
-other candidates filtered by `exclude_languages: ["markdown"]` or below
-0.3. Behavior matches the math; no normalization or score shift in code.
+exactly one anchor at single-leg rank-2 (score ~0.33), with all other
+candidates filtered by `exclude_languages: ["markdown"]` or below the
+0.3 cutoff. Behavior matches the math; no normalization or score shift in
+code. (The specific file anchored is omitted intentionally — the
+codebase has restructured since 2026-05-13; the symbols above still exist
+but no longer live in their original location.)
 
 **Original ADR note (incorrect — kept for historical accuracy)**: a prior
 revision of this section predicted RRF scores in [0, 0.016] based on the

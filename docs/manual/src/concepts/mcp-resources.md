@@ -16,6 +16,8 @@ context on demand:
 | `doc://codescout-tool-guide`  | Generated per-tool long-form usage notes                         |
 | `memory://<name>`             | One resource per file in the active project's memory directory   |
 | `project://summary`           | JSON snapshot — active project, index status, language, LSP ready |
+| `probe://description-test`    | ~20 KB sentinel-laden resource description (see [Probe](#probe--mcp-delivery-diagnostic)) |
+| `probe://body-test`           | ~20 KB sentinel-laden resource body (see [Probe](#probe--mcp-delivery-diagnostic))         |
 
 In Claude Code, `@`-mention the URIs to include them in the prompt.
 
@@ -49,6 +51,33 @@ Long-running operations emit `notifications/progress` (throttled to 2 Hz):
 LSP cold-start progress is not yet wired (would require a trait-wide change to
 the LSP provider interface — tracked for a future release).
 
+## Probe — MCP delivery diagnostic
+
+Two resources and one tool ship under the `probe` namespace, used to measure
+how much of an MCP description or resource body actually reaches the model:
+
+- `probe://description-test` — a ~20 KB resource description containing
+  sentinel markers (`SENTINEL_0200_AA`, `SENTINEL_0500_BB`, …) at known byte
+  offsets up to 18 KB.
+- `probe://body-test` — a ~20 KB resource body with the same sentinel shape.
+  Read it with `resources/read`; the response payload itself is the
+  diagnostic.
+- The `probe` tool — ships a ~9 KB description with sentinels up to 8 KB.
+  Do not call it; the description is the artifact under test.
+
+The probes diagnose **where in the byte stream a host or transport truncates**.
+List which `SENTINEL_NNNN_XX` tokens the model can quote back, and the
+highest one visible names the effective cap.
+
+Use this surface when:
+
+- a long tool description appears to be truncated by the client;
+- an MCP resource looks shorter than its server-side bytes;
+- you need a reproducible byte-offset map across client / transport / model
+  combinations to compare delivery integrity.
+
+Three sentinel-bearing surfaces (tool description, resource description,
+resource body) let each layer be measured independently.
 ## Why this matters
 
 Claude Code re-sends every MCP tool description and server-instruction block
