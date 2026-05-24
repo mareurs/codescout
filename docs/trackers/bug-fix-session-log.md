@@ -53,7 +53,9 @@ time_scope: open-ended
 | F-5 | 2026-05-18 | high | release-pipeline | open | HEAD detached from `experiments` without `git checkout` in this session |
 | F-6 | 2026-05-20 | med | release-pipeline | open | HEAD non-compiling + 11 dormant clippy-1.95 lints exposed by toolchain bump |
 | F-8 | 2026-05-23 | med | codescout-tool | fixed-verified | `format_read_file` dispatches on `type`; json_path output collided → rendered `"0 lines"` |
-| F-12 | 2026-05-24 | med | codescout-tool-usage | fixed-verified | Dismissed `references`'s "use call_graph for authoritative callers" warning → shipped half-fix, missed `build.rs` duplicate |## Wins Index
+| F-12 | 2026-05-24 | med | codescout-tool-usage | fixed-verified | Dismissed `references`'s "use call_graph for authoritative callers" warning → shipped half-fix, missed `build.rs` duplicate |
+
+## Wins Index
 
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |

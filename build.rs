@@ -83,6 +83,13 @@ fn emit_prompt_surfaces() {
     println!("cargo:rerun-if-changed=build.rs");
 }
 
+/// **Duplicate of `src/prompts/source.rs::extract_surface` — keep in sync.**
+///
+/// Build scripts compile as a separate unit and cannot `use` crate code, so
+/// this function is intentionally copy-pasted. Any change to surface-marker
+/// parsing (e.g. CRLF tolerance — see commits af64c737, c83b5544 of the
+/// CI rehab session) must be applied to both copies. F-12 in
+/// `docs/trackers/bug-fix-session-log.md` captures the cost of missing this.
 fn extract_surface<'a>(source: &'a str, surface: &str) -> Option<&'a str> {
     let open = format!("<!-- @surface {surface} -->");
     let marker_end = source.find(&open)? + open.len();
