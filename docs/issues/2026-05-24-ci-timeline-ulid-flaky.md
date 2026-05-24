@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-05-24
-closed:
+closed: 2026-05-24
 severity: low
 owner: marius
 related: [docs/issues/2026-05-24-ci-test-matrix-undercount.md]

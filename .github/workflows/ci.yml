@@ -60,18 +60,17 @@ jobs:
       # Tests with the librarian feature on (default + local-embed configs)
       # construct CodeScoutServer instances which try to build_tool_context.
       # That call requires a librarian workspace file; seed an empty one so
-      # the relevant tools register on fresh CI runners. v6 catalog tolerates
-      # zero roots. unix uses XDG_CONFIG_HOME/HOME; Windows uses APPDATA.
+      # the relevant tools register on fresh CI runners. Use LIBRARIAN_WORKSPACE
+      # env var (per src/librarian/mod.rs:32) to point at a fixed path, avoiding
+      # the per-platform dirs::config_dir() differences ($HOME/.config on Linux,
+      # $HOME/Library/Application Support on macOS, $APPDATA on Windows). v6
+      # catalog tolerates zero roots.
       - name: Seed empty librarian workspace
         shell: bash
         run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            mkdir -p "$APPDATA/librarian"
-            touch "$APPDATA/librarian/workspace.toml"
-          else
-            mkdir -p "$HOME/.config/librarian"
-            touch "$HOME/.config/librarian/workspace.toml"
-          fi
+          mkdir -p "$HOME/codescout-ci"
+          touch "$HOME/codescout-ci/workspace.toml"
+          echo "LIBRARIAN_WORKSPACE=$HOME/codescout-ci/workspace.toml" >> "$GITHUB_ENV"
       - run: cargo test ${{ matrix.config.flags }}
 
   tool-docs-sync:
@@ -127,12 +126,14 @@ jobs:
           key: audit-doc-refs
       - run: cargo build --release --bin codescout
       # The audit hits `build_tool_context` which requires a librarian
-      # workspace file. On a fresh runner that file doesn't exist; seed
-      # an empty one (v6 catalog tolerates zero roots).
+      # workspace file. Use LIBRARIAN_WORKSPACE to pin a deterministic path
+      # (avoids per-platform dirs::config_dir() differences). v6 catalog
+      # tolerates zero roots.
       - name: Seed empty librarian workspace
         run: |
-          mkdir -p "$HOME/.config/librarian"
-          touch "$HOME/.config/librarian/workspace.toml"
+          mkdir -p "$HOME/codescout-ci"
+          touch "$HOME/codescout-ci/workspace.toml"
+          echo "LIBRARIAN_WORKSPACE=$HOME/codescout-ci/workspace.toml" >> "$GITHUB_ENV"
       # `--fail-on never` keeps the gate informational while
       # docs/adrs/2026-05-13-semantic-anchors-qdrant-payload.md still
       # references a since-refactored path (1 known hi-sev as of
