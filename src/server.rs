@@ -2127,12 +2127,19 @@ mod tests {
         // the project root (e.g. from readlink/realpath) must be returned
         // verbatim, not silently rewritten to a relative-looking string.
         let (dir, server) = make_server().await;
-        let root = dir.path().to_string_lossy().to_string();
-        let abs = format!("{root}/some/nested/path");
+        // Build with platform-native separators (\\ on Windows, / on Unix); avoid
+        // single-quote shell syntax which cmd.exe treats as literal characters.
+        let abs = dir
+            .path()
+            .join("some")
+            .join("nested")
+            .join("path")
+            .to_string_lossy()
+            .into_owned();
 
         let req = CallToolRequestParams::new("run_command").with_arguments(
             serde_json::from_value(serde_json::json!({
-                "command": format!("echo '{abs}'"),
+                "command": format!("echo {abs}"),
             }))
             .unwrap(),
         );

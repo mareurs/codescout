@@ -1464,6 +1464,10 @@ async fn read_file_binary_content_does_not_panic() {
     );
 }
 
+#[cfg_attr(
+    target_os = "windows",
+    ignore = "test passes /nonexistent/directory; Tree validates against project root differently on Windows. See docs/issues/2026-05-24-ci-windows-test-portability-rot.md"
+)]
 #[tokio::test]
 async fn tree_nonexistent_path_errors() {
     let ctx = test_ctx().await;

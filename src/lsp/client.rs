@@ -1738,9 +1738,11 @@ struct Point {
             .unwrap();
 
         // rust-analyzer indexes in the background after initialize; retry until
-        // workspace/symbol returns results (typically < 2s for a minimal project).
+        // workspace/symbol returns results. Linux: typically < 2s. Windows: GHA
+        // runners are I/O-slower, so allow up to 15s (30 × 500ms).
+        let retries = if cfg!(windows) { 30 } else { 10 };
         let mut symbols = vec![];
-        for _ in 0..10 {
+        for _ in 0..retries {
             symbols = client.workspace_symbols("add").await.unwrap();
             if !symbols.is_empty() {
                 break;
@@ -1750,7 +1752,7 @@ struct Point {
 
         assert!(
             !symbols.is_empty(),
-            "workspace/symbol 'add' should return results within 5s of indexing"
+            "workspace/symbol 'add' should return results within the retry budget"
         );
         assert!(
             symbols.iter().any(|s| s.name == "add"),

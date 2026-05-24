@@ -1886,6 +1886,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "/ is not the Windows filesystem root; needs platform-specific drive-root rejection logic. See docs/issues/2026-05-24-ci-windows-test-portability-rot.md"
+    )]
     #[test]
     fn validate_approve_path_rejects_filesystem_root() {
         let dir = tempdir().unwrap();

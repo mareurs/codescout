@@ -1657,6 +1657,10 @@ async fn run_command_cwd_rejects_nonexistent_path() {
     );
 }
 
+#[cfg_attr(
+    target_os = "windows",
+    ignore = "test uses /var as 'outside project but exists'; no Windows analog (allowed-roots vary). See docs/issues/2026-05-24-ci-windows-test-portability-rot.md"
+)]
 #[tokio::test]
 async fn run_command_cwd_rejects_path_escaping_root() {
     let (_dir, ctx) = project_ctx().await;
