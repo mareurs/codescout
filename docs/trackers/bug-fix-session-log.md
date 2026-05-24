@@ -53,7 +53,7 @@ time_scope: open-ended
 | F-5 | 2026-05-18 | high | release-pipeline | open | HEAD detached from `experiments` without `git checkout` in this session |
 | F-6 | 2026-05-20 | med | release-pipeline | open | HEAD non-compiling + 11 dormant clippy-1.95 lints exposed by toolchain bump |
 | F-8 | 2026-05-23 | med | codescout-tool | fixed-verified | `format_read_file` dispatches on `type`; json_path output collided → rendered `"0 lines"` |
-## Wins Index
+| F-12 | 2026-05-24 | med | codescout-tool-usage | fixed-verified | Dismissed `references`'s "use call_graph for authoritative callers" warning → shipped half-fix, missed `build.rs` duplicate |## Wins Index
 
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -714,6 +714,62 @@ before `Swatinem/rust-cache@v2`) in jobs clippy, test, msrv,
 audit-doc-refs. Also: `.cargo/config.toml` may belong as
 `.cargo/config.toml.example` with a CI-friendly version checked in instead.
 
+## F-12 — Dismissed `references` "use call_graph" warning → shipped half-fix to `extract_surface`, missed build.rs duplicate
+
+**Observed:** 2026-05-24, during CI rot rehab after CI run `26356842338` showed
+Windows builds panicking on `extract_surface` with CRLF source.md.
+
+**When:** Mid-fix scout. About to edit `src/prompts/source.rs::extract_surface`,
+ran `references(symbol="extract_surface", path="src/prompts/source.rs")` to
+verify call sites. Tool returned 3 results AND emitted this warning:
+
+> `warning: references found 3, but call-hierarchy found 5 call sites —
+>  rust-analyzer's textDocument/references is incomplete for this symbol.
+>  Use call_graph(symbol, direction="callers") for the authoritative caller
+>  set.`
+
+**Expected (what I should have done):** Read the warning, run `call_graph` per
+its instruction. The 2 missing call sites would have surfaced `build.rs:71`
+calling its OWN `extract_surface` (duplicate parser declared at `build.rs:86`,
+unreachable from `references` because build.rs lives outside the LSP project
+index — it compiles as a separate unit).
+
+**Got (what I did):** Skimmed the warning, treated the 3 hits as the full set,
+shipped the CRLF fix only in `src/prompts/source.rs`. Pushed commit `c83b5544`,
+verified local tests pass, monitored CI run `26357101302` — Windows tests
+failed with the **exact same panic** as before. Spent another 5–10 minutes
+investigating "why didn't the fix take" before realizing build.rs has a
+duplicate parser the build script actually runs. Shipped follow-up fix in
+`af64c737`.
+
+**Probable cause:** F-7 (same tracker, 2026-05-21) already pinned the root
+mechanism — `references` queries live `textDocument/references` which is
+incomplete on some symbols. The tool surfaces this clearly with a per-call
+warning naming the workaround. I dismissed it as a generic "tool noise" line
+instead of a specific load-bearing pointer.
+
+**Workaround:** When the `references` warning fires, **always** run
+`call_graph(direction="callers")` before assuming the result is exhaustive.
+Especially for: build scripts (build.rs), proc-macros, dev-dependencies,
+doctests, or any code that lives outside the main crate's LSP index. Their
+callers are invisible to live rust-analyzer.
+
+**Severity:** med — cost was one wasted CI cycle (~10 min) + ~5 min of
+investigation. Bigger lesson: any tool that explicitly tells you it's
+incomplete is signalling at exactly the seams where the incompleteness will
+bite. F-7 already documents the *mechanism*; F-12 documents the *cost of
+dismissing the surfaced warning*.
+
+**Status:** fixed-verified — `af64c737` shipped CRLF-tolerance to both
+parsers. CRLF test in `src/prompts/source.rs` pins LF→CRLF byte-equality.
+build.rs has no test surface (it runs at compile time on Windows runners; CI
+matrix is the verification).
+
+**Fix idea / Pointer:** None for the tools themselves — both `references`
+and `call_graph` work as designed. The remediation is **behavioural**: read
+the warning, follow its instruction. Consider promoting this to CLAUDE.md
+under a "Tool warning discipline" section if a third datapoint lands.
+References: F-7 (root mechanism), `docs/issues/2026-05-21-references-undercounts-vs-call-graph.md`.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

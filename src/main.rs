@@ -79,6 +79,7 @@ enum Commands {
     },
 
     /// Run the LSP multiplexer (internal — spawned automatically by codescout)
+    #[cfg(unix)]
     #[command(hide = true)]
     Mux {
         /// Path to the Unix socket to listen on
@@ -328,6 +329,7 @@ async fn main() -> Result<()> {
         Commands::AuditDocRefs(args) => {
             codescout::cli::audit_doc_refs::run(args).await?;
         }
+        #[cfg(unix)]
         Commands::Mux {
             socket,
             lock,

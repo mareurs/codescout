@@ -1457,6 +1457,7 @@ mod tests {
         assert_eq!(val, Some(9100));
     }
 
+    #[cfg(unix)]
     #[test]
     fn build_mux_args_includes_env_forwarding() {
         use std::path::PathBuf;
@@ -1496,6 +1497,7 @@ mod tests {
         assert_eq!(args[dash_idx + 2], "--stdio");
     }
 
+    #[cfg(unix)]
     #[test]
     fn build_mux_args_defaults_idle_timeout_to_300_when_none() {
         use std::path::PathBuf;
