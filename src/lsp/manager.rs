@@ -1181,10 +1181,12 @@ mod tests {
         let key = LspKey::new("rust", Path::new("/stale-project"));
 
         // Step 1 — baseline: insert a stale entry (1 hour in the past)
-        mgr.last_used.lock().await.insert(
-            key.clone(),
-            Instant::now() - std::time::Duration::from_secs(3600),
-        );
+        // 100ms — comfortably older than the 1ms TTL used in step 2, while small
+        // enough to not underflow on Windows where Instant::now() is near process start.
+        let stale = Instant::now()
+            .checked_sub(std::time::Duration::from_millis(100))
+            .expect("process has been running > 100ms");
+        mgr.last_used.lock().await.insert(key.clone(), stale);
         assert_eq!(mgr.last_used.lock().await.len(), 1);
 
         // Step 2 — evict with a 1 ms TTL; the 1-hour-old entry qualifies

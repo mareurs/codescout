@@ -1082,6 +1082,10 @@ mod tests {
     }
 
     #[cfg_attr(
+        target_os = "windows",
+        ignore = "Windows lacks /tmp; absolute Unix-path test inputs need a portable rewrite. See docs/issues/2026-05-24-ci-windows-test-portability-rot.md"
+    )]
+    #[cfg_attr(
         target_os = "macos",
         ignore = "/tmp → /private/tmp symlink; allowlist comparison happens before canonicalization on macOS, see docs/issues/2026-05-24-ci-macos-tempdir-canonicalization.md"
     )]

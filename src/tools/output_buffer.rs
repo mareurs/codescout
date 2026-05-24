@@ -678,7 +678,7 @@ mod tests {
         let (cmd, files, is_buffer_only, _refreshed) =
             buf.resolve_refs(&format!("grep hello {}", id)).unwrap();
         assert!(!cmd.contains(&id));
-        assert!(cmd.contains("/")); // temp file path
+        assert!(cmd.contains(std::path::MAIN_SEPARATOR)); // temp file path
         assert_eq!(files.len(), 1);
         assert!(is_buffer_only);
         let content = std::fs::read_to_string(&files[0]).unwrap();
@@ -792,7 +792,12 @@ mod tests {
         let (resolved, files, _, _refreshed) =
             buf.resolve_refs(&format!("grep hello {}", id)).unwrap();
         assert!(!resolved.contains('@'), "got: {}", resolved);
-        assert!(resolved.starts_with("grep hello /"));
+        assert!(
+            resolved.starts_with("grep hello ")
+                && resolved.chars().nth("grep hello ".len()) == Some(std::path::MAIN_SEPARATOR),
+            "expected path-substituted prefix, got: {}",
+            resolved
+        );
         OutputBuffer::cleanup_temp_files(&files);
     }
 

@@ -316,6 +316,9 @@ async fn project_status_includes_memory_staleness() {
 async fn activate_includes_cwd_hint() {
     let dir = tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    // Canonicalize to match Agent::activate's canonicalization
+    // (resolves /var → /private/var on macOS, strips \\?\ prefix on Windows).
+    let root = std::fs::canonicalize(dir.path()).unwrap();
     let agent = Agent::new(None).await.unwrap();
     let ctx = ToolContext {
         agent,
@@ -328,14 +331,14 @@ async fn activate_includes_cwd_hint() {
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
-    let input = json!({ "path": dir.path().to_str().unwrap() });
+    let input = json!({ "path": root.to_str().unwrap() });
     let result = ActivateProject.call(input, &ctx).await.unwrap();
     let hint = result["hint"].as_str().unwrap();
     assert!(
         hint.starts_with("CWD: "),
         "hint should start with CWD: but was: {hint}"
     );
-    assert!(hint.contains(dir.path().to_str().unwrap()));
+    assert!(hint.contains(root.to_str().unwrap()));
 }
 
 #[tokio::test]
@@ -344,7 +347,11 @@ async fn activate_hint_shows_switched_when_away_from_home() {
     let dir2 = tempdir().unwrap();
     std::fs::create_dir_all(dir1.path().join(".codescout")).unwrap();
     std::fs::create_dir_all(dir2.path().join(".codescout")).unwrap();
-    let agent = Agent::new(Some(dir1.path().to_path_buf())).await.unwrap();
+    // Canonicalize to match Agent::new/activate's canonicalization
+    // (resolves /var → /private/var on macOS, strips \\?\ prefix on Windows).
+    let root1 = std::fs::canonicalize(dir1.path()).unwrap();
+    let root2 = std::fs::canonicalize(dir2.path()).unwrap();
+    let agent = Agent::new(Some(root1.clone())).await.unwrap();
     let ctx = ToolContext {
         agent,
         lsp: lsp(),
@@ -356,7 +363,7 @@ async fn activate_hint_shows_switched_when_away_from_home() {
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
     };
-    let input = json!({ "path": dir2.path().to_str().unwrap() });
+    let input = json!({ "path": root2.to_str().unwrap() });
     let result = ActivateProject.call(input, &ctx).await.unwrap();
     let hint = result["hint"].as_str().unwrap();
     // Non-home default is RO: "Browsing … (read-only). CWD: … — remember to workspace(action='activate', …)"
@@ -365,11 +372,11 @@ async fn activate_hint_shows_switched_when_away_from_home() {
         "hint should warn to switch back: {hint}"
     );
     assert!(
-        hint.contains(dir2.path().to_str().unwrap()),
+        hint.contains(root2.to_str().unwrap()),
         "should contain new path: {hint}"
     );
     assert!(
-        hint.contains(dir1.path().to_str().unwrap()),
+        hint.contains(root1.to_str().unwrap()),
         "should contain home path: {hint}"
     );
 }
@@ -380,7 +387,11 @@ async fn activate_hint_shows_returned_when_back_home() {
     let dir2 = tempdir().unwrap();
     std::fs::create_dir_all(dir1.path().join(".codescout")).unwrap();
     std::fs::create_dir_all(dir2.path().join(".codescout")).unwrap();
-    let agent = Agent::new(Some(dir1.path().to_path_buf())).await.unwrap();
+    // Canonicalize to match Agent::new/activate's canonicalization
+    // (resolves /var → /private/var on macOS, strips \\?\ prefix on Windows).
+    let root1 = std::fs::canonicalize(dir1.path()).unwrap();
+    let root2 = std::fs::canonicalize(dir2.path()).unwrap();
+    let agent = Agent::new(Some(root1.clone())).await.unwrap();
     let ctx = ToolContext {
         agent,
         lsp: lsp(),
@@ -394,17 +405,17 @@ async fn activate_hint_shows_returned_when_back_home() {
     };
     // Switch away
     ActivateProject
-        .call(json!({ "path": dir2.path().to_str().unwrap() }), &ctx)
+        .call(json!({ "path": root2.to_str().unwrap() }), &ctx)
         .await
         .unwrap();
     // Return home
     let result = ActivateProject
-        .call(json!({ "path": dir1.path().to_str().unwrap() }), &ctx)
+        .call(json!({ "path": root1.to_str().unwrap() }), &ctx)
         .await
         .unwrap();
     let hint = result["hint"].as_str().unwrap();
     assert!(hint.contains("Returned to home project"), "hint: {hint}");
-    assert!(hint.contains(dir1.path().to_str().unwrap()));
+    assert!(hint.contains(root1.to_str().unwrap()));
 }
 
 #[tokio::test]
