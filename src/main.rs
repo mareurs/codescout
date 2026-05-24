@@ -149,6 +149,12 @@ enum Commands {
 
     /// Attach or merge augmentation (prompt + params) on an artifact.
     ArtifactAugment(codescout::cli::artifact_augment::AugmentArgs),
+
+    /// Audit markdown files for stale code references (file paths, symbols,
+    /// line refs, link targets, module paths). Surfaces broken references
+    /// against the current filesystem + LSP symbol index. Used by CI gates
+    /// against `master`/PR docs to catch drift.
+    AuditDocRefs(codescout::cli::audit_doc_refs::AuditArgs),
 }
 
 fn parse_env_kv(s: &str) -> Result<(String, String), String> {
@@ -307,6 +313,9 @@ async fn main() -> Result<()> {
         }
         Commands::ArtifactAugment(args) => {
             codescout::cli::artifact_augment::run(args).await?;
+        }
+        Commands::AuditDocRefs(args) => {
+            codescout::cli::audit_doc_refs::run(args).await?;
         }
         Commands::Mux {
             socket,

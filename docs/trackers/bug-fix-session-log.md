@@ -549,6 +549,102 @@ The bug was invisible until a tool returned `type: <a value not in {source, mark
 
 **Fix idea / Pointer:** Defensive improvement candidate (not done in this commit): make `format_read_file_summary` log/warn on unknown `type` variants rather than fallthrough rendering `"{line_count} lines\n"` with no body branch. Would have caught the collision at first sighting.
 
+## F-9 — `audit_doc_refs` `fail_on` arg silently ignores `med` and `low` despite docs advertising them
+
+**Observed:** 2026-05-24, pre-implementation reconnaissance for the
+`codescout audit-doc-refs` CLI subcommand (H-5 + R-1 shipping).
+
+**When:** About to write the CLI arg parser with `--fail-on` accepting
+`high | med | low | never`, per `CLAUDE.md` § Standard Ship Sequence step 5
+and the librarian schema docstring.
+
+**Expected (docs):** `librarian(action="audit_doc_refs", fail_on="med")`
+returns exit_code=1 when at least one finding has `severity: med`. Same for
+`low`. Documented in two places:
+- `src/librarian/tools/librarian.rs` schema: *"exit_code 1 when findings reach this severity (high | med | low | never)"*
+- `CLAUDE.md` § Standard Ship Sequence step 5 cites `audit_doc_refs --fail-on med`
+
+**Got (scouted reality):** `src/librarian/tools/audit_doc_refs/mod.rs::build_response`
+(line 542+) hard-codes only two truthy arms:
+
+```rust
+let exit_code: i32 = match fail_on {
+    "high" if findings.iter().any(|f| f.resolution.severity == Severity::High
+        && !matches!(f.resolution.verdict, Verdict::Resolved | Verdict::External)) => 1,
+    "any" if n_broken + n_unknown > 0 => 1,
+    _ => 0,
+};
+```
+
+`fail_on="med"` and `fail_on="low"` fall through the wildcard arm and return
+exit_code=0 — silently behaving like `never`. The `Severity` enum has all
+three variants (High/Med/Low at line 65) so the data is there; the gating
+arm just never references Med/Low.
+
+**Probable cause:** Schema/docs were written aspirationally before
+build_response was extended to honor the lower thresholds; the extension
+never happened. CLI shipping is the natural forcing function — a real
+`--fail-on` flag has to either match the docs or silently lie.
+
+**Workaround (this session):** CLI `--fail-on` accepts only the values the
+MCP code actually honors: `high | any | never`. Matches existing behavior;
+docs in `librarian.rs` schema + CLAUDE.md need a follow-up reconciliation
+(either extend build_response or correct the docs).
+
+**Severity:** med — would have produced a CI gate that silently lets `med`
+findings through despite the user believing `--fail-on med` was active.
+A noisy bug (silent no-op gates are the worst kind) but not cascading;
+controller absorbs the divergence by accepting only verified values.
+
+**Status:** mitigated — CLI accepts only verified values for this session.
+Follow-up: decide between extending build_response or rewriting docs;
+either ships in a separate change.
+
+**Fix idea / Pointer:** `src/librarian/tools/audit_doc_refs/mod.rs:542`
+(build_response). Either add `"med" if findings.iter().any(|f| matches!(f.resolution.severity, Severity::Med | Severity::High) && ...)` arms, or downgrade the docs to `high | any | never` to match reality.
+
+## F-10 — RELEASE-TODO advertises "CI pipeline" as unchecked; workflow already exists, push trigger points at nonexistent branch
+
+**Observed:** 2026-05-24, scouting `.github/` directory before writing the CI
+workflow for H-5 + R-1.
+
+**When:** About to `create_file(.github/workflows/ci.yml, ...)` based on
+RELEASE-TODO High Priority item *"CI pipeline — GitHub Actions workflow
+running `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test` on
+every PR. Single biggest protection against bad contributions."*
+
+**Expected (docs):** No CI workflow exists; needs to be created from scratch.
+
+**Got (scouted reality):** `.github/workflows/ci.yml` exists with 5 jobs:
+- `fmt` (cargo fmt --check)
+- `clippy` (cargo clippy -- -D warnings)
+- `test` (3×3 matrix: linux/macos/windows × default/local-embed/no-features)
+- `tool-docs-sync` (lints tools manual stays in sync with `src/tools/*.rs`)
+- `msrv` (cargo check on 1.82)
+
+Two bugs in the existing workflow:
+1. `on.push.branches: [main]` — the repo's protected branch is `master`
+   (per CLAUDE.md § Branch Strategy). Push-trigger is dead.
+2. No `audit-doc-refs` job — the lint that catches doc/code drift on PRs.
+
+**Probable cause:** RELEASE-TODO was authored before CI was built and never
+updated when CI shipped. The `main` vs `master` branch mismatch is a
+copy-from-template artifact (most repos default to `main`).
+
+**Workaround (this session):** Skip the scratch creation; surgically edit
+the existing `ci.yml` to (a) fix the push branches list, (b) add the
+audit-doc-refs job. Update RELEASE-TODO to reflect the partial-shipped
+state.
+
+**Severity:** med — would have produced a duplicate / clobbering workflow
+file. The existing workflow is invisible to a controller that trusts
+RELEASE-TODO, so a from-scratch write was a real risk.
+
+**Status:** mitigated — edits target the existing file this session.
+
+**Fix idea / Pointer:** `.github/workflows/ci.yml`, `docs/RELEASE-TODO.md`
+"High Priority" section.
+
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

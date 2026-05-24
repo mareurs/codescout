@@ -13,9 +13,13 @@ Tracking remaining work items for the first public release of codescout.
 - [x] **Tool access controls** — Per-category enable/disable in `[security]` config (shell disabled by default)
 - [x] **Librarian project-model redesign (schema v6)** — Catalog now keys artifacts by absolute path instead of `(repo, rel_path)`. First launch on an existing catalog triggers an automatic migration that backfills `abs_path`/`git_root` and creates a `catalog.db.pre-v6-bak.<ts>` backup before dropping legacy columns. `workspace.toml` `[[roots]]` is deprecated (still parsed for the migration; emits a boot warning). New scope ladder: `scope=project|repo|umbrella|all` resolves against the host's active project path. See `docs/superpowers/specs/2026-05-08-librarian-project-model-redesign.md`.
 
-- [x] **CreateFile overwrite protection** — `create_file` rejects existing paths unless `overwrite: true` is passed (default `false`). Schema documents the param; tool description says *"Refuses to overwrite an existing file unless `overwrite: true` is passed."* Implementation at `src/tools/create_file.rs::call` checks `if !overwrite && resolved.exists() { return Err(...) }`.## High Priority
+- [x] **CreateFile overwrite protection** — `create_file` rejects existing paths unless `overwrite: true` is passed (default `false`). Schema documents the param; tool description says *"Refuses to overwrite an existing file unless `overwrite: true` is passed."* Implementation at `src/tools/create_file.rs::call` checks `if !overwrite && resolved.exists() { return Err(...) }`.
 
-- [ ] **CI pipeline** — GitHub Actions workflow running `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test` on every PR. Single biggest protection against bad contributions.
+- [x] **CI pipeline** — GitHub Actions workflow at `.github/workflows/ci.yml` runs `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test` (3×3 matrix: linux/macos/windows × default/local-embed/no-features), `tool-docs-sync`, `msrv` (1.82), and `audit-doc-refs` (informational) on every PR + push to `master`/`experiments`. Push triggers fixed from the placeholder `main` branch in the same change.
+
+## High Priority
+
+- [ ] **CI gate: flip `audit-doc-refs` from informational to `--fail-on high`** — One known historical hi-sev blocks the flip: `docs/adrs/2026-05-13-semantic-anchors-qdrant-payload.md:116` cites a since-refactored `src/embed/index.rs`. Reconcile that ADR (archive convention or inline annotation), then in `.github/workflows/ci.yml` change `--fail-on never` → `--fail-on high` and remove the flip-trigger comment. See H-5 in `docs/trackers/codescout-usage-hookify.md`.
 - [ ] **Integration test: path security through MCP** — End-to-end test via `call_tool` flow (server → tool → path validation → error). Current tests validate the path_security module in isolation; need to confirm wiring through the server layer.
 - [ ] **Error message path sanitization** — Error messages leak full filesystem paths (home dirs, mount points) back to the LLM. Relativize paths to project root in tool error responses.
 

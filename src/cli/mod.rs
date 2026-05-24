@@ -8,6 +8,7 @@ pub mod artifact;
 pub mod artifact_augment;
 pub mod artifact_event;
 pub mod artifact_refresh;
+pub mod audit_doc_refs;
 pub mod format;
 
 use anyhow::{anyhow, Context, Result};
