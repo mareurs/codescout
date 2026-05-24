@@ -1,5 +1,5 @@
 ---
-status: open
+status: mitigated
 opened: 2026-05-24
 closed:
 severity: medium
