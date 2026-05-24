@@ -645,6 +645,75 @@ RELEASE-TODO, so a from-scratch write was a real risk.
 **Fix idea / Pointer:** `.github/workflows/ci.yml`, `docs/RELEASE-TODO.md`
 "High Priority" section.
 
+## F-11 — CI runner missing mold linker required by `.cargo/config.toml`
+
+**Observed:** 2026-05-24, CI smoke test for H-5 + R-1 after sccache fix
+shipped. Audit Doc Refs / Clippy / MSRV jobs fail with
+`collect2: fatal error: cannot find 'ld'` despite sccache now installing
+correctly.
+
+**When:** After mozilla-actions/sccache-action@v0.0.7 fix (7f107d8e) lands;
+investigating "next layer" of pre-existing CI rot. Initially diagnosed as a
+runner-image regression per researcher MCP synthesis on
+`collect2: cannot find 'ld'`. Researcher cited slim-image binutils
+omissions and `-fuse-ld=lld` configuration as causes. Scouted local config
+to verify which applies.
+
+**Expected (assumption):** Either the runner image is missing
+`build-essential`, or the project uses default cc/ld (no special linker
+config). Standard GitHub Actions ubuntu-latest should have `ld` in PATH.
+
+**Got (scouted reality):** `.cargo/config.toml` lines 5-7:
+```toml
+[target.x86_64-unknown-linux-gnu]
+linker = "cc"
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+```
+The project mandates the **mold linker** for x86_64 Linux. `collect2` is
+GCC's internal linker driver; it reports the missing program as `'ld'` in
+its error message regardless of which linker name was actually requested.
+Researcher synthesis pointed at this exact false-positive pattern (their
+note: *"the system fails to locate specific linkers like `ld.lld` when the
+`-fuse-ld=lld` flag is invoked, rather than a total absence of the GNU
+linker"*). Mold has the same shape — `-fuse-ld=mold` requires mold to be on
+PATH.
+
+Same config also mandates `rustc-wrapper = "sccache"` and `jobs = 64`. The
+file looks like a developer's local performance config (mold + sccache +
+64 jobs) but is committed to the repo.
+
+**Probable cause:** `.cargo/config.toml` was authored for local build speed
+(mold is much faster than ld for large Rust projects) and committed
+because it provides project-wide consistency. CI was never updated to
+install mold because CI hasn't successfully run since at least 2026-04-13
+(per F-10 + the historical run count).
+
+**Workaround:** Add `rui314/setup-mold@v1` step before `cargo build`
+invocations in every affected job (clippy, test matrix, msrv,
+audit-doc-refs). Format job unaffected (no compile step). Mirrors the
+sccache install pattern.
+
+Alternative: override the project rustflags in CI via env, e.g.
+`CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS=""`. Less clean —
+diverges CI from local build behavior.
+
+**Severity:** med — would have required a third CI iteration without the
+.cargo/config.toml scout (the researcher MCP correctly pointed at the
+`-fuse-ld=` pattern; scout confirmed which linker). Without the scout I'd
+have tried `apt-get install -y build-essential binutils` (the obvious
+guess) and watched it fail because the real issue isn't binutils.
+
+**Status:** open — fix pending user direction. Two pre-existing items also
+visible behind this one: macos/windows runners don't honor the linux-gnu
+target config so they hit different blockers; tool-docs-sync diff remains
+real drift.
+
+**Fix idea / Pointer:** `.github/workflows/ci.yml` — add
+`uses: rui314/setup-mold@v1` step (after `mozilla-actions/sccache-action`,
+before `Swatinem/rust-cache@v2`) in jobs clippy, test, msrv,
+audit-doc-refs. Also: `.cargo/config.toml` may belong as
+`.cargo/config.toml.example` with a CI-friendly version checked in instead.
+
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

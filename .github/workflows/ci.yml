@@ -95,6 +95,13 @@ jobs:
         with:
           key: audit-doc-refs
       - run: cargo build --release --bin codescout
+      # The audit hits `build_tool_context` which requires a librarian
+      # workspace file. On a fresh runner that file doesn't exist; seed
+      # an empty one (v6 catalog tolerates zero roots).
+      - name: Seed empty librarian workspace
+        run: |
+          mkdir -p "$HOME/.config/librarian"
+          touch "$HOME/.config/librarian/workspace.toml"
       # `--fail-on never` keeps the gate informational while
       # docs/adrs/2026-05-13-semantic-anchors-qdrant-payload.md still
       # references a since-refactored path (1 known hi-sev as of
