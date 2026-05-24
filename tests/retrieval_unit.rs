@@ -1,5 +1,6 @@
 use codescout::retrieval::config::RetrievalConfig;
 
+#[serial_test::serial]
 #[test]
 
 fn config_from_env_uses_defaults_when_unset() {
@@ -19,6 +20,7 @@ fn config_from_env_uses_defaults_when_unset() {
     assert_eq!(cfg.profile, "cpu");
 }
 
+#[serial_test::serial]
 #[test]
 
 fn config_from_env_reads_overrides() {

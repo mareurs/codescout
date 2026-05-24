@@ -817,7 +817,10 @@ fn extract_title_multibyte_at_boundary() {
     // Title body (minus the "...") should be valid UTF-8 and <= 80 bytes
     let body = &title[..title.len() - 3];
     assert!(body.len() <= 80);
-    assert!(body.len() % 3 == 0, "should truncate at char boundary");
+    assert!(
+        body.len().is_multiple_of(3),
+        "should truncate at char boundary"
+    );
 }
 
 #[tokio::test]
