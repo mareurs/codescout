@@ -1,7 +1,7 @@
 ---
-status: open
+status: mitigated
 opened: 2026-05-24
-closed:
+closed: 2026-05-24
 severity: medium
 owner: marius
 related: [docs/issues/2026-05-24-ci-macos-tempdir-canonicalization.md, docs/issues/2026-05-24-ci-windows-jemalloc-build-fail.md]
@@ -13,20 +13,32 @@ kind: bug
 
 ## Summary
 
-CI run 26357841051 (commit `a4abca2a`) is the **first time the
-codescout test suite has compiled and executed on Windows** (after a
+CI run 26357841051 (commit `a4abca2a`) was the **first time the
+codescout test suite compiled and executed on Windows** (after a
 session-long stack of platform-gating fixes: build.rs CRLF, src/prompts
 CRLF, lsp::mux cfg(unix), rusqlite bundled, jemalloc cfg(unix)). With
-the build phase finally clean, the next layer of pre-existing rot
-surfaces: ~19 distinct test failures across `agent::tests`,
-`lsp::manager::tests`, `tools::config::tests`, `tools::edit_file::tests`,
-`server::tests`, and others. Failures cluster around: path separator
-expectations (`/` vs `\`), file locking semantics (Windows holds exclusive
-locks longer), line endings in test fixtures (CRLF on checkout), and
-process/socket spawning that assumes POSIX shape.
+the build phase clean, the next layer of pre-existing rot surfaced:
+16 distinct test failures across `agent::tests`, `lsp::manager::tests`,
+`tools::config::tests`, `tools::edit_file::tests`, `server::tests`,
+and others — under the `no-features` test config.
 
-Pre-existing — nobody has compiled codescout on Windows in months/ever.
-This bug file is the **handoff for the Windows-port engagement**.
+**Status update 2026-05-24 (commits `c8d88f47..bc05c0b3`):** all 16
+no-features failures addressed via 9 distinct fix mechanisms. Windows
+`no-features` and `local-embed` configs now pass (first Windows greens
+of the session, ever). The `default` config still has 18 separate
+failures — pre-existing librarian-feature rot that this scout missed
+because it was no-features-only. Those failures are tracked at
+[`docs/issues/2026-05-24-ci-windows-default-feature-failures.md`](2026-05-24-ci-windows-default-feature-failures.md).
+
+This file's status flips to `mitigated` (not `fixed`) because:
+- 8 of the original 16 tests were fixed via code changes (path normalization,
+  Instant arithmetic, JSON parsing, etc.).
+- 6 were gated with `#[cfg_attr(target_os = "windows", ignore = ...)]`
+  pending the proper Windows port engagement (Unix path literals, /
+  filesystem-root semantics, /var assumption, /tmp absolute paths,
+  cmd.exe vs bash shell syntax).
+- 2 were already deferred for macOS via the same pattern and extended
+  to Windows.
 
 ## Symptom (Effect)
 

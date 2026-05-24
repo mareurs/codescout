@@ -1738,11 +1738,11 @@ struct Point {
             .unwrap();
 
         // rust-analyzer indexes in the background after initialize; retry until
-        // workspace/symbol returns results. Linux: typically < 2s. Windows: GHA
-        // runners are I/O-slower, so allow up to 15s (30 × 500ms).
-        let retries = if cfg!(windows) { 30 } else { 10 };
+        // workspace/symbol returns results. Local Linux: typically < 2s, but GHA
+        // runners (especially macOS + Windows) can be I/O-slower under load.
+        // Budget 15s (30 × 500ms) on all platforms.
         let mut symbols = vec![];
-        for _ in 0..retries {
+        for _ in 0..30 {
             symbols = client.workspace_symbols("add").await.unwrap();
             if !symbols.is_empty() {
                 break;
