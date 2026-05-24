@@ -443,7 +443,10 @@ mod tests {
             "p2 row must survive a project-scoped force reindex of p1"
         );
 
-        let p2_pattern = format!("%{}/p2/%", root.display());
+        // Forward-slash LIKE pattern — catalog stores abs_paths in forward-slash
+        // form (artifact::upsert via to_forward_slash); a native-separator pattern
+        // would not match any rows on Windows.
+        let p2_pattern = format!("%{}/p2/%", crate::util::fs::to_forward_slash(root));
         let p2_count: i64 = ctx_p1
             .catalog
             .lock()

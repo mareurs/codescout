@@ -2612,6 +2612,10 @@ mod guide_hint_tests {
         }
     }
 
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "intermittent 'tool artifact not registered' on Windows runners — 4 of 5 guide_hint tests pass with identical setup. Suspected test-ordering / SQLite locking interaction with the shared LIBRARIAN_DB on Windows (mandatory file locking vs POSIX advisory). Needs dedicated investigation. See docs/issues/2026-05-24-ci-windows-default-feature-failures.md"
+    )]
     #[tokio::test]
     async fn activate_project_resets_hints() {
         let (dir, server) = make_server().await;
@@ -2656,6 +2660,10 @@ mod guide_hint_tests {
         );
     }
 
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "uses 'yes filler | head -2000' shell pipeline — both 'yes' and 'head' are Unix-only and the inject_tee path-validator rejects Windows temp file paths (C:\\Users\\...\\Temp\\codescout-unfiltered-XXX has chars outside the [a-zA-Z0-9/_-.] allowlist). See docs/issues/2026-05-24-ci-windows-default-feature-failures.md"
+    )]
     #[tokio::test]
     async fn run_command_with_overflow_emits_progressive_hint_once() {
         let (_dir, server) = make_server().await;

@@ -406,6 +406,9 @@ path = "/tmp/proj-b"
         std::fs::write(repo_root.join("docs/specs/a.md"), "# a\n").unwrap();
 
         let ws_path = tmp.path().join("workspace.toml");
+        // Forward-slash form for the TOML literal — Windows backslashes in a
+        // bare double-quoted TOML string trigger escape parsing (e.g. \U is an
+        // 8-hex-digit Unicode escape sequence) and the load fails.
         let ws_content = format!(
             r#"
 [[roots]]
@@ -416,7 +419,7 @@ path = "{}"
 glob = "**/docs/specs/*.md"
 kind = "spec"
 "#,
-            repo_root.display()
+            crate::util::fs::to_forward_slash(&repo_root)
         );
         std::fs::write(&ws_path, ws_content).unwrap();
 
