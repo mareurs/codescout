@@ -190,6 +190,20 @@ permanent surfaces (CLAUDE.md, ADRs, skills) when their `Promote-when` criterion
 against `docs/evals/reconnaissance-trigger.md`. Re-score before any future SKILL.md
 description change — empirical baseline (2026-05-17) is 6/7 at threshold.
 
+
+**Verify-open cadence (added 2026-05-25 after W-7 promotion):** Before any "what's open?"
+report or backlog triage, run a verify-open pass on session-log entries with `Status: open`
+older than 14 days — reconcile the body status against current code + the bug-file archive.
+Distributed fixes leave entries zombie-open by default: a fix shipping under a `fix(ci): ...`
+or `feat(...): ...` commit message rather than one naming the tracker entry doesn't trip any
+automated gate. Evidence: the W-7 scout pass (2026-05-25, `docs/trackers/bug-fix-session-log.md`)
+flipped 3 of 4 nominally-open F-N entries to `fixed-verified` / `mitigated` in a single pass —
+75% zombie-open rate in one tracker. Pairs with Standard Ship Sequence step 4 (bug-file archive
+discipline at the `docs/issues/` level) and the `audit_doc_refs` CI gate (doc-link drift at the
+markdown-reference level) — three independent bookkeeping surfaces leak the same way under the
+same root cause (fix-then-forget), and the project's hygiene discipline is now complete across
+all three.
+
 ## Git Workflow
 
 **This is a public repo.** Do not push incomplete or untested work.
