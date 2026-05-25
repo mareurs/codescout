@@ -697,3 +697,216 @@ datapoint — likely the next time another test module hits this.
 
 
 ---
+
+
+
+### U-21 — `edit_code` action=replace silently drops outer attributes when body starts with an attribute
+
+**When:** Stability backlog task #68 (re-enable Windows-gated `guide_hint`
+tests), session 2026-05-25 (post-compact). Surfaced during the second
+phase of the fix — adding `#[serial]` to all 6 tests after the Python
+cfg_attr removal pass (see [[U-19]]).
+
+**Iron Law / pattern:** `edit_code` behavioral inconsistency with its
+docstring. Tool docs state: *"action='replace' overwrites body
+(PRESERVES outer #[...] attributes — drop with edit_file)"*. In
+practice, when the replacement body's first non-whitespace token is
+itself an attribute (e.g. `#[serial]\n    async fn ...`), the previously
+preserved outer attributes (`#[tokio::test]`) **disappear** from the
+result. Net effect: the test functions ended up with only `#[serial]`
+attached, lost their `#[tokio::test]` marker, and the test runner found
+zero tests in the module — exactly the symptom that triggered the bug
+hunt.
+
+**Confirming data:** single-turn data point with 6 verbatim repro
+instances (all 6 tests in `guide_hint_tests`):
+
+1. First-pass `edit_code action=replace` body: `#[serial]\n    async fn first_artifact_call_emits_librarian_hint() { ... }`.
+2. Post-edit `cargo test --lib server::guide_hint_tests` reported
+   `running 0 tests` plus 6 dead-code warnings on `EnvGuard`,
+   `make_server`, `tool_by_name`, `shared_ctx`, `extract_hint`,
+   `EnvGuard::set` — diagnostic signal that no test fn was bound to a
+   harness attribute.
+3. `read_file` of the affected region showed `#[serial]\n    async fn ...`
+   with `#[tokio::test]` absent from above.
+4. Second-pass replacement body explicitly carrying both attributes
+   (`#[tokio::test]\n    #[serial]\n    async fn ...`) restored the
+   correct shape; tests then ran (6 passed).
+
+**Severity:** med — caught immediately by the build's dead-code warnings
+and the 0-test count, so no shipped damage. But the docstring's
+preserve promise is a load-bearing claim — any other replacement whose
+body happens to start with `#[...]` faces the same trap.
+
+**Status:** open — distinct from U-19's missing-API gap. U-19 is "no
+action to DROP attributes"; U-21 is "the existing PRESERVE promise has
+edge cases".
+
+**Diagnosis (introspection):** the heuristic edit_code probably uses to
+find the symbol-replacement region scans backwards from the `fn` /
+`async fn` keyword over `#[...]` lines and includes them in the
+replacement scope. When the new body itself starts with `#[...]`, the
+heuristic may interpret it as "you supplied the attributes you want" and
+elide the previously-preserved set. Without source inspection of
+`edit_code`'s implementation this is speculation; the observable
+behavior is what U-21 captures.
+
+**Pointer:** two possible fixes:
+
+- **Doc fix** — clarify in the docstring that "preserved" only applies
+  when the replacement body's first token is NOT an attribute. Add a
+  worked example showing the correct pattern (body includes all desired
+  attributes; outer attrs are concatenated only if body has none).
+- **Behavior fix** — make preservation unconditional regardless of body
+  shape, and require callers to opt OUT via a new `replace_attributes`
+  field if they want to override (the option-A path from U-19 would
+  also close this).
+
+Workaround until fix: always include ALL desired outer attributes in
+the replacement body. Treat edit_code's preserve promise as "preserved
+only when body starts with non-attribute syntax".
+
+
+---
+
+### U-22 — IL3 detector flags literal `|` inside the string content of `git commit -m`
+
+**When:** Stability backlog task #68 commit phase, session 2026-05-25.
+Hit twice in two attempts to ship the same commit message.
+
+**Iron Law / pattern:** Pika IL3 detector false-positive. The detector
+scans the full `run_command` invocation string for pipe characters
+without parsing shell quote/escape boundaries. When the commit message
+*content* contains a literal `|` — common in shell-related code
+discussions, e.g. "uses 'yes filler | head -2000' shell pipeline" — the
+detector sees it as an output pipe and blocks the call.
+
+**Confirming data:** two strikes in a single session:
+
+1. First attempt:
+
+   ```
+   git add ... && git commit -m "... uses 'yes filler | head -2000' ..."
+   ```
+
+   Blocked. IL3 hook reported the message as "piped … to a log-trimmer".
+   The `|` it flagged was inside a single-quoted substring within the
+   `-m` argument.
+
+2. Second attempt switched to Python heredoc — but the Python source
+   itself referenced the same shell pipeline (`'yes filler | head -2000'`)
+   in the message body string. Blocked again with the same diagnostic.
+
+   ```
+   python3 -c "
+   msg = '''... uses \"yes filler | head -2000\" ...'''
+   open('/tmp/commit-msg-68.txt', 'w').write(msg)
+   "
+   ```
+
+   The detector's text scan does not respect Python triple-quoted
+   string boundaries either.
+
+**Severity:** low — workaround is mechanical (write message to file
+via heredoc, then `git commit -F /tmp/file`), but the workaround is
+ad-hoc and non-obvious until you've hit it. First-occurrence cost
+~5 minutes of debugging the unhelpful "to a log-trimmer" message
+before realizing the offending `|` was inside the string content.
+
+**Status:** open — substrate detector imprecision. The IL3 surface is
+otherwise well-targeted (see U-18 for the deny-mode baseline).
+
+**Diagnosis (introspection):** the detector likely uses a simple regex
+like `\|` against the joined command tokens, with no shell-AST
+parsing. Shell-AST parsing in a PreToolUse hook is expensive — but a
+cheaper heuristic could help: ignore `|` characters appearing inside
+matched single-quote pairs in the unparsed command (won't catch
+escaped or nested quotes; would catch this common case).
+
+**Pointer:** small substrate refinement candidate. Track-only for now
+— the heredoc-to-file workaround is reliable. If a third occurrence
+lands, promote to a hookify candidate. Tag related: see [[U-3]] /
+[[U-18]] for the legitimate-IL3 baseline this false positive sits
+alongside.
+
+
+---
+
+### U-23 — MCP server `strip_project_root_from_result` rewrites path strings, easy to misread as catalog data
+
+**When:** Stability backlog task #69 (`librarian doctor`) extensive
+smoke-test phase, session 2026-05-25 (this conversation). Discovered
+when verifying the doctor output against the live catalog post-rebuild.
+
+**Iron Law / pattern:** not an Iron Law violation — a
+**methodological gotcha** for any agent inspecting MCP tool output to
+reason about underlying data shape. The codescout MCP server at
+`src/server.rs:351` runs `strip_project_root_from_result(call_result,
+&root_prefix)` on every tool response except `run_command`, rewriting
+absolute paths under the active project root into relative-looking
+form. The catalog stores absolute paths; the MCP buffer shows
+project-relative views; the two are easy to conflate when you have not
+read the server's response-processing code.
+
+**Confirming data:** single-session misread with concrete fallout:
+
+1. `librarian(action="doctor")` returned 153 violations. The first
+   ~75 had paths like `/home/marius/work/stefanini/...` (absolute) —
+   those are NOT under the active project root, so the strip layer
+   did not rewrite them.
+2. The last ~78 had paths like `docs/issues/2026-05-19-...md`
+   (relative-looking) — those ARE under the active project root
+   (`/home/marius/work/claude/code-explorer/`), so the strip layer
+   rewrote them to omit the prefix.
+3. I read the mixed shapes as "two classes of catalog drift —
+   absolute (genuine missing files) plus relative (wrong-shape rows)"
+   and drafted a follow-up commit `feat(librarian): doctor — add
+   abs_path_must_be_absolute check` with an overclaiming message
+   citing a non-existent discovery.
+4. The CLI's raw stdout (which bypasses the MCP strip layer) showed
+   ALL 153 paths absolute. Re-reading `src/server.rs:341-371` confirmed
+   the strip layer's behavior.
+5. Amended the commit message to honest defense-in-depth framing.
+   No code change required — the check itself is still valuable as
+   a guardrail.
+
+**Severity:** med — the misread led to overclaiming in a draft commit
+message. Caught and corrected before push. But the underlying confusion
+shape is reproducible: any agent inspecting MCP tool output that
+contains path fields can hit the same misread, and the strip behavior
+is not surfaced in the tool response itself (only the `read_file`
+fallback emits a `[codescout] paths are relative to {root}` annotation,
+capped at 3 per session — see `src/server.rs:365`).
+
+**Status:** open — design-level. Two paths:
+
+- **Document-only** — add a note to the codescout MCP server description
+  (or to tool docs that return path fields) that "paths under the
+  active project root are returned in relative form for readability;
+  raw catalog data is absolute. Use the CLI variant for unmediated
+  output." Cheapest. Costs nothing per-call. Easy to forget.
+- **Surface-on-every-response** — emit the `[codescout] paths are
+  relative to {root}` annotation on ALL stripping responses, not just
+  `read_file` (or raise the per-session cap from 3 → unlimited). Adds
+  ~50 bytes per response. Removes ambiguity entirely.
+
+**Diagnosis (introspection):** the strip layer exists for human
+readability — relative paths are visually scannable, absolute paths
+add noise for the common case where the agent already knows the
+project root. The trade-off is correct for human reading, wrong for
+machine-side data-shape verification. The annotation-on-`read_file`
+cap of 3 reads as "once you've seen this 3 times you know the
+convention" — but for a fresh agent on a fresh session, 3 strikes
+isn't enough to internalize when the convention applies (which tools)
+and when it doesn't (`run_command`).
+
+**Pointer:** the smoke-test discipline lesson is portable: when
+verifying a tool's data-shape claims against an MCP response, prefer
+the CLI variant or read the buffer with `read_file ... json_path=...`
+on a known-absolute field to detect rewrites. Worth a W-N in the
+recon-patterns tracker once the pattern repeats a second time.
+Related: see [[U-19]] / [[U-21]] for other "docstring says X,
+behavior does Y" cases.
+
+
+---
