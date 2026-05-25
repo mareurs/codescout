@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-05-24
-closed:
+closed: 2026-05-25
 severity: low
 owner: marius
 related: []
@@ -124,6 +124,34 @@ re-run by itself.
    `config_from_env_reads_overrides` in `temp_env::with_vars(...)`.
 3. Remove the `#[serial_test::serial]` markers — no longer needed.
 4. Run 50x; confirm stable.
+
+## Disposition (2026-05-25)
+
+**Status: fixed.** Applied Option B (temp-env crate) per the Fix
+section's recommendation:
+
+- `temp-env = "0.3"` added to `Cargo.toml [dev-dependencies]`.
+- `config_from_env_uses_defaults_when_unset` rewritten to wrap its
+  assertions in `temp_env::with_vars_unset([...], || { ... })` — the
+  6 `CODESCOUT_*` vars are unset for the closure's scope, then
+  restored to their prior values on exit.
+- `config_from_env_reads_overrides` rewritten to wrap its assertions
+  in `temp_env::with_vars([(name, Some(value)), ...], || { ... })`.
+  Old per-var cleanup loop removed (with_vars handles restoration).
+- `#[serial_test::serial]` markers dropped from both tests.
+
+`cargo test --test retrieval_unit` passes 8/8 green this session.
+
+The fix works because `temp_env::with_vars` uses an internal global
+mutex to serialize all calls within the process — covering both the
+in-binary concurrent-test case and any other tests in the same
+binary that adopt temp_env in the future. Cross-binary state isn't
+the actual issue (each test binary is a separate OS process with
+its own env); the original analysis in this file conflated
+"binary-as-thread" with "binary-as-process." The in-binary race
+between serial-tagged tests and untagged tests that read/write
+CODESCOUT_* (e.g. `client_from_env_constructs_when_urls_present`)
+is what made the flake rate variable.
 
 ## References
 
