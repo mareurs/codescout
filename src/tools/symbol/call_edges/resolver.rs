@@ -195,6 +195,15 @@ async fn resolve_via_ts(
                 let caller = enclosing_function_name(&tree, &src, byte, language_id)
                     .unwrap_or_else(|| "<anonymous>".to_owned());
 
+                // Skip self-edges: when the LSP can't model a symbol (e.g.
+                // #[test] fns), `references` may return locations inside the
+                // symbol's own body, which the AST walk-up resolves back to
+                // the symbol itself. Real self-recursion goes through
+                // `incoming_calls` (LSP path), not this fallback.
+                if caller == sym_name {
+                    continue;
+                }
+
                 edges.push(Edge {
                     caller_sym: caller,
                     callee_sym: sym_name.to_owned(),
@@ -734,6 +743,65 @@ mod tests {
         assert_eq!(e.source, EdgeSource::Ts);
         assert_eq!(e.caller_sym, "bar");
         assert_eq!(e.callee_sym, "foo");
+    }
+
+    /// Regression test for docs/issues/2026-05-25-call-graph-tree-sitter-self-edges.md.
+    /// Pre-fix: resolve_one_hop emits a spurious self-edge when references
+    /// returns a location inside the queried symbol's own body (which happens
+    /// for symbols RA cannot fully model, e.g. #[test] fns).
+    #[tokio::test]
+    async fn resolve_one_hop_ts_fallback_callers_skips_self_edge() {
+        let src = "fn bar(x: i32) {}\nfn foo() { bar(1); }\n";
+
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = dir.path().join("fixture.rs");
+        std::fs::write(&fixture, src).unwrap();
+
+        let fixture_uri = {
+            let path_str = fixture.to_string_lossy().replace('\\', "/");
+            if path_str.starts_with('/') {
+                format!("file://{}", path_str)
+            } else {
+                format!("file:///{}", path_str)
+            }
+        };
+
+        // Reference INSIDE foo's body — at the `bar(1)` call site.
+        // Simulates RA returning internal call sites (rather than external
+        // callers) when asked references on a symbol it doesn't fully model.
+        let ref_loc = lsp_types::Location {
+            uri: fixture_uri.parse::<lsp_types::Uri>().unwrap(),
+            range: lsp_types::Range {
+                start: lsp_types::Position {
+                    line: 1,
+                    character: 11,
+                },
+                end: lsp_types::Position {
+                    line: 1,
+                    character: 14,
+                },
+            },
+        };
+
+        let mock = MockLspClient::new();
+        mock.references_results
+            .lock()
+            .unwrap()
+            .insert(fixture.clone(), vec![ref_loc]);
+
+        let edges = resolve_one_hop(&mock, "foo", &fixture, 1, 3, "rust", Direction::Callers)
+            .await
+            .unwrap();
+
+        for e in &edges {
+            assert_ne!(
+                (e.caller_sym.as_str(), e.callee_sym.as_str()),
+                ("foo", "foo"),
+                "spurious self-edge: tree-sitter fallback resolved a reference \
+                 inside foo's own body as a caller-of-foo edge. \
+                 Pre-fix this returned 1 edge foo→foo; post-fix should return 0."
+            );
+        }
     }
 
     // ── Test 3: Callees with no LSP → RecoverableError ───────────────────────
