@@ -8,20 +8,26 @@
 //!
 //! Checks (MVP):
 //!
-//! 1. `backslash_in_abs_path` — `artifact.abs_path` must contain only `/`
+//! 1. `abs_path_must_be_absolute` — the schema declares
+//!    `abs_path TEXT NOT NULL UNIQUE` but does not enforce absoluteness.
+//!    Pre-#66 code paths stored relative strings in some rows; the doctor
+//!    surfaces them so they can be migrated (or evicted via `reindex`)
+//!    rather than masquerading as `missing_file` false positives.
+//!    Discovered in the live-catalog smoke test after the #69 commit.
+//! 2. `backslash_in_abs_path` — `artifact.abs_path` must contain only `/`
 //!    separators. After the [`crate::util::fs::RepoPath`] newtype migration,
 //!    every write goes through `to_forward_slash` — any backslash row is
 //!    pre-migration drift.
-//! 2. `ads_colon_in_abs_path` — no colon outside the optional Windows
+//! 3. `ads_colon_in_abs_path` — no colon outside the optional Windows
 //!    drive-letter prefix (`[a-zA-Z]:/`). Defends against the NTFS alternate
 //!    data stream `foo.txt:hidden` shape (Ibex S-2 in rounds 3–8 review).
-//! 3. `dotdot_segment_in_abs_path` — no segment is exactly `..`. Catches
+//! 4. `dotdot_segment_in_abs_path` — no segment is exactly `..`. Catches
 //!    path-escape strings even though the gather tool's
 //!    [`guard_relative_path`] already rejects them on input.
-//! 4. `missing_file` — every `artifact.abs_path` must exist on disk
+//! 5. `missing_file` — every `artifact.abs_path` must exist on disk
 //!    (`Path::exists()`). Catches rows orphaned by `git rm` /
 //!    out-of-band file moves that bypassed `reindex`.
-//! 5. `backslash_in_git_root` — `commits.git_root` carries paths too;
+//! 6. `backslash_in_git_root` — `commits.git_root` carries paths too;
 //!    the same forward-slash invariant applies (commits.rs writes via
 //!    `RepoPath::from_path(...).into_string()` post-#66).
 //!
@@ -100,9 +106,12 @@ pub async fn call(ctx: &ToolContext, _args: Value) -> Result<Value> {
     }))
 }
 
-/// Pulls every `(id, abs_path)` row once and runs four per-row checks
-/// (backslash / ads_colon / dotdot / missing_file). Single SQL fetch +
-/// in-memory passes is cheaper than four separate queries.
+/// Pulls every `(id, abs_path)` row once and runs five per-row checks
+/// (abs_path_must_be_absolute / backslash / ads_colon / dotdot /
+/// missing_file). Single SQL fetch + in-memory passes is cheaper than five
+/// separate queries. `abs_path_must_be_absolute` runs first because it is
+/// the gating shape check — a relative-path row should be evicted, not
+/// further analyzed.
 fn scan_artifact_paths(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
     let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact")?;
     let rows: Vec<(String, String)> = stmt
@@ -111,6 +120,9 @@ fn scan_artifact_paths(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
 
     let mut violations = Vec::new();
     for (id, abs_path) in &rows {
+        if let Some(v) = check_abs_path_must_be_absolute(id, abs_path) {
+            violations.push(v);
+        }
         if let Some(v) = check_backslash(id, abs_path, "backslash_in_abs_path") {
             violations.push(v);
         }
@@ -208,6 +220,34 @@ fn check_missing_file(id: &str, abs_path: &str) -> Option<Violation> {
     }
 }
 
+fn check_abs_path_must_be_absolute(id: &str, abs_path: &str) -> Option<Violation> {
+    // Schema declares `abs_path TEXT NOT NULL UNIQUE` but does not enforce
+    // absoluteness. Pre-#66 code paths stored relative strings here in some
+    // cases; the doctor catches the wrong-shape rows so they can be migrated
+    // (or evicted via reindex) rather than masquerading as `missing_file`
+    // false positives (Path::exists resolves them against the caller's cwd).
+    //
+    // Absolute on the platforms we care about:
+    //   - POSIX: leading `/`
+    //   - Windows: leading `<drive>:` (`C:`, `D:`, …), with `[a-zA-Z]:` byte
+    //     pattern at positions 0..2.
+    //   - Windows UNC `\\server\share` is allowed in theory but extremely
+    //     unusual in our content corpus; if it ever appears the
+    //     `backslash_in_abs_path` check catches it first.
+    let bytes = abs_path.as_bytes();
+    let starts_with_posix_root = bytes.first() == Some(&b'/');
+    let starts_with_drive = bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+    if starts_with_posix_root || starts_with_drive {
+        return None;
+    }
+    Some(Violation::new(
+        "abs_path_must_be_absolute",
+        Some(id.to_string()),
+        abs_path,
+        "abs_path is relative — schema requires absolute form (leading '/' or '<drive>:')",
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,10 +327,31 @@ mod tests {
         assert_eq!(v.check, "missing_file");
     }
 
+    #[test]
+    fn check_abs_path_must_be_absolute_accepts_posix_and_drive() {
+        assert!(check_abs_path_must_be_absolute("a1", "/home/x/foo.md").is_none());
+        assert!(check_abs_path_must_be_absolute("a1", "/").is_none());
+        assert!(check_abs_path_must_be_absolute("a1", "C:/Users/x/foo.md").is_none());
+        assert!(check_abs_path_must_be_absolute("a1", "z:/").is_none());
+    }
+
+    #[test]
+    fn check_abs_path_must_be_absolute_flags_relative() {
+        let v = check_abs_path_must_be_absolute("a1", "docs/foo.md").unwrap();
+        assert_eq!(v.check, "abs_path_must_be_absolute");
+        assert_eq!(v.path, "docs/foo.md");
+        assert!(v.detail.contains("relative"));
+
+        // Relative with drive-shape but missing colon at pos 1 — still wrong
+        assert!(check_abs_path_must_be_absolute("a1", "Cusers/foo.md").is_some());
+        // Empty string is not absolute (no leading slash)
+        assert!(check_abs_path_must_be_absolute("a1", "").is_some());
+    }
+
     #[tokio::test]
     async fn doctor_call_surfaces_seeded_drift() {
         let cat = Catalog::open_in_memory().unwrap();
-        // 5 seeded artifact rows + 1 commit row. Each fault triggers ALL
+        // 6 seeded artifact rows + 1 commit row. Each fault triggers ALL
         // applicable checks (e.g. a backslash path also fails `missing_file`
         // because no host file lives at the bogus path) — so we assert
         // by per-check counts, not by total.
@@ -298,6 +359,9 @@ mod tests {
         seed_artifact(&cat, "bad-ads", "C:/users/foo.txt:stream");
         seed_artifact(&cat, "bad-dotdot", "/home/marius/../etc/passwd");
         seed_artifact(&cat, "bad-missing", "/definitely/not/a/real/path.md");
+        // Wrong-shape row — relative string stored where abs is required.
+        // Found in the wild during the post-#69 live-catalog smoke test.
+        seed_artifact(&cat, "bad-relative", "docs/issues/foo.md");
         // Clean path that exists on Linux hosts. (cargo test runs on Linux/CI;
         // /tmp is universally present.)
         seed_artifact(&cat, "clean", "/tmp");
@@ -311,9 +375,11 @@ mod tests {
         assert_eq!(by_check.get("backslash_in_abs_path").copied(), Some(1));
         assert_eq!(by_check.get("ads_colon_in_abs_path").copied(), Some(1));
         assert_eq!(by_check.get("dotdot_segment_in_abs_path").copied(), Some(1));
-        // 4 missing-file hits: bad-backslash, bad-ads, bad-dotdot, bad-missing.
-        // The "clean" row at /tmp does not fire missing_file.
-        assert_eq!(by_check.get("missing_file").copied(), Some(4));
+        assert_eq!(by_check.get("abs_path_must_be_absolute").copied(), Some(1));
+        // 5 missing-file hits: bad-backslash, bad-ads, bad-dotdot, bad-missing,
+        // and bad-relative (Path::exists on "docs/issues/foo.md" resolves
+        // against the test runner's cwd and finds nothing). /tmp does not fire.
+        assert_eq!(by_check.get("missing_file").copied(), Some(5));
 
         let r = scan_commits_git_root(&cat.conn).unwrap();
         assert_eq!(r.len(), 1);

@@ -25,10 +25,11 @@ impl Tool for Librarian {
          when a doc-heavy PR is about to merge or when drift is suspected. \
          Output is an `audit_issues` tracker. \
          doctor: read-only catalog drift scanner. Checks abs_path columns for \
-         forward-slash form, NTFS ADS colons, '..' segments, and missing files \
-         on disk; checks commits.git_root for forward-slash form. Returns a \
-         JSON report with per-check violation counts. Manual cadence — run \
-         after large refactors or when downstream LIKE queries return empty."
+         absolute-form, forward-slash form, NTFS ADS colons, '..' segments, \
+         and missing files on disk; checks commits.git_root for forward-slash \
+         form. Returns a JSON report with per-check violation counts. Manual \
+         cadence — run after large refactors or when downstream LIKE queries \
+         return empty."
     }
 
     fn input_schema(&self) -> Value {
