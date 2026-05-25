@@ -144,9 +144,14 @@ falsely signalled "the API accepts that shape." If it had returned
 
 ## Fix
 
-Four-layer defense in depth on `experiments` branch. Cherry-pick to
-`master` pending (run `git rev-parse HEAD` on master after cherry-pick
-and update this Fix section with the master-side SHA).
+Four-layer defense in depth, shipped to master across two commits:
+
+- **`f351e1a2`** — `feat(librarian): defense-in-depth + surgical body_edits[] for artifact update` (Layers 1–4 + prompt surfaces)
+- **`1ac537c7`** — `fix(librarian): drop deny_unknown_fields from update::Args — dispatcher passes 'action' through` (regression fix caught by live MCP smoke test; the `feat` commit incorrectly added strict deserialization to `Args` as well as `UpdatePatch`, breaking every `artifact(update)` call through the dispatcher)
+
+Experiments-side originals: `6ba6809c` (feat) and `5e39649d` (fix). After
+the master cherry-picks and `git rebase master` on experiments, those SHAs
+are orphans; cite the master-side SHAs above.
 
 **Layer 1 — body-shrink guard.** Refuses any body write that would reduce
 the file by more than 50% unless `force=true`.
@@ -160,14 +165,16 @@ the file by more than 50% unless `force=true`.
 
 **Layer 2 — strict patch deserializer.**
 `src/librarian/tools/update.rs:8-36` adds `#[serde(deny_unknown_fields)]`
-to `UpdatePatch` and `Args`. Misspelled keys now return
-`RecoverableError`.
+to `UpdatePatch`. Misspelled keys now return `RecoverableError` listing the
+valid fields. `Args` is intentionally NOT strict — the outer Artifact
+dispatcher passes `action` through, and strict checking there breaks the
+public surface (caught in `1ac537c7`).
 
 **Layer 3 — `body_edits[]` surgical surface.**
 `patch={body_edits: [{heading, action, content?|old_string+new_string?,
 at?, replace_all?, include_subsections?}]}` mirrors `edit_markdown`'s
-batch shape; routed through `perform_section_edit_ext` / `perform_scoped_edit`
-helpers (now `pub(crate)` via
+batch shape; routed through `perform_section_edit_ext` /
+`perform_scoped_edit` helpers (now `pub(crate)` via
 `src/tools/markdown/mod.rs:3`). Mutual exclusion with bare `body`
 enforced; combined with `params` updates atomically.
 
@@ -186,7 +193,6 @@ edits_count, mode, forced}`. Reuses the existing `field_patch` event kind
 - `docs/architecture/augmented-artifacts.md` — new "## Body editing
   surfaces — `body_edits` vs. `body`" section after the
   managed-markdown gate explanation.
-
 ## Tests added
 
 In `src/librarian/tools/update.rs::tests`:
