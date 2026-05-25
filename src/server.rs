@@ -1308,9 +1308,15 @@ pub async fn run(
 /// absolute path without a trailing slash, so they do not match `root_prefix`
 /// and pass through unchanged.
 ///
-/// Buffer content (`@tool_xxx` refs) is covered automatically: it only
-/// re-enters the pipeline through `run_command`, which also passes through
-/// `call_tool` and gets stripped there.
+/// Buffer content (`@tool_xxx` refs) is covered automatically: every
+/// non-`run_command` tool's output passes through `post_process`, which
+/// strips and annotates — including subsequent `read_file(@tool_xxx, ...)`,
+/// `grep PATTERN @tool_xxx`, or any other tool that re-reads the buffer
+/// content. `run_command @tool_xxx` is the only re-read path that bypasses
+/// stripping, by design (its output is raw shell bytes; see the
+/// path-literals bug file). The buffer FILE itself contains raw
+/// unstripped content — that's intentional (the file is an internal
+/// artifact, not user-facing output).
 fn strip_project_root_from_result(
     mut result: CallToolResult,
     root_prefix: &str,

@@ -942,3 +942,78 @@ behavior does Y" cases.
 
 
 ---
+
+
+
+### U-24 — `strip_project_root_from_result` docstring lies about how buffer content is covered
+
+**When:** 2026-05-25 verify-open recon pass after the U-23 fix shipped.
+Investigating the question "does the annotation survive @tool buffer
+overflow?" as a follow-up to my own prior-session note ("may not appear
+in @tool buffer when response overflows").
+
+**Iron Law / pattern:** not an Iron Law violation — a **documentation
+bug** that misdirects future readers about how strip coverage is
+actually achieved. The actual runtime coverage is correct; the docstring
+makes two factually false claims about it.
+
+**Symptom (in `src/server.rs:1311-1313`):**
+
+```rust
+/// Buffer content (`@tool_xxx` refs) is covered automatically: it only
+/// re-enters the pipeline through `run_command`, which also passes through
+/// `call_tool` and gets stripped there.
+```
+
+Both claims are wrong:
+
+1. **"It only re-enters the pipeline through `run_command`"** — false.
+   Buffer content also re-enters via `read_file(@tool_xxx, json_path=...)`,
+   `read_file(@tool_xxx, start_line=N, end_line=M)`, `grep PATTERN @tool_xxx`,
+   and any tool that accepts an `@ref` substring.
+2. **"`run_command` ... gets stripped there"** — false. `run_command` is
+   EXEMPT from stripping per the gate at `src/server.rs:352`
+   (`let should_strip = tool_name != "run_command";`). The exemption
+   exists precisely because `run_command`'s output is raw shell stdout
+   where stripping would corrupt path literals (see
+   `docs/issues/2026-05-21-run-command-strips-project-root-from-path-literals.md`).
+
+**Why it slipped through:** the docstring was written under an older
+mental model when both observations may have been partially true.
+Then `run_command` was carved out for the path-literals bug, and the
+buffer-reading surface broadened to include `read_file`'s json_path /
+line-slicing forms — but the docstring of `strip_project_root_from_result`
+wasn't updated either time. The two claims compound each other: a reader
+who trusts claim 1 (only run_command re-enters) and claim 2 (run_command
+strips) concludes "all buffer-re-reads are stripped" — which happens to
+be correct by accident, since other re-read paths (`read_file`, etc.)
+also strip via the non-`run_command` post_process path. The mechanism
+described is wrong; the conclusion happens to be right.
+
+**Actual coverage (how it really works):**
+
+- Original tool call: tool's `call_content()` produces output. If
+  oversized, the tool writes raw content to a buffer file and returns a
+  small JSON envelope referencing `@tool_xxx`. The envelope passes
+  through `post_process`, which strips (small envelope's path strings)
+  and annotates.
+- Later `read_file(@tool_xxx, ...)`: dispatches to the `read_file` tool,
+  which reads the raw buffer content. Its output passes through
+  `post_process` (because `read_file != "run_command"`), which strips
+  and annotates the buffer content too.
+- `run_command @tool_xxx` is the only exception — its output is raw
+  shell bytes, exempt by design.
+
+**Severity:** low — documentation only. Easy to fix by replacing the
+two false claims with the accurate framing.
+
+**Status:** fixed-shipped (this session). Docstring rewritten in
+`src/server.rs` to describe the actual mechanism.
+
+**Pointer:** the same shape ("docstring describes wrong mechanism;
+runtime coverage is accidentally correct anyway") is worth watching for
+during any future PRs that touch `post_process` or the buffer subsystem.
+Related: see [[U-23]] (the U-N entry that originated the question), and
+the prior `_path_note_count` rename which was the LAST vestigial
+artifact of the per-session-cap mental model that the docstring also
+reflects.
