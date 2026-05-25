@@ -45,6 +45,20 @@ read_file("@tool_xyz", start_line=N, end_line=M)  # slice lines
 other tools. Both are addressable by any tool that accepts a path.
 `@file_*` and `@ack_*` are sibling handle kinds — same mechanics.
 
+
+
+## Path-relative annotation
+
+Every non-`run_command` tool response that contains paths under the
+active project root carries a trailing `[codescout] paths are relative
+to <root>` note. Paths in the response body are project-relative;
+prepend `<root>` mentally for absolute resolution. `run_command` output
+is exempt (raw shell bytes; stripping would corrupt path literals) and
+never carries the annotation. The catalog stores absolute paths;
+the strip layer is a display-time transform — when verifying tool
+output against catalog state, prefer reading the buffer directly
+(`read_file(@tool_xxx, json_path=...)`) on a known-absolute field.
+
 ## Anti-patterns
 
 - **Re-running a tool because the result was "too long".** Query the
