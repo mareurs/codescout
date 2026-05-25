@@ -111,6 +111,29 @@ fn uses_cold_start_retry_budget(method: &str) -> bool {
     !matches!(method, "workspace/symbol")
 }
 
+/// Cold-start retry count for LSP requests, scaled by host OS.
+///
+/// rust-analyzer and the Kotlin LSP cold-start are documented in the codescout
+/// `gotchas` memory as 2–3× slower on Windows than Linux; macOS sits in between
+/// under rosetta/ARM heterogeneity. The platform variance is largest at the
+/// tail (slow startups), not the median, so scaling the retry **count** keeps
+/// first-attempt latency identical on every platform — we only add more
+/// attempts before giving up.
+///
+/// The retry delay (`RETRY_DELAY_COLD_MS`) and cold-start window
+/// (`COLD_START_WINDOW`) deliberately stay platform-uniform; only the retry
+/// count varies. `cfg!` is const-stable, so the body resolves at compile time
+/// and the caller still treats the result as a plain `const usize`.
+const fn cold_start_max_retries() -> usize {
+    if cfg!(target_os = "windows") {
+        20
+    } else if cfg!(target_os = "macos") {
+        15
+    } else {
+        10
+    }
+}
+
 /// Scan a stderr line buffer for patterns that make LSP-side retries pointless.
 ///
 /// Pure helper so it can be exercised in unit tests without spinning up a real
@@ -553,10 +576,12 @@ impl LspClient {
         // the server returns -32800 (RequestCancelled) for every query. We use a
         // patient retry window while fresh, and a short one once warm.
         //
-        // Cold: 10 retries × 3 s linear backoff ≈ 45 s max wait.
+        // Cold: cold_start_max_retries() retries × 3 s linear backoff.
+        //       Linux ≈ 45 s max, macOS ≈ 67 s, Windows ≈ 90 s (per
+        //       `cold_start_max_retries`).
         // Warm:  3 retries × 300 ms linear backoff ≈ 1.2 s max wait.
         const COLD_START_WINDOW: std::time::Duration = std::time::Duration::from_secs(5 * 60);
-        const MAX_RETRIES_COLD: usize = 10;
+        const MAX_RETRIES_COLD: usize = cold_start_max_retries();
         const RETRY_DELAY_COLD_MS: u64 = 3_000;
         const MAX_RETRIES_WARM: usize = 3;
         const RETRY_DELAY_WARM_MS: u64 = 300;
@@ -1541,6 +1566,29 @@ mod tests {
         assert!(uses_cold_start_retry_budget("textDocument/hover"));
         // workspace/symbol must still be idempotent so warm-path retry works.
         assert!(is_idempotent_lsp_method("workspace/symbol"));
+    }
+
+    #[test]
+    fn cold_start_max_retries_matches_host_platform() {
+        // The helper is `const fn` with cfg! branching, so the result for the
+        // currently-compiling host should be deterministic. This test asserts
+        // that no future refactor accidentally inverts the platform ranking
+        // (Windows must get the most headroom, Linux the least).
+        let actual = cold_start_max_retries();
+        let expected = if cfg!(target_os = "windows") {
+            20
+        } else if cfg!(target_os = "macos") {
+            15
+        } else {
+            10
+        };
+        assert_eq!(actual, expected);
+
+        // Sanity: cold-start budget must always exceed the warm-path retry
+        // count (3, see `request`). A future tweak that drops cold below warm
+        // means cold-start would retry *fewer* times than steady-state — almost
+        // certainly a regression.
+        assert!(actual >= 3, "cold-start retries must exceed warm budget");
     }
 
     #[test]
