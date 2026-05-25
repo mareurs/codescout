@@ -107,7 +107,12 @@ impl Tool for Artifact {
                 },
                 "patch": {
                     "type": "object",
-                    "description": "update: fields to change (body, title, status, topic, owners, tags, params). `params` is RFC 7396 merge-patched into the augmentation params — use null values to delete keys."
+                    "description": "update: fields to change. Accepted keys: status, title, owners, tags, topic, body, body_edits, params (any other key returns RecoverableError). Body editing — three modes: (1) `body_edits: [{heading, action, content?|old_string+new_string?, at?, replace_all?, include_subsections?}]` for surgical per-section edits (mirrors edit_markdown's batch shape, applied atomically, RECOMMENDED for tracker maintenance); (2) `body` for total overwrite, gated by the 50% shrink guard unless `force=true` is passed at top level; (3) frontmatter-only changes via status/title/owners/tags/topic. `body` and `body_edits` are mutually exclusive. `params` is RFC 7396 merge-patched into the augmentation params — use null values to delete keys. Body mutations emit `field_patch` events (kind=field_patch, payload.field=body)."
+                },
+                "force": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "update: bypass the body-shrink guard. Required when a body write would reduce the file by more than 50%. Use only when shrinkage is intentional (full rewrite, archiving stale sections). Default false. See get_guide(\"librarian\") § Body Editing Surfaces."
                 },
                 "addBlocks": {
                     "type": "array",

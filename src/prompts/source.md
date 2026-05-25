@@ -37,7 +37,7 @@ before finishing the turn. Foreign-project state otherwise leaks.
 ## Deeper guidance
 
 Call get_guide(topic) where topic in:
-- "librarian"               — artifact model, filters, trackers
+- "librarian"               — artifact model, filters, trackers, body editing
 - "tracker-conventions"     — frontmatter, archive flow, status
 - "progressive-disclosure"  — output budgets, @ref buffer details
 - "error-handling"          — RecoverableError vs anyhow::bail

@@ -1,6 +1,6 @@
 //! Markdown-specific tools: `read_markdown` and `edit_markdown`.
 
-mod edit_markdown;
+pub(crate) mod edit_markdown;
 mod frontmatter;
 mod read_markdown;
 

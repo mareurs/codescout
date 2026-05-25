@@ -72,6 +72,58 @@ Use artifact tools instead:
 The gate is intentional friction — it forces you through a path that
 respects the params/body distinction.
 
+
+
+## Body editing surfaces — `body_edits` vs. `body`
+
+`artifact(update)` exposes two body-mutation modes plus an escape hatch.
+Picking the wrong one cost a real ~600-line tracker body in 2026-05-25
+(see `docs/issues/`).
+
+| Patch shape | Effect | Guard |
+|---|---|---|
+| `patch={body_edits: [{heading, action, content?\|old_string+new_string?, at?, replace_all?, include_subsections?}, ...]}` | Surgical per-section edits. Each entry mirrors `edit_markdown`'s batch shape. Atomic (all-or-nothing). | Per-entry `include_subsections` guard for `action="replace"`. |
+| `patch={body: "..."}` | Total overwrite — the new string becomes the entire body. | **50% shrink guard.** If the new body is more than 50% shorter than the old body, the write is refused with `RecoverableError("body-shrink guard: ...")`. |
+| `force=true` (top-level on the call) | Bypass the shrink guard. | Use only when shrinkage is intentional (full rewrite, archiving). |
+
+**Mutual exclusion.** `patch={body, body_edits}` together returns
+`RecoverableError("body and body_edits are mutually exclusive")`. Pick one.
+
+**Exemptions to the shrink guard.** It does not fire when:
+
+- The original file is under 200 bytes (the threshold is meaningless for
+  near-empty shells; new artifacts inside this window can shrink freely).
+- The augmentation has `append_mode + history_cap` set — legitimate
+  history trimming is expected to shrink the body on each refresh.
+- The caller passed `force=true`.
+
+**Patch-key strictness.** `UpdatePatch` now uses
+`#[serde(deny_unknown_fields)]`. Misspelled keys like `body_prepend_section`
+return `RecoverableError("unknown field 'body_prepend_section'")` listing
+the valid fields, instead of silently no-opping.
+
+**Forensic trail.** Every body mutation emits an `events` row:
+
+- `kind="field_patch"`
+- `payload={field: "body", prev_bytes, new_bytes, edits_count, mode: "overwrite"|"edits", forced}`
+
+Query via `artifact_event(action="list", artifact_id=X)` — a single body
+write that shouldn't have happened is now reconstructable from the event
+timeline without scraping `usage.db`.
+
+**The anti-pattern to remember.** The 2026-05-25 incident:
+
+```text
+1. artifact(get, id=X, heading="Currently Shipped")  → returns one section
+2. artifact(update, id=X, patch={body: <just that section>})  → WIPES body
+```
+
+The `artifact(get, heading=)` shape *returns* a section, but
+`patch={body}` *replaces* the entire body with whatever string is passed.
+The LLM's mental model "I have the body in hand, I'll write it back" is
+wrong — it has *a section* in hand. The shrink guard catches the >50%
+case; the surgical `body_edits[]` surface removes the temptation to write
+a partial body in the first place.
 ## The artifact_augment lifecycle
 
 `artifact_augment` controls the prompt + params + ancillary fields:

@@ -489,6 +489,7 @@ impl Tool for EditMarkdown {
                 "new_string": { "type": "string", "description": "For action='edit': replacement text" },
                 "replace_all": { "type": "boolean", "default": false, "description": "For action='edit': replace all occurrences" },
                 "include_subsections": { "type": "boolean", "default": false, "description": "For action='replace': opt in to consuming nested sub-headings (deeper levels). Default refuses to wipe children — see BUG-043." },
+                "force": { "type": "boolean", "default": false, "description": "Bypass the body-shrink guard. Required when the resulting file would be more than 50% shorter than the original. Use only when the shrinkage is intentional." },
                 "frontmatter": {
                     "type": "object",
                     "description": "Mutate the YAML frontmatter block at the start of the file. Flat keys only (one-key-per-line; scalar / string / inline-array values). Combinable atomically with `edits` or `heading`+`action` in the same call. Example: `{set: {status: \"fixed\", closed: \"2026-05-17\"}, delete: [\"legacy_field\"]}`. At least one of `set` / `delete` must be non-empty.",
@@ -687,6 +688,33 @@ impl Tool for EditMarkdown {
                     RecoverableError::with_hint(e.to_string(), "Check heading name and action.")
                 })?
             };
+        }
+
+        // ── Body-shrink guard ──────────────────────────────────────
+        // Refuse a write that would reduce the file by >50% unless the
+        // caller passed `force: true`. Files smaller than 200 bytes are
+        // exempt — the threshold is meaningless for near-empty shells.
+        // The parallel guard on artifact(update) lives in
+        // src/librarian/tools/update.rs (load-bearing site for the
+        // augmented-tracker body-overwrite footgun).
+        const SHRINK_GUARD_MIN_BYTES: usize = 200;
+        let force = input["force"].as_bool().unwrap_or(false);
+        if !force
+            && file_content.len() >= SHRINK_GUARD_MIN_BYTES
+            && new_content.len() * 2 < file_content.len()
+        {
+            let pct = 100 - (new_content.len() * 100 / file_content.len().max(1));
+            return Err(RecoverableError::with_hint(
+                format!(
+                    "body-shrink guard: write to {} would reduce {} → {} bytes ({}% reduction)",
+                    resolved.display(),
+                    file_content.len(),
+                    new_content.len(),
+                    pct
+                ),
+                "Use action='edit' with old_string/new_string for surgical mutation, or pass force=true if the shrinkage is intentional.",
+            )
+            .into());
         }
 
         crate::util::fs::atomic_write(&resolved, &new_content)?;

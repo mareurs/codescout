@@ -135,6 +135,53 @@ artifact_refresh(action="list_stale", threshold_hours=24)
 
 ---
 
+
+
+## Body Editing Surfaces
+
+Augmented artifacts (e.g. trackers with `kind=tracker`) store body and params
+separately. The body is the canonical narrative; params are the structured
+index. **Editing the body has three surfaces, with different blast radius:**
+
+| Surface | Shape | Effect | When to use |
+|---|---|---|---|
+| `artifact(update, patch={body_edits: [...]})` | Surgical, per-section | Each entry mirrors `edit_markdown`'s batch shape: `{heading, action, content?\|old_string+new_string?, at?, replace_all?, include_subsections?}`. Atomic. | **Default choice for tracker maintenance.** Adding a new section, fixing a typo, replacing one section. |
+| `artifact(update, patch={body: "..."})` | Total overwrite | The new string replaces the entire body. **Gated by the 50% shrink guard** unless `force=true` is passed. | Initial body authoring, intentional full rewrite. |
+| `edit_markdown` | Refused on managed files | Returns a `librarian_guard` error pointing back at `artifact(update)`. | Never on augmented artifacts. |
+
+**Avoid this anti-pattern** (caused a real ~600-line tracker body loss):
+
+```text
+1. artifact(get, id=X, heading="Currently Shipped")  → returns one section
+2. artifact(update, id=X, patch={body: <just that section>})  → WIPES rest of body
+```
+
+The fix:
+
+```text
+artifact(update, id=X, patch={body_edits: [{
+    heading: "Currently Shipped",
+    action: "insert_after",
+    at: "after-heading-line",
+    content: "..."
+}]})
+```
+
+**Body-shrink guard.** Any body write that would reduce the file by more
+than 50% is refused with `RecoverableError("body-shrink guard: ...")`.
+The error hint names both `body_edits[]` and the `force=true` escape.
+Files under 200 bytes are exempt (the percentage is meaningless for shells).
+Artifacts with `append_mode + history_cap` are also exempt — legitimate
+history trimming is expected to shrink the body.
+
+**Body mutations emit `field_patch` events.** Every body write records a
+`field_patch` event with `payload={field: "body", prev_bytes, new_bytes,
+edits_count, mode, forced}`. Query forensic history with
+`artifact_event(action="list", artifact_id=X)`.
+
+**`patch` accepts only declared keys.** Unknown keys (e.g.
+`body_prepend_section`) return `RecoverableError` listing the valid fields.
+Accepted keys: `status, title, owners, tags, topic, body, body_edits, params`.
 ## librarian(action=...) — Reference
 
 | Action | What it does |

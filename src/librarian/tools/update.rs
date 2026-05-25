@@ -6,6 +6,7 @@ use super::ToolContext;
 use crate::librarian::catalog::artifact;
 
 #[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 struct UpdatePatch {
     #[serde(default)]
     status: Option<String>,
@@ -17,8 +18,17 @@ struct UpdatePatch {
     tags: Option<Vec<String>>,
     #[serde(default)]
     topic: Option<String>,
+    /// Full body replacement. Total-overwrite — destroys existing body content.
+    /// Gated by a 50% shrink guard unless `force=true` is passed on the call.
+    /// Mutually exclusive with `body_edits`.
     #[serde(default)]
     body: Option<String>,
+    /// Surgical body edits — array of edit-markdown-shaped entries
+    /// `{heading, action, content?, old_string?, new_string?, replace_all?, at?, include_subsections?}`.
+    /// Applied atomically (all-or-nothing). Mirrors edit_markdown's batch-mode `edits` array.
+    /// Mutually exclusive with `body`.
+    #[serde(default)]
+    body_edits: Option<Vec<serde_json::Value>>,
     /// RFC 7396 merge-patch applied to the augmentation params.
     /// Requires an existing augmentation; ignored silently if none.
     #[serde(default)]
@@ -26,18 +36,108 @@ struct UpdatePatch {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Args {
     id: String,
     patch: UpdatePatch,
     /// When true, also call augmentation::commit_refresh after the update.
     #[serde(default)]
     commit_refresh: bool,
+    /// Bypass the body-shrink guard. Required when a body write would reduce
+    /// the existing body by more than 50%. Use only when the shrinkage is
+    /// intentional (e.g. archiving stale sections, full rewrite).
+    #[serde(default)]
+    force: bool,
 }
+/// Body writes smaller than this byte count skip the shrink guard. Files this
+/// small are typically just-created frontmatter shells where a shrink ratio
+/// would be misleading. A real tracker with content is always many KB.
+const SHRINK_GUARD_MIN_BYTES: usize = 200;
+
+/// Apply a batch of edit-markdown-shaped body edits to `working` in sequence.
+/// Mirrors the batch semantics of `edit_markdown`'s `edits=[...]`. Used by
+/// `artifact(update, patch={body_edits: [...]})` to provide surgical body
+/// mutation on librarian-managed files — `edit_markdown` itself refuses to
+/// touch them (see `librarian_guard::guard_not_librarian_managed`).
+fn apply_body_edits(working: &str, edits: &[Value]) -> Result<String> {
+    let mut buf = working.to_string();
+    for (i, edit) in edits.iter().enumerate() {
+        let heading = edit["heading"].as_str().ok_or_else(|| {
+            super::RecoverableError::with_hint(
+                format!("body_edits[{i}]: missing required 'heading' field"),
+                "Each entry must have shape {heading, action, content?|old_string+new_string?, at?, replace_all?, include_subsections?}.",
+            )
+        })?;
+        let action = edit["action"].as_str().ok_or_else(|| {
+            super::RecoverableError::with_hint(
+                format!("body_edits[{i}]: missing required 'action' field"),
+                "Allowed actions: replace, insert_before, insert_after, remove, edit.",
+            )
+        })?;
+
+        buf = if action == "edit" {
+            let old_string = edit["old_string"].as_str().ok_or_else(|| {
+                super::RecoverableError::with_hint(
+                    format!("body_edits[{i}]: old_string is required for action='edit'"),
+                    "Pass {action: \"edit\", heading, old_string, new_string, replace_all?}.",
+                )
+            })?;
+            let new_string = edit["new_string"].as_str().unwrap_or("");
+            let replace_all = edit["replace_all"].as_bool().unwrap_or(false);
+            crate::tools::markdown::edit_markdown::perform_scoped_edit(
+                &buf,
+                heading,
+                old_string,
+                new_string,
+                replace_all,
+            )
+            .map_err(|e| {
+                super::RecoverableError::with_hint(
+                    format!("body_edits[{i}]: {e}"),
+                    "Check heading name and old_string content.",
+                )
+            })?
+        } else {
+            if action == "replace" && !edit["include_subsections"].as_bool().unwrap_or(false) {
+                if let Ok(victims) =
+                    crate::tools::markdown::edit_markdown::find_consumed_subsections(&buf, heading)
+                {
+                    if !victims.is_empty() {
+                        return Err(super::RecoverableError::with_hint(
+                            format!(
+                                "body_edits[{i}]: replace on '{heading}' would wipe {n} nested heading(s): {list}. \
+                                 Pass include_subsections: true to opt into consuming children.",
+                                n = victims.len(),
+                                list = victims.join(", "),
+                            ),
+                            "Prefer action=\"edit\" with old_string/new_string to target text inside the section without touching its subsections.",
+                        ));
+                    }
+                }
+            }
+            crate::tools::markdown::edit_markdown::perform_section_edit_ext(
+                &buf,
+                heading,
+                action,
+                edit["content"].as_str(),
+                edit["at"].as_str(),
+            )
+            .map_err(|e| {
+                super::RecoverableError::with_hint(
+                    format!("body_edits[{i}]: {e}"),
+                    "Check heading name and action.",
+                )
+            })?
+        };
+    }
+    Ok(buf)
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if args.get("patch").and_then(|p| p.get("rel_path")).is_some() {
         return Err(super::RecoverableError::with_hint(
             "artifact(action=\"update\") cannot change `rel_path` — the file location is owned by the `move` action",
-            "Use artifact(action=\"move\", id=..., new_rel_path=...) to rename the backing file and update the catalog atomically. `update` only modifies frontmatter fields (status, title, owners, tags, topic, body, params).",
+            "Use artifact(action=\"move\", id=..., new_rel_path=...) to rename the backing file and update the catalog atomically. `update` only modifies frontmatter fields (status, title, owners, tags, topic, body, body_edits, params).",
         ));
     }
 
@@ -47,9 +147,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         artifact::get(&cat, &a.id)?.ok_or_else(|| anyhow::anyhow!("unknown id `{}`", a.id))?;
 
     let full = row.abs_path.clone();
-
     let original = std::fs::read_to_string(&full)?;
     let patch = &a.patch;
+
+    if patch.body.is_some() && patch.body_edits.is_some() {
+        return Err(super::RecoverableError::with_hint(
+            "patch fields `body` and `body_edits` are mutually exclusive",
+            "Use `body_edits` for surgical per-section edits, or `body` for full-document overwrite (pair with `force=true` if it would shrink the file by >50%).",
+        ));
+    }
+
+    let body_changing = patch.body.is_some() || patch.body_edits.is_some();
 
     let new_content = if let Some(new_body) = &patch.body {
         let (fm_opt, old_body) = crate::librarian::frontmatter::parse(&original)?;
@@ -81,6 +189,33 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             _ => new_body.clone(),
         };
         crate::librarian::frontmatter::write(&fm, &format!("\n{actual_body}\n"))
+    } else if let Some(edits) = &patch.body_edits {
+        let mut working = original.clone();
+        let fm_changing = patch.status.is_some()
+            || patch.title.is_some()
+            || patch.owners.is_some()
+            || patch.tags.is_some()
+            || patch.topic.is_some();
+        if fm_changing {
+            working = crate::librarian::frontmatter::update_in_place(&working, |fm| {
+                if let Some(v) = &patch.status {
+                    fm.status = Some(v.clone());
+                }
+                if let Some(v) = &patch.title {
+                    fm.title = Some(v.clone());
+                }
+                if let Some(v) = &patch.owners {
+                    fm.owners = v.clone();
+                }
+                if let Some(v) = &patch.tags {
+                    fm.tags = v.clone();
+                }
+                if let Some(v) = &patch.topic {
+                    fm.topic = Some(v.clone());
+                }
+            })?;
+        }
+        apply_body_edits(&working, edits)?
     } else {
         crate::librarian::frontmatter::update_in_place(&original, |fm| {
             if let Some(v) = &patch.status {
@@ -100,6 +235,27 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             }
         })?
     };
+
+    if body_changing && !a.force && original.len() >= SHRINK_GUARD_MIN_BYTES {
+        let allow_history_trim = matches!(
+            crate::librarian::catalog::augmentation::get(&cat, &a.id)?,
+            Some(aug) if aug.append_mode && aug.history_cap.is_some()
+        );
+        if !allow_history_trim && new_content.len() * 2 < original.len() {
+            let pct = 100 - (new_content.len() * 100 / original.len().max(1));
+            return Err(super::RecoverableError::with_hint(
+                format!(
+                    "body-shrink guard: write to {} would reduce {} → {} bytes ({}% reduction)",
+                    full.display(),
+                    original.len(),
+                    new_content.len(),
+                    pct
+                ),
+                "Use patch={body_edits:[{heading, action, content?|old_string+new_string?, ...}]} for surgical per-section edits (mirrors edit_markdown's batch shape). \
+                 If the shrinkage is intentional (e.g. archiving stale sections, full rewrite), re-call with force=true.",
+            ));
+        }
+    }
 
     std::fs::write(&full, &new_content)?;
 
@@ -136,6 +292,30 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     if let Some(params_patch) = &patch.params {
         crate::librarian::catalog::augmentation::merge_params(&cat, &a.id, params_patch)?;
+    }
+
+    if body_changing {
+        let _ = crate::librarian::catalog::events::insert(
+            &cat,
+            &crate::librarian::catalog::events::EventRow {
+                id: ulid::Ulid::new().to_string(),
+                artifact_id: a.id.clone(),
+                kind: "field_patch".into(),
+                payload: serde_json::json!({
+                    "field": "body",
+                    "prev_bytes": original.len(),
+                    "new_bytes": new_content.len(),
+                    "edits_count": patch.body_edits.as_ref().map(|v| v.len()).unwrap_or(0),
+                    "mode": if patch.body.is_some() { "overwrite" } else { "edits" },
+                    "forced": a.force,
+                })
+                .to_string(),
+                anchor_commit: None,
+                head_commit: None,
+                author: None,
+                created_at: now,
+            },
+        );
     }
 
     let committed = if a.commit_refresh {
@@ -666,5 +846,267 @@ mod tests {
             !content.contains("## 20"),
             "dated header should not appear in replace mode"
         );
+    }
+
+    // ── Layer 1: body-shrink guard ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn body_shrink_guard_blocks_destructive_overwrite() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let big_body = "X".repeat(600);
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "big.md",
+                "kind": "spec", "title": "T", "body": big_body,
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        let err = call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"body": "tiny"}}),
+        )
+        .await
+        .expect_err("destructive overwrite should be blocked");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("body-shrink guard"),
+            "error must name the guard; got: {msg}"
+        );
+        assert!(
+            msg.contains("body_edits"),
+            "hint must point at body_edits; got: {msg}"
+        );
+        assert!(
+            msg.contains("force"),
+            "hint must name the force escape; got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn body_shrink_guard_allows_with_force() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let big_body = "X".repeat(600);
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "big2.md",
+                "kind": "spec", "title": "T", "body": big_body,
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        call(
+            &ctx,
+            serde_json::json!({
+                "id": id,
+                "patch": {"body": "intentionally small"},
+                "force": true,
+            }),
+        )
+        .await
+        .expect("force=true must bypass the guard");
+
+        let content = std::fs::read_to_string(tmp.path().join("big2.md")).unwrap();
+        assert!(content.contains("intentionally small"));
+    }
+
+    #[tokio::test]
+    async fn body_shrink_guard_skips_tiny_files() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "small.md",
+                "kind": "spec", "title": "T", "body": "starting body",
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        call(&ctx, serde_json::json!({"id": id, "patch": {"body": "x"}}))
+            .await
+            .expect("small file shrink should not trigger the guard");
+    }
+
+    // ── Layer 2: deny unknown patch keys ────────────────────────────────
+
+    #[tokio::test]
+    async fn unknown_patch_key_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "doc-uk.md",
+                "kind": "spec", "title": "T", "body": "b",
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        let err = call(
+            &ctx,
+            serde_json::json!({
+                "id": id,
+                "patch": {"body_prepend_section": null},
+            }),
+        )
+        .await
+        .expect_err("unknown patch key should be rejected");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("body_prepend_section") || msg.contains("unknown field"),
+            "error must name the bad key; got: {msg}"
+        );
+    }
+
+    // ── Layer 3: patch={body_edits: [...]} surgical surface ─────────────
+
+    #[tokio::test]
+    async fn body_edits_inserts_after_section() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let seed = "# Doc\n\n## Currently Shipped\n\nold content\n\n## Recent\n\nstuff\n";
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "be.md",
+                "kind": "spec", "title": "T", "body": seed,
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        call(
+            &ctx,
+            serde_json::json!({
+                "id": id,
+                "patch": {
+                    "body_edits": [{
+                        "heading": "## Currently Shipped",
+                        "action": "insert_after",
+                        "at": "after-heading-line",
+                        "content": "\n> scope note inserted\n",
+                    }]
+                }
+            }),
+        )
+        .await
+        .expect("body_edits insert_after must succeed");
+
+        let content = std::fs::read_to_string(tmp.path().join("be.md")).unwrap();
+        assert!(
+            content.contains("scope note inserted"),
+            "inserted content missing"
+        );
+        assert!(
+            content.contains("old content"),
+            "original body must survive"
+        );
+        assert!(content.contains("## Recent"), "siblings must survive");
+    }
+
+    #[tokio::test]
+    async fn body_and_body_edits_mutually_exclusive() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "mx.md",
+                "kind": "spec", "title": "T", "body": "x",
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        let err = call(
+            &ctx,
+            serde_json::json!({
+                "id": id,
+                "patch": {
+                    "body": "new",
+                    "body_edits": [],
+                }
+            }),
+        )
+        .await
+        .expect_err("body + body_edits together must error");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("mutually exclusive"),
+            "error must say mutually exclusive; got: {msg}"
+        );
+    }
+
+    // ── Layer 4: auto-emit body_patch event ─────────────────────────────
+
+    #[tokio::test]
+    async fn body_patch_event_emitted_on_body_change() {
+        use crate::librarian::catalog::events;
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "ev.md",
+                "kind": "spec", "title": "T", "body": "before",
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"status": "fixed"}}),
+        )
+        .await
+        .unwrap();
+
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"body": "after"}}),
+        )
+        .await
+        .unwrap();
+
+        let cat = ctx.catalog.lock();
+        let evs = events::timeline_for_artifact(&cat, &id, None, None, 100).unwrap();
+        let body_patches: Vec<_> = evs
+            .iter()
+            .filter(|e| {
+                e.kind == "field_patch"
+                    && serde_json::from_str::<serde_json::Value>(&e.payload)
+                        .ok()
+                        .and_then(|p| p["field"].as_str().map(|s| s.to_string()))
+                        .as_deref()
+                        == Some("body")
+            })
+            .collect();
+        assert_eq!(
+            body_patches.len(),
+            1,
+            "exactly one body field_patch event expected; got: {body_patches:?}"
+        );
+        let payload: serde_json::Value = serde_json::from_str(&body_patches[0].payload).unwrap();
+        assert_eq!(payload["field"], "body");
+        assert_eq!(payload["mode"], "overwrite");
+        assert_eq!(payload["forced"], false);
+        assert!(payload["prev_bytes"].is_number());
+        assert!(payload["new_bytes"].is_number());
     }
 }
