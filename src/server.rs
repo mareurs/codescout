@@ -2513,14 +2513,53 @@ mod guide_hint_tests {
     use super::*;
     use serde_json::{json, Value};
 
-    async fn make_server() -> (tempfile::TempDir, CodeScoutServer) {
+    use serial_test::serial;
+
+    /// RAII env-var guard mirroring the pattern in `librarian::tests::EnvGuard`.
+    ///
+    /// `make_server()` sets `LIBRARIAN_DB` to a per-test path so each test gets an
+    /// isolated SQLite catalog. Without isolation, all tests resolve the env
+    /// fallback (`dirs::data_local_dir().join("librarian/catalog.db")`) and race
+    /// on the shared file — intermittent on Linux (POSIX advisory locks), routine
+    /// hangs on Windows (mandatory file locks). The guard restores the prior
+    /// value on drop so test ordering does not bleed env state forward.
+    struct EnvGuard {
+        key: &'static str,
+        original: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set<V: AsRef<std::ffi::OsStr>>(key: &'static str, value: V) -> Self {
+            let original = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match self.original.take() {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    async fn make_server() -> (tempfile::TempDir, EnvGuard, CodeScoutServer) {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        // Per-test LIBRARIAN_DB isolation. Combined with `#[serial]` on every
+        // test that calls this helper, this prevents the Windows
+        // mandatory-locking deadlock on the shared default catalog path
+        // (`dirs::data_local_dir().join("librarian/catalog.db")`). The guard's
+        // restore-on-drop semantics keep the env clean for non-guide_hint tests
+        // that run after.
+        let db_env = EnvGuard::set("LIBRARIAN_DB", dir.path().join("librarian.db"));
         let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
             .await
             .unwrap();
         let server = CodeScoutServer::new(agent).await;
-        (dir, server)
+        (dir, db_env, server)
     }
 
     fn tool_by_name(server: &CodeScoutServer, name: &str) -> Arc<dyn crate::tools::Tool> {
@@ -2552,13 +2591,10 @@ mod guide_hint_tests {
             .map(String::from)
     }
 
-    #[cfg_attr(
-        target_os = "windows",
-        ignore = "intermittent 'tool artifact not registered' on Windows — flakes alternate between guide_hint tests across runs, suggesting SQLite mandatory-locking race on the shared LIBRARIAN_DB (Windows file locks are mandatory; POSIX are advisory). Needs per-test EnvGuard-style DB isolation OR --test-threads 1 on Windows. See docs/issues/2026-05-24-ci-windows-default-feature-failures.md"
-    )]
     #[tokio::test]
+    #[serial]
     async fn first_artifact_call_emits_librarian_hint() {
-        let (_dir, server) = make_server().await;
+        let (_dir, _env, server) = make_server().await;
         let ctx = shared_ctx(&server);
         let tool = tool_by_name(&server, "artifact");
         let result = tool
@@ -2573,13 +2609,10 @@ mod guide_hint_tests {
         );
     }
 
-    #[cfg_attr(
-        target_os = "windows",
-        ignore = "shares the guide_hint cluster's intermittent 'tool artifact not registered' race on Windows. See docs/issues/2026-05-24-ci-windows-default-feature-failures.md"
-    )]
     #[tokio::test]
+    #[serial]
     async fn second_artifact_call_no_hint() {
-        let (_dir, server) = make_server().await;
+        let (_dir, _env, server) = make_server().await;
         let ctx = shared_ctx(&server);
         let tool = tool_by_name(&server, "artifact");
         let _ = tool
@@ -2596,13 +2629,10 @@ mod guide_hint_tests {
         );
     }
 
-    #[cfg_attr(
-        target_os = "windows",
-        ignore = "shares the guide_hint cluster's intermittent 'tool artifact not registered' race on Windows. See docs/issues/2026-05-24-ci-windows-default-feature-failures.md"
-    )]
     #[tokio::test]
+    #[serial]
     async fn artifact_event_after_artifact_no_hint() {
-        let (_dir, server) = make_server().await;
+        let (_dir, _env, server) = make_server().await;
         let ctx = shared_ctx(&server);
         let artifact = tool_by_name(&server, "artifact");
         let event = tool_by_name(&server, "artifact_event");
@@ -2624,13 +2654,10 @@ mod guide_hint_tests {
         }
     }
 
-    #[cfg_attr(
-        target_os = "windows",
-        ignore = "intermittent 'tool artifact not registered' on Windows runners — 4 of 5 guide_hint tests pass with identical setup. Suspected test-ordering / SQLite locking interaction with the shared LIBRARIAN_DB on Windows (mandatory file locking vs POSIX advisory). Needs dedicated investigation. See docs/issues/2026-05-24-ci-windows-default-feature-failures.md"
-    )]
     #[tokio::test]
+    #[serial]
     async fn activate_project_resets_hints() {
-        let (dir, server) = make_server().await;
+        let (dir, _env, server) = make_server().await;
         let ctx = shared_ctx(&server);
         let artifact = tool_by_name(&server, "artifact");
         let workspace = tool_by_name(&server, "workspace");
@@ -2658,8 +2685,9 @@ mod guide_hint_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn run_command_without_overflow_no_progressive_hint() {
-        let (_dir, server) = make_server().await;
+        let (_dir, _env, server) = make_server().await;
         let ctx = shared_ctx(&server);
         let tool = tool_by_name(&server, "run_command");
         let result = tool
@@ -2677,8 +2705,9 @@ mod guide_hint_tests {
         ignore = "uses 'yes filler | head -2000' shell pipeline — both 'yes' and 'head' are Unix-only and the inject_tee path-validator rejects Windows temp file paths (C:\\Users\\...\\Temp\\codescout-unfiltered-XXX has chars outside the [a-zA-Z0-9/_-.] allowlist). See docs/issues/2026-05-24-ci-windows-default-feature-failures.md"
     )]
     #[tokio::test]
+    #[serial]
     async fn run_command_with_overflow_emits_progressive_hint_once() {
-        let (_dir, server) = make_server().await;
+        let (_dir, _env, server) = make_server().await;
         let ctx = shared_ctx(&server);
         let tool = tool_by_name(&server, "run_command");
         let big = tool
