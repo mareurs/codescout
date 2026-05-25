@@ -103,6 +103,9 @@ pub mod reindex;
 pub mod context;
 
 pub mod audit_doc_refs;
+
+pub mod doctor;
+
 pub mod augment;
 pub mod goal_aggregation;
 pub mod refresh;

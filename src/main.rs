@@ -162,6 +162,14 @@ enum Commands {
     /// against `master`/PR docs to catch drift.
     #[cfg(feature = "librarian")]
     AuditDocRefs(codescout::cli::audit_doc_refs::AuditArgs),
+
+    /// Read-only scan of the librarian catalog for invariant violations:
+    /// non-forward-slash separators, NTFS ADS colons, `..` segments, and
+    /// missing files on disk. Output is a JSON report with per-check
+    /// violation counts. Manual cadence — run after large refactors or
+    /// when downstream LIKE queries return unexpected empty sets.
+    #[cfg(feature = "librarian")]
+    Doctor(codescout::cli::doctor::DoctorArgs),
 }
 
 fn parse_env_kv(s: &str) -> Result<(String, String), String> {
@@ -328,6 +336,10 @@ async fn main() -> Result<()> {
         #[cfg(feature = "librarian")]
         Commands::AuditDocRefs(args) => {
             codescout::cli::audit_doc_refs::run(args).await?;
+        }
+        #[cfg(feature = "librarian")]
+        Commands::Doctor(args) => {
+            codescout::cli::doctor::run(args).await?;
         }
         #[cfg(unix)]
         Commands::Mux {

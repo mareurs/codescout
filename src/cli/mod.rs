@@ -17,6 +17,8 @@ pub mod artifact_refresh;
 #[cfg(feature = "librarian")]
 pub mod audit_doc_refs;
 
+pub mod doctor;
+
 use anyhow::{anyhow, Context, Result};
 use std::io::Read;
 use std::path::PathBuf;

@@ -14,7 +14,7 @@ impl Tool for Librarian {
 
     fn description(&self) -> &'static str {
         "Workspace-level librarian operations. \
-         action: context | reindex | tracker_design | workspace_state_at | audit_doc_refs. \
+         action: context | reindex | tracker_design | workspace_state_at | audit_doc_refs | doctor. \
          context: pack topic/anchor neighbourhood into a markdown bundle. \
          reindex: re-scan and classify markdown artifacts. \
          tracker_design: return teaching prompt + archetype library (call BEFORE artifact(create) for trackers). \
@@ -23,7 +23,12 @@ impl Tool for Librarian {
          line refs, link targets, module paths). Surfaces broken references \
          against current filesystem + LSP symbol index. Manual cadence — run \
          when a doc-heavy PR is about to merge or when drift is suspected. \
-         Output is an `audit_issues` tracker."
+         Output is an `audit_issues` tracker. \
+         doctor: read-only catalog drift scanner. Checks abs_path columns for \
+         forward-slash form, NTFS ADS colons, '..' segments, and missing files \
+         on disk; checks commits.git_root for forward-slash form. Returns a \
+         JSON report with per-check violation counts. Manual cadence — run \
+         after large refactors or when downstream LIKE queries return empty."
     }
 
     fn input_schema(&self) -> Value {
@@ -33,7 +38,7 @@ impl Tool for Librarian {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["context", "reindex", "tracker_design", "workspace_state_at", "audit_doc_refs"],
+                    "enum": ["context", "reindex", "tracker_design", "workspace_state_at", "audit_doc_refs", "doctor"],
                     "description": "Operation to perform"
                 },
                 "topic": { "type": "string", "description": "context: subject for semantic/LIKE search across titles and topics" },
@@ -76,7 +81,7 @@ impl Tool for Librarian {
     async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
         let action = args["action"].as_str().ok_or_else(|| {
             RecoverableError::new(
-                "action required — one of: context, reindex, tracker_design, workspace_state_at, audit_doc_refs",
+                "action required — one of: context, reindex, tracker_design, workspace_state_at, audit_doc_refs, doctor",
             )
         })?;
         match action {
@@ -85,8 +90,9 @@ impl Tool for Librarian {
             "tracker_design"     => super::tracker_design::call(ctx, args).await,
             "workspace_state_at" => super::workspace_state_at::call(ctx, args).await,
             "audit_doc_refs"     => super::audit_doc_refs::call(ctx, args).await,
+            "doctor"             => super::doctor::call(ctx, args).await,
             other => Err(RecoverableError::new(format!(
-                "unknown action '{other}' — expected one of: context, reindex, tracker_design, workspace_state_at, audit_doc_refs"
+                "unknown action '{other}' — expected one of: context, reindex, tracker_design, workspace_state_at, audit_doc_refs, doctor"
             ))),
         }
     }
