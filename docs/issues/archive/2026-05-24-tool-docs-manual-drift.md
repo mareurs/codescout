@@ -113,7 +113,13 @@ N/A — the diff is mechanical; root cause is documented above.
 
 ## Fix
 
-Three-part fix shipped 2026-05-25:
+**Shipped in master `6ebf65ee` (2026-05-25).** Prerequisite commits on master:
+- `0aaf3f2c` — log F-13 + F-14 release-pipeline frictions (incidental).
+- `bb5c160a` — fix the lint's own bugs (silent-empty code-side, regex anchoring,
+  test-file exclusion).
+- `6ebf65ee` — doc-side rewrite + strict gate restoration.
+
+Three-part fix:
 
 **Part 1 — Lint correctness** (`.github/workflows/ci.yml`):
 
