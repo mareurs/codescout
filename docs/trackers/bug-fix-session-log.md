@@ -52,7 +52,7 @@ time_scope: open-ended
 | F-4 | 2026-05-18 | med | codescout-tool | fixed-via-bug-tracker | `edit_markdown action="replace"` with a heading clobbers the whole section body |
 | F-5 | 2026-05-18 | high | release-pipeline | open | HEAD detached from `experiments` without `git checkout` in this session |
 | F-6 | 2026-05-20 | med | release-pipeline | fixed-verified | HEAD non-compiling + 11 dormant clippy-1.95 lints exposed by toolchain bump |
-| F-7 | 2026-05-21 | high | codescout-tool | open | `references` undercounts vs `call_graph` (~18%); root is live-RA incompleteness, not position |
+| F-7 | 2026-05-21 | high | codescout-tool | mitigated | `references` undercounts vs `call_graph` (~18%); root is live-RA incompleteness, not position |
 | F-8 | 2026-05-23 | med | codescout-tool | fixed-verified | `format_read_file` dispatches on `type`; json_path output collided → rendered `"0 lines"` |
 | F-9 | 2026-05-24 | med | codescout-tool | mitigated | `audit_doc_refs` `fail_on` arg silently ignores `med`/`low` despite docs |
 | F-10 | 2026-05-24 | low | release-pipeline | mitigated | RELEASE-TODO advertises "CI pipeline" as unchecked; workflow exists, push trigger pointed nowhere |
@@ -70,7 +70,7 @@ time_scope: open-ended
 | W-4 | 2026-05-18 | high | Pre-fix recon validates filed-bug claims against pinned regression tests | Would have implemented a "fix" that broke the BUG-037 regression test `editing_start_line_does_not_walk_back_to_outer_attribute_on_impl_block`; bug filing itself was inaccurate (claimed attrs not included; actually they ARE via BUG-031) | validated |
 | W-5 | 2026-05-24 | med | Deserialize before asserting: test against semantic data, not serialized text | Round-2 Windows fix asserted on JSON-encoded `text` containing escaped backslashes; passed Linux but broke Windows. Saves ≥1 CI cycle (10-15 min) per cross-platform test fix | validated |
 | W-6 | 2026-05-24 | high | Cross-platform representation choices apply at every read AND write seam | Round 5 normalized writes only; round 6 had to fix 6 separate read-side boundaries (LIKE patterns, scope filters, substring checks). Missed read-side normalization is silent until integration. One miss (delete_orphan_repos LIKE) was destructive — wiped every catalog row. | validated |
-| W-7 | 2026-05-25 | med | Verify-open recon flips zombie-fixed entries from `open` to `fixed-verified` | Without scout, F-6 + F-11 would have continued to be counted as actionable backlog; future "what's open?" queries would have wasted ~30 min each re-investigating already-shipped fixes, or shipped them as known-issues in release notes. 2 zombies caught in one pass. | validated |
+| W-7 | 2026-05-25 | med | Verify-open recon flips zombie-fixed entries from `open` to `fixed-verified` | Without scout, F-6 + F-7 + F-11 would have continued to be counted as actionable backlog; future "what's open?" queries would have wasted ~30 min each re-investigating already-shipped fixes, or shipped them as known-issues in release notes. 3 zombies caught in one pass — promote-when criterion fired. | promotion-eligible |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -527,8 +527,7 @@ to `grep` for non-call references. Treat a low `references` count as suspect.
 **Severity:** high — a navigation tool silently returning ~18% of real callers will
 mislead any refactor that trusts it.
 
-**Status:** open — root mechanism (live-RA incompleteness) needs the confirming
-experiment. Bug tracker: `docs/issues/2026-05-21-references-undercounts-vs-call-graph.md`.
+**Status:** mitigated (2026-05-21, ratified 2026-05-25 verify-open pass). Mitigation shipped: `references_completeness_hint` cross-check in `src/tools/symbol/references.rs:25-35` + integration at `references.rs:168-189`. On undercount detection (call-hierarchy finds more call sites than references returned), the response carries a `completeness_warning` field directing the caller to use `call_graph(direction="callers")`. The underlying RA bug is not fixed (lives in rust-analyzer's domain) but the codescout-side surface is honest about its own incompleteness. Root-cause hypothesis updated: not symbol-shape, but **transient RA staleness** — commit `495c8640 docs(issues): correct references-undercount root cause — transient RA staleness, not symbol shape`. Bug file archived to `docs/issues/archive/2026-05-21-references-undercounts-vs-call-graph.md` with `status: mitigated`, `closed: 2026-05-21`. Mitigation commit: `3d984e77 feat(tools): extend OutputForm::Text sweep; add references completeness guard`.
 
 **Fix idea / Pointer:** if confirmed RA-incompleteness, references needs either a
 warmth/completeness guard (re-query until stable, or `did_open`+settle) or should
@@ -885,26 +884,17 @@ caught early; over a year of distributed-fix workflow the steady-state
 count would likely grow.
 
 **Confirming data points:**
-1. F-6 — clippy 1.95 cleanup (this session).
-2. F-11 — CI mold linker install (this session).
-3. Pending — any future "verify-open-N" scout that flips ≥1 entry.
+1. F-6 — clippy 1.95 cleanup (this session). Shipped distributed across post-2026-05-20 commits, carried to master in merge `d1742c46`.
+2. F-11 — CI mold linker install (this session). Shipped as `29075470 fix(ci): install mold linker required by .cargo/config.toml`.
+3. F-7 — `references` undercount mitigation (this session). Shipped as `3d984e77 feat(tools): ... add references completeness guard`, root-cause refinement as `495c8640`, bug file archived to `docs/issues/archive/2026-05-21-...md` with `status: mitigated`.
 
-**Impact:** med — saves N×30min per zombie entry detected, plus
-prevents false-positive items in human-facing backlog reports.
+**Impact:** med-to-high — saves N×30min per zombie entry detected, plus prevents false-positive items in human-facing backlog reports. 3-of-4 nominally-open F-N entries this session were actually closed weeks ago (75% zombie-open rate in this tracker).
 
-**Promote-when:** A third zombie-open detection from a future recon
-scout. At 3 datapoints, promote to a project-wide cadence rule in
-CLAUDE.md: "Before any 'what's open?' report, run a verify-open pass
-on bug-fix session-log entries with `Status: open` older than 14 days —
-distributed fixes leave entries zombie-open by default."
+**Promote-when:** FIRED — 3 datapoints in one scout pass. Promote to CLAUDE.md as project-wide cadence rule: "Before any 'what's open?' report or backlog triage, run a verify-open pass on bug-fix session-log entries with `Status: open` older than 14 days. Distributed fixes leave entries zombie-open by default — the absence of a commit message naming the tracker entry is not evidence the fix didn't ship."
 
-**Related patterns:** the same shape applies to `docs/issues/*.md` bug
-files whose Fix section cites a SHA but whose `status:` frontmatter never
-flipped — see CLAUDE.md Standard Ship Sequence step 4 (the archive-move
-discipline) for the analogue at the bug-tracker level.
+**Related patterns:** the same shape applies to `docs/issues/*.md` bug files whose Fix section cites a SHA but whose `status:` frontmatter never flipped — see CLAUDE.md Standard Ship Sequence step 4 (the archive-move discipline) for the analogue at the bug-tracker level. Also pairs with the audit_doc_refs lint at the doc-link level: three independent surfaces (session-log entries, bug-file frontmatter, doc-link targets) all drift the same way under the same root cause — fix-then-forget.
 
-**Status:** validated — 2 datapoints in one scout pass. Awaiting third
-to promote.
+**Status:** promotion-eligible — 3 datapoints fired the criterion. Awaiting CLAUDE.md edit to graduate.
 
 ## Template for new entries
 
