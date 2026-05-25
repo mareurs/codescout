@@ -836,3 +836,169 @@ class Foo:
         "beta's body must survive; got:\n{result}"
     );
 }
+
+/// Rust (rust-analyzer): edit_code action=replace with `attributes: []` drops
+/// outer attributes entirely. Closes U-19 (no edit_code action existed to
+/// drop attributes; edit_file was Pika-blocked).
+#[tokio::test]
+#[ignore] // requires rust-analyzer
+async fn u19_replace_with_empty_attributes_drops_outer_attrs() {
+    if !lsp_available("rust-analyzer") {
+        eprintln!("Skipping: rust-analyzer not installed");
+        return;
+    }
+
+    let manifest = r#"[package]
+name = "test-project"
+version = "0.1.0"
+edition = "2021"
+"#;
+    let code = r#"#[allow(dead_code)]
+#[inline]
+pub fn target() -> i32 {
+    1
+}
+"#;
+
+    let (dir, ctx) = project_with_files(&[("Cargo.toml", manifest), ("src/lib.rs", code)]).await;
+
+    let new_body = "pub fn target() -> i32 {\n    99\n}";
+
+    EditCode
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "symbol": "target",
+                "action": "replace",
+                "body": new_body,
+                "attributes": [],  // explicit empty array → drop all attrs
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let result = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
+    assert!(
+        result.contains("99"),
+        "body must be replaced; got:\n{result}"
+    );
+    assert!(
+        !result.contains("#[allow(dead_code)]"),
+        "#[allow] attribute must be dropped; got:\n{result}"
+    );
+    assert!(
+        !result.contains("#[inline]"),
+        "#[inline] attribute must be dropped; got:\n{result}"
+    );
+}
+
+/// Rust (rust-analyzer): edit_code action=replace with `attributes: ["#[new]"]`
+/// replaces existing outer attributes with exactly the supplied list. Closes
+/// U-21 (the previous "PRESERVES outer attributes" promise broke when the
+/// new_body's first token was itself an attribute).
+#[tokio::test]
+#[ignore] // requires rust-analyzer
+async fn u21_replace_with_explicit_attributes_overrides_existing() {
+    if !lsp_available("rust-analyzer") {
+        eprintln!("Skipping: rust-analyzer not installed");
+        return;
+    }
+
+    let manifest = r#"[package]
+name = "test-project"
+version = "0.1.0"
+edition = "2021"
+"#;
+    let code = r#"#[allow(dead_code)]
+#[deprecated]
+pub fn target() -> i32 {
+    1
+}
+"#;
+
+    let (dir, ctx) = project_with_files(&[("Cargo.toml", manifest), ("src/lib.rs", code)]).await;
+
+    let new_body = "pub fn target() -> i32 {\n    99\n}";
+
+    EditCode
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "symbol": "target",
+                "action": "replace",
+                "body": new_body,
+                "attributes": ["#[inline]"],  // exactly this list replaces the existing two
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let result = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
+    assert!(
+        result.contains("#[inline]"),
+        "new #[inline] attribute must be present; got:\n{result}"
+    );
+    assert!(
+        !result.contains("#[allow(dead_code)]"),
+        "old #[allow] must be replaced; got:\n{result}"
+    );
+    assert!(
+        !result.contains("#[deprecated]"),
+        "old #[deprecated] must be replaced; got:\n{result}"
+    );
+    assert!(
+        result.contains("99"),
+        "body must be replaced; got:\n{result}"
+    );
+}
+
+/// Rust (rust-analyzer): edit_code action=replace WITHOUT the `attributes`
+/// field still preserves outer attributes when the new_body does not lead
+/// with a decorator (regression guard for the existing heuristic).
+#[tokio::test]
+#[ignore] // requires rust-analyzer
+async fn u19_u21_replace_without_attributes_preserves_existing_default() {
+    if !lsp_available("rust-analyzer") {
+        eprintln!("Skipping: rust-analyzer not installed");
+        return;
+    }
+
+    let manifest = r#"[package]
+name = "test-project"
+version = "0.1.0"
+edition = "2021"
+"#;
+    let code = r#"#[allow(dead_code)]
+pub fn target() -> i32 {
+    1
+}
+"#;
+
+    let (dir, ctx) = project_with_files(&[("Cargo.toml", manifest), ("src/lib.rs", code)]).await;
+
+    // body does NOT lead with attribute → heuristic preserves the existing #[allow]
+    let new_body = "pub fn target() -> i32 {\n    99\n}";
+
+    EditCode
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "symbol": "target",
+                "action": "replace",
+                "body": new_body,
+                // attributes field omitted — default preserve behavior
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let result = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
+    assert!(
+        result.contains("#[allow(dead_code)]"),
+        "without `attributes` arg, existing attrs preserved; got:\n{result}"
+    );
+    assert!(result.contains("99"), "body still replaced; got:\n{result}");
+}

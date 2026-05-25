@@ -593,23 +593,17 @@ was ~10 minutes of tool-search + drafting + verifying. The larger cost
 is the precedent — every future attribute-drop in this codebase faces
 the same gap.
 
-**Status:** open — substrate gap, not a habit issue. Two candidate fixes:
+**Status:** fixed-verified (this session). `edit_code` action=replace now
+accepts an optional `attributes: Vec<String>` field. When supplied
+(even empty), replaces ALL outer attributes with the supplied list:
+`attributes: []` drops them, `attributes: ["#[derive(Debug)]"]` sets
+them exactly. Omitted keeps the original preserve heuristic.
 
-**Option A** — Extend `edit_code` action=replace to accept an optional
-`attributes` field. When supplied, **replaces** the outer attribute list
-(default behavior unchanged: preserve). Allows `attributes: Some(vec![])`
-to drop all attributes, or `attributes: Some(vec!["#[tokio::test]"])` to
-set a specific list. Surgical and minimal API surface.
-
-**Option B** — Relax `debug_enforce_symbol_tools` to allow `edit_file`
-when the diff touches only lines **before** the function signature
-(attributes-only region) and contains no `fn`/`async fn` keyword shift.
-More general — also helps with doc-comment edits above structs, derive-
-macro changes, etc.
-
-Option A is more precise; B is broader. Likely both eventually — A first
-for the missing edit_code surface, B later to relax over-broad blocks
-for other attribute-region patterns.
+The U-19 example (removing `#[cfg_attr(target_os = "windows", ...)]`
+above a test fn): now expressible as a single `edit_code` call with
+`attributes: ["#[tokio::test]"]` (or with whatever attributes you want
+to keep). No more Python escape hatch. Closed alongside U-21 in the
+same fix.
 
 **Diagnosis (introspection):** the IL2 design assumed `edit_code` would
 cover all structural edits and `edit_file` the rest. Outer-attribute
@@ -751,9 +745,31 @@ and the 0-test count, so no shipped damage. But the docstring's
 preserve promise is a load-bearing claim — any other replacement whose
 body happens to start with `#[...]` faces the same trap.
 
-**Status:** open — distinct from U-19's missing-API gap. U-19 is "no
-action to DROP attributes"; U-21 is "the existing PRESERVE promise has
-edge cases".
+**Status:** fixed-verified (this session). Closed alongside U-19 in one
+fix. `edit_code` action=replace now supports an explicit `attributes`
+field. The behavioral quirk (`body_leads_with_decorator` heuristic
+clobbering existing attrs when the new body started with `#[...]`)
+still exists for backwards compat when `attributes` is omitted — but
+callers who want deterministic outcomes pass `attributes: [...]` and
+get exactly the result they specify. The trap U-21 documents is now
+**avoidable** with one extra field, and the new tool description names
+the option so it's discoverable.
+
+Worked example showing the U-21 trap is now closeable in one call —
+the cfg_attr removal that took Python via run_command in the U-19
+session would now be:
+
+```python
+edit_code(symbol="..." , path="...", action="replace",
+         body="async fn ...() { ... }",
+         attributes=["#[tokio::test]", "#[serial]"])
+```
+
+Three integration tests added in `tests/bug_regression.rs`
+(`u19_replace_with_empty_attributes_drops_outer_attrs`,
+`u21_replace_with_explicit_attributes_overrides_existing`,
+`u19_u21_replace_without_attributes_preserves_existing_default`) cover
+the three meaningful states: drop, replace, default-preserve.
 
 **Diagnosis (introspection):** the heuristic edit_code probably uses to
 find the symbol-replacement region scans backwards from the `fn` /

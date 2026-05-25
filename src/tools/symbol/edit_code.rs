@@ -34,9 +34,10 @@ impl Tool for EditCode {
     }
 
     fn description(&self) -> &str {
-        "Mutate a symbol. action='replace' overwrites body (PRESERVES outer #[...] attributes — \
-         drop with edit_file). action='insert' injects code adjacent. action='remove' deletes. \
-         action='rename' renames across codebase via LSP (sweeps textual occurrences)."
+        "Mutate a symbol. action='replace' overwrites body. PRESERVES outer \
+         #[...] attributes (drop with attributes:[] / set with attributes:[...] — \
+         see schema). action='insert' injects code adjacent. action='remove' \
+         deletes. action='rename' renames across codebase via LSP."
     }
 
     fn input_schema(&self) -> Value {
@@ -49,6 +50,11 @@ impl Tool for EditCode {
                 "action":   { "type": "string", "enum": ["rename", "remove", "replace", "insert"] },
                 "new_name": { "type": "string", "description": "rename only" },
                 "body":     { "type": "string", "description": "replace: new body; insert: code to inject" },
+                "attributes": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "replace only: explicit outer-attribute list. When supplied, replaces ALL existing outer #[...] attributes (and any doc comments captured in the symbol's lead region) with exactly this list. Use [] to drop all attributes. Omit to keep the default preserve-when-body-has-no-leading-attribute heuristic. Each entry should be a complete attribute string, indented to match the symbol's column (e.g. \"    #[tokio::test]\")."
+                },
                 "position": {
                     "type": "string",
                     "enum": ["before", "after"],
@@ -100,7 +106,37 @@ impl Tool for EditCode {
                 let Some(body) = input["body"].as_str() else {
                     return Err(RecoverableError::new("action 'replace' requires 'body'").into());
                 };
-                let mut result = self.do_replace(ctx, name_path, rel_path, body).await?;
+                // Optional `attributes: Vec<String>` — when present (even if
+                // empty) it overrides the body-leads-with-decorator heuristic
+                // and replaces all outer attributes with the supplied list.
+                // Empty array drops all attributes. Omitted (None) keeps the
+                // default preserve-when-safe behavior. Closes U-19 + U-21
+                // (codescout-usage-frictions tracker).
+                let attributes: Option<Vec<String>> = match input.get("attributes") {
+                    Some(Value::Array(arr)) => {
+                        let mut out = Vec::with_capacity(arr.len());
+                        for (i, v) in arr.iter().enumerate() {
+                            let Some(s) = v.as_str() else {
+                                return Err(RecoverableError::new(format!(
+                                    "action 'replace': attributes[{i}] must be a string"
+                                ))
+                                .into());
+                            };
+                            out.push(s.to_string());
+                        }
+                        Some(out)
+                    }
+                    Some(Value::Null) | None => None,
+                    Some(_) => {
+                        return Err(RecoverableError::new(
+                            "action 'replace': attributes must be an array of strings (or omitted)",
+                        )
+                        .into());
+                    }
+                };
+                let mut result = self
+                    .do_replace(ctx, name_path, rel_path, body, attributes.as_deref())
+                    .await?;
                 result["hint"] = json!(format!(
                     "verify callers: references(symbol=\"{}\", path=\"{}\")",
                     name_path, rel_path
@@ -443,6 +479,7 @@ impl EditCode {
         name_path: &str,
         rel_path: &str,
         new_body: &str,
+        attributes: Option<&[String]>,
     ) -> anyhow::Result<Value> {
         let full_path = resolve_write_path(&ctx.agent, rel_path).await?;
         guard_not_markdown(&full_path)?;
@@ -464,83 +501,96 @@ impl EditCode {
             (start0, end0)
         };
 
-        // R-08 / BUG-031 reconciliation: editing_start_line walks back past
-        // preceding doc comments / attributes so that a new_body containing
-        // doc-comments+signature replaces them cleanly (no BUG-031 duplication).
-        // But when the LLM passes a new_body that intentionally omits decorators
-        // (e.g. only changing the body), that walk-back drops the existing doc
-        // comment. Detect this: if new_body does NOT lead with a decorator, narrow
-        // `start` forward past any leading decorator/attribute lines in the
-        // captured range so they are preserved.
-        let body_leads_with_decorator = new_body
-            .lines()
-            .find(|l| !l.trim().is_empty())
-            .map(|l| {
-                let t = l.trim_start();
-                t.starts_with("///")
-                    || t.starts_with("//!")
-                    || t.starts_with("//")
-                    || t.starts_with("#[")
-                    || t.starts_with("/**")
-                    || t.starts_with("/*")
-                    || t.starts_with('@')
-            })
-            .unwrap_or(false);
+        // U-19 + U-21 fix: when `attributes` is explicitly supplied (Some, even
+        // empty), force `start = start0` so the full decorator+symbol range
+        // gets replaced, and prepend the supplied attributes verbatim to the
+        // new body. Skips the body_leads_with_decorator heuristic — the
+        // caller's intent is explicit. `attributes: []` drops all outer
+        // attributes; non-empty replaces them with exactly that list.
+        let (start, effective_body): (usize, String) = if let Some(attrs) = attributes {
+            let attrs_block = attrs.join("\n");
+            let combined = if attrs_block.is_empty() {
+                new_body.to_string()
+            } else {
+                format!("{attrs_block}\n{new_body}")
+            };
+            (start, combined)
+        } else {
+            // R-08 / BUG-031 reconciliation: editing_start_line walks back past
+            // preceding doc comments / attributes so that a new_body containing
+            // doc-comments+signature replaces them cleanly (no BUG-031 duplication).
+            // But when the LLM passes a new_body that intentionally omits decorators
+            // (e.g. only changing the body), that walk-back drops the existing doc
+            // comment. Detect this: if new_body does NOT lead with a decorator,
+            // narrow `start` forward past any leading decorator/attribute lines in
+            // the captured range so they are preserved.
+            let body_leads_with_decorator = new_body
+                .lines()
+                .find(|l| !l.trim().is_empty())
+                .map(|l| {
+                    let t = l.trim_start();
+                    t.starts_with("///")
+                        || t.starts_with("//!")
+                        || t.starts_with("//")
+                        || t.starts_with("#[")
+                        || t.starts_with("/**")
+                        || t.starts_with("/*")
+                        || t.starts_with('@')
+                })
+                .unwrap_or(false);
 
-        let start = if !body_leads_with_decorator {
-            // Walk forward from `start` skipping decorator lines (doc comments,
-            // attributes, decorators, and bracket continuations of multi-line
-            // attributes) up to `end`. Land on the first non-decorator line —
-            // typically the `fn`/`impl`/`struct` keyword line.
-            let mut s = start;
-            let mut pending_open_brackets: usize = 0;
-            while s < end {
-                let trimmed = lines[s].trim();
-                if pending_open_brackets > 0 {
-                    for ch in trimmed.chars() {
-                        match ch {
-                            '(' | '[' => pending_open_brackets += 1,
-                            ')' | ']' => {
-                                pending_open_brackets = pending_open_brackets.saturating_sub(1)
+            let start_narrowed = if !body_leads_with_decorator {
+                // Walk forward from `start` skipping decorator lines.
+                let mut s = start;
+                let mut pending_open_brackets: usize = 0;
+                while s < end {
+                    let trimmed = lines[s].trim();
+                    if pending_open_brackets > 0 {
+                        for ch in trimmed.chars() {
+                            match ch {
+                                '(' | '[' => pending_open_brackets += 1,
+                                ')' | ']' => {
+                                    pending_open_brackets = pending_open_brackets.saturating_sub(1)
+                                }
+                                _ => {}
                             }
-                            _ => {}
+                        }
+                        s += 1;
+                        continue;
+                    }
+                    let is_decorator = trimmed.starts_with("///")
+                        || trimmed.starts_with("//!")
+                        || trimmed.starts_with("//")
+                        || trimmed.starts_with("/**")
+                        || trimmed.starts_with("/*")
+                        || trimmed.starts_with("* ")
+                        || trimmed == "*"
+                        || trimmed == "*/"
+                        || trimmed.starts_with('@')
+                        || trimmed.starts_with("#[");
+                    if !is_decorator {
+                        break;
+                    }
+                    if trimmed.starts_with("#[") {
+                        let mut depth: isize = 0;
+                        for ch in trimmed.chars() {
+                            match ch {
+                                '(' | '[' => depth += 1,
+                                ')' | ']' => depth -= 1,
+                                _ => {}
+                            }
+                        }
+                        if depth > 0 {
+                            pending_open_brackets = depth as usize;
                         }
                     }
                     s += 1;
-                    continue;
                 }
-                let is_decorator = trimmed.starts_with("///")
-                    || trimmed.starts_with("//!")
-                    || trimmed.starts_with("//")
-                    || trimmed.starts_with("/**")
-                    || trimmed.starts_with("/*")
-                    || trimmed.starts_with("* ")
-                    || trimmed == "*"
-                    || trimmed == "*/"
-                    || trimmed.starts_with('@')
-                    || trimmed.starts_with("#[");
-                if !is_decorator {
-                    break;
-                }
-                if trimmed.starts_with("#[") {
-                    // Track unclosed brackets in case of multi-line attribute.
-                    let mut depth: isize = 0;
-                    for ch in trimmed.chars() {
-                        match ch {
-                            '(' | '[' => depth += 1,
-                            ')' | ']' => depth -= 1,
-                            _ => {}
-                        }
-                    }
-                    if depth > 0 {
-                        pending_open_brackets = depth as usize;
-                    }
-                }
-                s += 1;
-            }
-            s
-        } else {
-            start
+                s
+            } else {
+                start
+            };
+            (start_narrowed, new_body.to_string())
         };
 
         if start >= lines.len() {
@@ -567,7 +617,7 @@ impl EditCode {
 
         let mut new_lines = Vec::new();
         new_lines.extend_from_slice(&lines[..start]);
-        new_lines.extend(new_body.lines());
+        new_lines.extend(effective_body.lines());
         new_lines.extend_from_slice(&lines[end..]);
 
         write_lines(&full_path, &new_lines, content.ends_with('\n'))?;
