@@ -10,7 +10,7 @@ use crate::librarian::filter::FilterNode;
 
 const MAX_LIMIT: usize = 500;
 const MAX_OFFSET: usize = 100_000;
-const HIDDEN_STATUSES: &[&str] = &["archived", "superseded", "retired"];
+use super::HIDDEN_STATUSES;
 
 #[derive(Deserialize)]
 struct Args {

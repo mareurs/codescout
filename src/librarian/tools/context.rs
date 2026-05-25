@@ -8,7 +8,7 @@ use crate::librarian::filter::FilterNode;
 use super::scope::{apply_scope, Scope};
 use super::ToolContext;
 
-const HIDDEN_STATUSES: &[&str] = &["archived", "superseded"];
+use super::HIDDEN_STATUSES;
 
 #[derive(Deserialize)]
 
@@ -415,6 +415,51 @@ mod tests {
         assert!(
             !md.contains("Billing"),
             "markdown should not contain Billing"
+        );
+    }
+
+    #[tokio::test]
+    async fn topic_search_hides_retired_artifacts() {
+        // Regression for the HIDDEN_STATUSES split-brain: the context topic
+        // branch must hide `retired` artifacts exactly as find() does.
+        // See docs/issues/2026-05-25-hidden-statuses-context-missing-retired.md
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        std::fs::write(root.join("auth_live.md"), "# Auth Live\nsome body\n").unwrap();
+        std::fs::write(root.join("auth_retired.md"), "# Auth Retired\nsome body\n").unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(
+            &cat,
+            &sample_row("r/auth_live.md", "r", "auth_live.md", "Auth Live", None),
+        )
+        .unwrap();
+        let mut retired = sample_row(
+            "r/auth_retired.md",
+            "r",
+            "auth_retired.md",
+            "Auth Retired",
+            None,
+        );
+        retired.status = "retired".into();
+        artifact::upsert(&cat, &retired).unwrap();
+
+        let ctx = mk_ctx(root.to_path_buf(), cat);
+
+        let v = call(&ctx, json!({"topic": "auth"})).await.unwrap();
+
+        let ids = v["included_ids"].as_array().unwrap();
+        assert_eq!(
+            ids.len(),
+            1,
+            "retired artifact must be hidden in topic context, like find()"
+        );
+        let md = v["markdown"].as_str().unwrap();
+        assert!(md.contains("Auth Live"), "live artifact should be present");
+        assert!(
+            !md.contains("Auth Retired"),
+            "retired artifact must not leak into context markdown"
         );
     }
 

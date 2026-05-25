@@ -12,6 +12,20 @@ pub mod get;
 pub mod graph;
 pub mod scope;
 
+/// Statuses hidden by default from `find` and `context` listings.
+///
+/// Single source of truth shared by `find.rs` and `context.rs` so the two
+/// surfaces cannot drift — they did once: `retired` was added to `find` but
+/// not `context` (see
+/// docs/issues/2026-05-25-hidden-statuses-context-missing-retired.md).
+///
+/// - `archived` / `superseded`: terminal; the file is physically moved to an
+///   `archive/` path.
+/// - `retired`: terminal but kept in place (MRV in-place redirect — the file
+///   stays at its original path so incoming links still resolve, and its body
+///   forwards to the canonical successor).
+pub(crate) const HIDDEN_STATUSES: &[&str] = &["archived", "superseded", "retired"];
+
 /// A recoverable tool error: the LLM gave bad input and can self-correct.
 ///
 /// When a tool returns this error type, the MCP server serialises it as
