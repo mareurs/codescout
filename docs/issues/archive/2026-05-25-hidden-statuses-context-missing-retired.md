@@ -105,7 +105,7 @@ The session log records the `find.rs` fix but does not note the parallel
    `left: 2, right: 1` panic at `context.rs:448`.
 ## Fix
 
-Implemented and verified on `experiments` (not yet committed/shipped to master).
+Shipped to master.
 Root-cause fix — single shared constant, drift class removed:
 
 - Added `pub(crate) const HIDDEN_STATUSES = ["archived","superseded","retired"]`
@@ -115,8 +115,9 @@ Root-cause fix — single shared constant, drift class removed:
   `use super::HIDDEN_STATUSES;` instead of each defining their own.
 
 `cargo test -p codescout --lib librarian::tools::context` → 10 passed; full
-`librarian::tools` → 332 passed; `cargo clippy` clean. **Cite the master-side
-SHA here after cherry-pick** (CLAUDE.md § "After cherry-pick: cite the master SHA").
+`librarian::tools` → 332 passed; `cargo clippy` clean. Shipped: experiments-side
+`c770cd6e`, master-side **`a96af3ae`** (cite the master SHA per CLAUDE.md §
+"After cherry-pick").
 ## Tests added
 
 `topic_search_hides_retired_artifacts` — `src/librarian/tools/context.rs`
@@ -132,12 +133,7 @@ surfaces already hide.
 
 ## Resume
 
-Fix verified on experiments. To ship: commit ONLY the fix paths (context.rs,
-find.rs, mod.rs, this bug file, the research memo) — NOT
-`docs/trackers/bug-fix-session-log.md`, which holds a concurrent release
-session's uncommitted F-13/F-14 entries. Then cherry-pick to master per the
-Standard Ship Sequence, capture the master-side SHA into the Fix section, and
-`git mv` this file to `docs/issues/archive/`.
+N/A — shipped to master (`a96af3ae`) and archived to `docs/issues/archive/`.
 ## References
 - `src/librarian/tools/find.rs:13` — canonical (3-element) definition + `retired` doc at `find.rs:37`
 - `src/librarian/tools/context.rs:11` — stale (2-element) definition
