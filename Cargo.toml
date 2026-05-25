@@ -22,7 +22,7 @@ sqlite-vec = "0.1"
 
 [package]
 name = "codescout"
-version = "0.13.0"
+version = "0.14.0"
 edition = "2021"
 description = "High-performance coding agent toolkit MCP server"
 repository = "https://github.com/mareurs/codescout"
@@ -31,7 +31,7 @@ documentation = "https://mareurs.github.io/codescout/"
 license = "MIT"
 rust-version = "1.88"
 build = "build.rs"
-exclude = [".codescout/", "docs/", "scripts/", ".github/", "CLAUDE.md"]
+exclude = [".codescout/", "docs/", "!docs/PROGRESSIVE_DISCOVERABILITY.md", "scripts/", ".github/", "CLAUDE.md"]
 
 [lib]
 name = "codescout"

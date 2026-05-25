@@ -2,6 +2,72 @@
 
 All notable changes to codescout are documented here.
 
+## [0.14.0] — 2026-05-25
+
+### Added
+
+- **Surgical body editing for `artifact(update)` — `patch={body_edits: [...]}`.**
+  Mirrors `edit_markdown`'s batch shape: each entry is `{heading, action,
+  content? | old_string+new_string?, at?, replace_all?, include_subsections?}`,
+  applied atomically. Mutually exclusive with `patch={body}`. Removes the
+  temptation to write a partial body in the first place — the anti-pattern
+  that cost a real ~600-line tracker on 2026-05-25 (`artifact(get,
+  heading=…)` returns *a section*, but `patch={body: <section>}` *replaces
+  the entire body*). See
+  [docs/architecture/augmented-artifacts.md § Body editing surfaces](docs/architecture/augmented-artifacts.md)
+  and the live MCP guide at `src/prompts/guides/librarian.md § Body Editing
+  Surfaces`. Refs `docs/issues/archive/2026-05-25-augmented-artifact-body-overwrite.md`.
+
+### Changed
+
+- **Body-write safety net: 50% shrink guard + `force=true` escape hatch.**
+  Any `patch={body}` (or `edit_markdown`) write that would reduce the file
+  by more than 50% is refused with
+  `RecoverableError("body-shrink guard: …")`. The error hint names both
+  `body_edits[]` and `force=true`. Exemptions: files under 200 bytes (the
+  percentage is meaningless for shells), and augmentations with
+  `append_mode + history_cap` set (legitimate history trimming).
+
+- **Strict patch deserializer on `UpdatePatch`.** Misspelled keys like
+  `body_prepend_section` now return `RecoverableError` listing the valid
+  fields instead of silently no-opping. (Strictness applies to the patch
+  body only; the outer `Args` still accepts dispatcher-injected fields.)
+
+- **Forensic body-mutation trail.** Every body write emits a `field_patch`
+  event with `payload={field: "body", prev_bytes, new_bytes, edits_count,
+  mode, forced}`. Query via `artifact_event(action="list", artifact_id=X)`
+  — a body write that shouldn't have happened is now reconstructable from
+  the event timeline.
+
+### Fixed
+
+- **`call_graph` depth > 1 timeout.** BFS now parallelizes per-level LSP
+  one-hop queries via `futures::try_join_all`; previous serial loop
+  saturated at ~6s × N siblings, hitting the 60s tool timeout on depth=2
+  walks across realistic call sites.
+
+- **`call_graph` spurious self-edges in the tree-sitter fallback.** When
+  rust-analyzer cannot model a symbol (e.g. `#[test]` fns), the
+  `references()` fallback could return locations inside the symbol's own
+  body, which the AST walk-up resolved back to the symbol itself. Filtered
+  at the edge construction site.
+
+- **Test isolation regressions.** `retrieval_unit` env tests now use the
+  `temp-env` crate (drop `serial_test` markers; concurrent test runs no
+  longer leak env into sibling tests). `symbols_no_body_start_line` pins
+  the new auto-inline contract.
+
+### Docs
+
+- New section in `docs/architecture/augmented-artifacts.md` covering the
+  body / `body_edits` / `force` surfaces, the shrink-guard exemptions, the
+  forensic trail, and the anti-pattern story.
+- New `## Body Editing Surfaces` section in the live MCP guide
+  (`src/prompts/guides/librarian.md`).
+- `librarian` guide action table now includes `doctor` and `audit_doc_refs`.
+- `progressive-disclosure` guide documents the path-relative annotation
+  convention.
+
 ## [0.12.1] — 2026-05-16
 
 ### Added
