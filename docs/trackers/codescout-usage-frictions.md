@@ -673,19 +673,23 @@ cross-platform bug for months. The fix (per-test `EnvGuard` for
 through `make_server()`) is mechanical but easy to miss without the
 existing librarian-tests precedent.
 
-**Status:** instance-fixed (#68), **class still open** — the `make_server()`
-race is closed for `guide_hint_tests`, but a one-off flake of
-`artifact_event_after_artifact_no_hint` on Linux during the U-23
-verification (`cargo test --lib`, full suite) suggests the
-`#[serial]` + `EnvGuard` discipline is **not** 100% robust under heavy
-concurrent test load. Hypothesis: the `#[serial]` lock serializes
-guide_hint_tests against each other, but a non-`#[serial]` test in
-another module (e.g. one that touches LIBRARIAN_DB or LIBRARIAN_CWD
-without an EnvGuard) can race with the in-flight Agent construction
-inside `make_server`. Re-running the failing test alone — both as
-`server::guide_hint_tests` and as the single failing case — passed
-cleanly twice. Worth a separate F-N entry once the class fix lands
-in `librarian doctor doctor`-style isolation.
+**Status:** fixed-verified (instance + class). Instance: `make_server()`
+in `src/server.rs::guide_hint_tests` now returns
+`(TempDir, EnvGuard, CodeScoutServer)` (#68 commit `701103d5`). Class:
+the project-wide convention is promoted to
+[`docs/conventions/test-env-isolation.md`](../conventions/test-env-isolation.md)
+with a CLAUDE.md cross-link in the Testing Patterns section
+(this-session commit). Future test helpers that read env-resolved
+config now have a discoverable rule + two exemplars to copy from.
+
+**Known gap (deferred):** the `#[serial]` + `EnvGuard` discipline
+serializes within a module but not across. Observed once on Linux
+during the U-23 verification session — `artifact_event_after_artifact_no_hint`
+flaked under full `cargo test --lib`, passed both isolated retries.
+The convention doc names the gap explicitly in its "Known gaps"
+section so future maintainers see it before they hit it. Class fix
+candidates (annotate every env-mutating test with `#[serial]`, or
+move config off env onto explicit args) deferred — not blocking.
 
 **Diagnosis (introspection):** the friction is **shape**, not knowledge.
 The librarian module already documented the hazard inline. A

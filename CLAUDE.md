@@ -435,6 +435,15 @@ A two-query test (baseline → post-invalidation) only confirms the happy path. 
 
 See `did_change_refreshes_stale_symbol_positions` in `src/lsp/client.rs` for the canonical example.
 
+**Test helpers that build env-reading objects must isolate env per test.**
+Any helper that constructs an `Agent` (or any object that resolves config
+from process-global env like `LIBRARIAN_DB`, `LIBRARIAN_WORKSPACE`,
+`LIBRARIAN_CWD`) must return an `EnvGuard` and the calling test must
+carry `#[serial_test::serial]`. Exemplars: `EnvGuard` in
+`src/librarian/mod.rs::tests` and `src/server.rs::guide_hint_tests`. See
+[`docs/conventions/test-env-isolation.md`](docs/conventions/test-env-isolation.md)
+for the full rule + diagnostic shape + known cross-module gap.
+
 ## Key Patterns
 
 Load-bearing rules I keep getting wrong otherwise:
