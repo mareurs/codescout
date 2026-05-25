@@ -84,24 +84,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check all tools are documented
-        # Informational only: surfaces drift between src/tools/**/*.rs and
-        # docs/manual/src/tools/ but does not fail the build. The current
-        # diff is ~20 tools added/renamed/removed since the manual was last
-        # refreshed (edit_section→edit_markdown, *_symbol consolidated into
-        # edit_code, new tools call_graph/get_guide/get_usage_stats/index*/
-        # library/list_*/memory CRUD). Manual refresh is its own engagement
-        # — see docs/issues/2026-05-24-tool-docs-manual-drift.md.
-        # Recursive grep (vs the prior non-recursive *.rs); test files
-        # excluded. Diff is printed; exit code 0 regardless.
+        # Strict: tool registrations under src/tools/**/*.rs must each have a
+        # matching ^# `tool_name`$ or ^## `tool_name`$ heading in
+        # docs/manual/src/tools/. Test files (tests.rs) and the internal
+        # description-cap probe are excluded. Recursive grep with -h to
+        # suppress filename prefixes; anchored doc-side regex catches H1 + H2.
         run: |
           grep -rhA1 'fn name(&self)' src/tools/ --include='*.rs' --exclude-dir=tests --exclude='tests.rs' --exclude='probe.rs' \
             | grep -E '^\s*"[a-z_]+"' \
             | sed 's/.*"\(.*\)".*/\1/' \
             | sort -u > /tmp/code-tools.txt
-          grep -rohE '^## `[a-z_]+`$' docs/manual/src/tools/ | sed 's/## `\(.*\)`/\1/' | sort -u > /tmp/doc-tools.txt
-          if ! diff -u /tmp/code-tools.txt /tmp/doc-tools.txt; then
-            echo "::warning::Tool docs out of sync — see docs/issues/2026-05-24-tool-docs-manual-drift.md"
-          fi
+          grep -rohE '^#{1,2} `[a-z_]+`$' docs/manual/src/tools/ | sed 's/.*`\(.*\)`/\1/' | sort -u > /tmp/doc-tools.txt
+          diff -u /tmp/code-tools.txt /tmp/doc-tools.txt
 
   msrv:
     name: MSRV (1.88)

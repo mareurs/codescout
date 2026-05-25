@@ -1,4 +1,9 @@
-# `read_markdown` improvements
+# `read_markdown`
+
+> **Page history:** this page started as a release note for the `read_markdown`
+> improvements landing — adaptive output tiers, `@file_*` buffer ref support,
+> and heading navigation. It now serves as the tool's reference. The
+> "What changed" framing below preserves the historical context.
 ## What changed
 
 Three related improvements landed together:

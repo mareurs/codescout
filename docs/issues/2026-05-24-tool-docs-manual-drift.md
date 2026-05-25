@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-05-24
-closed:
+closed: 2026-05-25
 severity: medium
 owner: marius
 related: []
@@ -113,20 +113,54 @@ N/A — the diff is mechanical; root cause is documented above.
 
 ## Fix
 
-Two-phase:
+Three-part fix shipped 2026-05-25:
 
-1. **Reconcile renames/consolidations** — for each `+` line in the diff
-   above, decide: did the tool get renamed (rename the doc file) or
-   consolidated into another tool (delete the doc file, ensure the
-   destination tool's doc covers the consolidated behavior)?
-2. **Write missing docs** — for each `-` line, write a section in the
-   appropriate `docs/manual/src/tools/*.md` file following the existing
-   tool-doc shape.
+**Part 1 — Lint correctness** (`.github/workflows/ci.yml`):
 
-Once both phases ship and the diff is clean, restore the strict gate in
-`.github/workflows/ci.yml::tool-docs-sync` (revert the `informational`
-comment block and the `if !diff ...` wrapper back to the previous
-`diff ... || exit 1` shape).
+- Added `-h` to the recursive `grep`. The downstream filter `grep -E '^\s*"..."'`
+  required leading whitespace, but `grep -r` prefixes each output line with
+  `filename:` (matched) or `filename-` (context). Result: the code-side
+  extraction had been silently producing an empty list for an unknown period.
+  Discovered during the fix audit.
+- Anchored the doc-side regex to `^#{1,2} \`[a-z_]+\`$` (line-exact match of
+  H1 or H2 backticked tool name). The previous unanchored `## \`[a-z_]*\``
+  matched H3/H4 sub-headings (e.g. `### \`replace\`` in edit-code.md) and
+  inline backticks, creating six false-positive `+` entries in this bug's
+  recorded diff.
+- Added `--exclude='tests.rs'` (test-fixture files like `EchoTool` and
+  `AlwaysTool` in `src/tools/core/tests.rs` were polluting code-side).
+- Added `--exclude='probe.rs'` (internal `__probe_description_cap__` is not
+  user-facing).
+- H1 acceptance: single-tool pages (`call-graph.md`, `edit-code.md`,
+  `get-guide.md`, `read-markdown.md`) already use `# \`tool_name\`` as title;
+  forcing a redundant H2 would be documentation-for-the-lint.
+
+**Part 2 — Doc-side cleanup** (`docs/manual/src/tools/**`):
+
+- Removed 4 legacy `*_symbol` stubs in `symbol-navigation.md` (consolidated
+  into `edit_code` in v0.11).
+- Renamed `## \`edit_section\`` → `## \`edit_markdown\`` in
+  `document-section-editing.md` (v0.11 tool rename).
+- Normalized `read-markdown.md` H1 from `# \`read_markdown\` improvements`
+  to `# \`read_markdown\``; preserved the "page history" framing.
+- Rewrote parenthetical H2 forms to bare H2s + new alias sections:
+  - `workflow-and-config.md`: `## \`workspace\``, added `## \`project_status\``
+    and `## \`get_usage_stats\``.
+  - `semantic-search.md`: `## \`index\``, added `## \`index_project\`` and
+    `## \`index_status\`` alias sections.
+  - `library-navigation.md`: `## \`library\``, added `## \`list_libraries\``
+    and `## \`register_library\``.
+  - `memory.md`: added `## \`read_memory\``, `## \`write_memory\``,
+    `## \`list_memories\``, `## \`delete_memory\`` alias sections.
+  - `ast.md`: added `## \`list_functions\`` and `## \`list_docs\`` back-compat
+    notes, corrected the stale "removed in v1" prose.
+
+**Part 3 — Strict gate restored** (`.github/workflows/ci.yml`):
+
+- Removed the `if ! diff ...; then echo "::warning::"; fi` wrapper. Bare
+  `diff -u` now fails the job on any drift, matching the original intent.
+
+Final lint output: 33 code-side, 33 doc-side, diff exit 0.
 
 ## Tests added
 

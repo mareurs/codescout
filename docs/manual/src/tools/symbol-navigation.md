@@ -310,36 +310,6 @@ import) a given symbol. This is the "find all usages" feature from your IDE.
 
 ---
 
-## `replace_symbol`
-
-> **Renamed in v0.11.** The standalone `replace_symbol` tool was consolidated
-> into the unified `edit_code` tool. Use `edit_code(action="replace", symbol, path, body)`
-> instead — see [edit_code](edit-code.md) for parameters, examples, and the
-> full action set (`replace` / `insert` / `remove` / `rename`).
-
----
-## `insert_code`
-
-> **Renamed in v0.11.** Consolidated into `edit_code`. Use
-> `edit_code(action="insert", symbol, path, body, position="before"|"after")`
-> instead — see [edit_code](edit-code.md).
-
----
-## `rename_symbol`
-
-> **Renamed in v0.11.** Consolidated into `edit_code`. Use
-> `edit_code(action="rename", symbol, path, new_name)` instead — see
-> [edit_code](edit-code.md). The implementation still goes through LSP
-> `workspace/rename` and sweeps textual occurrences in comments and strings.
-
----
-## `remove_symbol`
-
-> **Renamed in v0.11.** Consolidated into `edit_code`. Use
-> `edit_code(action="remove", symbol, path)` instead — see
-> [edit_code](edit-code.md).
-
----
 ## `symbol_at`
 
 **Purpose:** Inspect a symbol at a given position via LSP. Returns the symbol's

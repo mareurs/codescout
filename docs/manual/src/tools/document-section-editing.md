@@ -31,11 +31,14 @@ Seven features built on a shared heading-parsing foundation:
 
 ---
 
-## `edit_section`
+## `edit_markdown`
 
 **Purpose:** Whole-section operations on markdown files — replace content, insert
 new sections, or remove existing ones. Addresses sections by heading, not line
 numbers.
+
+> The tool was renamed from `edit_section` to `edit_markdown` in v0.11 to
+> mirror `read_markdown`. The behavior is unchanged.
 
 **Parameters:**
 

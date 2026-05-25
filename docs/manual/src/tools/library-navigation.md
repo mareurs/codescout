@@ -45,7 +45,9 @@ distinguish origin.
 
 ---
 
-## `library(action: list / register)`
+## `library`
+
+Dispatched by `action`: `"list"` or `"register"`.
 
 **Purpose:** Show all registered libraries, their root paths, and whether a
 semantic index has been built for each. Use `library(action: list)`.
@@ -93,7 +95,15 @@ You can also register a new library manually with `library(action: register)`.
   directly if you need to edit or remove an entry.
 
 ---
-## Indexing a Library for Semantic Search
+## `list_libraries`
+
+Backward-compatible alias for `library(action="list")`. The dedicated tool is
+still registered; new code should prefer the action-dispatched form.
+
+## `register_library`
+
+Backward-compatible alias for `library(action="register")`. The dedicated tool
+is still registered; new code should prefer the action-dispatched form.## Indexing a Library for Semantic Search
 
 Once a library is registered (via `library(action: list)` or auto-discovery), build its
 semantic index by pointing `index(action: build)` at its root:

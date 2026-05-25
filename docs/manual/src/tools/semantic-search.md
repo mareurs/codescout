@@ -126,11 +126,11 @@ Omit `project` to search across the workspace-level context. See
 
 ---
 
-## `index(action: build)`
+## `index`
 
-**Purpose:** Build or incrementally update the semantic search index for the
-active project. Only re-embeds files whose content has changed since the last
-run unless `force` is set. Use `index(action: build)`.
+**Purpose:** Manage the semantic search index. Dispatches by `action`:
+`"build"` (default-most-common: incremental rebuild) or `"status"`
+(introspect index health, file count, drift). Use `index(action: build)`.
 
 **Parameters:**
 
@@ -205,7 +205,16 @@ the current HEAD commit, results include:
   may take a few minutes the first time.
 
 ---
-## `index(action: status)`
+## `index_project`
+
+Backward-compatible alias for `index(action="build")`. The dedicated tool is
+still registered; new code should prefer the action-dispatched form for
+consistency with the other meta-tools (`workspace`, `library`, `memory`).
+
+## `index_status`
+
+Backward-compatible alias for `index(action="status")`. The dedicated tool is
+still registered and accepts the same parameters as the action variant.
 
 **Purpose:** Show the health of the semantic index — file count, chunk count,
 embedding model, last update time, and optional per-file drift scores.

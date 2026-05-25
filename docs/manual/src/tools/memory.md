@@ -134,6 +134,26 @@ Omitting `project` reads/writes workspace-level memory.
 
 ---
 
+## `read_memory`
+
+Backward-compatible alias for `memory(action="read")`. The dedicated tool is
+still registered; new code should prefer the action-dispatched `memory`.
+
+## `write_memory`
+
+Backward-compatible alias for `memory(action="write")`. The dedicated tool is
+still registered; new code should prefer the action-dispatched `memory`.
+
+## `list_memories`
+
+Backward-compatible alias for `memory(action="list")`. The dedicated tool is
+still registered; new code should prefer the action-dispatched `memory`.
+
+## `delete_memory`
+
+Backward-compatible alias for `memory(action="delete")`. The dedicated tool is
+still registered; new code should prefer the action-dispatched `memory`.
+
 ## Private Store
 
 Pass `private: true` to any action to target the gitignored private store at `.codescout/private-memories/`. Private memories are never surfaced in system instructions and are not shared with teammates:

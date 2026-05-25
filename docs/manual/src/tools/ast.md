@@ -1,9 +1,10 @@
 # AST Analysis
 
-> **Note:** The `list_functions` and `list_docs` tools were removed in the v1
-> tool restructure. The tree-sitter layer still exists internally and powers
-> richer symbol extraction for languages with grammar support (Rust, Python,
-> TypeScript, Go) — but it is no longer exposed as a standalone MCP tool.
+> **Note:** The `list_functions` and `list_docs` tools are still registered
+> for backward compatibility, but new code should use `symbols` (and
+> `symbols(include_body=true)` to inspect doc comments). The tree-sitter
+> layer powers richer symbol extraction internally for languages with grammar
+> support — it is no longer the recommended public entrypoint.
 
 ## What to Use Instead
 
@@ -19,3 +20,15 @@
 The offline advantage (no LSP startup) was outweighed by the maintenance cost of a parallel navigation path. `symbols` starts the language server on the first call and keeps it running — subsequent calls are instant. For the initial cold start, the latency difference is negligible for interactive use.
 
 See [Symbol Navigation](symbol-navigation.md) for the full `symbols` reference.
+
+## `list_functions`
+
+Backward-compatible alias retained for tree-sitter-only callsites that need
+function extraction without starting an LSP server. New code should use
+`symbols` — it covers more languages and returns richer output.
+
+## `list_docs`
+
+Backward-compatible alias retained for tree-sitter doc-comment extraction
+without an LSP. New code should use `symbols(include_body=true)` and inspect
+the body for `///` / `/**` blocks.

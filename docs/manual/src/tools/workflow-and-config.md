@@ -199,7 +199,9 @@ On Unix the command runs under `sh -c`. On Windows it runs under `cmd /C`.
 
 ---
 
-## `workspace` (activate / status / list_projects)
+## `workspace`
+
+Dispatched by `action`: `activate`, `status`, or `list_projects`.
 
 **Purpose:** Switch the active project to a different directory. All subsequent tool calls operate relative to the new project root. Use `workspace(action: activate, path: ...)`.
 
@@ -249,7 +251,10 @@ browsing another project for reference. See
 **Tips:** When working across multiple projects in a single session, call `workspace(action: activate)` to switch between them. After activating, call `onboarding` to see whether the new project has been set up. The server starts with no active project — you must call `workspace(action: activate)` (or have it activated via the `--project` CLI flag) before using any tool that requires a project context.
 
 ---
-## `workspace(action: status)`
+## `project_status`
+
+Legacy alias for `workspace(action="status")`. The dedicated `project_status`
+tool returns the same payload.
 
 **Purpose:** Display the full state of the active project in one call: config, semantic index health, library registry, and memory staleness. Use `workspace(action: status)`. Combines what was previously `get_config` and `index(action: status)`.
 
@@ -346,3 +351,17 @@ Write tools (`edit_file`, `edit_code`, `create_file`) reject paths outside the a
 **Protected paths.** Sensitive locations such as `~/.ssh` and `~/.gnupg` are permanently blocked and cannot be approved regardless of the argument.
 
 **Overly broad paths are rejected.** Approving a root like `/home/user` or `/` is not allowed — the path must point to a specific subdirectory.
+
+## `get_usage_stats`
+
+Return aggregate usage counts for the active project. Backed by the per-project
+`.codescout/usage.db` sqlite store; one row per tool call, with timestamps.
+
+```json
+{ "tool": "get_usage_stats", "arguments": {} }
+```
+
+Returns a compact summary by tool name with call counts and a recent-call
+timestamp. Useful for spotting tools that have near-zero calls despite being
+advertised by the prompt surfaces — a signal that the prompt is not surfacing
+them effectively.
