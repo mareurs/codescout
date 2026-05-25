@@ -36,7 +36,7 @@ pub fn upsert(cat: &Catalog, row: &ArtifactRow) -> Result<()> {
     // abs_path; the id is a derived hash. When the two diverge, the
     // abs_path wins (file content survives across id-algorithm changes;
     // the old id-based row is stale).
-    let abs_path_str = crate::util::fs::to_forward_slash(&row.abs_path);
+    let abs_path_str = crate::util::fs::RepoPath::from(&row.abs_path);
     cat.conn.execute(
         "DELETE FROM artifact WHERE abs_path = ?1 AND id != ?2",
         params![abs_path_str, row.id],
@@ -112,7 +112,7 @@ pub fn delete_orphan_repos(cat: &Catalog, active_roots: &[&std::path::Path]) -> 
     // so the DELETE wipes every row.
     let params: Vec<String> = active_roots
         .iter()
-        .map(|p| format!("{}/%", crate::util::fs::to_forward_slash(p)))
+        .map(|p| format!("{}/%", crate::util::fs::RepoPath::from_path(p)))
         .collect();
     let param_refs: Vec<&dyn rusqlite::ToSql> =
         params.iter().map(|s| s as &dyn rusqlite::ToSql).collect();

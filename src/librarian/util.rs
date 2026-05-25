@@ -6,15 +6,16 @@ pub fn sha_of_bytes(b: &[u8]) -> String {
     format!("{:x}", h.finalize())
 }
 
-/// Normalize a relative path to POSIX separators. No-op on Unix; on Windows,
-/// replaces `\` with `/` so IDs, globs, and cross-platform clients all agree
-/// on a single canonical form.
+/// Normalize a relative path to POSIX separators.
+///
+/// Unconditional backslash-to-forward-slash replacement on every platform —
+/// matches `crate::util::fs::to_forward_slash`. The earlier platform-conditional
+/// shape (no-op when `MAIN_SEPARATOR == '/'`) was a latent Linux bug: a `rel`
+/// string containing a literal `\` byte (e.g. produced by upstream code that
+/// already touched a Windows path, or in cross-platform test fixtures) would
+/// pass through unchanged on Linux, breaking catalog LIKE matches.
 pub fn normalize_rel_path(rel: &str) -> String {
-    if std::path::MAIN_SEPARATOR == '/' {
-        rel.to_string()
-    } else {
-        rel.replace(std::path::MAIN_SEPARATOR, "/")
-    }
+    rel.replace('\\', "/")
 }
 
 #[cfg(test)]

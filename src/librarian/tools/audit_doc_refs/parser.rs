@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 
 pub fn parse_refs(text: &str, md_path: &Path) -> (Vec<RefCandidate>, Vec<ParseWarning>) {
     // Forward-slash normalize so md_file keys are consistent across platforms.
-    let md_file = crate::util::fs::to_forward_slash(md_path);
+    let md_file = crate::util::fs::RepoPath::from(md_path).into_string();
     let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH;
     let mut candidates = Vec::new();
     let warnings = fence_warnings(text, &md_file);

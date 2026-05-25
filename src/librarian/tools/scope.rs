@@ -121,7 +121,7 @@ fn path_prefix_clause(p: &std::path::Path) -> FilterNode {
     // Forward-slash normalize so the filter matches catalog rows (which are
     // stored in forward-slash form via artifact::upsert), regardless of which
     // platform built the path.
-    let s = crate::util::fs::to_forward_slash(p);
+    let s = crate::util::fs::RepoPath::from(p).into_string();
     let prefix = format!("{s}/");
     FilterNode::Or {
         or: vec![

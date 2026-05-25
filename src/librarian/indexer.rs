@@ -202,7 +202,9 @@ pub fn index_repo_sync(
     // Delete rows under abs_root that were not seen in this walk.
     let root_prefix = format!(
         "{}/",
-        crate::util::fs::to_forward_slash(abs_root).replace('\'', "''")
+        crate::util::fs::RepoPath::from(abs_root)
+            .as_str()
+            .replace('\'', "''")
     );
     let removed = if seen_ids.is_empty() {
         cat.conn.execute(

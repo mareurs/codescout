@@ -97,6 +97,71 @@ pub fn to_forward_slash(p: &std::path::Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
 
+/// A path string in forward-slash separator form, suitable for catalog
+/// storage, hashing into IDs, and LIKE-pattern construction.
+///
+/// Constructed only via [`RepoPath::from_path`] (or the equivalent
+/// `From<&Path>` / `From<&PathBuf>` impls). Each constructor routes through
+/// [`to_forward_slash`], so the inner string is guaranteed to contain no
+/// backslash byte regardless of host platform.
+///
+/// This is a *write/storage* type — for paths that will be persisted in the
+/// catalog DB, hashed via `artifact_id_from_abs`, or matched against catalog
+/// rows in LIKE patterns. Paths intended only for display in MCP responses or
+/// human-readable logs can keep using [`std::path::Path::to_string_lossy`]
+/// directly; the invariant carried by `RepoPath` is specifically about catalog
+/// correctness.
+///
+/// `RepoPath` does not encode abs-vs-rel. Both forms appear in the catalog
+/// (`artifact.abs_path` is absolute; `artifact_event.rel_path` is relative).
+/// Callers that need to enforce one shape over the other should validate
+/// separately — see [`librarian::tools::gather::guard_relative_path`] for the
+/// relative-path validator.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RepoPath(String);
+
+impl RepoPath {
+    /// Build a `RepoPath` from any `&Path`, normalizing separators.
+    pub fn from_path(p: &std::path::Path) -> Self {
+        Self(to_forward_slash(p))
+    }
+
+    /// Borrow the inner string. Use this for `rusqlite::params!` and
+    /// `format!` arguments where a `&str` is expected.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Consume the `RepoPath`, returning the owned forward-slash string.
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl AsRef<str> for RepoPath {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for RepoPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl From<&std::path::Path> for RepoPath {
+    fn from(p: &std::path::Path) -> Self {
+        Self::from_path(p)
+    }
+}
+
+impl From<&std::path::PathBuf> for RepoPath {
+    fn from(p: &std::path::PathBuf) -> Self {
+        Self::from_path(p.as_path())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,6 +260,52 @@ mod tests {
         let twice = to_forward_slash(std::path::Path::new(&once));
         assert_eq!(once, twice);
         assert_eq!(once, "C:/mixed/separators/foo.md");
+    }
+
+    #[test]
+    fn repo_path_from_path_normalizes_backslashes() {
+        let p = std::path::PathBuf::from("C:\\roots\\alive\\a.md");
+        let rp = RepoPath::from_path(&p);
+        assert_eq!(rp.as_str(), "C:/roots/alive/a.md");
+    }
+
+    #[test]
+    fn repo_path_from_trait_works_for_path_and_pathbuf() {
+        let pb = std::path::PathBuf::from("a\\b\\c.md");
+        let from_pb: RepoPath = RepoPath::from(&pb);
+        let from_path: RepoPath = RepoPath::from(pb.as_path());
+        assert_eq!(from_pb, from_path);
+        assert_eq!(from_pb.as_str(), "a/b/c.md");
+    }
+
+    #[test]
+    fn repo_path_display_matches_inner() {
+        let rp = RepoPath::from_path(std::path::Path::new("foo\\bar"));
+        assert_eq!(format!("{}", rp), "foo/bar");
+        assert_eq!(format!("{}/%", rp), "foo/bar/%");
+    }
+
+    #[test]
+    fn repo_path_as_ref_str_works_with_format_args() {
+        let rp = RepoPath::from_path(std::path::Path::new("docs\\foo.md"));
+        let s: &str = rp.as_ref();
+        assert_eq!(s, "docs/foo.md");
+    }
+
+    #[test]
+    fn repo_path_idempotent_via_string_roundtrip() {
+        let p = std::path::PathBuf::from("C:\\mixed/seps\\foo.md");
+        let once = RepoPath::from_path(&p);
+        let twice = RepoPath::from_path(std::path::Path::new(once.as_str()));
+        assert_eq!(once, twice);
+        assert_eq!(once.as_str(), "C:/mixed/seps/foo.md");
+    }
+
+    #[test]
+    fn repo_path_into_string_consumes() {
+        let rp = RepoPath::from_path(std::path::Path::new("a\\b"));
+        let owned: String = rp.into_string();
+        assert_eq!(owned, "a/b");
     }
 
     #[cfg(unix)]

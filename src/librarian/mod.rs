@@ -299,10 +299,7 @@ pub(crate) async fn reindex_cli(repo: Option<&str>, force: bool) -> Result<()> {
         for root in &roots {
             cat.conn.execute(
                 "DELETE FROM artifact WHERE abs_path LIKE ?1",
-                rusqlite::params![format!(
-                    "{}/",
-                    crate::util::fs::to_forward_slash(&root.path)
-                )],
+                rusqlite::params![format!("{}/", crate::util::fs::RepoPath::from(&root.path))],
             )?;
         }
     }
@@ -422,7 +419,7 @@ path = "{}"
 glob = "**/docs/specs/*.md"
 kind = "spec"
 "#,
-            crate::util::fs::to_forward_slash(&repo_root)
+            crate::util::fs::RepoPath::from(&repo_root)
         );
         std::fs::write(&ws_path, ws_content).unwrap();
 

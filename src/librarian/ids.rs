@@ -16,8 +16,8 @@ pub fn artifact_id(repo: &str, rel_path: &str) -> String {
 /// produce the same id as paths derived from forward-slash strings.
 pub fn artifact_id_from_abs(abs_path: &std::path::Path) -> String {
     let mut h = Sha256::new();
-    let normalized = crate::util::fs::to_forward_slash(abs_path);
-    h.update(normalized.as_bytes());
+    let normalized = crate::util::fs::RepoPath::from(abs_path);
+    h.update(normalized.as_str().as_bytes());
     let hex = format!("{:x}", h.finalize());
     hex[..16].into()
 }

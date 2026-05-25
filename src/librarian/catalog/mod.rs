@@ -15,6 +15,16 @@ mod migrate_v6;
 pub mod observations;
 pub mod sources;
 
+/// `RepoPath` stores its inner string in forward-slash normalized form
+/// (see `src/util/fs.rs`). Implementing `ToSql` here keeps `fs.rs`
+/// rusqlite-free while still letting every `params![repo_path]` call site
+/// pass a `RepoPath` directly — no `.as_str()` boilerplate.
+impl rusqlite::ToSql for crate::util::fs::RepoPath {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        self.as_str().to_sql()
+    }
+}
+
 pub struct Catalog {
     pub conn: Connection,
 }

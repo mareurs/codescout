@@ -203,8 +203,8 @@ pub fn list_stale(
     let mut idx = 2usize;
 
     if let Some(prefix) = abs_path_prefix {
-        let prefix_s = crate::util::fs::to_forward_slash(prefix);
-        if !prefix_s.is_empty() {
+        let prefix_s = crate::util::fs::RepoPath::from(prefix);
+        if !prefix_s.as_str().is_empty() {
             sql.push_str(&format!(" AND a.abs_path LIKE ?{idx}"));
             params.push(Box::new(format!("{prefix_s}/%")));
             idx += 1;

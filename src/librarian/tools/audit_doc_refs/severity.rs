@@ -42,12 +42,14 @@ fn drop_two(s: Severity) -> Severity {
 }
 
 fn matches_archive(p: &Path) -> bool {
-    let s = crate::util::fs::to_forward_slash(p);
-    s.contains("docs/archive/") || s.ends_with(".archive.md")
+    let s = crate::util::fs::RepoPath::from(p);
+    s.as_str().contains("docs/archive/") || s.as_str().ends_with(".archive.md")
 }
 
 fn matches_issues(p: &Path) -> bool {
-    crate::util::fs::to_forward_slash(p).contains("docs/issues/")
+    crate::util::fs::RepoPath::from(p)
+        .as_str()
+        .contains("docs/issues/")
 }
 
 fn matches_memory(p: &Path, globs: &[globset::Glob]) -> bool {
