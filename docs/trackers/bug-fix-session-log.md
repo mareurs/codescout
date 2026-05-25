@@ -58,6 +58,8 @@ time_scope: open-ended
 | F-10 | 2026-05-24 | low | release-pipeline | mitigated | RELEASE-TODO advertises "CI pipeline" as unchecked; workflow exists, push trigger pointed nowhere |
 | F-11 | 2026-05-24 | med | release-pipeline | fixed-verified | CI runner missing `mold` linker required by `.cargo/config.toml` |
 | F-12 | 2026-05-24 | med | codescout-tool-usage | fixed-verified | Dismissed `references`'s "use call_graph for authoritative callers" warning → shipped half-fix, missed `build.rs` duplicate |
+| F-13 | 2026-05-25 | med | release-pipeline | fixed-verified | CHANGELOG entry written under wrong version label — `Cargo.toml`-as-authoritative assumption (0.13.0 already published) |
+| F-14 | 2026-05-25 | high | release-pipeline | fixed-verified | `cargo publish` failed on `include_str!("../docs/...")` path stripped by `Cargo.toml` `exclude` — pre-publish gates couldn't detect
 
 ## Wins Index
 
@@ -959,6 +961,55 @@ snapshot test, or cross-surface tool-name lint."
 
 **Status:** validated — single datapoint this session; the test gate
 worked exactly as designed. Awaiting promotion criterion.
+
+## F-13 — Wrote CHANGELOG entry under wrong version label (`0.13.0` instead of `0.14.0`)
+
+**Observed:** 2026-05-25, Frog audit Phase 2, drafting the next-release CHANGELOG entry.
+
+**When:** Composing `## [0.13.0] — 2026-05-25` heading for the `body_edits` shipment. About to commit + tag.
+
+**Expected:** `Cargo.toml`'s `version = "0.13.0"` reads as "next-to-be-released version." Pick `0.13.0` for the CHANGELOG heading + git tag.
+
+**Got (scouted reality):** `git tag --list 'v*'` showed `v0.13.0` already present (commit `b744fbd3 chore: bump version to 0.13.0`). The crates.io API confirmed `0.13.0` published `2026-05-18T13:31:22Z` — 7 days before this attempt. `Cargo.toml` had been bumped on 2026-05-18 and the version sat unchanged through 160+ subsequent commits. Per CLAUDE.md semver ("minor for new features"), `body_edits` justified `0.14.0`, not `0.13.1`.
+
+**Probable cause:** Frog Phase 1 ("Frame — check what already exists") was scoped to repo-internal sources (manual, prompt guides, architecture page) but not to external release state. The `release-notes-soul` memory hints at this — "Pre-merge punchlist for a folded release: bump `Cargo.toml`, land `experiments` → `master`, decide whether `Unreleased` graduates into the same version, then publish to crates.io and `gh release create`" — implies `Cargo.toml` may lead crates.io. I knew this abstractly; didn't verify before writing.
+
+**Workaround:** Self-corrected openly, `edit_markdown` swap `[0.13.0]` → `[0.14.0]` in CHANGELOG heading, `edit_file` swap `version = "0.13.0"` → `version = "0.14.0"` in `Cargo.toml`. Continued release sequence as `v0.14.0`.
+
+**Severity:** med — caught pre-publish during user-prompted release prep; cost was one tag-list query, one crates.io API call, and two edits. Had I run `cargo publish` first (which I almost did before re-checking), it would have errored with `version already exists in registry` mid-flight and forced a version roll with a dirty already-pushed commit.
+
+**Status:** fixed-verified — `v0.14.0` shipped successfully (codescout 0.14.0 on crates.io, master at `9e6edfc9`).
+
+**Fix idea / Pointer:** Frog `SKILL.md` Phase 1 should add an explicit release-state verification step when the doc target is release-related (CHANGELOG, release notes, version-tied doc): _"Before writing a version-numbered heading, scout `git tag --list 'v*' --sort=-v:refname | head -1` and the crates.io API. The repo's `Cargo.toml` may lead the registry — confirm before committing to a version label."_ Cross-link from the project-side memory `release-notes-soul`.
+
+## F-14 — `cargo publish` failed on `include_str!` path stripped by `Cargo.toml` exclude
+
+**Observed:** 2026-05-25, first `cargo publish v0.14.0` attempt. Pre-publish gates (`cargo build --release` + `cargo test` (2620 passed) + `cargo clippy --all-targets -- -D warnings`) all green.
+
+**When:** Standard Release Cycle step 5 (`cargo publish`), after step 2 (build/test/clippy) verified the working tree.
+
+**Expected:** Verification compile inside the packaged tarball succeeds. The tarball is a hermetic snapshot of the crate.
+
+**Got (scouted reality):**
+
+```
+error: couldn't read `src/../docs/PROGRESSIVE_DISCOVERABILITY.md`: No such file or directory (os error 2)
+  --> src/server.rs:787:22
+   |
+787|             content: include_str!("../docs/PROGRESSIVE_DISCOVERABILITY.md"),
+```
+
+`Cargo.toml` had `exclude = [".codescout/", "docs/", "scripts/", ".github/", "CLAUDE.md"]`. `cargo package` strips `docs/` from the tarball, then the verification compile inside `target/package/codescout-0.14.0/` fails. `cargo build` from the repo root never trips it because the working-tree `docs/` is still in place.
+
+**Probable cause:** Two paths diverge: (a) dev/CI build runs from the working tree where `exclude` doesn't apply; (b) publish runs in the packaged tarball where it does. Only path (b) tests the actual published artifact, and there's no CI step that exercises it — no `cargo package --list` or `cargo publish --dry-run` gate.
+
+**Workaround:** Cargo's `exclude` accepts gitignore-style negation. Patched the list with `"!docs/PROGRESSIVE_DISCOVERABILITY.md"` after `"docs/"` — keeps the one needed doc in the tarball while excluding the rest. Verified via `cargo package --list --allow-dirty | grep -i progressive`, then amended the bump commit, re-pinned `v0.14.0` tag, re-published successfully.
+
+**Severity:** high — publish-blocker. Manifested only at the irreversible step (`cargo publish`); pre-publish gates couldn't detect it. Future `include_str!("../docs/...")` additions will silently regress this until a CI gate or pre-commit hook covers it.
+
+**Status:** fixed-verified — v0.14.0 published cleanly post-fix; the negation pattern shipped in `9e6edfc9`.
+
+**Fix idea / Pointer:** Add a CI step that runs `cargo publish --dry-run` (or at minimum `cargo package --list` with an assertion that every `include_str!("../...")` path appears in the listing). Alternatively, a `pre-commit` hook grepping `src/` for `include_str!.*"\.\./` and cross-checking against `cargo package --list`. Track as its own bug file if no such CI step exists. Cross-references: `Cargo.toml` `exclude` list at repo root, `src/server.rs:787`.
 
 ## Template for new entries
 
