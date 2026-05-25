@@ -229,6 +229,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn update_action_passes_through_dispatcher_without_unknown_field_error() {
+        // Regression: deny_unknown_fields on update::Args used to reject the
+        // outer dispatcher's `action` field, breaking every artifact(update)
+        // call through the Tool surface. Unit tests of update::call directly
+        // missed this because they passed args without `action`. Going through
+        // Artifact.call exercises the dispatcher pass-through.
+        // See docs/issues/2026-05-25-augmented-artifact-body-overwrite.md.
+        let err = Artifact
+            .call(
+                &mk_ctx(),
+                serde_json::json!({
+                    "action": "update",
+                    "id": "nonexistent",
+                    "patch": {"title": "X"},
+                }),
+            )
+            .await
+            .expect_err("update on nonexistent id should error");
+        let msg = err.to_string();
+        assert!(
+            !msg.contains("unknown field `action`"),
+            "outer dispatcher's `action` must pass through to update::call; got: {msg}"
+        );
+        assert!(
+            msg.contains("unknown id") || msg.contains("nonexistent"),
+            "expected unknown-id error after dispatcher passes; got: {msg}"
+        );
+    }
+
+    #[tokio::test]
     async fn find_action_routes_correctly() {
         let v = Artifact
             .call(&mk_ctx(), serde_json::json!({"action": "find"}))

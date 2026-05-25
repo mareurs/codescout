@@ -36,7 +36,6 @@ struct UpdatePatch {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Args {
     id: String,
     patch: UpdatePatch,
