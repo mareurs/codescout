@@ -51,8 +51,12 @@ time_scope: open-ended
 | F-3 | 2026-05-18 | med | plan-prose | fixed-verified | Plan test assertions cited non-existent `RecoverableError.hint` field |
 | F-4 | 2026-05-18 | med | codescout-tool | fixed-via-bug-tracker | `edit_markdown action="replace"` with a heading clobbers the whole section body |
 | F-5 | 2026-05-18 | high | release-pipeline | open | HEAD detached from `experiments` without `git checkout` in this session |
-| F-6 | 2026-05-20 | med | release-pipeline | open | HEAD non-compiling + 11 dormant clippy-1.95 lints exposed by toolchain bump |
+| F-6 | 2026-05-20 | med | release-pipeline | fixed-verified | HEAD non-compiling + 11 dormant clippy-1.95 lints exposed by toolchain bump |
+| F-7 | 2026-05-21 | high | codescout-tool | open | `references` undercounts vs `call_graph` (~18%); root is live-RA incompleteness, not position |
 | F-8 | 2026-05-23 | med | codescout-tool | fixed-verified | `format_read_file` dispatches on `type`; json_path output collided → rendered `"0 lines"` |
+| F-9 | 2026-05-24 | med | codescout-tool | mitigated | `audit_doc_refs` `fail_on` arg silently ignores `med`/`low` despite docs |
+| F-10 | 2026-05-24 | low | release-pipeline | mitigated | RELEASE-TODO advertises "CI pipeline" as unchecked; workflow exists, push trigger pointed nowhere |
+| F-11 | 2026-05-24 | med | release-pipeline | fixed-verified | CI runner missing `mold` linker required by `.cargo/config.toml` |
 | F-12 | 2026-05-24 | med | codescout-tool-usage | fixed-verified | Dismissed `references`'s "use call_graph for authoritative callers" warning → shipped half-fix, missed `build.rs` duplicate |
 
 ## Wins Index
@@ -66,6 +70,7 @@ time_scope: open-ended
 | W-4 | 2026-05-18 | high | Pre-fix recon validates filed-bug claims against pinned regression tests | Would have implemented a "fix" that broke the BUG-037 regression test `editing_start_line_does_not_walk_back_to_outer_attribute_on_impl_block`; bug filing itself was inaccurate (claimed attrs not included; actually they ARE via BUG-031) | validated |
 | W-5 | 2026-05-24 | med | Deserialize before asserting: test against semantic data, not serialized text | Round-2 Windows fix asserted on JSON-encoded `text` containing escaped backslashes; passed Linux but broke Windows. Saves ≥1 CI cycle (10-15 min) per cross-platform test fix | validated |
 | W-6 | 2026-05-24 | high | Cross-platform representation choices apply at every read AND write seam | Round 5 normalized writes only; round 6 had to fix 6 separate read-side boundaries (LIKE patterns, scope filters, substring checks). Missed read-side normalization is silent until integration. One miss (delete_orphan_repos LIKE) was destructive — wiped every catalog row. | validated |
+| W-7 | 2026-05-25 | med | Verify-open recon flips zombie-fixed entries from `open` to `fixed-verified` | Without scout, F-6 + F-11 would have continued to be counted as actionable backlog; future "what's open?" queries would have wasted ~30 min each re-investigating already-shipped fixes, or shipped them as known-issues in release notes. 2 zombies caught in one pass. | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -473,7 +478,7 @@ Promote to CLAUDE.md as a permanent rule:
 
 **Severity:** med — Problem 1 means HEAD on a public-facing branch is broken; any developer cloning `experiments` would fail `cargo test` without the uncommitted local edits. Problem 2 is mechanical cleanup but blocks the project's CLAUDE.md "clippy clean before commit" gate.
 
-**Status:** open — pending the cleanup commit + ship to master.
+**Status:** fixed-verified (2026-05-25). The clippy-clean state shipped to master as part of the cumulative session-work batch in merge `d1742c46`; no single labeled "clippy 1.95 cleanup" commit landed, so the entry stayed `open` despite the underlying condition being long-resolved. Verified this turn: `cargo clippy --all-targets -- -D warnings` on current experiments HEAD exits 0 with no warnings. Lesson — distributed-fix entries need an explicit close pass; the absence of a labeled commit doesn't mean the bug is still open.
 
 **Fix idea / Pointer:** This recon session — split-commit plan adjusted to (1) clippy 1.95 auto-fix cleanup, (2) IL3 narrow + tests.rs field init + bug doc, (3) probe sentinels, (4) docker-compose gfx1101 + backtick-eof bug doc.
 
@@ -707,10 +712,7 @@ diverges CI from local build behavior.
 have tried `apt-get install -y build-essential binutils` (the obvious
 guess) and watched it fail because the real issue isn't binutils.
 
-**Status:** open — fix pending user direction. Two pre-existing items also
-visible behind this one: macos/windows runners don't honor the linux-gnu
-target config so they hit different blockers; tool-docs-sync diff remains
-real drift.
+**Status:** fixed-verified (2026-05-25). Commit `29075470 fix(ci): install mold linker required by .cargo/config.toml` (now on master via merge `d1742c46`) added `rui314/setup-mold@v1` to all four affected jobs — clippy, test, msrv (toolchain 1.88), audit-doc-refs. Verified by grep: 4 occurrences in `.github/workflows/ci.yml` at lines 30, 55, 114, 127. The "two pre-existing items behind this one" (macos/windows runner divergence, tool-docs-sync drift) were also addressed in the Windows portability rounds 1-8 + `4e475bad fix(tests): macOS /private/var symlink`. Same distributed-fix bookkeeping pattern as F-6 — entry stayed `open` because the fix landed under a `fix(ci):` label rather than an explicit "closes F-11" reference.
 
 **Fix idea / Pointer:** `.github/workflows/ci.yml` — add
 `uses: rui314/setup-mold@v1` step (after `mozilla-actions/sccache-action`,
@@ -840,6 +842,69 @@ The cost of missing these in round 5 was a wasted CI cycle (~15 min) and a confu
 6. Test assertions using the representation: assert against normalized form or normalize both sides before compare.
 
 **Status:** validated — single datapoint (this session), but the pattern is broad enough that the next rollout will validate quickly.
+
+## W-7 — Recon-driven distributed-fix sweep closes zombie-open entries
+
+**Observed:** 2026-05-25, triage scout after user prompt "lets look at the
+new frictions and fix them." Initial grep across four tracker surfaces
+(U-N usage-frictions, H-N hookify, bug-fix session-log, R-N recon-patterns)
+returned 4 open F-N entries in the bug-fix session log: F-5, F-6, F-7, F-11.
+
+**Pattern:** When a fix lands as part of a larger labeled commit
+(`fix(ci): install mold linker required by .cargo/config.toml`, or as
+ambient cleanup folded into a "cumulative session work" merge) rather than
+a commit explicitly naming the tracker entry it closes, the tracker entry
+stays `open` indefinitely. The bookkeeping gap is silent — no test
+fails, no CI gate trips, no PR comment flags it. The entry only flips
+when someone manually verifies it.
+
+Two of four "open" F-N entries this session turned out to be already
+fixed:
+
+- **F-6** (clippy 1.95 dormant lints) — verified by `cargo clippy
+  --all-targets -- -D warnings` exit 0 on current `experiments` HEAD. The
+  cleanup shipped distributed across multiple post-2026-05-20 commits and
+  was carried to master in merge `d1742c46`.
+- **F-11** (CI missing mold linker) — verified by grep on
+  `.github/workflows/ci.yml`: 4 occurrences of `rui314/setup-mold@v1` at
+  lines 30, 55, 114, 127, matching the proposed fix's 4-job scope exactly.
+  Shipped as `29075470 fix(ci): install mold linker required by
+  .cargo/config.toml`.
+
+The Index table at the top of the session log was also stale — F-7, F-9,
+F-10, F-11 were never added when those entries were inserted. Recon
+caught this as a second-order bookkeeping gap and synced the rows.
+
+**Counterfactual:** Without this scout pass, the next "what's open?"
+query would have continued to count F-6 and F-11 as actionable backlog.
+Concrete cost over time: one or both would eventually pull a session
+into re-investigating an already-shipped fix (estimated 15-30 min of
+context per re-investigation), or worse — a user-facing release-readiness
+report would have advertised them as known issues. Two zombie entries
+caught early; over a year of distributed-fix workflow the steady-state
+count would likely grow.
+
+**Confirming data points:**
+1. F-6 — clippy 1.95 cleanup (this session).
+2. F-11 — CI mold linker install (this session).
+3. Pending — any future "verify-open-N" scout that flips ≥1 entry.
+
+**Impact:** med — saves N×30min per zombie entry detected, plus
+prevents false-positive items in human-facing backlog reports.
+
+**Promote-when:** A third zombie-open detection from a future recon
+scout. At 3 datapoints, promote to a project-wide cadence rule in
+CLAUDE.md: "Before any 'what's open?' report, run a verify-open pass
+on bug-fix session-log entries with `Status: open` older than 14 days —
+distributed fixes leave entries zombie-open by default."
+
+**Related patterns:** the same shape applies to `docs/issues/*.md` bug
+files whose Fix section cites a SHA but whose `status:` frontmatter never
+flipped — see CLAUDE.md Standard Ship Sequence step 4 (the archive-move
+discipline) for the analogue at the bug-tracker level.
+
+**Status:** validated — 2 datapoints in one scout pass. Awaiting third
+to promote.
 
 ## Template for new entries
 
