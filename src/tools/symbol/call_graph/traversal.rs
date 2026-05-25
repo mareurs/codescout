@@ -4,6 +4,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use async_trait::async_trait;
+use futures::future::try_join_all;
 
 use crate::tools::symbol::call_edges::resolver::{Direction, Edge};
 
@@ -52,8 +53,15 @@ pub async fn bfs<R: OneHopResolver>(
         let mut next_symbols: HashSet<String> = HashSet::new();
         let mut level_raw: Vec<EdgeWithDepth> = Vec::new();
 
-        while let Some(sym) = current_level.pop_front() {
-            let hops = resolver.one_hop(&sym, direction.clone()).await?;
+        let symbols_at_level: Vec<String> = current_level.drain(..).collect();
+        let hop_results = try_join_all(
+            symbols_at_level
+                .iter()
+                .map(|sym| resolver.one_hop(sym, direction.clone())),
+        )
+        .await?;
+
+        for hops in hop_results {
             for edge in hops {
                 let neighbor = match direction {
                     Direction::Callers => edge.caller_sym.clone(),
@@ -259,5 +267,61 @@ mod tests {
         // After dedup, 1 edge with paths=2
         assert_eq!(res.edges.len(), 1);
         assert_eq!(res.edges[0].paths, 2);
+    }
+
+    #[tokio::test]
+    async fn bfs_parallelizes_one_hop_within_level() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        struct ConcurrencyTrackingResolver {
+            graph: HashMap<String, Vec<Edge>>,
+            active: Arc<AtomicUsize>,
+            max_active: Arc<AtomicUsize>,
+        }
+
+        #[async_trait::async_trait]
+        impl OneHopResolver for ConcurrencyTrackingResolver {
+            async fn one_hop(
+                &self,
+                symbol: &str,
+                direction: Direction,
+            ) -> anyhow::Result<Vec<Edge>> {
+                let cur = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+                self.max_active.fetch_max(cur, Ordering::SeqCst);
+                for _ in 0..10 {
+                    tokio::task::yield_now().await;
+                }
+                let key = resolver_key(symbol, &direction);
+                let result = self.graph.get(&key).cloned().unwrap_or_default();
+                self.active.fetch_sub(1, Ordering::SeqCst);
+                Ok(result)
+            }
+        }
+
+        // Depth-1: seed "a" expands to 5 leaf children. Depth-2 then fires 5
+        // one_hop calls in parallel — that's the level where pre-fix BFS hung.
+        let mut graph: HashMap<String, Vec<Edge>> = HashMap::new();
+        let depth1: Vec<Edge> = (1..=5).map(|i| edge("a", &format!("b{}", i))).collect();
+        graph.insert(resolver_key("a", &Direction::Callees), depth1);
+
+        let r = ConcurrencyTrackingResolver {
+            graph,
+            active: Arc::new(AtomicUsize::new(0)),
+            max_active: Arc::new(AtomicUsize::new(0)),
+        };
+        let max_active = r.max_active.clone();
+
+        let cfg = TraversalConfig {
+            max_depth: 2,
+            max_edges: 1000,
+        };
+        bfs(&r, "a", Direction::Callees, cfg).await.unwrap();
+
+        assert!(
+            max_active.load(Ordering::SeqCst) > 1,
+            "expected concurrent one_hop calls within a level — got max_active = {}",
+            max_active.load(Ordering::SeqCst)
+        );
     }
 }
