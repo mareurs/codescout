@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-05-25
-closed:
+closed: 2026-05-25
 severity: low
 owner: marius
 related: []
@@ -79,8 +79,11 @@ Got: 12 edges — the 7 correct depth=1 + 5 spurious depth=2 self-edges.
 
 ## Root cause
 
-Unknown — see Hypotheses tried.
+Confirmed by deterministic regression test. The TS callers fallback in `src/tools/symbol/call_edges/resolver.rs::resolve_via_ts` invokes `client.references(sym_path, sym_line, sym_col, lang)` and then iterates the returned locations. For each location it runs `position_is_call` to filter non-call references and `enclosing_function_name` to determine the caller. The edge is built with `caller_sym = enclosing_function_name(...)` and `callee_sym = sym_name` (the query symbol).
 
+When rust-analyzer cannot model a symbol in its call hierarchy (e.g. `#[test]` fns inside `#[cfg(test)] mod tests`), `prepare_call_hierarchy` returns None and `references()` may return locations INSIDE the symbol's own body — for example, the call site of a different function (`bfs`) at line 192 inside `bfs_reaches_max_depth_then_stops`. The AST walk-up resolves that location's enclosing function back to the queried symbol itself, producing `caller_sym == callee_sym == sym_name` — a spurious self-edge.
+
+The pre-existing test `resolve_one_hop_ts_fallback_callers` already exercised the cross-function case (refs INSIDE another function's body) and passed. The new bug case (refs INSIDE the queried symbol's OWN body) was untested until 2026-05-25 and surfaced only after the depth>1 timeout fix (commit `bd8fdbb4`) let depth=2 traversal actually complete.
 ## Evidence
 
 ### E1 — Self-edges only appear under tree-sitter source
@@ -160,26 +163,30 @@ forced for these symbols.
 
 ## Fix
 
-Not yet implemented — file is `status: open`.
+Shipped on master in commit `23746b6e` (`fix(call_graph): filter spurious self-edges from tree-sitter callers fallback`).
 
+Fix is a 4-line filter added to `src/tools/symbol/call_edges/resolver.rs::resolve_via_ts` (callers branch), placed immediately after `enclosing_function_name` resolves the caller:
+
+```rust
+if caller == sym_name {
+    continue;
+}
+```
+
+Real self-recursion is modeled by LSP `incoming_calls` (the LSP path in `resolve_via_lsp`), not by this tree-sitter fallback — so dropping `caller == sym_name` edges in the TS path loses no real edges in practice. The fallback is invoked exactly when LSP can't model the symbol; in that case the references list cannot reliably distinguish "external caller" from "internal name token whose enclosing fn happens to be the queried symbol."
+
+**Live verification post-rebuild + `/mcp` reconnect:**
+- `call_graph(symbol="bfs_reaches_max_depth_then_stops", direction="callers", max_depth=1)` returns `0 edges` (correct — `#[test]` fns have no real callers; pre-fix returned 1 spurious self-edge).
+- `call_graph(symbol="bfs", direction="callers", max_depth=2)` returns no `(depth=2, ts)` self-edges (pre-fix returned 5 spurious self-edges, one per test fn).
 ## Tests added
 
-N/A — open bug, no fix yet. When fixed, a regression test should:
+`resolve_one_hop_ts_fallback_callers_skips_self_edge` in `src/tools/symbol/call_edges/resolver.rs` (inside the existing `tests` module, immediately after the pre-existing `resolve_one_hop_ts_fallback_callers` test).
 
-1. Build a fixture with a leaf function whose only "reference" is its own
-   declaration (e.g., a `#[test]` fn in a `#[cfg(test)]` module, OR a
-   `pub fn never_called()` with no callers anywhere).
-2. Call the underlying tree-sitter callee resolver
-   (`resolve_via_ts` in `src/tools/symbol/call_edges/resolver.rs`)
-   with `Direction::Callers` against the symbol.
-3. Assert the returned edge list is empty (or at least does NOT contain
-   a self-edge where `caller_sym == callee_sym == query_symbol`).
+Uses `MockLspClient` with `prepare_call_hierarchy_results` empty (forces TS fallback) and `references_results` seeded with a single reference location INSIDE the queried symbol's own body — at the `bar(1)` call inside `fn foo() { bar(1); }`. Queries callers of `foo`, asserts no edge with `caller_sym == callee_sym == "foo"`.
 
-The fixture must specifically trigger the LSP-returns-None path so the
-tree-sitter fallback runs. A `MockLspClient` with
-`prepare_call_hierarchy_results` empty and a single reference
-location seeded for the symbol's own declaration would isolate the bug.
+Deterministic. Fails against pre-fix code with `left: ("foo", "foo") right: ("foo", "foo")`. Passes after the 4-line filter in `resolve_via_ts` lands.
 
+The pre-existing 12 sibling tests in `call_edges::resolver::tests` (including `resolve_one_hop_ts_fallback_callers` which exercises the cross-function case at refs inside `bar`'s body querying callers of `foo`) continue to pass unchanged, confirming the filter doesn't break cross-edge resolution.
 ## Workarounds
 
 - Visually filter `source: ts` self-edges at the caller side (Claude /
@@ -190,20 +197,7 @@ location seeded for the symbol's own declaration would isolate the bug.
 
 ## Resume
 
-Concrete next actions, in order:
-
-1. Locate the tree-sitter callee resolver:
-   `symbols(name="resolve_via_ts")` or `symbols(path="src/tools/symbol/call_edges")`.
-2. Read the body of `resolve_via_ts` (the tree-sitter callers path that
-   walks references + AST). Look for where each `references()` location
-   is mapped to a caller symbol via AST walk.
-3. Check whether the mapping filters out references that land inside the
-   symbol's own definition range. If not, add that filter (Hypothesis 4
-   direction).
-4. If filtering doesn't fix it (because Hypothesis 3 is the cause), trace
-   the `lookup_pos` cache in `CachedResolver` for cross-depth contamination.
-5. Add a regression test as described in `## Tests added`.
-
+N/A — fixed.
 ## References
 
 - Surfacing event: 2026-05-25 reconnect verification of
