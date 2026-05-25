@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-05-25
-closed:
+closed: 2026-05-25
 severity: medium
 owner: marius
 related: []
@@ -84,8 +84,7 @@ empty, and terminate immediately.
 
 ## Root cause
 
-Unknown — see Hypotheses tried.
-
+Confirmed after fix: the BFS inner loop at `src/tools/symbol/call_graph/traversal.rs::bfs` serialized `OneHopResolver::one_hop` calls via `while let Some(sym) = current_level.pop_front()`. Each `one_hop` awaits before the next starts. At depth>1 over a level of leaf functions (e.g., 10 `#[cfg(test)] mod tests` `#[test]` fns), each `resolve_one_hop` issues a `textDocument/references` LSP call. Rust-analyzer's empty-result latency on `#[cfg(test)]` functions is ~6s per call (RA walks the crate to confirm no caller exists). 10 serial calls × 6s = 60s = the tool timeout.
 ## Evidence
 
 ### E1 — Two consecutive `call_graph(depth=2)` calls both timed out
@@ -154,23 +153,20 @@ is specific to `call_graph`'s depth>1 expansion.
 
 ## Fix
 
-Not yet implemented — file is `status: open`.
+Shipped on master in commit `bd8fdbb4` (`fix(call_graph): parallelize BFS inner loop to fix depth>1 timeout`).
 
+The serial `while let Some(sym) = pop_front()` loop in `src/tools/symbol/call_graph/traversal.rs::bfs` was replaced with `futures::future::try_join_all` over the drained level. All post-await processing (visited tracking, edge accumulation, depth-coherent `max_edges` cap, cycle handling) stays serial — only the `OneHopResolver::one_hop` calls fan out concurrently. Edge order, dedup semantics, and the depth-coherent truncation invariant are preserved.
+
+`Cargo.toml`: `futures` moved from `optional = true` (librarian-gated) to mandatory dep. `Cargo.lock` unchanged — the dep was already transitively resolved via the default `librarian` feature.
+
+**Live verification post-rebuild + `/mcp` reconnect:**
+- `call_graph(symbol="Onboarding/call_content", direction="callers", max_depth=2)` returned in <1s with 10 depth=1 edges, vs 60s timeout pre-fix. (The `(truncated at depth 2)` rendering line is a pre-existing per-symbol display artifact from RA returning spurious depth-2 callers for `#[test]` fns + the depth-coherent cap firing — unrelated to this fix, surfaced only because the BFS now completes.)
+- `call_graph(symbol="bfs", direction="callers", max_depth=2)` returned 7 callers across 2 files, `max_depth_reached: 2`.
 ## Tests added
 
-N/A — open bug, no fix yet. When fixed, a regression test should:
+`bfs_parallelizes_one_hop_within_level` in `src/tools/symbol/call_graph/traversal.rs` (inside the existing `tests` module). Uses a custom `ConcurrencyTrackingResolver` that tracks active concurrent `one_hop` calls via two `AtomicUsize` counters (active + max_active) and yields 10× via `tokio::task::yield_now()` per call to give sibling futures a chance to interleave. After a depth=2 BFS where the seed `a` expands to 5 leaf-fn callers, the test asserts `max_active > 1`. The test deterministically fails against the pre-fix serial code (max_active stays at 1 with no concurrent interleaves).
 
-1. Build a fixture with a known small symbol-call graph (e.g.,
-   `tests/fixtures/rust-library/`).
-2. Call `call_graph(symbol=X, direction=callers, max_depth=2)` where
-   the depth=1 callers are leaf functions with no further callers.
-3. Assert the call completes well under the 60s tool timeout (e.g., <5s)
-   AND returns the correct edge set (depth=1 edges only, since depth=2
-   expands to no further callers).
-
-The fixture must use real test functions or otherwise-leaf callers to
-exercise the specific code path that triggered the timeout.
-
+The 4 pre-existing BFS tests (`bfs_reaches_max_depth_then_stops`, `bfs_handles_cycle_without_infinite_loop`, `bfs_depth_coherent_cap_preserves_full_levels`, `bfs_dedupes_parallel_paths`) continue to pass unchanged — confirming the parallelization preserved correctness invariants.
 ## Workarounds
 
 - Use `max_depth=1` instead. The bug is specific to depth>1; depth=1
@@ -183,22 +179,7 @@ exercise the specific code path that triggered the timeout.
 
 ## Resume
 
-Concrete next actions, in order of decreasing certainty:
-
-1. Read `src/tools/call_graph.rs` (or `src/agent/call_graph.rs` — locate
-   with `symbols(name="call_graph")`) and confirm whether depth>1 LSP
-   queries are issued serially or in parallel. If serial, that alone
-   may explain a 60s timeout for 10 leaf-test-fn queries. Fix path:
-   parallelize via `futures::future::join_all` or similar.
-2. If parallelization is already in place, instrument per-query latency
-   with `RA_LOG=lsp_server=trace` set when launching codescout, then
-   run the depth=2 reproduction (capture to `.codescout/diagnostic-*.log`).
-   Look for `textDocument/references` requests against the leaf test fns
-   that don't return promptly.
-3. Cross-check against `docs/trackers/lsp-tools-error-rate-2026-04.md`
-   (`f87ff6fcbb6eaa56`) — that tracker logs LSP latency/error patterns
-   and may already have the underlying RA query data.
-
+N/A — fixed.
 ## References
 
 - Session JSONL: `/home/marius/.claude-kat/projects/-home-marius-work-claude-code-explorer/77099ac5-fd0c-4bff-b47e-fa01146b0bc9.jsonl`
