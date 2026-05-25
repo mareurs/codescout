@@ -69,9 +69,11 @@ pub struct CodeScoutServer {
     /// while replacement takes a write lock.
     resources: Arc<tokio::sync::RwLock<Arc<crate::mcp_resources::ResourceRegistry>>>,
     /// How many times the path-disambiguation note ("paths are relative to …") has
-    /// been emitted this session. Capped at `PATH_NOTE_MAX` to avoid noise while
-    /// still surfacing the context early in a session.
-    path_note_count: Arc<std::sync::atomic::AtomicUsize>,
+    /// been emitted this session. Vestigial — the note now emits on every
+    /// stripped response (no cap); see [`post_process`]. Kept underscore-prefixed
+    /// to silence dead_code without a struct-shape change; remove on the next
+    /// pass that touches CodeScoutServer's fields.
+    _path_note_count: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl CodeScoutServer {
@@ -166,7 +168,7 @@ impl CodeScoutServer {
             debug,
             last_broadcast_caps: Arc::new(parking_lot::Mutex::new(None)),
             resources,
-            path_note_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            _path_note_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
     }
 
@@ -354,23 +356,20 @@ impl CodeScoutServer {
             (call_result, false)
         };
 
-        // "Low hint": for tools that echo raw content (file contents), append a
-        // one-liner so agents can distinguish stripped absolute paths from
-        // genuine relative path values in file content. Capped at PATH_NOTE_MAX
-        // per session — after that the agent has seen it enough times to
-        // remember.
-        const PATH_NOTE_MAX: usize = 3;
-        const PATH_NOTE_TOOLS: &[&str] = &["read_file"];
-        if stripped && PATH_NOTE_TOOLS.contains(&tool_name) {
-            let prev = self
-                .path_note_count
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if prev < PATH_NOTE_MAX {
-                let root = root_prefix.trim_end_matches('/');
-                call_result.content.push(Content::text(format!(
-                    "\n[codescout] paths are relative to {root}"
-                )));
-            }
+        // When stripping fired, append a disambiguation note so downstream
+        // agents can distinguish stripped-absolute paths from genuine-relative
+        // path values in tool content. Emitted on every stripped response of
+        // every non-`run_command` tool — the U-23 friction (2026-05-25
+        // session) showed that suppressing this after a per-session cap left
+        // later tools (e.g. `librarian(action="doctor")`) with no signal,
+        // causing a fresh reader to misread the rewritten paths as catalog
+        // data shape. The cost is ~50 bytes per stripped response — well
+        // below the savings from stripping itself.
+        if stripped {
+            let root = root_prefix.trim_end_matches('/');
+            call_result.content.push(Content::text(format!(
+                "\n[codescout] paths are relative to {root}"
+            )));
         }
         call_result
     }
@@ -1295,8 +1294,9 @@ pub async fn run(
 /// active; the replace becomes a no-op.
 ///
 /// Returns `(result, stripped)` where `stripped` is true when at least one
-/// content block was modified. The caller decides whether to append a
-/// disambiguation note (see `PATH_NOTE_MAX` / `PATH_NOTE_TOOLS`).
+/// content block was modified. The caller appends a disambiguation note to
+/// every stripped response (see `post_process`) so agents can tell stripped
+/// absolute paths apart from genuine relative path values in tool content.
 ///
 /// **Stripping heuristic**: only occurrences preceded by a non-path character
 /// (e.g. `"`, ` `, `:`, `\n`) or at the very start of the text are replaced.
@@ -2117,6 +2117,73 @@ mod tests {
         assert!(
             !text.contains(&root),
             "Expected absolute root to be stripped, but found it in output:\n{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn stripped_responses_always_carry_paths_relative_annotation() {
+        // U-23 fix (2026-05-25): when post_process strips the project root
+        // from a tool response, append the disambiguation note on EVERY
+        // such response — not just `read_file`, and not capped at 3 per
+        // session. Without this, downstream agents inspecting other tools'
+        // output (e.g. `librarian(action="doctor")`) misread rewritten
+        // paths as catalog data shape.
+        let (dir, server) = make_server().await;
+        let root = dir.path().to_string_lossy().to_string();
+        let trimmed_root = root.trim_end_matches('/');
+
+        // Drive post_process directly with a constructed result containing
+        // the absolute project root. This bypasses tool dispatch and
+        // focuses the assertion on the annotation behavior itself.
+        let make_payload = || {
+            CallToolResult::success(vec![Content::text(format!(
+                r#"{{"file":"{root}/src/main.rs","line":1}}"#
+            ))])
+        };
+
+        // 4 sequential calls across different tool names — pre-#70 behavior
+        // would have emitted the annotation only on the first 3 read_file
+        // calls per session AND never on `tree`/`symbols`/`librarian`/etc.
+        // Post-fix every stripped response carries the annotation regardless
+        // of tool name or call ordinal.
+        for (i, tool_name) in [
+            "read_file",
+            "read_file",
+            "read_file",
+            "read_file",
+            "tree",
+            "symbols",
+            "librarian",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let processed = server.post_process(make_payload(), tool_name).await;
+            let joined: String = processed
+                .content
+                .iter()
+                .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                joined.contains(&format!("[codescout] paths are relative to {trimmed_root}")),
+                "call #{i} ({tool_name}): expected annotation on every stripped response, got:\n{joined}"
+            );
+        }
+
+        // Negative case: run_command is exempt from stripping, so the
+        // annotation must NOT be appended even when its payload happens to
+        // contain the project root.
+        let processed = server.post_process(make_payload(), "run_command").await;
+        let joined: String = processed
+            .content
+            .iter()
+            .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !joined.contains("[codescout] paths are relative to"),
+            "run_command must not get the annotation (its raw stdout is left unstripped), got:\n{joined}"
         );
     }
 

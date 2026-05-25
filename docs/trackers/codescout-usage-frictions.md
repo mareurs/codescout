@@ -673,10 +673,19 @@ cross-platform bug for months. The fix (per-test `EnvGuard` for
 through `make_server()`) is mechanical but easy to miss without the
 existing librarian-tests precedent.
 
-**Status:** fixed-verified (this session) — `make_server()` now returns
-`(TempDir, EnvGuard, CodeScoutServer)`, each test sets its own DB path
-inside its tempdir, all 6 tests carry `#[serial]`. Build clean; full
-verification on Windows CI pending.
+**Status:** instance-fixed (#68), **class still open** — the `make_server()`
+race is closed for `guide_hint_tests`, but a one-off flake of
+`artifact_event_after_artifact_no_hint` on Linux during the U-23
+verification (`cargo test --lib`, full suite) suggests the
+`#[serial]` + `EnvGuard` discipline is **not** 100% robust under heavy
+concurrent test load. Hypothesis: the `#[serial]` lock serializes
+guide_hint_tests against each other, but a non-`#[serial]` test in
+another module (e.g. one that touches LIBRARIAN_DB or LIBRARIAN_CWD
+without an EnvGuard) can race with the in-flight Agent construction
+inside `make_server`. Re-running the failing test alone — both as
+`server::guide_hint_tests` and as the single failing case — passed
+cleanly twice. Worth a separate F-N entry once the class fix lands
+in `librarian doctor doctor`-style isolation.
 
 **Diagnosis (introspection):** the friction is **shape**, not knowledge.
 The librarian module already documented the hazard inline. A
@@ -878,17 +887,15 @@ is not surfaced in the tool response itself (only the `read_file`
 fallback emits a `[codescout] paths are relative to {root}` annotation,
 capped at 3 per session — see `src/server.rs:365`).
 
-**Status:** open — design-level. Two paths:
-
-- **Document-only** — add a note to the codescout MCP server description
-  (or to tool docs that return path fields) that "paths under the
-  active project root are returned in relative form for readability;
-  raw catalog data is absolute. Use the CLI variant for unmediated
-  output." Cheapest. Costs nothing per-call. Easy to forget.
-- **Surface-on-every-response** — emit the `[codescout] paths are
-  relative to {root}` annotation on ALL stripping responses, not just
-  `read_file` (or raise the per-session cap from 3 → unlimited). Adds
-  ~50 bytes per response. Removes ambiguity entirely.
+**Status:** fixed-verified (this session). The annotation now emits on
+every stripped response — no per-tool filter, no per-session cap. Cost
+is ~50 bytes per stripped response (negligible vs the prefix savings
+the stripping itself yields). The fix is the option-B path from the
+original entry ("surface-on-every-response"). Per-call commit on
+experiments captures the change + a regression test exercising
+post_process with 7 mock tool names (4 read_file + tree + symbols +
+librarian) plus a negative case for run_command (which is exempt from
+stripping and must NOT carry the annotation).
 
 **Diagnosis (introspection):** the strip layer exists for human
 readability — relative paths are visually scannable, absolute paths
