@@ -94,11 +94,11 @@ jobs:
         # Recursive grep (vs the prior non-recursive *.rs); test files
         # excluded. Diff is printed; exit code 0 regardless.
         run: |
-          grep -rA1 'fn name(&self)' src/tools/ --include='*.rs' --exclude-dir=tests \
+          grep -rhA1 'fn name(&self)' src/tools/ --include='*.rs' --exclude-dir=tests --exclude='tests.rs' --exclude='probe.rs' \
             | grep -E '^\s*"[a-z_]+"' \
             | sed 's/.*"\(.*\)".*/\1/' \
             | sort -u > /tmp/code-tools.txt
-          grep -roh '## `[a-z_]*`' docs/manual/src/tools/ | sed 's/## `\(.*\)`/\1/' | sort -u > /tmp/doc-tools.txt
+          grep -rohE '^## `[a-z_]+`$' docs/manual/src/tools/ | sed 's/## `\(.*\)`/\1/' | sort -u > /tmp/doc-tools.txt
           if ! diff -u /tmp/code-tools.txt /tmp/doc-tools.txt; then
             echo "::warning::Tool docs out of sync — see docs/issues/2026-05-24-tool-docs-manual-drift.md"
           fi
