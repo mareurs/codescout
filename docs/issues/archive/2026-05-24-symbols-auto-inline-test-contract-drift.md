@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-05-24
-closed:
+closed: 2026-05-25
 severity: low
 owner: marius
 related: []
@@ -104,6 +104,19 @@ bug. The test is the only thing that breaks.
    opts out.
 2. Apply option 2 if opt-out exists; else option 1.
 3. Run `cargo test --test symbol_lsp` to verify green.
+
+## Disposition (2026-05-25)
+
+**Status: fixed.** Confirmed Option 2 viability by reading
+`src/tools/symbol/symbols.rs:560`: the gate is
+`include_body_explicit.is_none() && !include_body` — explicit
+`include_body=false` sets `include_body_explicit = Some(false)` and
+short-circuits the auto-inline path. Updated the test to pass
+`include_body: false` explicitly, dropped the `#[ignore]` annotation,
+and rewrote the docstring to pin the new contract ("explicit
+`include_body=false` opts out of auto-inline, even for small results").
+`cargo test --test symbol_lsp symbols_no_body_start_line_without_include_body`
+passes green this session.
 
 ## References
 

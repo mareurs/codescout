@@ -1128,10 +1128,12 @@ async fn symbols_body_start_line_field_with_attributes() {
     );
 }
 
-#[ignore = "auto-inline behavior superseded the test contract; see docs/issues/2026-05-24-symbols-auto-inline-test-contract-drift.md"]
-/// symbols without include_body should NOT have body_start_line.
 #[tokio::test]
 async fn symbols_no_body_start_line_without_include_body() {
+    // Auto-inline (src/tools/symbol/symbols.rs:560) attaches `body` for small results
+    // when `include_body` is not passed. Explicit `include_body=false` opts out of
+    // auto-inline via the `include_body_explicit.is_some()` branch — that's the
+    // contract this test now pins.
     let src = "#[test]\nfn target() {}\n";
 
     let (_dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
@@ -1145,7 +1147,8 @@ async fn symbols_no_body_start_line_without_include_body() {
         .call(
             json!({
                 "symbol": "target",
-                "path": "src/lib.rs"
+                "path": "src/lib.rs",
+                "include_body": false
             }),
             &ctx,
         )
@@ -1155,11 +1158,11 @@ async fn symbols_no_body_start_line_without_include_body() {
     let sym = &result["symbols"][0];
     assert!(
         sym.get("body").is_none(),
-        "body should not be present without include_body"
+        "body should not be present with explicit include_body=false"
     );
     assert!(
         sym.get("body_start_line").is_none(),
-        "body_start_line should not be present without include_body"
+        "body_start_line should not be present with explicit include_body=false"
     );
 }
 
