@@ -842,21 +842,26 @@ ad-hoc and non-obvious until you've hit it. First-occurrence cost
 ~5 minutes of debugging the unhelpful "to a log-trimmer" message
 before realizing the offending `|` was inside the string content.
 
-**Status:** open — substrate detector imprecision. The IL3 surface is
-otherwise well-targeted (see U-18 for the deny-mode baseline).
+**Status:** fixed-verified (this session). Closed at
+`codescout-companion:d64749e`. The IL3 deny hook now runs a sed pass
+to strip single-quoted (`'...'`) and double-quoted (`"..."`)
+substrings before the pipe-detection regex, so literal `|` characters
+inside string content no longer trigger the false positive. Also
+derives `PRE_PIPE` from the de-quoted command so a quoted `|` before
+a real `|` doesn't truncate the pre-pipe segment at the wrong
+position. 4 new test cases added in
+`hooks/il3-deny-hook.test.sh`; all 22 pre-existing tests still pass.
 
-**Diagnosis (introspection):** the detector likely uses a simple regex
-like `\|` against the joined command tokens, with no shell-AST
-parsing. Shell-AST parsing in a PreToolUse hook is expensive — but a
-cheaper heuristic could help: ignore `|` characters appearing inside
-matched single-quote pairs in the unparsed command (won't catch
-escaped or nested quotes; would catch this common case).
+Compound shell decomposition (`&&` / `;` / `||`) remains out of scope
+— the detector continues to treat compound commands as a single CMD,
+which is a separate enhancement opportunity. The fix here is scoped
+specifically to the U-22 friction shape (quoted-pipe in single
+command), which is what bit during the #68 / U-23 session.
 
-**Pointer:** small substrate refinement candidate. Track-only for now
-— the heredoc-to-file workaround is reliable. If a third occurrence
-lands, promote to a hookify candidate. Tag related: see [[U-3]] /
-[[U-18]] for the legitimate-IL3 baseline this false positive sits
-alongside.
+The heredoc-to-file workaround documented earlier in the entry is no
+longer needed for the specific shape U-22 captured; the detector now
+allows quoted pipes directly. Workaround stays valid for any other
+future false-positive shape.
 
 
 ---
