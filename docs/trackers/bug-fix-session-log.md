@@ -71,6 +71,7 @@ time_scope: open-ended
 | W-5 | 2026-05-24 | med | Deserialize before asserting: test against semantic data, not serialized text | Round-2 Windows fix asserted on JSON-encoded `text` containing escaped backslashes; passed Linux but broke Windows. Saves ≥1 CI cycle (10-15 min) per cross-platform test fix | validated |
 | W-6 | 2026-05-24 | high | Cross-platform representation choices apply at every read AND write seam | Round 5 normalized writes only; round 6 had to fix 6 separate read-side boundaries (LIKE patterns, scope filters, substring checks). Missed read-side normalization is silent until integration. One miss (delete_orphan_repos LIKE) was destructive — wiped every catalog row. | validated |
 | W-7 | 2026-05-25 | med | Verify-open recon flips zombie-fixed entries from `open` to `fixed-verified` | Without scout, F-6 + F-7 + F-11 would have continued to be counted as actionable backlog; future "what's open?" queries would have wasted ~30 min each re-investigating already-shipped fixes, or shipped them as known-issues in release notes. 3 zombies caught in one pass — promote-when criterion fired. | promoted-to-permanent-docs |
+| W-8 | 2026-05-25 | high | `prompt_surfaces` test gate catches cap / snapshot / tool-name lint violations that `clippy`/`fmt` miss | Without `source_md_under_cap`, commit `4cc49ccb` would have shipped a server_instructions surface 339 bytes over the 2KB MCP cap, silently truncating Workspace gate + Deeper guidance in every fresh session for every project. Cost: workspace-restore slips + lost get_guide discovery surface, undetectable client-side. | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -895,6 +896,69 @@ count would likely grow.
 **Related patterns:** the same shape applies to `docs/issues/*.md` bug files whose Fix section cites a SHA but whose `status:` frontmatter never flipped — see CLAUDE.md Standard Ship Sequence step 4 (the archive-move discipline) for the analogue at the bug-tracker level. Also pairs with the audit_doc_refs lint at the doc-link level: three independent surfaces (session-log entries, bug-file frontmatter, doc-link targets) all drift the same way under the same root cause — fix-then-forget.
 
 **Status:** promoted-to-permanent-docs — graduated to CLAUDE.md § Ad-Hoc Session Logs as the "Verify-open cadence" rule (2026-05-25).
+
+## W-8 — `prompt_surfaces` test gate catches cap violation before ship
+
+**Observed:** 2026-05-25, Frog audit Gap 1 fix attempt. Added a "## Path
+annotation" section to `src/prompts/source.md` server_instructions
+surface, ran `cargo clippy` + `cargo fmt --check` (both green),
+committed as `4cc49ccb`. Later `cargo test --lib` (full suite) caught
+two failures: `prompts::redesign_invariants::source_md_under_cap`
+(2139 chars; cap is 1800) and
+`prompts::tests::prompt_surfaces_server_instructions_snapshot`
+(1741 expected, 2139 actual).
+
+**Pattern:** Whenever a commit touches any of the three prompt surfaces
+(`src/prompts/source.md`, `src/prompts/guides/*.md`,
+`build_system_prompt_draft()` in `src/prompts/builders.rs`), run
+`cargo test --lib prompt_surfaces` BEFORE committing. `cargo clippy` +
+`cargo fmt --check` are NOT sufficient — they don't run the cap test,
+the snapshot test, or the cross-surface tool-name lint
+(`server::tests::prompt_surfaces_reference_only_real_tools`). Each
+of those three tests guards a different invariant; missing any one
+ships a broken surface silently. The cap test is the load-bearing one
+because Claude Code's MCP client truncates `initialize.instructions`
+at ~2 KB (per U-8) and a silent overflow corrupts every session's
+context for every project.
+
+**Counterfactual:** Without `source_md_under_cap` catching the 2139-byte
+overflow, commit `4cc49ccb` would have shipped a server_instructions
+surface 339 bytes over cap. Claude Code MCP clients would have
+truncated the surface at ~2 KB, silently cutting off the tail —
+specifically: the "## Workspace gate" section and the "## Deeper
+guidance" section (with the get_guide topic pointers). Every fresh
+session for every project using the codescout MCP server would have
+lost workspace-restore guidance (Iron Law-adjacent — leaking
+foreign-project state) and the get_guide pointer table (the deep-
+documentation discovery surface). Estimated steady-state cost: every
+session with a workspace switch would risk failing to restore the
+home workspace before turn end. Once shipped, the surface change is
+live within seconds at every `/mcp` reconnect — no way to detect
+truncation client-side until a downstream slip surfaces.
+
+**Confirming data points:**
+1. 2026-05-25 this session — Gap 1 fix attempt at commit `4cc49ccb`.
+   Caught + corrected + relocated to progressive-disclosure guide
+   (commit `a0d9e3b6` then cherry-picked to master as `8c101b91`).
+2. Pending — any future prompt-surface edit where the test gate
+   catches a violation that `clippy`/`fmt` missed.
+
+**Impact:** high — the cap violation, if shipped, would have
+degraded every MCP session for every consumer until manually
+reverted. The detect-after-ship loop is ≥1 affected day per
+consumer per detection delay.
+
+**Promote-when:** A second prompt-surface edit (in any future
+session) where the `prompt_surfaces` test gate catches a violation
+that `clippy`/`fmt` missed. At 2 datapoints, promote to CLAUDE.md
+§ Prompt Surface Consistency as a discipline rule: "Run `cargo test
+--lib prompt_surfaces` before committing changes to any of the three
+prompt surfaces (`source.md` slices, `build_system_prompt_draft()`).
+`clippy` + `fmt` are not sufficient — they do not run the cap test,
+snapshot test, or cross-surface tool-name lint."
+
+**Status:** validated — single datapoint this session; the test gate
+worked exactly as designed. Awaiting promotion criterion.
 
 ## Template for new entries
 
