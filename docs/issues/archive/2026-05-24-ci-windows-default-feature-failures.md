@@ -1,7 +1,7 @@
 ---
-status: open
+status: mitigated
 opened: 2026-05-24
-closed:
+closed: 2026-05-25
 severity: medium
 owner: marius
 related: [docs/issues/2026-05-24-ci-windows-test-portability-rot.md]
@@ -192,6 +192,26 @@ Treat `Test (windows-latest / default)` as informational pending fix.
 The other 8 OS×config slots (Linux × 3, macOS × 3, Windows × 2)
 pass — production verification surface is intact for the dominant
 deployments.
+
+## Disposition (2026-05-25)
+
+**Status: mitigated.** Rounds 1-8 of the Windows portability work all
+shipped to master via merges culminating in `e3e461ff`. Mechanism A
+(path separator drift, 13 tests) is **fixed** via
+`crate::util::fs::to_forward_slash` applied at every catalog
+read/write seam (commits `6771cc1a`, `144d429d`, `091ecc32`,
+`479f5529`). Mechanism B (SQLite mandatory file locking on shared
+LIBRARIAN_DB for 5 `server::guide_hint_tests`) is **gated** on
+Windows via commit `971b12de fix(ci): Windows default — round 8`
+rather than fully fixed — the right fix (per-test `EnvGuard` for
+`LIBRARIAN_DB`, OR `--test-threads 1`, OR SQLite WAL + retry) is
+deferred to a future Windows-port engagement when there's time to
+do it properly. Closing as `mitigated` (not `fixed`) because the 5
+guide_hint tests remain Windows-gated rather than passing — the
+underlying race is real but no longer blocks CI.
+
+Closed via the verify-open cadence rule (CLAUDE.md § Ad-Hoc Session
+Logs), 4th W-7 datapoint this session.
 
 ## Resume
 
