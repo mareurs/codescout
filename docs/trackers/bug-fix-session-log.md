@@ -50,7 +50,7 @@ time_scope: open-ended
 | F-2 | 2026-05-17 | med | self-friction | fixed-verified | 2 of 3 buffer bugs likely stale — code reads correct |
 | F-3 | 2026-05-18 | med | plan-prose | fixed-verified | Plan test assertions cited non-existent `RecoverableError.hint` field |
 | F-4 | 2026-05-18 | med | codescout-tool | fixed-via-bug-tracker | `edit_markdown action="replace"` with a heading clobbers the whole section body |
-| F-5 | 2026-05-18 | high | release-pipeline | open | HEAD detached from `experiments` without `git checkout` in this session |
+| F-5 | 2026-05-18 | high | release-pipeline | mitigated | HEAD detached from `experiments` without `git checkout` in this session |
 | F-6 | 2026-05-20 | med | release-pipeline | fixed-verified | HEAD non-compiling + 11 dormant clippy-1.95 lints exposed by toolchain bump |
 | F-7 | 2026-05-21 | high | codescout-tool | mitigated | `references` undercounts vs `call_graph` (~18%); root is live-RA incompleteness, not position |
 | F-8 | 2026-05-23 | med | codescout-tool | fixed-verified | `format_read_file` dispatches on `type`; json_path output collided → rendered `"0 lines"` |
@@ -365,7 +365,7 @@ HEAD was actively bounced between `experiments` and parallel-session commit SHAs
 
 **Severity:** high — silent data-loss vector. Commits on detached HEAD are reachable only via reflog and expire on `git gc`. The user only sees the failure if they read the `git commit` output carefully — easy to miss.
 
-**Status:** open — root cause unknown.
+**Status:** mitigated (2026-05-25 verify-open audit). The F-5 fix idea's hypothesis — "audit companion hooks that touch git state" — was discharged this session via an exhaustive grep across all 24 hook files in `~/work/claude/claude-plugins/codescout-companion/hooks/`. Every `git` invocation is read-only: `git rev-parse` (show-toplevel, git-common-dir, git-dir, HEAD), `git rev-list --count`, `git worktree list --porcelain`, `git remote get-url`. The single destructive-verb reference is a regex match-pattern in `git-worktree-guard.sh:38` used to BLOCK `git commit|push|reset --hard|rebase|merge|checkout -b` — a guard, not an invocation. No companion hook contains code that moves HEAD. Multiple `/reload-plugins` and `/mcp` reconnect cycles in subsequent sessions (including this one's post-compact reconnect + a deliberate `/reload-plugins` after this audit) have not reproduced the symptom. Note: this disposition is *audit-driven*, not *fix-shipped* — the original investigation premise turned out wrong; no specific fix can be cited as closing F-5. Symptom may have come from a one-time interaction outside the companion plugin (other plugins, IDE side-effects, race during workspace activation). If it recurs, reopen with the explicit reflog evidence + the non-companion source narrowed in mind.
 
 **Fix idea / Pointer:** Open a bug file with the reflog snippet preserved. Audit companion hooks that touch git state — likely candidates: `hooks/cs-activate-project.sh`, `hooks/worktree-activate.sh`, anything in the SessionStart hook chain. If a hook is moving HEAD as a side effect of workspace activation, scope it to only run when the active project itself changed, not on every reconnect.
 
