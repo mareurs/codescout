@@ -243,10 +243,23 @@ services:
       - --dtype
       - float16
       - --auto-truncate
+      # Cap warmup/serving batch to bound VRAM. SPLADE projects every token to a
+      # vocab-sized ([tokens x 30522] f16) tensor, so peak memory scales with
+      # max-batch-tokens; TEI's default 16384 drives ~13.7 GiB on this 16 GiB
+      # card. 2048 still batches ~4 full-length (512-tok) docs per pass.
+      - --max-batch-tokens
+      - "2048"
+      - --max-client-batch-size
+      - "8"
       - --hostname
       - 0.0.0.0
       - --port
       - "80"
+    environment:
+      # PyTorch's caching allocator never returns freed blocks to the driver;
+      # expandable_segments lets ROCm reclaim fragmented reservations, trimming
+      # the reserved high-water-mark left over after warmup.
+      PYTORCH_HIP_ALLOC_CONF: expandable_segments:True
     ports:
       - "127.0.0.1:48084:80"
     volumes:
