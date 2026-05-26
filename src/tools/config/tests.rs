@@ -1174,6 +1174,39 @@ async fn workspace_action_unknown_errors() {
 }
 
 #[tokio::test]
+async fn workspace_post_compact_without_action_infers_status() {
+    let ctx = ToolContext {
+        agent: Agent::new(None).await.unwrap(),
+        lsp: lsp(),
+        output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+    };
+    // post_compact=true without action should infer action='status' and flush LSP
+    let result = Workspace
+        .call(json!({ "post_compact": true }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(result["flushed"], json!(true), "expected flushed:true");
+    assert!(result["hint"].is_string(), "expected hint string");
+    assert!(
+        result.get("project_root").is_none(),
+        "compact flush must not include status fields"
+    );
+
+    // missing action without post_compact must still error
+    let err = Workspace.call(json!({}), &ctx).await.unwrap_err();
+    assert!(
+        err.to_string().contains("workspace requires 'action'"),
+        "expected missing-action error, got: {err}"
+    );
+}
+
+#[tokio::test]
 async fn activation_response_includes_stale_warning_when_no_stored_version() {
     // No project.toml → onboarding_version = None → stale
     let dir = tempdir().unwrap();

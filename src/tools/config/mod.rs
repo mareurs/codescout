@@ -39,7 +39,7 @@ impl Tool for Workspace {
                 },
                 "post_compact": {
                     "type": "boolean",
-                    "description": "For action='status': flush all LSP clients (used after context compaction)."
+                    "description": "Flush all LSP clients after context compaction. Implies action='status' when action is omitted."
                 }
             },
             "required": ["action"]
@@ -47,15 +47,21 @@ impl Tool for Workspace {
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        let action = input
-            .get("action")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                super::RecoverableError::with_hint(
+        let post_compact = input
+            .get("post_compact")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let action = match input.get("action").and_then(|v| v.as_str()) {
+            Some(a) => a,
+            None if post_compact => "status",
+            None => {
+                return Err(super::RecoverableError::with_hint(
                     "workspace requires 'action' parameter",
                     "Pass action='activate' | 'status' | 'list_projects'.",
                 )
-            })?;
+                .into());
+            }
+        };
         match action {
             "activate" => ActivateProject.call(input, ctx).await,
             "status" => ProjectStatus.call(input, ctx).await,
