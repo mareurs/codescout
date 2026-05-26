@@ -163,7 +163,12 @@ pub fn perform_section_edit_ext(
             };
             let before = join_lines(&lines[..insert_idx]);
             let after = join_lines_tail(&lines[insert_idx..]);
-            let result = format!("{}{}{}", before, new, after);
+            // Guarantee `new` ends with a newline so its last line never fuses
+            // onto whatever follows. At end-of-section the next line is often a
+            // sibling/parent heading; without this, `new entry## Heading` lands
+            // on one line and silently demotes the heading to body text. Matches
+            // the `replace` / `insert_before` arms, which already normalize.
+            let result = format!("{}{}{}", before, ensure_trailing_newline(new), after);
             Ok(normalize_trailing_newline(&result))
         }
 

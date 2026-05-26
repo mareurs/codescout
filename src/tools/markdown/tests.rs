@@ -988,6 +988,37 @@ fn insert_after_invalid_at_value_errors() {
     );
 }
 
+/// Regression: insert_after with content lacking a trailing newline must NOT
+/// fuse the inserted block's last line onto the following heading. Previously
+/// `format!("{}{}{}", before, new, after)` concatenated `new` directly with
+/// the next heading line, silently demoting it (and every sibling after it)
+/// to body text. The tool must guarantee a trailing newline regardless of
+/// whether the caller supplied one.
+#[test]
+fn insert_after_without_trailing_newline_preserves_following_heading() {
+    let content = "## Section A\ncontent here\n\n## Constraint Stream Patterns\nmore content\n";
+    // Caller forgets the trailing newline — the historical foot-gun.
+    let result =
+        perform_section_edit(content, "## Section A", "insert_after", Some("new entry")).unwrap();
+
+    // The following heading must survive as a recognized heading, not fuse
+    // into "new entry## Constraint Stream Patterns".
+    assert!(
+        !result.contains("new entry## Constraint Stream Patterns"),
+        "inserted content fused onto the following heading: {result:?}"
+    );
+    let headings = crate::tools::file_summary::parse_all_headings(&result);
+    let heading_texts: Vec<&str> = headings.iter().map(|h| h.text.as_str()).collect();
+    assert!(
+        heading_texts.contains(&"## Constraint Stream Patterns"),
+        "following heading was demoted to body text; headings found: {heading_texts:?}"
+    );
+    assert!(
+        result.contains("new entry"),
+        "inserted content missing: {result:?}"
+    );
+}
+
 /// Deeply nested section (###) inside a ## section — replace ## consumes ### children.
 #[test]
 fn replace_consumes_nested_children() {
