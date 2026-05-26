@@ -356,7 +356,16 @@ pub(crate) fn perform_scoped_edit(
 
     let before = join_lines(&lines[..heading_idx]);
     let after = join_lines_tail(&lines[end_idx..]);
-    let result = format!("{}{}{}", before, new_section, after);
+    // Guarantee the section keeps a trailing newline so it never fuses onto the
+    // following heading. A scoped replace whose old_string consumed the section's
+    // trailing newline (and whose new_string omitted it) would otherwise demote
+    // the next heading to body text — the same Class-A fusion as insert_after.
+    let result = format!(
+        "{}{}{}",
+        before,
+        ensure_trailing_newline(&new_section),
+        after
+    );
     Ok(normalize_trailing_newline(&result))
 }
 

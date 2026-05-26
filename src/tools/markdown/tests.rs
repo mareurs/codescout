@@ -655,6 +655,28 @@ fn scoped_edit_empty_replacement() {
     assert_eq!(result, "# Title\n## Setup\nremove word\n");
 }
 
+/// Class-A fusion (sibling of the insert_after bug): when the scoped-edit
+/// old_string consumes the section's trailing newline and new_string does
+/// not restore it, the edited section fuses onto the following heading,
+/// silently demoting it. The tool must guarantee the section keeps its
+/// trailing newline.
+#[test]
+fn scoped_edit_consuming_trailing_newline_preserves_following_heading() {
+    let content = "## A\nkeep\nold line\n## B\nbody\n";
+    // old_string includes the line's trailing newline; new_string omits it.
+    let result = perform_scoped_edit(content, "## A", "old line\n", "new line", false).unwrap();
+    assert!(
+        !result.contains("new line## B"),
+        "scoped edit fused onto the following heading: {result:?}"
+    );
+    let headings = crate::tools::file_summary::parse_all_headings(&result);
+    let heading_texts: Vec<&str> = headings.iter().map(|h| h.text.as_str()).collect();
+    assert!(
+        heading_texts.contains(&"## B"),
+        "following heading demoted to body text; headings found: {heading_texts:?}"
+    );
+}
+
 // ── batch mode tests ────────────────────────────────────────────────
 
 #[test]
