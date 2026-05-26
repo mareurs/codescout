@@ -1036,6 +1036,59 @@ fn symbol_name_matches_suffix_at_word_boundary() {
 }
 
 #[test]
+fn symbol_name_matches_kotlin_backtick_normalization() {
+    let make_sym = |name: &str, name_path: &str| SymbolInfo {
+        name: name.to_string(),
+        name_path: name_path.to_string(),
+        kind: crate::lsp::SymbolKind::Method,
+        file: std::env::temp_dir().join("Test.kt"),
+        start_line: 0,
+        end_line: 10,
+        start_col: 0,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+
+    // LSP strips backticks: stored as "foo bar", queried with "`foo bar`"
+    let sym = make_sym(
+        "isStage is carried as a constructor value",
+        "Stage2LessonTest/isStage is carried as a constructor value",
+    );
+    assert!(
+        symbol_name_matches(&sym, "`isStage is carried as a constructor value`"),
+        "bare name with backtick query must match"
+    );
+    assert!(
+        symbol_name_matches(
+            &sym,
+            "Stage2LessonTest/`isStage is carried as a constructor value`"
+        ),
+        "name_path with backtick query must match"
+    );
+
+    // AST preserves backticks: stored as "`foo bar`", queried without (unusual but safe)
+    let sym2 = make_sym("`has spaces and words`", "MyTest/`has spaces and words`");
+    assert!(
+        symbol_name_matches(&sym2, "has spaces and words"),
+        "query without backticks must match backtick-stored name"
+    );
+
+    // Exact match (both have backticks) still works
+    assert!(
+        symbol_name_matches(&sym2, "`has spaces and words`"),
+        "exact backtick match must still work"
+    );
+
+    // Must NOT match unrelated names just because they share letters
+    let sym3 = make_sym("other function", "MyTest/other function");
+    assert!(
+        !symbol_name_matches(&sym3, "`isStage is carried as a constructor value`"),
+        "must not match unrelated name"
+    );
+}
+
+#[test]
 fn find_symbol_by_name_path_generic_types() {
     let test_file = std::env::temp_dir().join("test.ts");
     let symbols = vec![

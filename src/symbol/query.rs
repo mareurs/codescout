@@ -513,6 +513,12 @@ pub fn find_matching_symbol(
 /// Also supports suffix matching at word boundaries (space, `/`, `:`), so
 /// e.g. `SemanticSearch/call` matches `impl Tool for SemanticSearch/call`
 /// and `Book/method` matches `impl Trait for crate::path::Book/method`.
+///
+/// Kotlin backtick normalization: kotlin-language-server strips backtick
+/// delimiters from `DocumentSymbol.name`, so LSP symbols carry `foo bar`
+/// while the AST (and `symbols()` output) carries `` `foo bar` ``. When
+/// either side contains backticks, both are stripped before comparing so
+/// that a user query copied from `symbols()` resolves correctly in `edit_code`.
 pub fn symbol_name_matches(sym: &SymbolInfo, query: &str) -> bool {
     if sym.name_path == query || sym.name == query {
         return true;
@@ -535,6 +541,16 @@ pub fn symbol_name_matches(sym: &SymbolInfo, query: &str) -> bool {
         if candidate.len() > query.len() && candidate.ends_with(query) {
             let boundary = candidate.as_bytes()[candidate.len() - query.len() - 1];
             if matches!(boundary, b' ' | b'/' | b':') {
+                return true;
+            }
+        }
+    }
+    // Kotlin backtick normalization: strip backtick delimiters and retry exact
+    // match. Only pays the allocation cost when backticks are actually present.
+    if query.contains('`') || sym.name.contains('`') || sym.name_path.contains('`') {
+        let q_norm = query.replace('`', "");
+        for candidate in [sym.name.as_str(), sym.name_path.as_str()] {
+            if candidate.replace('`', "") == q_norm {
                 return true;
             }
         }

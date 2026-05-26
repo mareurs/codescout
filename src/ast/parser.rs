@@ -2239,6 +2239,58 @@ val PI = 3.14159
     }
 
     #[test]
+    fn kotlin_backtick_function_names() {
+        let source = r#"
+class MyTest {
+    @Test
+    fun `is carried as a constructor value`() {}
+
+    @Test
+    fun `has spaces and words`() {}
+
+    fun normalName() {}
+}
+"#;
+        let syms =
+            extract_symbols_from_source(source, Some("kotlin"), Path::new("Test.kt")).unwrap();
+        let test_class = syms.iter().find(|s| s.name == "MyTest").unwrap();
+
+        // Backtick names must be indexed with backticks preserved (AST truth)
+        let names: Vec<&str> = test_class
+            .children
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        assert!(
+            names.contains(&"`is carried as a constructor value`"),
+            "backtick-named function must be indexed with backticks; got: {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"`has spaces and words`"),
+            "second backtick function missing; got: {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"normalName"),
+            "normalName missing: {:?}",
+            names
+        );
+
+        // name_path must include backticks as the slash-joined form
+        let paths: Vec<&str> = test_class
+            .children
+            .iter()
+            .map(|s| s.name_path.as_str())
+            .collect();
+        assert!(
+            paths.contains(&"MyTest/`is carried as a constructor value`"),
+            "name_path must carry backticks; got: {:?}",
+            paths
+        );
+    }
+
+    #[test]
     fn kotlin_docstrings() {
         let source = r#"
 package com.example
