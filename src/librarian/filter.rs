@@ -2,6 +2,7 @@ use crate::tools::RecoverableError;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::cmp::Ordering;
 
 /// Recursive filter AST ported from redis/agent-memory-server filters.py
 /// (Apache-2.0). See CREDITS.md.
@@ -241,6 +242,165 @@ fn compile_leaf(map: &serde_json::Map<String, Value>) -> Result<SqlFragment> {
         }),
     }
 }
+/// Evaluate a filter AST against one entry object, in memory.
+///
+/// Sibling to `compile` (which emits SQL). No `ALLOWED_FIELDS` gate —
+/// matching a JSON map has no injection surface and entry fields are
+/// arbitrary by design. Op semantics mirror `compile_leaf`.
+pub fn eval(node: &FilterNode, entry: &serde_json::Map<String, Value>) -> Result<bool> {
+    match node {
+        FilterNode::And { and } => {
+            if and.is_empty() {
+                return Err(empty_composition_err("and"));
+            }
+            for c in and {
+                if !eval(c, entry)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+        FilterNode::Or { or } => {
+            if or.is_empty() {
+                return Err(empty_composition_err("or"));
+            }
+            for c in or {
+                if eval(c, entry)? {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        }
+        FilterNode::Not { not } => Ok(!eval(not, entry)?),
+        FilterNode::Leaf(map) => eval_leaf(map, entry),
+    }
+}
+
+fn empty_composition_err(op: &str) -> anyhow::Error {
+    RecoverableError::with_hint(
+        format!("empty composition `{op}`"),
+        "`and` / `or` / `not` require at least one child filter.",
+    )
+    .into()
+}
+
+fn eval_leaf(
+    map: &serde_json::Map<String, Value>,
+    entry: &serde_json::Map<String, Value>,
+) -> Result<bool> {
+    if map.len() != 1 {
+        return Err(RecoverableError::with_hint(
+            format!("leaf must have exactly one field, got {}", map.len()),
+            "Each leaf has shape `{field: {op: value}}`. Wrap multiple fields with `and`/`or`.",
+        )
+        .into());
+    }
+    let (field, ops) = map.iter().next().unwrap();
+    let ops = ops.as_object().ok_or_else(|| {
+        RecoverableError::with_hint(
+            "ops must be an object",
+            "Leaf op shape is `{field: {op: value}}`.",
+        )
+    })?;
+    if ops.len() != 1 {
+        return Err(RecoverableError::with_hint(
+            format!("exactly one op per leaf, got {}", ops.len()),
+            "Wrap multiple ops on the same field with `and`/`or`.",
+        )
+        .into());
+    }
+    let (op_name, value) = ops.iter().next().unwrap();
+    let op = op_name.parse::<LeafOp>().map_err(|_| {
+        RecoverableError::with_hint(
+            format!("unknown op `{op_name}`"),
+            "valid ops: eq, ne, in, nin, gt, lt, gte, lte, contains, prefix",
+        )
+    })?;
+
+    // Missing field never matches (mirrors SQL NULL comparison semantics).
+    let Some(actual) = entry.get(field) else {
+        return Ok(false);
+    };
+
+    Ok(match op {
+        LeafOp::Eq => json_eq(actual, value),
+        LeafOp::Ne => !json_eq(actual, value),
+        LeafOp::In | LeafOp::Nin => {
+            let arr = value.as_array().ok_or_else(|| {
+                RecoverableError::with_hint(
+                    "`in`/`nin` expects an array",
+                    "Provide a JSON array, e.g. `{\"in\": [\"a\", \"b\"]}`.",
+                )
+            })?;
+            if arr.is_empty() {
+                return Err(RecoverableError::with_hint(
+                    "`in`/`nin` expects a non-empty array",
+                    "Provide at least one value, e.g. `{\"in\": [\"a\", \"b\"]}`.",
+                )
+                .into());
+            }
+            let hit = arr.iter().any(|v| json_eq(actual, v));
+            if op == LeafOp::In {
+                hit
+            } else {
+                !hit
+            }
+        }
+        LeafOp::Gt => json_cmp(actual, value) == Some(Ordering::Greater),
+        LeafOp::Lt => json_cmp(actual, value) == Some(Ordering::Less),
+        LeafOp::Gte => matches!(
+            json_cmp(actual, value),
+            Some(Ordering::Greater | Ordering::Equal)
+        ),
+        LeafOp::Lte => matches!(
+            json_cmp(actual, value),
+            Some(Ordering::Less | Ordering::Equal)
+        ),
+        LeafOp::Contains => match actual {
+            Value::String(s) => {
+                let needle = value.as_str().ok_or_else(|| {
+                    RecoverableError::with_hint(
+                        "`contains` on a string field expects a string value",
+                        "Provide a string, e.g. `{\"contains\": \"foo\"}`.",
+                    )
+                })?;
+                s.to_ascii_lowercase()
+                    .contains(&needle.to_ascii_lowercase())
+            }
+            Value::Array(items) => items.iter().any(|v| json_eq(v, value)),
+            _ => false,
+        },
+        LeafOp::Prefix => {
+            let pfx = value.as_str().ok_or_else(|| {
+                RecoverableError::with_hint(
+                    "`prefix` expects a string",
+                    "Provide a string value, e.g. `{\"prefix\": \"docs/\"}`.",
+                )
+            })?;
+            actual.as_str().map(|s| s.starts_with(pfx)).unwrap_or(false)
+        }
+    })
+}
+
+/// JSON value equality with numeric coercion (`2` == `2.0`).
+fn json_eq(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => {
+            matches!((x.as_f64(), y.as_f64()), (Some(p), Some(q)) if p == q)
+        }
+        _ => a == b,
+    }
+}
+
+/// Ordering for gt/lt/gte/lte: numbers numerically, strings lexically.
+/// Mismatched or non-orderable types → None (treated as non-match).
+fn json_cmp(a: &Value, b: &Value) -> Option<Ordering> {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => x.as_f64()?.partial_cmp(&y.as_f64()?),
+        (Value::String(x), Value::String(y)) => Some(x.cmp(y)),
+        _ => None,
+    }
+}
 
 fn json_value_to_sql(v: &Value) -> Result<rusqlite::types::Value> {
     Ok(match v {
@@ -377,5 +537,51 @@ mod tests {
     fn repo_filter_rejected() {
         let node = parse(json!({"repo": {"eq": "codescout"}}));
         assert!(compile(&node).is_err());
+    }
+    fn entry(json: Value) -> serde_json::Map<String, Value> {
+        json.as_object().unwrap().clone()
+    }
+
+    #[test]
+    fn eval_eq_and_missing_field() {
+        let e = entry(json!({"status": "open", "priority": 2}));
+        assert!(eval(&parse(json!({"status": {"eq": "open"}})), &e).unwrap());
+        assert!(!eval(&parse(json!({"status": {"eq": "done"}})), &e).unwrap());
+        assert!(!eval(&parse(json!({"owner": {"eq": "x"}})), &e).unwrap()); // missing field
+    }
+
+    #[test]
+    fn eval_in_gt_contains_prefix() {
+        let e = entry(json!({"cat": "hardware", "priority": 2, "tags": ["gpu", "thermal"]}));
+        assert!(eval(&parse(json!({"cat": {"in": ["hardware", "software"]}})), &e).unwrap());
+        assert!(eval(&parse(json!({"priority": {"gt": 1}})), &e).unwrap());
+        assert!(!eval(&parse(json!({"priority": {"lt": 1}})), &e).unwrap());
+        assert!(eval(&parse(json!({"cat": {"contains": "hard"}})), &e).unwrap()); // string substring
+        assert!(eval(&parse(json!({"tags": {"contains": "gpu"}})), &e).unwrap()); // array membership
+        assert!(eval(&parse(json!({"cat": {"prefix": "hard"}})), &e).unwrap());
+    }
+
+    #[test]
+    fn eval_and_or_not() {
+        let e = entry(json!({"cat": "hardware", "status": "open"}));
+        assert!(eval(
+            &parse(json!({"and": [{"cat": {"eq": "hardware"}}, {"status": {"eq": "open"}}]})),
+            &e
+        )
+        .unwrap());
+        assert!(eval(&parse(json!({"not": {"status": {"eq": "done"}}})), &e).unwrap());
+        assert!(!eval(
+            &parse(json!({"or": [{"cat": {"eq": "software"}}, {"status": {"eq": "done"}}]})),
+            &e
+        )
+        .unwrap());
+    }
+    #[test]
+    fn eval_contains_is_case_insensitive() {
+        let e = entry(json!({"title": "Docs Lotus Frog"}));
+        // mirrors SQLite LIKE '%v%' ASCII case-folding
+        assert!(eval(&parse(json!({"title": {"contains": "frog"}})), &e).unwrap());
+        assert!(eval(&parse(json!({"title": {"contains": "FROG"}})), &e).unwrap());
+        assert!(eval(&parse(json!({"title": {"contains": "lotus"}})), &e).unwrap());
     }
 }
