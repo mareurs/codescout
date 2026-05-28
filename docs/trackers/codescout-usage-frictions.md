@@ -1017,3 +1017,59 @@ Related: see [[U-23]] (the U-N entry that originated the question), and
 the prior `_path_note_count` rename which was the LAST vestigial
 artifact of the per-session-cap mental model that the docstring also
 reflects.
+
+
+
+### U-25 — Path-disambiguation annotation fires per call; activation + worktree state invisible
+
+**When:** 2026-05-28 session, working inside a git worktree
+(`/home/marius/work/mirela/backend-kotlin/.worktrees/weekly-pattern`).
+User flagged the `[codescout] paths are relative to <root>` line as
+"useful but spammy" and asked for: (1) novelty-gated emission, (2)
+worktree validation, (3) explicit activation signal at session start.
+
+**Iron Law / pattern:** not an Iron Law violation — a **prompt surface
+density / signal placement** issue. The U-23 fix (2026-05-25) resolved
+correctness ("cold readers misread stripped paths as catalog data") by
+moving from a per-session cap to per-call emission. The cost was ~50
+bytes × every non-`run_command` tool, multiplied across a session, with
+no corresponding signal for two adjacent UX questions ("am I in a
+worktree?", "did activate_project happen?").
+
+**Resolution shape:**
+
+1. **A — novelty-gated annotation.** Repurposed the vestigial
+   `_path_note_count: AtomicUsize` field at `src/server.rs:76` (pre-fix)
+   into `path_note_emitted_since_activation: AtomicBool`. `post_process`
+   emits the annotation only on the first stripped response since
+   server start or last `activate_project`. The activation branch of
+   `call_tool` (`src/server.rs`) resets the bool so the next stripped
+   response carries the annotation again with the new root.
+2. **C — worktree-aware validation banner.** New `WorktreeInfo` struct
+   + filesystem-only `detect_worktree_info` helper in
+   `src/prompts/mod.rs`. Plumbed through `ProjectStatus` and populated
+   in `Agent::project_status`. `build_server_instructions` emits
+   `**Worktree:** branch \`<branch>\` of \`<main_repo>\`` when present.
+3. **D — explicit activation banner.** `**Project:**` →
+   `**Active project:**` in `build_server_instructions`. Surfaces the
+   implicit launch-time activation. Refreshes on every
+   `activate_project` via the existing `refresh_instructions` path.
+
+**Why this is safe vs U-23:** the cold-reader signal the U-23 fix
+protected (per-call annotation so post-compaction readers can still
+disambiguate stripped paths) now lives in `server_instructions` —
+specifically the `**Active project:**` line in the Project Status
+block, which is system-prompt content and survives compaction. The
+per-response annotation becomes redundant after the first stripped
+call within an activation window.
+
+**Severity:** low — UX friction, not correctness. The fix is a
+follow-on to U-23, not a regression.
+
+**Status:** fixed-shipped (this session, experiments-side; master SHA
+to be recorded after cherry-pick).
+
+**Related:** [[U-23]] (the per-call cadence this entry partially
+relaxes), [[U-24]] (the docstring-vs-runtime follow-up on the same
+post_process surface). Bug file:
+`docs/issues/2026-05-28-path-annotation-spam.md`.

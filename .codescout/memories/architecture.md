@@ -1,48 +1,66 @@
-# Workspace Architecture — codescout
+# codescout — Architecture
 
-## Project Map
-
-- **core/** — The engine: solver, domain introspection, score director, constraint streams (see `memory(project_id="core", topic="architecture")`)
-  - `core/optaplanner-core-impl/` — solver, config, domain descriptors, heuristics, moves, score director
-  - `core/optaplanner-constraint-streams-bavet/` — default constraint stream engine (graph-based DAG)
-  - `core/optaplanner-constraint-streams-drools/` — alternative Drools-based constraint evaluation
-  - `core/optaplanner-constraint-streams-common/` — shared constraint stream infrastructure
-  - `core/optaplanner-constraint-drl/` — DRL rule language support
-- **optaplanner-persistence/** — Score serialization (Jackson, JAXB, XStream, JSON-B, JPA) (see `memory(project_id="optaplanner-persistence")`)
-- **optaplanner-benchmark/** — Benchmarking framework (see `memory(project_id="optaplanner-benchmark")`)
-- **optaplanner-test/** — ConstraintVerifier API (see `memory(project_id="optaplanner-test")`)
-- **optaplanner-examples/** — 16 example planning problems (see `memory(project_id="optaplanner-examples")`)
-- **optaplanner-spring-integration/** — Spring Boot autoconfigure (see `memory(project_id="optaplanner-spring-integration")`)
-- **optaplanner-quarkus-integration/** — Quarkus extension with Gizmo bytecode gen (see `memory(project_id="optaplanner-quarkus-integration")`)
-- **optaplanner-docs/** — AsciiDoc documentation (see `memory(project_id="optaplanner-docs")`)
-- **build/** — BOM, build-parent, IDE config, javadoc, distribution
-## Cross-Project Dependencies
+## Module Structure (src/)
 
 ```
-code-explorer
-  └── codescout-embed   (crates/codescout-embed, path dep)
-  └── librarian-mcp     (no code dep; sibling MCP server, shared config)
-
-codescout-embed
-  └── (no internal deps)
-
-librarian-mcp
-  └── codescout-embed   (crates/codescout-embed, path dep for embeddings)
-
-fixtures (java/kotlin/python/rust/typescript)
-  └── (no deps; static targets for codescout tests)
+src/
+  server.rs          — CodeScoutServer (MCP ServerHandler), tool registry, request dispatch
+  agent/             — Agent, ActiveProject, project state, write locking, per-project config
+  tools/
+    core/            — Tool trait, ToolContext, OutputGuard, RecoverableError
+    symbols.rs       — symbol navigation (LSP + tree-sitter)
+    references.rs    — find all references via LSP
+    call_graph.rs    — transitive call graph (BFS, configurable direction + depth)
+    edit_code.rs     — structural code editing (LSP-aware; action=replace/insert/remove/rename)
+    edit_file.rs     — exact string replacement in files
+    edit_markdown.rs — heading-addressed markdown editing
+    create_file.rs   — new file creation
+    semantic_search.rs — vector search (Qdrant + optional cross-encoder reranker)
+    memory.rs        — per-project markdown memory (read/write/list/semantic)
+    librarian.rs     — artifact registry operations (find/get/update/event/refresh)
+    onboarding.rs    — project onboarding + system prompt generation + ONBOARDING_VERSION
+    workspace.rs     — workspace activate/status/list
+    index.rs         — semantic index build/status/cancel
+    tree.rs          — filesystem exploration (glob + recursive listing)
+    grep.rs          — regex search across files
+    run_command.rs   — shell command execution
+    output.rs        — OutputGuard (progressive disclosure enforcement)
+  lsp/               — LSP client, mux, per-language servers, circuit breaker
+  librarian/         — SQLite artifact catalog (find.rs, get.rs, update.rs, events.rs, refresh.rs)
+  prompts/           — source.md (two surfaces), builders.rs, source.rs (slice extractor)
+  embed/             — embedding integration (delegates to codescout-embed crate)
 ```
 
-## Shared Infrastructure
+## Key Abstractions
 
-- **CI:** `.github/workflows/ci.yml` — runs `cargo test`, `cargo clippy`, `cargo fmt --check` on push/PR
-- **Workspace Cargo.toml:** single `[workspace]` at root; all Rust crates share dep versions
-- **Embedding model cache:** `~/.cache/huggingface/hub/` shared across code-explorer + librarian-mcp
-- **Test fixtures:** `tests/fixtures/` — all 5 language fixtures are read-only navigation targets; codescout's integration tests reference them directly
-- **Shared config dir:** `.codescout/` — workspace.toml, memories/, embeddings/ live here
+- **`CodeScoutServer`** (`server.rs`) — MCP `ServerHandler` impl; owns the tool registry;
+  all `CallToolRequest`s flow through `call_tool_inner()`
+- **`Tool` trait + `ToolContext`** (`tools/core/types.rs`) — every tool implements `call()`;
+  `call_content()` is the MCP entry point (handles output buffer routing)
+- **`Agent` / `ActiveProject`** (`agent/mod.rs`) — project state (config, memory, write lock);
+  tools access it via `with_project(|p| ...)`
+- **`OutputGuard`** (`tools/output.rs`) — enforces two-mode progressive disclosure:
+  Exploring (compact, capped at 200 items) / Focused (full detail, paginated)
+- **`RecoverableError`** — maps to `isError: false`; prevents sibling parallel tool call abort;
+  all other errors map to `isError: true`
 
-## Key Shared Abstractions
+## Data Flow: MCP Tool Call
 
-- `Embedder` trait (codescout-embed) — consumed by both code-explorer and librarian-mcp
-- `Catalog<T: Searchable>` pattern — mirrored in all 5 fixture languages (intentional parallel design)
-- `Searchable` interface/trait — same concept in all 5 fixture languages for codescout test coverage
+1. `ServerHandler::call_tool()` receives `CallToolRequest`
+2. `call_tool_inner()` resolves tool by name, checks access, parses JSON
+3. Builds `ToolContext` (Agent, LspManager, output buffer, progress reporter)
+4. Acquires write guard if mutating
+5. Calls `tool.call_content()` → `tool.call()` + buffer routing
+6. Success → `CallToolResult::success`; Error → `route_tool_error()`:
+   - `RecoverableError` → `isError: false` with structured JSON guidance
+   - Other errors → `isError: true`
+7. Post-process: strip project root prefixes, log duration
+
+## Prompt Surfaces
+
+Three surfaces, two editable via `src/prompts/source.md`:
+- **`server_instructions`** slice — injected at every MCP session start; no cache, no version bump needed
+- **`onboarding_prompt`** slice — drives stored per-project system prompt; bump `ONBOARDING_VERSION` in `onboarding.rs` to refresh
+- **`build_system_prompt_draft()`** in `builders.rs` — generated per-project context; also version-gated
+
+Test `server::tests::prompt_surfaces_reference_only_real_tools` catches stale tool names across all three surfaces at build time.

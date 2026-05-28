@@ -1,28 +1,40 @@
 # rust-library — Project Overview
 
 ## Purpose
-A fixture project used as a test target for codescout's Rust code intelligence features (symbol navigation, semantic search, LSP integration). It models a small library catalog domain — books, genres, a generic catalog service — with deliberate use of diverse Rust language constructs so codescout tooling can be validated against them.
+
+A small, deliberately-structured Rust library that serves as a test fixture for the codescout code intelligence engine. It is NOT a production library. Its primary role is to provide a representative set of Rust language constructs — structs, enums, traits, generics, lifetimes, derive macros, impl Trait, Iterator impls — so that codescout's symbol discovery, semantic search, and retrieval pipelines can be exercised against realistic Rust code.
 
 ## Tech Stack
-- **Language:** Rust (edition 2021)
-- **Crate name:** `rust-library`
-- **Version:** 0.1.0
-- **Dependencies:** none (no external crates)
-- **Build:** standard `cargo build` / `cargo test`
 
-## Key Dependencies
-None. The crate is intentionally dependency-free to keep it a clean fixture.
+- Language: Rust (edition 2021)
+- No runtime dependencies (empty `[dependencies]` in Cargo.toml)
+- Crate type: library (`lib.rs` entry point)
 
-## Module Layout
+## Domain
+
+A minimal library catalog domain: books, genres, a searchable catalog, and search result types. The domain is simple and stable — it exists only to anchor recognizable language patterns.
+
+## Key Constructs Covered
+
+- `Book` — core domain struct with private fields, public accessor methods
+- `Genre` — enum with `#[derive(Debug, Clone, PartialEq)]` and a `label()` method
+- `Searchable` — trait with one required method (`search_text`) and one defaulted method (`relevance`)
+- `Catalog<T: Searchable>` — generic struct with trait-bounded type parameter
+- `SearchResult` — enum with struct variants, tuple variants, and unit-like variants
+- `BookIterator` — struct implementing the `Iterator` trait (associated type pattern)
+- `BookRef` — derive-macro struct in extensions
+- `borrow_title` — function with lifetime annotation
+- `available_titles` — function with `impl Trait` return type
+
+## Public API Surface (re-exported from lib.rs)
+
 ```
-src/
-  lib.rs              — crate root; re-exports four top-level modules
-  models/             — domain data types (Book, Genre)
-  traits/             — Rust trait definitions (Searchable)
-  services/           — business logic (Catalog<T>)
-  extensions/         — advanced Rust patterns (SearchResult, BookIterator, BookRef, lifetime/iterator demos)
+rust_library::Book
+rust_library::Genre
+rust_library::Searchable
+rust_library::Catalog
 ```
 
 ## Runtime Requirements
-- Rust stable toolchain
-- No runtime dependencies or external services
+
+None — no external services, databases, or environment variables needed to build.

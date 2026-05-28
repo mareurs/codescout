@@ -68,12 +68,24 @@ pub struct CodeScoutServer {
     /// memory dir. Held behind `RwLock<Arc<...>>` so list/read only need a read lock
     /// while replacement takes a write lock.
     resources: Arc<tokio::sync::RwLock<Arc<crate::mcp_resources::ResourceRegistry>>>,
-    /// How many times the path-disambiguation note ("paths are relative to …") has
-    /// been emitted this session. Vestigial — the note now emits on every
-    /// stripped response (no cap); see [`post_process`]. Kept underscore-prefixed
-    /// to silence dead_code without a struct-shape change; remove on the next
-    /// pass that touches CodeScoutServer's fields.
-    _path_note_count: Arc<std::sync::atomic::AtomicUsize>,
+    /// Tracks whether the `[codescout] paths are relative to <root>` annotation
+    /// has been emitted since the last activation. Replaces the per-session cap
+    /// (`_path_note_count`) that the U-23 fix removed.
+    ///
+    /// Gate logic (`post_process`): emit only on the FIRST stripped response
+    /// since (a) server start or (b) a successful `activate_project`. The
+    /// activation reset is wired in the `is_activate` branch of `call_tool`
+    /// alongside `refresh_resources` / `refresh_instructions`.
+    ///
+    /// Why a per-activation gate, not the U-23 "every-call" cadence: the
+    /// cold-reader signal U-23 protected (later tools rewriting paths look
+    /// like raw catalog data) is now carried by the **Active project** +
+    /// **Worktree** lines in `build_server_instructions`, which compaction
+    /// preserves as system-prompt content. The per-response annotation
+    /// becomes redundant after the first stripped call. See U-25 in
+    /// `docs/trackers/codescout-usage-frictions.md` and the bug file at
+    /// `docs/issues/2026-05-28-path-annotation-spam.md`.
+    path_note_emitted_since_activation: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl CodeScoutServer {
@@ -168,7 +180,7 @@ impl CodeScoutServer {
             debug,
             last_broadcast_caps: Arc::new(parking_lot::Mutex::new(None)),
             resources,
-            _path_note_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            path_note_emitted_since_activation: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -356,20 +368,28 @@ impl CodeScoutServer {
             (call_result, false)
         };
 
-        // When stripping fired, append a disambiguation note so downstream
-        // agents can distinguish stripped-absolute paths from genuine-relative
-        // path values in tool content. Emitted on every stripped response of
-        // every non-`run_command` tool — the U-23 friction (2026-05-25
-        // session) showed that suppressing this after a per-session cap left
-        // later tools (e.g. `librarian(action="doctor")`) with no signal,
-        // causing a fresh reader to misread the rewritten paths as catalog
-        // data shape. The cost is ~50 bytes per stripped response — well
-        // below the savings from stripping itself.
+        // Novelty-gated annotation — emit only the FIRST stripped response since
+        // server start or the last `activate_project`. Replaces the per-call
+        // cadence the U-23 fix introduced. Subsequent stripped responses skip
+        // the annotation; the agent already has the "paths are relative to
+        // <root>" signal from the `Active project` line in server_instructions
+        // (built by `build_server_instructions`), which survives compaction
+        // because it lives in the system-prompt slot, not in tool output.
+        //
+        // Reset point: `call_tool` flips the bool back to false in the
+        // `is_activate` branch so the next activation re-emits the banner with
+        // the new root. See [`path_note_emitted_since_activation`] for the
+        // full rationale.
         if stripped {
-            let root = root_prefix.trim_end_matches('/');
-            call_result.content.push(Content::text(format!(
-                "\n[codescout] paths are relative to {root}"
-            )));
+            let already_emitted = self
+                .path_note_emitted_since_activation
+                .swap(true, std::sync::atomic::Ordering::Relaxed);
+            if !already_emitted {
+                let root = root_prefix.trim_end_matches('/');
+                call_result.content.push(Content::text(format!(
+                    "\n[codescout] paths are relative to {root}"
+                )));
+            }
         }
         call_result
     }
@@ -762,6 +782,13 @@ impl ServerHandler for CodeScoutServer {
             // and refresh instructions so stdio clients see current project state.
             self.refresh_resources().await;
             self.refresh_instructions().await;
+
+            // Reset the path-annotation novelty gate so the next stripped
+            // response re-emits `[codescout] paths are relative to <root>`
+            // with the new project's root. Pairs with the bool's docstring
+            // on `path_note_emitted_since_activation`.
+            self.path_note_emitted_since_activation
+                .store(false, std::sync::atomic::Ordering::Relaxed);
         }
 
         Ok(result)
@@ -2127,43 +2154,40 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stripped_responses_always_carry_paths_relative_annotation() {
-        // U-23 fix (2026-05-25): when post_process strips the project root
-        // from a tool response, append the disambiguation note on EVERY
-        // such response — not just `read_file`, and not capped at 3 per
-        // session. Without this, downstream agents inspecting other tools'
-        // output (e.g. `librarian(action="doctor")`) misread rewritten
-        // paths as catalog data shape.
+    async fn stripped_responses_emit_paths_relative_annotation_once_per_activation() {
+        // Novelty-gated annotation (replaces the U-23 "every-call" cadence):
+        // post_process emits `[codescout] paths are relative to <root>` only on
+        // the FIRST stripped response since server start or the last
+        // `activate_project`. Subsequent stripped responses skip the
+        // annotation — the agent already carries the signal via the
+        // `Active project` line in `build_server_instructions`, which
+        // compaction preserves in the system-prompt slot.
         let (dir, server) = make_server().await;
         let root = dir.path().to_string_lossy().to_string();
         let trimmed_root = root.trim_end_matches('/');
 
-        // Drive post_process directly with a constructed result containing
-        // the absolute project root. This bypasses tool dispatch and
-        // focuses the assertion on the annotation behavior itself.
         let make_payload = || {
             CallToolResult::success(vec![Content::text(format!(
                 r#"{{"file":"{root}/src/main.rs","line":1}}"#
             ))])
         };
 
-        // 4 sequential calls across different tool names — pre-#70 behavior
-        // would have emitted the annotation only on the first 3 read_file
-        // calls per session AND never on `tree`/`symbols`/`librarian`/etc.
-        // Post-fix every stripped response carries the annotation regardless
-        // of tool name or call ordinal.
-        for (i, tool_name) in [
-            "read_file",
-            "read_file",
-            "read_file",
-            "read_file",
-            "tree",
-            "symbols",
-            "librarian",
-        ]
-        .iter()
-        .enumerate()
-        {
+        // First stripped response — annotation MUST appear.
+        let first = server.post_process(make_payload(), "read_file").await;
+        let joined: String = first
+            .content
+            .iter()
+            .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains(&format!("[codescout] paths are relative to {trimmed_root}")),
+            "first stripped response must carry the annotation, got:\n{joined}"
+        );
+
+        // Subsequent stripped responses across multiple tool names — annotation
+        // MUST NOT re-appear within the same activation window.
+        for tool_name in ["read_file", "tree", "symbols", "librarian", "grep"] {
             let processed = server.post_process(make_payload(), tool_name).await;
             let joined: String = processed
                 .content
@@ -2172,14 +2196,16 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n");
             assert!(
-                joined.contains(&format!("[codescout] paths are relative to {trimmed_root}")),
-                "call #{i} ({tool_name}): expected annotation on every stripped response, got:\n{joined}"
+                !joined.contains("[codescout] paths are relative to"),
+                "tool '{tool_name}' must not re-emit the annotation within the same activation window, got:\n{joined}"
             );
         }
 
         // Negative case: run_command is exempt from stripping, so the
         // annotation must NOT be appended even when its payload happens to
-        // contain the project root.
+        // contain the project root. Independent of the novelty gate — the
+        // run_command branch in post_process skips the strip+annotate path
+        // entirely.
         let processed = server.post_process(make_payload(), "run_command").await;
         let joined: String = processed
             .content
@@ -2190,6 +2216,23 @@ mod tests {
         assert!(
             !joined.contains("[codescout] paths are relative to"),
             "run_command must not get the annotation (its raw stdout is left unstripped), got:\n{joined}"
+        );
+
+        // Activation reset: flipping the gate manually (as `call_tool` does in
+        // its `is_activate` branch) must restore single-shot emission.
+        server
+            .path_note_emitted_since_activation
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        let after_reset = server.post_process(make_payload(), "read_file").await;
+        let joined: String = after_reset
+            .content
+            .iter()
+            .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains(&format!("[codescout] paths are relative to {trimmed_root}")),
+            "post-activation reset: next stripped response must re-emit the annotation, got:\n{joined}"
         );
     }
 

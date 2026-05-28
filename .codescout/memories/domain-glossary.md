@@ -1,41 +1,44 @@
-# Domain Glossary — codescout Workspace
+# Workspace Domain Glossary
 
-## Core Terms
+## Shared across all 5 language fixture libraries
 
-**MCP (Model Context Protocol)** — JSON-RPC protocol over stdio or HTTP/SSE; codescout implements an MCP server that exposes tools to LLM clients.
+| Term | Definition |
+|---|---|
+| `Searchable` | Interface/trait requiring `search_text() -> str/String` — the universal indexing contract across Java, Kotlin, Python, Rust, TypeScript fixtures |
+| `Catalog<T>` | Generic container service for `Searchable` items; exposes `add`, `search` (substring filter on `search_text()`), and `stats` |
+| `Book` | Primary domain entity: title, isbn, genre, copiesAvailable; used across all 5 fixture languages |
+| `Genre` | Enum of book categories (Fiction, NonFiction, Science, History, Biography) with a humanizing `label()` method |
+| `SearchResult` | Discriminated union / sealed class / enum with `Found`, `NotFound`, `Error` variants |
+| `CatalogStats` | Value object returned by `Catalog.stats()` — totalItems + name |
+| `AudioBook` | Appears in Python fixture only — extends Book + Playable mixin; the only concrete `Searchable` in that fixture |
 
-**Tool** — A zero-size struct implementing the `Tool` trait; represents one capability exposed over MCP (e.g. `replace_symbol`, `semantic_search`).
+## codescout (code-explorer) specific
 
-**RecoverableError** — An expected, input-driven failure that routes to `isError: false`; sibling parallel MCP tool calls survive. Contrast with `anyhow::bail!` (`isError: true`).
+| Term | Definition |
+|---|---|
+| `RecoverableError` | `isError: false` MCP error for expected input failures — sibling tool calls survive |
+| `OutputGuard` | Enforces progressive disclosure: Exploring mode (compact, capped at 200) / Focused mode (full, paginated) |
+| `ToolContext` | Per-call context carrying Agent, LspManager, output buffer, and progress reporter |
+| `Agent` / `ActiveProject` | Project state holder (config, memory, write locking); tools call `with_project(|p| ...)` |
+| `call_content()` | MCP entry point for tools — handles buffer routing; `call()` is the inner logic |
+| `server_instructions` | MCP session-start injected prompt surface (live on every connect; no cache) |
+| `onboarding_prompt` | Stored per-project system prompt surface (cached; bump `ONBOARDING_VERSION` to refresh) |
+| `librarian` | SQLite-backed artifact registry indexing markdown docs (specs, plans, ADRs, trackers) |
 
-**OutputGuard** — Controls progressive disclosure: `exploring` mode (default, capped at 200 items) vs `focused` mode (full detail, paginated). Enforced per-tool via `OutputGuard`.
+## codescout-embed specific
 
-**OutputBuffer** — 50-slot LRU store for large tool outputs; returns `@tool_*` or `@cmd_*` ref instead of inline. Agents read back with `read_file("@tool_*")`.
+| Term | Definition |
+|---|---|
+| `Embedder` | Async trait: `embed(&[&str]) -> Vec<Embedding>` + `embed_query(&str)` |
+| `RawChunk` | Pre-embedding text chunk with 1-indexed `start_line` / `end_line` provenance |
+| `model_spec` | Full model identifier including prefix: `local:AllMiniLML6V2Q`, `ollama:<name>`, `openai:<name>` |
+| `chunk_size` | In characters (not tokens); derived as `floor(max_tokens × 0.85 × 3)` |
 
-**ActiveProject** — Runtime state for one activated project: root path, config, memory store, write lock, advisory flock.
+## Eval fixture specific (edit-eval-rust)
 
-**Agent** — `Arc<RwLock<AgentInner>>` holding the current `ActiveProject`; all tools access via `ctx.agent.with_project(...)`.
-
-**Anchor / Anchor Sidecar** — `.anchors.toml` file tracking which source files a memory topic references; used for staleness detection.
-
-**KNN Search** — K-nearest-neighbor vector search using sqlite-vec `vec0` virtual tables; used by `semantic_search`.
-
-**AST Chunker** — tree-sitter-based splitter that chunks code at symbol boundaries for embedding; falls back to line-based chunking.
-
-**Embedder** — Trait in `codescout-embed`; two backends: `LocalEmbedder` (ONNX/fastembed) and `RemoteEmbedder` (OpenAI-compatible HTTP).
-
-**Library Registry** — Read-only navigation target for third-party crates/packages registered via `library(action="register")`.
-
-**TimeMachine** (librarian-mcp) — Event log allowing replay of artifact state at any past git commit or timestamp.
-
-**FilterNode** (librarian-mcp) — Recursive JSON filter AST compiled to injection-safe SQL fragments for artifact queries.
-
-## Fixture Shared Domain
-
-All 5 test fixtures (java/kotlin/python/rust/typescript) use these types intentionally:
-
-- **`Book`** — Core domain entity (record/dataclass/struct/data class/class)
-- **`Genre`** — Enum for book categories
-- **`Searchable`** — Interface/trait defining `search_text()` and `relevance()`
-- **`Catalog<T: Searchable>`** — Generic container with `add`, `search`, `stats`
-- **`SearchResult`** — Sealed class / discriminated union / enum with `Found`, `NotFound`, `Error` variants
+| Term | Definition |
+|---|---|
+| `EditCase` | One eval scenario: input JSON for `edit_code` + expected disk invariants + compiler expectation |
+| `ContentInvariant` | Assertion that a file Contains or NotContains a needle string after the edit |
+| `CompilerExpected` | `Builds` (fixture compiles after edit) or `Breaks` (intentional compile failure) |
+| `Verdict` | Eval outcome: `Correct | SilentWrong | Panic | Hung` |

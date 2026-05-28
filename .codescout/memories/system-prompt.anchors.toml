@@ -3,23 +3,23 @@
 
 [[anchors]]
 path = "src/server.rs"
-hash = "d6a350c3c9e864962235073e3513a8bea20e9bccb159d7eb7d5decdf13d60c47"
+hash = "52d3c20f8aa796c9132af283c13b48aa5f6801350b533bb58473107d476a4fa1"
 
 [[anchors]]
-path = "src/tools/mod.rs"
-hash = "c41a6ee6009e7d73cc5efa07ff8ed23d938f7f4fce8f92adcef44a94cabe96ca"
+path = "src/tools/core/types.rs"
+hash = "e8e67fab5421656a68863abb7c5f87f8eeb28d67524b9c6076b5921f6d067c83"
 
 [[anchors]]
 path = "src/tools/output.rs"
 hash = "3780a914063ee4973c233c17fd9299424725ea08cd775e0e4d2415e4d414a88a"
 
 [[anchors]]
-path = "src/lsp/ops.rs"
-hash = "4c12308497e11e1057d1e9ae97503ac5fda307026f29134155a802f73c3503e6"
+path = "src/tools/mod.rs"
+hash = "5c28721ba34f85a42a584b6b27d56bf97a8e156816a41ff62941784b5e172fa7"
 
 [[anchors]]
-path = "docs/TODO-tool-misbehaviors.md"
-hash = "3a41895e1ab773118574f471504be884faaba340e1c243f0ae274f2ac2c53a73"
+path = "src/lsp/ops.rs"
+hash = "4c12308497e11e1057d1e9ae97503ac5fda307026f29134155a802f73c3503e6"
 
 [[anchors]]
 path = "docs/PROGRESSIVE_DISCOVERABILITY.md"
@@ -27,7 +27,7 @@ hash = "dd5fd6f8fdbb6662d9eb0f6510e4b3e706df309723350e93abad061a2d6b54d6"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "0f651cd601e1a96be5e6294baa7bcb51484d736468f01eb5ee49e590b40ebd39"
+hash = "0b8186ea53d7b04799d13711a56de4f9b16caf5ee6af5b925ec7784342e04731"
 
 [[anchors]]
 path = "src/lib.rs"
@@ -35,12 +35,12 @@ hash = "ad0e85f7250eb474a849509291466e669f26eef3656e4b76f918d9ca449c763a"
 
 [[anchors]]
 path = "src/agent/mod.rs"
-hash = "65ebfa32e43d282086416a906474fb28d3a1612607556dff60e3b808d8f01540"
+hash = "65747eb4fc388f067f2e60b2c70ecb6c68bbb425588a2458d11d2cf07169fc3e"
 
 [[anchors]]
 path = "src/tools/output_buffer.rs"
-hash = "521194730f585c90fc9c36c96504ac3f5ee6195a3538d9d7f393dec9d4080236"
+hash = "f856c9ba3b3de1a550384c1baf51365f4a789120b4f2041c26f702cb843cf20b"
 
 [[anchors]]
 path = "src/util/path_security.rs"
-hash = "666d63d6e5896856d6a37cdfc6ca95a73b0c4fd55414ae3604a9a5bce9242bb4"
+hash = "697e68e05c7f567a6e1e97cba531f78a50795c8287faca8ee9a09eda724d1ff8"

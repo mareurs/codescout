@@ -1,65 +1,65 @@
-# Development Commands — codescout Workspace
+# Workspace Development Commands
 
-## Workspace-Level (run from repo root)
+## code-explorer (main MCP server)
 
 ```bash
-# Build
-cargo build                    # dev build
-cargo build --release          # release build (required for live MCP testing)
+cargo build --release        # release binary — required for live MCP testing
+cargo test                   # unit + integration tests (excludes #[ignore])
+cargo clippy -- -D warnings  # lint (must be clean before commit)
+cargo fmt                    # format (run before commit)
+# After release build, run /mcp to reconnect — symlink auto-updates
+# ~/.cargo/bin/codescout → target/release/codescout
 
-# Test
-cargo test                     # all tests (workspace)
-cargo test -p codescout        # main crate only
-cargo test -p codescout-embed  # embed crate only
-cargo test -p librarian-mcp    # librarian crate only
-
-# Lint / Format
-cargo fmt                      # format all
-cargo fmt --check              # CI check
-cargo clippy -- -D warnings    # lint with errors
-
-# E2E tests (requires real LSP servers installed)
-cargo test --features e2e-rust     # Rust LSP tests
-cargo test --features e2e-python   # Python LSP tests
-cargo test --features e2e-ts       # TypeScript LSP tests
+# Edit eval harness (ignored by default):
+cargo test --test e2e -- edit_eval_harness --ignored
 ```
 
-## Live MCP Testing
+## codescout-embed
 
 ```bash
-cargo build --release          # rebuild first
-# Then restart MCP server in Claude Code:
-#   /mcp → restart codescout
+cargo test                   # unit tests (chunker, smoke) — no I/O required
+cargo test -- --ignored      # integration tests (require Ollama or model download)
 ```
 
-## Release (from master only)
+## edit-eval-rust (fixture)
 
 ```bash
-# 1. Bump version in Cargo.toml
-# 2. Build + test + clippy
-cargo build --release && cargo test && cargo clippy -- -D warnings
-# 3. Commit + tag
-git add Cargo.toml Cargo.lock && git commit -m "chore: bump version to X.Y.Z"
-git tag vX.Y.Z
-# 4. Publish
-CARGO_REGISTRY_TOKEN=$(grep CARGO_REGISTRY_TOKEN .env | cut -d= -f2) cargo publish
-# 5. Push + release
-git push && git push --tags
-gh release create vX.Y.Z --title "vX.Y.Z" --notes "..."
-# 6. Rebase experiments
-git checkout experiments && git rebase master
+cargo check                                          # verify fixture compiles
+git restore tests/fixtures/edit-eval-rust/src        # reset mutations between eval cases
 ```
 
-## Dashboard
+## nav-eval-rust (fixture)
 
 ```bash
-codescout dashboard            # starts Axum HTTP dashboard (opt-in feature)
+cargo check    # verify fixture compiles
 ```
 
-## Semantic Index
+## java-library (fixture)
 
 ```bash
-# Via MCP tool:
-# index(action="build", force=true)    — full reindex
-# index(action="status")               — check progress / drift
+./gradlew build    # compile + assemble (requires JDK 21+)
+```
+
+## kotlin-library (fixture)
+
+```bash
+./gradlew build    # requires JDK + Kotlin 2.1 toolchain
+```
+
+## rust-library (fixture)
+
+```bash
+cargo check    # verify compilation
+```
+
+## python-library (fixture)
+
+```bash
+python -c "import library"    # verify imports (stdlib only, no build step)
+```
+
+## typescript-library (fixture)
+
+```bash
+tsc    # compile src/ → dist/ (no test runner configured)
 ```

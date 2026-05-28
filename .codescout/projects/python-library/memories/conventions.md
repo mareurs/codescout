@@ -1,40 +1,54 @@
 # python-library — Conventions
 
-## Language & Style
+## Language Patterns
 
-- `from __future__ import annotations` in every module (deferred evaluation of type hints, Python 3.10+)
-- Type annotations on all function signatures and class fields
-- `@dataclass` for value objects (Book); plain classes for services and ABCs
-- Enum over string literals for categorical values (Genre)
+- **Python 3.10+** with `from __future__ import annotations` in files that use
+  self-referential or forward-ref type hints (book.py, catalog.py, advanced.py)
+- **Stdlib only** — no third-party dependencies; types come from abc, dataclasses,
+  enum, typing
 
-## Naming
+## Naming Conventions
 
-- Classes: `PascalCase` (`Book`, `AudioBook`, `Catalog`, `Genre`)
-- Functions and methods: `snake_case` (`search_text`, `is_available`, `rank_results`)
-- Constants: `UPPER_SNAKE_CASE` (`MAX_RESULTS`, `FICTION`, `NON_FICTION`)
-- Private attributes: single leading underscore (`_items`, `_name`, `_score`)
-- Type variables: single uppercase letter (`T`)
+- Classes: PascalCase (`Book`, `AudioBook`, `Catalog`, `Genre`)
+- Constants: SCREAMING_SNAKE_CASE (`MAX_RESULTS`, `T`)
+- Methods/functions: snake_case (`search_text`, `rank_results`, `create_default_catalog`)
+- Private attributes: single underscore prefix (`_items`, `_name`)
+- Internal helpers: underscore prefix + descriptive name (`_score` closure in rank_results)
 
-## Module / Package Conventions
+## Type Annotation Style
 
-- Each subpackage has an `__init__.py` with a module docstring only (no re-exports except top-level)
-- Top-level `library/__init__.py` re-exports the four main public symbols: `Book`, `Genre`, `Searchable`, `Catalog`
-- `extensions/advanced.py` is explicitly a showcase of advanced Python constructs, not production code
+- All public methods annotated with return types
+- TypeVar bound: `T = TypeVar("T", bound=Searchable)` for generic constraints
+- Type alias at module level: `BookList = list[Book]`
+- Protocol for structural typing: `@runtime_checkable class HasISBN(Protocol)`
+- No use of `Optional` / `Union` — fixture is intentionally simple
 
-## Interface Design
+## Class Design Patterns
 
-- Abstractions live in `interfaces/` (ABC and Protocol)
-- `Catalog` is generic over `Searchable` — only types implementing `search_text()` are valid items
-- `Book` itself is **not** `Searchable`; `AudioBook` is the concrete searchable book type
-- `HasISBN` Protocol uses `@runtime_checkable` for `isinstance()` checks
+- Domain models use `@dataclass` (Book, AudioBook inherits it)
+- Interfaces use `ABC` + `@abstractmethod` (Searchable)
+- Structural interfaces use `Protocol` (HasISBN)
+- Enums subclass `Enum` and may have instance methods (Genre.label)
+- Mixins are plain classes with no required base (Playable)
+- Generic services use `Generic[T]` with TypeVar bound (Catalog)
+
+## Module Organization
+
+- `models/` — pure data, no service dependencies
+- `interfaces/` — ABCs and Protocols, no model imports
+- `services/` — depend on interfaces only, not models directly
+- `extensions/` — depends on both models and interfaces; houses edge-case language features
+- `__init__.py` files are minimal: top-level re-exports the 4 main public symbols
 
 ## Testing Approach
 
-- No test files exist inside this fixture
-- The fixture is exercised by codescout's own integration/unit tests in the host project
-- `pytest` is listed as a build command in project hints but no test suite is present
+- No test files within this fixture — it IS the test fixture for codescout
+- Designed to exercise codescout's Python LSP/symbol/navigation tooling
+- Each file and class is annotated with comments like `"""Extension: ...`" to
+  document which Python language feature it demonstrates
 
-## Error Handling
+## Docstring Style
 
-- No explicit error handling in this fixture — it is a clean-path demonstration codebase
-- Type safety is enforced at the annotation level; no runtime validation or exceptions defined
+- All public classes and methods have one-line docstrings
+- Extension/edge-case markers in docstrings: `"""Extension: <feature description>"""`
+- No multi-paragraph docstrings; keep minimal for fixture purposes

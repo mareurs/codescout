@@ -7,11 +7,11 @@ hash = "299cc710929e49e6dcaead85f654d22518b5d6268a0ca361e1cb0da98ea0a2b1"
 
 [[anchors]]
 path = "src/lsp/client.rs"
-hash = "db0e153bb5f47a1b64a5cc254f32581d04947a8c0135490bf2be783397973475"
+hash = "3e45c4253dab8ad677be7f3273d116c6869ed69c35215776c5a03a34ad0ed7d6"
 
 [[anchors]]
 path = "src/util/path_security.rs"
-hash = "666d63d6e5896856d6a37cdfc6ca95a73b0c4fd55414ae3604a9a5bce9242bb4"
+hash = "697e68e05c7f567a6e1e97cba531f78a50795c8287faca8ee9a09eda724d1ff8"
 
 [[anchors]]
 path = ".codescout/project.toml"
@@ -23,15 +23,11 @@ hash = "ec269942aa229cdf317b8a8bca43e6f5555c55b2ef803735762102bc9e3863b0"
 
 [[anchors]]
 path = "src/tools/mod.rs"
-hash = "c41a6ee6009e7d73cc5efa07ff8ed23d938f7f4fce8f92adcef44a94cabe96ca"
-
-[[anchors]]
-path = "docs/TODO-tool-misbehaviors.md"
-hash = "3a41895e1ab773118574f471504be884faaba340e1c243f0ae274f2ac2c53a73"
+hash = "5c28721ba34f85a42a584b6b27d56bf97a8e156816a41ff62941784b5e172fa7"
 
 [[anchors]]
 path = "Cargo.toml"
-hash = "6045b4b9c23cd03abbdc69ed601a0c98825e6c8cc0a9831ae72af65964f332a0"
+hash = "d83dd60b20df213a66ee3631bdf054b3d01aacf24627fe958089251e2dbfef7a"
 
 [[anchors]]
 path = ".codescout/system-prompt.md"

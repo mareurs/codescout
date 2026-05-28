@@ -3,8 +3,8 @@
 
 [[anchors]]
 path = "src/lib.rs"
-hash = "d7fabcbfe4c95b8c9d583f5c8a3c35d3fad097eb6a7e9290a0a768c4093fc883"
+hash = "ad0e85f7250eb474a849509291466e669f26eef3656e4b76f918d9ca449c763a"
 
 [[anchors]]
 path = "src/embed/mod.rs"
-hash = "bd800387ac4e5b70da2cc8c1f5177e920213872b6be101fd911e09479bb1f9c4"
+hash = "dd566de12b36b8907d8ac621819ff03a1d4d605103827fea41e7ea18102406b5"

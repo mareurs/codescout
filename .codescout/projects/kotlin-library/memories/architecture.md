@@ -1,95 +1,58 @@
-# kotlin-library — Architecture
+## Architecture
 
-## Module Structure
-
-Single Gradle subproject (`rootProject.name = "kotlin-library"`). No multi-module setup.
-All sources live under `src/main/kotlin/library/`, split into four sub-packages:
+**Module structure:**
 
 ```
-interfaces/   — abstract contracts (Searchable)
-models/       — value types (Book, Genre)
-services/     — business logic (Catalog<T>, factory/extension fns)
-extensions/   — advanced Kotlin idioms (ISBN, LazyBook, SearchResult, BookRegistry)
+src/main/kotlin/library/
+  models/
+    Book.kt          — data class Book(title, isbn, genre, copiesAvailable); companion with factory methods
+    Genre.kt         — enum class Genre { FICTION, NON_FICTION, SCIENCE, HISTORY, BIOGRAPHY }; label()
+  interfaces/
+    Searchable.kt    — interface with searchText(): String + default relevance(): Double = 0.0
+  services/
+    Catalog.kt       — generic class Catalog<T : Searchable>; add/search/stats; free + extension fns
+  extensions/
+    Advanced.kt      — ISBN (value class), LazyBook (delegated property), createBookWithDefaults (scope fns)
+    Results.kt       — SearchResult (sealed class), BookRegistry (singleton object)
 ```
 
-There are no test sources in this fixture.
+**Key abstractions:**
 
-## Key Abstractions
+- `Searchable` — interface that all catalog items must implement; `searchText()` is the indexing contract;
+  `relevance()` provides default `0.0` score, overridable for custom ranking
+- `Catalog<T : Searchable>` — generic, name-bearing container; maintains a mutable internal list; exposes
+  `add`, `search` (filter by `searchText().contains`), and `stats` (returns nested `CatalogStats`)
+- `Book` — primary domain entity as a data class; immutable by default; companion object provides
+  `create` and `fromJson` factory methods
+- `SearchResult` — sealed class hierarchy for typed search outcomes: `Found(book, score)`, `NotFound`
+  (object), `Error(message, code)`; `isMatch()` checks `is Found`
+- `BookRegistry` — top-level singleton (`object`) keyed by ISBN; `register(book)` + `lookup(isbn): Book?`
 
-### `Searchable` (interface)
-Defines the contract for catalog entries:
-- `searchText(): String` — required; text used for substring filtering
-- `relevance(): Double` — optional; default returns 0.0
+**Data flows:**
 
-### `Book` (data class)
-Primary domain type. Fields: `title`, `isbn`, `genre` (Genre enum), `copiesAvailable` (default 1).
-- `isAvailable()` — copiesAvailable > 0
-- `companion object` with `create(title, isbn)` and `fromJson(json)` factory methods
+1. **Search flow:**
+   `Catalog<T>.search(query)` → `items.filter { it.searchText().contains(query) }` → `List<T>`
+   Items must implement `Searchable`; the search is purely string-contains on `searchText()` output.
+   Async variant: `suspend fun Catalog<T>.searchAsync(query)` — delegates to the synchronous `search`.
 
-### `Genre` (enum)
-Five values: FICTION, NON_FICTION, SCIENCE, HISTORY, BIOGRAPHY.
-`label()` formats the name for display (lowercase, capitalize first char).
+2. **Registry lookup flow:**
+   `BookRegistry.register(book)` → `books[book.isbn] = book` (mutable map, ISBN as key)
+   `BookRegistry.lookup(isbn)` → `books[isbn]` returning `Book?` (null if absent)
 
-### `Catalog<T : Searchable>` (generic class)
-- Holds a mutable list of `T`
-- `add(item)` / `search(query): List<T>` (substring match on `searchText()`)
-- `stats()` → nested `CatalogStats(totalItems, name)` data class
-- Top-level: `createDefaultCatalog()`, `createNamedCatalog(name, maxItems)`
-- Extension: `suspend fun Catalog<T>.searchAsync(query)` (delegates to `search`)
-- Extension on Book: `fun Book.toSearchText()` → `"$title ($isbn)"`
+**Design patterns present:**
+- Generic service with type-bound (`Catalog<T : Searchable>`) — classic bounded-type pattern
+- Sealed class for result types (`SearchResult`) — Kotlin idiom replacing checked exceptions
+- Companion object factory (`Book.create`, `Book.fromJson`) — named constructors
+- Singleton object (`BookRegistry`) — thread-safe by JVM class-loading semantics
+- Delegated property (`LazyBook.formattedTitle by lazy`) — lazy evaluation demo
+- Scope function chaining (`let { }.copy(...)`) in `createBookWithDefaults`
 
-### `SearchResult` (sealed class)
-Three variants:
-- `Found(book: Book, score: Double)` — data class
-- `NotFound` — object
-- `Error(message: String, code: Int)` — data class
-- `isMatch()` — returns `this is Found`
+**Semantic search examples (project_id="kotlin-library"):**
+- `semantic_search("generic catalog search interface", project_id="kotlin-library")`
+- `semantic_search("sealed class result type error handling", project_id="kotlin-library")`
+- `semantic_search("value class ISBN delegated property lazy", project_id="kotlin-library")`
+- `semantic_search("singleton registry companion object factory", project_id="kotlin-library")`
+- `semantic_search("suspend extension function coroutine", project_id="kotlin-library")`
 
-### `BookRegistry` (object / singleton)
-Thread-unsafe in-memory map from ISBN → Book.
-- `register(book)` / `lookup(isbn): Book?`
-
-### `ISBN` (value class)
-`@JvmInline value class ISBN(val value: String)` — wraps a raw string with zero overhead.
-
-### `LazyBook`
-Demonstrates `by lazy` delegated properties: `formattedTitle` computed once on first access.
-
-### `createBookWithDefaults`
-Demonstrates `.let {}` scope function with `copy()` to build a modified instance.
-
-## Data Flow
-
-### Search path (typical use)
-1. Caller creates `Catalog<Book>("name")`
-2. Books added via `catalog.add(book)`
-3. `catalog.search("kotlin")` → `items.filter { it.searchText().contains("kotlin") }`
-   (`Book` doesn't directly implement `Searchable`; `searchText()` would need to be provided
-   by an implementing class or extension — the fixture uses `Book.toSearchText()` as a hint)
-4. Returns filtered `List<T>`
-
-### Registry lookup path
-1. `BookRegistry.register(book)` stores `isbn → book` in the singleton map
-2. `BookRegistry.lookup(isbn)` returns `Book?` (null if not found)
-3. Caller pattern-matches on `SearchResult` variants for richer error surfacing
-
-## Design Patterns Used
-
-- **Value object:** `data class Book`, `data class CatalogStats`
-- **Sealed hierarchy for typed errors:** `SearchResult`
-- **Singleton via object:** `BookRegistry`
-- **Factory via companion object:** `Book.Companion.create / fromJson`
-- **Generic bounded type parameter:** `Catalog<T : Searchable>`
-- **Delegated property:** `LazyBook.formattedTitle by lazy`
-- **Value/inline class:** `ISBN`
-- **Extension functions & coroutines:** `searchAsync`, `toSearchText`
-
-## Useful Semantic Search Queries
-
-```
-semantic_search("sealed class result variants", project_id="kotlin-library")
-semantic_search("generic catalog bounded type parameter search", project_id="kotlin-library")
-semantic_search("companion object factory create", project_id="kotlin-library")
-semantic_search("singleton object registry lookup", project_id="kotlin-library")
-semantic_search("coroutine suspend extension function", project_id="kotlin-library")
-```
+Note: semantic index may be empty for this fixture; fall back to
+`grep(pattern, path="tests/fixtures/kotlin-library/src")`.

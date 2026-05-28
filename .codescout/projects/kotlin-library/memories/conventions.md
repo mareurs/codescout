@@ -1,48 +1,46 @@
-# kotlin-library — Conventions
+## Conventions
 
-## Language & Style
+**Language:** Kotlin 2.1.0 on JVM. Build: Gradle Kotlin DSL (`build.gradle.kts`).
 
-- **Kotlin 2.1.0** targeting JVM; no Java interop layer beyond `@JvmInline`
-- All public types and functions carry KDoc `/** ... */` doc comments
-- Expression-body functions preferred for single-expression logic:
-  `fun isAvailable(): Boolean = copiesAvailable > 0`
-- Named arguments used when constructing data classes with multiple params
+**Naming:**
+- Classes/interfaces/objects: PascalCase (`Book`, `Catalog`, `SearchResult`, `BookRegistry`)
+- Functions and properties: camelCase (`isAvailable`, `searchText`, `copiesAvailable`)
+- Constants: camelCase at top level (`MAX_RESULTS`), not SCREAMING_SNAKE (deviates from Java convention)
+- Enum entries: UPPER_SNAKE (`FICTION`, `NON_FICTION`)
+- Packages: lowercase dotted (`library.models`, `library.services`)
 
-## Naming
+**Immutability:**
+- Data class properties are `val` by default
+- Internal mutable state is private (`private val items = mutableListOf<T>()`)
+- Public API exposes `List<T>` (read-only view), never `MutableList`
 
-- Classes/interfaces: `PascalCase` (Book, Catalog, Searchable, SearchResult)
-- Functions/properties: `camelCase` (searchText, isAvailable, copiesAvailable)
-- Constants / enum entries: `UPPER_SNAKE_CASE` (MAX_RESULTS, FICTION, NON_FICTION)
-- Packages: all-lowercase, dot-separated (`library.models`, `library.services`)
-- File names match the primary type they declare (`Book.kt`, `Genre.kt`)
+**Null safety:**
+- Nullable returns typed explicitly (`Book?` for registry lookup)
+- No `!!` usage in the fixture — absence is expressed as nullable return
 
-## Type Design
+**Error / precondition handling:**
+- `require(condition) { message }` for preconditions (see `createNamedCatalog`)
+- No exception throwing beyond `require`; errors modelled as sealed class variants (`SearchResult.Error`)
 
-- `data class` for value objects (Book, CatalogStats, SearchResult.Found)
-- `enum class` with member functions for categorization (Genre.label())
-- `sealed class` for exhaustive result/error hierarchies (SearchResult)
-- `object` for singletons and companion factories (BookRegistry, Book.Companion)
-- `@JvmInline value class` for typed wrappers with no runtime overhead (ISBN)
+**Testing:**
+- No test directory in this fixture — it is a navigation/parsing target, not a tested library
 
-## Extension Pattern
+**Documentation:**
+- All public members have KDoc (`/** ... */`)
+- `createNamedCatalog` demonstrates multi-line KDoc with `@param` / `@return` tags
+- Comments use `//` for inline code notes
 
-Advanced.kt and the bottom of Catalog.kt follow a deliberate "extension showcase" pattern:
-each declaration is annotated with a `/** Extension: ... */` KDoc explaining what Kotlin
-feature it demonstrates. This is intentional test-fixture commentary, not production style.
+**Kotlin-specific idioms present:**
+- `@JvmInline value class` for zero-overhead wrappers (`ISBN`)
+- `by lazy` for deferred property init (`LazyBook.formattedTitle`)
+- `sealed class` for exhaustive result modeling (`SearchResult`)
+- Top-level `object` for singleton services (`BookRegistry`)
+- Extension functions on own and foreign types (`Book.toSearchText`, `Catalog<T>.searchAsync`)
+- Scope functions (`let`, `copy`) for inline transformations
+- Nested data class inside outer class (`Catalog.CatalogStats`)
 
-## Build
-
-- Gradle Kotlin DSL only — no `build.gradle` (Groovy)
-- No test source set configured; `./gradlew test` would be a no-op
-- `./gradlew build` compiles to `build/` (only `build/reports/` present in repo)
-
-## Error Handling
-
-No exception-based error handling in this fixture. Errors are modelled as
-`SearchResult.Error(message, code)` — a value in the sealed hierarchy — following
-the Kotlin "railway-oriented" convention of avoiding thrown exceptions for expected failures.
-
-## No Tests
-
-This project is a codescout fixture, not a shipping library. There are no test sources.
-All verification happens via codescout's own integration tests in the parent project.
+**LSP note:**
+The Kotlin LSP (`kotlin-language-server`) circuit-breaker is known to trip on this fixture
+when another codescout instance targets the same project. If `symbols(include_body=true)`
+fails with "circuit-breaker open", use `grep(pattern, path=...)` as fallback to read source.
+See `docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md` in the code-explorer project.

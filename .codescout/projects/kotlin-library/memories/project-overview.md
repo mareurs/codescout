@@ -1,38 +1,39 @@
-# kotlin-library — Project Overview
+## Project Overview
 
-## Purpose
+**Purpose:** Test fixture for codescout's Kotlin language support. Exercises idiomatic
+Kotlin and JVM language features to validate codescout's tree-sitter parsing, symbol
+extraction, and navigation tools on Kotlin code.
 
-A small Kotlin library fixture used as a test target for codescout's LSP and symbol
-navigation tools. It models a simplified book catalog domain and deliberately exercises
-a range of Kotlin language features so that codescout can be verified against them.
+**Tech Stack:**
+- Kotlin 2.1.0 (JVM target)
+- Gradle build system (Kotlin DSL — `build.gradle.kts`)
+- Single dependency: `kotlin("stdlib")`
+- Group `library`, version `0.1.0`
 
-## Tech Stack
+**Structure:** Single Gradle module (`kotlin-library`) with 6 source files under
+`src/main/kotlin/library/`. No tests, no README — this is a codescout test fixture,
+not a production project.
 
-- **Language:** Kotlin (JVM target, stdlib only)
-- **Build system:** Gradle with Kotlin DSL (`build.gradle.kts`)
-- **Kotlin version:** 2.1.0
-- **Group / version:** `library` / `0.1.0`
-- **Dependencies:** `kotlin("stdlib")` only — no third-party runtime deps
-- **Test suite:** None — this is a fixture, not a production library
+**Packages:**
+- `library.models` — domain entities: `Book` (data class), `Genre` (enum with method)
+- `library.interfaces` — contracts: `Searchable` (interface with default `relevance()`)
+- `library.services` — business logic: `Catalog<T : Searchable>` (generic service),
+  free functions (`createDefaultCatalog`, `createNamedCatalog`), extension functions
+- `library.extensions` — advanced features: `ISBN` (value class), `LazyBook` (delegated
+  property), `SearchResult` (sealed class), `BookRegistry` (object/singleton),
+  `createBookWithDefaults` (scope functions demo)
 
-## Package Layout
-
-```
-library/
-  interfaces/   Searchable interface
-  models/       Book (data class), Genre (enum)
-  services/     Catalog<T> generic class + top-level factory/extension fns
-  extensions/   ISBN value class, LazyBook, SearchResult sealed class,
-                BookRegistry singleton object, createBookWithDefaults scope fn
-```
-
-## Key Files
-
-| File | Role |
-|---|---|
-| `models/Book.kt` | Core domain type; `data class` with companion factory |
-| `models/Genre.kt` | Enum with a display-label helper |
-| `interfaces/Searchable.kt` | Search contract; `Catalog` is bounded on this |
-| `services/Catalog.kt` | Generic collection + search; KDoc coroutine/extension extras |
-| `extensions/Results.kt` | Sealed result hierarchy + `BookRegistry` singleton |
-| `extensions/Advanced.kt` | `@JvmInline` value class, `by lazy`, scope functions |
+**Kotlin Features Exercised:**
+- Data classes (`Book`, `Found`, `Error`, `CatalogStats`)
+- Enum class with member function (`Genre.label()`)
+- `@JvmInline` value class (`ISBN`)
+- Sealed class hierarchy (`SearchResult` with `Found`, `NotFound`, `Error` variants)
+- Object declarations — companion (`Book.Companion`) and top-level singleton (`BookRegistry`)
+- Delegated properties (`by lazy` in `LazyBook`)
+- Generic class with upper bound (`Catalog<T : Searchable>`)
+- Extension functions on generic receiver (`Catalog<T>.searchAsync`, `Book.toSearchText`)
+- Suspend (coroutine) extension function (`searchAsync`)
+- Scope functions (`let`, `copy` in `createBookWithDefaults`)
+- Precondition helpers (`require` in `createNamedCatalog`)
+- Nested data class inside a class (`CatalogStats` inside `Catalog`)
+- Multi-line KDoc with `@param`/`@return` tags (`createNamedCatalog`)

@@ -1,61 +1,54 @@
-# Gotchas — codescout Workspace
+# Workspace Gotchas
 
-## Cross-Project
+## Semantic Index — Fixture Projects Not Indexed
 
-**Embedding dimension mismatch on fixture project memories**
-`memory(write)` on fixture projects (java/kotlin/python/rust/typescript) emits
-`cross-embed failed: Dimension mismatch (expected 384, received 768)` warnings.
-Status is still `ok` — the memory text is saved; only the cross-project embedding index fails.
-Cause: fixture project `.codescout/embeddings/project.db` was indexed with 384-dim model
-but current encoder runs 768-dim. Non-blocking; just noise in logs.
+The semantic index is populated for `code-explorer` only. All fixture projects
+(java-library, kotlin-library, python-library, rust-library, typescript-library,
+nav-eval-rust, edit-eval-rust) have no separate semantic index.
+**When searching within fixture projects:** skip `semantic_search`; use
+`grep(pattern, path="tests/fixtures/<name>/src")` or `symbols(path="tests/fixtures/<name>/")` directly.
 
-**Fixture project memory reads fall back to home project**
-`memory(action="read", project="java-library", topic="project-overview")` returns
-the home project's (code-explorer's) memory if the fixture project has no memory store
-or wasn't activated. Always check the returned content matches the expected project.
+## Kotlin LSP Circuit-Breaker
 
-**Subagents share the MCP server state**
-`workspace(action="activate", path=...)` is global state. Any subagent that activates
-a different project MUST restore the home project before exiting, or all subsequent
-tool calls in the parent session break silently.
+`kotlin-language-server` circuit-breaker trips when two codescout instances target the same
+Kotlin project concurrently. `symbols(include_body=true)` will fail with "circuit-breaker open".
+**Workaround:** use `grep` as fallback.
+See `docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md`.
 
-## code-explorer Specific
+## eval Fixture Workspace Isolation
 
-**LSP cold start on first symbol query** — rust-analyzer and other LSPs need 5–30s to
-index on first use. Retry logic is built into `LspClient` but the first call may appear
-slow. Use `MockLspProvider` in tests to avoid this.
+`edit-eval-rust` and `nav-eval-rust` declare their own `[workspace]` tables and must
+**never** be added as workspace members of code-explorer. Their `Cargo.lock` must stay separate.
+`git restore tests/fixtures/edit-eval-rust/src` resets mutations — all `src/` files must be
+git-tracked or restore silently no-ops and mutations leak between eval cases.
 
-**Kotlin LSP conflict** — Multiple concurrent Kotlin LSP instances can conflict.
-See `docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md`. TTL is 2h vs 30min
-for other languages.
+## MCP Binary Symlink
 
-**`symbols()` truncation** — `symbols(path)` caps output via OutputGuard. If symbols
-appear missing, use `symbols(path, detail_level="full")` or narrow with `name=` filter.
+`~/.cargo/bin/codescout` is a symlink → `target/release/codescout`.
+`cargo build` (dev profile) does NOT update the live binary. Only `cargo build --release` does.
+After a release build, run `/mcp` to reconnect. If the symlink is missing after `cargo clean`,
+recreate: `ln -sf "$(pwd)/target/release/codescout" ~/.cargo/bin/codescout`.
 
-**`edit_file` gate on multi-line structural edits** — `edit_file` hard-errors on edits
-containing definition keywords (`fn`, `class`, `struct`, etc.) on LSP-supported languages.
-Use `replace_symbol`, `insert_code`, or `remove_symbol` instead.
+## RemoteEmbedder Dimensions
 
-**Three-query sandwich for cache invalidation tests** — A two-query test only checks the
-happy path. Always: baseline → assert stale → invalidate → assert fresh.
-See `did_change_refreshes_stale_symbol_positions` in `src/lsp/client.rs`.
+`RemoteEmbedder.dimensions()` returns `0` until after the first successful `embed()` call
+(uses `AtomicUsize` cached lazily). Callers needing a guaranteed non-zero dimension must
+embed a sample text first.
 
-**Prompt surface tripwire** — `server::tests::prompt_surfaces_reference_only_real_tools`
-fails if any of the 3 prompt surfaces reference a non-existent tool name. Add to allowlist
-or fix the stale reference.
+## Cherry-Pick SHA Discipline
 
-## librarian-mcp Specific
+Always record the **master-side SHA** after cherry-pick, not the experiments-side original.
+After `git rebase master`, experiments-side originals become orphans — `git branch --contains`
+returns empty. Use `git log master --oneline --grep="<subject>"` to recover master SHA if needed.
 
-**FilterNode SQL injection** — Never build SQL fragments by hand. Always go through
-`filter::compile()` which emits parameterized queries.
+## Cross-Repo Commit References
 
-**TimeMachine replay requires git history** — `artifact_state_at` replays via git diff;
-repos without full history (shallow clones) may miss events.
+When a tracker cites a commit from a sibling repo, prefix: `<repo>:<sha>` (e.g. `codescout-companion:0b75991`).
+A bare SHA implies the current repo. Unenforced by tooling — readers must notice the prefix.
 
-## codescout-embed Specific
+## Onboarding Subagent Project-Scope Collision
 
-**fastembed `&mut self` in v5** — fastembed 5 changed `embed` to `&mut self`, requiring
-`Arc<Mutex<LocalEmbedder>>` even for read-only usage. Don't try to make it `Arc<RwLock>`.
-
-**Remote embedder lazy dimension caching** — `RemoteEmbedder` caches dimensions via
-`Arc<AtomicUsize>`. The first embed call populates it; before that, `dimensions()` returns 0.
+During parallel force-onboarding, subagents may overwrite each other's memories in the
+`code-explorer` project slot (last writer wins when multiple subagents share the focused project).
+Verify `memory(action="read", project_id="code-explorer", topic="project-overview")` after onboarding
+to confirm the content is actually about codescout and not a fixture crate.

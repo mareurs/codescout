@@ -1,50 +1,62 @@
 # codescout-embed — Conventions
 
-## Language & Style
-- Rust 2021 edition; workspace-level `edition`, `license`, `authors` fields
-- `async-trait` for async trait methods (`#[async_trait::async_trait]`)
-- `anyhow::Result` throughout; `thiserror` available but not currently used in structs
-
 ## Error Handling
-- `anyhow::bail!` for user-facing configuration errors with actionable messages
-- Error messages include concrete alternatives and example config snippets
-- `unwrap()` only in tests or truly infallible paths (e.g. `Client::build`)
-- `spawn_blocking` join errors propagated via `map_err` with context
 
-## Feature Gates
-- All remote HTTP code under `#[cfg(feature = "remote-embed")]`
-- All fastembed/ONNX code under `#[cfg(feature = "local-embed")]`
-- `lib.rs` guards module `pub mod` declarations with the same cfg attributes
-- Dead-variable suppression via `let _ = &var` under `#[cfg(not(feature = ...))]`
+- Uses `anyhow::bail!` throughout (no `RecoverableError` — this is a library crate).
+- Empty/whitespace-only batch → `bail!` immediately (do not pass to server; old sentinel
+  `vec![vec![0.0; 1]]` approach was removed — it silently corrupted the dim-check downstream).
+- `custom:` model prefix → hard error with migration hint to use `url` field.
+- Missing `OPENAI_API_KEY` → descriptive error naming the env var.
+- Ollama unreachable → descriptive error with fallback options listed.
+- Unknown local model → `bail!` listing all 7 supported `local:` model IDs.
 
-## Naming
-- Model strings use prefix convention: `local:ModelName`, `ollama:model-name`, `openai:model-name`
-- fastembed model variant names match `fastembed::EmbeddingModel` enum variants exactly (PascalCase)
-- Public chunker functions: `split` (generic), `split_markdown` (returns `RawChunk`), `chunk_markdown` (returns `Vec<String>`)
+## Async Patterns
 
-## Testing
-- Unit tests in `mod tests` at bottom of each file
-- `#[ignore = "requires running Ollama"]` for integration tests needing external services
-- Chunker tests verify: coverage of all lines, line number accuracy, overlap behavior, content match
-- `local.rs` tests use only `parse_model` (sync, no ONNX needed) — no `#[tokio::test]`
-- Remote tests test constructor logic (sync); actual HTTP tests are `#[ignore]`
-- Smoke test in `lib.rs` verifies crate compiles: `assert_eq!(2 + 2, 4)`
+- `LocalEmbedder::new()` is async; heavy ONNX work is on `tokio::task::spawn_blocking`.
+- `LocalEmbedder::embed()` also uses `spawn_blocking` (fastembed 5 `embed()` is `&mut self`).
+- Mutex (std, blocking) wraps the fastembed model — serialises concurrent embed calls.
+- `RemoteEmbedder` is fully async (`reqwest` + tokio).
 
-## Chunk Size Formula
-- `chunk_size = (max_tokens × 0.85 × 3) as usize`
-- 0.85 factor: 15% headroom for tokenization variance and control tokens
-- 3 chars/token: conservative lower bound for code
-- Unknown models fall back to 512 tokens
-- Not user-configurable — derived from model spec to prevent misconfiguration
+## Feature Gating
 
-## HTTP Safety
-- 300-second per-request timeout on embed HTTP client
-- 2-second timeout on `probe_ollama`
-- 32 MiB cap on response bodies
-- API keys forbidden over plaintext HTTP unless loopback host
-- Batch size: 32 texts per request
-- Retry: 3 attempts, exponential backoff starting at 500ms, only on 5xx
+- All `local.rs` code is `#[cfg(feature = "local-embed")]`.
+- All `remote.rs` code is `#[cfg(feature = "remote-embed")]`.
+- `lib.rs` has fine-grained `cfg` blocks per resolver step in `create_embedder_with_config`.
+- `chunk_size_for_model` is feature-free — knows about local model token counts but
+  avoids importing local.rs to keep it unconditionally available.
 
-## Workspace Integration
-- `edition.workspace = true`, `license.workspace = true`, `authors.workspace = true`
-- `anyhow`, `serde`, `serde_json`, `tokio`, `tracing`, `thiserror` from workspace
+## Naming Conventions
+
+- `model_spec` — full spec string including prefix (e.g. `"local:AllMiniLML6V2Q"`)
+- `model_id` / `bare_model` / `bare` — model name after stripping prefix
+- `chunk_size` — in characters
+- `chunk_overlap` — in characters
+- `max_tokens` — token budget; `chunk_markdown` converts to chars via `× 4`
+- `RawChunk` — pre-embedding chunk with line provenance; used by indexing pipeline
+- `Embedding` = `Vec<f32>`; `Vec<Embedding>` = one vector per input text
+
+## Testing Approach
+
+- Pure logic tests (chunker): `#[test]` in `mod tests` at bottom of `chunker.rs`.
+  No `#[ignore]` needed — no I/O.
+- Remote embedder tests: `#[tokio::test] #[ignore = "requires running Ollama"]` for live
+  HTTP tests; only `probe_ollama_errors_when_unreachable` runs in CI (uses port 1).
+- Local model tests: `#[test] #[ignore = "requires fastembed model download"]`.
+- Smoke test in `lib.rs::smoke::crate_builds` — `#[test] fn crate_builds()` — trivially
+  passes; exists to confirm the crate compiles with no features.
+- No integration test directory — all tests are in-module.
+- Test constants: `const MODEL: &str = "nomic-embed-text"` for Ollama tests.
+
+## HTTP Client Configuration
+
+- Per-request timeout: 300 seconds (handles slow GPU-discovery Ollama startups).
+- `probe_ollama` uses a separate 2-second client for fast connectivity check.
+- `rustls-no-provider` feature on reqwest — caller must install ring provider via `Once`.
+- Response body capped at 32 MiB before JSON decode.
+
+## Batch Processing Constants (`remote.rs`)
+
+- `BATCH_SIZE = 32` texts per HTTP request
+- `MAX_RETRIES = 3` (0, 500ms, 1000ms backoff; doubles each retry)
+- `INITIAL_BACKOFF_MS = 500`
+- 4xx errors are NOT retried; 5xx and network errors are.

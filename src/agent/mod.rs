@@ -720,7 +720,16 @@ impl Agent {
     /// Get the current project status for building server instructions.
     pub async fn project_status(&self) -> Option<crate::prompts::ProjectStatus> {
         // Phase 1: cheap clones under the read lock — no blocking I/O
-        let (name, path, languages, memory_store, db_path, prompt_file, default_prompt) = {
+        let (
+            name,
+            path,
+            project_root,
+            languages,
+            memory_store,
+            db_path,
+            prompt_file,
+            default_prompt,
+        ) = {
             let inner = self.inner.read().await;
             let project = inner.active_project()?;
             let prompt_file = project.root.join(".codescout").join("system-prompt.md");
@@ -732,6 +741,7 @@ impl Agent {
             Some((
                 project.config.project.name.clone(),
                 project.root.display().to_string(),
+                project.root.clone(),
                 project.config.project.languages.clone(),
                 project.memory.clone(),
                 db_path,
@@ -741,18 +751,20 @@ impl Agent {
         }?; // lock dropped here
 
         // Phase 2: blocking filesystem reads off the executor
-        let (memories, has_index, system_prompt) = tokio::task::spawn_blocking(move || {
-            let memories = memory_store.list().unwrap_or_default();
-            let has_index = db_path.exists();
-            let system_prompt = if prompt_file.exists() {
-                std::fs::read_to_string(&prompt_file).ok()
-            } else {
-                default_prompt
-            };
-            (memories, has_index, system_prompt)
-        })
-        .await
-        .ok()?;
+        let (memories, has_index, system_prompt, worktree) =
+            tokio::task::spawn_blocking(move || {
+                let memories = memory_store.list().unwrap_or_default();
+                let has_index = db_path.exists();
+                let system_prompt = if prompt_file.exists() {
+                    std::fs::read_to_string(&prompt_file).ok()
+                } else {
+                    default_prompt
+                };
+                let worktree = crate::prompts::detect_worktree_info(&project_root);
+                (memories, has_index, system_prompt, worktree)
+            })
+            .await
+            .ok()?;
 
         // Phase 3: workspace summary (acquires its own read-lock)
         let workspace = self.workspace_summary().await;
@@ -765,6 +777,7 @@ impl Agent {
             has_index,
             system_prompt,
             workspace,
+            worktree,
         })
     }
 

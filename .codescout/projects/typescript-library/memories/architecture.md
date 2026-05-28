@@ -1,58 +1,101 @@
-# Architecture — typescript-library
+# typescript-library — Architecture
 
 ## Module Structure
-- **`models/`** — Domain types: `Book` (class with private fields, accessor methods) and
-  `Genre` (string enum with 5 values + `genreLabel` helper).
-- **`interfaces/`** — Contracts and type utilities:
-  - `searchable.ts`: `Searchable` interface (`searchText(): string`, optional `relevance?(): number`)
-  - `types.ts`: discriminated union `SearchResult = FoundResult | NotFoundResult | ErrorResult`,
-    type guard `isFound()`, `ReadonlyBook` (mapped type), `IsAvailable<T>` (conditional type),
-    `BookIndex` (index signature interface)
-- **`services/`** — Runtime logic: generic `Catalog<T extends Searchable>` with `add/search/stats`
-  methods; `CatalogStats` value object; `createDefaultCatalog()` factory function.
-- **`extensions/`** — Advanced TypeScript patterns: function overloads (`findBook`), experimental
-  decorator (`@logged`), `BookService` with decorated method, `BookMetadata` interface + namespace
-  merging, `DefaultCatalog` default export class.
+
+```
+src/
+  index.ts                     # public re-export barrel
+  models/
+    book.ts                    # Book class + MAX_RESULTS constant
+    genre.ts                   # Genre enum + genreLabel() helper
+  interfaces/
+    searchable.ts              # Searchable interface (search protocol)
+    types.ts                   # Union result types + type utilities
+  services/
+    catalog.ts                 # Catalog<T> generic service + CatalogStats
+  extensions/
+    advanced.ts                # Advanced TS feature demos (overloads, decorators, namespaces)
+```
 
 ## Key Abstractions
-1. **`Searchable`** (`src/interfaces/searchable.ts`) — The core constraint used by `Catalog<T>`.
-   Any type that implements `searchText(): string` can be stored and searched.
-2. **`Book`** (`src/models/book.ts`) — Primary domain model. Holds title, ISBN, genre,
-   copiesAvailable. Exposes `isAvailable()` used by the `IsAvailable<T>` conditional type.
-3. **`Catalog<T extends Searchable>`** (`src/services/catalog.ts`) — Generic container.
-   Filters items via `item.searchText().includes(query)` on search.
-4. **`SearchResult`** (`src/interfaces/types.ts`) — Discriminated union (`kind` field) with
-   three variants; `isFound()` type guard narrows to `FoundResult`.
-5. **`advanced.ts`** (`src/extensions/advanced.ts`) — Showcase of TypeScript extension points:
-   overloads, decorators, namespace/interface merging, default exports.
 
-## Data Flow — Catalog Search
-1. Create `new Catalog<Book>('name')` (or `createDefaultCatalog()` for defaults)
-2. Call `catalog.add(book)` — pushes Book into internal `items: T[]` array
-3. Call `catalog.search(query)` — filters via `book.searchText().includes(query)`
-   (Note: `Book` does not implement `Searchable` in the current fixture; the generic
-   constraint is exercised by design but Book lacks `searchText()` — intentional for tests)
-4. Call `catalog.stats()` — returns `CatalogStats { totalItems, name }`
+### `Searchable` interface (`interfaces/searchable.ts`)
+Protocol for items that can live in a `Catalog`. Two methods:
+- `searchText(): string` — required; returns text to filter against
+- `relevance?(): number` — optional; score (default 0)
 
-## Data Flow — SearchResult Discriminated Union
-1. An operation returns `SearchResult` (union of `FoundResult | NotFoundResult | ErrorResult`)
-2. Call `isFound(result)` — type guard returns `result is FoundResult` by checking `result.kind === 'found'`
-3. In the `true` branch, TypeScript narrows `result` to `FoundResult` giving access to `.book` and `.score`
-4. Other branches handled via `kind === 'not_found'` or `kind === 'error'`
+NOTE: `Book` does NOT implement `Searchable` in this fixture — the interface is defined
+but no concrete class wires up to `Catalog<Book>` within the fixture source. The generic
+constraint exists for structural completeness.
+
+### `Book` class (`models/book.ts`)
+Core domain entity. Constructor-injected private fields (title, isbn, genre,
+copiesAvailable). All fields exposed via same-name methods (no public fields). Has
+`isAvailable(): boolean` checking `_copiesAvailable > 0`. Not plugged into `Searchable`.
+
+### `Genre` enum (`models/genre.ts`)
+String enum: `Fiction='fiction'`, `NonFiction='non_fiction'`, `Science='science'`,
+`History='history'`, `Biography='biography'`. Plus free function `genreLabel()` that
+calls `genre.replace('_', ' ')` for display.
+
+### `Catalog<T extends Searchable>` (`services/catalog.ts`)
+Generic catalog with:
+- `add(item: T): void` — appends to private `items: T[]`
+- `search(query: string): T[]` — filters by `item.searchText().includes(query)`
+- `stats(): CatalogStats` — returns a `CatalogStats` value object
+
+`CatalogStats` is a simple data class (totalItems, name).
+`createDefaultCatalog()` is a free function returning `Catalog<any>` named 'Main Library'.
+
+### SearchResult union types (`interfaces/types.ts`)
+Discriminated union via literal `kind` field:
+- `FoundResult` — `kind:'found'`, `book: Book`, `score: number`
+- `NotFoundResult` — `kind:'not_found'`, `query: string`
+- `ErrorResult` — `kind:'error'`, `message: string`, `code: number`
+- `SearchResult = FoundResult | NotFoundResult | ErrorResult` (union alias)
+- `isFound(result): result is FoundResult` — type guard (checks `kind === 'found'`)
+
+Advanced type utilities also in this file:
+- `ReadonlyBook = Readonly<Pick<Book, 'title' | 'isbn'>>` — mapped/utility type
+- `IsAvailable<T>` — conditional type (`T extends { isAvailable(): boolean } ? true : false`)
+- `BookIndex` — index signature interface (`[isbn: string]: Book`)
+
+### `extensions/advanced.ts` — TypeScript Feature Showcase
+Each export is labeled "Extension:" in its JSDoc to signal fixture intent:
+- `findBook` — function overload signatures (two call signatures + implementation)
+- `logged` — method decorator (experimental; just returns descriptor)
+- `BookService` — class with `@logged`-decorated `process(book): void` method
+- `BookMetadata` — interface + namespace declaration merging (same name, different kinds)
+- `DefaultCatalog` — `export default class` (default export pattern)
 
 ## Design Patterns
-- Generic constraint pattern: `class Catalog<T extends Searchable>`
-- Discriminated union + type guard for safe variant access
-- Declaration merging: `BookMetadata` interface and namespace share the same name
-- Decorator pattern (experimental): `@logged` applied to class method
-- Factory function: `createDefaultCatalog()` returns pre-configured `Catalog<any>`
-- Barrel export: `src/index.ts` re-exports only the public API surface
 
-## Good `semantic_search` Queries for This Project
+- **Generic service with constraint:** `Catalog<T extends Searchable>` — pluggable catalog
+- **Discriminated union + type guard:** `SearchResult` + `isFound()` — exhaustive narrowing
+- **Namespace/interface merging:** `BookMetadata` interface + `BookMetadata` namespace coexist
+- **Constructor private injection:** `Book` fields are all `private` and exposed via getter methods
+- **Barrel re-exports:** `index.ts` is a clean public API surface; internal modules are additive
+
+## Import Graph
+
 ```
-semantic_search("catalog search items filter", project_id="typescript-library")
-semantic_search("type guard discriminated union", project_id="typescript-library")
-semantic_search("decorator method logging", project_id="typescript-library")
-semantic_search("namespace declaration merging", project_id="typescript-library")
-semantic_search("generic constraint extends interface", project_id="typescript-library")
+advanced.ts  →  models/book.ts
+types.ts     →  models/book.ts
+book.ts      →  models/genre.ts
+catalog.ts   →  interfaces/searchable.ts
+index.ts     →  models/book, models/genre, interfaces/searchable, services/catalog
 ```
+
+`extensions/advanced.ts` and `interfaces/types.ts` are NOT re-exported from `index.ts`.
+
+## Good Semantic Search Queries (when index is built)
+
+```
+semantic_search("Searchable interface protocol", project_id="typescript-library")
+semantic_search("discriminated union type guard", project_id="typescript-library")
+semantic_search("generic catalog search items", project_id="typescript-library")
+semantic_search("function overload signatures", project_id="typescript-library")
+semantic_search("decorator experimental method", project_id="typescript-library")
+```
+
+Note: semantic index may not be pre-built; fall back to `grep` or `symbols` if results are empty.

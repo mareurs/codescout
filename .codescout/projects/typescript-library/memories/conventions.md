@@ -1,43 +1,55 @@
-# Conventions — typescript-library
+# typescript-library — Conventions
 
-## Language & Compiler
-- TypeScript strict mode (`"strict": true`) — all implicit `any`, nullability, and
-  type-safety checks enforced.
-- `experimentalDecorators` and `emitDecoratorMetadata` enabled — decorators are used
-  in `extensions/advanced.ts`; avoid relying on this in non-extension code.
-- Target ES2022, CommonJS modules.
+## TypeScript Configuration
 
-## Naming
-- Classes: PascalCase (`Book`, `Catalog`, `CatalogStats`, `BookService`)
-- Interfaces: PascalCase (`Searchable`, `FoundResult`, `BookIndex`)
-- Enums: PascalCase name, PascalCase members (`Genre.Fiction`, `Genre.NonFiction`)
-- Type aliases: PascalCase (`SearchResult`, `ReadonlyBook`, `IsAvailable`)
-- Functions: camelCase (`genreLabel`, `isFound`, `createDefaultCatalog`, `findBook`)
-- Constants: SCREAMING_SNAKE_CASE (`MAX_RESULTS`)
-- Private class fields: underscore-prefixed camelCase (`_title`, `_isbn`, `_genre`)
+- **Strict mode on** (`"strict": true`) — all strict type checks enforced
+- **Target:** ES2022 with CommonJS modules
+- **Decorators:** `experimentalDecorators: true` + `emitDecoratorMetadata: true`
+- **No path aliases** — imports use relative paths only (`../models/book`, `./genre`)
 
-## Class Pattern
-- Constructor parameters use `private _field` naming; public accessor methods are
-  plain methods (not getters) returning the field value.
-- No public field exposure; all state behind accessor methods.
+## Naming Conventions
 
-## Interface / Type Design
-- Discriminated unions use a `kind` string literal field for safe narrowing.
-- Type guards follow the `function isFoo(x: T): x is FooType` pattern.
-- Mapped types (`Readonly`, `Pick`) preferred over manual re-declaration.
-- Conditional types used for structural capability checks (`IsAvailable<T>`).
+- **Classes:** PascalCase (`Book`, `Catalog`, `BookService`, `DefaultCatalog`)
+- **Interfaces:** PascalCase (`Searchable`, `FoundResult`, `BookIndex`)
+- **Enums:** PascalCase name, PascalCase members (`Genre.Fiction`, `Genre.NonFiction`)
+- **Enum values:** string literals in snake_case (`'fiction'`, `'non_fiction'`)
+- **Type aliases:** PascalCase (`SearchResult`, `ReadonlyBook`, `IsAvailable`)
+- **Functions:** camelCase (`isFound`, `genreLabel`, `createDefaultCatalog`)
+- **Constants:** SCREAMING_SNAKE_CASE (`MAX_RESULTS`)
+- **Private fields:** underscore prefix (`_title`, `_isbn`, `_genre`, `_copiesAvailable`)
 
-## Module / Export Conventions
-- Each domain concept lives in its own file under `models/`, `interfaces/`, `services/`, or `extensions/`.
-- `src/index.ts` is a barrel that re-exports only the stable public API; extension types from
-  `extensions/advanced.ts` are NOT re-exported (internal/test-only).
-- Default exports used only in `extensions/advanced.ts` (`DefaultCatalog`) as an explicit
-  demonstration of the feature — elsewhere named exports only.
+## Code Patterns
 
-## Testing
-- No test files are present in this fixture project. It is used as a code intelligence test
-  target, not a tested application.
+- **Private fields exposed as same-name methods** (not getters/properties): `title(): string`,
+  `isbn(): string`, `genre(): Genre`, `isAvailable(): boolean`
+- **Constructor injection:** private fields declared via constructor parameter shorthand
+- **Type guards:** `isFound(result): result is FoundResult` pattern for narrowing unions
+- **Discriminated unions:** `kind` literal field on all result variants
+- **Generic constraints:** `T extends Searchable` on `Catalog<T>`
+- **Free factory functions:** `createDefaultCatalog()` alongside the class
 
-## Documentation
-- JSDoc `/** ... */` comments on all exported classes, interfaces, and methods.
-- Extension-specific patterns are labelled with "Extension: <pattern-name>" in their JSDoc.
+## Documentation Style
+
+- JSDoc `/** ... */` on every exported symbol
+- Advanced/fixture-specific features labeled with `/** Extension: <feature-name>. */`
+
+## Module Organization
+
+- `models/` — domain data (value objects + enums)
+- `interfaces/` — protocols (`Searchable`) and shared type utilities (`types.ts`)
+- `services/` — business logic classes
+- `extensions/` — advanced TypeScript feature examples (NOT part of the public API barrel)
+- `index.ts` — re-export barrel for public API only
+
+## Testing Approach
+
+No test files exist in this fixture. This codebase is a test TARGET for codescout's own
+tests, exercised from the parent `code-explorer` project's test suite. There is no Jest,
+Vitest, or other test runner configured. The `package.json` has no `scripts` field.
+
+## What This Fixture Covers (for codescout test authors)
+
+Symbol types present: class, interface, enum, function, const, type alias, namespace,
+method, property, constructor. Feature coverage: overloads, decorators, namespace merging,
+default exports, generics, discriminated unions, mapped types, conditional types, index
+signatures, type guards. All TypeScript features that a symbol-navigation tool should handle.

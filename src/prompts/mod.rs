@@ -29,10 +29,27 @@ pub fn build_server_instructions(project_status: Option<&ProjectStatus>) -> Stri
 
     if let Some(status) = project_status {
         instructions.push_str("\n\n## Project Status\n\n");
+        // "Active project" wording makes the implicit launch-time activation
+        // explicit — agents see at a glance that activation happened without
+        // needing a separate tool call signal. Pairs with the worktree line
+        // below so the activated root is never ambiguous.
         instructions.push_str(&format!(
-            "- **Project:** {} at `{}`\n",
+            "- **Active project:** {} at `{}`\n",
             status.name, status.path
         ));
+        if let Some(wt) = &status.worktree {
+            let branch = wt.branch.as_deref().unwrap_or("<detached HEAD>");
+            let main = wt
+                .main_repo
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "<unknown>".to_string());
+            // Explicit worktree banner — when present, the agent must NOT
+            // assume the activated root is the canonical checkout. Changes
+            // here flow into commits, branches, and PRs on the worktree's
+            // branch, not the main repo's.
+            instructions.push_str(&format!("- **Worktree:** branch `{branch}` of `{main}`\n"));
+        }
         if !status.languages.is_empty() {
             instructions.push_str(&format!(
                 "- **Languages:** {}\n",
@@ -112,6 +129,70 @@ pub struct WorkspaceProjectSummary {
     pub depends_on: Vec<String>,
 }
 
+/// Worktree context for the active project, when it lives in a git worktree
+/// (i.e. `.git` is a *file* pointing at `<main_repo>/.git/worktrees/<name>/`,
+/// not a regular `.git/` directory).
+///
+/// Used by [`build_server_instructions`] to surface a "Worktree: branch X of
+/// /main/repo" line in the Project Status block so the agent knows when it's
+/// operating in an isolated worktree vs the main checkout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeInfo {
+    /// Current branch name parsed from the worktree's `HEAD` file. `None` when
+    /// HEAD is detached (a raw SHA rather than a `ref: refs/heads/...` line).
+    pub branch: Option<String>,
+    /// Filesystem path of the main repo this worktree belongs to. Parsed from
+    /// the `gitdir:` pointer in `.git` (the worktree's `.git` file contains
+    /// `gitdir: <main>/.git/worktrees/<name>`; we strip the `/worktrees/<name>`
+    /// suffix and a trailing `/.git` to recover `<main>`).
+    pub main_repo: Option<std::path::PathBuf>,
+}
+
+/// Detect whether `root` is a git worktree and return basic context if so.
+///
+/// Returns `None` when:
+/// - `<root>/.git` does not exist (not a git repo at all).
+/// - `<root>/.git` is a directory (regular checkout — not a worktree).
+/// - Reading the `.git` pointer file fails.
+///
+/// Filesystem-only — no `git` subprocess. The detection is the standard
+/// "linked worktree" shape: `git worktree add` writes a `.git` *file*
+/// containing `gitdir: <abs path to main repo's .git/worktrees/<name>>`.
+pub fn detect_worktree_info(root: &std::path::Path) -> Option<WorktreeInfo> {
+    let dot_git = root.join(".git");
+    let meta = std::fs::symlink_metadata(&dot_git).ok()?;
+    if !meta.file_type().is_file() {
+        return None;
+    }
+    let pointer = std::fs::read_to_string(&dot_git).ok()?;
+    let gitdir_line = pointer
+        .lines()
+        .find_map(|l| l.strip_prefix("gitdir:").map(str::trim))?;
+    let gitdir = std::path::PathBuf::from(gitdir_line);
+
+    // Recover the main repo path: gitdir typically looks like
+    // `<main_repo>/.git/worktrees/<name>`. Strip `<name>` then `worktrees`
+    // then `.git`. Be tolerant — if the shape doesn't match, we still
+    // return a WorktreeInfo with main_repo: None.
+    let main_repo = gitdir
+        .parent() // .../.git/worktrees
+        .and_then(|p| p.parent()) // .../.git
+        .and_then(|p| p.parent()) // .../<main_repo>
+        .map(std::path::PathBuf::from);
+
+    // Branch comes from <gitdir>/HEAD: either `ref: refs/heads/<name>` or
+    // a raw SHA (detached HEAD).
+    let branch = std::fs::read_to_string(gitdir.join("HEAD"))
+        .ok()
+        .and_then(|s| {
+            s.trim()
+                .strip_prefix("ref: refs/heads/")
+                .map(|b| b.trim().to_string())
+        });
+
+    Some(WorktreeInfo { branch, main_repo })
+}
+
 /// Dynamic project status used to build server instructions.
 #[derive(Debug)]
 pub struct ProjectStatus {
@@ -124,6 +205,12 @@ pub struct ProjectStatus {
     /// Other projects in the workspace, if this is a multi-project repo.
     /// None for single-project activations; Some([]) is never emitted.
     pub workspace: Option<Vec<WorkspaceProjectSummary>>,
+    /// Git worktree context for the active project. `Some(...)` when the
+    /// project root lives in a linked git worktree (a `.git` *file* pointing
+    /// at the main repo's worktree dir). Surfaced in server_instructions so
+    /// the agent can tell worktree from main-checkout — see
+    /// [`detect_worktree_info`].
+    pub worktree: Option<WorktreeInfo>,
 }
 
 pub const INCLUDE_MARKER: &str = "{{include: memory-templates.md}}";
@@ -268,13 +355,25 @@ mod tests {
             has_index: true,
             system_prompt: None,
             workspace: None,
+            worktree: None,
         };
         let result = build_server_instructions(Some(&status));
         assert!(result.contains("## Project Status"));
-        assert!(result.contains("my-project"));
+        // D: explicit activation banner — "Active project" wording surfaces the
+        // implicit launch-time activation so agents don't have to infer it from
+        // path stripping in tool output.
+        assert!(
+            result.contains("**Active project:** my-project at `/home/user/my-project`"),
+            "missing Active project banner, got:\n{result}"
+        );
         assert!(result.contains("rust, python"));
         assert!(result.contains("architecture, conventions"));
         assert!(result.contains("Semantic index:** Built"));
+        // Without worktree info present, NO worktree line should appear.
+        assert!(
+            !result.contains("Worktree:"),
+            "non-worktree project must not emit a Worktree line, got:\n{result}"
+        );
     }
 
     #[test]
@@ -287,6 +386,7 @@ mod tests {
             has_index: false,
             system_prompt: None,
             workspace: None,
+            worktree: None,
         };
         let result = build_server_instructions(Some(&status));
         assert!(result.contains("run `onboarding`"));
@@ -399,6 +499,7 @@ mod tests {
             has_index: false,
             system_prompt: Some("Always use pytest.".into()),
             workspace: None,
+            worktree: None,
         };
         let result = build_server_instructions(Some(&status));
         assert!(result.contains("## Custom Instructions"));
@@ -419,6 +520,7 @@ mod tests {
             has_index: false,
             system_prompt: None,
             workspace: None,
+            worktree: None,
         };
         let result = build_server_instructions(Some(&status));
         assert!(!result.contains("## Custom Instructions"));
@@ -453,6 +555,7 @@ mod tests {
                     depends_on: vec!["mcp-server".into()],
                 },
             ]),
+            worktree: None,
         };
         let result = build_server_instructions(Some(&status));
         assert!(result.contains("## Workspace Projects"));
@@ -476,6 +579,7 @@ mod tests {
             has_index: false,
             system_prompt: None,
             workspace: None,
+            worktree: None,
         };
         let result = build_server_instructions(Some(&status));
         assert!(!result.contains("## Workspace Projects"));
@@ -564,12 +668,108 @@ mod tests {
             has_index: false,
             system_prompt: None,
             workspace: None,
+            worktree: None,
         };
         let result = build_server_instructions(Some(&status));
         assert!(
             result.contains("kotlin-lsp"),
             "Kotlin project must include Kotlin known issues"
         );
+    }
+
+    #[test]
+    fn build_with_worktree_emits_worktree_banner() {
+        // C: when ProjectStatus carries WorktreeInfo, the Project Status block
+        // must surface a "Worktree: branch X of /main/repo" line so the agent
+        // knows it's in a linked worktree, not the main checkout.
+        let status = ProjectStatus {
+            name: "backend-kotlin".into(),
+            path: "/home/user/repo/.worktrees/weekly-pattern".into(),
+            languages: vec!["kotlin".into()],
+            memories: vec![],
+            has_index: false,
+            system_prompt: None,
+            workspace: None,
+            worktree: Some(WorktreeInfo {
+                branch: Some("weekly-pattern".into()),
+                main_repo: Some(std::path::PathBuf::from("/home/user/repo")),
+            }),
+        };
+        let result = build_server_instructions(Some(&status));
+        assert!(
+            result.contains("**Worktree:** branch `weekly-pattern` of `/home/user/repo`"),
+            "missing worktree banner, got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn build_with_detached_worktree_renders_placeholder() {
+        // Edge case: HEAD is detached (raw SHA, not `ref: refs/heads/...`).
+        // The banner should still emit with a clear "<detached HEAD>" marker
+        // rather than silently dropping the worktree line.
+        let status = ProjectStatus {
+            name: "wt".into(),
+            path: "/some/path".into(),
+            languages: vec![],
+            memories: vec![],
+            has_index: false,
+            system_prompt: None,
+            workspace: None,
+            worktree: Some(WorktreeInfo {
+                branch: None,
+                main_repo: Some(std::path::PathBuf::from("/main")),
+            }),
+        };
+        let result = build_server_instructions(Some(&status));
+        assert!(
+            result.contains("**Worktree:** branch `<detached HEAD>` of `/main`"),
+            "detached HEAD placeholder missing, got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn detect_worktree_info_identifies_linked_worktree() {
+        // Build a fake worktree fixture on disk:
+        //   <tmp>/main/.git/worktrees/feat/HEAD       — ref: refs/heads/feat
+        //   <tmp>/wt/.git                              — gitdir: <tmp>/main/.git/worktrees/feat
+        // detect_worktree_info(<tmp>/wt) must return Some with both branch
+        // and main_repo populated correctly.
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("main");
+        let wt = dir.path().join("wt");
+        let worktree_meta = main.join(".git").join("worktrees").join("feat");
+        std::fs::create_dir_all(&worktree_meta).unwrap();
+        std::fs::write(worktree_meta.join("HEAD"), "ref: refs/heads/feat\n").unwrap();
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(
+            wt.join(".git"),
+            format!("gitdir: {}\n", worktree_meta.display()),
+        )
+        .unwrap();
+
+        let info = detect_worktree_info(&wt).expect("worktree should be detected");
+        assert_eq!(info.branch.as_deref(), Some("feat"));
+        assert_eq!(info.main_repo.as_deref(), Some(main.as_path()));
+    }
+
+    #[test]
+    fn detect_worktree_info_returns_none_for_regular_checkout() {
+        // A real checkout has `.git` as a directory, not a file. Detector
+        // must return None so the banner stays absent.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        assert!(
+            detect_worktree_info(dir.path()).is_none(),
+            "regular checkout must not be classified as a worktree"
+        );
+    }
+
+    #[test]
+    fn detect_worktree_info_returns_none_when_no_git() {
+        // Plain directory with no .git at all — defensive: returns None
+        // rather than panicking on a missing path.
+        let dir = tempfile::tempdir().unwrap();
+        assert!(detect_worktree_info(dir.path()).is_none());
     }
 
     #[test]
@@ -582,6 +782,7 @@ mod tests {
             has_index: false,
             system_prompt: None,
             workspace: None,
+            worktree: None,
         };
         let result = build_server_instructions(Some(&status));
         assert!(
@@ -745,6 +946,7 @@ mod tests {
             has_index: false,
             system_prompt: None,
             workspace: None,
+            worktree: None,
         };
         let rendered = build_server_instructions(Some(&status));
         for dead in [
@@ -828,6 +1030,14 @@ mod tests {
 mod redesign_invariants {
     use super::*;
 
+    /// Maximum byte length of the rendered `server_instructions` slice
+    /// (`build_server_instructions(None)`). Claude Code silently truncates the
+    /// MCP `initialize.instructions` field at ~2000 bytes — see
+    /// `docs/architecture/mcp-channel-caps.md`. The 2200 cap gives ~200 bytes
+    /// of headroom for the dynamic `## Project Status` block that runtime
+    /// appends; growth beyond this risks truncating Iron Laws themselves
+    /// rather than just the dynamic suffix. If you need to add content,
+    /// author a `get_guide(topic)` entry and reference it from the slice.
     const MAX_INSTRUCTIONS_CHARS: usize = 2200;
 
     #[test]

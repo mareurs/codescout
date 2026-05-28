@@ -1,43 +1,48 @@
-# Workspace Conventions — codescout
+# codescout — Conventions
 
-## Shared Across All Rust Projects (code-explorer, codescout-embed, librarian-mcp)
+## Pre-Commit Requirements
 
-### Pre-commit Checklist
-```
-cargo fmt
-cargo clippy -- -D warnings
-cargo test
-cargo build --release   # required before live MCP testing
-```
+1. `cargo fmt`
+2. `cargo clippy -- -D warnings`
+3. `cargo test`
+All three must pass. No exceptions.
 
-### Error Handling
-- `RecoverableError` for expected input-driven failures → `isError: false`
-- `anyhow::bail!` for genuine bugs → `isError: true`
-- Never leak full error chains to callers; log server-side only
+## Error Handling
 
-### Naming
-- Files: `snake_case.rs`; MCP tool names: `snake_case`; constants: `SCREAMING_SNAKE_CASE`
-- Test functions name the invariant, not the action
+- `RecoverableError` for expected, input-driven failures → `isError: false` (sibling calls survive)
+- `anyhow::bail!` for genuine tool failures → `isError: true` (fatal)
+- Write tools return `json!("ok")` — never echo content back
+- See `get_guide("error-handling")` for the full decision tree
 
-### Git Workflow
-- `experiments` branch for all in-progress work; `master` protected
-- Cherry-pick to master only when tests pass + clippy clean
-- Feature commits on `experiments` require docs in `docs/manual/src/experimental/`
-- See code-explorer `conventions` memory for full cherry-pick + graduation procedure
+## MCP Entry Point
 
-## Per-Project Conventions
+`call_content()` is the MCP entry point — it handles buffer routing via `OutputGuard`.
+Do NOT call `call()` directly from `ServerHandler`; it bypasses buffer routing.
 
-- Core: see `memory(project_id="core", topic="conventions")` — trailing underscore generics, Config→Factory→Runtime, section separators
-- Examples: see `memory(project_id="optaplanner-examples", topic="conventions")` — per-example package structure
-- Benchmark: see `memory(project_id="optaplanner-benchmark", topic="conventions")` — JAXB config, result hierarchy
-- Test: see `memory(project_id="optaplanner-test", topic="conventions")` — fluent assertion builder
-- Spring: see `memory(project_id="optaplanner-spring-integration", topic="conventions")` — @ConditionalOnMissingBean, EntityScanner
-- Quarkus: see `memory(project_id="optaplanner-quarkus-integration", topic="conventions")` — build-time/runtime split, Gizmo, ARC workarounds
-- Persistence: see `memory(project_id="optaplanner-persistence", topic="conventions")` — serializer per score type
-## Fixture Projects (tests/fixtures/)
+## Progressive Disclosure
 
-All 5 fixtures (java/kotlin/python/rust/typescript) share the same intentional design:
-- Model a `Catalog<T: Searchable>` pattern in each language
-- No tests, no runtime deps — static navigation targets only
-- Java 21 / Kotlin / Python 3.x / Rust stable / TypeScript strict mode
-- Naming: `Book`, `Genre`, `Catalog`, `Searchable`, `SearchResult` — consistent across all languages
+Every tool defaults to compact/exploring output. Full bodies only with `detail_level: "full"`.
+Overflow → actionable hint + `by_file` distribution map, never truncated garbage.
+See `docs/PROGRESSIVE_DISCOVERABILITY.md` before adding or modifying any tool.
+
+## Testing Patterns
+
+- Cache-invalidation tests use a **three-query sandwich** (baseline → stale assertion → post-invalidation)
+- Test helpers that build env-reading objects must use `EnvGuard` + `#[serial_test::serial]`
+- See `docs/conventions/test-env-isolation.md` for the full isolation rule
+
+## Prompt Surface Consistency
+
+Any tool rename, addition, or behavior change requires updating all three prompt surfaces.
+The build-time test `prompt_surfaces_reference_only_real_tools` catches stale tool names.
+Bump `ONBOARDING_VERSION` only for `onboarding_prompt` surface changes — never for `server_instructions`.
+
+## Bug Tracking
+
+Every noticed bug gets a file in `docs/issues/YYYY-MM-DD-<slug>.md` (copy `_TEMPLATE.md`).
+Archive to `docs/issues/archive/` only after the fix ships to `master` (verify via `git branch --contains`).
+
+## Commit Style
+
+Conventional commits: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`.
+Subject: imperative, ≤72 chars. Cherry-pick to master after all checks pass + MCP verify.
