@@ -203,6 +203,54 @@ pub(crate) fn truncate_output(output: &str, limit: usize) -> (String, bool) {
     }
 }
 
+/// Classify a command into a known-slow bucket. Returns a short label used
+/// to tailor the timeout-error hint. Conservative — only matches strong
+/// signals (test runners, build systems, ETL/training pipelines) so the
+/// generic fallback hint still fires for ad-hoc commands.
+///
+/// Source for the patterns: docs/usage-reports/2026-05-27-usage-analysis.md
+/// query F (slow run_commands) — the top-15 timeout offenders.
+pub(crate) fn classify_slow_command(cmd: &str) -> Option<&'static str> {
+    let lower = cmd.to_lowercase();
+    if lower.contains("pytest")
+        || lower.contains("cargo test")
+        || lower.contains("npm test")
+        || lower.contains("pnpm test")
+        || lower.contains("yarn test")
+        || lower.contains("tox ")
+    {
+        return Some("test suite");
+    }
+    if lower.contains("cargo build")
+        || lower.contains("npm run build")
+        || lower.contains("pnpm build")
+        || lower.contains("yarn build")
+        || lower.contains("make ")
+        || lower.contains("gradle ")
+        || lower.contains("./gradlew")
+        || lower.contains("mvn ")
+        || lower.contains("./scripts/build")
+        || lower.contains("docker build")
+    {
+        return Some("build");
+    }
+    if lower.contains(" ingest")
+        || lower.contains(" eval")
+        || lower.contains("benchmark")
+        || lower.contains(" training")
+        || lower.contains(" train ")
+    {
+        return Some("ETL/eval/training");
+    }
+    if lower.contains("uv run python")
+        || lower.contains("python -m ")
+        || lower.contains("python scripts/")
+    {
+        return Some("python script");
+    }
+    None
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_command_inner(
     original_command: &str,
@@ -413,11 +461,31 @@ pub(crate) async fn run_command_inner(
                 // tree (sh + curl + grep + tee + head) in one shot.
                 unsafe { libc::killpg(pgid, libc::SIGKILL) };
             }
+            let next_timeout = timeout_secs.saturating_mul(3).max(300);
+            let hint = match classify_slow_command(original_command) {
+                Some(label) => format!(
+                    "Looks like a {label} command (long-running by nature). \
+                     Two options: (1) re-run with run_in_background: true — returns \
+                     immediately, output streams to a log file you can tail/grep; \
+                     (2) re-run with a higher timeout_secs (current: {timeout_secs}s; \
+                     try {next_timeout}s). If the command launches background processes \
+                     (with &), prefer run_in_background — shell & leaves them holding \
+                     the stdout pipe open."
+                ),
+                None => format!(
+                    "Command exceeded {timeout_secs}s. If it launches background \
+                     processes (e.g. with &), use run_in_background: true — shell & \
+                     leaves background processes holding the stdout pipe open, so \
+                     output() never gets EOF. run_in_background spawns via a log file \
+                     instead and returns immediately. For genuinely slow commands, \
+                     pass a higher timeout_secs (try {next_timeout}s)."
+                ),
+            };
             Ok(json!({
                 "timed_out": true,
                 "stderr": format!("Command timed out after {} seconds", timeout_secs),
                 "exit_code": null,
-                "hint": "If the command launches background processes (e.g. with &), use run_in_background: true — shell & leaves background processes holding the stdout pipe open, so output() never gets EOF. run_in_background spawns via a log file instead and returns immediately."
+                "hint": hint,
             }))
         }
     }

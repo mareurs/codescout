@@ -1,3 +1,4 @@
+use super::inner::classify_slow_command;
 use super::*;
 use crate::agent::Agent;
 use crate::prompts::builders::{
@@ -3683,4 +3684,48 @@ async fn onboarding_fast_path_when_version_current() {
         result.get("subagent_prompt").is_none(),
         "current version must not trigger refresh"
     );
+}
+
+#[test]
+fn classify_slow_command_tags_pytest() {
+    assert_eq!(
+        classify_slow_command("uv run pytest -m permutation tests/eval"),
+        Some("test suite")
+    );
+    assert_eq!(
+        classify_slow_command("cargo test --release"),
+        Some("test suite")
+    );
+}
+
+#[test]
+fn classify_slow_command_tags_builds() {
+    assert_eq!(
+        classify_slow_command("cargo build --release"),
+        Some("build")
+    );
+    assert_eq!(classify_slow_command("./scripts/build.sh"), Some("build"));
+    assert_eq!(
+        classify_slow_command("docker build -t foo ."),
+        Some("build")
+    );
+}
+
+#[test]
+fn classify_slow_command_tags_etl() {
+    assert_eq!(
+        classify_slow_command("uv run mrv ingest --reset"),
+        Some("ETL/eval/training")
+    );
+    assert_eq!(
+        classify_slow_command("python -m tests.eval._rescore"),
+        Some("python script")
+    );
+}
+
+#[test]
+fn classify_slow_command_none_for_quick_commands() {
+    assert_eq!(classify_slow_command("ls -la"), None);
+    assert_eq!(classify_slow_command("git status"), None);
+    assert_eq!(classify_slow_command("echo hello"), None);
 }

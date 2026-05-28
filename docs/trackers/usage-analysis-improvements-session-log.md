@@ -33,11 +33,15 @@
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-05-27 | med | architectural | mitigated | Cargo incremental cache masked prompt-surface drift; snapshot test passed on stale binary |
 | F-2 | 2026-05-27 | med | codescout-tool | open | IL3 piping habit recurred 6× in single turn despite warn-mode prompts (hookify candidate H-1) |
+| F-3 | 2026-05-27 | low | plan-prose | open | CLAUDE.md cites non-existent Kotlin LSP issue tracker path |
+| F-3a | 2026-05-27 | med | architectural | open | I-4 retry coverage incomplete for edit_code (27/43 disconnect errors unaddressed; pairs with I-2 deeper redesign) |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-05-27 | med | scout-response-shape-before-adding-field | would have added invisible/redundant by_file field, ~1 round-trip cost | validated |
+| W-2 | 2026-05-27 | med | scout-for-existing-helper-before-designing-new | would have built duplicate retry helper, ~half-day rework | validated |
+| W-3 | 2026-05-27 | med | reframe-redesign-as-selection-policy | I-2 "redesign" → 10-line cost-aware LRU change instead of multi-day Kotlin LSP rewrite | validated |
 ---
 
 ## Category conventions
@@ -300,6 +304,143 @@ threshold seems set too high (5+ slips in a turn didn't promote to deny).
 A faster escalation (2 slips → deny for the rest of the turn) would land
 the habit sooner. Tracker artifact for hookify candidates lives at
 `docs/trackers/codescout-usage-hookify.md` if/when promoted.
+## F-3 — CLAUDE.md cites non-existent Kotlin LSP issue tracker path
+
+**Observed:** 2026-05-27, during I-2 (Kotlin LSP scoping). CLAUDE.md line 570
+cites `docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md` as the
+authoritative tracker for the Kotlin multi-instance issue.
+
+**Got:** Path returns "file not found". `tree --glob "docs/issues/**/*kotlin*"`
+finds only `docs/issues/archive/2026-04-24-find-symbol-kotlin-multi-session.md`
+(different topic, archived). The cited tracker either never existed or was
+archived under a different name; no path-rewrite was applied to CLAUDE.md.
+
+**Diagnostic:** Classic doc-drift — CLAUDE.md was authored with a forward
+reference, the file was never created (or got renamed/archived), and the
+audit_doc_refs check didn't run on CLAUDE.md (the default scan covers
+`docs/**/*.md` plus `CLAUDE.md`, so it should have caught this — possibly
+silenced by `verdict=ambiguous_basename` resolution).
+
+**Severity:** low — wastes an LLM round-trip when it tries to follow the
+cite, and could mislead future investigation.
+
+**Status:** open — needs (a) a real Kotlin-LSP tracker file at the cited path
+OR (b) a CLAUDE.md edit to remove the dangling reference. Defer to next
+`audit_doc_refs` run.
+
+**Fix idea:** Run `librarian(action="audit_doc_refs")` after this commit
+ships; the audit's `missing` verdict on this ref will surface the same issue.
+
+## W-2 — Pre-edit scout surfaced existing retry_on_mux_disconnect infrastructure
+
+**Observed:** 2026-05-27, planning I-4 (LSP disconnect single-retry).
+Initial plan: design retry logic from scratch wrapping each tool's LSP calls.
+
+**Pattern:** Before designing new infrastructure for a problem that "feels
+like" existing code might already handle, grep for related verbs (here:
+"retry", "reconnect", "alive") across the LSP layer. Took one
+`semantic_search(query=...)` and one `grep -context=3 retry_on_`.
+
+**Counterfactual:** Without the scout, I would have:
+1. Designed a new retry helper (~30-60 min of design)
+2. Implemented it in a new module
+3. Migrated tool call sites to use it
+4. Possibly introduced a duplicate-purpose helper that the next code review
+   would have to consolidate against the existing `retry_on_mux_disconnect`.
+
+**Confirming data points:**
+1. `src/fs/mod.rs:299` already exposes `retry_on_mux_disconnect<F, Fut, T>`.
+2. `src/tools/symbol/symbol_at.rs` already uses it for `goto_definition`
+   and `hover` — production callers established the pattern.
+3. `is_mux_disconnect` (line 288) is the gate; broadening it to match the
+   broader "LSP server disconnected" error was a 4-line change.
+
+**Impact:** med — saved a ~half-day rework cycle. More broadly: the codebase
+has a culture of small, well-named helpers; semantic_search + grep for
+related verbs is high-yield before designing new infra.
+
+**Promote-when:** Three observations of "I almost built X from scratch; a
+two-minute scout found X already existed". At three, promote to CLAUDE.md
+as "Before designing new helper/wrapper code, semantic-search the related
+verb across the touched layer — codescout's helper culture is dense."
+
+**Status:** validated — single datapoint; awaiting recurrence to promote.
+
+## W-3 — Cost-aware LRU eviction with tier helper, ~10-line change for I-2
+
+**Observed:** 2026-05-27, implementing I-2 (Kotlin LSP cold-start cost).
+The "redesign" framing in the original report suggested multi-day work
+(redesigning startup, lazy indexing, JVM warm cache). Reality: most of the
+cost surfaces as `lru_evicted` (avg 24s) — Kotlin getting kicked out of
+the pool by cheap-to-restart languages.
+
+**Pattern:** Frame expensive-resource-management problems as a *selection*
+choice before a *redesign* choice. Often a single helper (`restart_cost_tier`)
+and a one-line change to a sort comparator (`min_by_key`) shifts the
+trade-off entirely without touching the expensive subsystem.
+
+**Counterfactual:** Without the cost-aware tier framing, the "real" I-2
+fix would have required: investigating kotlin-language-server startup,
+profiling JVM init, experimenting with lazy stdlib loading, possibly
+forking kotlin-language-server. Multi-day. Instead: 1 helper fn + 1 sort
+key change in `src/lsp/manager.rs::LspManager::get_or_start`. Targets the
+exact failure mode (3 lru_evicted cases × 24s avg) without addressing
+the deeper cold-start time.
+
+**Confirming data points:**
+1. Pool LRU selector at `src/lsp/manager.rs:312-318` was strict-LRU
+   (`min_by_key(|(_, t)| *t)`).
+2. `ttl_for_language` already had Kotlin-specific tuning (2-hour idle TTL
+   vs default), so per-language behavior was already a established pattern
+   in the file.
+3. The 3-case lru_evicted in the report × 24s = 72s of friction targeted
+   by a 10-line change.
+
+**Impact:** med — eliminates one of three Kotlin friction modes (lru_evicted
+specifically). Idle_evicted (11.7s avg) and new_session (5.3s avg) remain
+as full-redesign territory.
+
+**Promote-when:** A second case where reframing "redesign" → "selection
+policy" produces a 10x effort reduction. Promote to a CLAUDE.md heuristic
+"Before estimating a redesign, ask whether the cost lives in the selection
+criterion rather than the underlying resource."
+
+**Status:** validated — single datapoint; awaiting recurrence to promote.
+
+## F-3a (deferral) — I-4 retry coverage incomplete for edit_code
+
+**Observed:** 2026-05-27, while landing I-4 (LSP disconnect single-retry).
+
+**When:** Implementing retry_on_mux_disconnect wraps across tools.
+
+**Expected:** Apply retry to all LSP-touching tools — including edit_code
+(27 errors in usage report, the highest count of any tool for "LSP server
+disconnected").
+
+**Got (deferred):** edit_code's four action methods (do_rename, do_replace,
+do_remove, do_insert) each make 2-4 LSP calls in sequence, sometimes via
+`fetch_validated_symbol` which has its own internal retry budget for stale
+positions (3 tries with did_change + backoff). Wrapping these with retry
+correctly requires:
+- Either move the entire action body into the retry closure (LARGE change,
+  needs careful idempotency analysis — the file write at the end is NOT
+  idempotent)
+- Or wrap each LSP call individually with retry, fragmenting the existing
+  fetch_validated_symbol cohesion
+
+Both paths warrant a small ADR. Deferring to a follow-up that pairs naturally
+with I-2's continued Kotlin LSP work (most edit_code disconnects are Kotlin).
+
+**Severity:** med — leaves 27 of 43 disconnect errors (63%) unaddressed by
+the cheap retry; symbols (16 errors) and references are covered, but the
+highest-volume offender is not.
+
+**Status:** open — pinned for follow-up alongside the deeper I-2 redesign.
+
+**Fix idea / Pointer:** When implementing the full I-2 (lazy Kotlin indexing
+or single-instance pinning), revisit edit_code retry strategy as part of
+that work — the LSP behavior under the new design will inform whether
+retry is even needed, or whether the disconnects disappear at the source.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

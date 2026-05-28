@@ -13,7 +13,7 @@ use crate::tools::{optional_u64_param, parse_bool_param, RecoverableError, ToolC
 
 use crate::fs::{
     format_library_path, get_lsp_client, get_path_param, is_glob, resolve_glob,
-    resolve_library_roots, resolve_read_path, LspTimer,
+    resolve_library_roots, resolve_read_path, retry_on_mux_disconnect, LspTimer,
 };
 use crate::symbol::query::{filter_variable_symbols, symbol_to_json};
 
@@ -278,7 +278,21 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
         let root = ctx.agent.require_project_root().await?;
         let (client, lang) = get_lsp_client(&ctx.agent, &*ctx.lsp, &full_path).await?;
         let timer = LspTimer::start();
-        let symbols = client.document_symbols(&full_path, &lang).await?;
+        // I-4: single-retry on transient LSP-mux disconnect (covers Kotlin LSP
+        // eviction churn). Closure is idempotent — document_symbols is a pure
+        // read of the LSP-side index.
+        let symbols = retry_on_mux_disconnect(
+            &ctx.agent,
+            &*ctx.lsp,
+            &full_path,
+            client,
+            lang.clone(),
+            |c, l| {
+                let p = full_path.clone();
+                async move { c.document_symbols(&p, &l).await }
+            },
+        )
+        .await?;
         timer.record(&*ctx.lsp, raw_lang, &root).await;
         // BUG-054 mitigation: rust-analyzer (and similar LSPs) return Ok(vec![])
         // during cold-start indexing instead of -32800 RequestCancelled,

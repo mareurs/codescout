@@ -8,7 +8,8 @@ use serde_json::{json, Value};
 ///
 /// Patterns are checked in order of specificity: collection-missing first
 /// (most common after first-time setup), then dim-mismatch (model/index
-/// drift), then transport (stack went away), then a generic fallback.
+/// drift), then TEI errors (dense embedding service unhealthy), then
+/// transport (stack went away), then a generic fallback.
 pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
     if err_str.contains("doesn't exist")
         || err_str.contains("not found")
@@ -23,6 +24,18 @@ pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
          Drop the collection and re-index: \
          `curl -X DELETE $CODESCOUT_QDRANT_URL/../collections/code_chunks` \
          then `cargo run --release --bin sync_project -- . <project-id>`"
+            .to_string()
+    } else if err_str.contains("dense tei")
+        || err_str.contains("sparse tei")
+        || err_str.contains("tei status")
+    {
+        "Embedding service (TEI) is unhealthy. Most common cause: dense \
+         or sparse TEI container OOM'd or returned non-200. \
+         Check: `docker logs codescout-tei-dense` and \
+         `docker logs codescout-tei-sparse`. \
+         Restart: `./scripts/retrieval-stack.sh up`. \
+         If persistent, inspect container memory limits + model file. \
+         Workaround: fall back to `grep` / `symbols` for this query while TEI recovers."
             .to_string()
     } else if err_str.contains("Connection refused")
         || err_str.contains("transport error")
@@ -389,6 +402,39 @@ mod classify_search_error_tests {
         assert!(
             hint.contains("sync_project"),
             "specificity ordering: {hint}"
+        );
+    }
+
+    #[test]
+    fn tei_status_routes_to_embedding_service_hint() {
+        // I-7: 45 of 53 'dense tei status' errors in the 2026-05-27 usage
+        // analysis fell into the generic bucket because TEI didn't have its
+        // own classification. New TEI bucket gives a concrete recovery path.
+        let err = "stack search failed: dense tei status: HTTP 503";
+        let hint = classify_search_error(err, "codescout");
+        assert!(
+            hint.contains("TEI") || hint.contains("tei"),
+            "hint must name TEI explicitly: {hint}"
+        );
+        assert!(
+            hint.contains("docker logs"),
+            "hint must point at container logs: {hint}"
+        );
+        assert!(
+            hint.contains("retrieval-stack.sh up"),
+            "hint must give restart command: {hint}"
+        );
+    }
+
+    #[test]
+    fn tei_bucket_takes_priority_over_generic_fallback() {
+        // A bare TEI error string that doesn't also match collection/dim/
+        // transport should resolve to the new TEI hint, not the generic one.
+        let err = "search_code: dense tei status (HTTP 504, upstream timeout)";
+        let hint = classify_search_error(err, "codescout");
+        assert!(
+            !hint.contains("Stack reachable but query failed"),
+            "must not hit generic fallback: {hint}"
         );
     }
 }

@@ -24,6 +24,25 @@ fn ttl_for_language(language: &str, global: Duration) -> Duration {
     }
 }
 
+/// Restart-cost tier for LSP eviction selection. Lower numbers = cheaper to restart.
+///
+/// When the pool is at `max_clients`, the eviction selector prefers the
+/// cheapest-to-restart victim instead of pure LRU. Rationale (from
+/// docs/usage-reports/2026-05-27-usage-analysis.md LSP-events):
+/// - Kotlin: avg 5.3s cold start, p100 62.5s, `lru_evicted` avg 24s
+/// - Java:   avg 2.2s, max 6.3s
+/// - Rust / TS / JS / Python / shell: ≤500ms (typically <100ms)
+///
+/// So evicting an idle Kotlin server to make room for a brief rust query is a
+/// bad trade. This selector pushes Kotlin/Java to last-resort and only evicts
+/// them when the entire pool is expensive.
+fn restart_cost_tier(language: &str) -> u8 {
+    match language {
+        "kotlin" | "java" => 2,
+        _ => 1,
+    }
+}
+
 use super::client::{LspClient, LspServerConfig};
 use super::servers;
 
@@ -310,11 +329,14 @@ impl LspManager {
             let at_capacity = self.clients.lock().await.len() >= self.max_clients;
             if at_capacity {
                 // Find the LRU key under last_used lock alone.
+                // I-2: cost-aware selection — sort by (restart_cost_tier ASC, last_used ASC).
+                // Cheap-restart languages get evicted before Kotlin/Java; only when
+                // every pool entry is expensive do we evict an expensive one by LRU.
                 let oldest_key = {
                     let last_used = self.last_used.lock().await;
                     last_used
                         .iter()
-                        .min_by_key(|(_, t)| *t)
+                        .min_by_key(|(k, t)| (restart_cost_tier(&k.language), *t))
                         .map(|(k, _)| k.clone())
                 };
                 if let Some(oldest_key) = oldest_key {
@@ -1194,6 +1216,92 @@ mod tests {
 
         // Step 3 — stale entry removed
         assert_eq!(mgr.last_used.lock().await.len(), 0);
+    }
+
+    #[test]
+    fn restart_cost_tier_orders_cheap_languages_first() {
+        // I-2: pure-logic check on the eviction-selection tier mapping.
+        // (kotlin, java) → 2 (expensive); everything else → 1 (cheap).
+        // Pool [(rust, t=0), (kotlin, t=10)] sorted by (tier, t): rust comes first
+        // even though it's older — kotlin is protected from eviction.
+        assert_eq!(restart_cost_tier("rust"), 1);
+        assert_eq!(restart_cost_tier("typescript"), 1);
+        assert_eq!(restart_cost_tier("python"), 1);
+        assert_eq!(restart_cost_tier("javascript"), 1);
+        assert_eq!(restart_cost_tier("bash"), 1);
+        assert_eq!(restart_cost_tier("html"), 1);
+        assert_eq!(restart_cost_tier("kotlin"), 2);
+        assert_eq!(restart_cost_tier("java"), 2);
+    }
+
+    #[tokio::test]
+    async fn lru_eviction_prefers_cheap_languages_over_kotlin() {
+        // I-2: pool at max_clients with [kotlin (oldest), rust (newer)]. Pure
+        // LRU would evict kotlin; cost-aware LRU evicts rust instead. We
+        // simulate the pool by inserting last_used entries directly and
+        // observing which key the selector picks.
+        let mgr = LspManager::new();
+        let kotlin_key = LspKey::new("kotlin", Path::new("/proj-a"));
+        let rust_key = LspKey::new("rust", Path::new("/proj-b"));
+
+        // Kotlin is OLDER than rust (would lose under pure-LRU).
+        let kotlin_time = Instant::now()
+            .checked_sub(std::time::Duration::from_secs(60))
+            .expect("process has been running > 60s");
+        let rust_time = Instant::now();
+        {
+            let mut lu = mgr.last_used.lock().await;
+            lu.insert(kotlin_key.clone(), kotlin_time);
+            lu.insert(rust_key.clone(), rust_time);
+        }
+
+        // Mirror the selector logic from get_or_start verbatim.
+        let oldest_key = {
+            let last_used = mgr.last_used.lock().await;
+            last_used
+                .iter()
+                .min_by_key(|(k, t)| (restart_cost_tier(&k.language), *t))
+                .map(|(k, _)| k.clone())
+        };
+
+        assert_eq!(
+            oldest_key,
+            Some(rust_key),
+            "cost-aware LRU must pick rust over kotlin even though kotlin is older"
+        );
+    }
+
+    #[tokio::test]
+    async fn lru_eviction_evicts_kotlin_only_when_pool_is_all_expensive() {
+        // I-2: pool of [kotlin (oldest), java (newer)] — both expensive — should
+        // fall back to pure LRU within the expensive tier and pick kotlin.
+        let mgr = LspManager::new();
+        let kotlin_key = LspKey::new("kotlin", Path::new("/proj-a"));
+        let java_key = LspKey::new("java", Path::new("/proj-b"));
+
+        let kotlin_time = Instant::now()
+            .checked_sub(std::time::Duration::from_secs(60))
+            .expect("process has been running > 60s");
+        let java_time = Instant::now();
+        {
+            let mut lu = mgr.last_used.lock().await;
+            lu.insert(kotlin_key.clone(), kotlin_time);
+            lu.insert(java_key.clone(), java_time);
+        }
+
+        let oldest_key = {
+            let last_used = mgr.last_used.lock().await;
+            last_used
+                .iter()
+                .min_by_key(|(k, t)| (restart_cost_tier(&k.language), *t))
+                .map(|(k, _)| k.clone())
+        };
+
+        assert_eq!(
+            oldest_key,
+            Some(kotlin_key),
+            "with no cheap victims available, fall back to pure LRU and evict kotlin"
+        );
     }
 
     /// evict_idle must leave entries whose age is below the TTL untouched.

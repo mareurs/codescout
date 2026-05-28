@@ -285,9 +285,18 @@ pub(crate) async fn get_lsp_client(
 
 /// Returns `true` for transient LSP-mux infrastructure errors that warrant
 /// a single retry with a freshly-spawned client.
+///
+/// Covers two failure modes:
+/// 1. mux process gone — "Mux connection lost" / "Failed to spawn mux process"
+/// 2. server-side disconnect — "LSP server disconnected" from
+///    `LspClient::drain_pending_disconnect`, surfaced when a request was
+///    pending at the moment the server died (most common with the Kotlin LSP
+///    eviction cycle, see docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md).
 fn is_mux_disconnect(e: &anyhow::Error) -> bool {
     let s = e.to_string();
-    s.contains("Mux connection lost") || s.contains("Failed to spawn mux process")
+    s.contains("Mux connection lost")
+        || s.contains("Failed to spawn mux process")
+        || s.contains("LSP server disconnected")
 }
 
 /// Run an LSP operation; on a transient mux disconnect, refetch a fresh
@@ -390,5 +399,33 @@ pub(crate) async fn tag_external_path(
         format!("lib:{}", name)
     } else {
         "external".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_mux_disconnect_matches_lsp_server_disconnected() {
+        // I-4: 27 edit_code errors + 16 symbols errors in the 2026-05-27 usage
+        // analysis surfaced as "LSP server disconnected" — broaden the
+        // classifier so retry_on_mux_disconnect catches them too.
+        let e = anyhow::anyhow!("LSP server disconnected");
+        assert!(is_mux_disconnect(&e));
+    }
+
+    #[test]
+    fn is_mux_disconnect_matches_mux_lost() {
+        let e = anyhow::anyhow!("Mux connection lost while sending textDocument/rename");
+        assert!(is_mux_disconnect(&e));
+    }
+
+    #[test]
+    fn is_mux_disconnect_rejects_other_errors() {
+        let e = anyhow::anyhow!("invalid line range");
+        assert!(!is_mux_disconnect(&e));
+        let e = anyhow::anyhow!("file not found: src/foo.rs");
+        assert!(!is_mux_disconnect(&e));
     }
 }

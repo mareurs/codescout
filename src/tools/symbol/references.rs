@@ -8,7 +8,7 @@ use crate::tools::{require_str_param, OutputForm, Tool, ToolContext};
 
 use crate::fs::{
     classify_reference_path, get_lsp_client, path_in_excluded_dir, require_path_param,
-    resolve_library_roots, resolve_read_path, uri_to_path, LspTimer,
+    resolve_library_roots, resolve_read_path, retry_on_mux_disconnect, uri_to_path, LspTimer,
 };
 use crate::symbol::query::find_unique_symbol_by_name_path;
 
@@ -67,16 +67,32 @@ impl Tool for References {
         let root = ctx.agent.require_project_root().await?;
         let (client, lang) = get_lsp_client(&ctx.agent, &*ctx.lsp, &full_path).await?;
 
-        // Find the symbol's position by walking document symbols
+        // Find the symbol's position by walking document symbols, then resolve
+        // references. I-4: wrap the whole symbol-then-references flow in a
+        // single mux-disconnect retry — both calls are idempotent reads.
+        // `client` and `lang` are cloned so the post-retry call-hierarchy
+        // cross-check (below) still has them.
         let timer = LspTimer::start();
-        let symbols = client.document_symbols(&full_path, &lang).await?;
+        let name_path_owned = name_path.to_string();
+        let (sym, refs) = retry_on_mux_disconnect(
+            &ctx.agent,
+            &*ctx.lsp,
+            &full_path,
+            client.clone(),
+            lang.clone(),
+            |c, l| {
+                let p = full_path.clone();
+                let np = name_path_owned.clone();
+                async move {
+                    let symbols = c.document_symbols(&p, &l).await?;
+                    let sym = find_unique_symbol_by_name_path(&symbols, &np)?.clone();
+                    let refs = c.references(&p, sym.start_line, sym.start_col, &l).await?;
+                    anyhow::Ok((sym, refs))
+                }
+            },
+        )
+        .await?;
         timer.record(&*ctx.lsp, raw_lang, &root).await;
-        let sym = find_unique_symbol_by_name_path(&symbols, name_path)?;
-
-        // Get references at the symbol's position
-        let refs = client
-            .references(&full_path, sym.start_line, sym.start_col, &lang)
-            .await?;
 
         // Resolve all library roots for classification (Scope::All to get every lib).
         let lib_roots =
