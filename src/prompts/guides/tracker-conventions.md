@@ -131,5 +131,11 @@ artifact(action="get", id="<id>", full=true)
 artifact(action="get", id="<id>", heading="## Foo")
 ```
 
+**Filterable trackers** — augmented trackers that store structured rows in a params array
+can be queried at entry grain via `entry_filter`. Call `artifact_augment` with
+`entry_collection="<array-key>"` to enable it, then pass `entry_filter={…}` (same AST as
+`filter`) to `artifact(action="get")`. Prose trackers need retrofit first — see
+`docs/conventions/retrofitting-trackers-for-filtering.md`.
+
 For deeper artifact / augmentation / event mechanics see
 `get_guide("librarian")`.

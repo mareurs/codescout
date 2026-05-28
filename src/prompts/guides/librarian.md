@@ -80,6 +80,13 @@ Equivalent to `filter={"and":[{"kind":{"eq":"tracker"}},{"status":{"eq":"active"
 - `scope="repo"` — widen to the active project's enclosing git repo
 - `scope="umbrella"` — all projects in the umbrella the active project belongs to (requires `[[umbrella]]` in workspace.toml)
 
+**Entry-grain filtering** — `artifact(action="get", entry_filter=…)` is the per-row twin of
+artifact-grain `filter`. It uses the same AST and ops, but runs in-memory over the array
+named by the augmentation's `entry_collection` field instead of querying the SQL catalog.
+`contains` is case-insensitive (matches SQL LIKE behaviour). Only augmented trackers that
+declare an `entry_collection` support this; prose trackers need retrofit first — see
+`docs/conventions/retrofitting-trackers-for-filtering.md`.
+
 ---
 
 ## artifact(action="create") — Required Fields

@@ -79,6 +79,10 @@ impl Tool for Artifact {
                     "items": { "type": "string" },
                     "description": "get: fetch multiple sections by heading"
                 },
+                "entry_filter": {
+                    "type": "object",
+                    "description": "get: filter AST (same shape as find's `filter`) applied to the rows of the tracker's declared entry_collection; returns matching rows as `entries` + `entry_total`. Requires the artifact to be augmented with an entry_collection naming the params array to filter. e.g. {\"and\":[{\"status\":{\"eq\":\"open\"}}]}"
+                },
                 "start_line": { "type": "integer", "description": "get: 1-indexed start of line slice" },
                 "end_line": { "type": "integer", "description": "get: 1-indexed inclusive end of line slice" },
                 "new_rel_path": { "type": "string", "description": "move: destination path relative to repo root (e.g. 'docs/archive/foo.md'). Parent directories are created automatically. Fails if destination already exists." },
