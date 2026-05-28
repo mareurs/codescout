@@ -23,14 +23,6 @@ Subagents inherit these rules. Pass them along.
 - Who calls X → references(symbol, path) — NOT grep
 - Structural code edit → edit_code | Text/import edit → edit_file
 
-## Buffered tool results (@ref)
-
-When a tool returns {output_id: "@tool_xyz", summary, hint}:
-- Result was too big to inline. Stored in the buffer.
-- Query it: grep PATTERN @tool_xyz | read_file(@ref, json_path="$.foo")
-  | read_file(@ref, start_line=N, end_line=M).
-- Don't re-call the tool. Don't ask the user to paste content.
-
 ## Workspace gate
 
 After workspace(activate, path=foreign), call workspace(activate, path=home)
