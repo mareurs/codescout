@@ -584,4 +584,95 @@ mod tests {
         assert!(eval(&parse(json!({"title": {"contains": "FROG"}})), &e).unwrap());
         assert!(eval(&parse(json!({"title": {"contains": "lotus"}})), &e).unwrap());
     }
+    #[test]
+    fn eval_matches_compile_on_fixture() {
+        use rusqlite::Connection;
+
+        // (id, status: Option<&str>, confidence: i64, title: &str)
+        // status=None models a missing/NULL field. Only eq/ne/in/nin reference it
+        // (those agree across engines on a missing field — both exclude it).
+        let rows: &[(&str, Option<&str>, i64, &str)] = &[
+            ("a", Some("open"), 1, "Docs Lotus Frog"),
+            ("b", Some("done"), 3, "50% off sale"),
+            ("c", Some("open"), 5, "hardware roadmap"),
+            ("d", None, 2, "untriaged item"), // missing status
+        ];
+
+        // SQL side: temp table; None -> NULL status.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE e (id TEXT, status TEXT, confidence INTEGER, title TEXT)",
+            [],
+        )
+        .unwrap();
+        for (id, status, confidence, title) in rows {
+            conn.execute(
+                "INSERT INTO e (id, status, confidence, title) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![id, status, confidence, title],
+            )
+            .unwrap();
+        }
+
+        // eval side: JSON entries; omit "status" key for the None row.
+        let entries: Vec<serde_json::Map<String, Value>> = rows
+            .iter()
+            .map(|(id, status, confidence, title)| {
+                let mut m = serde_json::Map::new();
+                m.insert("id".into(), json!(id));
+                if let Some(s) = status {
+                    m.insert("status".into(), json!(s));
+                }
+                m.insert("confidence".into(), json!(confidence));
+                m.insert("title".into(), json!(title));
+                m
+            })
+            .collect();
+
+        let filters = [
+            json!({"status": {"eq": "open"}}),
+            json!({"status": {"ne": "open"}}), // missing-status row excluded by both
+            json!({"confidence": {"gt": 2}}),
+            json!({"confidence": {"gte": 3}}),
+            json!({"confidence": {"lt": 5}}),
+            json!({"and": [{"status": {"eq": "open"}}, {"confidence": {"lt": 5}}]}),
+            json!({"not": {"title": {"eq": "50% off sale"}}}), // not over an ALWAYS-present field
+            json!({"status": {"in": ["open", "flaky"]}}),
+            json!({"status": {"nin": ["done"]}}),
+            json!({"title": {"contains": "FROG"}}), // case-insensitivity parity
+            json!({"title": {"contains": "lotus"}}),
+            json!({"title": {"prefix": "50%"}}), // %-escape parity
+        ];
+
+        for fj in filters {
+            let node = parse(fj.clone());
+
+            let mut eval_ids: Vec<String> = entries
+                .iter()
+                .filter(|e| eval(&node, e).unwrap())
+                .map(|e| e["id"].as_str().unwrap().to_string())
+                .collect();
+            eval_ids.sort();
+
+            let frag = compile(&node).unwrap();
+            let sql = format!("SELECT id FROM e WHERE {} ORDER BY id", frag.sql);
+            let mut stmt = conn.prepare(&sql).unwrap();
+            let sql_ids: Vec<String> = stmt
+                .query_map(rusqlite::params_from_iter(frag.params.iter()), |r| {
+                    r.get::<_, String>(0)
+                })
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+
+            assert_eq!(eval_ids, sql_ids, "engine disagreement on filter {fj}");
+        }
+    }
+
+    #[test]
+    fn eval_and_compile_both_reject_empty_in() {
+        let node = parse(json!({"status": {"in": []}}));
+        assert!(compile(&node).is_err());
+        let e = json!({"status": "open"}).as_object().unwrap().clone();
+        assert!(eval(&node, &e).is_err());
+    }
 }
