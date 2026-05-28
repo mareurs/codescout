@@ -24,6 +24,8 @@ struct Args {
     append_mode: Option<bool>,
     #[serde(default)]
     history_cap: Option<usize>,
+    #[serde(default)]
+    entry_collection: Option<String>,
 }
 
 #[async_trait]
@@ -35,11 +37,11 @@ impl Tool for ArtifactAugment {
     fn description(&self) -> &'static str {
         "Attach or replace a persistent prompt + params on any artifact (merge=false, default), \
          or RFC 7396 merge-patch params only without changing the prompt (merge=true). \
-         On merge=false ALL six caller-controlled fields — prompt, params, render_template, \
-         params_schema, append_mode, history_cap — are overwritten with the call's values; \
+         On merge=false ALL seven caller-controlled fields — prompt, params, render_template, \
+         params_schema, append_mode, history_cap, entry_collection — are overwritten with the call's values; \
          fields you omit silently reset to None / false on the stored row. To preserve sibling \
          fields across a re-augment, either pass them back in the call, or use merge=true \
-         (which patches params only and leaves the other five fields untouched). \
+         (which patches params only and leaves the other six fields untouched). \
          Idempotent — safe to call on already-augmented artifacts. \
          Replaces artifact_update_params."
     }
@@ -79,6 +81,10 @@ impl Tool for ArtifactAugment {
                     "type": "integer",
                     "minimum": 1,
                     "description": "Max number of dated ## YYYY-MM-DD sections to retain. Oldest sections beyond cap are dropped on each append. On merge=false this field is overwritten with the call's value (None if omitted) — pass the existing cap back to preserve it."
+                },
+                "entry_collection": {
+                    "type": "string",
+                    "description": "Names the params array whose objects are this tracker's filterable entry rows (e.g. \"failures\"). Enables artifact(get, entry_filter=...). On merge=false this field is overwritten with the call's value (None if omitted) — pass the existing value back to preserve it."
                 }
             }
         })
@@ -281,7 +287,7 @@ impl Tool for ArtifactAugment {
                 params_schema: params_schema_str,
                 append_mode: a.append_mode.unwrap_or(false),
                 history_cap: a.history_cap.map(|v| v as i64),
-                entry_collection: None,
+                entry_collection: a.entry_collection,
             },
         )?;
 
@@ -684,5 +690,27 @@ mod tests {
 
         // Suppress unused warning.
         let _: i32 = 0;
+    }
+    #[tokio::test]
+    async fn persists_entry_collection() {
+        let ctx = mk_ctx();
+        seed_artifact(&ctx, "ec-tool");
+        ArtifactAugment
+            .call(
+                &ctx,
+                json!({
+                    "id": "ec-tool",
+                    "prompt": "maintain the failures list",
+                    "params": { "failures": [] },
+                    "entry_collection": "failures"
+                }),
+            )
+            .await
+            .unwrap();
+        let row = {
+            let cat = ctx.catalog.lock();
+            augmentation::get(&cat, "ec-tool").unwrap().unwrap()
+        };
+        assert_eq!(row.entry_collection.as_deref(), Some("failures"));
     }
 }
