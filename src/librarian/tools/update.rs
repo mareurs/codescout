@@ -120,6 +120,7 @@ fn apply_body_edits(working: &str, edits: &[Value]) -> Result<String> {
                 action,
                 edit["content"].as_str(),
                 edit["at"].as_str(),
+                false,
             )
             .map_err(|e| {
                 super::RecoverableError::with_hint(

@@ -12,12 +12,44 @@ use super::frontmatter;
 // Helper functions (moved from section_edit.rs)
 // ---------------------------------------------------------------------------
 
+/// Scan `text` for surface-marker HTML comments — lines that exactly match
+/// `<!-- @surface NAME -->` or `<!-- @end -->`. Returns the markers in
+/// document order; duplicates preserved. Used by the F-7 marker-preservation
+/// gate in `perform_section_edit_ext`'s replace arm: a replace whose new
+/// content omits markers present in the OLD body would silently drop them.
+///
+/// Pattern is strict (line-anchored, exact whitespace) to avoid false
+/// positives from prose that quotes the marker shape (e.g. F-5 in
+/// `docs/trackers/prompt-guide-refactor-session-log.md` documents the
+/// dual problem in `extract_surface`).
+fn extract_surface_markers(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            let is_marker = trimmed == "<!-- @end -->"
+                || (trimmed.starts_with("<!-- @surface ")
+                    && trimmed.ends_with(" -->")
+                    && !trimmed[14..trimmed.len() - 4].contains("<!--"));
+            is_marker.then(|| trimmed.to_string())
+        })
+        .collect()
+}
+
+/// Returns surface markers that appear in `old_body` but not in `new_content`.
+/// Used by the F-7 gate — see [`extract_surface_markers`].
+fn find_lost_surface_markers(old_body: &str, new_content: &str) -> Vec<String> {
+    let old = extract_surface_markers(old_body);
+    let new = extract_surface_markers(new_content);
+    old.into_iter().filter(|m| !new.contains(m)).collect()
+}
+
 /// Pure string transformation: apply `action` to the section identified by `heading_query`.
 ///
 /// Test-only thin wrapper that delegates to `perform_section_edit_ext` with
-/// `at=None`, preserving the historical 4-arg signature for the test suite.
-/// Production code (`EditMarkdown::call`) calls `perform_section_edit_ext`
-/// directly so the `at` parameter threads through.
+/// `at=None` and `force=false`, preserving the historical 4-arg signature
+/// for the test suite. Production code (`EditMarkdown::call`) calls
+/// `perform_section_edit_ext` directly so the `at` parameter and the F-7
+/// surface-marker-preservation gate's `force` override thread through.
 ///
 /// Returns the full modified file content (always ends with a single newline).
 #[cfg(test)]
@@ -27,7 +59,7 @@ pub fn perform_section_edit(
     action: &str,
     new_content: Option<&str>,
 ) -> Result<String> {
-    perform_section_edit_ext(content, heading_query, action, new_content, None)
+    perform_section_edit_ext(content, heading_query, action, new_content, None, false)
 }
 
 /// Extended form: `at` controls where `insert_after` lands. Pass
@@ -35,13 +67,23 @@ pub fn perform_section_edit(
 /// of inserting at the end of the heading's section, or
 /// `Some("after-heading-line")` to insert content immediately after
 /// the heading line itself. Ignored by other actions.
+///
+/// `force` bypasses the F-7 surface-marker-preservation gate: when `false`
+/// (default for the user-facing tool path), a `replace` whose new content
+/// would drop `<!-- @surface NAME -->` or `<!-- @end -->` lines present in
+/// the OLD body returns `RecoverableError` naming the lost markers. Pass
+/// `true` to override (e.g. intentional structural change). See F-7 in
+/// `docs/trackers/prompt-guide-refactor-session-log.md` for the bug-class
+/// rationale.
 pub fn perform_section_edit_ext(
     content: &str,
     heading_query: &str,
     action: &str,
     new_content: Option<&str>,
     at: Option<&str>,
+    force: bool,
 ) -> Result<String> {
+    use crate::tools::core::types::RecoverableError;
     use crate::tools::file_summary::{heading_level, resolve_section_range};
 
     let range =
@@ -55,6 +97,33 @@ pub fn perform_section_edit_ext(
         "replace" => {
             let new = new_content
                 .ok_or_else(|| anyhow::anyhow!("content is required for the replace action"))?;
+
+            // F-7: surface-marker-preservation gate.
+            // The section's body may contain `<!-- @surface NAME -->` or
+            // `<!-- @end -->` HTML-comment markers that demarcate prompt
+            // surfaces in source.md (and similar). A replace whose new
+            // content omits them silently drops the markers, breaking the
+            // build.rs slice extractor (F-5's sibling). Refuse the replace
+            // unless the caller passes `force=true`.
+            if !force {
+                let body_start = heading_idx + 1;
+                let body_end = end_idx.min(lines.len());
+                if body_start < body_end {
+                    let old_body = lines[body_start..body_end].join("\n");
+                    let lost = find_lost_surface_markers(&old_body, new);
+                    if !lost.is_empty() {
+                        let listed = lost.join(", ");
+                        return Err(RecoverableError::with_hint(
+                            format!(
+                                "replace on section {heading_query:?} would drop {} surface marker(s) from the body: {listed}",
+                                lost.len()
+                            ),
+                            "Include those markers verbatim in the new content (they must be alone on their own lines), OR pass force=true if the structural change is intentional. See F-7 in docs/trackers/prompt-guide-refactor-session-log.md.",
+                        )
+                        .into());
+                    }
+                }
+            }
 
             let replace_heading = new
                 .lines()
@@ -654,6 +723,7 @@ impl Tool for EditMarkdown {
                         action,
                         edit_content,
                         edit["at"].as_str(),
+                        input["force"].as_bool().unwrap_or(false),
                     )
                     .map_err(|e| {
                         RecoverableError::with_hint(
@@ -697,6 +767,7 @@ impl Tool for EditMarkdown {
                     action,
                     content,
                     input["at"].as_str(),
+                    input["force"].as_bool().unwrap_or(false),
                 )
                 .map_err(|e| {
                     RecoverableError::with_hint(e.to_string(), "Check heading name and action.")

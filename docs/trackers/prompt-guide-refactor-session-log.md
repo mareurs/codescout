@@ -137,6 +137,7 @@ This measurement must precede the V2 decision.
 | F-4 | 2026-05-28 | med | static-slice-cut | fixed-verified | Brainstorm missed pre-existing `source_md_under_cap` invariant (2200-byte gate); Iron Law 6 cannot ship alone |
 | F-5 | 2026-05-28 | med | static-slice-cut | mitigated | `extract_surface` uses substring `find()`; any content quoting the marker breaks slice extraction |
 | F-6 | 2026-05-28 | med | iron-law-6 | open | Parent should brief subagent on triggered guide topics, not just on file paths |
+| F-7 | 2026-05-28 | med | codescout-tool | fixed-verified | `edit_markdown(action='replace')` silently drops `<!-- @surface NAME -->` / `<!-- @end -->` markers from the section body |
 
 ## Wins Index
 
@@ -497,6 +498,27 @@ Symptoms:
 **Promote-when:** A second subagent dispatch with the same brief shape produces an equivalent "self-discovery cost ≈ zero" report. At 2 datapoints, promote to CLAUDE.md as: *"When dispatching subagents, the Iron Law 6 nouns are not abstract. Enumerate concrete file paths, symbol names, tracker IDs (F-N/W-N), and finding pointers. The subagent's report should be able to cite back the same paths verbatim — if it can't, the brief was insufficient."*
 
 **Status:** validated
+
+---
+## F-7 — `edit_markdown(action='replace')` silently drops `<!-- @surface NAME -->` / `<!-- @end -->` markers from the section body
+
+**Observed:** 2026-05-28, twice in succession while editing `src/prompts/source.md` this turn.
+
+**When:** Used `edit_markdown(action="replace", heading="## Deeper guidance", content="<new topic list>")` to refresh the get_guide topic list. The first attempt's new content omitted the `<!-- @end -->` and following `<!-- @surface onboarding_prompt -->` markers that lived at the tail of the section body. Build panicked: `surface 'onboarding_prompt' not found`. After restoring those markers in the new content, the same shape struck again — the intro paragraph of the `onboarding_prompt` surface (which structurally lives between the `<!-- @surface onboarding_prompt -->` line and the next heading `## THE IRON LAW`) was inside the same replace target body. UPDATE_PROMPT_SNAPSHOTS=1 then regenerated the onboarding_prompt fixture to match the broken-source-md state, masking the bug until `git diff` caught the unstaged snapshot diff.
+
+**Expected:** Replace would only modify the human-readable content I provided, preserving structural markers.
+
+**Got:** Replace overwrites the ENTIRE section body (from line-after-heading to next-sibling-heading) verbatim with the new content. Any structural HTML comment markers in the OLD body that the NEW content doesn't include are dropped silently — no warning, no test failure.
+
+**Probable cause:** `perform_section_edit_ext`'s "replace" arm (`src/tools/markdown/edit_markdown.rs`) computes the section's body range from heading line to next-sibling-heading and substitutes the new content wholesale. Surface markers are body content by markdown's parse model — they're not headings, they're HTML comments — so the section-shape semantics don't know they're load-bearing. Sibling of F-5 (`extract_surface` substring-finds; can match the FIRST occurrence anywhere). Both stem from `source.md` mixing structural markers with prose body content where line-naive parsers/editors can't see them.
+
+**Workaround (used this turn):** Manually restored the lost markers + intro paragraph via `edit_markdown(action="edit", old_string=..., new_string=...)`. Re-ran UPDATE_PROMPT_SNAPSHOTS to refresh the now-correct fixture. Amended the previous commit to bundle the fix.
+
+**Severity:** med — silent data loss caught only by build.rs panic (and only because the broken state failed extract_surface). If the markers had been less load-bearing (e.g. an HTML comment styling hint), the loss would have shipped unnoticed.
+
+**Status:** fixed-verified — `perform_section_edit_ext` now gates `action="replace"` on a surface-marker-preservation check. New helper `find_lost_surface_markers(old_body, new_content)` returns markers present in OLD but not NEW; if non-empty AND `force=false`, the replace returns `RecoverableError` naming the lost markers and pointing at this F-7 entry. `force=true` (already used for the body-shrink guard) overrides the gate for intentional structural change. Tests added: `replace_refuses_when_surface_markers_would_be_dropped`, `replace_with_force_drops_markers_silently`, `replace_preserves_markers_when_new_content_includes_them`, `extract_surface_markers_ignores_marker_shaped_text_in_prose` — the last is the false-positive guard for prose that quotes the marker shape (sibling of F-5's parser-side line-anchoring rule).
+
+**Fix idea / Pointer:** Shipped this turn (next commit on `experiments`). Future deeper fix could move surface markers to dedicated heading-separated blocks in `source.md` so they never live inside section bodies in the first place — but the gate is sufficient for now. The librarian's `artifact(update)` write path (`src/librarian/tools/update.rs:117`) ALSO benefits from the gate — call_site updated to pass `false` (defensive in depth; tracker bodies don't typically contain markers but a future tracker documenting THIS feature might quote them).
 
 ---
 ## Template for new entries

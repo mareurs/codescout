@@ -962,6 +962,7 @@ fn insert_after_h1_with_at_after_heading_line_inserts_right_after_heading() {
         "insert_after",
         Some("inserted right after\n"),
         Some("after-heading-line"),
+        false,
     )
     .unwrap();
     assert_eq!(
@@ -987,6 +988,7 @@ fn insert_after_with_explicit_end_of_section_matches_default() {
         "insert_after",
         Some("\n## Testing\ntest\n"),
         Some("end-of-section"),
+        false,
     )
     .unwrap();
     assert_eq!(default_result, explicit_result);
@@ -1001,12 +1003,140 @@ fn insert_after_invalid_at_value_errors() {
         "insert_after",
         Some("x\n"),
         Some("nonsense"),
+        false,
     )
     .unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("invalid at=") && msg.contains("nonsense"),
         "error should name the invalid value, got: {msg}"
+    );
+}
+
+#[test]
+fn replace_refuses_when_surface_markers_would_be_dropped() {
+    // F-7: replace whose new content omits `<!-- @surface NAME -->` or
+    // `<!-- @end -->` lines present in the OLD body must refuse with a
+    // RecoverableError listing the lost markers. The bug surfaced in real
+    // use when editing src/prompts/source.md — the `## Deeper guidance`
+    // section's body contained the @end marker for `server_instructions`
+    // surface AND the @surface opener for `onboarding_prompt`; replace
+    // wiped both, breaking the build's slice extraction.
+    let content = "## Deeper guidance\n\
+                   \n\
+                   list:\n\
+                   - one\n\
+                   - two\n\
+                   <!-- @end -->\n\
+                   \n\
+                   <!-- @surface next_surface -->\n\
+                   intro\n\
+                   ## Next Heading\nbody\n";
+    let err = perform_section_edit_ext(
+        content,
+        "## Deeper guidance",
+        "replace",
+        Some("list:\n- new\n- entries\n"),
+        None,
+        false,
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("surface marker"),
+        "error should mention 'surface marker', got: {msg}"
+    );
+    assert!(
+        msg.contains("<!-- @end -->"),
+        "error should list the @end marker, got: {msg}"
+    );
+    assert!(
+        msg.contains("<!-- @surface next_surface -->"),
+        "error should list the @surface marker, got: {msg}"
+    );
+}
+
+#[test]
+fn replace_with_force_drops_markers_silently() {
+    // F-7: force=true bypasses the marker-preservation gate. Used when the
+    // structural change is intentional (e.g. removing a deprecated surface).
+    let content = "## Section\n\
+                   body\n\
+                   <!-- @end -->\n";
+    let result = perform_section_edit_ext(
+        content,
+        "## Section",
+        "replace",
+        Some("new body\n"),
+        None,
+        true,
+    )
+    .unwrap();
+    assert!(
+        !result.contains("<!-- @end -->"),
+        "force=true must allow marker removal, got:\n{result}"
+    );
+    assert!(
+        result.contains("new body"),
+        "result should contain new body, got:\n{result}"
+    );
+}
+
+#[test]
+fn replace_preserves_markers_when_new_content_includes_them() {
+    // F-7: happy path — when the new content explicitly re-includes the
+    // markers, the gate passes silently and the replace proceeds.
+    let content = "## Section\n\
+                   list:\n\
+                   - one\n\
+                   <!-- @end -->\n\
+                   \n\
+                   <!-- @surface other -->\n";
+    let result = perform_section_edit_ext(
+        content,
+        "## Section",
+        "replace",
+        Some("list:\n- new\n<!-- @end -->\n\n<!-- @surface other -->\n"),
+        None,
+        false,
+    )
+    .unwrap();
+    assert!(
+        result.contains("<!-- @end -->"),
+        "@end marker should be preserved, got:\n{result}"
+    );
+    assert!(
+        result.contains("<!-- @surface other -->"),
+        "@surface marker should be preserved, got:\n{result}"
+    );
+    assert!(
+        result.contains("- new"),
+        "new content should be in result, got:\n{result}"
+    );
+}
+
+#[test]
+fn extract_surface_markers_ignores_marker_shaped_text_in_prose() {
+    // F-7 false-positive guard: marker matching must be strict (anchored
+    // to whole-line, exact prefix/suffix), so prose that *quotes* the
+    // marker shape doesn't trip the gate. Pairs with F-5's parser-side
+    // issue in extract_surface — both should be line-anchored.
+    let content = "## Section\n\
+                   Prose with inline reference to <!-- @surface foo --> not on its own line.\n\
+                   Another line says the marker is `<!-- @end -->` (code-quoted).\n";
+    // Should be allowed — no markers are alone on a line.
+    let result = perform_section_edit_ext(
+        content,
+        "## Section",
+        "replace",
+        Some("new body\n"),
+        None,
+        false,
+    );
+    assert!(
+        result.is_ok(),
+        "marker-shaped text in prose should not trigger the gate, got: {:?}",
+        result.err()
     );
 }
 
