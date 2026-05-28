@@ -75,6 +75,12 @@ impl Tool for ReadFile {
         let start_line = optional_u64_param(&input, "start_line");
         let end_line = optional_u64_param(&input, "end_line");
         validate_read_nav_params(&input, start_line, end_line)?;
+        // start_line alone defaults end_line to a 50-line window (read_with_line_range
+        // clamps past-EOF cases, so saturating_add is safe).
+        let end_line = match (start_line, end_line) {
+            (Some(s), None) => Some(s.saturating_add(49)),
+            (_, e) => e,
+        };
 
         let source_tag = compute_source_tag(&resolved, ctx).await;
 
@@ -209,6 +215,11 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
     let total_lines = text.lines().count();
     let start = optional_u64_param(input, "start_line");
     let end = optional_u64_param(input, "end_line");
+    // start_line alone defaults end_line to a 50-line window — same as the real-file path.
+    let end = match (start, end) {
+        (Some(s), None) => Some(s.saturating_add(49)),
+        (_, e) => e,
+    };
 
     if let (Some(s), Some(e)) = (start, end) {
         if s == 0 || e < s {
@@ -282,15 +293,19 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
 }
 
 /// Validate navigation parameter combinations for real-file reads.
+///
+/// `start_line` alone is allowed — the caller defaults `end_line` to a 50-line
+/// window. The validation only rejects mutually-exclusive combinations and the
+/// (None, Some) shape (end_line without start_line is meaningless).
 fn validate_read_nav_params(
     input: &Value,
     start_line: Option<u64>,
     end_line: Option<u64>,
 ) -> Result<()> {
-    if start_line.is_some() != end_line.is_some() {
+    if start_line.is_none() && end_line.is_some() {
         return Err(RecoverableError::with_hint(
-            "both start_line and end_line are required",
-            "Provide both start_line and end_line for a line range, e.g. start_line=1, end_line=50",
+            "end_line provided without start_line",
+            "Pass start_line (end_line defaults to start_line+49), or pass both for an explicit range.",
         )
         .into());
     }
@@ -1067,6 +1082,36 @@ mod tests {
         assert!(
             !text.trim_start().starts_with('{'),
             "read_file output must be text, not JSON, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_file_buffer_start_line_alone_defaults_50_line_window() {
+        // I-6: start_line alone should default end_line to start+49 (50-line window),
+        // not be silently ignored (buffer) or rejected (real file).
+        let lines: Vec<String> = (1..=200).map(|i| format!("line {i}")).collect();
+        let content = lines.join("\n");
+        let ctx = test_ctx().await;
+        let buf_id = ctx.output_buffer.store_tool("cmd", content);
+
+        let tool = ReadFile;
+        let result = tool
+            .call(json!({ "path": buf_id, "start_line": 100 }), &ctx)
+            .await
+            .unwrap();
+
+        let body = result.get("content").and_then(|v| v.as_str()).unwrap_or("");
+        assert!(
+            body.contains("line 100") && body.contains("line 149"),
+            "start_line alone should yield a 50-line window 100..=149, got: {body:?}"
+        );
+        assert!(
+            !body.contains("line 150"),
+            "window should stop at start+49 (line 149), got: {body:?}"
+        );
+        assert!(
+            !body.contains("line 99"),
+            "window should start at start_line (line 100), got: {body:?}"
         );
     }
 }

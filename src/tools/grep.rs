@@ -206,10 +206,35 @@ impl Tool for Grep {
                 "files": files,
             });
             if truncated {
+                // Pattern 1 (PROGRESSIVE_DISCOVERABILITY.md): concrete + copy-paste-ready.
+                // `groups` is already sorted by count desc by group_by_file.
+                let top: Vec<String> = groups
+                    .iter()
+                    .take(3)
+                    .map(|g| format!("path=\"{}\" ({} matches)", g.file, g.items.len()))
+                    .collect();
+                let hint = if top.is_empty() {
+                    format!(
+                        "Showing {} of {} matches across {} files. \
+                         Narrow with a more specific pattern or add path=<file>.",
+                        visible.len(),
+                        total,
+                        files
+                    )
+                } else {
+                    format!(
+                        "Showing {} of {} matches across {} files. \
+                         Narrow with one of: {} — or use a more specific pattern.",
+                        visible.len(),
+                        total,
+                        files,
+                        top.join(", ")
+                    )
+                };
                 r["overflow"] = json!({
                     "shown": visible.len(),
                     "total": total,
-                    "hint": "Many matches. Narrow the pattern or use a more specific path.",
+                    "hint": hint,
                 });
             }
             r
@@ -218,12 +243,36 @@ impl Tool for Grep {
             let mut r =
                 json!({ "matches": matches, "total": shown_count, "context_lines": context_lines });
             if hit_cap {
+                // Derive top files from the flat matches we collected.
+                use std::collections::BTreeMap;
+                let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+                for m in &matches {
+                    if let Some(f) = m.get("file").and_then(|v| v.as_str()) {
+                        *counts.entry(f.to_string()).or_default() += 1;
+                    }
+                }
+                let mut ranked: Vec<(String, usize)> = counts.into_iter().collect();
+                ranked.sort_by_key(|(_, c)| std::cmp::Reverse(*c));
+                let top: Vec<String> = ranked
+                    .iter()
+                    .take(3)
+                    .map(|(f, n)| format!("path=\"{f}\" ({n} matches)"))
+                    .collect();
+                let hint = if top.is_empty() {
+                    format!(
+                        "Showing first {shown_count} matches (cap hit). \
+                         Narrow with a more specific pattern or path=<file>."
+                    )
+                } else {
+                    format!(
+                        "Showing first {shown_count} matches (cap hit). \
+                         Narrow with one of: {} — or use a more specific pattern.",
+                        top.join(", ")
+                    )
+                };
                 r["overflow"] = json!({
                     "shown": shown_count,
-                    "hint": format!(
-                        "Showing first {} matches (cap hit). Narrow with a more specific pattern or path=<file>.",
-                        shown_count
-                    )
+                    "hint": hint,
                 });
             }
             r
@@ -689,6 +738,53 @@ mod tests {
         assert!(
             total > 0,
             "grep should find 'foo_bar_baz' in @tool_* buffer content, got total={total}: {result}"
+        );
+    }
+
+    #[tokio::test]
+    async fn grep_overflow_hint_names_top_files() {
+        // I-5: when grep overflows, the hint must be concrete and copy-paste-ready —
+        // it should cite the top file paths by match count so the LLM can narrow.
+        use serde_json::json;
+        let dir = tempdir().unwrap();
+        // Create three files; one dominates by match count.
+        let many: String = (0..40).map(|i| format!("fn target_{i}() {{}}\n")).collect();
+        std::fs::write(dir.path().join("hot.rs"), many).unwrap();
+        std::fs::write(
+            dir.path().join("warm.rs"),
+            "fn target_a() {}\nfn target_b() {}\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("cold.rs"), "fn target_c() {}\n").unwrap();
+
+        let ctx = test_ctx().await;
+        let tool = Grep;
+        // limit=5 forces overflow against the 43 total matches.
+        let result = tool
+            .call(
+                json!({ "pattern": "target", "path": dir.path().to_str().unwrap(), "limit": 5 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let overflow = result
+            .get("overflow")
+            .expect("limit=5 against 43 matches must overflow");
+        let hint = overflow["hint"]
+            .as_str()
+            .expect("overflow.hint must be a string");
+        assert!(
+            hint.contains("path="),
+            "hint must include a concrete `path=\"...\"` suggestion, got: {hint}"
+        );
+        assert!(
+            hint.contains("hot.rs"),
+            "hint must cite the highest-match file, got: {hint}"
+        );
+        assert!(
+            hint.contains("matches"),
+            "hint must include match counts so the model can pick, got: {hint}"
         );
     }
 }

@@ -6,12 +6,15 @@ Subagents inherit these rules. Pass them along.
 1. NEVER read_file source code → symbols(path) for overview,
    symbols(name=..., include_body=true) for bodies.
 2. NEVER edit_file structural code → edit_code (LSP-aware).
-3. NEVER pipe unbounded run_command output → run bare, query
-   the @cmd_* buffer (grep "ERROR" @cmd_abc). Bounded LHS
-   (ls, cat, awk, sed, find -maxdepth N) is OK.
+   Gate: "edit contains a symbol definition — use symbol tools" or
+   "edit_file is blocked for structural edits on source code files".
+3. NEVER pipe unbounded run_command → run bare, query @cmd_* buffer
+   (grep "ERROR" @cmd_abc). Bounded LHS (ls, cat, awk, sed,
+   find -maxdepth N) is OK. Shell on source files is blocked.
 4. NEVER read_file markdown → read_markdown (heading-addressed).
+   Gate: "Use read_markdown for markdown files".
 5. NEVER edit_file markdown → edit_markdown (heading-addressed).
-
+   Gate: "Use edit_markdown for markdown files".
 ## Search/Edit decision quickref
 
 - Know name → symbols(name=X) | symbol_at(path, line, col)

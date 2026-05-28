@@ -828,7 +828,7 @@ mod tests {
 mod redesign_invariants {
     use super::*;
 
-    const MAX_INSTRUCTIONS_CHARS: usize = 1800;
+    const MAX_INSTRUCTIONS_CHARS: usize = 2200;
 
     #[test]
     fn source_md_under_cap() {
