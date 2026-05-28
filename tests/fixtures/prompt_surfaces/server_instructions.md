@@ -13,8 +13,9 @@ Subagents inherit these rules. Pass them along.
 5. NEVER edit_file markdown → edit_markdown (heading-addressed).
 6. Subagents see only what you brief them with. Pass: which
    get_guide(topic) to call (or the content itself), prior tool results,
-   file paths, symbol names. Applies at every spawn boundary. A subagent
-   re-discovering what you knew is a dispatch defect — yours, not theirs.
+   file paths, symbol names, topics already triggered this session.
+   Applies at every spawn boundary. A subagent re-discovering what you
+   knew is a dispatch defect — yours, not theirs.
 ## Search/Edit decision quickref
 
 - Know name → symbols(name=X) | symbol_at(path, line, col)

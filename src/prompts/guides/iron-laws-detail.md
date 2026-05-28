@@ -126,9 +126,9 @@ combined with body edits in the same call.
 
 **Rule:** subagents see only what you brief them with. Pass: which
 `get_guide(topic)` to call (or the content itself), prior tool
-results, file paths, symbol names. Applies at every spawn boundary.
-A subagent re-discovering what you knew is a dispatch defect —
-yours, not theirs.
+results, file paths, symbol names, **topics already triggered this
+session**. Applies at every spawn boundary. A subagent re-discovering
+what you knew is a dispatch defect — yours, not theirs.
 
 **No tool gate enforces this.** Iron Law 6 is behavioral, not
 substrate-gated. The discipline is observable post-hoc: a subagent
@@ -157,6 +157,13 @@ not relay automatically.
   time/cost budget?
 - Avoid context dumps. "Everything I know" wastes the subagent's
   budget; "what the subagent needs to act on this task" is the bar.
+- **State which get_guide topics you've already triggered this
+  session** (F-6 in `docs/trackers/prompt-guide-refactor-session-log.md`).
+  The `guide_hints_emitted` ledger is shared parent↔subagent — so once
+  you trigger a topic, the subagent will NOT receive its V2 auto-inject
+  independently. Telling the subagent "I've triggered: [librarian,
+  progressive-disclosure]" lets it predict its own injection behavior
+  accurately and short-circuit redundant `get_guide` calls.
 
 ## Related
 

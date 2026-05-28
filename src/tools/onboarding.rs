@@ -261,10 +261,9 @@ impl Tool for Onboarding {
     }
 
     fn description(&self) -> &str {
-        "Perform initial project discovery: detect languages, read key files \
-         (README, build config, CLAUDE.md), and return instructions for creating \
-         project memories and a system prompt draft. Requires an active project. \
-         Returns status if already onboarded (use force=true to re-scan)."
+        "Initial project discovery: languages, key files (README, build config, \
+         CLAUDE.md). Returns instructions for memories + system prompt draft, \
+         OR status if already onboarded. Requires active project. force=true re-scans."
     }
     fn input_schema(&self) -> Value {
         json!({

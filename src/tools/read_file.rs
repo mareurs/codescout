@@ -16,10 +16,10 @@ impl Tool for ReadFile {
     }
 
     fn description(&self) -> &str {
-        "Read a file. Large files return a summary + @file_* handle. \
-         Format-aware: json_path (JSON), toml_key (TOML/YAML). Use read_markdown for .md files. \
-         Source files: a start_line+end_line range overlapping a named symbol is redirected \
-         to symbols(include_body=true); pass force=true to bypass."
+        "Read a file. Large output → @file_* buffer. Format-aware: json_path \
+         (JSON), toml_key (TOML/YAML). Use read_markdown for .md. Source files: \
+         a line range overlapping a symbol redirects to symbols(include_body=true); \
+         pass force=true to bypass."
     }
 
     fn relevant_guide_topic(&self) -> Option<&str> {

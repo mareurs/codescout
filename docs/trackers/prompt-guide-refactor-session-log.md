@@ -136,7 +136,7 @@ This measurement must precede the V2 decision.
 | F-3 | 2026-05-28 | high | injection-mechanic | pinned-as-eval-baseline | Soft `_guide_hint` compliance is ~1.3% — model nearly never calls `get_guide` after a hint |
 | F-4 | 2026-05-28 | med | static-slice-cut | fixed-verified | Brainstorm missed pre-existing `source_md_under_cap` invariant (2200-byte gate); Iron Law 6 cannot ship alone |
 | F-5 | 2026-05-28 | med | static-slice-cut | fixed-verified | `extract_surface` uses substring `find()`; any content quoting the marker breaks slice extraction |
-| F-6 | 2026-05-28 | med | iron-law-6 | open | Parent should brief subagent on triggered guide topics, not just on file paths |
+| F-6 | 2026-05-28 | med | iron-law-6 | fixed-verified | Parent should brief subagent on triggered guide topics, not just on file paths |
 | F-7 | 2026-05-28 | med | codescout-tool | fixed-verified | `edit_markdown(action='replace')` silently drops `<!-- @surface NAME -->` / `<!-- @end -->` markers from the section body |
 
 ## Wins Index
@@ -474,7 +474,7 @@ Symptoms:
 
 **Severity:** med — does not block the V2 mechanism (subagent still got the guide content auto-injected; the mistake was prediction, not delivery). But the gap is a real signal-quality friction for parents diagnosing subagent behavior, AND adds noise to W-2 in this tracker (made my "subagents are blind to topics parent triggered" framing read as falsifiable rather than substrate-derived).
 
-**Status:** open — fix in this turn is documentation (W-2 amendment + this F-6 entry + extending the source.md `## Deeper guidance` topic list to include `workspace-state` + `iron-laws-detail`, which the subagent ALSO caught as a separate discoverability gap). Iron Law 6 wording amendment deferred — needs a brainstorm pass and re-running the source_md_under_cap arithmetic.
+**Status:** fixed-verified — Iron Law 6 wording updated this turn in `src/prompts/source.md` and the canonical expansion in `src/prompts/guides/iron-laws-detail.md`. The noun list now reads "Pass: which `get_guide(topic)` to call (or the content itself), prior tool results, file paths, symbol names, **topics already triggered this session**." The iron-laws-detail guide adds a dedicated bullet under "What brief means concretely" explaining the shared-ledger substrate and the recommended brief shape ("I've triggered: [librarian, progressive-disclosure]"). +39 bytes added to the static slice; final size still well under the 2200 cap. The F-6 critique came directly from the verification subagent's Section E in W-4 — promoting that observation to the law text itself.
 
 **Fix idea / Pointer:** Concrete brief shape next time: `"I've triggered these topics this session: [librarian, progressive-disclosure]. You will not see V2 inject for them."` — 2 lines, 100 bytes. Cite W-2 + F-6 in the spawn prompt for any future subagent.
 

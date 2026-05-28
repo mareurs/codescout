@@ -346,10 +346,10 @@ impl Tool for CallGraph {
     }
 
     fn description(&self) -> &str {
-        "Transitive call graph for a symbol. `direction=callers` for blast radius, \
-         `callees` for outbound flow, `both` for both. `max_depth` (default 3) bounds \
-         traversal. Edges tagged `source: \"lsp\"` (authoritative) or `\"ts\"` \
-         (tree-sitter, best-effort). Use `references` for ALL refs (not call-filtered)."
+        "Transitive call graph for a symbol. `direction`: callers (blast radius), \
+         callees (outbound), both. `max_depth=3` default. Edges tagged \
+         `source=\"lsp\"` (authoritative) or `\"ts\"` (best-effort). For all refs \
+         (not call-filtered) use `references`."
     }
 
     fn relevant_guide_topic(&self) -> Option<&str> {
