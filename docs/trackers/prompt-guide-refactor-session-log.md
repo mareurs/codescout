@@ -136,6 +136,7 @@ This measurement must precede the V2 decision.
 | F-3 | 2026-05-28 | high | injection-mechanic | pinned-as-eval-baseline | Soft `_guide_hint` compliance is ~1.3% — model nearly never calls `get_guide` after a hint |
 | F-4 | 2026-05-28 | med | static-slice-cut | fixed-verified | Brainstorm missed pre-existing `source_md_under_cap` invariant (2200-byte gate); Iron Law 6 cannot ship alone |
 | F-5 | 2026-05-28 | med | static-slice-cut | mitigated | `extract_surface` uses substring `find()`; any content quoting the marker breaks slice extraction |
+| F-6 | 2026-05-28 | med | iron-law-6 | open | Parent should brief subagent on triggered guide topics, not just on file paths |
 
 ## Wins Index
 
@@ -144,6 +145,7 @@ This measurement must precede the V2 decision.
 | W-1 | 2026-05-28 | high | Recon-before-build on Tool trait methods | Avoided ~150 LOC duplicate of existing `_guide_hint` mechanism | validated |
 | W-2 | 2026-05-28 | high | Recon revealed substrate vindicates Iron Law 6 | Avoided shipping soft-hint extension without compensating discipline; subagents would be structurally blind to parent-triggered topics | validated |
 | W-3 | 2026-05-28 | high | Project's `source_md_under_cap` invariant caught the over-cap edit before merge | Iron Law 6 would have shipped malformed (truncated mid-law); silent multi-session subagent-quality regression | validated |
+| W-4 | 2026-05-28 | high | Iron Law 6 briefing pattern empirically validated by subagent self-assessment | Without file-and-symbol-anchored brief, subagent would have spent ≥10 exploratory tool calls discovering the architecture | validated |
 
 ---
 
@@ -321,7 +323,7 @@ The `… [truncated]` marker is the literal Claude Code injection at the ~2 KB /
 
 **Promote-when:** if Iron Law 6 lands AND post-deployment session logs show that parents are briefing subagents about specific `get_guide(topic)` calls (visible as subagent first-tool-calls being `get_guide(X)` after parent pre-context), promote to CLAUDE.md as: *"Iron Law 6 is not stylistic — the `guide_hints_emitted` ledger is per-MCP-session, shared across all callers including subagents. Once the parent triggers a topic hint, no subagent will receive that hint independently. Briefing subagents about relevant topics is the only compensating channel. See `docs/architecture/mcp-channel-caps.md` for the underlying cap that necessitates the soft-hint mechanism in the first place."*
 
-**Status:** validated
+**Status:** validated — refined 2026-05-28 after live subagent observation (F-6, W-4). The substrate model holds within an MCP session, but the **session boundary is `/mcp` reconnect**, not the wall-clock session. A reconnect creates a fresh `CodeScoutServer` (`src/server.rs:157` instantiates a new `guide_hints_emitted: Arc<Mutex<HashSet<String>>>` via `Default::default()`) and the ledger resets to empty. Subagents are blind to topics the parent triggered **in the same post-reconnect window**, not topics the parent triggered hours ago in a prior reconnect window. In the live verification, my parent had triggered `librarian` post-reconnect (subagent saw no librarian inject ✓) but had NOT re-triggered `progressive-disclosure` post-reconnect (subagent's first overflowing `symbols` call DID receive a progressive-disclosure inject ✓). Both observations match the substrate; the prediction error was about ledger STATE at spawn time, captured separately in F-6 as a briefing-shape friction.
 
 ---
 ## F-3 — Soft `_guide_hint` compliance is ~1.3% — model nearly never calls `get_guide` after a hint
@@ -453,6 +455,48 @@ Symptoms:
 **Status:** mitigated — workaround documented. Root cause requires extractor fix.
 
 **Fix idea / Pointer:** Tighten `extract_surface` so the marker must appear at line start (anchored regex `(?m)^<!-- @surface {surface} -->$`), OR add an extractor test that includes a marker-mention prefix to lock the desired behavior. Worth filing as a `docs/issues/2026-05-28-extract-surface-substring-match.md` bug file if the root cause is to be addressed in this work stream; otherwise the F-5 mitigation (README.md Rule 8) is sufficient guidance.
+
+---
+## F-6 — Parent should brief subagent on triggered guide topics, not just on file paths
+
+**Observed:** 2026-05-28, post-`/mcp` reconnect, after launching a verification subagent to assess V2 hard-injection behavior.
+
+**When:** Spawned a general-purpose subagent with Iron-Law-6-compliant briefing (file paths, symbol names, F-2/W-2 finding pointer). Asked it to explore the prompt surface architecture AND report whether it saw any V2 auto-inject markers in its tool responses.
+
+**Expected (briefing's claim):** Parent had already triggered `librarian` and "very likely" `progressive-disclosure` post-reconnect; subagent would see neither, confirming W-2.
+
+**Got:** Subagent's first `symbols()` call DID fire V2 hard-injection for `progressive-disclosure` — full guide body in second Content block, markers intact. The subagent reported the inject was a surprise relative to my briefing prediction. Substrate model still holds — explanation in W-2 amendment below — but the subagent's actionable critique was: *"I have no idea which tool calls the parent already made this turn, so I can't predict which V2 injects will fire on me. If the parent had said 'I've triggered these topics: [librarian]', I'd have predicted my own injects accurately."*
+
+**Probable cause:** Iron Law 6 (commit 79d5e496) names what to pass — guide topics, tool results, file paths, symbol names — but doesn't explicitly call out **session-state context** like the triggered-topic ledger. The parent has access to its own action history; the subagent has none of it.
+
+**Workaround / fix idea:** Extend Iron Law 6's noun list to include "topics you've already triggered this MCP session" as a recommended brief item. Lightweight — costs ~10 bytes in the spawn prompt typically. Optional substrate support: `workspace(status, include=["guide_hints"])` could surface the ledger, but that's a v2 concern; the immediate fix is behavioral.
+
+**Severity:** med — does not block the V2 mechanism (subagent still got the guide content auto-injected; the mistake was prediction, not delivery). But the gap is a real signal-quality friction for parents diagnosing subagent behavior, AND adds noise to W-2 in this tracker (made my "subagents are blind to topics parent triggered" framing read as falsifiable rather than substrate-derived).
+
+**Status:** open — fix in this turn is documentation (W-2 amendment + this F-6 entry + extending the source.md `## Deeper guidance` topic list to include `workspace-state` + `iron-laws-detail`, which the subagent ALSO caught as a separate discoverability gap). Iron Law 6 wording amendment deferred — needs a brainstorm pass and re-running the source_md_under_cap arithmetic.
+
+**Fix idea / Pointer:** Concrete brief shape next time: `"I've triggered these topics this session: [librarian, progressive-disclosure]. You will not see V2 inject for them."` — 2 lines, 100 bytes. Cite W-2 + F-6 in the spawn prompt for any future subagent.
+
+---
+
+## W-4 — Iron Law 6 briefing pattern empirically validated by subagent self-assessment
+
+**Observed:** 2026-05-28, same subagent dispatch as F-6.
+
+**Pattern:** The Iron Law 6 wording locked in commit 79d5e496 — "Pass: which `get_guide(topic)` to call (or the content itself), prior tool results, file paths, symbol names" — was applied to the dispatch prompt by enumerating specific files (`src/prompts/source.md`, `src/prompts/source.rs::extract_surface`, `src/prompts/mod.rs::build_server_instructions`, `src/prompts/mod.rs::redesign_invariants`, `src/prompts/mod.rs::GUIDE_TOPICS`, `src/tools/core/types.rs::Tool/call_content`, two new guide markdowns, `src/prompts/README.md`) and pointing at F-2/W-2 in this tracker for the substrate finding.
+
+**Counterfactual:** Without the file-and-symbol-anchored briefing, the subagent would have spent time discovering the architecture via grep + symbols search (codescout's tool composition is non-trivial — `build.rs` slicing, runtime `extract_surface` parser, `GUIDE_TOPICS`/`topic_body` pair as single source of truth feeding both `GetGuide` and `Tool::call_content`). The subagent's report (Section C) explicitly says: *"the file:symbol enumeration... and the F-2/W-2 pointer made navigation O(1). Self-discovery cost: roughly zero."* Without the brief, expect ≥10 exploratory tool calls before the subagent could write the same Section A architecture findings.
+
+**Confirming data points:**
+1. Subagent Section A — every file:line citation in the architecture findings matches a path/symbol named in the spawn prompt. No discovery work needed for the architecture.
+2. Subagent Section C — "missing" list = exactly one item (the `## Deeper guidance` topic-list staleness), which is a real bug the briefing couldn't have known. "Excessive" list = empty.
+3. Subagent Section D — chose NOT to call `get_guide()` because file paths were named directly; "`get_guide` becomes redundant unless I want the canonical 'in-prompt' rendering." Briefing made the get_guide pathway optional rather than required.
+
+**Impact:** high — pattern is reproducible; can be promoted to a CLAUDE.md "Dispatch Patterns" section after one more confirming subagent dispatch. The single-shot validation above is sufficient to keep the Iron Law 6 wording as-shipped without amendment for that specific concrete-noun discipline.
+
+**Promote-when:** A second subagent dispatch with the same brief shape produces an equivalent "self-discovery cost ≈ zero" report. At 2 datapoints, promote to CLAUDE.md as: *"When dispatching subagents, the Iron Law 6 nouns are not abstract. Enumerate concrete file paths, symbol names, tracker IDs (F-N/W-N), and finding pointers. The subagent's report should be able to cite back the same paths verbatim — if it can't, the brief was insufficient."*
+
+**Status:** validated
 
 ---
 ## Template for new entries

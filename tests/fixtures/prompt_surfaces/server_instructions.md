@@ -35,3 +35,5 @@ Call get_guide(topic) where topic in:
 - "tracker-conventions"     — frontmatter, archive flow, status
 - "progressive-disclosure"  — output budgets, @ref buffer details
 - "error-handling"          — RecoverableError vs anyhow::bail
+- "workspace-state"         — activate_project, home/foreign, ledger reset
+- "iron-laws-detail"        — per-law gate text, exceptions, edge cases
