@@ -102,11 +102,7 @@ fn run_migrations(conn: &Connection, ws: Option<&WorkspaceConfig>) -> Result<()>
             [],
         )?;
     }
-    conn.execute(
-        "INSERT OR IGNORE INTO schema_version (version) VALUES (7)",
-        [],
-    )?;
-    // NOTE: the v7 block above is ordered before the v6 add/backfill for locality
+    // NOTE: the entry_collection block above is ordered before the v6 add/backfill for locality
     // with the other artifact_augmentation column adds. Order is irrelevant — each
     // block is independently guarded (column_exists / catalog_needs_v6_migration),
     // so run_migrations is correct top-to-bottom regardless of version sequence.
