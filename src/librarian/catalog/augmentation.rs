@@ -21,6 +21,9 @@ pub struct AugmentationRow {
     pub append_mode: bool,
     /// Max number of dated `## YYYY-MM-DD` sections to retain. Oldest are dropped beyond cap.
     pub history_cap: Option<i64>,
+    /// Names the params array whose objects are the tracker's filterable
+    /// entry rows (e.g. "failures", "children"). None = not entry-filterable.
+    pub entry_collection: Option<String>,
 }
 
 pub fn upsert(cat: &Catalog, row: &AugmentationRow) -> Result<()> {
@@ -28,8 +31,8 @@ pub fn upsert(cat: &Catalog, row: &AugmentationRow) -> Result<()> {
         "INSERT INTO artifact_augmentation
            (artifact_id, prompt, params, last_refreshed_at, refresh_count,
             created_at, updated_at, render_template, params_schema,
-            append_mode, history_cap)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            append_mode, history_cap, entry_collection)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
          ON CONFLICT(artifact_id) DO UPDATE SET
            prompt = excluded.prompt,
            params = excluded.params,
@@ -37,6 +40,7 @@ pub fn upsert(cat: &Catalog, row: &AugmentationRow) -> Result<()> {
            params_schema = excluded.params_schema,
            append_mode = excluded.append_mode,
            history_cap = excluded.history_cap,
+           entry_collection = excluded.entry_collection,
            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
         rusqlite::params![
             row.artifact_id,
@@ -50,6 +54,7 @@ pub fn upsert(cat: &Catalog, row: &AugmentationRow) -> Result<()> {
             row.params_schema,
             row.append_mode as i64,
             row.history_cap,
+            row.entry_collection,
         ],
     )?;
     Ok(())
@@ -59,7 +64,7 @@ pub fn get(cat: &Catalog, artifact_id: &str) -> Result<Option<AugmentationRow>> 
     let mut stmt = cat.conn.prepare(
         "SELECT artifact_id, prompt, params, last_refreshed_at, refresh_count,
                 created_at, updated_at, render_template, params_schema,
-                append_mode, history_cap
+                append_mode, history_cap, entry_collection
          FROM artifact_augmentation WHERE artifact_id = ?1",
     )?;
     let mut rows = stmt.query_map([artifact_id], row_from_sql)?;
@@ -79,6 +84,7 @@ fn row_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<AugmentationRow> {
         params_schema: row.get(8)?,
         append_mode: row.get::<_, i64>(9).map(|v| v != 0)?,
         history_cap: row.get(10)?,
+        entry_collection: row.get(11)?,
     })
 }
 
@@ -158,7 +164,7 @@ pub fn get_batch(
     let sql = format!(
         "SELECT artifact_id, prompt, params, last_refreshed_at, refresh_count,
                 created_at, updated_at, render_template, params_schema,
-                append_mode, history_cap
+                append_mode, history_cap, entry_collection
          FROM artifact_augmentation WHERE artifact_id IN ({placeholders})"
     );
     let mut stmt = cat.conn.prepare(&sql)?;
@@ -272,6 +278,7 @@ mod tests {
             params_schema: None,
             append_mode: false,
             history_cap: None,
+            entry_collection: None,
         }
     }
 
@@ -471,5 +478,31 @@ mod tests {
         let got = get(&cat, "a2").unwrap().unwrap();
         assert!(!got.append_mode);
         assert_eq!(got.history_cap, None);
+    }
+    #[test]
+    fn entry_collection_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let cat = Catalog::open(dir.path().join("cat.db").as_path()).unwrap();
+        crate::librarian::catalog::artifact::upsert(&cat, &sample_art("ec-art")).unwrap();
+        upsert(
+            &cat,
+            &AugmentationRow {
+                artifact_id: "ec-art".into(),
+                prompt: "p".into(),
+                params: "{}".into(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-05-28T00:00:00.000Z".into(),
+                updated_at: "2026-05-28T00:00:00.000Z".into(),
+                render_template: None,
+                params_schema: None,
+                append_mode: false,
+                history_cap: None,
+                entry_collection: Some("failures".into()),
+            },
+        )
+        .unwrap();
+        let got = get(&cat, "ec-art").unwrap().unwrap();
+        assert_eq!(got.entry_collection.as_deref(), Some("failures"));
     }
 }

@@ -149,6 +149,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 params_schema: None,
                 append_mode: false,
                 history_cap: None,
+                entry_collection: None,
             },
         )?;
     }

@@ -596,6 +596,7 @@ mod tests {
                         params_schema: None,
                         append_mode: false,
                         history_cap: None,
+                        entry_collection: None,
                     },
                 )
                 .unwrap();
@@ -652,6 +653,7 @@ mod tests {
                         params_schema: None,
                         append_mode: false,
                         history_cap: None,
+                        entry_collection: None,
                     },
                 )
                 .unwrap();

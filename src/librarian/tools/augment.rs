@@ -281,6 +281,7 @@ impl Tool for ArtifactAugment {
                 params_schema: params_schema_str,
                 append_mode: a.append_mode.unwrap_or(false),
                 history_cap: a.history_cap.map(|v| v as i64),
+                entry_collection: None,
             },
         )?;
 

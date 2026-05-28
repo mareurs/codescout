@@ -95,6 +95,21 @@ fn run_migrations(conn: &Connection, ws: Option<&WorkspaceConfig>) -> Result<()>
         "INSERT OR IGNORE INTO schema_version (version) VALUES (5)",
         [],
     )?;
+    // v7: entry_collection column on artifact_augmentation (filterable trackers)
+    if !column_exists(conn, "artifact_augmentation", "entry_collection")? {
+        conn.execute(
+            "ALTER TABLE artifact_augmentation ADD COLUMN entry_collection TEXT",
+            [],
+        )?;
+    }
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version) VALUES (7)",
+        [],
+    )?;
+    // NOTE: the v7 block above is ordered before the v6 add/backfill for locality
+    // with the other artifact_augmentation column adds. Order is irrelevant — each
+    // block is independently guarded (column_exists / catalog_needs_v6_migration),
+    // so run_migrations is correct top-to-bottom regardless of version sequence.
     // v6: add abs_path/git_root alongside legacy columns, then backfill.
     // drop_legacy_and_stamp is called separately by open_with_workspace after
     // backfill — NOT here, because backfill requires a workspace config and

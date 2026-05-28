@@ -308,6 +308,7 @@ mod tests {
             params_schema: None,
             append_mode: false,
             history_cap: None,
+            entry_collection: None,
         };
 
         // Two children: a failure_table (all-pass → done) and a task_list (empty → pending).
@@ -401,6 +402,7 @@ mod tests {
                     params_schema: None,
                     append_mode: false,
                     history_cap: None,
+                    entry_collection: None,
                 },
             )
             .unwrap();
@@ -457,6 +459,7 @@ mod tests {
             params_schema: None,
             append_mode: false,
             history_cap: None,
+            entry_collection: None,
         };
 
         {
@@ -542,6 +545,7 @@ mod tests {
             params_schema: None,
             append_mode: false,
             history_cap: None,
+            entry_collection: None,
         };
         {
             let cat = ctx.catalog.lock();
