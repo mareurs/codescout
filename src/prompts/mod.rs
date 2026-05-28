@@ -120,6 +120,39 @@ pub fn build_server_instructions(project_status: Option<&ProjectStatus>) -> Stri
     instructions
 }
 
+/// Topic names registered as compiled-in `get_guide(topic)` content.
+///
+/// Single source of truth: `GetGuide` uses this for tool registration
+/// and the input-schema enum; `Tool::call_content` uses [`topic_body`]
+/// to inject the body when a `relevant_guide_topic()` hint fires.
+pub const GUIDE_TOPICS: &[&str] = &[
+    "librarian",
+    "tracker-conventions",
+    "progressive-disclosure",
+    "error-handling",
+    "workspace-state",
+    "iron-laws-detail",
+];
+
+/// Return the compiled-in markdown body for a `get_guide(topic)` topic.
+/// `None` for unknown topics — callers that need a hard-fail should match
+/// `None` themselves; `GetGuide::call` wraps `None` into a
+/// `RecoverableError`.
+///
+/// The matched cases must stay in sync with [`GUIDE_TOPICS`]; the
+/// `prompts::tests::guide_topics_have_bodies` invariant enforces this.
+pub fn topic_body(topic: &str) -> Option<&'static str> {
+    match topic {
+        "librarian" => Some(include_str!("guides/librarian.md")),
+        "tracker-conventions" => Some(include_str!("guides/tracker-conventions.md")),
+        "progressive-disclosure" => Some(include_str!("guides/progressive-disclosure.md")),
+        "error-handling" => Some(include_str!("guides/error-handling.md")),
+        "workspace-state" => Some(include_str!("guides/workspace-state.md")),
+        "iron-laws-detail" => Some(include_str!("guides/iron-laws-detail.md")),
+        _ => None,
+    }
+}
+
 /// One row in the workspace project table injected into server instructions.
 #[derive(Debug)]
 pub struct WorkspaceProjectSummary {
@@ -817,6 +850,19 @@ mod tests {
             templates.contains("EMPTY_STUB:"),
             "memory-templates.md must define the canonical empty stub"
         );
+    }
+
+    #[test]
+    fn guide_topics_have_bodies() {
+        for &topic in crate::prompts::GUIDE_TOPICS {
+            let body = crate::prompts::topic_body(topic).unwrap_or_else(|| {
+                panic!(
+                    "GUIDE_TOPICS lists '{topic}' but topic_body returned None — \
+                     add a match arm with include_str!(\"guides/{topic}.md\")"
+                )
+            });
+            assert!(!body.is_empty(), "topic '{topic}' has an empty body");
+        }
     }
 
     #[test]

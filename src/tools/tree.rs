@@ -26,6 +26,10 @@ impl Tool for Tree {
         "Explore the filesystem. With `glob` set, returns matching files (e.g. '**/*.rs'). Without `glob`, lists directory entries (recursive optional). Respects .gitignore."
     }
 
+    fn relevant_guide_topic(&self) -> Option<&str> {
+        Some("progressive-disclosure")
+    }
+
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",

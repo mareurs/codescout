@@ -19,6 +19,10 @@ impl Tool for ReadMarkdown {
          or targeted sections via heading/headings params."
     }
 
+    fn relevant_guide_topic(&self) -> Option<&str> {
+        Some("progressive-disclosure")
+    }
+
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",

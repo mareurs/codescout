@@ -42,6 +42,11 @@ impl Tool for References {
     fn description(&self) -> &str {
         "Find all usages of a symbol. Requires symbol and file."
     }
+
+    fn relevant_guide_topic(&self) -> Option<&str> {
+        Some("progressive-disclosure")
+    }
+
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",

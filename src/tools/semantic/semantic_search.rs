@@ -90,6 +90,10 @@ impl Tool for SemanticSearch {
          Returns ranked chunks with file path, line range, and similarity score."
     }
 
+    fn relevant_guide_topic(&self) -> Option<&str> {
+        Some("progressive-disclosure")
+    }
+
     fn long_docs(&self) -> Option<&str> {
         Some(
             "## When to use\n\

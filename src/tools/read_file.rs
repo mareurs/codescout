@@ -22,6 +22,10 @@ impl Tool for ReadFile {
          to symbols(include_body=true); pass force=true to bypass."
     }
 
+    fn relevant_guide_topic(&self) -> Option<&str> {
+        Some("progressive-disclosure")
+    }
+
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",

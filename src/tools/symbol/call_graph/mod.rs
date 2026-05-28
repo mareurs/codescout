@@ -352,6 +352,10 @@ impl Tool for CallGraph {
          (tree-sitter, best-effort). Use `references` for ALL refs (not call-filtered)."
     }
 
+    fn relevant_guide_topic(&self) -> Option<&str> {
+        Some("progressive-disclosure")
+    }
+
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",

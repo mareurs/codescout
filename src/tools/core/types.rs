@@ -438,6 +438,19 @@ pub trait Tool: Send + Sync {
     /// (`OutputForm::Json`, default) or as the compact text form
     /// (`OutputForm::Text`, for bulk locators like grep/references/tree-glob).
     /// Override directly for full control over content blocks.
+    ///
+    /// **V2 hard-injection** (added 2026-05-28): when this is the first call
+    /// in the session that triggers `relevant_guide_topic()` for some topic,
+    /// the response gets a SECOND `Content::text` block containing the full
+    /// guide body for that topic, wrapped in `<!-- auto-injected get_guide
+    /// ('TOPIC') ... -->` markers. The tool's actual response block stays
+    /// FIRST so the model sees its answer before the supplementary guide.
+    /// The legacy `_guide_hint` JSON field is also retained on the first
+    /// block (backward compat for tests + clients that only render text;
+    /// soft pointer to the second-block guide content). Compliance with the
+    /// pointer was empirically ~1.3% (F-3 in
+    /// `docs/trackers/prompt-guide-refactor-session-log.md`); V2 closes that
+    /// gap by delivering the content directly.
     async fn call_content(&self, input: Value, ctx: &ToolContext) -> Result<Vec<Content>> {
         let val = self.call(input, ctx).await?;
         let form = self.output_form();
@@ -482,13 +495,32 @@ pub trait Tool: Send + Sync {
                     "_guide_hint".to_string(),
                     Value::String(format!(
                         "First call this session for topic '{topic}'. \
-                         Run get_guide(\"{topic}\") for full guidance."
+                         Full guide auto-injected as a separate content \
+                         block below; do not re-call get_guide(\"{topic}\")."
                     )),
                 );
             }
         }
 
-        if exceeds_inline_limit(&json) {
+        /// Build the second-block content for V2 hard-injection. Returns
+        /// `None` when the topic's body is not registered (defensive — the
+        /// `_guide_hint` field still ships in that case so the model knows
+        /// to call `get_guide(topic)` manually).
+        fn guide_block(topic: &str) -> Option<Content> {
+            let body = crate::prompts::topic_body(topic)?;
+            let wrapped = format!(
+                "<!-- auto-injected get_guide('{topic}') — first call this session \
+                 that triggers the topic. Do NOT re-call get_guide for this topic. -->\n\
+                 \n\
+                 {body}\n\
+                 \n\
+                 <!-- end auto-injected get_guide('{topic}') -->"
+            );
+            Some(Content::text(wrapped))
+        }
+
+        // Build the primary response block (the tool's actual output).
+        let primary = if exceeds_inline_limit(&json) {
             let json_len = json.len();
             let ref_id = ctx.output_buffer.store_tool(self.name(), json);
             let raw_summary = self
@@ -513,25 +545,42 @@ pub trait Tool: Send + Sync {
             if let Some(topic) = &hint_topic {
                 inject_hint(&mut buffered, topic);
             }
-            return Ok(vec![Content::text(
+            Content::text(
                 serde_json::to_string_pretty(&buffered)
                     .unwrap_or_else(|_| format!("{{\"output_id\":\"{ref_id}\"}}")),
-            )]);
-        }
+            )
+        } else {
+            // Small output path.
+            let mut val = val;
+            if let Some(topic) = &hint_topic {
+                inject_hint(&mut val, topic);
+            }
+            if form == OutputForm::Text {
+                if let Some(text) = self.format_compact(&val) {
+                    Content::text(text)
+                } else {
+                    Content::text(
+                        serde_json::to_string_pretty(&val).unwrap_or_else(|_| val.to_string()),
+                    )
+                }
+            } else {
+                Content::text(
+                    serde_json::to_string_pretty(&val).unwrap_or_else(|_| val.to_string()),
+                )
+            }
+        };
 
-        // Small output path.
-        let mut val = val;
+        // V2 hard-injection: append the full guide body as a second block
+        // when a hint fired. Topic body lookup may return None (unregistered
+        // topic) — in that case we ship only the primary block with the
+        // soft `_guide_hint` pointer.
+        let mut blocks = vec![primary];
         if let Some(topic) = &hint_topic {
-            inject_hint(&mut val, topic);
-        }
-        if form == OutputForm::Text {
-            if let Some(text) = self.format_compact(&val) {
-                return Ok(vec![Content::text(text)]);
+            if let Some(block) = guide_block(topic) {
+                blocks.push(block);
             }
         }
-        Ok(vec![Content::text(
-            serde_json::to_string_pretty(&val).unwrap_or_else(|_| val.to_string()),
-        )])
+        Ok(blocks)
     }
 
     /// Topic name this tool's discipline depends on, for the first-call

@@ -2785,6 +2785,69 @@ mod guide_hint_tests {
 
     #[tokio::test]
     #[serial]
+    async fn first_artifact_call_appends_librarian_guide_body_v2() {
+        // V2 hard-injection: first call to a tool whose relevant_guide_topic
+        // returns Some("librarian") gets a SECOND Content block containing
+        // the full guide body wrapped in `<!-- auto-injected ... -->` markers.
+        let (_dir, _env, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        let tool = tool_by_name(&server, "artifact");
+        let result = tool
+            .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(
+            result.len(),
+            2,
+            "expected 2 content blocks on first librarian-topic call (primary + auto-injected guide), got {}",
+            result.len()
+        );
+        let second = result[1].as_text().expect("second block must be text");
+        assert!(
+            second
+                .text
+                .contains("<!-- auto-injected get_guide('librarian')"),
+            "second block missing auto-inject opening marker: {:?}",
+            &second.text[..second.text.len().min(200)]
+        );
+        assert!(
+            second
+                .text
+                .contains("<!-- end auto-injected get_guide('librarian') -->"),
+            "second block missing auto-inject closing marker"
+        );
+        assert!(
+            second.text.contains("artifact"),
+            "second block should contain librarian guide content (mentions 'artifact')"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn second_artifact_call_no_guide_body_block_v2() {
+        // V2: dedup applies — second call within the same session does NOT
+        // re-append the guide body block. Only the primary response block.
+        let (_dir, _env, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        let tool = tool_by_name(&server, "artifact");
+        let _ = tool
+            .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
+            .await
+            .unwrap();
+        let result = tool
+            .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "second call must not re-inject the guide body block, got {} blocks",
+            result.len()
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn artifact_event_after_artifact_no_hint() {
         let (_dir, _env, server) = make_server().await;
         let ctx = shared_ctx(&server);

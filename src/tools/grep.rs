@@ -20,6 +20,10 @@ impl Tool for Grep {
         "Regex search across files. Returns matching lines with location. Pass context_lines for surrounding code."
     }
 
+    fn relevant_guide_topic(&self) -> Option<&str> {
+        Some("progressive-disclosure")
+    }
+
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",

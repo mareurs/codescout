@@ -17,27 +17,11 @@ pub struct GetGuide {
 impl GetGuide {
     pub fn new() -> Self {
         let mut topics: BTreeMap<&'static str, &'static str> = BTreeMap::new();
-        topics.insert("librarian", include_str!("../prompts/guides/librarian.md"));
-        topics.insert(
-            "tracker-conventions",
-            include_str!("../prompts/guides/tracker-conventions.md"),
-        );
-        topics.insert(
-            "progressive-disclosure",
-            include_str!("../prompts/guides/progressive-disclosure.md"),
-        );
-        topics.insert(
-            "error-handling",
-            include_str!("../prompts/guides/error-handling.md"),
-        );
-        topics.insert(
-            "workspace-state",
-            include_str!("../prompts/guides/workspace-state.md"),
-        );
-        topics.insert(
-            "iron-laws-detail",
-            include_str!("../prompts/guides/iron-laws-detail.md"),
-        );
+        for &topic in crate::prompts::GUIDE_TOPICS {
+            if let Some(body) = crate::prompts::topic_body(topic) {
+                topics.insert(topic, body);
+            }
+        }
         Self { topics }
     }
 }
@@ -68,9 +52,7 @@ impl Tool for GetGuide {
                 "topic": {
                     "type": "string",
                     "description": "Topic to fetch. Omit to list available topics.",
-                    "enum": ["librarian", "tracker-conventions",
-                             "progressive-disclosure", "error-handling",
-                             "workspace-state", "iron-laws-detail"]
+                    "enum": crate::prompts::GUIDE_TOPICS
                 }
             },
             "additionalProperties": false
