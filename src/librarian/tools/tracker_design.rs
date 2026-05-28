@@ -110,7 +110,8 @@ fn archetype_failure_table() -> Value {
         },
         "render_template_example": "**Suite:** `{{ suite }}` — {{ failures|selectattr(\"status\",\"equalto\",\"fail\")|list|length }} failing / {{ failures|length }} total\n\n| id | status | owner | last seen | notes |\n|----|--------|-------|-----------|-------|\n{% for f in failures %}| {{ f.id }} | {{ f.status }} | {{ f.owner or \"—\" }} | {{ f.last_seen or \"—\" }} | {{ f.notes or \"\" }} |\n{% endfor %}",
         "body_skeleton": "## Suite methodology\n\n_What the suite tests, how it runs, where results live._\n\n## Per-failure detail\n\n_Optional deeper notes per F-N when warranted._\n\n## History\n\n_### YYYY-MM-DD — <event>_",
-        "prompt_template": "Maintain the F-N failure list. After each suite run (gather_from: file pointing at the latest junit/json report), update each failure's status, last_seen, and notes. Add new F-N entries for new failures (next free integer). Never delete an entry — mark fixed entries as pass with a notes line citing the commit. Body holds methodology and per-failure deep dives."
+        "prompt_template": "Maintain the F-N failure list. After each suite run (gather_from: file pointing at the latest junit/json report), update each failure's status, last_seen, and notes. Add new F-N entries for new failures (next free integer). Never delete an entry — mark fixed entries as pass with a notes line citing the commit. Body holds methodology and per-failure deep dives.",
+        "entry_collection": "failures"
     })
 }
 
@@ -430,6 +431,10 @@ The archetype's `prompt_template` is a starting point — customize for the user
 - **Render output** is injected between the `[LIVE]` header and the body excerpt in `librarian_context`. Keep it scannable — tables and short status lines.
 - **No template** is fine for `reflective` trackers — omit the field.
 
+## Step 5b — Make entries filterable (optional)
+
+If a tracker's per-entry rows should be queryable (e.g. "show only the open hardware items"), set `entry_collection` in the augmentation to the params key holding the array of entry objects (e.g. `"failures"`). This enables `artifact(get, id=..., entry_filter={field:{op:value}})`, which returns the matching rows using the same filter syntax as `artifact(find)`. Only archetypes that keep entries in params (e.g. `failure_table`, `task_list`) support this; `reflective` trackers keep entries in prose — retrofit them first (see `docs/conventions/retrofitting-trackers-for-filtering.md`).
+
 ## Step 6 — Sketch the body skeleton
 
 - Each archetype has a `body_skeleton`. Use it.
@@ -710,6 +715,16 @@ mod tests {
             });
         }
     }
+    #[test]
+    fn failure_table_archetype_has_entry_collection_field() {
+        let v = archetype_failure_table();
+        assert_eq!(
+            v["entry_collection"].as_str(),
+            Some("failures"),
+            "failure_table archetype must advertise entry_collection = \"failures\""
+        );
+    }
+
     #[tokio::test]
     async fn goal_archetype_present_and_registered() {
         let v = archetypes();
