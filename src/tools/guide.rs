@@ -30,6 +30,14 @@ impl GetGuide {
             "error-handling",
             include_str!("../prompts/guides/error-handling.md"),
         );
+        topics.insert(
+            "workspace-state",
+            include_str!("../prompts/guides/workspace-state.md"),
+        );
+        topics.insert(
+            "iron-laws-detail",
+            include_str!("../prompts/guides/iron-laws-detail.md"),
+        );
         Self { topics }
     }
 }
@@ -47,11 +55,10 @@ impl Tool for GetGuide {
     }
 
     fn description(&self) -> &str {
-        "Fetch deep guidance for a topic. Returns full text (large topics \
-         overflow to @tool_* buffer). Use when the system prompt points \
-         here (e.g. \"see get_guide('librarian')\"). Topics: librarian | \
-         tracker-conventions | progressive-disclosure | error-handling. \
-         No args = list topics + summaries."
+        "Deep guidance for a topic. Use when the system prompt points here. \
+         Topics: librarian | tracker-conventions | progressive-disclosure | \
+         error-handling | workspace-state | iron-laws-detail. No args = list \
+         topics + summaries. Large bodies overflow to @tool_* buffer."
     }
 
     fn input_schema(&self) -> Value {
@@ -62,7 +69,8 @@ impl Tool for GetGuide {
                     "type": "string",
                     "description": "Topic to fetch. Omit to list available topics.",
                     "enum": ["librarian", "tracker-conventions",
-                             "progressive-disclosure", "error-handling"]
+                             "progressive-disclosure", "error-handling",
+                             "workspace-state", "iron-laws-detail"]
                 }
             },
             "additionalProperties": false
@@ -78,7 +86,9 @@ impl Tool for GetGuide {
                     "librarian": "artifact model, filter syntax, trackers, augmentations",
                     "tracker-conventions": "frontmatter, archive flow, status vocabulary",
                     "progressive-disclosure": "MAX_INLINE_TOKENS, @ref buffer, overflow patterns",
-                    "error-handling": "RecoverableError vs anyhow::bail, is_error routing"
+                    "error-handling": "RecoverableError vs anyhow::bail, is_error routing",
+                    "workspace-state": "activate_project semantics, home/foreign, per-session reset, subagent inheritance",
+                    "iron-laws-detail": "per-law gate text, exceptions, edge cases for Iron Laws 1-6"
                 }
             })),
             Some(t) => match self.topics.get(t) {
@@ -124,7 +134,9 @@ mod tests {
         assert!(names.contains(&"tracker-conventions"));
         assert!(names.contains(&"progressive-disclosure"));
         assert!(names.contains(&"error-handling"));
-        assert_eq!(names.len(), 4);
+        assert!(names.contains(&"workspace-state"));
+        assert!(names.contains(&"iron-laws-detail"));
+        assert_eq!(names.len(), 6);
     }
 
     #[tokio::test]
