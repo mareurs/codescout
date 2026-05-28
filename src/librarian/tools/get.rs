@@ -10,6 +10,8 @@ use crate::librarian::frontmatter;
 use crate::librarian::preview::headings;
 use std::path::PathBuf;
 
+use crate::librarian::filter::{eval, FilterNode};
+
 const SOFT_CAP_LINES: usize = 500;
 const OVERFLOW_HEADING_LIMIT: usize = 10;
 
@@ -89,6 +91,8 @@ struct Args {
     start_line: Option<usize>,
     #[serde(default)]
     end_line: Option<usize>,
+    #[serde(default)]
+    entry_filter: Option<FilterNode>,
 }
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if args.get("include_body").is_some() {
@@ -237,6 +241,43 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }),
         None => Value::Null,
     };
+
+    if let Some(ref filter) = a.entry_filter {
+        let aug_row = aug.as_ref().ok_or_else(|| {
+            RecoverableError::new(
+                "entry_filter set but this artifact is not augmented — declare \
+                 entry_collection on its augmentation, or retrofit it \
+                 (docs/conventions/retrofitting-trackers-for-filtering.md)",
+            )
+        })?;
+        let collection = aug_row.entry_collection.as_deref().ok_or_else(|| {
+            RecoverableError::new(
+                "entry_filter set but the augmentation has no entry_collection — \
+                 declare which params array holds the filterable rows",
+            )
+        })?;
+        let params: Value = serde_json::from_str(&aug_row.params)?;
+        let arr = params
+            .get(collection)
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| {
+                RecoverableError::new(format!(
+                    "entry_collection points at `{collection}` but params has no array there"
+                ))
+            })?;
+        let mut matched: Vec<Value> = Vec::new();
+        let mut considered = 0usize;
+        for item in arr {
+            if let Some(obj) = item.as_object() {
+                considered += 1;
+                if eval(filter, obj)? {
+                    matched.push(item.clone());
+                }
+            }
+        }
+        out["entry_total"] = json!(considered);
+        out["entries"] = json!(matched);
+    }
 
     out["augmentation"] = match aug {
         Some(a) => json!({
@@ -989,5 +1030,103 @@ mod tests {
         )
         .await;
         assert!(err.is_err());
+    }
+
+    #[tokio::test]
+    async fn entry_filter_returns_matching_rows() {
+        use crate::librarian::tools::augment::ArtifactAugment;
+        use crate::librarian::tools::Tool;
+        let cat = crate::librarian::catalog::Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("roadmap")).unwrap();
+        let ctx = mk_ctx(cat);
+        ArtifactAugment
+            .call(
+                &ctx,
+                json!({
+                    "id": "roadmap",
+                    "prompt": "maintain items",
+                    "params": { "items": [
+                        {"id": "R-1", "category": "hardware", "status": "open"},
+                        {"id": "R-2", "category": "software", "status": "open"},
+                        {"id": "R-3", "category": "hardware", "status": "done"}
+                    ]},
+                    "entry_collection": "items"
+                }),
+            )
+            .await
+            .unwrap();
+
+        let out = call(
+            &ctx,
+            json!({
+                "id": "roadmap",
+                "entry_filter": {"and": [
+                    {"category": {"eq": "hardware"}},
+                    {"status": {"eq": "open"}}
+                ]}
+            }),
+        )
+        .await
+        .unwrap();
+
+        let entries = out["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["id"], "R-1");
+        assert_eq!(out["entry_total"], 3);
+    }
+
+    #[tokio::test]
+    async fn entry_filter_on_non_augmented_is_recoverable_error() {
+        let cat = crate::librarian::catalog::Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("plain")).unwrap();
+        let ctx = mk_ctx(cat);
+        let err = call(
+            &ctx,
+            json!({
+                "id": "plain",
+                "entry_filter": {"category": {"eq": "hardware"}}
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("not augmented")
+                || err.to_string().contains("entry_collection"),
+            "error message was: {}",
+            err
+        );
+    }
+    #[tokio::test]
+    async fn entry_filter_missing_collection_key_is_error() {
+        use crate::librarian::tools::augment::ArtifactAugment;
+        use crate::librarian::tools::Tool;
+        let cat = crate::librarian::catalog::Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("rm2")).unwrap();
+        let ctx = mk_ctx(cat);
+        ArtifactAugment
+            .call(
+                &ctx,
+                json!({
+                    "id": "rm2",
+                    "prompt": "p",
+                    "params": { "items": [] },
+                    "entry_collection": "nonexistent"
+                }),
+            )
+            .await
+            .unwrap();
+        let err = call(
+            &ctx,
+            json!({
+                "id": "rm2",
+                "entry_filter": {"x": {"eq": "y"}}
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("no array there") || err.to_string().contains("nonexistent"),
+            "got: {err}"
+        );
     }
 }
