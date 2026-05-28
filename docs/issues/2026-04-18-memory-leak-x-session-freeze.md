@@ -1,5 +1,5 @@
 ---
-status: zombie
+status: wontfix
 opened: 2026-04-18
 severity: critical
 owner: marius
@@ -7,6 +7,7 @@ related: []
 tags: ["memory-leak", "oom", "embeddings", "ptmalloc2", "phase-2"]
 last_observed: 2026-04-30
 kind: bug
+closed: 2026-05-28
 ---
 
 # BUG: codescout memory leak → OOM → X session freeze
@@ -382,3 +383,22 @@ indexing-heavy session, X session freeze, or recurring `ptmalloc2`
 heap-fragmentation evidence. If observed, flip `status: investigating`,
 set `last_observed:` to that date, and resume from the Phase 2 step 5
 result.
+
+
+
+## Wontfix (2026-05-28)
+
+Status flipped `zombie` → `wontfix`. Rationale: no recurrence observed in
+the 28 days since `last_observed: 2026-04-30`, and the Phase 2
+investigation in this file rejected both top hypotheses without
+identifying a confirmed root cause. Retiring active tracking on this
+issue — if it resurfaces, the **re-open trigger** in the Status: zombie
+section above still applies (flip back to `investigating`, restore
+`last_observed:`, resume from Phase 2 step 5).
+
+The file is kept in `docs/issues/` (not archived to `docs/issues/archive/`)
+because six other markdown files cite this path as forensic evidence of
+catastrophic-OOM behavior — `docs/manual/src/concepts/`,
+`docs/superpowers/specs/`, and the index-scope-guard design docs. Archiving
+or deleting would force a coordinated rewrite of those references; status
+retirement preserves the link graph and the historical record.
