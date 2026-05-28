@@ -29,6 +29,7 @@
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-05-28 | med | architectural | open | Filter engine is compile-to-SQL only; entry-grain filtering needs a new in-memory evaluator |
 | F-2 | 2026-05-28 | med | architectural | open | tracker_design archetypes already structure entries, but heterogeneously — no common collection contract for a generic filter |
+| F-3 | 2026-05-28 | med | release-pipeline | fixed-verified | Review-polish fix-up verified with check+clippy, not cargo test — shipped a 4-test schema-version regression |
 
 ## Wins Index
 
@@ -179,6 +180,27 @@ Codified so the Index column means the same thing across sessions.
 **Status:** open
 
 **Fix idea / Pointer:** Spec must define the `entry_collection` pointer + its home (augmentation field vs reserved params key). Scout the augmentation params/record shape before the spec pins that. Feeds F-1's engine target.
+
+---
+## F-3 — Review-polish fix-up verified with check+clippy, not cargo test — shipped a 4-test regression
+
+**Observed:** 2026-05-28, executing the filterable-trackers plan (Task 1 review cycle, subagent-driven).
+
+**When:** Code-quality review of Task 1 flagged a missing `schema_version` stamp for the new v7 column as Minor ("v4/v5 stamp their versions; v6 omits one — may be deliberate"). A fix-up subagent added `INSERT OR IGNORE INTO schema_version (version) VALUES (7)` to `run_migrations`.
+
+**Expected:** A harmless consistency improvement matching the v4/v5 stamp pattern.
+
+**Got:** The stamp bumped the schema head to 7, breaking 4 tests that assert head==6 (`mod.rs:268` schema_has_timemachine_tables, `mod.rs:303` migrations_are_idempotent, `migrate_v6.rs:422/437`). The fix-up "verified clean" via `cargo check --lib` + `cargo clippy --lib` — **neither runs tests** — so the regression passed the gate and landed in amended commit `bfc7fc6e`. Caught only because Task 2's implementer ran the FULL suite and reported "4 failed" (initially misattributed as pre-existing).
+
+**Probable cause:** Verification gate for a schema/migration change omitted `cargo test`; check/clippy verify compilation + lints, not behavior. Compounding: I overrode the reviewer's explicit hedge — the `==6` assertions encode deliberate maintainer intent (head version is bumped deliberately, not as a side effect of an additive column add).
+
+**Workaround:** Reverted the stamp (commit `8edd3cc8`) → 2544 passed, 0 failed. The `entry_collection` ALTER is `column_exists`-guarded and works without any version stamp. Process fix: every implementer/fix-up dispatch this session now gates on FULL `cargo test --lib` (0 failures) before commit, not just check+clippy. For schema-version changes specifically, grep for hardcoded version assertions before bumping.
+
+**Severity:** med — caught within one task; cost was investigation + revert. Would have been high if it reached master (4 red tests + a spurious schema bump).
+
+**Status:** fixed-verified
+
+**Fix idea / Pointer:** Revert commit `8edd3cc8` (master SHA TBD on cherry-pick). The check-vs-test verification gap generalizes beyond this session — candidate for promotion to CLAUDE.md's verification discipline if it recurs.
 
 ---
 ## Template for new entries
