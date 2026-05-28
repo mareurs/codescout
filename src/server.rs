@@ -1507,6 +1507,44 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn tool_descriptions_report_lengths() {
+        // Companion to `tool_descriptions_stay_under_budget` — no assertions,
+        // just prints each tool's description length sorted descending. Run
+        // with `cargo test --lib tool_descriptions_report_lengths -- --nocapture`
+        // to audit how close each tool is to the 300-char cap. Useful when
+        // adding new tools or trimming overgrown descriptions; do NOT delete
+        // this even though it has no assertions — its purpose is observability.
+        let (_dir, server) = make_server().await;
+        let mut lengths: Vec<(String, usize, bool)> = server
+            .tools
+            .iter()
+            .map(|t| {
+                (
+                    t.name().to_string(),
+                    t.description().len(),
+                    is_librarian_tool(t.name()),
+                )
+            })
+            .collect();
+        lengths.sort_by_key(|b| std::cmp::Reverse(b.1));
+        println!(
+            "\n  len  cap  tool                                            (exempt = librarian)"
+        );
+        println!("  ---  ---  ---------------------------------------------");
+        for (name, len, exempt) in &lengths {
+            let cap = if *exempt { "  -" } else { "300" };
+            let flag = if *exempt {
+                ""
+            } else if *len > 270 {
+                "  ⚠ near cap"
+            } else {
+                ""
+            };
+            println!("  {len:>3}  {cap}  {name:<45}{flag}");
+        }
+    }
+
     /// Guard against prompt-surface drift: every backticked snake_case identifier
     /// in `server_instructions.md`, `onboarding_prompt.md`, and the generated
     /// `build_system_prompt_draft` output must resolve to a real registered tool

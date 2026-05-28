@@ -334,7 +334,25 @@ pub trait Tool: Send + Sync {
     /// Tool name as exposed over MCP (e.g. "symbols")
     fn name(&self) -> &str;
 
-    /// Short description shown to the LLM
+    /// Short description shown to the LLM.
+    ///
+    /// **Hard cap: 300 chars** — enforced by
+    /// `server::tests::tool_descriptions_stay_under_budget`
+    /// (`src/server.rs:1493-1508`). Test fails the build if any tool's
+    /// description exceeds the cap. Librarian tools are exempt because
+    /// they expose feature-rich CRUD surfaces with multiple actions.
+    ///
+    /// Rationale: Claude Code (the primary consumer) silently truncates
+    /// per-tool `description` fields at ~2000 bytes / ~500 tokens per
+    /// the MCP channel inventory (`docs/architecture/mcp-channel-caps.md`).
+    /// The 300-char self-cap is well inside the platform truncation
+    /// boundary AND leaves room for tool count to grow without the LLM
+    /// drowning in description text at session start.
+    ///
+    /// Style: lead with the action verb, name the most-used arguments,
+    /// keep examples short. If the description starts approaching the cap,
+    /// prefer pointing the LLM at `get_guide(topic)` (large-budget
+    /// channel — ~100 KB cap on tool results) over packing prose here.
     fn description(&self) -> &str;
 
     /// Extended usage documentation for `doc://codescout-tool-guide`.
