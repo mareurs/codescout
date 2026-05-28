@@ -24,11 +24,15 @@ skill).
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
-| R-1 | 2026-05-19 | hit | Pre-dispatch grep for asserts on `include_str!`'d constants | mcp-prompt-redesign F-1 + W-1 |
+| R-1 | 2026-05-19 | hit → promoted | Pre-dispatch grep for asserts on `include_str!`'d constants | mcp-prompt-redesign F-1 + W-1 |
 | R-2 | 2026-05-19 | miss | Scout missed constant-write patterns (`.replace(TOKEN, ...)`) | mcp-prompt-redesign F-2 |
 | R-3 | 2026-05-19 | miss → promoted | Scout limited grep to one file/crate; cross-file asserts slipped | mcp-prompt-redesign F-2 |
 | R-4 | 2026-05-19 | miss | Grep undercounts struct-field construction sites by 2-3× | mcp-prompt-redesign F-3 + W-2 |
 | R-5 | 2026-05-19 | proposal | Add "compiler as scout" as a Phase-1 tool alongside grep | covers R-4 |
+| R-6 | 2026-05-28 | hit | Explicit recon invocation on substrate before mechanism design | prompt-guide-refactor F-2 + W-2 |
+| R-7 | 2026-05-28 | miss → applies-R-1 (promoted) | Invariant test on `include_str!`'d file not pre-enumerated | prompt-guide-refactor F-4 + W-3 |
+| R-8 | 2026-05-28 | miss → proposal | `edit_markdown(action='replace')` shape unverified on marker-bearing section | prompt-guide-refactor F-7 |
+| R-9 | 2026-05-28 | proposal → drafted | Session-state recon for subagent dispatch | prompt-guide-refactor F-6 + W-4 |
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
 
@@ -66,6 +70,8 @@ after a second `include_str!` rewrite work stream confirms the
 pattern. Concrete addition: `SKILL.md § Phase 1 — Scout`, sub-bullet
 "For `include_str!`'d content files, grep `<CONST>.contains / .find /
 snapshot` to enumerate asserting tests."
+
+**Status:** promoted to SKILL.md (claude-plugins:f842848, 2026-05-28). Added as a 5th bullet under Phase 1 — Scout, citing R-1 + R-7 by name with the loophole-closing cross-reference from the "When NOT to Use" rewrite (same commit). Promote-when criterion fired with 2/2 datapoints — R-1 (mcp-prompt-redesign work stream, 2026-05-19) and R-7 (this session's prompt-guide-refactor F-4 + W-3, 2026-05-28).
 
 ---
 
@@ -192,6 +198,164 @@ prompt itself*, not just the implementation.
 **Threshold to promote:** R-4 + one more datapoint where a
 struct-field-style change benefits from this approach. Currently
 1/2.
+
+---
+
+## R-6 — Explicit recon invocation on substrate before mechanism design
+
+**Verdict:** hit
+
+**Observed:** 2026-05-28, prompt+get_guide refactor work stream
+(`docs/trackers/prompt-guide-refactor-session-log.md` F-2 + W-2).
+
+**Pattern:** Before locking the v1 design for a new runtime mechanism
+(in-band hard-injection of get_guide content), invoked
+`/codescout-companion:reconnaissance` to scout the actual substrate.
+Read `ToolContext::guide_hints_emitted`, `CodeScoutServer::build_context`,
+the workspace-reset trigger at `ActivateProject::call`, and existing tests
+at `server.rs:2711-2840`. Discovered the ledger lives on `CodeScoutServer`
+(per-MCP-session, shared via Arc across all per-request ToolContexts
+including subagents) — NOT on `Agent` state as the brainstorm had assumed.
+
+**Evidence:** Without the scout, task #3 in the brainstorm would have
+shipped a parallel per-Agent ledger, conflicting with the existing one
+(2 sources of truth) or superseding it (breaking 6 existing tests at
+`src/server.rs:2711-2840`). The substrate finding ALSO vindicated Iron
+Law 6 architecturally — subagents are structurally blind to topics the
+parent triggered (W-2), so the "parent must brief" law isn't stylistic
+but substrate-mandated.
+
+**Counterfactual confirmed by:** F-2 and W-2 in
+`docs/trackers/prompt-guide-refactor-session-log.md`. Recon-before-build
+prevented at least 150 LOC of duplicate mechanism, AND surfaced the
+architectural reality that anchors Iron Law 6.
+
+**Promote-when:** R-6 is a single datapoint of "explicit invocation
+produces win" — pair with R-1 type hits to argue for promoting "always
+scout substrate state before locking a design that assumes specific
+storage" to SKILL.md. Currently 1/2.
+
+---
+
+## R-7 — Miss: invariant test on `include_str!`'d file not pre-enumerated (R-1 applies)
+
+**Verdict:** miss → applies-existing-pattern R-1
+
+**Observed:** 2026-05-28, same work stream
+(`docs/trackers/prompt-guide-refactor-session-log.md` F-4 + W-3).
+
+**Pattern that failed:** Added Iron Law 6 (+282 bytes) to
+`src/prompts/source.md` without first enumerating invariant tests on
+the rendered `server_instructions` slice. The 2200-byte cap test
+`source_md_under_cap` at `src/prompts/mod.rs:1037-1046` fired
+loudly on `cargo test --lib prompt`, blocking the edit. R-1
+("Pre-dispatch grep for asserts on `include_str!`'d constants",
+validated 2026-05-19) would have caught this — `MAX_INSTRUCTIONS_CHARS`
+and the `redesign_invariants` module both turn up in a 5-second grep.
+
+**Pattern proposal (folds into R-1 promotion):** R-1 was already
+validated as needing SKILL.md promotion; this is the second datapoint.
+Cost of skipping recon here: 1 failed `cargo test`, 1 surgical cut to
+make room (`Gate:` quote lines in Iron Laws 2/4/5), 1 amend cycle.
+Estimated time penalty: ~5 minutes vs. ~30 seconds for the grep.
+
+**Cost absorbed:** 1 minor scope expansion (gate-quote cut bundled
+into the Iron Law 6 commit) + 1 amend on a working-tree-recovery
+incident downstream. Recoverable.
+
+**Promote-when:** R-1 promotion is now 2/2 datapoints (R-1 + R-7).
+Ship the SKILL.md promotion this turn or next.
+
+**Status:** R-1 promotion triggered same turn (claude-plugins:f842848, 2026-05-28). R-7 serves as the second datapoint that closed R-1's promote-when criterion; the new SKILL.md Phase 1 Scout bullet names BOTH R-1 and R-7 as evidence.
+
+---
+
+## R-8 — Miss: `edit_markdown(action='replace')` shape unverified on marker-bearing section
+
+**Verdict:** miss → proposal
+
+**Observed:** 2026-05-28, same work stream
+(`docs/trackers/prompt-guide-refactor-session-log.md` F-7).
+
+**Pattern that failed:** Used `edit_markdown(action='replace',
+heading='## Deeper guidance', ...)` on `src/prompts/source.md` without
+first scouting the section's body. The body contained inline
+`<!-- @end -->` and `<!-- @surface onboarding_prompt -->` HTML-comment
+markers that demarcate prompt surfaces; replace wiped them, breaking
+the build (`surface 'onboarding_prompt' not found`). Hit a second time
+on the next edit attempt — lost the intro paragraph that lived between
+the `<!-- @surface onboarding_prompt -->` opener and the next heading.
+Both losses were caught only by the build's downstream gates
+(extract_surface panic, snapshot test regen detecting the gap on diff).
+
+**Pattern proposal (new vocabulary for SKILL.md § Phase 1 Scout):**
+*"When using `edit_markdown(action='replace')`, FIRST read the
+section's body with `read_markdown(heading=...)`. Replace overwrites
+the entire body verbatim. If the body contains structural HTML-comment
+markers (`<!-- @surface NAME -->`, `<!-- @end -->`, project-specific
+sentinels), the new content must explicitly include them or the
+replace will drop them silently."*
+
+The F-7 fix (commit 80f2fbca) adds a programmatic gate that catches
+this at the editor level. R-8 is the human-discipline counterpart
+that prevents the gate from ever needing to fire.
+
+**Cost absorbed:** 2 edit attempts, 1 destructive working-tree recovery
+incident (separately captured at `~/.buddy/memory/common/never-git-checkout-to-exclude-wip.md`),
+1 commit amend. ~15 minutes of friction + 1 erosion of user trust.
+
+**Promote-when:** R-8 + one more "replace dropped structural content"
+incident (e.g. in a tracker template that has separator lines) → promote
+to SKILL.md § Phase 1 Scout. Currently 1/2.
+
+---
+
+## R-9 — Proposal: session-state recon for subagent dispatch
+
+**Verdict:** proposal
+
+**Source:** F-6 in
+`docs/trackers/prompt-guide-refactor-session-log.md` + the verification
+subagent's self-assessment (W-4).
+
+**Pattern that failed:** Dispatched a subagent with full Iron Law 6
+briefing (file paths, symbol names, F-2/W-2 finding pointer). The
+briefing was rated "self-discovery cost ≈ zero" (W-4) but the parent's
+predictions about V2 auto-inject behavior were wrong — the subagent's
+first `symbols()` call DID fire `progressive-disclosure` injection
+that the parent claimed was already triggered. Cause: the parent
+didn't communicate the **session-state ledger** — which topics had
+actually been re-triggered in the post-`/mcp`-reconnect window.
+
+**Proposal:** Add to SKILL.md § Phase 1 Scout, sub-bullet for
+subagent-dispatch case:
+
+> **For subagent dispatch, also scout session-level state** — what
+> topics has the parent triggered, what workspace is active, what's
+> already in the @ref buffer. The `guide_hints_emitted` ledger is
+> per-MCP-session and shared between parent and subagent; the subagent
+> can't see it from inside a tool call. Brief it explicitly:
+> *"I've triggered: [librarian, progressive-disclosure]"* lets the
+> subagent predict its own V2 auto-inject behavior accurately.
+
+**Why this is a phase-1 tool, not a phase-4 fallback:** the scout's
+job is to enumerate what the subagent will need. Session-state IS
+context the subagent needs; without it, the subagent makes wrong
+predictions (per W-4 Section E) and the parent's prediction becomes
+falsifiable rather than substrate-derived (per F-6).
+
+**Caveats:**
+- The `guide_hints_emitted` ledger has no read-only query tool; the
+  parent has to remember what it triggered. Future enhancement could
+  expose `workspace(status, include=['guide_hints'])` or similar.
+- Wall-clock session vs. post-reconnect window is a real distinction
+  (per W-2's amendment). Parent should brief based on
+  post-reconnect-window state, not full session history.
+
+**Threshold to promote:** R-9 + one more datapoint where a subagent
+mis-predicts V2/session-state behavior. Currently 1/2.
+
+**Status:** drafted into SKILL.md preemptively (claude-plugins:f842848, 2026-05-28). Added as a 6th bullet under Phase 1 — Scout, naming subagent dispatch's session-state-scout requirement and the recommended brief shape (`"I've triggered: [librarian, progressive-disclosure]"`). Ships at 1/2 datapoints because the F-6 critique came verbatim from a verification subagent's own self-assessment (W-4 Section E), which is unusually high signal for a single datapoint — the future subagent who'd benefit from this guidance is exactly the agent that named the gap. Revised promote-when: if R-9's pattern catches a similar miss in a future session → mark `validated`; if no further misses surface within 3 multi-session work streams that involve subagent dispatch, the proactive ship was correct.
 
 ---
 
