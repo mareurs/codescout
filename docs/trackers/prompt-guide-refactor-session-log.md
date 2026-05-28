@@ -135,7 +135,7 @@ This measurement must precede the V2 decision.
 | F-2 | 2026-05-28 | med | ledger-state | fixed-verified | Ledger lives on `CodeScoutServer`, not `Agent`; reset is `workspace.activate` |
 | F-3 | 2026-05-28 | high | injection-mechanic | pinned-as-eval-baseline | Soft `_guide_hint` compliance is ~1.3% — model nearly never calls `get_guide` after a hint |
 | F-4 | 2026-05-28 | med | static-slice-cut | fixed-verified | Brainstorm missed pre-existing `source_md_under_cap` invariant (2200-byte gate); Iron Law 6 cannot ship alone |
-| F-5 | 2026-05-28 | med | static-slice-cut | mitigated | `extract_surface` uses substring `find()`; any content quoting the marker breaks slice extraction |
+| F-5 | 2026-05-28 | med | static-slice-cut | fixed-verified | `extract_surface` uses substring `find()`; any content quoting the marker breaks slice extraction |
 | F-6 | 2026-05-28 | med | iron-law-6 | open | Parent should brief subagent on triggered guide topics, not just on file paths |
 | F-7 | 2026-05-28 | med | codescout-tool | fixed-verified | `edit_markdown(action='replace')` silently drops `<!-- @surface NAME -->` / `<!-- @end -->` markers from the section body |
 
@@ -453,7 +453,7 @@ Symptoms:
 
 **Severity:** med — caught by snapshot test (W-3 win again). Production-shippable workaround is in place. But the root cause (brittle extractor) remains. Future editor who tries the same well-intentioned thing will hit the same wall.
 
-**Status:** mitigated — workaround documented. Root cause requires extractor fix.
+**Status:** fixed-verified — `extract_surface` rewritten with line-anchored matching (commit pending this turn). The new implementation walks lines with `split_inclusive('\n')`, tracking byte offsets, and matches the marker only when a trimmed line exactly equals `<!-- @surface NAME -->` or `<!-- @end -->`. Prose that quotes the marker shape inline no longer matches. Mirrors the editor-side line-anchoring discipline added by F-7. Tests added: `extract_ignores_marker_quoted_in_prose`, `extract_ignores_close_marker_quoted_in_prose`, `extract_tolerates_trailing_whitespace_on_marker`, `extract_requires_marker_on_its_own_line`. All 6 pre-existing tests still pass byte-for-byte (the source.md fixtures round-trip cleanly). Mitigation (README.md Rule 8 "don't quote the markers in source.md") is now belt-and-suspenders rather than the only line of defense — the parser self-defends.
 
 **Fix idea / Pointer:** Tighten `extract_surface` so the marker must appear at line start (anchored regex `(?m)^<!-- @surface {surface} -->$`), OR add an extractor test that includes a marker-mention prefix to lock the desired behavior. Worth filing as a `docs/issues/2026-05-28-extract-surface-substring-match.md` bug file if the root cause is to be addressed in this work stream; otherwise the F-5 mitigation (README.md Rule 8) is sufficient guidance.
 
