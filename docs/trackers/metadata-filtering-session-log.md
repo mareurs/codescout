@@ -31,6 +31,9 @@
 | F-2 | 2026-05-28 | med | architectural | fixed-verified | tracker_design archetypes already structure entries, but heterogeneously — no common collection contract for a generic filter |
 | F-3 | 2026-05-28 | med | release-pipeline | fixed-verified | Review-polish fix-up verified with check+clippy, not cargo test — shipped a 4-test schema-version regression |
 | F-4 | 2026-05-29 | high | tooling-output | fixed-verified | artifact(get, full=true) buffered body truncated at ~36 KB silently dropped U-19..U-25 during retrofit parse |
+| F-5 | 2026-05-29 | med | api-ergonomics | open | params_schema/render_template change forces full merge=false re-send (silent-reset foot-gun) |
+| F-6 | 2026-05-29 | low | api-surface | open | No artifact(delete) action — throwaway cleanup needs rm + reindex; orphans augmentation |
+| F-7 | 2026-05-29 | med | silent-failure | open | entry_filter silently returns empty on unknown/typo'd field (asymmetric with SQL engine error) |
 
 ## Wins Index
 
@@ -242,6 +245,71 @@ Codified so the Index column means the same thing across sessions.
 **Promote-when:** A second instance of buffered-body parsing missing tail content. At 2 datapoints, promote to a codescout convention: "Reconcile parsed buffered-body entry counts against `preview.headings` before structured writes."
 
 **Status:** validated — single datapoint; drift caught and corrected before any consumer queried the index.
+
+---
+## F-5 — Changing params_schema / render_template on an augmented tracker forces a full merge=false re-send (silent-reset foot-gun)
+
+**Observed:** 2026-05-29, retrofitting `codescout-usage-frictions`; had to add `fixed-verified` to the status enum after discovering U-19..U-23 used it.
+
+**When:** Widening one enum value in `params_schema` on an already-augmented tracker.
+
+**Expected:** A field-granular patch — add an enum value (or edit the schema/template) without re-sending the whole augmentation.
+
+**Got:** `merge=true` patches `params` **only** — it cannot touch `params_schema` / `render_template` / `prompt` / `entry_collection`. The sole way to change the schema is `merge=false`, which overwrites **all seven** caller-controlled fields; any field omitted silently resets to `None`. So a one-value enum widening forced re-sending prompt + render_template + the full schema + entry_collection + the entire 22-entry params array in a single call.
+
+**Probable cause:** `artifact_augment` has exactly two modes — full replace (`merge=false`) and params-only patch (`merge=true`). No field-granular patch exists for the other six caller-controlled fields.
+
+**Workaround:** Re-sent every field verbatim in one `merge=false` call, keeping prompt/render_template byte-identical to avoid drift; verified `entry_total` afterward.
+
+**Severity:** med — schema/template tweaks are routine maintenance, but each one carries a silent-reset foot-gun + a large re-send. The retrofit guide warns about it; the tool offers no safer path.
+
+**Status:** open
+
+**Fix idea / Pointer:** A `merge=true` that also accepts `params_schema` / `render_template` patches, or a dedicated schema-patch path. Minimum: server rejects a `merge=false` that drops a previously-set field unless an explicit clear is requested.
+
+---
+
+## F-6 — No artifact(delete) action; throwaway cleanup needs rm + reindex and orphans the augmentation
+
+**Observed:** 2026-05-29, cleaning up the `_entry-filter-smoke.md` throwaway tracker after the feature smoke test.
+
+**When:** Removing a deliberately-created throwaway artifact.
+
+**Expected:** `artifact(action="delete", id=...)` removing the file + catalog row + augmentation atomically.
+
+**Got:** The `artifact` action enum is find|get|create|update|move|link|graph|state_at — no `delete`. Cleanup required `rm <file>` (run_command) + `librarian(reindex)` to drop the orphaned catalog row (reindex reported `removed:1`).
+
+**Probable cause:** Delete was never added; `move` covers relocation, removal is out-of-band.
+
+**Workaround:** rm + reindex. Reliable, but two steps; forgetting the reindex leaves an orphaned catalog row, and the augmentation (catalog-only, no disk form) has no cleanup path at all if the row lingers.
+
+**Severity:** low — workaround is reliable; only bites for throwaway/mistaken artifacts. The orphaned-augmentation-on-rm case is a latent catalog-hygiene gap.
+
+**Status:** open
+
+**Fix idea / Pointer:** Add `artifact(action="delete", id)` removing file + catalog row + augmentation atomically; mirror `artifact(move)`'s catalog-aware path.
+
+---
+
+## F-7 — entry_filter silently returns empty on an unknown / typo'd field (asymmetric with the SQL engine's hard error)
+
+**Observed:** 2026-05-29, grounding a friction hypothesis against the shipped implementation.
+
+**When:** Filtering `tool-usage-patterns` with a deliberately-misspelled field: `entry_filter={"verdcit": {"eq": "wrong-tool"}}`.
+
+**Expected:** An unknown field errors — the SQL side does exactly this (`artifact(find)` with a bad field → `no such column`, which was T-010's entire story).
+
+**Got:** `entry_total=10, entries=[]` — silent empty, no error, no `unknown_field` hint. The in-memory `eval`/`eval_leaf` path (`src/librarian/filter.rs:250,287`) deliberately dropped the `ALLOWED_FIELDS` gate (F-1's design rationale: an in-memory match has no injection surface), so any field name is accepted and a field absent from every entry simply never matches.
+
+**Probable cause:** The injection-driven allowlist was removed for the in-memory path and nothing replaced it as a typo/diagnostic guard. The two engines now diverge: SQL errors on unknown fields, eval silently returns empty.
+
+**Workaround:** None at call time — caller must cross-check the result set against expectations (same mitigation as F-4 / W-1: reconcile against an independent view). A typo'd field is indistinguishable from a genuine zero-match.
+
+**Severity:** med — silent wrong results; an authoritative-looking empty set on a typo, the same silent-underreport class as F-4. Risk rose now that 4 trackers are filterable and callers will hand-type field names.
+
+**Status:** open
+
+**Fix idea / Pointer:** `eval` could collect the union of keys present across all entries and surface a soft `unknown_field` warning when a filtered field matches none of them — a warning, not a hard reject (entries are heterogeneous; a field present in some but not all is legitimate). Strong candidate for promotion to a `docs/issues/` bug.
 
 ---
 ## Template for new entries
