@@ -307,7 +307,7 @@ Codified so the Index column means the same thing across sessions.
 
 **Severity:** med — silent wrong results; an authoritative-looking empty set on a typo, the same silent-underreport class as F-4. Risk rose now that 4 trackers are filterable and callers will hand-type field names.
 
-**Status:** fixed-verified — commit eb70bafb. Added `referenced_fields(&FilterNode)` (`filter.rs`) + a `filter_warnings.unknown_fields` block in the entry_filter handler (`get.rs`) that warns (not rejects — entries are heterogeneous) when a referenced field is present in zero entries. Tests green: `entry_filter_warns_on_unknown_field`, `referenced_fields_collects_across_composites`. Live /mcp confirmation pending next reconnect (running server holds the prior binary).
+**Status:** fixed-verified — commit eb70bafb. Added `referenced_fields(&FilterNode)` (`filter.rs`) + a `filter_warnings.unknown_fields` block in the entry_filter handler (`get.rs`) that warns (not rejects — entries are heterogeneous) when a referenced field is present in zero entries. Tests green: `entry_filter_warns_on_unknown_field`, `referenced_fields_collects_across_composites`. Live /mcp confirmation 2026-05-29: re-running `{"verdcit":{"eq":"wrong-tool"}}` on tool-usage-patterns now returns `entry_total=10, entries=[], filter_warnings.unknown_fields=["verdcit"]` (was silent empty pre-fix). Three-query regression sandwich complete.
 
 **Fix idea / Pointer:** `eval` could collect the union of keys present across all entries and surface a soft `unknown_field` warning when a filtered field matches none of them — a warning, not a hard reject (entries are heterogeneous; a field present in some but not all is legitimate). Strong candidate for promotion to a `docs/issues/` bug.
 
