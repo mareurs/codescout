@@ -263,7 +263,7 @@ Codified so the Index column means the same thing across sessions.
 
 **Severity:** med — schema/template tweaks are routine maintenance, but each one carries a silent-reset foot-gun + a large re-send. The retrofit guide warns about it; the tool offers no safer path.
 
-**Status:** fixed-verified — commit 8a3aa7f0. `merge=true` now overlays any provided sibling field (prompt / params_schema / render_template / entry_collection / append_mode / history_cap) and preserves every field omitted; merged params validate against the effective schema (new if provided, else stored). Params-only merge keeps the fast path. Test: `merge_true_patches_sibling_fields_preserving_rest`. Live /mcp confirmation pending reconnect.
+**Status:** fixed-verified — commit 8a3aa7f0. `merge=true` now overlays any provided sibling field (prompt / params_schema / render_template / entry_collection / append_mode / history_cap) and preserves every field omitted; merged params validate against the effective schema (new if provided, else stored). Params-only merge keeps the fast path. Test: `merge_true_patches_sibling_fields_preserving_rest`. Live /mcp confirmation 2026-05-29: a `merge=true` call providing only params + a widened schema on a demo tracker preserved the prompt and accepted a `"blocked"` item against the new enum (old enum would have rejected it).
 
 **Fix idea / Pointer:** A `merge=true` that also accepts `params_schema` / `render_template` patches, or a dedicated schema-patch path. Minimum: server rejects a `merge=false` that drops a previously-set field unless an explicit clear is requested.
 
@@ -285,7 +285,7 @@ Codified so the Index column means the same thing across sessions.
 
 **Severity:** low — workaround is reliable; only bites for throwaway/mistaken artifacts. The orphaned-augmentation-on-rm case is a latent catalog-hygiene gap.
 
-**Status:** fixed-verified — commit c40d5cbe. `artifact(action="delete", id)` removes the file + catalog row; FK `ON DELETE CASCADE` drops augmentation/links/observations/events (no orphans). Root-containment guarded; missing file tolerated. Tests: `delete_removes_file_catalog_row_and_augmentation` (+2). Live /mcp confirmation pending reconnect.
+**Status:** fixed-verified — commit c40d5cbe. `artifact(action="delete", id)` removes the file + catalog row; FK `ON DELETE CASCADE` drops augmentation/links/observations/events (no orphans). Root-containment guarded; missing file tolerated. Tests: `delete_removes_file_catalog_row_and_augmentation` (+2). Live /mcp confirmation 2026-05-29: `artifact(delete)` on a demo tracker returned `deleted=true`; subsequent `get` returned `null` and the file was gone from disk (cascade dropped the augmentation).
 
 **Fix idea / Pointer:** Add `artifact(action="delete", id)` removing file + catalog row + augmentation atomically; mirror `artifact(move)`'s catalog-aware path.
 
