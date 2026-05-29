@@ -33,7 +33,7 @@
 | F-4 | 2026-05-29 | high | tooling-output | fixed-verified | artifact(get, full=true) buffered body truncated at ~36 KB silently dropped U-19..U-25 during retrofit parse |
 | F-5 | 2026-05-29 | med | api-ergonomics | open | params_schema/render_template change forces full merge=false re-send (silent-reset foot-gun) |
 | F-6 | 2026-05-29 | low | api-surface | open | No artifact(delete) action — throwaway cleanup needs rm + reindex; orphans augmentation |
-| F-7 | 2026-05-29 | med | silent-failure | open | entry_filter silently returns empty on unknown/typo'd field (asymmetric with SQL engine error) |
+| F-7 | 2026-05-29 | med | silent-failure | fixed-verified | entry_filter silently returns empty on unknown/typo'd field (asymmetric with SQL engine error) |
 
 ## Wins Index
 
@@ -307,7 +307,7 @@ Codified so the Index column means the same thing across sessions.
 
 **Severity:** med — silent wrong results; an authoritative-looking empty set on a typo, the same silent-underreport class as F-4. Risk rose now that 4 trackers are filterable and callers will hand-type field names.
 
-**Status:** open
+**Status:** fixed-verified — commit eb70bafb. Added `referenced_fields(&FilterNode)` (`filter.rs`) + a `filter_warnings.unknown_fields` block in the entry_filter handler (`get.rs`) that warns (not rejects — entries are heterogeneous) when a referenced field is present in zero entries. Tests green: `entry_filter_warns_on_unknown_field`, `referenced_fields_collects_across_composites`. Live /mcp confirmation pending next reconnect (running server holds the prior binary).
 
 **Fix idea / Pointer:** `eval` could collect the union of keys present across all entries and surface a soft `unknown_field` warning when a filtered field matches none of them — a warning, not a hard reject (entries are heterogeneous; a field present in some but not all is legitimate). Strong candidate for promotion to a `docs/issues/` bug.
 
