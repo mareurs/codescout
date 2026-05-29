@@ -36,12 +36,13 @@ impl Tool for ArtifactAugment {
 
     fn description(&self) -> &'static str {
         "Attach or replace a persistent prompt + params on any artifact (merge=false, default), \
-         or RFC 7396 merge-patch params only without changing the prompt (merge=true). \
+         or patch only the fields you provide, leaving the rest untouched (merge=true). \
          On merge=false ALL seven caller-controlled fields — prompt, params, render_template, \
          params_schema, append_mode, history_cap, entry_collection — are overwritten with the call's values; \
-         fields you omit silently reset to None / false on the stored row. To preserve sibling \
-         fields across a re-augment, either pass them back in the call, or use merge=true \
-         (which patches params only and leaves the other six fields untouched). \
+         fields you omit silently reset to None / false on the stored row. To change only some \
+         fields, use merge=true — it RFC 7396 merge-patches params and overlays any sibling field \
+         you provide (prompt, render_template, params_schema, append_mode, history_cap, \
+         entry_collection), preserving every field you omit. \
          Idempotent — safe to call on already-augmented artifacts. \
          Replaces artifact_update_params."
     }
@@ -62,29 +63,29 @@ impl Tool for ArtifactAugment {
                 },
                 "render_template": {
                     "type": "string",
-                    "description": "Optional MiniJinja template projecting `params` into a markdown snippet rendered into librarian_context output. Decouples live state from prose body. On merge=false this field is overwritten with the call's value (None if omitted) — pass the existing template back to preserve it."
+                    "description": "Optional MiniJinja template projecting `params` into a markdown snippet rendered into librarian_context output. Decouples live state from prose body. On merge=false this field is overwritten with the call's value (None if omitted) — pass the existing template back to preserve it (or use merge=true to patch just this field)."
                 },
                 "params_schema": {
                     "type": "object",
-                    "description": "Optional JSON Schema validating params on every merge. Initial params are also validated. On merge=false this field is overwritten with the call's value (None if omitted) — pass the existing schema back to preserve it."
+                    "description": "Optional JSON Schema validating params on every merge. Initial params are also validated. On merge=false this field is overwritten with the call's value (None if omitted) — pass the existing schema back to preserve it (or use merge=true to patch just this field)."
                 },
                 "merge": {
                     "type": "boolean",
-                    "description": "When true, apply RFC 7396 merge-patch to params only — prompt is not required. Requires an existing augmentation."
+                    "description": "When true, patch only the fields you provide onto the existing augmentation: params is RFC 7396 merge-patched; any sibling field you pass (prompt, render_template, params_schema, append_mode, history_cap, entry_collection) is overlaid; omitted fields are preserved. prompt is not required. Requires an existing augmentation."
                 },
                 "append_mode": {
                     "type": "boolean",
                     "default": false,
-                    "description": "When true, artifact_update prepends a new dated section instead of replacing the body. Prompt should instruct the LLM to write only the new delta block. On merge=false this field is overwritten with the call's value (false if omitted) — pass the existing value back to preserve append behaviour."
+                    "description": "When true, artifact_update prepends a new dated section instead of replacing the body. Prompt should instruct the LLM to write only the new delta block. On merge=false this field is overwritten with the call's value (false if omitted) — pass the existing value back to preserve append behaviour (or use merge=true to patch just this field)."
                 },
                 "history_cap": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "Max number of dated ## YYYY-MM-DD sections to retain. Oldest sections beyond cap are dropped on each append. On merge=false this field is overwritten with the call's value (None if omitted) — pass the existing cap back to preserve it."
+                    "description": "Max number of dated ## YYYY-MM-DD sections to retain. Oldest sections beyond cap are dropped on each append. On merge=false this field is overwritten with the call's value (None if omitted) — pass the existing cap back to preserve it (or use merge=true to patch just this field)."
                 },
                 "entry_collection": {
                     "type": "string",
-                    "description": "Names the params array whose objects are this tracker's filterable entry rows (e.g. \"failures\"). Enables artifact(get, entry_filter=...). On merge=false this field is overwritten with the call's value (None if omitted) — pass the existing value back to preserve it."
+                    "description": "Names the params array whose objects are this tracker's filterable entry rows (e.g. \"failures\"). Enables artifact(get, entry_filter=...). On merge=false this field is overwritten with the call's value (None if omitted) — pass the existing value back to preserve it (or use merge=true to patch just this field)."
                 }
             }
         })
@@ -108,6 +109,7 @@ impl Tool for ArtifactAugment {
                     .as_ref()
                     .cloned()
                     .unwrap_or(Value::Object(Default::default()));
+                let mut patched_siblings = false;
                 if let Some(existing) = augmentation::get(&cat, &a.id)? {
                     let mut current: Value = serde_json::from_str(&existing.params)
                         .unwrap_or(Value::Object(Default::default()));
@@ -117,7 +119,16 @@ impl Tool for ArtifactAugment {
                         .map(String::from);
                     augmentation::apply_merge_patch(&mut current, &patch);
 
-                    if let Some(schema_text) = existing.params_schema.as_deref() {
+                    // F-5: validate merged params against the EFFECTIVE schema —
+                    // the new one if this call provides it, otherwise the stored one.
+                    if let Some(new_schema) = a.params_schema.as_ref() {
+                        crate::librarian::tools::schema_validate::validate(new_schema, &current)
+                            .map_err(|e| {
+                                RecoverableError::new(format!(
+                                    "merged params violate params_schema: {e}"
+                                ))
+                            })?;
+                    } else if let Some(schema_text) = existing.params_schema.as_deref() {
                         crate::librarian::tools::schema_validate::validate_against_stored(
                             schema_text,
                             &current,
@@ -208,13 +219,63 @@ impl Tool for ArtifactAugment {
                             }
                         }
                     }
+                    // F-5: when this call also provides sibling fields (prompt /
+                    // params_schema / render_template / entry_collection / flags),
+                    // patch them onto the existing row here via a full upsert that
+                    // PRESERVES every field the caller did not provide. Removes the
+                    // merge=false foot-gun where an omitted field silently resets to
+                    // None — merge=true now patches whatever you pass, keeps the rest.
+                    if a.prompt.is_some()
+                        || a.params_schema.is_some()
+                        || a.render_template.is_some()
+                        || a.entry_collection.is_some()
+                        || a.append_mode.is_some()
+                        || a.history_cap.is_some()
+                    {
+                        let now = chrono::Utc::now()
+                            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                            .to_string();
+                        let params_schema_str = match a.params_schema.as_ref() {
+                            Some(s) => Some(serde_json::to_string(s)?),
+                            None => existing.params_schema.clone(),
+                        };
+                        augmentation::upsert(
+                            &cat,
+                            &augmentation::AugmentationRow {
+                                artifact_id: a.id.clone(),
+                                prompt: a.prompt.clone().unwrap_or_else(|| existing.prompt.clone()),
+                                params: serde_json::to_string(&current)?,
+                                last_refreshed_at: existing.last_refreshed_at.clone(),
+                                refresh_count: existing.refresh_count,
+                                created_at: existing.created_at.clone(),
+                                updated_at: now,
+                                render_template: a
+                                    .render_template
+                                    .clone()
+                                    .or_else(|| existing.render_template.clone()),
+                                params_schema: params_schema_str,
+                                append_mode: a.append_mode.unwrap_or(existing.append_mode),
+                                history_cap: a
+                                    .history_cap
+                                    .map(|v| v as i64)
+                                    .or(existing.history_cap),
+                                entry_collection: a
+                                    .entry_collection
+                                    .clone()
+                                    .or_else(|| existing.entry_collection.clone()),
+                            },
+                        )?;
+                        patched_siblings = true;
+                    }
                 }
-                let found = augmentation::merge_params(&cat, &a.id, &patch)?;
-                if !found {
-                    return Err(RecoverableError::new(format!(
-                        "no augmentation for artifact '{}' — call artifact_augment first",
-                        a.id
-                    )));
+                if !patched_siblings {
+                    let found = augmentation::merge_params(&cat, &a.id, &patch)?;
+                    if !found {
+                        return Err(RecoverableError::new(format!(
+                            "no augmentation for artifact '{}' — call artifact_augment first",
+                            a.id
+                        )));
+                    }
                 }
             } // cat dropped here
 
@@ -484,6 +545,83 @@ mod tests {
         assert!(
             params.get("b").map(|v| v.is_null()).unwrap_or(true),
             "b must be deleted"
+        );
+    }
+    #[tokio::test]
+    async fn merge_true_patches_sibling_fields_preserving_rest() {
+        let ctx = mk_ctx();
+        seed_artifact(&ctx, "aug-sib");
+        // Initial full augmentation with every caller-controlled field set.
+        ArtifactAugment
+            .call(
+                &ctx,
+                json!({
+                    "id": "aug-sib",
+                    "prompt": "keep the list",
+                    "params": {"items": [{"id": "X-1", "status": "open"}]},
+                    "params_schema": {
+                        "type": "object",
+                        "properties": {"items": {"type": "array", "items": {
+                            "type": "object",
+                            "properties": {"status": {"enum": ["open", "done"]}}
+                        }}}
+                    },
+                    "render_template": "ORIGINAL TEMPLATE",
+                    "entry_collection": "items"
+                }),
+            )
+            .await
+            .unwrap();
+
+        // F-5: widen the schema enum (add "blocked") AND add an item using it, in
+        // ONE merge=true call. Pre-fix this needed a full merge=false re-send of
+        // prompt/render_template/entry_collection or they'd reset to None.
+        ArtifactAugment
+            .call(
+                &ctx,
+                json!({
+                    "id": "aug-sib",
+                    "merge": true,
+                    "params": {"items": [
+                        {"id": "X-1", "status": "open"},
+                        {"id": "X-2", "status": "blocked"}
+                    ]},
+                    "params_schema": {
+                        "type": "object",
+                        "properties": {"items": {"type": "array", "items": {
+                            "type": "object",
+                            "properties": {"status": {"enum": ["open", "done", "blocked"]}}
+                        }}}
+                    }
+                }),
+            )
+            .await
+            .unwrap();
+
+        let cat = ctx.catalog.lock();
+        let aug = crate::librarian::catalog::augmentation::get(&cat, "aug-sib")
+            .unwrap()
+            .unwrap();
+        // Fields NOT provided in the merge call are preserved (not reset to None).
+        assert_eq!(aug.prompt, "keep the list", "prompt preserved");
+        assert_eq!(
+            aug.render_template.as_deref(),
+            Some("ORIGINAL TEMPLATE"),
+            "render_template preserved"
+        );
+        assert_eq!(
+            aug.entry_collection.as_deref(),
+            Some("items"),
+            "entry_collection preserved"
+        );
+        // The provided schema was written (now accepts "blocked").
+        let schema = aug.params_schema.expect("schema present");
+        assert!(schema.contains("blocked"), "schema widened: {schema}");
+        let params: serde_json::Value = serde_json::from_str(&aug.params).unwrap();
+        assert_eq!(
+            params["items"].as_array().unwrap().len(),
+            2,
+            "second item merged in"
         );
     }
 

@@ -128,10 +128,15 @@ Augmentation attaches a persistent prompt to any artifact.
 artifact_augment(id="...", prompt="...", params={...})
 ```
 
-**Merge-patch params only** (without changing prompt):
+**Merge-patch (`merge=true`)** — patch only the fields you provide, preserve the rest:
 ```
 artifact_augment(id="...", merge=true, params={key: value})
 ```
+
+`merge=true` also overlays any sibling field you pass — `prompt`, `render_template`,
+`params_schema`, `append_mode`, `history_cap`, `entry_collection` — and preserves every
+field you omit. Use it to change one field (e.g. widen a `params_schema` enum) without
+re-sending the rest; `merge=false` replaces all seven (omitted fields reset to None).
 
 **Refresh cycle** (run by the agent, not automatic):
 1. `artifact_refresh(action="gather", id="...")` — collects context; does NOT write
