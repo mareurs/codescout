@@ -27,8 +27,8 @@
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
-| F-1 | 2026-05-28 | med | architectural | open | Filter engine is compile-to-SQL only; entry-grain filtering needs a new in-memory evaluator |
-| F-2 | 2026-05-28 | med | architectural | open | tracker_design archetypes already structure entries, but heterogeneously — no common collection contract for a generic filter |
+| F-1 | 2026-05-28 | med | architectural | fixed-verified | Filter engine is compile-to-SQL only; entry-grain filtering needs a new in-memory evaluator |
+| F-2 | 2026-05-28 | med | architectural | fixed-verified | tracker_design archetypes already structure entries, but heterogeneously — no common collection contract for a generic filter |
 | F-3 | 2026-05-28 | med | release-pipeline | fixed-verified | Review-polish fix-up verified with check+clippy, not cargo test — shipped a 4-test schema-version regression |
 | F-4 | 2026-05-29 | high | tooling-output | fixed-verified | artifact(get, full=true) buffered body truncated at ~36 KB silently dropped U-19..U-25 during retrofit parse |
 
@@ -157,7 +157,7 @@ Codified so the Index column means the same thing across sessions.
 
 **Severity:** med — without this catch, the design doc would have under-scoped the entry-filter component; a subagent implementing from it would have hit the `ALLOWED_FIELDS` rejection wall (or routed entries through SQL) and forced a mid-build plan revision.
 
-**Status:** open
+**Status:** fixed-verified — 2026-05-29 verify-open pass. Shipped `pub fn eval` + `eval_leaf` with the `ALLOWED_FIELDS` gate dropped (`src/librarian/filter.rs:250,287`) and the dual-engine consistency test `eval_matches_compile_on_fixture` (`filter.rs:588`); commits 41445120 (eval), cbf1f0fe (consistency test). Verified live this session via `entry_filter` on 4 retrofitted trackers.
 
 **Fix idea / Pointer:** Feeds the metadata-filtering design (this work stream). Candidate shape: an `eval` fn beside `compile` in `filter.rs` sharing `LeafOp` + value-coercion; in-memory path drops the allowlist; add a consistency test. Re-scope severity once the design picks params-source vs body-parse vs SQL-table.
 
@@ -178,7 +178,7 @@ Codified so the Index column means the same thing across sessions.
 
 **Severity:** med — without this, the engine would target one invented shape and silently fail on existing archetype collections, or a forked convention would split the tracker model.
 
-**Status:** open
+**Status:** fixed-verified — 2026-05-29 verify-open pass. The `entry_collection` augmentation pointer shipped (commit 6fffc05c; taught in tracker_design via eb04a149) and was used to retrofit 4 trackers this session (tool-usage-patterns, codescout-usage-frictions, codescout-usage-hookify, skill-frictions).
 
 **Fix idea / Pointer:** Spec must define the `entry_collection` pointer + its home (augmentation field vs reserved params key). Scout the augmentation params/record shape before the spec pins that. Feeds F-1's engine target.
 
