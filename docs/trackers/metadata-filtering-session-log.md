@@ -31,8 +31,8 @@
 | F-2 | 2026-05-28 | med | architectural | fixed-verified | tracker_design archetypes already structure entries, but heterogeneously — no common collection contract for a generic filter |
 | F-3 | 2026-05-28 | med | release-pipeline | fixed-verified | Review-polish fix-up verified with check+clippy, not cargo test — shipped a 4-test schema-version regression |
 | F-4 | 2026-05-29 | high | tooling-output | fixed-verified | artifact(get, full=true) buffered body truncated at ~36 KB silently dropped U-19..U-25 during retrofit parse |
-| F-5 | 2026-05-29 | med | api-ergonomics | open | params_schema/render_template change forces full merge=false re-send (silent-reset foot-gun) |
-| F-6 | 2026-05-29 | low | api-surface | open | No artifact(delete) action — throwaway cleanup needs rm + reindex; orphans augmentation |
+| F-5 | 2026-05-29 | med | api-ergonomics | fixed-verified | params_schema/render_template change forces full merge=false re-send (silent-reset foot-gun) |
+| F-6 | 2026-05-29 | low | api-surface | fixed-verified | No artifact(delete) action — throwaway cleanup needs rm + reindex; orphans augmentation |
 | F-7 | 2026-05-29 | med | silent-failure | fixed-verified | entry_filter silently returns empty on unknown/typo'd field (asymmetric with SQL engine error) |
 
 ## Wins Index
@@ -263,7 +263,7 @@ Codified so the Index column means the same thing across sessions.
 
 **Severity:** med — schema/template tweaks are routine maintenance, but each one carries a silent-reset foot-gun + a large re-send. The retrofit guide warns about it; the tool offers no safer path.
 
-**Status:** open
+**Status:** fixed-verified — commit 8a3aa7f0. `merge=true` now overlays any provided sibling field (prompt / params_schema / render_template / entry_collection / append_mode / history_cap) and preserves every field omitted; merged params validate against the effective schema (new if provided, else stored). Params-only merge keeps the fast path. Test: `merge_true_patches_sibling_fields_preserving_rest`. Live /mcp confirmation pending reconnect.
 
 **Fix idea / Pointer:** A `merge=true` that also accepts `params_schema` / `render_template` patches, or a dedicated schema-patch path. Minimum: server rejects a `merge=false` that drops a previously-set field unless an explicit clear is requested.
 
@@ -285,7 +285,7 @@ Codified so the Index column means the same thing across sessions.
 
 **Severity:** low — workaround is reliable; only bites for throwaway/mistaken artifacts. The orphaned-augmentation-on-rm case is a latent catalog-hygiene gap.
 
-**Status:** open
+**Status:** fixed-verified — commit c40d5cbe. `artifact(action="delete", id)` removes the file + catalog row; FK `ON DELETE CASCADE` drops augmentation/links/observations/events (no orphans). Root-containment guarded; missing file tolerated. Tests: `delete_removes_file_catalog_row_and_augmentation` (+2). Live /mcp confirmation pending reconnect.
 
 **Fix idea / Pointer:** Add `artifact(action="delete", id)` removing file + catalog row + augmentation atomically; mirror `artifact(move)`'s catalog-aware path.
 
