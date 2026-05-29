@@ -630,6 +630,50 @@ async fn memory_write_and_read_via_dispatch() {
 }
 
 #[tokio::test]
+async fn memory_read_accepts_name_alias_for_topic() {
+    let (dir, ctx) = test_ctx_with_project().await;
+    let tool = Memory;
+
+    let w = tool
+        .call(
+            json!({ "action": "write", "topic": "alias-test", "content": "hi" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_memory_write_ok(&w);
+
+    let r = tool
+        .call(json!({ "action": "read", "name": "alias-test" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(r["content"], json!("hi"));
+
+    let r2 = tool
+        .call(json!({ "action": "read", "key": "alias-test" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(r2["content"], json!("hi"));
+
+    drop(dir);
+}
+
+#[tokio::test]
+async fn memory_read_missing_topic_and_aliases_returns_recoverable() {
+    let (dir, ctx) = test_ctx_with_project().await;
+    let tool = Memory;
+
+    let err = tool
+        .call(json!({ "action": "read" }), &ctx)
+        .await
+        .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("topic"), "error should mention topic: {msg}");
+
+    drop(dir);
+}
+
+#[tokio::test]
 async fn memory_large_read_buffers_as_file_ref() {
     // Regression: memory(action="read") for large topics must return a @file_* ref
     // rather than {"content":"..."} inline. Without this, call_content wraps the

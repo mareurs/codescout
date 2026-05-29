@@ -266,6 +266,26 @@ fn now_epoch_string() -> String {
     format!("{secs:010}")
 }
 
+/// Resolve the topic parameter, accepting `topic` (canonical) or the
+/// `name` / `key` aliases. LLMs frequently call `memory(action="read",
+/// name="...")` — the strict missing-`topic` error makes the tool feel
+/// brittle for what is effectively a synonym. Error message still
+/// references the canonical `topic` so the schema stays the source of
+/// truth.
+fn require_topic_param(input: &Value) -> anyhow::Result<&str> {
+    for key in ["topic", "name", "key"] {
+        if let Some(v) = input.get(key).and_then(|v| v.as_str()) {
+            return Ok(v);
+        }
+    }
+    Err(RecoverableError::with_hint(
+        "missing 'topic' parameter",
+        "Add the required 'topic' parameter to the tool call. \
+         (Aliases 'name' and 'key' are also accepted.)",
+    )
+    .into())
+}
+
 /// Best-effort cross-embed a markdown memory into the semantic store.
 /// Called on `write` so that structured memories are also discoverable via `recall`.
 async fn cross_embed_memory(ctx: &ToolContext, topic: &str, content: &str) -> anyhow::Result<()> {
@@ -563,7 +583,7 @@ impl Tool for Memory {
         let action = super::require_str_param(&input, "action")?;
         match action {
             "write" => {
-                let topic = super::require_str_param(&input, "topic")?;
+                let topic = require_topic_param(&input)?;
                 let content = super::require_str_param(&input, "content")?;
                 let private = parse_bool_param(&input["private"]);
 
@@ -647,7 +667,7 @@ impl Tool for Memory {
                 }
             }
             "read" => {
-                let topic = super::require_str_param(&input, "topic")?;
+                let topic = require_topic_param(&input)?;
                 let private = parse_bool_param(&input["private"]);
                 let sections: Vec<String> = super::optional_array_param(&input, "sections")
                     .map(|arr| {
@@ -703,7 +723,7 @@ impl Tool for Memory {
                 }
             }
             "delete" => {
-                let topic = super::require_str_param(&input, "topic")?;
+                let topic = require_topic_param(&input)?;
                 let private = parse_bool_param(&input["private"]);
 
                 // Delete markdown file — route to per-project dir when `project` param given.
@@ -897,7 +917,7 @@ impl Tool for Memory {
                 Ok(json!("ok"))
             }
             "refresh_anchors" => {
-                let topic = super::require_str_param(&input, "topic")?;
+                let topic = require_topic_param(&input)?;
                 let root = ctx.agent.require_project_root().await?;
                 let memories_dir = resolve_memory_dir(&input, ctx).await.unwrap_or_else(|_| {
                     root.join(".codescout").join("memories")
