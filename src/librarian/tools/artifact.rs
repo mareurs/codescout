@@ -13,7 +13,7 @@ impl Tool for Artifact {
     }
 
     fn description(&self) -> &'static str {
-        "Artifact CRUD and query. action: find | get | create | update | link | graph | state_at. \
+        "Artifact CRUD and query. action: find | get | create | update | move | delete | link | graph | state_at. \
          Defaults: scope=project (active project only), archived/superseded hidden when \
          filter does not constrain status. Shortcut params kind/status expand to eq-filters \
          and combine with filter via AND. \
@@ -28,7 +28,7 @@ impl Tool for Artifact {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["find", "get", "create", "update", "move", "link", "graph", "state_at"],
+                    "enum": ["find", "get", "create", "update", "move", "delete", "link", "graph", "state_at"],
                     "description": "Operation to perform"
                 },
                 "filter": {
@@ -176,11 +176,12 @@ impl Tool for Artifact {
             "create"   => super::create::call(ctx, args).await,
             "update"   => super::update::call(ctx, args).await,
             "move"     => super::mv::call(ctx, args).await,
+            "delete"   => super::delete::call(ctx, args).await,
             "link"     => super::link::call(ctx, args).await,
             "graph"    => super::graph::call(ctx, args).await,
             "state_at" => super::state_at::call(ctx, args).await,
             other => Err(RecoverableError::new(format!(
-                "unknown action '{other}' — expected one of: find, get, create, update, move, link, graph, state_at"
+                "unknown action '{other}' — expected one of: find, get, create, update, move, delete, link, graph, state_at"
             ))),
         }
     }

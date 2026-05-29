@@ -104,6 +104,7 @@ pub mod update;
 
 pub mod link;
 
+pub mod delete;
 pub mod mv;
 
 pub mod event_create;

@@ -240,6 +240,12 @@ Returns BFS traversal of linked artifacts up to `depth` (1–3).
 Archive flow (status flip + git mv to docs/trackers/archive/) is covered in
 get_guide("tracker-conventions"). At the artifact layer, `artifact(action="move",
 new_rel_path=...)` is the safe path — it updates the catalog atomically.
+
+To remove an artifact entirely, `artifact(action="delete", id=...)` deletes the file **and**
+the catalog row in one step, cascading (FK `ON DELETE CASCADE`) to the artifact's augmentation,
+links, observations, and events — no orphaned rows. The artifact must live under a managed
+workspace root; a missing file is tolerated (the catalog row is still dropped, so `delete` also
+repairs a stale entry). Prefer `move` for relocation — `delete` is irreversible.
 ## Common Mistakes
 
 | Mistake | Fix |
