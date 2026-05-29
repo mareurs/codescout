@@ -323,6 +323,43 @@ appear until reindex. On a busy workspace, call
 `scope="project"`; pass `scope="repo" | "umbrella" | "all"` to widen.
 `force=true` wipes only the targeted scope's rows.
 
+### Where catalog state lives (and what is *not* in the repo)
+
+The catalog is a single SQLite DB. Its path is resolved at server start:
+
+- **Default:** `dirs::data_local_dir()/librarian/catalog.db` — on Linux
+  `~/.local/share/librarian/catalog.db` (falls back to
+  `/tmp/librarian/catalog.db` if no data dir). Source:
+  `src/librarian/mod.rs` (`db_path` resolution).
+- **Override:** set the `LIBRARIAN_DB` env var to point elsewhere
+  (the test suite does this per-test for isolation; see
+  `docs/conventions/test-env-isolation.md`).
+
+**The DB is machine-local and git-ignored — it is *not* in the repo and
+*not* shared with teammates.** A teammate who clones the project gets the
+markdown files only.
+
+**Two different durability classes share this DB:**
+
+| State | Source of truth | Regenerable from disk? |
+|---|---|---|
+| Artifact rows (id, kind, status, title, frontmatter, body text) | the `.md` file | **Yes** — `reindex` rebuilds them from disk |
+| Augmentation (`prompt`, `params`, `params_schema`, `render_template`, `entry_collection`) | the **catalog DB only** | **No** — there is no on-disk representation |
+
+Implications for augmented trackers (anything with `entry_collection` /
+filterable `params`):
+
+- **An augment produces no git diff.** `artifact_augment` writes only the
+  catalog row; the `.md` body is untouched. `git status` stays clean.
+- **Augmentations survive `reindex`** (even `force=true`). Reindex
+  regenerates artifact rows *from disk*; it cannot recreate params that have
+  no disk form, so it preserves augmentation rows keyed by artifact `id`.
+- **They do NOT survive a file delete+recreate.** A recreated file gets a
+  new `id`, orphaning the old augmentation. Use `artifact(action="move")`
+  to relocate a tracker (preserves `id`), never delete+recreate.
+- **To share a filterable index with teammates**, the structured rows would
+  need to be persisted into the file (frontmatter/body) — the catalog alone
+  is local tooling state. As of 2026-05, retrofits are local-only by design.
 ### Per-project classifier overrides
 
 A project may ship `<project>/.codescout/librarian.toml` with
