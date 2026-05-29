@@ -275,6 +275,32 @@ pub fn eval(node: &FilterNode, entry: &serde_json::Map<String, Value>) -> Result
         FilterNode::Leaf(map) => eval_leaf(map, entry),
     }
 }
+/// Collect the set of field names referenced by any leaf in the filter AST.
+///
+/// Used by the `entry_filter` path to warn when a filter names a field that is
+/// absent from every entry. The in-memory [`eval`] path intentionally has no
+/// field allowlist (unlike the SQL [`compile`] path, which errors on unknown
+/// columns), so a typo'd field silently matches nothing. Surfacing the
+/// referenced fields lets the caller distinguish a typo from a true zero-match.
+/// See the metadata-filtering session log, F-7.
+pub fn referenced_fields(node: &FilterNode) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::new();
+    collect_referenced_fields(node, &mut out);
+    out
+}
+
+fn collect_referenced_fields(node: &FilterNode, out: &mut std::collections::BTreeSet<String>) {
+    match node {
+        FilterNode::And { and } => and.iter().for_each(|n| collect_referenced_fields(n, out)),
+        FilterNode::Or { or } => or.iter().for_each(|n| collect_referenced_fields(n, out)),
+        FilterNode::Not { not } => collect_referenced_fields(not, out),
+        FilterNode::Leaf(map) => {
+            for k in map.keys() {
+                out.insert(k.clone());
+            }
+        }
+    }
+}
 
 fn empty_composition_err(op: &str) -> anyhow::Error {
     RecoverableError::with_hint(
@@ -576,6 +602,25 @@ mod tests {
         )
         .unwrap());
     }
+    #[test]
+    fn referenced_fields_collects_across_composites() {
+        let node: FilterNode = serde_json::from_value(json!({
+            "and": [
+                {"status": {"eq": "open"}},
+                {"or": [
+                    {"severity": {"eq": "high"}},
+                    {"not": {"owner": {"eq": "x"}}}
+                ]}
+            ]
+        }))
+        .unwrap();
+        let fields = referenced_fields(&node);
+        assert!(fields.contains("status"));
+        assert!(fields.contains("severity"));
+        assert!(fields.contains("owner"));
+        assert_eq!(fields.len(), 3);
+    }
+
     #[test]
     fn eval_contains_is_case_insensitive() {
         let e = entry(json!({"title": "Docs Lotus Frog"}));

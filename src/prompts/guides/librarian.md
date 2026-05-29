@@ -83,7 +83,10 @@ Equivalent to `filter={"and":[{"kind":{"eq":"tracker"}},{"status":{"eq":"active"
 **Entry-grain filtering** — `artifact(action="get", entry_filter=…)` is the per-row twin of
 artifact-grain `filter`. It uses the same AST and ops, but runs in-memory over the array
 named by the augmentation's `entry_collection` field instead of querying the SQL catalog.
-`contains` is case-insensitive (matches SQL LIKE behaviour). Only augmented trackers that
+`contains` is case-insensitive (matches SQL LIKE behaviour). A filter field absent from
+every entry yields a `filter_warnings.unknown_fields` list in the response — the in-memory
+engine has no field allowlist (unlike the SQL side, which errors on unknown columns), so an
+empty result there may be a field-name typo, not a true zero-match. Only augmented trackers that
 declare an `entry_collection` support this; prose trackers need retrofit first — see
 `docs/conventions/retrofitting-trackers-for-filtering.md`.
 

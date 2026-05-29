@@ -275,6 +275,27 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 }
             }
         }
+        // F-7: the in-memory eval path has no field allowlist, so a filter
+        // naming a field absent from every entry silently matches nothing.
+        // Warn when a referenced field is present in zero entries (a likely
+        // typo) — distinct from a genuine zero-match.
+        if !arr.is_empty() {
+            let present: std::collections::BTreeSet<String> = arr
+                .iter()
+                .filter_map(|i| i.as_object())
+                .flat_map(|o| o.keys().cloned())
+                .collect();
+            let unknown: Vec<String> = crate::librarian::filter::referenced_fields(filter)
+                .into_iter()
+                .filter(|f| !present.contains(f))
+                .collect();
+            if !unknown.is_empty() {
+                out["filter_warnings"] = json!({
+                    "unknown_fields": unknown,
+                    "hint": "these entry_filter fields are absent from every entry — an empty or reduced result may be a field-name typo, not a true zero-match",
+                });
+            }
+        }
         out["entry_total"] = json!(considered);
         out["entries"] = json!(matched);
     }
@@ -1073,6 +1094,58 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0]["id"], "R-1");
         assert_eq!(out["entry_total"], 3);
+    }
+    #[tokio::test]
+    async fn entry_filter_warns_on_unknown_field() {
+        use crate::librarian::tools::augment::ArtifactAugment;
+        use crate::librarian::tools::Tool;
+        let cat = crate::librarian::catalog::Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("roadmap2")).unwrap();
+        let ctx = mk_ctx(cat);
+        ArtifactAugment
+            .call(
+                &ctx,
+                json!({
+                    "id": "roadmap2",
+                    "prompt": "maintain items",
+                    "params": { "items": [
+                        {"id": "R-1", "category": "hardware", "status": "open"},
+                        {"id": "R-2", "category": "software", "status": "done"}
+                    ]},
+                    "entry_collection": "items"
+                }),
+            )
+            .await
+            .unwrap();
+
+        // Typo'd field ("statuss") is present in no entry → silent empty result
+        // plus a filter_warnings.unknown_fields entry (F-7).
+        let out = call(
+            &ctx,
+            json!({ "id": "roadmap2", "entry_filter": {"statuss": {"eq": "open"}} }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out["entry_total"], 2);
+        assert_eq!(out["entries"].as_array().unwrap().len(), 0);
+        let unknown = out["filter_warnings"]["unknown_fields"]
+            .as_array()
+            .expect("filter_warnings.unknown_fields present for a typo'd field");
+        assert_eq!(unknown.len(), 1);
+        assert_eq!(unknown[0], "statuss");
+
+        // A genuinely-present field produces NO warning, even on zero matches.
+        let out2 = call(
+            &ctx,
+            json!({ "id": "roadmap2", "entry_filter": {"status": {"eq": "nonexistent"}} }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out2["entries"].as_array().unwrap().len(), 0);
+        assert!(
+            out2.get("filter_warnings").is_none(),
+            "no warning for a known field, even with zero matches"
+        );
     }
 
     #[tokio::test]
