@@ -33,6 +33,7 @@ skill).
 | R-7 | 2026-05-28 | miss → applies-R-1 (promoted) | Invariant test on `include_str!`'d file not pre-enumerated | prompt-guide-refactor F-4 + W-3 |
 | R-8 | 2026-05-28 | miss → proposal | `edit_markdown(action='replace')` shape unverified on marker-bearing section | prompt-guide-refactor F-7 |
 | R-9 | 2026-05-28 | proposal → drafted | Session-state recon for subagent dispatch | prompt-guide-refactor F-6 + W-4 |
+| R-10 | 2026-05-29 | miss → proposal | Buffered tool output parsed for structured extraction without a completeness scout | metadata-filtering F-4 + W-1 |
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
 
@@ -359,6 +360,43 @@ mis-predicts V2/session-state behavior. Currently 1/2.
 
 ---
 
+## R-10 — Miss: buffered artifact body parsed for structured extraction without a completeness scout
+
+**Verdict:** miss → proposal
+
+**Observed:** 2026-05-29, metadata-filtering work stream
+(`docs/trackers/metadata-filtering-session-log.md` F-4 + W-1).
+
+**Pattern that failed:** Retrofitting `codescout-usage-frictions` to be
+`entry_filter`-searchable required parsing the tracker's body into a structured
+array. `artifact(get, full=true)` returned a 36 KB `@tool_*` buffer whose `body`
+field was truncated at U-18 by the progressive-disclosure inline budget; the
+parse silently produced 15 of 22 entries (U-19..U-25 dropped). No Phase-1 scout
+verified that the parsed body was *complete* before it became the input to a
+write (`artifact_augment`). The drift was caught only at post-augment
+verification, by noticing the get response's `preview.headings` listed entries
+beyond the parsed tail.
+
+**Pattern proposal:** Add to Phase-1 Scout — *when a buffered tool output
+(`@tool_*` / `@cmd_*`) is the input to a structured extraction or write, treat
+its completeness as an unverified shape.* Reconcile the parsed item count against
+an independent server-side view (`preview.headings` for artifacts, total/by_file
+for search tools) before acting on it. Buffered bodies are silently clipped at
+the inline budget; the truncation carries no in-band marker.
+
+**Cost absorbed:** 1 incomplete catalog write (corrected before any consumer
+queried it) + 1 re-read (line-range get) + 1 `merge=false` re-augment with a
+widened schema enum. Recoverable, but had verification not cross-checked the
+preview, a 7-of-22-entry index would have shipped with no error and no git diff.
+
+**Promote-when:** A second instance of a buffered tool output truncating a
+structured-extraction input. At 2 datapoints, fold into a Phase-1 Scout bullet
+in SKILL.md ("buffered outputs are unverified shape for extraction/writes").
+
+**Status:** proposal — single datapoint (F-4 + W-1, this session). Awaiting a
+second occurrence before SKILL.md promotion.
+
+---
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:

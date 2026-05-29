@@ -30,12 +30,13 @@
 | F-1 | 2026-05-28 | med | architectural | open | Filter engine is compile-to-SQL only; entry-grain filtering needs a new in-memory evaluator |
 | F-2 | 2026-05-28 | med | architectural | open | tracker_design archetypes already structure entries, but heterogeneously — no common collection contract for a generic filter |
 | F-3 | 2026-05-28 | med | release-pipeline | fixed-verified | Review-polish fix-up verified with check+clippy, not cargo test — shipped a 4-test schema-version regression |
+| F-4 | 2026-05-29 | high | tooling-output | fixed-verified | artifact(get, full=true) buffered body truncated at ~36 KB silently dropped U-19..U-25 during retrofit parse |
 
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
-| W-1 | YYYY-MM-DD | low/med/high | <pattern> | <what-would-have-happened> | open |
+| W-1 | 2026-05-29 | high | Reconcile parsed buffered-body entry count against preview.headings before structured writes | Incomplete 15/22-entry index ships silently; entry_filter under-reports with no error or diff | validated |
 
 ---
 
@@ -201,6 +202,46 @@ Codified so the Index column means the same thing across sessions.
 **Status:** fixed-verified
 
 **Fix idea / Pointer:** Revert commit `8edd3cc8` (master SHA TBD on cherry-pick). The check-vs-test verification gap generalizes beyond this session — candidate for promotion to CLAUDE.md's verification discipline if it recurs.
+
+---
+## F-4 — artifact(get, full=true) buffered body truncated at ~36 KB silently dropped U-19..U-25 during retrofit parse
+
+**Observed:** 2026-05-29, retrofitting `codescout-usage-frictions` (U-N, id `7226af4c655b62a3`) to be `entry_filter`-searchable.
+
+**When:** Parsing the tracker body to build the structured `frictions` array for `artifact_augment`.
+
+**Expected:** `artifact(action="get", id=…, full=true)` returns the complete 1065-line body; a regex parse over `d['body']` yields all active U-N entries.
+
+**Got:** The get response stored a 36 387-byte `@tool_*` buffer whose `body` field ended at U-18. Parsing yielded 15 entries. The tracker actually runs U-1..U-25 (22 active after archived U-4/U-9/U-16). U-19..U-25 were silently absent — the parsed `body` field carried no truncation marker; only the response's `preview.headings` (server-generated from the full file) listed U-19..U-22 at lines 549–791.
+
+**Probable cause:** Progressive-disclosure overflow — the full body exceeded the inline budget, so the buffered `body` field I parsed was a truncated slice; the tail needed a separate line-range read.
+
+**Workaround:** Reconciled parsed count against `preview.headings`, re-read lines 540–1065 via `artifact(get, start_line/end_line)`, recovered U-19..U-25 (surfacing a new `fixed-verified` status value), then re-augmented `merge=false` with the complete 22-entry array + updated schema enum. Verified `entry_total=22` live after `/mcp` reconnect.
+
+**Severity:** high — had it shipped, the searchable index would have under-reported by 7 of 22 entries; the exact queries the retrofit exists to enable ("open high-severity frictions", "all fixed") would silently miss real rows, with no error and no git diff (catalog-only write) to flag the gap.
+
+**Status:** fixed-verified — re-augmented; `entry_total=22` confirmed post-reconnect.
+
+**Fix idea / Pointer:** When parsing a buffered artifact body for structured extraction, reconcile the parsed entry count against `preview.headings` before trusting it. This session, W-1.
+
+---
+## W-1 — preview.headings cross-check caught a silent buffered-body truncation before the index was relied upon
+
+**Observed:** 2026-05-29, retrofitting `codescout-usage-frictions` during the metadata-filtering work stream.
+
+**Pattern:** After augmenting a tracker from a parsed buffered (`@tool_*`) body, verify completeness by reconciling `entry_total` and the max entry ID against the get response's `preview.headings` list — not against the buffered `body` you parsed. The preview is generated server-side from the whole file and is independent of the inline-budget truncation that can clip the buffered body.
+
+**Counterfactual:** The first augment wrote only 15 of 22 U-N entries (F-4). Without the cross-check, that incomplete index would have stood: `entry_filter` queries the retrofit exists to enable would have returned authoritative-looking subsets missing U-19..U-25, with no error and no git diff (catalog-only write) to expose it. The gap would have persisted until a human manually noticed absent rows. The risk was invisible on the other three trackers retrofitted this session (176/178/262-line bodies, all fit inline and parsed complete) — only the one >36 KB body truncated, so a "it worked three times" heuristic would have shipped the bug.
+
+**Confirming data points:**
+1. F-4 (this session) — the verification get's `preview.headings` showed U-19..U-22 while the parsed `body` stopped at U-18; that discrepancy was the only signal.
+2. Post-reconnect re-verification (`entry_total=22`; `status=open`→2 rows; `status` prefix `fixed`→15 rows) confirmed completeness only because the count was reconciled first.
+
+**Impact:** high — prevented shipping a silently-incomplete searchable index whose under-reporting would be durable and undetectable by normal use.
+
+**Promote-when:** A second instance of buffered-body parsing missing tail content. At 2 datapoints, promote to a codescout convention: "Reconcile parsed buffered-body entry counts against `preview.headings` before structured writes."
+
+**Status:** validated — single datapoint; drift caught and corrected before any consumer queried the index.
 
 ---
 ## Template for new entries
