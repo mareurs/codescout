@@ -127,8 +127,7 @@ impl Tool for ActivateProject {
             let is_project_id = {
                 let inner = ctx.agent.inner.read().await;
                 inner
-                    .workspace
-                    .as_ref()
+                    .default_workspace()
                     .map(|ws| ws.projects.iter().any(|p| p.discovered.id == path))
                     .unwrap_or(false)
             };

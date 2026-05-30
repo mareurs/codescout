@@ -80,7 +80,17 @@ pub struct Agent {
 }
 
 pub struct AgentInner {
-    pub workspace: Option<Workspace>,
+    /// Registry of activated workspaces, keyed by canonical workspace root.
+    /// Phase 1: holds at most one entry — `activate` clears and reinserts,
+    /// mirroring the previous single-slot drop-and-replace, so behavior is
+    /// unchanged. Phase 3 lifts the clear-on-activate to enable true
+    /// multi-workspace residence + eviction. See
+    /// docs/plans/2026-05-30-per-request-workspace-pinning.md.
+    pub workspaces: HashMap<PathBuf, Workspace>,
+    /// Canonical root of the workspace that unpinned calls resolve to — the
+    /// per-session default (what `activate` sets). Replaces the implicit
+    /// "the one workspace" identity of the old single `workspace` slot.
+    pub default_workspace_root: Option<PathBuf>,
     pub project_explicitly_activated: bool,
     pub home_root: Option<PathBuf>,
     /// Last `activate()` as (root, when). Drives the concurrent-activation
@@ -92,15 +102,30 @@ pub struct AgentInner {
 }
 
 impl AgentInner {
-    /// Convenience: get `&ActiveProject` from the focused workspace project.
-    pub fn active_project(&self) -> Option<&ActiveProject> {
-        self.workspace.as_ref()?.focused_active()?.as_active()
+    /// The workspace that unpinned calls resolve to (the per-session default).
+    /// Phase 1 this is the single live workspace; the ambient accessors below
+    /// route through it. Phase 2+ adds selector-aware twins alongside.
+    pub fn default_workspace(&self) -> Option<&Workspace> {
+        self.workspaces.get(self.default_workspace_root.as_ref()?)
     }
 
-    /// Convenience: get `&mut ActiveProject` from the focused workspace project.
+    /// Mutable twin of `default_workspace`. Clones the key first to avoid a
+    /// split borrow of `default_workspace_root` and `workspaces`.
+    pub fn default_workspace_mut(&mut self) -> Option<&mut Workspace> {
+        let root = self.default_workspace_root.clone()?;
+        self.workspaces.get_mut(&root)
+    }
+
+    /// Convenience: get `&ActiveProject` from the focused project of the
+    /// default workspace.
+    pub fn active_project(&self) -> Option<&ActiveProject> {
+        self.default_workspace()?.focused_active()?.as_active()
+    }
+
+    /// Convenience: get `&mut ActiveProject` from the focused project of the
+    /// default workspace.
     pub fn active_project_mut(&mut self) -> Option<&mut ActiveProject> {
-        self.workspace
-            .as_mut()?
+        self.default_workspace_mut()?
             .focused_active_mut()?
             .as_active_mut()
     }
@@ -308,10 +333,20 @@ impl Agent {
         // A project provided at startup (via --project or CWD) is treated as explicitly
         // activated — the server operator already chose the write target.
         let project_explicitly_activated = workspace.is_some();
+        let default_workspace_root = workspace.as_ref().map(|ws| ws.root.clone());
+        let workspaces = match workspace {
+            Some(ws) => {
+                let mut m = HashMap::new();
+                m.insert(ws.root.clone(), ws);
+                m
+            }
+            None => HashMap::new(),
+        };
 
         Ok(Self {
             inner: Arc::new(RwLock::new(AgentInner {
-                workspace,
+                workspaces,
+                default_workspace_root,
                 project_explicitly_activated,
                 home_root,
                 last_activation: None,
@@ -382,7 +417,7 @@ impl Agent {
             // the old locks does not serialize against new tools using the new
             // locks, and two writers can race on the same project. Scan the
             // current workspace for an already-activated project at this root.
-            let existing = inner.workspace.as_ref().and_then(|ws| {
+            let existing = inner.workspaces.values().find_map(|ws| {
                 ws.projects.iter().find_map(|p| match &p.state {
                     ProjectState::Activated(ap) if ap.root == root => Some((
                         ap.write_lock.clone(),
@@ -447,9 +482,13 @@ impl Agent {
             let ws = Workspace::new(root.clone(), projects);
 
             if inner.home_root.is_none() {
-                inner.home_root = Some(root);
+                inner.home_root = Some(root.clone());
             }
-            inner.workspace = Some(ws);
+            // Phase 1: single-entry registry — clear + reinsert mirrors the
+            // previous single-slot drop-and-replace (no multi-residence yet).
+            inner.workspaces.clear();
+            inner.workspaces.insert(root.clone(), ws);
+            inner.default_workspace_root = Some(root);
             inner.project_explicitly_activated = true;
         }
         Ok(())
@@ -505,8 +544,7 @@ impl Agent {
     pub async fn require_project_root(&self) -> Result<PathBuf> {
         let inner = self.inner.read().await;
         inner
-            .workspace
-            .as_ref()
+            .default_workspace()
             .ok_or_else(|| {
                 crate::tools::RecoverableError::with_hint(
                     "No active project. Use activate_project first.",
@@ -528,8 +566,7 @@ impl Agent {
     pub async fn switch_focus(&self, project_id: &str) -> Result<()> {
         let mut inner = self.inner.write().await;
         inner
-            .workspace
-            .as_mut()
+            .default_workspace_mut()
             .ok_or_else(|| anyhow::anyhow!("No active workspace"))?
             .set_focused(project_id)
     }
@@ -547,8 +584,7 @@ impl Agent {
         let (abs_root, home_root_snapshot) = {
             let inner = self.inner.read().await;
             let ws = inner
-                .workspace
-                .as_ref()
+                .default_workspace()
                 .ok_or_else(|| anyhow::anyhow!("No active workspace"))?;
             let relative_root = ws
                 .projects
@@ -589,8 +625,7 @@ impl Agent {
         let home_root = inner.home_root.clone();
 
         let ws = inner
-            .workspace
-            .as_mut()
+            .default_workspace_mut()
             .ok_or_else(|| anyhow::anyhow!("No active workspace"))?;
 
         // Re-resolve root under the write lock to guard against concurrent
@@ -674,8 +709,7 @@ impl Agent {
     ) -> Result<PathBuf> {
         let inner = self.inner.read().await;
         inner
-            .workspace
-            .as_ref()
+            .default_workspace()
             .ok_or_else(|| anyhow::anyhow!("No active project"))?
             .resolve_root(project, file_hint)
     }
@@ -849,7 +883,7 @@ impl Agent {
     /// Returns None for single-project workspaces.
     pub async fn workspace_summary(&self) -> Option<Vec<crate::prompts::WorkspaceProjectSummary>> {
         let inner = self.inner.read().await;
-        let ws = inner.workspace.as_ref()?;
+        let ws = inner.default_workspace()?;
         if ws.projects.len() <= 1 {
             return None;
         }
@@ -903,8 +937,7 @@ impl Agent {
     pub async fn call_edges_project_id(&self) -> String {
         let inner = self.inner.read().await;
         inner
-            .workspace
-            .as_ref()
+            .default_workspace()
             .and_then(|ws| ws.focused.clone())
             .unwrap_or_else(|| crate::workspace::ROOT_PROJECT_ID.to_string())
     }
@@ -961,7 +994,7 @@ impl Agent {
     /// sub-project that hasn't been fully loaded yet).
     pub async fn project_root(&self) -> Option<PathBuf> {
         let inner = self.inner.read().await;
-        inner.workspace.as_ref()?.focused_project_root().ok()
+        inner.default_workspace()?.focused_project_root().ok()
     }
 
     pub async fn is_project_explicitly_activated(&self) -> bool {
@@ -988,8 +1021,7 @@ impl Agent {
     pub async fn discovered_projects(&self) -> Vec<crate::workspace::DiscoveredProject> {
         let inner = self.inner.read().await;
         inner
-            .workspace
-            .as_ref()
+            .default_workspace()
             .map(|ws| ws.projects.iter().map(|p| p.discovered.clone()).collect())
             .unwrap_or_default()
     }
@@ -998,7 +1030,7 @@ impl Agent {
     /// Returns an empty vec for single-project activations (workspace absent or len ≤ 1).
     pub async fn workspace_project_memories(&self) -> Vec<(String, Vec<String>)> {
         let inner = self.inner.read().await;
-        let ws = match inner.workspace.as_ref() {
+        let ws = match inner.default_workspace() {
             Some(ws) if ws.projects.len() > 1 => ws,
             _ => return vec![],
         };
@@ -1351,6 +1383,66 @@ mod tests {
             agent.require_project_root().await.unwrap(),
             canonical(dir2.path())
         );
+    }
+    #[tokio::test]
+    async fn activate_registers_default_workspace_by_canonical_root() {
+        // Pins the Phase-1 registry invariant: after activate(root), the default
+        // resolves to that canonical root, the registry is keyed by it, and the
+        // focused project's root matches. The resolution invariant is durable
+        // through Phase 3 (multi-residence); only the single-entry assertion is
+        // Phase-1-specific (clear + reinsert on activate).
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let root = canonical(dir.path());
+
+        let agent = Agent::new(None).await.unwrap();
+        agent
+            .activate(dir.path().to_path_buf(), None)
+            .await
+            .unwrap();
+
+        {
+            let inner = agent.inner.read().await;
+            assert_eq!(
+                inner.default_workspace_root.as_deref(),
+                Some(root.as_path()),
+                "default_workspace_root must be the canonical activated root"
+            );
+            assert!(
+                inner.workspaces.contains_key(&root),
+                "registry must be keyed by the canonical root"
+            );
+            assert_eq!(
+                inner.workspaces.len(),
+                1,
+                "Phase 1: single-entry registry (clear + reinsert on activate)"
+            );
+        }
+
+        // The focused project resolves through the default workspace to the root.
+        let p_root = agent
+            .with_project(|p| Ok(p.root().to_path_buf()))
+            .await
+            .unwrap();
+        assert_eq!(p_root, root);
+
+        // Re-activating the same root keeps the single-entry invariant.
+        agent
+            .activate(dir.path().to_path_buf(), None)
+            .await
+            .unwrap();
+        {
+            let inner = agent.inner.read().await;
+            assert_eq!(
+                inner.workspaces.len(),
+                1,
+                "re-activate same root: still one entry"
+            );
+            assert_eq!(
+                inner.default_workspace_root.as_deref(),
+                Some(root.as_path())
+            );
+        }
     }
 
     #[tokio::test]
@@ -1933,7 +2025,7 @@ mod tests {
         // Workspace topology preserved — all original projects still exist
         let project_count = {
             let inner = agent.inner.read().await;
-            inner.workspace.as_ref().unwrap().projects.len()
+            inner.default_workspace().unwrap().projects.len()
         };
         assert!(
             project_count >= 2,

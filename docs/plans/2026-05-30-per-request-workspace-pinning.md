@@ -202,31 +202,43 @@ until the next `index_project` clears it, or (b) trigger a final index then evic
 only if dirty entries are observed pinning the map open.
 ## Phases
 
-- **Phase 0 — Inventory & classify.** Enumerate the ~100 resolution sites (`grep` + `references` on the
-  four accessors); tag read vs mutating, "needs pinning" vs "fine on default". Output: a checklist table
-  in this plan.
-- **Phase 1 — Registry + lifetime contract, no behavior change.** Promote
-  `inner.workspace: Option<Workspace>` to `workspaces: HashMap<PathBuf, Arc<RwLock<Workspace>>>` +
-  `default_workspace_root` in `AgentInner`; `activate` populates the map and sets the default; all existing
-  accessors resolve via `default_workspace_root` → the one entry → the **existing** `Workspace::resolve_root`.
-  **No new resolver is written** — `resolve_root` is reused. Move the AgentInner-wide lock to per-`Workspace`
-  locks (the concurrency-model change). **Define and implement the lifetime contract here** (eviction over
-  whole `Workspace`s; quiescence across all activated projects; map-bound tied to the LSP LRU) — the
-  boundary, not a later decoration. Full suite green = no regression.
+*Sequencing refined 2026-05-30 during Phase-1 implementation: per-`Workspace` locking and the eviction
+sweep moved from Phase 1 to Phase 3, because both are unobservable and untestable until pinning creates
+concurrent entries (one entry never contends; the default is eviction-exempt). A mechanism ships with the
+test that proves it. The lifetime contract stays **defined** in Phase 1 (above); its **mechanism** lands
+in Phase 3.*
+
+- **Phase 0 — Inventory & classify.** *(done — see "Phase 0 — Call-site census" below.)* Enumerate the
+  resolution sites (`references` on the accessor surface); tag read vs mutating, needs-pinning vs
+  fine-on-default.
+- **Phase 1 — Registry data structure + default, no behavior change.** Promote
+  `inner.workspace: Option<Workspace>` to `workspaces: HashMap<PathBuf, Workspace>` +
+  `default_workspace_root` in `AgentInner`, all accessors resolving through a new `default_workspace()`
+  helper. The map holds **at most one entry** — `activate` clears and reinserts, exactly mirroring the
+  previous single-slot drop-and-replace — so behavior is identical and the full suite stays green. Map
+  values are plain `Workspace` (not yet `Arc<RwLock<_>>`): the single `AgentInner` lock is unchanged, so
+  every accessor signature (`active_project() -> Option<&ActiveProject>`, …) is preserved and no call site
+  outside the field swap changes. The lifetime contract is *defined* (above); its *mechanism* is Phase 3.
 - **Phase 2 — Selector plumbing.** Add `workspace_override` to `ToolContext`; populate from an optional
   `workspace` input field in `build_context`/`call_tool_inner`. The selector is `{ workspace_root,
   project, file_hint }` — Level-2 fields feed the reused `resolve_root`. No tool reads it yet.
-- **Phase 3 — Migrate read tools.** `symbols`, `references`, `grep`, `semantic_search`, `read_file`,
-  `tree` resolve via `with_project_at(selector)` (Level-1 registry lookup → Level-2 `resolve_root`). Add
-  the concurrent-pinning regression (the 5-subagent scenario from the bug file, asserting each pinned call
-  reads its own root).
+- **Phase 3 — Multi-residence + per-entry locks + migrate read tools.** Lift Phase-1's
+  clear-on-activate so the registry holds N live workspaces; change entry values to
+  `Arc<RwLock<Workspace>>` for per-entry locking (calls on different roots stop serializing); implement
+  the eviction sweep per the lifetime contract. Add the selector-aware accessors (`with_project_at`,
+  `require_project_root_for`, `project_root_for`) — Level-1 registry lookup → Level-2 `resolve_root` —
+  and migrate the Phase-0 READ list (`symbols`, `references`, `grep`, `semantic_search`, `read_file`,
+  `tree`, `ast`, `symbol_at`, `call_graph`, `list_overview`, `read_markdown`, `library`). The ~10 direct
+  `inner.active_project()` grabs migrate to the closure form. **Add the concurrent-pinning regression**
+  (the 5-subagent scenario from the bug file) — the test that proves both the lock model and regime-3
+  fixed.
 - **Phase 4 — Migrate write tools + lock-ordering validation gate.** `edit_code`, `edit_file`,
   `create_file`, `edit_markdown`, `memory` writes pin + keep `write.lock` semantics under the resolved
   project's per-`ActiveProject` write guard. **Gate (must pass before Phase 4 ships):** prove the
-  per-`Workspace` `RwLock`, the per-project in-process `write_lock`, and the cross-process `write.lock`
-  flock have a single consistent acquisition order — no inversion, no cross-entry cycle. A deadlock here is
-  the classic failure mode of this design.
-- **Phase 5 — Tuning + retire the mitigation.** Tune the LRU/cap from Phase-1's contract. Update the
+  per-`Workspace` `RwLock` (Phase 3), the per-project in-process `write_lock`, and the cross-process
+  `write.lock` flock have a single consistent acquisition order — no inversion, no cross-entry cycle. A
+  deadlock here is the classic failure mode of this design.
+- **Phase 5 — Tuning + retire the mitigation.** Tune the LRU/cap from the lifetime contract. Update the
   three prompt surfaces (`src/prompts/source.md` server_instructions + onboarding, `builders.rs`) to
   document the `workspace` param; **bump `ONBOARDING_VERSION`** (param semantics reach the onboarding
   surface). **Remove** the `concurrent_activation_warning` guard for pinned flows; resolve the

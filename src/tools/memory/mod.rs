@@ -416,7 +416,7 @@ async fn resolve_memory_dir(
 ) -> anyhow::Result<std::path::PathBuf> {
     let project_param = input.get("project_id").and_then(|v| v.as_str());
     let inner = ctx.agent.inner.read().await;
-    if let Some(ws) = inner.workspace.as_ref() {
+    if let Some(ws) = inner.default_workspace() {
         let project_id = project_param
             .map(|s| s.to_string())
             .or_else(|| ws.focused.clone())
