@@ -83,6 +83,12 @@ pub struct AgentInner {
     pub workspace: Option<Workspace>,
     pub project_explicitly_activated: bool,
     pub home_root: Option<PathBuf>,
+    /// Last `activate()` as (root, when). Drives the concurrent-activation
+    /// guard (`Agent::note_activation`): if a *different* root is activated
+    /// under this shared server within a short window, the activate response
+    /// carries a `concurrent_activation_warning`. See
+    /// docs/issues/2026-05-30-shared-server-global-active-project-race.md
+    pub last_activation: Option<(PathBuf, std::time::Instant)>,
 }
 
 impl AgentInner {
@@ -308,6 +314,7 @@ impl Agent {
                 workspace,
                 project_explicitly_activated,
                 home_root,
+                last_activation: None,
             })),
             indexing: Arc::new(std::sync::Mutex::new(IndexingState::Idle)),
             nudged_libraries: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -446,6 +453,52 @@ impl Agent {
             inner.project_explicitly_activated = true;
         }
         Ok(())
+    }
+    /// Window within which activating a *different* root counts as concurrent
+    /// contention (a subagent racing the shared slot) rather than a normal
+    /// sequential re-activation by one linear session.
+    const CONCURRENT_ACTIVATION_WINDOW: std::time::Duration = std::time::Duration::from_secs(5);
+
+    /// Pure decision for the concurrent-activation guard. Returns a warning when
+    /// `new_root` rapidly replaces a *different* recently-activated root — the
+    /// fingerprint of concurrent multi-workspace use on a single shared server
+    /// (parallel subagents that each `activate` a different workspace). Same-root
+    /// re-activation and slow sequential switches (outside `window`) are silent.
+    /// See docs/issues/2026-05-30-shared-server-global-active-project-race.md
+    fn concurrent_switch_warning(
+        prev: Option<(&std::path::Path, std::time::Duration)>,
+        new_root: &std::path::Path,
+        window: std::time::Duration,
+    ) -> Option<String> {
+        match prev {
+            Some((prev_root, since)) if prev_root != new_root && since < window => Some(format!(
+                "active project switched from {} to {} {:?} ago — another caller \
+                 (e.g. a concurrent subagent) shares this server's single \
+                 active-project slot, so reads may resolve against the wrong \
+                 workspace. For parallel multi-workspace work use separate Claude \
+                 Code windows (separate processes = separate slots).",
+                prev_root.display(),
+                new_root.display(),
+                since
+            )),
+            _ => None,
+        }
+    }
+
+    /// Record this activation and return a warning if it rapidly replaced a
+    /// *different* recently-activated root. Best-effort drift signal — it cannot
+    /// prevent the race (the active project is process-global shared state), only
+    /// surface it. The real fix is per-request workspace pinning; see the bug file.
+    pub async fn note_activation(&self, root: &std::path::Path) -> Option<String> {
+        let mut inner = self.inner.write().await;
+        let prev = inner
+            .last_activation
+            .as_ref()
+            .map(|(p, at)| (p.as_path(), at.elapsed()));
+        let warning =
+            Self::concurrent_switch_warning(prev, root, Self::CONCURRENT_ACTIVATION_WINDOW);
+        inner.last_activation = Some((root.to_path_buf(), std::time::Instant::now()));
+        warning
     }
 
     /// Get the active project root, or error if none is set.
@@ -1308,6 +1361,34 @@ mod tests {
             err.to_string().contains("No active project"),
             "error should mention no active project: {}",
             err
+        );
+    }
+    #[test]
+    fn concurrent_switch_warning_flags_rapid_foreign_switch() {
+        use std::time::Duration;
+        let a = std::path::Path::new("/tmp/cc-wt-a");
+        let b = std::path::Path::new("/tmp/cc-wt-b");
+        let window = Duration::from_secs(5);
+
+        // First activation (no prior) → silent.
+        assert!(Agent::concurrent_switch_warning(None, a, window).is_none());
+
+        // Rapid switch to a DIFFERENT root → warning (the subagent-race signature).
+        let w = Agent::concurrent_switch_warning(Some((a, Duration::from_millis(200))), b, window);
+        assert!(w
+            .as_deref()
+            .is_some_and(|s| s.contains("separate Claude Code windows")));
+
+        // Same-root re-activation → silent (normal return-home / re-activate).
+        assert!(
+            Agent::concurrent_switch_warning(Some((a, Duration::from_millis(200))), a, window)
+                .is_none()
+        );
+
+        // Different root but OUTSIDE the window (slow sequential switch) → silent.
+        assert!(
+            Agent::concurrent_switch_warning(Some((a, Duration::from_secs(60))), b, window)
+                .is_none()
         );
     }
 

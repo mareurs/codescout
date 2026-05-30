@@ -185,8 +185,15 @@ impl Tool for ActivateProject {
             HintScenario::SwitchAway
         };
 
+        let concurrent_warning = ctx.agent.note_activation(&root).await;
         let auto_registered = crate::library::auto_register::auto_register_deps(&root, ctx).await;
-        build_activation_response(ctx, scenario, &auto_registered).await
+        let mut resp = build_activation_response(ctx, scenario, &auto_registered).await?;
+        if let Some(w) = concurrent_warning {
+            if let Some(obj) = resp.as_object_mut() {
+                obj.insert("concurrent_activation_warning".to_string(), json!(w));
+            }
+        }
+        Ok(resp)
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
