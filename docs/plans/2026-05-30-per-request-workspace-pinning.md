@@ -389,6 +389,27 @@ external Qdrant stack — unrelated).
   `activate_registers_default_workspace_by_canonical_root` (Phase-1 invariant).
 
 ### NEXT — Phase 4 (writes + per-Workspace locking + eviction). START WITH THE LOCK-ORDERING PROOF.
+> **Update (2026-05-31, session 2).** 7/7 pinned write accessors built (incl.
+> `invalidate_call_edges_for` + `call_edges_project_id_for`); the latent Phase-3 `call_graph`
+> READ `project_id` gap is **closed** (it pinned root but resolved the cache namespace ambiently).
+> **6 write tools fully migrated + audited complete:** `edit_file`, `create_file`,
+> `symbol/edit_code`, `markdown/edit_markdown`, `approve_write`, `library`(register).
+> **STILL TO MIGRATE (mapped below):**
+> - `semantic/index.rs` — 5 sites: `@96`/`@199` read blocks (`inner.read()`+`active_project()`),
+>   `@149` mut block (`active_project_mut()`), `@187` root, `@288` dirty. Needs `with_project_at`/
+>   `with_project_at_mut` closure rewrites (the `@149` block is `.await`-free → wraps cleanly).
+> - `memory/mod.rs` — 7 sites: `@427`/`@795`/`@833`/`@905` `active_project()`, `@619`/`@635`/`@921`
+>   `require_project_root()`. Classify read-vs-write per site (memory has both recall and remember).
+> - `run_command/mod.rs` `@161`/`@162` (root + security) — quick 2-swap; audit confirms no other sites.
+> - `core/guards.rs:18` `require_project_root()` — shared write guard; check `ctx.workspace_override`
+>   is in scope (may need the selector threaded in).
+>
+> **Separate latent Phase-3 READ gap (not 4a, but found here):** `tree`(81/187), `ast`(19),
+> `grep`(56), `read_markdown`(80) pin their root but still call ambient `security_config()` — a pinned
+> read applies the *default* project's security rules. Assess whether read-path security needs pinning
+> (likely yes for blocked-path rules); fold into a Phase-3 follow-up or here.
+>
+> Then the **concurrent-WRITE regression** test (mirror `read_file_concurrent_pins_no_cross_workspace_bleed`).
 > **Phase 4 progress (2026-05-30, this session):**
 > - ✅ **Step 1 — lock-ordering proof** → see **`## Phase 4 — Lock-Ordering Proof (the gate)`** below.
 > - ✅ **4a keystone — central write-gate pinned.** `server::acquire_write_guard_if_writing` now

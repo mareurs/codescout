@@ -175,9 +175,9 @@ impl EditCode {
             .rename(&full_path, sym.start_line, sym.start_col, new_name, &lang)
             .await?;
 
-        let root = ctx.agent.require_project_root().await?;
-        let security = ctx.agent.security_config().await;
-        let session_roots = ctx.agent.session_write_roots_snapshot().await;
+        let root = ctx.agent.require_project_root_for(ctx.workspace_override.as_deref()).await?;
+        let security = ctx.agent.security_config_for(ctx.workspace_override.as_deref()).await;
+        let session_roots = ctx.agent.session_write_roots_snapshot_for(ctx.workspace_override.as_deref()).await;
         let mut lsp_files: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
 
         struct PlannedWrite {
@@ -303,8 +303,8 @@ impl EditCode {
 
         for path in &lsp_files {
             ctx.lsp.notify_file_changed(path).await;
-            ctx.agent.invalidate_call_edges(path).await;
-            ctx.agent.mark_file_dirty(path.clone()).await;
+            ctx.agent.invalidate_call_edges_for(ctx.workspace_override.as_deref(), path).await;
+            ctx.agent.mark_file_dirty_for(ctx.workspace_override.as_deref(), path.clone()).await;
         }
 
         let mut corruption_hints: Vec<Value> = vec![];
@@ -462,8 +462,8 @@ impl EditCode {
 
         write_lines(&full_path, &new_lines, content.ends_with('\n'))?;
         ctx.lsp.notify_file_changed(&full_path).await;
-        ctx.agent.invalidate_call_edges(&full_path).await;
-        ctx.agent.mark_file_dirty(full_path).await;
+        ctx.agent.invalidate_call_edges_for(ctx.workspace_override.as_deref(), &full_path).await;
+        ctx.agent.mark_file_dirty_for(ctx.workspace_override.as_deref(), full_path).await;
         let line_count = end - start;
         let removed_range = format!("{}-{}", start + 1, end);
         Ok(json!({
@@ -632,8 +632,8 @@ impl EditCode {
             if post_count == 0 {
                 write_lines(&full_path, &lines, content.ends_with('\n'))?;
                 ctx.lsp.notify_file_changed(&full_path).await;
-                ctx.agent.invalidate_call_edges(&full_path).await;
-                ctx.agent.mark_file_dirty(full_path).await;
+                ctx.agent.invalidate_call_edges_for(ctx.workspace_override.as_deref(), &full_path).await;
+                ctx.agent.mark_file_dirty_for(ctx.workspace_override.as_deref(), full_path).await;
                 return Err(RecoverableError::with_hint(
                     format!(
                         "edit_code replace('{name_path}') dropped the symbol definition — \
@@ -656,8 +656,8 @@ impl EditCode {
             if !dropped.is_empty() {
                 write_lines(&full_path, &lines, content.ends_with('\n'))?;
                 ctx.lsp.notify_file_changed(&full_path).await;
-                ctx.agent.invalidate_call_edges(&full_path).await;
-                ctx.agent.mark_file_dirty(full_path).await;
+                ctx.agent.invalidate_call_edges_for(ctx.workspace_override.as_deref(), &full_path).await;
+                ctx.agent.mark_file_dirty_for(ctx.workspace_override.as_deref(), full_path).await;
                 return Err(RecoverableError::with_hint(
                     format!(
                         "edit_code replace('{name_path}') would have dropped sibling symbols: {}. \
@@ -673,8 +673,8 @@ impl EditCode {
         }
 
         ctx.lsp.notify_file_changed(&full_path).await;
-        ctx.agent.invalidate_call_edges(&full_path).await;
-        ctx.agent.mark_file_dirty(full_path).await;
+        ctx.agent.invalidate_call_edges_for(ctx.workspace_override.as_deref(), &full_path).await;
+        ctx.agent.mark_file_dirty_for(ctx.workspace_override.as_deref(), full_path).await;
         Ok(json!({ "status": "ok", "replaced_lines": format!("{}-{}", start + 1, end) }))
     }
 
@@ -748,8 +748,8 @@ impl EditCode {
 
         write_lines(&full_path, &new_lines, content.ends_with('\n'))?;
         ctx.lsp.notify_file_changed(&full_path).await;
-        ctx.agent.invalidate_call_edges(&full_path).await;
-        ctx.agent.mark_file_dirty(full_path).await;
+        ctx.agent.invalidate_call_edges_for(ctx.workspace_override.as_deref(), &full_path).await;
+        ctx.agent.mark_file_dirty_for(ctx.workspace_override.as_deref(), full_path).await;
         Ok(json!({ "status": "ok", "inserted_at_line": insert_at + 1, "position": position }))
     }
 }

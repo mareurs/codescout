@@ -209,7 +209,7 @@ impl Tool for EditFile {
         // allowed through; only multi-line edits containing definition keywords are
         // routed to edit_code.
         if crate::util::path_security::is_source_path(path) {
-            let security = ctx.agent.security_config().await;
+            let security = ctx.agent.security_config_for(ctx.workspace_override.as_deref()).await;
             if security.debug_enforce_symbol_tools && is_structural_edit(&input, path) {
                 return Err(super::RecoverableError::with_hint(
                     "edit_file is blocked for structural edits on source code files (debug_enforce_symbol_tools is enabled)",
@@ -240,9 +240,9 @@ impl Tool for EditFile {
                 )
                 .into());
             }
-            let root = ctx.agent.require_project_root().await?;
-            let security = ctx.agent.security_config().await;
-            let session_roots = ctx.agent.session_write_roots_snapshot().await;
+            let root = ctx.agent.require_project_root_for(ctx.workspace_override.as_deref()).await?;
+            let security = ctx.agent.security_config_for(ctx.workspace_override.as_deref()).await;
+            let session_roots = ctx.agent.session_write_roots_snapshot_for(ctx.workspace_override.as_deref()).await;
             let resolved = crate::util::path_security::validate_write_path(
                 path,
                 &root,
@@ -341,10 +341,10 @@ impl Tool for EditFile {
 
             // All edits passed — write once (atomic to prevent corruption on crash).
             crate::util::fs::atomic_write(&resolved, &content)?;
-            ctx.agent.reload_config_if_project_toml(&resolved).await;
+            ctx.agent.reload_config_if_project_toml_for(ctx.workspace_override.as_deref(), &resolved).await;
             ctx.lsp.notify_file_changed(&resolved).await;
-            ctx.agent.invalidate_call_edges(&resolved).await;
-            ctx.agent.mark_file_dirty(resolved).await;
+            ctx.agent.invalidate_call_edges_for(ctx.workspace_override.as_deref(), &resolved).await;
+            ctx.agent.mark_file_dirty_for(ctx.workspace_override.as_deref(), resolved).await;
             return Ok(json!("ok"));
         }
 
@@ -357,9 +357,9 @@ impl Tool for EditFile {
                 )
                 .into());
             }
-            let root = ctx.agent.require_project_root().await?;
-            let security = ctx.agent.security_config().await;
-            let session_roots = ctx.agent.session_write_roots_snapshot().await;
+            let root = ctx.agent.require_project_root_for(ctx.workspace_override.as_deref()).await?;
+            let security = ctx.agent.security_config_for(ctx.workspace_override.as_deref()).await;
+            let session_roots = ctx.agent.session_write_roots_snapshot_for(ctx.workspace_override.as_deref()).await;
             let resolved = crate::util::path_security::validate_write_path(
                 path,
                 &root,
@@ -382,8 +382,8 @@ impl Tool for EditFile {
             };
             crate::util::fs::atomic_write(&resolved, &new_content)?;
             ctx.lsp.notify_file_changed(&resolved).await;
-            ctx.agent.invalidate_call_edges(&resolved).await;
-            ctx.agent.mark_file_dirty(resolved).await;
+            ctx.agent.invalidate_call_edges_for(ctx.workspace_override.as_deref(), &resolved).await;
+            ctx.agent.mark_file_dirty_for(ctx.workspace_override.as_deref(), resolved).await;
             return Ok(json!("ok"));
         }
 
@@ -426,9 +426,9 @@ async fn perform_edit(
     replace_all: bool,
     ctx: &ToolContext,
 ) -> Result<Value> {
-    let root = ctx.agent.require_project_root().await?;
-    let security = ctx.agent.security_config().await;
-    let session_roots = ctx.agent.session_write_roots_snapshot().await;
+    let root = ctx.agent.require_project_root_for(ctx.workspace_override.as_deref()).await?;
+    let security = ctx.agent.security_config_for(ctx.workspace_override.as_deref()).await;
+    let session_roots = ctx.agent.session_write_roots_snapshot_for(ctx.workspace_override.as_deref()).await;
     let resolved =
         crate::util::path_security::validate_write_path(path, &root, &security, &session_roots)?;
 
@@ -465,10 +465,10 @@ async fn perform_edit(
 
     let new_content = content.replace(old_string, new_string);
     crate::util::fs::atomic_write(&resolved, &new_content)?;
-    ctx.agent.reload_config_if_project_toml(&resolved).await;
+    ctx.agent.reload_config_if_project_toml_for(ctx.workspace_override.as_deref(), &resolved).await;
     ctx.lsp.notify_file_changed(&resolved).await;
-    ctx.agent.invalidate_call_edges(&resolved).await;
-    ctx.agent.mark_file_dirty(resolved.clone()).await;
+    ctx.agent.invalidate_call_edges_for(ctx.workspace_override.as_deref(), &resolved).await;
+    ctx.agent.mark_file_dirty_for(ctx.workspace_override.as_deref(), resolved.clone()).await;
 
     // Syntax check: warn if the edit introduced parse errors (non-fatal).
     if let Some(lang) = crate::ast::detect_language(std::path::Path::new(path)) {

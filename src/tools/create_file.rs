@@ -44,9 +44,9 @@ impl Tool for CreateFile {
         let path = super::require_str_param(&input, "path")?;
         let content = super::require_str_param(&input, "content")?;
         let overwrite = super::parse_bool_param(&input["overwrite"]);
-        let root = ctx.agent.require_project_root().await?;
-        let security = ctx.agent.security_config().await;
-        let session_roots = ctx.agent.session_write_roots_snapshot().await;
+        let root = ctx.agent.require_project_root_for(ctx.workspace_override.as_deref()).await?;
+        let security = ctx.agent.security_config_for(ctx.workspace_override.as_deref()).await;
+        let session_roots = ctx.agent.session_write_roots_snapshot_for(ctx.workspace_override.as_deref()).await;
         let resolved = crate::util::path_security::validate_write_path(
             path,
             &root,
@@ -63,8 +63,8 @@ impl Tool for CreateFile {
         }
         crate::util::fs::write_utf8(&resolved, content)?;
         ctx.lsp.notify_file_changed(&resolved).await;
-        ctx.agent.invalidate_call_edges(&resolved).await;
-        ctx.agent.mark_file_dirty(resolved).await;
+        ctx.agent.invalidate_call_edges_for(ctx.workspace_override.as_deref(), &resolved).await;
+        ctx.agent.mark_file_dirty_for(ctx.workspace_override.as_deref(), resolved).await;
         Ok(json!("ok"))
     }
 }

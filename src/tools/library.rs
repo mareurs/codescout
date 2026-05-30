@@ -174,25 +174,21 @@ impl Tool for RegisterLibrary {
             .or_else(|| discovered.as_ref().map(|d| d.language.clone()))
             .unwrap_or_else(|| "unknown".to_string());
 
-        // Register and save
-        {
-            let mut inner = ctx.agent.inner.write().await;
-            let project = inner.active_project_mut().ok_or_else(|| {
-                super::RecoverableError::with_hint(
-                    "No active project.",
-                    "Call workspace(action='activate') first.",
-                )
-            })?;
-            project.library_registry.register(
-                name.clone(),
-                lib_path.clone(),
-                language.clone(),
-                crate::library::registry::DiscoveryMethod::Manual,
-                true,
-            );
-            let registry_path = project.root.join(".codescout").join("libraries.json");
-            project.library_registry.save(&registry_path)?;
-        }
+        // Register and save — pinned to the resolved workspace (regime-3).
+        ctx.agent
+            .with_project_at_mut(ctx.workspace_override.as_deref(), |project| {
+                project.library_registry.register(
+                    name.clone(),
+                    lib_path.clone(),
+                    language.clone(),
+                    crate::library::registry::DiscoveryMethod::Manual,
+                    true,
+                );
+                let registry_path = project.root.join(".codescout").join("libraries.json");
+                project.library_registry.save(&registry_path)?;
+                Ok(())
+            })
+            .await?;
 
         Ok(json!({
             "status": "ok",
