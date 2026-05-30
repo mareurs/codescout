@@ -1618,7 +1618,10 @@ mod tests {
             inner.workspaces.contains_key(&root_b),
             "default workspace B must remain resident"
         );
-        assert_eq!(inner.default_workspace_root.as_deref(), Some(root_b.as_path()));
+        assert_eq!(
+            inner.default_workspace_root.as_deref(),
+            Some(root_b.as_path())
+        );
     }
 
     #[tokio::test]
