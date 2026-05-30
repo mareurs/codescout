@@ -34,6 +34,7 @@ skill).
 | R-8 | 2026-05-28 | miss → proposal | `edit_markdown(action='replace')` shape unverified on marker-bearing section | prompt-guide-refactor F-7 |
 | R-9 | 2026-05-28 | proposal → drafted | Session-state recon for subagent dispatch | prompt-guide-refactor F-6 + W-4 |
 | R-10 | 2026-05-29 | miss → proposal | Buffered tool output parsed for structured extraction without a completeness scout | metadata-filtering F-4 + W-1 |
+| R-11 | 2026-05-30 | hit → proposal | Concept docs diverged from code on concurrency semantics (GRADLE_USER_HOME "isolation"; per-path mux) | issues/2026-05-30 concurrency bug files |
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
 
@@ -397,6 +398,44 @@ in SKILL.md ("buffered outputs are unverified shape for extraction/writes").
 second occurrence before SKILL.md promotion.
 
 ---
+## R-11 — Concept docs diverged from code on concurrency semantics
+
+**Verdict:** hit → proposal
+
+**Date:** 2026-05-30
+
+**Scout:** Before running a multi-instance / multi-worktree concurrency experiment on
+backend-kotlin, scouted `docs/manual/src/concepts/{cross-process-write-serialization,
+kotlin-lsp-multiplexer}.md` against the actual code (`src/lsp/mux/mod.rs`,
+`src/lsp/servers/mod.rs`). Two doc-vs-reality gaps surfaced *before* acting:
+
+1. **"Isolated GRADLE_USER_HOME to prevent daemon contention between instances"**
+   (`kotlin-lsp-multiplexer.md` § Gradle Isolation) reads as *per-instance* isolation.
+   Code: `src/lsp/servers/mod.rs:63` hard-codes a single fixed
+   `GRADLE_USER_HOME=/tmp/codescout-mux-gradle` shared by **every** kotlin JVM. The
+   isolation is from the user's `~/.gradle`, **not** between worktrees/instances.
+2. **Cross-worktree JVM multiplication is undocumented.** Neither doc states that the mux
+   socket is keyed on workspace **path** (`src/lsp/mux/mod.rs:14,20`), so N worktrees of one
+   repo spawn N JVMs against one shared, unguarded IntelliJ system-path. The mux docs imply
+   "one JVM per project"; reality is "one per path."
+
+**Counterfactual:** Without the scout, I'd have framed the experiment as "the mux dedups, so
+worktrees are cheap" and mis-read the 6-JVM / shared-system-path result as a bug in my setup
+rather than the designed (under-documented) behavior. The scout also corrected the user's
+premise that subagents create *separate instances* (they share one server → a different
+conflict regime entirely).
+
+**Proposal:** When scouting any "isolation" / "per-X" claim in concept docs, grep the
+constant the doc names (`GRADLE_USER_HOME`, `system-path`) and confirm the isolation key
+matches the doc's stated granularity. Doc adjectives ("isolated", "per-instance") are
+assertions to verify against the keying expression, not facts.
+
+**Evidence (bug trackers):** `docs/issues/2026-05-30-shared-server-global-active-project-race.md`,
+`docs/issues/2026-05-30-cross-worktree-kotlin-jvm-shared-system-path.md`.
+
+**Promote-when:** A second scout catches a doc "isolation/per-X" adjective contradicted by a
+shared constant. At 2 datapoints, promote to the skill as a Phase-1 rule:
+"verify isolation-claim adjectives against the keying expression."
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
