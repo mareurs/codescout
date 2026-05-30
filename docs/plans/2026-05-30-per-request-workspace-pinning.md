@@ -202,6 +202,29 @@ until the next `index_project` clears it, or (b) trigger a final index then evic
 only if dirty entries are observed pinning the map open.
 ## Phases
 
+> **Correction (2026-05-30, Phase-4 scout).** The per-phase prose below still
+> assigns per-`Workspace` `Arc<RwLock<_>>` locking + the eviction sweep to
+> **Phase 3**. In implementation they were deferred *again*: Phase 3 shipped
+> multi-residence + read-tool pinning **under the existing single `AgentInner`
+> lock** (map values are plain `Workspace`, not `Arc<RwLock<_>>`); the
+> per-`Workspace` `RwLock` swap, eviction, and write-tool migration are all
+> **Phase 4**. `## Design`'s `Arc<RwLock<Workspace>>` is the *target* shape, not
+> yet implemented. The authoritative ledger is `## Progress & Resume`.
+>
+> **Phase 4 is itself split (correctness before performance):**
+> - **4a — write-tool per-request migration (correctness).** Migrate write tools
+>   (`edit_file`, `edit_code`, `create_file`, `edit_markdown`, `memory` writes,
+>   …) to resolve their project from `ctx.workspace_override` — the exact mirror
+>   of the Phase-3 read migration — **under the existing lock**. This alone
+>   closes regime-3 for writes (a pinned write reaches the right project
+>   regardless of a concurrent subagent's `activate`). Different-root writes
+>   still serialize on the `AgentInner` write lock — correct, just not yet
+>   parallel.
+> - **4b — per-`Workspace` `Arc<RwLock<Workspace>>` + eviction (performance).**
+>   The large ~100-site accessor ripple that lets different-root calls stop
+>   serializing. Gated by `## Phase 4 — Lock-Ordering Proof`. Its own focused
+>   effort, landed behind a green suite.
+
 *Sequencing refined 2026-05-30 during Phase-1 implementation: per-`Workspace` locking and the eviction
 sweep moved from Phase 1 to Phase 3, because both are unobservable and untestable until pinning creates
 concurrent entries (one entry never contends; the default is eviction-exempt). A mechanism ships with the
@@ -366,8 +389,31 @@ external Qdrant stack — unrelated).
   `activate_registers_default_workspace_by_canonical_root` (Phase-1 invariant).
 
 ### NEXT — Phase 4 (writes + per-Workspace locking + eviction). START WITH THE LOCK-ORDERING PROOF.
-> **Proof drafted (2026-05-30)** — see **`## Phase 4 — Lock-Ordering Proof (the gate)`** below.
-> Step 1 is now: turn that proof into the new lock code + the stress/serialization tests it obligates.
+> **Phase 4 progress (2026-05-30, this session):**
+> - ✅ **Step 1 — lock-ordering proof** → see **`## Phase 4 — Lock-Ordering Proof (the gate)`** below.
+> - ✅ **4a keystone — central write-gate pinned.** `server::acquire_write_guard_if_writing` now
+>   resolves the `write_lock`/`file_lock` via `with_project_at(ctx override)` instead of ambient
+>   `with_project`. Verified `cargo check` + `cargo test --lib` green (2568 pass; lone failure is the
+>   known `first_artifact_call_appends_librarian_guide_body_v2` env-isolation flake — passes solo).
+> - ⏳ **4a remainder — per-tool path/state pinning (NEXT).** The central gate fixes the *lock*, not the
+>   *path*: each write tool's own resolution must pin too. SCOPED:
+>   - **New pinned accessors to add in `agent/mod.rs`** — writes touch mutable per-project state reads
+>     never did. Add `session_write_roots_snapshot_for`, `add_session_write_root_for`,
+>     `mark_file_dirty_for`, `dirty_files_arc_for`. All route through `with_project_at` (the fields are
+>     `Arc<Mutex>` interior-mutability → read access suffices; **no new mutating registry accessor**).
+>   - **Files to migrate — audit EVERY `ctx.agent.*` call (no compiler net for completeness):**
+>     `edit_file/mod.rs` (243/360/429), `create_file.rs` (47), `symbol/edit_code.rs` (178),
+>     `markdown/edit_markdown.rs` (627) all share the trio `require_project_root` + `security_config` +
+>     `session_write_roots_snapshot` (+ post-write `mark_file_dirty`); then `memory/mod.rs` writes,
+>     `approve_write.rs` (`add_session_write_root`), `run_command/inner.rs`, and the 3 `active_project_mut`
+>     writers `library.rs` / `fs` / `semantic/index.rs` (assess interior-mutability-via-`with_project_at`
+>     vs a real `with_project_at_mut`).
+>   - **Add the concurrent-WRITE regression** — two pinned writes to different workspaces, no cross-bleed;
+>     mirror `read_file_concurrent_pins_no_cross_workspace_bleed`.
+> - ⏳ **4b — per-`Workspace` `Arc<RwLock<Workspace>>` + eviction (performance).** The large ~100-site
+>   ripple, gated by the proof above. After 4a closes regime-3 for writes.
+>
+> The numbered steps below are the original detailed plan; 4a maps to step 4, 4b to steps 2–3+5.
 
 1. **Lock-ordering proof FIRST (the gate).** Per-`Workspace` `RwLock` + per-project `write_lock`
    (`Arc<Mutex>`) + cross-process `write.lock` flock: prove one consistent acquisition order, no

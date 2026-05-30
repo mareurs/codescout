@@ -257,9 +257,14 @@ impl CodeScoutServer {
         if !self.is_write_call(name, input) {
             return Ok(Ok(None));
         }
+        // regime-3: pin the write guard to the SAME workspace the tool body will
+        // resolve. A write pinned via `workspace` must acquire that project's
+        // write_lock/file_lock, not the session default's — otherwise a
+        // concurrent subagent's activate() steals the lock target.
+        let override_root = Self::extract_workspace_override(input);
         let (mutex, fd_lock, timeout_secs) = self
             .agent
-            .with_project(|p| {
+            .with_project_at(override_root.as_deref(), |p| {
                 Ok((
                     p.write_lock.clone(),
                     p.file_lock.clone(),
