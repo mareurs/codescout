@@ -411,7 +411,10 @@ impl Tool for CallGraph {
         // Get project root and project_id for the edge cache.
         // project_id must be derived via the shared helper so it matches what
         // invalidate_call_edges uses — they must write and delete with the same key.
-        let root = ctx.agent.require_project_root().await?;
+        let root = ctx
+            .agent
+            .require_project_root_for(ctx.workspace_override.as_deref())
+            .await?;
         let project_id = ctx.agent.call_edges_project_id().await;
 
         // Open the DB on a blocking thread — open_db does filesystem I/O

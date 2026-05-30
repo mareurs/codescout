@@ -12,7 +12,10 @@ pub struct ListDocs;
 /// Resolve input path (relative to project root if not absolute).
 async fn resolve_path(input: &Value, ctx: &ToolContext) -> anyhow::Result<PathBuf> {
     let path_str = super::require_str_param(input, "path")?;
-    let project_root = ctx.agent.project_root().await;
+    let project_root = ctx
+        .agent
+        .project_root_for(ctx.workspace_override.as_deref())
+        .await;
     let security = ctx.agent.security_config().await;
     crate::util::path_security::validate_read_path(path_str, project_root.as_deref(), &security)
 }

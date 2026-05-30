@@ -627,6 +627,16 @@ impl Agent {
             .await
             .unwrap_or_default()
     }
+    /// Pinned twin of `require_project_root`: focused root of the workspace
+    /// named by `workspace_override` (resident-on-demand), or a recoverable
+    /// "no active project" error if none resolvable.
+    pub async fn require_project_root_for(
+        &self,
+        workspace_override: Option<&Path>,
+    ) -> Result<PathBuf> {
+        self.with_project_at(workspace_override, |p| Ok(p.root().to_path_buf()))
+            .await
+    }
 
     /// Window within which activating a *different* root counts as concurrent
     /// contention (a subagent racing the shared slot) rather than a normal
@@ -1566,6 +1576,49 @@ mod tests {
                 Some(root.as_path())
             );
         }
+    }
+    #[tokio::test]
+    async fn require_project_root_for_resolves_pin_over_default() {
+        // Phase 3: the pinned accessors resolve workspace A even when the
+        // default is B — the Level-1 resolution every migrated read tool relies
+        // on, tested at the accessor seam where they all converge. Proves:
+        // pin resolves A, default stays B, both become resident (multi-residence).
+        let dir_a = tempdir().unwrap();
+        let dir_b = tempdir().unwrap();
+        std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+        std::fs::create_dir_all(dir_b.path().join(".codescout")).unwrap();
+        let root_a = canonical(dir_a.path());
+        let root_b = canonical(dir_b.path());
+
+        let agent = Agent::new(Some(dir_b.path().to_path_buf())).await.unwrap();
+
+        // Default (unpinned) resolves B.
+        assert_eq!(agent.require_project_root().await.unwrap(), root_b);
+
+        // Pinned to A resolves A (activate-on-miss), via both _for accessors.
+        assert_eq!(
+            agent.require_project_root_for(Some(&root_a)).await.unwrap(),
+            root_a
+        );
+        assert_eq!(
+            agent.project_root_for(Some(&root_a)).await,
+            Some(root_a.clone())
+        );
+
+        // The pin did NOT mutate the default — unpinned calls still resolve B.
+        assert_eq!(agent.require_project_root().await.unwrap(), root_b);
+
+        // A and B are both resident now (multi-residence); default is still B.
+        let inner = agent.inner.read().await;
+        assert!(
+            inner.workspaces.contains_key(&root_a),
+            "pinned workspace A must be resident"
+        );
+        assert!(
+            inner.workspaces.contains_key(&root_b),
+            "default workspace B must remain resident"
+        );
+        assert_eq!(inner.default_workspace_root.as_deref(), Some(root_b.as_path()));
     }
 
     #[tokio::test]

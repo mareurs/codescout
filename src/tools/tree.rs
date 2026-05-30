@@ -74,7 +74,10 @@ async fn list_dir_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
     use super::output::{OutputGuard, OutputMode, OverflowInfo};
 
     let raw_path = input["path"].as_str().unwrap_or(".");
-    let project_root = ctx.agent.project_root().await;
+    let project_root = ctx
+        .agent
+        .project_root_for(ctx.workspace_override.as_deref())
+        .await;
     let security = ctx.agent.security_config().await;
     let path = crate::util::path_security::validate_read_path(
         raw_path,
@@ -177,7 +180,10 @@ async fn glob_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("glob arg required"))?;
     let raw_path = input["path"].as_str().unwrap_or(".");
-    let project_root = ctx.agent.project_root().await;
+    let project_root = ctx
+        .agent
+        .project_root_for(ctx.workspace_override.as_deref())
+        .await;
     let security = ctx.agent.security_config().await;
     let search_path = crate::util::path_security::validate_read_path(
         raw_path,

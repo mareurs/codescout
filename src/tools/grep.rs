@@ -49,7 +49,10 @@ impl Tool for Grep {
             return grep_in_buffer(&input, ctx).await;
         }
 
-        let project_root = ctx.agent.project_root().await;
+        let project_root = ctx
+            .agent
+            .project_root_for(ctx.workspace_override.as_deref())
+            .await;
         let security = ctx.agent.security_config().await;
         let search_path = crate::util::path_security::validate_read_path(
             raw_path,

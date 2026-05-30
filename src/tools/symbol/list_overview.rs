@@ -224,7 +224,10 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
         guard.max_files = guard.max_files.min(LIST_SYMBOLS_MAX_FILES);
         let (files, file_overflow) =
             guard.cap_files(files, "Narrow with a more specific glob or file path");
-        let root = ctx.agent.require_project_root().await?;
+        let root = ctx
+            .agent
+            .require_project_root_for(ctx.workspace_override.as_deref())
+            .await?;
         let include_body = guard.should_include_body();
         let mut result = vec![];
         for file_path in &files {
@@ -275,7 +278,10 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
     if full_path.is_file() {
         let raw_lang = ast::detect_language(&full_path)
             .ok_or_else(|| anyhow::anyhow!("unsupported language"))?;
-        let root = ctx.agent.require_project_root().await?;
+        let root = ctx
+            .agent
+            .require_project_root_for(ctx.workspace_override.as_deref())
+            .await?;
         let (client, lang) = get_lsp_client(&ctx.agent, &*ctx.lsp, &full_path).await?;
         let timer = LspTimer::start();
         // I-4: single-retry on transient LSP-mux disconnect (covers Kotlin LSP
@@ -382,7 +388,10 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
         }
         Ok(result)
     } else if full_path.is_dir() {
-        let root = ctx.agent.require_project_root().await?;
+        let root = ctx
+            .agent
+            .require_project_root_for(ctx.workspace_override.as_deref())
+            .await?;
         let force_symbols = input["force_mode"].as_str() == Some("symbols");
         let (total_files, subdir_counts) = count_files_by_subdir(&root, &full_path);
 

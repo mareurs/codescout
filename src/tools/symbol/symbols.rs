@@ -222,7 +222,10 @@ impl Tool for Symbols {
         let depth = optional_u64_param(&input, "depth").unwrap_or(0) as usize;
         let scope = crate::library::scope::Scope::parse(input["scope"].as_str());
 
-        let root = ctx.agent.require_project_root().await?;
+        let root = ctx
+            .agent
+            .require_project_root_for(ctx.workspace_override.as_deref())
+            .await?;
         let pattern_lower = pattern.to_lowercase();
         // Build the name predicate once: exact matching for name_path lookups,
         // case-insensitive substring matching for pattern searches.

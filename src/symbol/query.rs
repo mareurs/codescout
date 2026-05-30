@@ -497,7 +497,11 @@ pub async fn resolve_range_via_document_symbols(
 ) -> Option<SymbolInfo> {
     let lang = crate::ast::detect_language(&sym.file)?;
     let language_id = crate::lsp::servers::lsp_language_id(lang);
-    let root = ctx.agent.require_project_root().await.ok()?;
+    let root = ctx
+        .agent
+        .require_project_root_for(ctx.workspace_override.as_deref())
+        .await
+        .ok()?;
     let mux_override = ctx.agent.lsp_mux_override(lang).await;
     let client = ctx.lsp.get_or_start(lang, &root, mux_override).await.ok()?;
     let doc_symbols = client.document_symbols(&sym.file, language_id).await.ok()?;

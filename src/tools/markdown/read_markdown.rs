@@ -73,7 +73,10 @@ impl Tool for ReadMarkdown {
                 .into());
             }
 
-            let project_root = ctx.agent.project_root().await;
+            let project_root = ctx
+                .agent
+                .project_root_for(ctx.workspace_override.as_deref())
+                .await;
             let security = ctx.agent.security_config().await;
             let resolved = crate::util::path_security::validate_read_path(
                 path,

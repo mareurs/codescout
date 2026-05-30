@@ -69,7 +69,10 @@ impl Tool for References {
         let full_path = resolve_read_path(&ctx.agent, rel_path).await?;
         let raw_lang = ast::detect_language(&full_path)
             .ok_or_else(|| anyhow::anyhow!("unsupported language"))?;
-        let root = ctx.agent.require_project_root().await?;
+        let root = ctx
+            .agent
+            .require_project_root_for(ctx.workspace_override.as_deref())
+            .await?;
         let (client, lang) = get_lsp_client(&ctx.agent, &*ctx.lsp, &full_path).await?;
 
         // Find the symbol's position by walking document symbols, then resolve

@@ -74,7 +74,10 @@ pub(crate) async fn fetch_definition(ctx: &ToolContext, input: &Value) -> anyhow
     let full_path = resolve_read_path(&ctx.agent, &rel_path).await?;
     let raw_lang =
         ast::detect_language(&full_path).ok_or_else(|| anyhow::anyhow!("unsupported language"))?;
-    let root = ctx.agent.require_project_root().await?;
+    let root = ctx
+        .agent
+        .require_project_root_for(ctx.workspace_override.as_deref())
+        .await?;
     let (client, lang) = get_lsp_client(&ctx.agent, &*ctx.lsp, &full_path).await?;
 
     // Resolution: col > identifier > first-non-whitespace.
@@ -244,7 +247,10 @@ pub(crate) async fn fetch_hover(ctx: &ToolContext, input: &Value) -> anyhow::Res
             async move { c.hover(&p, line_0, col, &l).await }
         })
         .await?;
-    let root = ctx.agent.require_project_root().await?;
+    let root = ctx
+        .agent
+        .require_project_root_for(ctx.workspace_override.as_deref())
+        .await?;
     timer.record(&*ctx.lsp, raw_lang, &root).await;
 
     let source_tag = tag_external_path(&full_path, &root, &ctx.agent).await;
