@@ -366,6 +366,9 @@ external Qdrant stack — unrelated).
   `activate_registers_default_workspace_by_canonical_root` (Phase-1 invariant).
 
 ### NEXT — Phase 4 (writes + per-Workspace locking + eviction). START WITH THE LOCK-ORDERING PROOF.
+> **Proof drafted (2026-05-30)** — see **`## Phase 4 — Lock-Ordering Proof (the gate)`** below.
+> Step 1 is now: turn that proof into the new lock code + the stress/serialization tests it obligates.
+
 1. **Lock-ordering proof FIRST (the gate).** Per-`Workspace` `RwLock` + per-project `write_lock`
    (`Arc<Mutex>`) + cross-process `write.lock` flock: prove one consistent acquisition order, no
    inversion, no cross-entry cycle. Mirror `src/lsp/manager.rs:326-344` (check-then-act; never hold
@@ -391,3 +394,116 @@ onboarding); **remove** `concurrent_activation_warning` for pinned flows; resolv
 ### Ship (when complete)
 Standard Ship Sequence (CLAUDE.md); **summon Docs Lotus Frog before merging to `master`**; update F-1
 SHA citations to master-side after cherry-pick. Bug: `docs/issues/2026-05-30-shared-server-global-active-project-race.md`.
+
+## Phase 4 — Lock-Ordering Proof (the gate)
+
+**Status: design proof — written before any write tool moves (Phase 4 step 1).
+Graduates to `docs/architecture/workspace-lock-ordering.md` (cited from the new
+lock code) when Phase 4 lands.** Scouted 2026-05-30 against the two reference
+implementations the codebase already ships.
+
+Phase 4 adds a per-`Workspace` `RwLock` (step 2) between the registry-map lock
+and the per-project write locks, plus an eviction sweep (step 3). Both touch the
+classic deadlock failure mode. This proves one consistent acquisition order with
+no inversion and no cross-entry cycle.
+
+### Lock inventory
+
+| # | Lock | Type | Scope | Guards |
+|---|------|------|-------|--------|
+| **L0** | `Agent.inner` | `tokio RwLock<AgentInner>` | process | the `workspaces` map + `default_workspace_root` — the *registry-map lock* |
+| **L1** | per-`Workspace` (Phase 4 step 2) | `tokio RwLock<Workspace>` (the map's values) | one workspace root | that workspace's projects + focused pointer |
+| **L2** | `ActiveProject.write_lock` | `Arc<tokio Mutex<()>>` | one activated project | in-process write serialization |
+| **L3** | `ActiveProject.file_lock` | `Arc<File>` flock | cross-process | `.codescout/write.lock` advisory lock |
+| **Lx** | `dirty_files`, `session_write_roots` | `Arc<std Mutex<_>>` | one project | leaf — short, self-contained critical sections |
+
+LSP-manager internal locks (`clients`, `last_used`, …) are a disjoint subsystem,
+reached only after L0–L3 are released; their own internal order never interleaves
+with the registry/write locks.
+
+### The existing order (already shipped — `src/agent/write_guard.rs:47-104`)
+
+`write_guard::acquire` defines **L2 → L3**, and crucially both are taken *after
+the registry lock is released*:
+
+- A write tool reads `active_project()` under **L0** (read), clones the
+  `write_lock` and `file_lock` `Arc`s, **drops the L0 guard**, then calls
+  `acquire`.
+- `acquire` locks the in-process async mutex via `lock_owned()` (**L2**) — an
+  *owned* guard that borrows nothing from the registry — then polls the flock on
+  a `spawn_blocking` thread (**L3**).
+
+So today the only registry-vs-write states are `{L0 alone, briefly}` and
+`{L2, then L2+L3}`, and they never overlap. No cycle is possible because L0 is
+dropped before L2 is ever awaited.
+
+### The Phase 4 order (total — acquire top→bottom, release in reverse)
+
+1. **L0** (registry map) — held only for *non-blocking* ops: `HashMap`
+   get/insert/remove, `Arc::clone`, and at most `write_lock.try_lock()`
+   (instantaneous).
+2. **L1** (per-`Workspace`) — held to navigate to the focused `ActiveProject`
+   and clone out its L2/L3/leaf `Arc`s. Also non-blocking while held.
+3. — **check-then-act boundary: L0 and L1 are RELEASED here** —
+4. **L2** (`write_lock`, owned) — awaited only now, with no registry lock held.
+5. **L3** (flock) — after L2, per `acquire`.
+6. **Lx** (leaf locks) — acquired and fully released within a step; never held
+   while reaching for L0–L3.
+
+### Deadlock-freedom invariant (THE GATE — enforce in review + test)
+
+> **No thread ever blocks or `.await`s on L2 / L3 / Lx while holding L0 or L1.**
+> Everything done under L0/L1 is non-blocking (map ops, `Arc::clone`,
+> `try_lock`). Everything blocking (L2 `lock_owned().await`, the L3 flock poll)
+> happens only *after* L0/L1 are dropped, reached via cloned `Arc`s.
+
+Given the invariant:
+
+- **No 1↔2 inversion:** you need L0 to find the `Arc<RwLock<Workspace>>`, so L0
+  always precedes L1; the reverse never occurs.
+- **No cross-entry cycle:** L0/L1 are *leaf-during-hold* — nothing blocking is
+  awaited under them — so a registry lock can never be the middle of a wait
+  cycle. A thread holding root A's L2 cannot be blocked on L0 held by a thread
+  blocked on A's L2, because no one *holds* L0 while waiting on any L2.
+- **Disjoint roots never contend:** different-root calls touch different L1 and
+  different L2/L3 `Arc`s — full parallelism (the point of step 2).
+- **Same-root writers serialize correctly:** `build_workspace`'s lock-reuse scan
+  (already shipped) makes re-activation reuse the *same* `write_lock` /
+  `file_lock` / `dirty_files` `Arc`s, so two writers to one root share L2.
+
+### Eviction (step 3) — must mirror check-then-act
+
+`evict_idle` (`src/lsp/manager.rs:932-962`) and the `get_or_start` LRU selector
+(~`326-344`) are the templates: snapshot victims under the pool lock, **release**,
+then act per-key with brief re-acquisition; the expensive `shutdown().await` runs
+holding no pool lock.
+
+The workspace eviction sweep does the same, and its quiescence probe is the one
+place L0 meets L2 — so it MUST be non-blocking:
+
+- Hold **L0 (write)** for the sweep so no new lookup can resurrect an entry
+  mid-removal (lookups need L0-read, excluded by L0-write).
+- Quiescence = for every activated project in the workspace,
+  `write_lock.try_lock()` is **free** (NOT `.lock().await`) AND `dirty_files` is
+  empty. `try_lock()` is instantaneous → safe under L0.
+- A writer mid-write holds L2 (registry already released) → `try_lock` fails →
+  not quiescent → skip. A writer about to start is blocked on L0-read until the
+  sweep finishes; if its entry was evicted it re-resolves via `ensure_resident`.
+- `default_workspace_root` is **exempt** (never evicted).
+
+### What the proof obligates the code to guarantee (→ Phase 4 step 1 tests)
+
+1. **Structural (review-enforced):** no `write_lock.lock()`, flock poll, or
+   `.await` on a per-project lock appears inside a scope still holding an L0/L1
+   guard. The pinned write accessors (`with_project_at_mut` /
+   `require_write_root_for` twins) must hand back cloned `Arc`s, never a guard
+   that borrows the registry.
+2. **Runtime proxy for the no-hang claim:** a stress test — M concurrent pinned
+   writes across K distinct roots (+ repeats on shared roots) — all complete
+   under a bounded `tokio::time::timeout`. A hang ⇒ the invariant was violated.
+   (Direct deadlock assertions hang rather than fail; the bounded-timeout stress
+   test is the practical regression. `loom` is overkill given the small fixed
+   lock set + the structural guarantee.)
+3. **Concurrency correctness:** two different-root pinned writes do NOT serialize
+   (overlap observable); two same-root pinned writes DO serialize (no interleave,
+   no corrupt file).
