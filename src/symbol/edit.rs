@@ -243,7 +243,9 @@ pub fn find_ast_name_path(
     lsp_start: u32,
 ) -> Option<String> {
     for s in ast_syms {
-        if s.name == lsp_name && s.start_line.abs_diff(lsp_start) <= 1 {
+        if crate::symbol::query::names_match_ignoring_backticks(&s.name, lsp_name)
+            && s.start_line.abs_diff(lsp_start) <= 1
+        {
             return Some(s.name_path.clone());
         }
         if let Some(found) = find_ast_name_path(&s.children, lsp_name, lsp_start) {

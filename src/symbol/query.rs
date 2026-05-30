@@ -375,11 +375,14 @@ pub fn find_ast_end_line_in(
     }
     if let Some(np) = name_path {
         // Prefer exact name_path equality; if LSP and AST name_paths diverge
-        // (impl blocks) the suffix match handles it.
-        if let Some(exact) = matches
-            .iter()
-            .find(|s| s.name_path == np || np.ends_with(&format!("/{}", s.name_path)))
-        {
+        // (impl blocks) the suffix match handles it. Backtick-tolerant so a
+        // Kotlin LSP name_path (no backticks) matches the AST's (with backticks).
+        if let Some(exact) = matches.iter().find(|s| {
+            names_match_ignoring_backticks(&s.name_path, np)
+                || np
+                    .replace('`', "")
+                    .ends_with(&format!("/{}", s.name_path.replace('`', "")))
+        }) {
             return Some(exact.end_line);
         }
     }
@@ -390,6 +393,19 @@ pub fn find_ast_end_line_in(
     Some(matches[0].end_line)
 }
 
+/// Compare two symbol names, tolerating Kotlin backtick delimiters.
+///
+/// kotlin-language-server strips backtick delimiters from `DocumentSymbol.name`,
+/// so LSP symbols carry `foo bar` while the AST carries `` `foo bar` ``. This
+/// mirrors the normalization in [`symbol_name_matches`] so the AST-end-line and
+/// sibling-guard matchers resolve LSP names the same way the symbol-resolution
+/// path already does. Only pays the allocation cost when a backtick is present.
+///
+/// Regression: docs/issues/2026-05-29-edit-code-kotlin-stale-lsp-range.md.
+pub(crate) fn names_match_ignoring_backticks(a: &str, b: &str) -> bool {
+    a == b || ((a.contains('`') || b.contains('`')) && a.replace('`', "") == b.replace('`', ""))
+}
+
 fn collect_ast_candidates<'a>(
     symbols: &'a [SymbolInfo],
     name: &str,
@@ -397,7 +413,9 @@ fn collect_ast_candidates<'a>(
     out: &mut Vec<&'a SymbolInfo>,
 ) {
     for sym in symbols {
-        if sym.name == name && sym.start_line.abs_diff(lsp_start) <= 1 {
+        if names_match_ignoring_backticks(&sym.name, name)
+            && sym.start_line.abs_diff(lsp_start) <= 1
+        {
             out.push(sym);
         }
         collect_ast_candidates(&sym.children, name, lsp_start, out);
@@ -661,4 +679,40 @@ pub fn collect_matching_symbols<'a>(
         results.extend(collect_matching_symbols(&sym.children, name_path));
     }
     results
+}
+#[cfg(test)]
+mod backtick_match_tests {
+    use super::*;
+    use std::path::Path;
+
+    /// Regression for docs/issues/2026-05-29-edit-code-kotlin-stale-lsp-range.md:
+    /// the AST stores Kotlin backtick fn names WITH backticks (pinned by
+    /// `parser::tests::kotlin_backtick_function_names`), while kotlin-lsp reports
+    /// them WITHOUT. `find_ast_end_line_in` must resolve the LSP-style (no-backtick)
+    /// name to the backtick-bearing AST symbol — mirroring the normalization that
+    /// already lives in `symbol_name_matches`.
+    #[test]
+    fn find_ast_end_line_in_resolves_kotlin_lsp_name_without_backticks() {
+        let source =
+            "class MyTest {\n    fun `no penalty when x`() {\n        val a = 1\n    }\n}\n";
+        let ast_syms = crate::ast::parser::extract_symbols_from_source(
+            source,
+            Some("kotlin"),
+            Path::new("Test.kt"),
+        )
+        .unwrap();
+
+        // LSP reports name + name_path WITHOUT backticks; AST has them WITH.
+        let end = find_ast_end_line_in(
+            &ast_syms,
+            "no penalty when x",
+            1, // the `fun` line, 0-based
+            Some("MyTest/no penalty when x"),
+        );
+        assert_eq!(
+            end,
+            Some(3),
+            "LSP name (no backticks) must resolve to AST symbol (backticks); got {end:?}"
+        );
+    }
 }
