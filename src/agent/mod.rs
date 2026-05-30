@@ -638,6 +638,136 @@ impl Agent {
             .await
     }
 
+    /// Pinned twin of `mark_file_dirty`: marks a file dirty in the workspace
+    /// named by `workspace_override` (resident-on-demand) or the session
+    /// default. Silently no-ops if no project resolves, matching the ambient
+    /// contract — by the time a write tool calls this it has already resolved
+    /// the same pin via `require_project_root_for`, so the workspace is resident.
+    pub async fn mark_file_dirty_for(&self, workspace_override: Option<&Path>, path: PathBuf) {
+        let _ = self
+            .with_project_at(workspace_override, |p| {
+                p.dirty_files
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(path);
+                Ok(())
+            })
+            .await;
+    }
+
+    /// Pinned twin of `add_session_write_root`.
+    pub async fn add_session_write_root_for(
+        &self,
+        workspace_override: Option<&Path>,
+        path: PathBuf,
+    ) {
+        let _ = self
+            .with_project_at(workspace_override, |p| {
+                p.session_write_roots
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(path);
+                Ok(())
+            })
+            .await;
+    }
+
+    /// Pinned twin of `session_write_roots_snapshot`. Empty Vec if no project resolves.
+    pub async fn session_write_roots_snapshot_for(
+        &self,
+        workspace_override: Option<&Path>,
+    ) -> Vec<PathBuf> {
+        self.with_project_at(workspace_override, |p| {
+            Ok(p.session_write_roots
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone())
+        })
+        .await
+        .unwrap_or_default()
+    }
+
+    /// Pinned twin of `dirty_files_arc`. None if no project resolves.
+    pub async fn dirty_files_arc_for(
+        &self,
+        workspace_override: Option<&Path>,
+    ) -> Option<Arc<std::sync::Mutex<std::collections::HashSet<PathBuf>>>> {
+        self.with_project_at(workspace_override, |p| Ok(p.dirty_files.clone()))
+            .await
+            .ok()
+    }
+
+    /// Mutable twin of `with_project_at`. Runs the closure with a `&mut
+    /// ActiveProject` for the workspace named by `workspace_override`
+    /// (resident-on-demand) or the session default. For write tools that mutate
+    /// `ActiveProject` fields *directly* (e.g. `p.config = …`,
+    /// `library_registry.register`) rather than via the `Arc<Mutex>`
+    /// interior-mutability fields — those use the read `with_project_at`.
+    ///
+    /// Phase 4a holds the single `AgentInner` write lock for the closure's
+    /// duration; the closure MUST stay non-blocking (no `.await` on a per-project
+    /// lock) per `## Phase 4 — Lock-Ordering Proof`. Phase 4b moves this onto the
+    /// per-`Workspace` lock.
+    pub async fn with_project_at_mut<F, T>(
+        &self,
+        workspace_override: Option<&Path>,
+        f: F,
+    ) -> Result<T>
+    where
+        F: FnOnce(&mut ActiveProject) -> Result<T>,
+    {
+        if let Some(root) = workspace_override {
+            self.ensure_resident(root.to_path_buf(), None).await?;
+        }
+        let mut inner = self.inner.write().await;
+        let ws = match workspace_override {
+            Some(root) => {
+                let key = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+                inner
+                    .workspaces
+                    .get_mut(&key)
+                    .ok_or_else(|| anyhow::anyhow!("pinned workspace not resident: {}", key.display()))?
+            }
+            None => {
+                let root = inner.default_workspace_root.clone().ok_or_else(|| {
+                    crate::tools::RecoverableError::with_hint(
+                        "No active project. Use activate_project first.",
+                        "Call activate_project(\"/path/to/project\") to set the active project.",
+                    )
+                })?;
+                inner
+                    .workspaces
+                    .get_mut(&root)
+                    .ok_or_else(|| anyhow::anyhow!("default workspace not resident"))?
+            }
+        };
+        let project = ws
+            .focused_active_mut()
+            .and_then(|p| p.as_active_mut())
+            .ok_or_else(|| anyhow::anyhow!("workspace has no active focused project"))?;
+        f(project)
+    }
+
+    /// Pinned twin of `reload_config_if_project_toml`.
+    pub async fn reload_config_if_project_toml_for(
+        &self,
+        workspace_override: Option<&Path>,
+        path: &std::path::Path,
+    ) {
+        let _ = self
+            .with_project_at_mut(workspace_override, |p| {
+                let toml_path = p.root.join(".codescout").join("project.toml");
+                if path == toml_path {
+                    if let Ok(fresh) = crate::config::project::ProjectConfig::load_or_default(&p.root)
+                    {
+                        p.config = fresh;
+                    }
+                }
+                Ok(())
+            })
+            .await;
+    }
+
     /// Window within which activating a *different* root counts as concurrent
     /// contention (a subagent racing the shared slot) rather than a normal
     /// sequential re-activation by one linear session.

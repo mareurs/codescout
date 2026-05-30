@@ -397,17 +397,33 @@ external Qdrant stack — unrelated).
 >   known `first_artifact_call_appends_librarian_guide_body_v2` env-isolation flake — passes solo).
 > - ⏳ **4a remainder — per-tool path/state pinning (NEXT).** The central gate fixes the *lock*, not the
 >   *path*: each write tool's own resolution must pin too. SCOPED:
->   - **New pinned accessors to add in `agent/mod.rs`** — writes touch mutable per-project state reads
->     never did. Add `session_write_roots_snapshot_for`, `add_session_write_root_for`,
->     `mark_file_dirty_for`, `dirty_files_arc_for`. All route through `with_project_at` (the fields are
->     `Arc<Mutex>` interior-mutability → read access suffices; **no new mutating registry accessor**).
->   - **Files to migrate — audit EVERY `ctx.agent.*` call (no compiler net for completeness):**
->     `edit_file/mod.rs` (243/360/429), `create_file.rs` (47), `symbol/edit_code.rs` (178),
->     `markdown/edit_markdown.rs` (627) all share the trio `require_project_root` + `security_config` +
->     `session_write_roots_snapshot` (+ post-write `mark_file_dirty`); then `memory/mod.rs` writes,
->     `approve_write.rs` (`add_session_write_root`), `run_command/inner.rs`, and the 3 `active_project_mut`
->     writers `library.rs` / `fs` / `semantic/index.rs` (assess interior-mutability-via-`with_project_at`
->     vs a real `with_project_at_mut`).
+>   - **Pinned accessors — 6/7 BUILT this session (compile + `clippy --lib` clean):**
+>     `session_write_roots_snapshot_for`, `add_session_write_root_for`, `mark_file_dirty_for`,
+>     `dirty_files_arc_for` (all route through the *read* `with_project_at` — `Arc<Mutex>` interior
+>     mutability), plus `with_project_at_mut` (the *mutating* twin: `inner.write()` + `&mut ActiveProject`,
+>     for direct field assignment like `p.config = …` / `library_registry.register`) and
+>     `reload_config_if_project_toml_for` (via `with_project_at_mut`).
+>   - **⚠ 7th accessor STILL TO BUILD — `invalidate_call_edges_for`.** Subtlety: `invalidate_call_edges`
+>     derives `project_id` via `call_edges_project_id()`, which resolves the **default** workspace's
+>     `focused` id — NOT `p.project_id()`. The pinned twin must derive `project_id` from the **pinned**
+>     workspace's `focused` (likely add a `call_edges_project_id_for`), and the doc says `call_graph`'s
+>     edge *upsert* calls the same method — so **verify the already-migrated `call_graph` READ tool pins
+>     its `project_id` too**, else reads/writes land in the wrong DB namespace under a pin. Investigate
+>     before building.
+>   - **Then migrate write tools — each COMPLETELY** (never half: a tool with root pinned but
+>     `invalidate_call_edges`/`reload_config` ambient is inconsistent). Audit EVERY `ctx.agent.*` call;
+>     no compiler net. Full per-tool maps scouted this session:
+>     - `edit_file/mod.rs`: `security_config` (212,244,361,430), `require_project_root` (243,360,429),
+>       `session_write_roots_snapshot` (245,362,431), `reload_config_if_project_toml` (344,468),
+>       `invalidate_call_edges` (346,385,470), `mark_file_dirty` (347,386,471).
+>     - `symbol/edit_code.rs`: trio (178-180) + `invalidate_call_edges`/`mark_file_dirty` ×6 (306/307,
+>       465/466, 635/636, 659/660, 676/677, 751/752).
+>     - `create_file.rs` (47-49 trio + 66/67), `markdown/edit_markdown.rs` (627-629 trio + 813/814),
+>       `approve_write.rs` (43 root, 47 security, 59 `add_session_write_root`).
+>     - `active_project_mut` writers → `with_project_at_mut`: `library.rs` (179-180, 392-393 register),
+>       `semantic/index.rs` (148-149; also `dirty_files_arc` 288, `require_project_root` 187).
+>     - `memory/mod.rs` writes (46/84/131/214/593/682/732 `with_project`; 295/335/427/765/795/833/905
+>       `active_project`; 619/635/921 `require_project_root`) — classify read-vs-write per site.
 >   - **Add the concurrent-WRITE regression** — two pinned writes to different workspaces, no cross-bleed;
 >     mirror `read_file_concurrent_pins_no_cross_workspace_bleed`.
 > - ⏳ **4b — per-`Workspace` `Arc<RwLock<Workspace>>` + eviction (performance).** The large ~100-site
