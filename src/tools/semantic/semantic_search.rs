@@ -189,14 +189,17 @@ impl Tool for SemanticSearch {
         let project_id = if let Some(pid) = input.get("project_id").and_then(|v| v.as_str()) {
             pid.to_string()
         } else {
-            let inner = ctx.agent.inner.read().await;
-            let p = inner.active_project().ok_or_else(|| {
-                crate::tools::RecoverableError::with_hint(
-                    "No active project. Use workspace(action='activate') first.",
-                    "Call workspace(action='activate', path=\"/path/to/project\") to set the active project.",
-                )
-            })?;
-            p.config.project.name.clone()
+            ctx.agent
+                .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                    Ok(p.config.project.name.clone())
+                })
+                .await
+                .map_err(|_| {
+                    crate::tools::RecoverableError::with_hint(
+                        "No active project. Use workspace(action='activate') first.",
+                        "Call workspace(action='activate', path=\"/path/to/project\") to set the active project.",
+                    )
+                })?
         };
         let client = crate::retrieval::client::RetrievalClient::from_env()
             .await

@@ -26,36 +26,39 @@ impl Tool for ListLibraries {
     }
 
     async fn call(&self, _input: Value, ctx: &ToolContext) -> Result<Value> {
-        let inner = ctx.agent.inner.read().await;
-        let project = inner.active_project().ok_or_else(|| {
-            super::RecoverableError::with_hint(
-                "No active project. Use workspace(action='activate') first.",
-                "Call workspace(action='activate', path=\"/path/to/project\") to set the active project.",
-            )
-        })?;
-
-        let libs: Vec<Value> = project
-            .library_registry
-            .all()
-            .iter()
-            .map(|entry| {
-                let stale = entry.indexed
-                    && entry.version.is_some()
-                    && entry.version_indexed.is_some()
-                    && entry.version != entry.version_indexed;
-                json!({
-                    "name": entry.name,
-                    "version": entry.version,
-                    "version_indexed": entry.version_indexed,
-                    "stale": stale,
-                    "path": entry.path.display().to_string(),
-                    "language": entry.language,
-                    "discovered_via": entry.discovered_via,
-                    "indexed": entry.indexed,
-                    "source_available": entry.source_available,
-                })
+        let libs: Vec<Value> = ctx
+            .agent
+            .with_project_at(ctx.workspace_override.as_deref(), |project| {
+                Ok(project
+                    .library_registry
+                    .all()
+                    .iter()
+                    .map(|entry| {
+                        let stale = entry.indexed
+                            && entry.version.is_some()
+                            && entry.version_indexed.is_some()
+                            && entry.version != entry.version_indexed;
+                        json!({
+                            "name": entry.name,
+                            "version": entry.version,
+                            "version_indexed": entry.version_indexed,
+                            "stale": stale,
+                            "path": entry.path.display().to_string(),
+                            "language": entry.language,
+                            "discovered_via": entry.discovered_via,
+                            "indexed": entry.indexed,
+                            "source_available": entry.source_available,
+                        })
+                    })
+                    .collect())
             })
-            .collect();
+            .await
+            .map_err(|_| {
+                super::RecoverableError::with_hint(
+                    "No active project. Use workspace(action='activate') first.",
+                    "Call workspace(action='activate', path=\"/path/to/project\") to set the active project.",
+                )
+            })?;
 
         Ok(json!({ "libraries": libs }))
     }
