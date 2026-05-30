@@ -37,8 +37,10 @@ workspace" — concrete, named, and the user's actual routine workflow.
 non-subagent consumer needs pinning (HTTP multi-client). Either reopens the
 default-vs-explicit-workspace contract.
 
-**Confidence:** medium-high on direction; the load-bearing risk is the registry **lifetime
-contract** (see Design), not the call-site migration.
+**Confidence:** high on direction — the load-bearing risk (the registry **lifetime contract**)
+is now specified (see *Lifetime contract*), and it collapsed once the scout showed the LSP pool
+already owns the RAM ceiling. The remaining risk is execution discipline across the ~100 call
+sites, not design.
 ## Problem (one paragraph)
 
 The active project is process-global: `Agent { inner: Arc<RwLock<AgentInner>> }`
@@ -105,6 +107,58 @@ until a long-lived server has activated dozens of worktrees. Before the registry
 
 **Concurrency:** per-entry `RwLock` so calls on *different* roots never serialize; the
 cross-process `write.lock` still serializes same-root writes.
+## Lifetime contract (Phase-1 detail)
+
+*The load-bearing decision, settled here so Phase 1 implements it rather than Phase 5
+discovering it. Grounded in the real `ActiveProject` shape, not a diagram.*
+
+### What an entry owns (eviction must account for each)
+`ActiveProject` (`src/agent/mod.rs:135`):
+- Pure data — `config`, `memory`, `private_memory`, `library_registry`, `head_sha`,
+  `has_git_remote`: drop is free.
+- `write_lock: Arc<tokio::Mutex<()>>` — in-process write serializer, **acquired FIRST** in the
+  write-lock order (struct doc, `src/agent/mod.rs:122`).
+- `file_lock: Arc<File>` — the fd whose `flock` *is* the cross-process `write.lock`. The flock
+  releases when the last `Arc<File>` clone drops or its `WriteGuard` unlocks
+  (`src/agent/write_guard.rs`).
+- `dirty_files: Arc<Mutex<HashSet>>` — files written but not yet re-indexed (cleared on a
+  successful `index_project`).
+- `session_write_roots` — `approve_write` grants; session-scoped, re-grantable.
+
+### Why the ceiling unifies trivially
+The heavy resource (LSP client + JVM) is **not** owned by `ActiveProject` — it lives in the
+separately-capped LSP pool (`src/lsp/manager.rs`: `max_clients` + idle-TTL + cost-tiered LRU,
+lines 27–38 / 83–90). So the registry is **not** a RAM manager (the LSP pool already is one);
+it only (a) releases the `write.lock` fd cleanly and (b) bounds hashmap growth. The registry
+therefore *reuses* the LSP pool's idle-TTL and needs no independent RAM cap — one policy, by
+construction, not by coordination.
+
+### The contract
+
+1. **Eviction trigger:** idle-TTL reusing the LSP pool's `idle_timeout_secs` (default 300s); a
+   background sweep on the same cadence as the LSP idle-evictor. A soft cap (≥ LSP
+   `max_clients`) bounds the map; over-cap runs an LRU pass under the same quiescence rule.
+2. **Quiescence predicate (never evict a busy entry):** evictable only if
+   `write_lock.try_lock()` succeeds **and** `dirty_files` is empty. A failed candidate is
+   skipped this cycle — the cap is soft; momentary over-cap is fine (mirrors the LSP pool's
+   re-check-between-locks, `manager.rs:344`).
+3. **Write-safety proof (not just a hope):** because `write_lock` is acquired *before* the
+   flock, a free `write_lock` proves no `WriteGuard` exists for the entry, hence nothing holds
+   the flock. Dropping the entry's `Arc<File>` then releases it with **no truncated write**.
+   The quiescence predicate is the safety property, end to end.
+4. **`default_root` is exempt.** The session's home entry is never evicted — unpinned calls
+   always resolve. Eviction only ever touches pinned, non-default entries.
+5. **On evict:** drop the entry; the LSP client is **not** force-killed — it ages out on its own
+   LSP-pool idle-TTL (decoupled lifetimes, shared TTL value).
+6. **Sweep lock ordering:** probe quiescence with `try_lock`, never a blocking lock, and never
+   hold the registry-map lock while probing an entry's `write_lock` (check-then-act, re-validate
+   after — `manager.rs:326–344` is the template). Same ordering the Phase-4 gate validates.
+
+### One question this forces (decide in Phase 1, recommendation given)
+If an entry is **dirty** (unindexed writes) when it would otherwise evict: (a) skip eviction
+until the next `index_project` clears it, or (b) trigger a final index then evict? **Recommend
+(a)** — simpler, and the stale-index risk is bounded (the next activation re-indexes). Revisit
+only if dirty entries are observed pinning the map open.
 ## Phases
 
 - **Phase 0 — Inventory & classify.** Enumerate the ~100 resolution sites (`grep` +
