@@ -129,6 +129,107 @@ impl AgentInner {
             .focused_active_mut()?
             .as_active_mut()
     }
+    /// Assemble a `Workspace` for `root` from pre-loaded `ProjectResources`,
+    /// under the caller's write lock. Reuses an already-resident project's
+    /// write/file/dirty locks (so re-activation serializes correctly against
+    /// in-flight writers). Pure read of `self` (home_root + workspaces) — it
+    /// returns an owned `Workspace` and does not mutate the registry; the
+    /// caller decides whether to clear+set-default (`activate`) or insert
+    /// alongside (`ensure_resident`).
+    fn build_workspace(
+        &self,
+        root: &Path,
+        read_only: Option<bool>,
+        res: ProjectResources,
+    ) -> Workspace {
+        let ProjectResources {
+            config,
+            memory,
+            private_memory,
+            library_registry,
+            head_sha,
+            discovered,
+            fresh_file_lock,
+        } = res;
+
+        let is_home = self
+            .home_root
+            .as_ref()
+            .map(|h| h.as_path() == root)
+            .unwrap_or(true);
+        let effective_read_only = match read_only {
+            Some(false) => false,
+            _ if is_home => false,
+            _ => true,
+        };
+
+        // Re-activating the same root must keep the SAME write_lock, file_lock,
+        // and dirty_files — otherwise an in-flight tool holding the old locks
+        // does not serialize against new tools, and two writers can race.
+        let existing = self.workspaces.values().find_map(|ws| {
+            ws.projects.iter().find_map(|p| match &p.state {
+                ProjectState::Activated(ap) if ap.root.as_path() == root => Some((
+                    ap.write_lock.clone(),
+                    ap.file_lock.clone(),
+                    ap.dirty_files.clone(),
+                )),
+                _ => None,
+            })
+        });
+        let (write_lock, file_lock, dirty_files) = existing.unwrap_or_else(|| {
+            (
+                Arc::new(tokio::sync::Mutex::new(())),
+                fresh_file_lock,
+                Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+            )
+        });
+
+        let active = ActiveProject {
+            root: root.to_path_buf(),
+            config,
+            memory,
+            private_memory,
+            library_registry,
+            dirty_files,
+            read_only: effective_read_only,
+            head_sha,
+            has_git_remote: probe_has_git_remote(root),
+            write_lock,
+            file_lock,
+            session_write_roots: Arc::new(std::sync::Mutex::new(Vec::new())),
+        };
+
+        let mut projects: Vec<Project> = Vec::new();
+        let mut root_found = false;
+        for dp in discovered {
+            if dp.relative_root == std::path::Path::new(".") {
+                root_found = true;
+                projects.push(Project {
+                    discovered: dp,
+                    state: ProjectState::Activated(Box::new(active.clone())),
+                });
+            } else {
+                projects.push(Project::new_dormant(dp));
+            }
+        }
+        if !root_found {
+            let root_dp = DiscoveredProject {
+                id: crate::workspace::ROOT_PROJECT_ID.to_string(),
+                relative_root: PathBuf::from("."),
+                languages: vec![],
+                manifest: None,
+            };
+            projects.insert(
+                0,
+                Project {
+                    discovered: root_dp,
+                    state: ProjectState::Activated(Box::new(active)),
+                },
+            );
+        }
+
+        Workspace::new(root.to_path_buf(), projects)
+    }
 }
 
 /// Active project state.
@@ -237,6 +338,35 @@ fn probe_has_git_remote(root: &Path) -> bool {
         .and_then(|repo| repo.remotes().ok())
         .map(|remotes| !remotes.is_empty())
         .unwrap_or(false)
+}
+/// Lock-free I/O products needed to assemble a `Workspace` for a root.
+/// Loaded by `Agent::load_project_resources` (outside any lock), then consumed
+/// by `AgentInner::build_workspace` under the write lock.
+struct ProjectResources {
+    config: ProjectConfig,
+    memory: MemoryStore,
+    private_memory: MemoryStore,
+    library_registry: LibraryRegistry,
+    head_sha: Option<String>,
+    discovered: Vec<DiscoveredProject>,
+    fresh_file_lock: Arc<std::fs::File>,
+}
+
+/// Derive a `PathSecurityConfig` from an active project: its security config
+/// plus library paths, with writes disabled when the project is read-only.
+/// Shared by `security_config` (default) and `security_config_for` (pinned).
+fn project_security_config(p: &ActiveProject) -> crate::util::path_security::PathSecurityConfig {
+    let mut config = p.config.security.to_path_security_config();
+    config.library_paths = p
+        .library_registry
+        .all()
+        .iter()
+        .map(|e| e.path.clone())
+        .collect();
+    if p.read_only {
+        config.file_write_enabled = false;
+    }
+    config
 }
 
 // ---------------------------------------------------------------------------
@@ -361,131 +491,27 @@ impl Agent {
         })
     }
 
-    /// Activate a project by path, replacing the current workspace.
+    /// Activate a project by path, replacing the current workspace as the
+    /// per-session default. Pinned workspaces are added via `ensure_resident`
+    /// without disturbing the default.
     pub async fn activate(&self, root: PathBuf, read_only: Option<bool>) -> Result<()> {
-        // Canonicalize up-front so every downstream consumer sees the same
-        // absolute path. Without this, activate(".") would compare unequal
-        // to Agent::new's canonicalized home_root, making is_home return
-        // false on the very first re-activation and flipping the project
-        // to read-only unexpectedly.
+        // Canonicalize up-front so every downstream consumer (and the registry
+        // key) sees the same absolute path. Without this, activate(".") would
+        // compare unequal to Agent::new's canonicalized home_root, making
+        // is_home false on the first re-activation and flipping to read-only.
         let root = std::fs::canonicalize(&root).unwrap_or(root);
-        // Load all resources outside any lock — I/O is independent of is_home.
-        let config = ProjectConfig::load_or_default(&root)?;
-        let memory = MemoryStore::open(&root)?;
-        let private_memory = MemoryStore::open_private(&root)?;
-        let registry_path = root.join(".codescout").join("libraries.json");
-        let library_registry = LibraryRegistry::load(&registry_path).unwrap_or_default();
-        let head_sha = resolve_head_sha(&root);
-
-        // Discover sub-projects before acquiring the write lock.
-        // Respect depth and exclude settings from workspace.toml if it exists.
-        // Walked on a blocking thread — see Agent::new for rationale.
-        let (discover_depth, discover_exclude) = load_discover_settings(&root);
-        let discovered = {
-            let root = root.clone();
-            let exclude = discover_exclude.clone();
-            tokio::task::spawn_blocking(move || discover_projects(&root, discover_depth, &exclude))
-                .await
-                .map_err(|e| anyhow::anyhow!("discover_projects task failed: {e}"))?
-        };
-
-        // Open the lock file before acquiring the write lock — involves blocking
-        // fs I/O (create_dir_all + OpenOptions::open) that must not run on the
-        // async executor while holding a write guard. This fresh handle may be
-        // discarded if we find we're re-activating the same root (in which case
-        // the existing file_lock is reused for correct serialization).
-        let fresh_file_lock = write_guard::open_lock_file(&root)
-            .with_context(|| format!("failed to open write.lock for {}", root.display()))?;
-
+        let res = Self::load_project_resources(&root).await?;
         {
             let mut inner = self.inner.write().await;
-
-            // Compute is_home and effective_read_only under the write lock so
-            // there is no TOCTOU window between checking home_root and using the
-            // result.  (Previously is_home was read under a short read lock, then
-            // the lock was dropped while I/O ran, then a write lock was acquired —
-            // a concurrent activate() could have changed home_root in between.)
-            let is_home = inner.home_root.as_ref().map(|h| *h == root).unwrap_or(true);
-            let effective_read_only = match read_only {
-                Some(false) => false,
-                _ if is_home => false,
-                _ => true,
-            };
-
-            // Re-activating the same root must keep the SAME write_lock,
-            // file_lock, and dirty_files — otherwise an in-flight tool holding
-            // the old locks does not serialize against new tools using the new
-            // locks, and two writers can race on the same project. Scan the
-            // current workspace for an already-activated project at this root.
-            let existing = inner.workspaces.values().find_map(|ws| {
-                ws.projects.iter().find_map(|p| match &p.state {
-                    ProjectState::Activated(ap) if ap.root == root => Some((
-                        ap.write_lock.clone(),
-                        ap.file_lock.clone(),
-                        ap.dirty_files.clone(),
-                    )),
-                    _ => None,
-                })
-            });
-            let (write_lock, file_lock, dirty_files) = existing.unwrap_or_else(|| {
-                (
-                    Arc::new(tokio::sync::Mutex::new(())),
-                    fresh_file_lock,
-                    Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-                )
-            });
-
-            let active = ActiveProject {
-                root: root.clone(),
-                config,
-                memory,
-                private_memory,
-                library_registry,
-                dirty_files,
-                read_only: effective_read_only,
-                head_sha,
-                has_git_remote: probe_has_git_remote(&root),
-                write_lock,
-                file_lock,
-                session_write_roots: Arc::new(std::sync::Mutex::new(Vec::new())),
-            };
-
-            let mut projects: Vec<Project> = Vec::new();
-            let mut root_found = false;
-            for dp in discovered {
-                if dp.relative_root == std::path::Path::new(".") {
-                    root_found = true;
-                    projects.push(Project {
-                        discovered: dp,
-                        state: ProjectState::Activated(Box::new(active.clone())),
-                    });
-                } else {
-                    projects.push(Project::new_dormant(dp));
-                }
-            }
-            if !root_found {
-                let root_dp = DiscoveredProject {
-                    id: crate::workspace::ROOT_PROJECT_ID.to_string(),
-                    relative_root: PathBuf::from("."),
-                    languages: vec![],
-                    manifest: None,
-                };
-                projects.insert(
-                    0,
-                    Project {
-                        discovered: root_dp,
-                        state: ProjectState::Activated(Box::new(active)),
-                    },
-                );
-            }
-
-            let ws = Workspace::new(root.clone(), projects);
-
+            // build_workspace computes is_home / read_only and reuses an
+            // existing root's locks, all under this write lock (no TOCTOU).
+            let ws = inner.build_workspace(&root, read_only, res);
             if inner.home_root.is_none() {
                 inner.home_root = Some(root.clone());
             }
-            // Phase 1: single-entry registry — clear + reinsert mirrors the
-            // previous single-slot drop-and-replace (no multi-residence yet).
+            // Phase 1: single-entry default registry — clear + reinsert mirrors
+            // the previous single-slot drop-and-replace. ensure_resident adds
+            // pinned entries alongside without clearing.
             inner.workspaces.clear();
             inner.workspaces.insert(root.clone(), ws);
             inner.default_workspace_root = Some(root);
@@ -493,6 +519,115 @@ impl Agent {
         }
         Ok(())
     }
+    /// Load all lock-free I/O for a project root (config, memory, library
+    /// registry, sub-project discovery, write-lock file). Shared by `activate`
+    /// and `ensure_resident`; the products are assembled into a `Workspace`
+    /// under the write lock by `AgentInner::build_workspace`.
+    async fn load_project_resources(root: &Path) -> Result<ProjectResources> {
+        let config = ProjectConfig::load_or_default(root)?;
+        let memory = MemoryStore::open(root)?;
+        let private_memory = MemoryStore::open_private(root)?;
+        let registry_path = root.join(".codescout").join("libraries.json");
+        let library_registry = LibraryRegistry::load(&registry_path).unwrap_or_default();
+        let head_sha = resolve_head_sha(root);
+        let (discover_depth, discover_exclude) = load_discover_settings(root);
+        let discovered = {
+            let root = root.to_path_buf();
+            let exclude = discover_exclude.clone();
+            tokio::task::spawn_blocking(move || discover_projects(&root, discover_depth, &exclude))
+                .await
+                .map_err(|e| anyhow::anyhow!("discover_projects task failed: {e}"))?
+        };
+        let fresh_file_lock = write_guard::open_lock_file(root)
+            .with_context(|| format!("failed to open write.lock for {}", root.display()))?;
+        Ok(ProjectResources {
+            config,
+            memory,
+            private_memory,
+            library_registry,
+            head_sha,
+            discovered,
+            fresh_file_lock,
+        })
+    }
+
+    /// Ensure `root` is resident in the registry (load + cache on miss) WITHOUT
+    /// clearing the registry or changing `default_workspace_root`. Lets a
+    /// per-request pinned workspace be resolved alongside the default. Pinned,
+    /// non-home workspaces default to read-only. Idempotent.
+    pub async fn ensure_resident(&self, root: PathBuf, read_only: Option<bool>) -> Result<()> {
+        let root = std::fs::canonicalize(&root).unwrap_or(root);
+        {
+            let inner = self.inner.read().await;
+            if inner.workspaces.contains_key(&root) {
+                return Ok(());
+            }
+        }
+        let res = Self::load_project_resources(&root).await?;
+        let mut inner = self.inner.write().await;
+        // Re-check under the write lock — another caller may have inserted it
+        // while we did the lock-free I/O.
+        if inner.workspaces.contains_key(&root) {
+            return Ok(());
+        }
+        let ws = inner.build_workspace(&root, read_only, res);
+        inner.workspaces.insert(root, ws);
+        Ok(())
+    }
+
+    /// Run a closure with a read-lock on the project resolved by an optional
+    /// workspace pin. `Some(root)` → that workspace (resident-on-demand);
+    /// `None` → the session default. The closure receives the workspace's
+    /// focused `&ActiveProject`. Level-2 sub-project pinning within a pinned
+    /// workspace is not yet wired (read tools pin at workspace granularity).
+    pub async fn with_project_at<F, T>(&self, workspace_override: Option<&Path>, f: F) -> Result<T>
+    where
+        F: FnOnce(&ActiveProject) -> Result<T>,
+    {
+        if let Some(root) = workspace_override {
+            self.ensure_resident(root.to_path_buf(), None).await?;
+        }
+        let inner = self.inner.read().await;
+        let ws = match workspace_override {
+            Some(root) => {
+                let key = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+                inner.workspaces.get(&key).ok_or_else(|| {
+                    anyhow::anyhow!("pinned workspace not resident: {}", key.display())
+                })?
+            }
+            None => inner.default_workspace().ok_or_else(|| {
+                crate::tools::RecoverableError::with_hint(
+                    "No active project. Use activate_project first.",
+                    "Call activate_project(\"/path/to/project\") to set the active project.",
+                )
+            })?,
+        };
+        let project = ws
+            .focused_active()
+            .and_then(|p| p.as_active())
+            .ok_or_else(|| anyhow::anyhow!("workspace has no active focused project"))?;
+        f(project)
+    }
+
+    /// Pinned twin of `project_root`: focused root of the workspace named by
+    /// `workspace_override` (resident-on-demand), or the default if `None`.
+    pub async fn project_root_for(&self, workspace_override: Option<&Path>) -> Option<PathBuf> {
+        self.with_project_at(workspace_override, |p| Ok(p.root().to_path_buf()))
+            .await
+            .ok()
+    }
+
+    /// Pinned twin of `security_config`: security config of the workspace named
+    /// by `workspace_override` (resident-on-demand), or defaults if `None`/none.
+    pub async fn security_config_for(
+        &self,
+        workspace_override: Option<&Path>,
+    ) -> crate::util::path_security::PathSecurityConfig {
+        self.with_project_at(workspace_override, |p| Ok(project_security_config(p)))
+            .await
+            .unwrap_or_default()
+    }
+
     /// Window within which activating a *different* root counts as concurrent
     /// contention (a subagent racing the shared slot) rather than a normal
     /// sequential re-activation by one linear session.
@@ -1061,19 +1196,7 @@ impl Agent {
     pub async fn security_config(&self) -> crate::util::path_security::PathSecurityConfig {
         let inner = self.inner.read().await;
         match inner.active_project() {
-            Some(p) => {
-                let mut config = p.config.security.to_path_security_config();
-                config.library_paths = p
-                    .library_registry
-                    .all()
-                    .iter()
-                    .map(|e| e.path.clone())
-                    .collect();
-                if p.read_only {
-                    config.file_write_enabled = false;
-                }
-                config
-            }
+            Some(p) => project_security_config(p),
             None => crate::util::path_security::PathSecurityConfig::default(),
         }
     }

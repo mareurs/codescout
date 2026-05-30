@@ -59,8 +59,14 @@ impl Tool for ReadFile {
             return read_from_buffer(path, &input, ctx);
         }
 
-        let project_root = ctx.agent.project_root().await;
-        let security = ctx.agent.security_config().await;
+        let project_root = ctx
+            .agent
+            .project_root_for(ctx.workspace_override.as_deref())
+            .await;
+        let security = ctx
+            .agent
+            .security_config_for(ctx.workspace_override.as_deref())
+            .await;
         let resolved = crate::util::path_security::validate_read_path(
             path,
             project_root.as_deref(),
@@ -333,15 +339,22 @@ fn validate_read_nav_params(
     Ok(())
 }
 
-/// Resolve the library source tag for a file (`"project"` or `"lib:<name>"`).
+/// Resolve the library source tag for a file (`"project"` or `"lib:<name>"`),
+/// honoring the per-request workspace pin so a pinned read tags against the
+/// pinned project's library registry, not the default's.
 async fn compute_source_tag(resolved: &std::path::Path, ctx: &ToolContext) -> String {
-    let inner = ctx.agent.inner.read().await;
-    if let Some(project) = inner.active_project() {
-        if let Some(lib) = project.library_registry.is_library_path(resolved) {
-            return format!("lib:{}", lib.name);
-        }
+    let tag = ctx
+        .agent
+        .with_project_at(ctx.workspace_override.as_deref(), |p| {
+            Ok(p.library_registry
+                .is_library_path(resolved)
+                .map(|lib| format!("lib:{}", lib.name)))
+        })
+        .await;
+    match tag {
+        Ok(Some(t)) => t,
+        _ => "project".to_string(),
     }
-    "project".to_string()
 }
 
 /// Read file contents with user-friendly error messages.
@@ -1003,6 +1016,109 @@ mod tests {
             )),
             guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
             workspace_override: None,
+        }
+    }
+    /// Phase 3 regression (regime 3): a read tool pinned to workspace A via
+    /// `ToolContext.workspace_override` must read A's files even when the
+    /// session default is workspace B. Today `read_file` resolves the default
+    /// project, so it reads B — this test is RED until Phase 3 wires the
+    /// override into path resolution. The single mutation it catches is
+    /// "ignore workspace_override," which IS the regime-3 last-writer-wins bug.
+    /// Contract: pinned(A) ⇒ reads A, regardless of default B.
+    #[tokio::test]
+    async fn read_file_honors_workspace_override_pin() {
+        use tempfile::tempdir;
+
+        let dir_a = tempdir().unwrap();
+        let dir_b = tempdir().unwrap();
+        std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+        std::fs::create_dir_all(dir_b.path().join(".codescout")).unwrap();
+        std::fs::write(dir_a.path().join("marker.txt"), "ALPHA-CONTENT").unwrap();
+        std::fs::write(dir_b.path().join("marker.txt"), "BETA-CONTENT").unwrap();
+        let root_a = std::fs::canonicalize(dir_a.path()).unwrap();
+
+        // Default (unpinned) project is B.
+        let agent = Agent::new(Some(dir_b.path().to_path_buf())).await.unwrap();
+        let mut ctx = test_ctx().await;
+        ctx.agent = agent;
+        // Pin THIS request to workspace A.
+        ctx.workspace_override = Some(root_a);
+
+        let result = ReadFile
+            .call(json!({ "path": "marker.txt" }), &ctx)
+            .await
+            .unwrap();
+        let body = result.get("content").and_then(|v| v.as_str()).unwrap_or("");
+
+        assert!(
+            body.contains("ALPHA-CONTENT"),
+            "pinned read should resolve workspace A (ALPHA), got: {result}"
+        );
+        assert!(
+            !body.contains("BETA-CONTENT"),
+            "pinned read must NOT leak the default workspace B (BETA), got: {result}"
+        );
+    }
+    /// Phase 3 regression (regime 3, concurrent form): N tasks share ONE Agent,
+    /// each pins a distinct workspace and reads its marker file concurrently on
+    /// a multi-thread runtime. Each must read ITS OWN workspace with zero
+    /// cross-bleed — proving per-request resolution survives interleaved/parallel
+    /// activation, which is exactly the original last-writer-wins-on-the-global-
+    /// slot bug. A shared-state regression flips this red.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn read_file_concurrent_pins_no_cross_workspace_bleed() {
+        use tempfile::tempdir;
+
+        const N: usize = 5;
+        let mut dirs = Vec::new();
+        let mut roots = Vec::new();
+        for i in 0..N {
+            let d = tempdir().unwrap();
+            std::fs::create_dir_all(d.path().join(".codescout")).unwrap();
+            std::fs::write(d.path().join("marker.txt"), format!("WS-{i}")).unwrap();
+            roots.push(std::fs::canonicalize(d.path()).unwrap());
+            dirs.push(d); // keep tempdirs alive for the duration
+        }
+
+        // Default (unpinned) project is workspace 0; tasks pin 0..N concurrently.
+        let agent = Agent::new(Some(dirs[0].path().to_path_buf()))
+            .await
+            .unwrap();
+
+        let mut handles = Vec::new();
+        for (i, root_i) in roots.iter().cloned().enumerate() {
+            let agent = agent.clone();
+            handles.push(tokio::spawn(async move {
+                let mut ctx = test_ctx().await;
+                ctx.agent = agent;
+                ctx.workspace_override = Some(root_i);
+                let result = ReadFile
+                    .call(json!({ "path": "marker.txt" }), &ctx)
+                    .await
+                    .unwrap();
+                let body = result
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                (i, body)
+            }));
+        }
+
+        for h in handles {
+            let (i, body) = h.await.unwrap();
+            assert!(
+                body.contains(&format!("WS-{i}")),
+                "task {i} pinned to its own workspace must read WS-{i}, got: {body:?}"
+            );
+            for j in 0..N {
+                if j != i {
+                    assert!(
+                        !body.contains(&format!("WS-{j}")),
+                        "task {i} leaked workspace {j}'s content (regime-3 bleed): {body:?}"
+                    );
+                }
+            }
         }
     }
 
