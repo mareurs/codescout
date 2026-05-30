@@ -57,10 +57,22 @@ pub fn default_config(language: &str, workspace_root: &Path) -> Option<LspServer
             idle_timeout_secs: None,
         }),
         "kotlin" => {
-            // With the mux, there's only one kotlin-lsp instance per workspace,
-            // so we use a stable (non-PID) system-path.
-            let system_dir = std::env::temp_dir().join("codescout-mux-kotlin-lsp");
-            let gradle_home = std::env::temp_dir().join("codescout-mux-gradle");
+            // Mux gives one kotlin-lsp per workspace *path*. Key the IntelliJ
+            // system dir by the workspace hash so different worktrees of one repo
+            // don't alias a single shared system/index dir (silent cache corruption
+            // + JVM multiplication). See
+            // docs/issues/2026-05-30-cross-worktree-kotlin-jvm-shared-system-path.md
+            let ws_hash = crate::lsp::mux::workspace_hash(workspace_root);
+            // Gradle home is keyed by the *repo* (main checkout) so worktrees of the
+            // same repo share one dependency cache instead of re-downloading deps.
+            let repo_root = crate::prompts::detect_worktree_info(workspace_root)
+                .and_then(|w| w.main_repo)
+                .unwrap_or_else(|| workspace_root.to_path_buf());
+            let repo_hash = crate::lsp::mux::workspace_hash(&repo_root);
+            let system_dir =
+                std::env::temp_dir().join(format!("codescout-mux-kotlin-lsp-{ws_hash}"));
+            let gradle_home =
+                std::env::temp_dir().join(format!("codescout-mux-gradle-{repo_hash}"));
             Some(LspServerConfig {
                 command: crate::platform::lsp_binary_name("kotlin-lsp"),
                 args: vec![
@@ -221,5 +233,75 @@ mod tests {
         assert!(!has_lsp_config("lua"));
         assert!(!has_lsp_config("markdown"));
         assert!(!has_lsp_config("unknown"));
+    }
+
+    fn kotlin_system_path(cfg: &LspServerConfig) -> String {
+        cfg.args
+            .iter()
+            .find_map(|a| a.strip_prefix("--system-path=").map(str::to_string))
+            .expect("kotlin config must carry --system-path")
+    }
+
+    fn kotlin_gradle_home(cfg: &LspServerConfig) -> String {
+        cfg.env
+            .iter()
+            .find(|(k, _)| k == "GRADLE_USER_HOME")
+            .map(|(_, v)| v.clone())
+            .expect("kotlin config must set GRADLE_USER_HOME")
+    }
+
+    #[test]
+    fn kotlin_system_path_is_per_workspace() {
+        // Regression: distinct worktree paths must NOT share one IntelliJ
+        // system dir (cross-worktree index aliasing). See
+        // docs/issues/2026-05-30-cross-worktree-kotlin-jvm-shared-system-path.md
+        let a = default_config("kotlin", Path::new("/tmp/codescout-test-repo-a")).unwrap();
+        let b = default_config("kotlin", Path::new("/tmp/codescout-test-repo-b")).unwrap();
+        assert_ne!(
+            kotlin_system_path(&a),
+            kotlin_system_path(&b),
+            "distinct workspace roots must get distinct --system-path"
+        );
+    }
+
+    #[test]
+    fn kotlin_system_path_is_stable_for_same_workspace() {
+        // Same path → same system dir: the per-path mux and multiple
+        // same-worktree instances deterministically share one index.
+        let a = default_config("kotlin", Path::new("/tmp/codescout-test-repo-a")).unwrap();
+        let b = default_config("kotlin", Path::new("/tmp/codescout-test-repo-a")).unwrap();
+        assert_eq!(kotlin_system_path(&a), kotlin_system_path(&b));
+    }
+
+    #[test]
+    fn kotlin_gradle_home_shared_across_worktrees_of_one_repo() {
+        // Worktrees of one repo SHARE the Gradle dependency cache (same deps)
+        // but keep per-worktree IntelliJ system dirs.
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("main");
+        let wt = dir.path().join("wt");
+        let worktree_meta = main.join(".git").join("worktrees").join("feat");
+        std::fs::create_dir_all(&worktree_meta).unwrap();
+        std::fs::write(worktree_meta.join("HEAD"), "ref: refs/heads/feat\n").unwrap();
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(
+            wt.join(".git"),
+            format!("gitdir: {}\n", worktree_meta.display()),
+        )
+        .unwrap();
+
+        let main_cfg = default_config("kotlin", &main).unwrap();
+        let wt_cfg = default_config("kotlin", &wt).unwrap();
+
+        assert_eq!(
+            kotlin_gradle_home(&main_cfg),
+            kotlin_gradle_home(&wt_cfg),
+            "worktree and its main repo must share GRADLE_USER_HOME"
+        );
+        assert_ne!(
+            kotlin_system_path(&main_cfg),
+            kotlin_system_path(&wt_cfg),
+            "worktree and its main repo must NOT share the IntelliJ system dir"
+        );
     }
 }
