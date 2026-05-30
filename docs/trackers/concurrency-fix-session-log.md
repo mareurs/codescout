@@ -17,7 +17,7 @@
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
-| _(none yet)_ | | | | | |
+| F-1 | 2026-05-30 | high | architectural | fixed-verified | Plan targets `ActiveProject` granularity; reality is a `Workspace` registry that already exists |
 
 ## Wins Index
 
@@ -47,6 +47,31 @@
 
 ---
 
+## F-1 — Plan targets `ActiveProject` granularity; reality is a `Workspace` registry that already exists
+
+**Observed:** 2026-05-30, pre-implementation review of `docs/plans/2026-05-30-per-request-workspace-pinning.md` (the regime-3 root-cause plan), before writing any Phase-0/1 code.
+
+**When:** Reading the plan's Design + Lifetime-contract sections, about to start the call-site inventory.
+
+**Expected (plan):** `AgentInner` holds a *single focused* `ActiveProject` slot; ~100 sites read it; the fix introduces `projects: HashMap<PathBuf, Arc<RwLock<ActiveProject>>>` + a `default_root`, and builds a per-request resolver ("explicit > default > error").
+
+**Got (scouted reality):**
+- `AgentInner.workspace: Option<Workspace>` (`src/agent/mod.rs:83`) — the racing slot is a whole `Workspace`, not a bare `ActiveProject`.
+- `Workspace` (`src/workspace.rs:316`) is **already** a multi-project registry: `projects: Vec<Project>`, each `Dormant` or `Activated(Box<ActiveProject>)`, plus `focused: Option<String>`.
+- `Workspace::resolve_root(project, file_hint)` (`src/workspace.rs:373`) **already** resolves "explicit id > file hint > focused" — the exact per-request order the plan proposes to build from scratch.
+- `Agent::activate` (`src/agent/mod.rs:330`) does `inner.workspace = Some(ws)` — it **replaces the whole slot**. A `Workspace`'s `projects` are all sub-projects of one `root`; it structurally cannot hold worktree A and worktree B at once. So the registry unit must be `Workspace`, not `ActiveProject`.
+
+**Probable cause:** Plan written from the regime-3 bug file's "single global active project" framing — accurate at the *symptom* layer (`active_project()` resolves one focused project) but not the *structural* layer (a `Workspace` nests N projects; only one `Workspace` is live). The plan lists `focused_project_root()` as an accessor, but its Design data structure (flat `HashMap<_, ActiveProject>`) shows the `Workspace` nesting was never modeled.
+
+**Severity:** high — implementing Phase 1 verbatim builds a flat `ActiveProject` HashMap that duplicates and collides with the existing `Workspace` abstraction; the collision surfaces only after the structure is wired, forcing a full Phase-1 rewrite. Caught pre-implementation, the correction is a plan revision (registry over `Workspace`s; reuse `resolve_root`) — net *less* code.
+
+**Workaround / Fix:** Revise the plan's Design + Lifetime-contract + Phases to `Workspace`-registry granularity before any code: (a) registry = `HashMap<PathBuf, Workspace>` (Arc/RwLock as needed) replacing `inner.workspace`; (b) `default_root` = default *workspace* root (focused-project-within-workspace stays via existing `focused`); (c) per-request resolution = registry lookup → existing `Workspace::resolve_root`; (d) lifetime/quiescence predicate must iterate ALL `Activated` projects in a workspace (each owns its own `write_lock`/`file_lock`/`dirty_files`), not check one `ActiveProject`.
+
+**Status:** fixed-verified — plan revised to `Workspace`-registry granularity (R2) 2026-05-30 after architecture-snow-lion review; revised Design / Lifetime-contract / Phases read coherently against the scouted code (`src/workspace.rs:316,373`, `src/agent/mod.rs:83,330`).
+
+**Fix idea / Pointer:** Plan Design + Lifetime-contract sections; this session.
+
+---
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
