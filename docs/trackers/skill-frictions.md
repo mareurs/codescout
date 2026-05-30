@@ -115,6 +115,13 @@ Running log of rough edges found while using project skills. Feed into refactor 
 **Got:** File created manually with `create_file` instead of `artifact(action="create", kind="tracker")`  
 **Prompt gap:** Neither `/claude-traces` nor `/analyze-usage` skill mentions that trackers should go through the librarian. A one-liner "create any tracker via `artifact(action=create, kind=tracker)` — call `librarian(tracker_design)` first" would prevent this.
 
+
+### F-010 — Step-2 query-battery output overflows; natural `grep | sed` post-processing trips the companion IL3 gate
+**When:** Step 2 (per-DB SQL queries), running under the `codescout-companion` PreToolUse hook (the normal dev environment for this repo).
+**Observation:** The documented invoke pattern loops `sqlite3 -line "$db" "..."` across every DB. With ~10 active DBs the combined output exceeds the inline budget and lands in a `@cmd_*` buffer (440+ lines buffered). The obvious next step — `grep -E "..." @cmd_xxx | sed 's/^ *//'` to extract the per-DB error rows — trips the IL3 advisory ("piped `grep` to a log-trimmer"), re-buffers the result, and truncates it again, forcing a fallback to `cat @cmd` + multiple `sed -n 'A,Bp' @cmd` paging calls. Net: ~3 extra round-trips per analysis to read data the skill already produced.
+**Got:** Skill Step 2 says nothing about (a) expecting overflow on multi-DB loops, or (b) that buffered output must be paged with a single bounded-LHS command (`sed -n`, `cat`, bare `grep @ref`) — never a chained pipe to `sed`/`head`/`tail`, which the companion gate blocks.
+**Fix idea:** Add a note to Step 2: "Multi-DB loop output overflows into a `@cmd_*` buffer. Page it with `sed -n 'N,Mp' @cmd_id` or bare `grep PATTERN @cmd_id` — do NOT chain `| sed`/`| head`/`| tail`, which the codescout IL3 gate blocks. Or scope each query tighter (single DB, `LIMIT`, date filter) so results fit inline." Pairs with the existing buffer guidance in `get_guide("progressive-disclosure")`.
+**Note:** The *cross-project* IL3 pipe-to-`head` recurrence seen in the usage data (deployment / claude-plugins / researcher piping `git log | head`, `find | head`) is a **tool-usage pattern**, not a skill friction — track that as a T-N in `docs/trackers/tool-usage-patterns.md`, not here.
 ## `/onboarding`
 
 ### F-001 — workspace onboarding silently over-reported per-project memory writes
