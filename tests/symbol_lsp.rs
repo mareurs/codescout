@@ -47,6 +47,7 @@ async fn ctx_with_mock(
             codescout::tools::section_coverage::SectionCoverage::new(),
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
     };
     (dir, ctx)
 }

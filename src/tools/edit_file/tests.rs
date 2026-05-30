@@ -48,6 +48,7 @@ async fn test_ctx() -> ToolContext {
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
     }
 }
 
@@ -67,6 +68,7 @@ async fn project_ctx() -> (tempfile::TempDir, ToolContext) {
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
             guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            workspace_override: None,
         },
     )
 }
@@ -2582,6 +2584,7 @@ async fn search_pattern_accepts_library_path() {
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
     };
 
     // search_pattern with a path pointing into the library — the walker must
@@ -3000,6 +3003,7 @@ async fn edit_file_blocked_on_source_file_when_debug_enforce_symbol_tools() {
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
     };
 
     let src_file = dir.path().join("src/lib.rs");
@@ -3054,6 +3058,7 @@ async fn edit_file_allows_literal_substitution_when_debug_enforce_symbol_tools()
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
     };
 
     let src_file = dir.path().join("src/lib.rs");
@@ -4443,6 +4448,7 @@ async fn read_file_large_content_returns_file_id_not_inline() {
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
     };
     let file = dir.path().join("big.txt");
     // Create a file > 10 KB (exceeds MAX_INLINE_TOKENS)

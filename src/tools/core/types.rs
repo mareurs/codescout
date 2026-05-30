@@ -70,6 +70,13 @@ pub struct ToolContext {
     /// Session-scoped set of guide topics already hinted to the model.
     /// Reset on workspace(action="activate").
     pub guide_hints_emitted: Arc<parking_lot::Mutex<std::collections::HashSet<String>>>,
+    /// Per-request workspace pin (Phase 2 plumbing for per-request workspace
+    /// resolution). Populated in `call_tool_inner` from an optional `workspace`
+    /// input field, canonicalized to match the registry's canonical-root keys.
+    /// No tool reads it yet — Phase 3 wires the selector-aware accessors
+    /// (`with_project_at`). See
+    /// docs/plans/2026-05-30-per-request-workspace-pinning.md.
+    pub workspace_override: Option<std::path::PathBuf>,
 }
 
 impl ToolContext {

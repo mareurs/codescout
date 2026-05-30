@@ -380,6 +380,7 @@ async fn project_ctx() -> (tempfile::TempDir, ToolContext) {
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
             guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            workspace_override: None,
         },
     )
 }
@@ -400,6 +401,7 @@ async fn project_ctx_at(root: &std::path::Path) -> ToolContext {
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
     }
 }
 
@@ -538,6 +540,7 @@ async fn onboarding_errors_without_project() {
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
     };
     assert!(Onboarding.call(json!({}), &ctx).await.is_err());
 }
@@ -844,6 +847,7 @@ async fn onboarded_project_ctx() -> (tempfile::TempDir, ToolContext) {
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
     };
     // Run full onboarding to write config + onboarding memory
     Onboarding.call(json!({}), &ctx).await.unwrap();
@@ -1036,6 +1040,7 @@ async fn project_ctx_with_progress(
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
     };
     (dir, ctx, sink)
 }
@@ -1210,6 +1215,7 @@ async fn onboarding_returns_gathered_context_fields() {
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
     };
     let result = Onboarding.call(json!({}), &ctx).await.unwrap();
 
@@ -1243,6 +1249,7 @@ async fn onboarding_includes_system_prompt_draft_in_subagent_prompt() {
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
     };
     let result = Onboarding.call(json!({}), &ctx).await.unwrap();
 
@@ -2374,6 +2381,7 @@ async fn onboarding_discovers_sub_projects() {
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
     };
 
     let result = Onboarding
@@ -3062,6 +3070,7 @@ async fn onboarding_creates_workspace_toml_for_multi_project() {
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
     };
 
     Onboarding
@@ -3105,6 +3114,7 @@ async fn onboarding_skips_workspace_toml_for_single_project() {
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
     };
 
     Onboarding
@@ -3618,6 +3628,7 @@ async fn onboarding_triggers_refresh_when_version_stale() {
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
     };
 
     let result = Onboarding.call(json!({}), &ctx).await.unwrap();
@@ -3675,6 +3686,7 @@ async fn onboarding_fast_path_when_version_current() {
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
     };
 
     let result = Onboarding.call(json!({}), &ctx).await.unwrap();

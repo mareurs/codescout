@@ -240,6 +240,7 @@ mod tests {
                 guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(
                     Default::default(),
                 )),
+                workspace_override: None,
             },
         )
     }
@@ -347,6 +348,7 @@ mod tests {
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
             guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            workspace_override: None,
         };
         let result = ListFunctions
             .call(json!({ "path": "nonexistent.rs" }), &ctx)

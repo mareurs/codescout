@@ -921,6 +921,7 @@ dependencies {
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
             guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            workspace_override: None,
         };
 
         let registered = auto_register_deps(root, &ctx).await;
@@ -969,6 +970,7 @@ dependencies {
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
             guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            workspace_override: None,
         };
 
         let first = auto_register_deps(root, &ctx).await;

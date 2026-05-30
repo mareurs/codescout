@@ -36,6 +36,7 @@ async fn test_ctx_with_project() -> (tempfile::TempDir, ToolContext) {
                 crate::tools::section_coverage::SectionCoverage::new(),
             )),
             guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            workspace_override: None,
         },
     )
 }
@@ -51,6 +52,7 @@ async fn test_ctx_no_project() -> ToolContext {
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
     }
 }
 
@@ -1027,6 +1029,7 @@ async fn memory_write_routes_to_project_dir() {
             crate::tools::section_coverage::SectionCoverage::new(),
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
     };
 
     // Write memory to mcp-server project

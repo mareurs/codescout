@@ -230,7 +230,20 @@ impl CodeScoutServer {
             peer,
             section_coverage: self.section_coverage.clone(),
             guide_hints_emitted: self.guide_hints_emitted.clone(),
+            workspace_override: None,
         }
+    }
+    /// Phase 2: extract an optional `workspace` pin from tool input. The value
+    /// is a path string, canonicalized to match the registry's canonical-root
+    /// keys. No tool consumes this yet — Phase 3 wires `with_project_at`.
+    /// See docs/plans/2026-05-30-per-request-workspace-pinning.md.
+    fn extract_workspace_override(input: &Value) -> Option<std::path::PathBuf> {
+        let raw = input.get("workspace")?.as_str()?;
+        if raw.trim().is_empty() {
+            return None;
+        }
+        let p = std::path::PathBuf::from(raw);
+        Some(std::fs::canonicalize(&p).unwrap_or(p))
     }
 
     async fn acquire_write_guard_if_writing(
@@ -500,7 +513,8 @@ impl CodeScoutServer {
 
         let input: Value = Self::parse_input(req.arguments);
 
-        let ctx = self.build_context(progress, peer);
+        let mut ctx = self.build_context(progress, peer);
+        ctx.workspace_override = Self::extract_workspace_override(&input);
 
         let timeout_secs = if tool_skips_server_timeout(&req.name) {
             None
@@ -2734,6 +2748,7 @@ mod guide_hint_tests {
             peer: None,
             section_coverage: server.section_coverage.clone(),
             guide_hints_emitted: server.guide_hints_emitted.clone(),
+            workspace_override: None,
         }
     }
 
