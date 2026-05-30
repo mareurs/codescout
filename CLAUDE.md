@@ -534,7 +534,26 @@ This project has a companion Claude Code plugin at **`../claude-plugins/codescou
 **What it does:**
 - `SessionStart` hook (`hooks/session-start.sh`) — injects tool guidance + memory hints into every session
 - `SubagentStart` hook (`hooks/subagent-guidance.sh`) — same for all subagents
-- `PreToolUse` hook on `Grep|Glob|Read` (`hooks/semantic-tool-router.sh`) — **blocks native Read/Grep/Glob on source files**, redirecting to codescout MCP tools
+- `PreToolUse` hook on `Grep|Glob|Read|Bash|Edit|Write` (`hooks/pre-tool-guard.sh`) — **hard-denies (`permissionDecision: deny`) native Read/Grep/Glob/Edit/Write on source files and native Bash**, redirecting to codescout MCP tools
+
+**Full hook inventory** (per `hooks/hooks.json`) — beyond the three above, the plugin wires:
+
+*PreToolUse (guards — hard `permissionDecision: deny`):*
+- `mcp__codescout__(edit_code|edit_file|edit_markdown|create_file)` → `worktree-write-guard.sh` — blocks codescout write tools when in a git worktree until `workspace(activate)` has run (clears the `.cs-worktree-pending` marker).
+- `Bash` → `git-worktree-guard.sh` — denies worktree-ambiguous destructive git verbs from Bash; requires `git -C <path>` (single-worktree repos carved out).
+- `mcp__.*__read_file` → `il4-deny-hook.sh` — IL4: hard-denies `read_file` on `.md` paths, redirecting to `read_markdown`.
+
+*PreToolUse (advisory — `exit 0` + injected hint):*
+- `mcp__.*__run_command` → `il3-warn-hook.sh` — IL3: warns (does not block) when piping unbounded `run_command` output to a log-trimmer; points at the `@cmd_*` buffer. (`il3-deny-hook.sh` exists on disk but is **not** registered — IL3 is warn-only.)
+- `Task` → `pre-task-hint.sh` — on the first subagent dispatch of a session, points at the `reconnaissance` skill.
+- `mcp__codescout__edit_code` → `pre-edit-hint.sh` — on the first shape-changing edit of a session, points at recon-for-shape-changes.
+
+*PostToolUse (state sync):*
+- `EnterWorktree` → `worktree-activate.sh` — injects workspace guidance, drops the `.cs-worktree-pending` write-block marker, symlinks `.codescout/` into the worktree.
+- `mcp__.*__workspace` → `cs-activate-project.sh` — records the declared workspace (statusline) and removes `.cs-worktree-pending` (unblocks write tools).
+
+*Stop:*
+- `goal-stop-hook.sh` — queries codescout goal-tracker artifacts at turn end and surfaces refresh-staleness in the stop reason; fail-open; disable via `.claude/codescout-companion.json {"goal_stop_hook": false}`.
 
 **Critical implication for working on this codebase:**
 The `PreToolUse` hook will **block** any attempt to use the native `Read`, `Grep`, or `Glob` tools on source code files (`.rs`, `.ts`, `.py`, etc). You will see `PreToolUse:Read hook error` if you try.
@@ -546,8 +565,8 @@ The `PreToolUse` hook will **block** any attempt to use the native `Read`, `Grep
 - `mcp__codescout__semantic_search(query)` — concept-level search
 - `mcp__codescout__read_file(path)` — for non-source files (markdown, toml, json)
 
-**Cross-repo work (companion ≥ 1.11.1):**
-The Bash branch of `pre-tool-guard.sh` is workspace-scoped. A leading `cd <dir>` resolving outside the active project's `$CWD` (absolute, quoted, tilde-expanded, or relative `../sibling`) passes through, so cross-repo git ops work natively. Out-of-shape commands (`pushd`, `bash -c '...'`, no `cd` prefix) still hit the default block — for those, switch the codescout workspace explicitly:
+**Cross-repo work (companion: hardened 2026-05-21):**
+The Bash branch of `pre-tool-guard.sh` no longer allows a `cd`-escape. **All native `Bash` is hard-denied and redirected to `run_command`**, whose cwd is sandboxed to the active project. For a sibling repo's git, run from the project root via `run_command(command="git -C /abs/path <subcommand>")` — no `cd` needed. For non-git work in a sibling (or out-of-shape commands like `pushd` / `bash -c '...'`), switch the codescout workspace explicitly:
 
 ```
 workspace(action="activate", path="/path/to/sibling", read_only=false)
