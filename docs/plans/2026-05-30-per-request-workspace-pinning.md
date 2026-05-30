@@ -232,6 +232,55 @@ only if dirty entries are observed pinning the map open.
   surface). **Remove** the `concurrent_activation_warning` guard for pinned flows; resolve the
   unpinned-under-concurrency open question (Risks) — either declare it unsupported or retain the warning
   *solely* on the `default_workspace_root` path.
+## Phase 0 — Call-site census (completed 2026-05-30)
+
+*`references` (LSP-aware, not grep) on the full accessor surface. Two corrections to the Phase-0
+framing above: the "four accessors" are actually **six**, and ~40% of raw refs are tests. Production
+sites needing pinning ≈ **50**, validating the R2 "smaller than ~100" claim.*
+
+### Accessor surface (6, not 4)
+
+| Accessor | Def | Kind | Raw refs / files | Resolves |
+|---|---|---|---|---|
+| `AgentInner::active_project()` | `agent/mod.rs:96` | read primitive | 31 / 8 | focused project of the one live workspace |
+| `AgentInner::active_project_mut()` | `agent/mod.rs:101` | **mutating** primitive | 18 / 6 (10 test) | mutable focused project |
+| `Agent::require_project_root()` | `agent/mod.rs:505` | read → `Result<PathBuf>` | 44 / 21 (~15 test) | focused root or error |
+| `Agent::with_project(\|p\|…)` | `agent/mod.rs:690` | read closure | 61 / 13 (~27 test) | `&ActiveProject` of focused |
+| `Agent::project_root()` | `agent/mod.rs:962` | read → `Option<PathBuf>` | 18 / 11 (~3 test) | focused root or None |
+| `Workspace::focused_project_root()` | `workspace.rs:339` | Level-2 primitive | 5 / 2 | (internal; called by `resolve_root`) |
+
+`require_project_root`, `project_root`, and `with_project` all delegate to `active_project()` /
+`focused_project_root()` internally — so **selector-aware resolution is added once at these primitives**
+plus the closure accessor; tool handlers then change `agent.X()` → `agent.X_for(ctx.selector())`.
+
+### Classification — production sites
+
+| Bucket | Count (approx) | Migration |
+|---|---|---|
+| **Needs pinning** — per-request read/write tool handlers | ~50 | route through `with_project_for(selector)` / `require_project_root_for(selector)` / `project_root_for(selector)`; selector from `ctx.workspace_override` |
+| **Fine on default** — session/server-level | ~18 | unchanged; resolve via `default_workspace_root` (server caps, heartbeat, usage recording, `mcp_resources`, prompt gen, onboarding, auto_register) |
+| **Internal plumbing** — the accessors themselves | ~22 (in `agent/mod.rs`) | add `_for(selector)` variants here; not per-site edits |
+| **Tests** | ~55 | unaffected (resolve via default); add new tests for pinned paths |
+
+### Needs-pinning, by tool — READ (Phase 3)
+`symbols` (`symbols.rs:225`), `references` (`references.rs:72`), `symbol_at` (`77,247`), `list_overview`
+(`227,278,385`), `call_graph` (`414`), `tree` (`77,180`), `ast` (`15`), `grep` (`52`), `read_file`
+(`62` + `active_project:339`), `read_markdown` (`76`), `semantic_search` (`active_project:193`),
+`semantic/index` (`96,199`), `library` (`active_project:30`).
+
+### Needs-pinning, by tool — WRITE (Phase 4; also per-entry `write_lock`)
+`edit_file` (`243,360,429`), `create_file` (`47`), `edit_code` (`178`), `edit_markdown` (`627`),
+`memory` writes (`mod.rs` + `active_project:427,795,833,905`), `approve_write` (`43`), `run_command`
+(`161`). `active_project_mut` writers: `library` (`177`), `fs` (`387`), `semantic/index` (`149`).
+
+### Highest-care sites (flag for Phase 3)
+The ~10 **direct `inner.active_project()` grabs** (`memory/mod.rs`, `semantic_search.rs`, `read_file.rs`,
+`library.rs`, `semantic/index.rs`) take their own `inner.read().await` then reach in — bypassing the
+`with_project` closure. Under per-`Workspace` locking the lock acquisition changes shape, so these
+**cannot swap the accessor in place**; they migrate to the closure form `with_project_for(selector,
+|p| …)` or a new `active_project_for(selector)` helper that resolves the registry entry first. These are
+the migration's sharp edges — not the closure callers, which retrofit mechanically.
+
 ## Testing
 
 - Port the bug file's 5-concurrent-activation scenario into an integration test that pins each
