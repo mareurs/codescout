@@ -24,6 +24,7 @@
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-05-30 | med | scout-existing-sync-helper-before-subprocess | would have spawned `git rev-parse` on the LSP-start hot path | validated |
+| W-2 | 2026-05-30 | high | correctness-vs-performance phase split | R1 plan would have landed deadlock-prone locking before any test could exercise it | validated |
 
 ---
 
@@ -70,6 +71,25 @@
 **Status:** fixed-verified — plan revised to `Workspace`-registry granularity (R2) 2026-05-30 after architecture-snow-lion review; revised Design / Lifetime-contract / Phases read coherently against the scouted code (`src/workspace.rs:316,373`, `src/agent/mod.rs:83,330`).
 
 **Fix idea / Pointer:** Plan Design + Lifetime-contract sections; this session.
+
+---
+## W-2 — Correctness-vs-performance phase split kept the deadlock risk out of the bug fix
+
+**Observed:** 2026-05-30, implementing the per-request-workspace-pinning plan (Phases 1–3) on branch `feat/per-request-workspace-pinning`.
+
+**Pattern:** architecture-snow-lion recognized that regime-3 is fixed by per-request resolution + multi-residence **alone** — per-`Workspace` locking is a separate *performance* concern, not a correctness requirement. Split the work: Phase 3 (correctness) ships under the **existing** single `AgentInner` `RwLock`; Phase 4 (per-entry `Arc<RwLock>` + eviction) lands later behind the lock-ordering gate. The whole read surface (13 tools) shipped + proven without touching the lock model.
+
+**Counterfactual:** The R1 plan bundled per-`Workspace` locking into Phase 1. Following it would have landed a deadlock-prone lock-reordering **before any test could exercise it** (with one resident entry, per-entry locks never contend), coupling the bug fix to the riskiest part of the design. The split let the bug close on a proven lock model and quarantined the deadlock risk in Phase 4 with its own gate — every Phase-1–3 commit stayed reversible.
+
+**Confirming data points:**
+1. Phase 3 closed regime-3 for all reads (`read_file_concurrent_pins_no_cross_workspace_bleed` — 5 tasks, shared Agent, multi-thread, zero bleed) under the **unchanged** single `RwLock` — proving locking wasn't needed for correctness.
+2. Pending: Phase 4 validates the per-entry lock model behind the lock-ordering gate.
+
+**Impact:** high — separated a correctness fix from a deadlock-risk optimization; shipped the fix reversibly, per commit.
+
+**Promote-when:** A second concurrency fix separates correctness (resolution) from performance (locking) and ships correctness first. At 2 datapoints, note in CLAUDE.md: "for concurrency fixes, land correctness under the existing lock model before changing lock granularity."
+
+**Status:** validated — Phase 3 shipped + proven; Phase 4 pending.
 
 ---
 ## Template for new entries

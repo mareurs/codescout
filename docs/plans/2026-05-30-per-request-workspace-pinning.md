@@ -325,3 +325,69 @@ list into the phases that own them. What remains is genuinely open:
 - Per-actor map: MCP `RequestContext` has no per-subagent key → impossible.
 - Mitigation only (shipped): the `concurrent_activation_warning` makes the race *visible* but a
   clobbered subagent still can't proceed correctly — it can only bail or serialize.
+
+## Progress & Resume (2026-05-30)
+
+**Status: Phases 0–3 COMPLETE — the entire READ surface honors per-request pinning;
+regime-3 is fixed for all reads.** Work lives on branch
+**`feat/per-request-workspace-pinning`** (forked from `experiments`). Nothing pushed;
+`master`/`experiments` untouched. Every commit green: `check`/`clippy --all-targets`,
+`fmt`, suite **2626 pass + 1 pre-existing reranker env failure** (`tests/retrieval_integration.rs:88`,
+external Qdrant stack — unrelated).
+
+### Commit ledger
+- `ccee0849` — R2 plan re-grain (Workspace registry, not ActiveProject)
+- `b3592b2c` — Phase 0 call-site census
+- `840259cc` — Phase 1: registry data structure, no behavior change
+- `05fa47a5` — Phase 2: `ToolContext.workspace_override` plumbing
+- `ae596995` — Phase 3: `read_file` + regime-3 proof + the core machinery
+- `1b1fcc0c` — Phase 3: read-nav tools batch + `require_project_root_for`
+- `898853a7` — Phase 3: direct-grab reads (`semantic_search`, `library` list)
+
+### Machinery built (`src/agent/mod.rs`)
+- `AgentInner.workspaces: HashMap<PathBuf, Workspace>` + `default_workspace_root: Option<PathBuf>`
+  (replaced `workspace: Option<Workspace>`); `default_workspace()/_mut()` helpers.
+- `AgentInner::build_workspace(root, read_only, ProjectResources)` — under-lock assembly w/ lock-reuse scan.
+- `Agent::load_project_resources(root)` — lock-free I/O → `ProjectResources` struct.
+- `Agent::ensure_resident(root, read_only)` — load+cache WITHOUT clear/default-change (multi-residence).
+- `Agent::with_project_at(workspace_override, |p| ...)` — Level-1 pin → focused `&ActiveProject`.
+- `Agent::project_root_for / require_project_root_for / security_config_for` — pinned twins;
+  `project_security_config(p)` extracted.
+- Tools read `ctx.workspace_override` (canonicalized in `server.rs::extract_workspace_override`).
+
+### Read tools migrated (13)
+`read_file`, `symbols`, `references`, `symbol_at`, `list_overview`, `call_graph`, `symbol/query`,
+`tree`, `ast`, `grep`, `read_markdown`, `semantic_search`, `library` (list).
+
+### Proof tests (regime-3)
+- `src/tools/read_file.rs`: `read_file_honors_workspace_override_pin`,
+  `read_file_concurrent_pins_no_cross_workspace_bleed` (5-task multi-thread, zero bleed).
+- `src/agent/mod.rs`: `require_project_root_for_resolves_pin_over_default` (accessor seam),
+  `activate_registers_default_workspace_by_canonical_root` (Phase-1 invariant).
+
+### NEXT — Phase 4 (writes + per-Workspace locking + eviction). START WITH THE LOCK-ORDERING PROOF.
+1. **Lock-ordering proof FIRST (the gate).** Per-`Workspace` `RwLock` + per-project `write_lock`
+   (`Arc<Mutex>`) + cross-process `write.lock` flock: prove one consistent acquisition order, no
+   inversion, no cross-entry cycle. Mirror `src/lsp/manager.rs:326-344` (check-then-act; never hold
+   the registry-map lock while probing an entry's `write_lock`). This is the design's classic deadlock
+   failure mode — write the proof/test before any write tool moves.
+2. **Per-`Workspace` `Arc<RwLock<Workspace>>`** — change `workspaces` values so different-root calls
+   don't serialize. Second touch of `with_project_at` + the accessors (anticipated in the R2 ADR).
+3. **Eviction sweep** — see "## Lifetime contract": idle-TTL reusing the LSP pool's `idle_timeout_secs`;
+   quiescence = EVERY activated project in a workspace has `write_lock.try_lock()` free AND `dirty_files`
+   empty; `default_workspace_root` exempt; drop the entry (LSP client ages out on its own TTL).
+4. **Migrate write tools** under the resolved project's write guard (likely need `with_project_at_mut` /
+   `require_write_root_for` twins): `edit_file`, `edit_code`, `create_file`, `edit_markdown`,
+   `approve_write`, `core/guards`, `run_command`, `memory` writes, `semantic/index` (reindex),
+   `library` register (`active_project_mut`). Sites in Phase 0 "Needs-pinning … WRITE" (line refs may drift).
+5. Add a concurrent-WRITE regression (two pinned writes to different workspaces: no serialize, no corrupt).
+
+### Then Phase 5
+Document the `workspace` param in the three prompt surfaces (`src/prompts/source.md`
+server_instructions + onboarding, `builders.rs`); **bump `ONBOARDING_VERSION`** (param semantics reach
+onboarding); **remove** `concurrent_activation_warning` for pinned flows; resolve the unpinned-
+`default_workspace_root`-under-concurrency open question (Risks).
+
+### Ship (when complete)
+Standard Ship Sequence (CLAUDE.md); **summon Docs Lotus Frog before merging to `master`**; update F-1
+SHA citations to master-side after cherry-pick. Bug: `docs/issues/2026-05-30-shared-server-global-active-project-race.md`.
