@@ -1203,17 +1203,32 @@ impl Agent {
         }
     }
 
-    /// Returns the canonical project_id used for call-edge cache entries.
-    ///
-    /// This is the focused sub-project name (e.g. `"codescout"`) when a
-    /// workspace is active, or `ROOT_PROJECT_ID` otherwise. Must match the
-    /// value used by the `call_graph` tool when it upserts edges — both sides
-    /// call this method so they always agree.
+    /// Returns the canonical `project_id` for the session-default workspace's
+    /// call-edge cache entries — the focused sub-project id, or `ROOT_PROJECT_ID`.
+    /// Delegates to `call_edges_project_id_for(None)`; kept as the ambient entry
+    /// point for callers that operate on the default workspace.
     pub async fn call_edges_project_id(&self) -> String {
+        self.call_edges_project_id_for(None).await
+    }
+
+    /// Pinned twin of `call_edges_project_id`: the call-edge `project_id` of the
+    /// workspace named by `workspace_override` (resident-on-demand), or the
+    /// session default when `None`. `call_graph` (read + upsert) and
+    /// `invalidate_call_edges_for` BOTH resolve `project_id` through here, so they
+    /// always agree on the cache namespace under a pin.
+    pub async fn call_edges_project_id_for(&self, workspace_override: Option<&Path>) -> String {
+        if let Some(root) = workspace_override {
+            let _ = self.ensure_resident(root.to_path_buf(), None).await;
+        }
         let inner = self.inner.read().await;
-        inner
-            .default_workspace()
-            .and_then(|ws| ws.focused.clone())
+        let ws = match workspace_override {
+            Some(root) => {
+                let key = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+                inner.workspaces.get(&key)
+            }
+            None => inner.default_workspace(),
+        };
+        ws.and_then(|ws| ws.focused.clone())
             .unwrap_or_else(|| crate::workspace::ROOT_PROJECT_ID.to_string())
     }
 
@@ -1255,6 +1270,41 @@ impl Agent {
         })
         .await;
     }
+
+    /// Pinned twin of `invalidate_call_edges`: invalidates the call-edge cache for
+    /// `path` in the workspace named by `workspace_override` (or the default).
+    /// Resolves BOTH the DB root and the `project_id` namespace from the pinned
+    /// workspace so it agrees with `call_graph`'s pinned upsert/read. Best-effort,
+    /// same no-op conditions as the ambient twin.
+    pub async fn invalidate_call_edges_for(
+        &self,
+        workspace_override: Option<&Path>,
+        path: &std::path::Path,
+    ) {
+        let root = self
+            .with_project_at(workspace_override, |p| Ok(p.root.clone()))
+            .await
+            .ok();
+        let Some(root) = root else { return };
+
+        let cache_db = root.join(".codescout/call_edges.db");
+        if !cache_db.exists() {
+            return;
+        }
+
+        let project_id = self.call_edges_project_id_for(workspace_override).await;
+        let path = path.to_path_buf();
+        let _ = tokio::task::spawn_blocking(move || {
+            let conn = match crate::tools::symbol::call_edges::cache::open_db(&root) {
+                Ok(c) => c,
+                Err(_) => return,
+            };
+            let cache = crate::tools::symbol::call_edges::cache::EdgeCache::new(&conn, &project_id);
+            let _ = cache.invalidate_file(&path);
+        })
+        .await;
+    }
+
 }
 
 // ---------------------------------------------------------------------------

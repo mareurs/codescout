@@ -415,7 +415,10 @@ impl Tool for CallGraph {
             .agent
             .require_project_root_for(ctx.workspace_override.as_deref())
             .await?;
-        let project_id = ctx.agent.call_edges_project_id().await;
+        let project_id = ctx
+            .agent
+            .call_edges_project_id_for(ctx.workspace_override.as_deref())
+            .await;
 
         // Open the DB on a blocking thread — open_db does filesystem I/O
         // (mkdir, sqlite open, PRAGMA/DDL migrations) that must not run on the
