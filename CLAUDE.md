@@ -562,6 +562,25 @@ Per Iron Law 4, restore the original workspace before turn end. The MCP server i
 - Can be overridden via `.claude/codescout-companion.json`
 - `block_reads: false` in that config to disable blocking (dev/debug use)
 
+### Concurrent multi-workspace: one server, one active project
+
+codescout's active project is **process-global** — one slot per server process. Parallel
+subagents within a single session share that one server, so if they `workspace(activate)`
+*different* paths concurrently it is **last-writer-wins**: a subagent can silently read
+another's worktree. The project `name` is identical across worktrees of one repo, so only the
+full `project_root` reveals the swap.
+
+**Rule:** for parallel multi-workspace work, use **separate Claude Code windows** (separate
+processes → separate active-project slots → no race). Within a single session, do **not** have
+concurrent subagents activate *different* workspaces — keep them in the parent's active
+workspace, or serialize the activations. A `concurrent_activation_warning` now appears on
+`activate` responses when a rapid foreign switch is detected (mitigation, not a fix).
+
+Root-cause fix (per-request workspace pinning) is tracked in
+`docs/plans/2026-05-30-per-request-workspace-pinning.md`; bug at
+`docs/issues/2026-05-30-shared-server-global-active-project-race.md`. Separate worktrees of one
+repo across separate processes are fine — the kotlin per-worktree LSP isolation bug is fixed
+(`docs/issues/2026-05-30-cross-worktree-kotlin-jvm-shared-system-path.md`).
 ## Language-Specific LSP Issues
 
 See codescout memory `gotchas` (LSP section) for Kotlin multi-instance conflicts,

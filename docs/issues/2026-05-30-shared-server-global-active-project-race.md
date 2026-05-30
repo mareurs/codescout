@@ -1,7 +1,7 @@
 ---
-status: open
+status: mitigated
 opened: 2026-05-30
-closed:
+closed: 2026-05-30
 severity: high
 owner: marius
 related: [2026-05-30-cross-worktree-kotlin-jvm-shared-system-path]
@@ -71,6 +71,7 @@ Secondary effect — LSP churn: the kotlin mux socket is keyed per workspace **p
 active root thrashed, the server tried to stand up a *second* kotlin mux for a different
 worktree path and it failed, falling back to direct LSP and disconnecting (see Evidence).
 
+**Confirmed 2026-05-30 (code trace).** The slot is `Agent { inner: Arc<RwLock<AgentInner>> }` (`src/agent/mod.rs:51`); `CodeScoutServer` is `#[derive(Clone)]` holding `agent: Agent` by value, so per-session clones share the same `Arc` → one global `AgentInner`. The MCP `RequestContext<RoleServer>` passed to `call_tool` (`src/server.rs:742`) exposes only `peer` (the single shared connection), `id` (a fresh per-*request* id, not a stable caller id), and `ct` (cancellation). **There is no per-subagent identity** — subagents ride the parent's one `Peer`, so the server cannot distinguish callers. This rules out a per-actor active-project map (no actor key to map on).
 ## Evidence
 
 ### Server diagnostic log — activation thrash + mux fragmentation
@@ -101,34 +102,35 @@ response had echoed each agent's own path regardless.
    **Evidence:** server diagnostic log subsection.
 
 ## Fix
-Plan (not yet implemented — design decision for the owner):
-- **Option A (preferred):** scope the active project **per-MCP-session / per-connection**
-  instead of process-global, so concurrent callers don't share one slot.
-- **Option B:** if global state must stay, make `workspace(activate)` under a foreign
-  active project return a `RecoverableError` ("another caller holds a different active
-  project") rather than silently winning — surfaces the race instead of hiding it.
-- Independent of A/B: the activate response should reflect *durable post-call* state, not
-  echo the caller's argument, so "success" can't lie.
 
+Scouted 2026-05-30. Options, re-ranked after the code trace:
+
+- **~~Per-actor active-project map~~ — INFEASIBLE.** Needs a stable per-caller key; MCP `RequestContext` provides none (peer shared, request id per-call). Dead end — do not attempt.
+- **~~Per-session keying~~ — does not fix the reported case.** Subagents share the parent's session/connection, so a `session_id`-keyed slot wouldn't isolate them (would only help true multi-client HTTP).
+- **Per-request workspace pinning — the only fully-correct fix for concurrent subagents.** Each tool call optionally names its target workspace; tools resolve the project per-call from the request instead of the ambient global slot. **Large:** project resolution is ambient across ~17 files / 100+ call sites (`require_project_root`, `Agent::with_project`, `active_project()`), concentrated in `src/agent/mod.rs`. Needs its own plan + staged refactor. Not a single-session change.
+- **Mitigation — make drift visible:** `activate`/`status` report the *true current* global active path (not the echoed request); warn when `activate` switches away from a path touched seconds ago. Cheap, ships standalone. Converts silent contamination into a detectable signal — but a subagent that sees the warning still can't pin, so it can only bail/serialize, not proceed correctly.
+- **Mitigation — reject concurrent foreign activate:** error on `activate` to a different path while another is 'recent'. Forces serialization; needs an 'in-flight' heuristic.
+
+No fix implemented yet — awaiting direction (per-request pinning is a planned effort vs. mitigation-now).
+**Shipped 2026-05-30 (mitigation only — root cause NOT addressed; status `mitigated`):**
+an activation drift-visibility guard. `Agent::note_activation` (`src/agent/mod.rs`) records the last activation `(root, Instant)`; on a `workspace(activate)` that switches to a *different* root within 5s of the prior one, the response carries a `concurrent_activation_warning` (wired in `ActivateProject::call`, `src/tools/config/mod.rs`). Pure decision in `Agent::concurrent_switch_warning`; regression test `concurrent_switch_warning_flags_rapid_foreign_switch` (`src/agent/mod.rs` tests). This converts the *silent* contamination into a visible signal — it does NOT remove the race (a clobbered subagent still can't pin its workspace).
+
+**Root-cause fix** is planned separately: `docs/plans/2026-05-30-per-request-workspace-pinning.md` (per-request workspace pinning — the only correct fix for concurrent subagents; ~100 call sites, phased).
 ## Tests added
 None yet — bug just logged. A regression test should assert that two interleaved
 `activate(path_a)` / `activate(path_b)` + `status` sequences each observe their own root
 (per-session isolation), or that the second activate is rejected (Option B).
 
 ## Workarounds
-- On a single shared server, **do not activate different workspaces concurrently.**
-  Serialize activations (one workspace at a time), or give each workspace its own
-  codescout server process (separate Claude Code session) — at the JVM RAM cost
-  documented in the related cross-worktree bug.
-- When auditing which workspace is active, check `project_root`, **not** `name` — name
-  is identical across worktrees of one repo and masks the drift.
 
+**Primary (fully avoids the bug today):** for parallel multi-workspace work, use **separate Claude Code windows** (separate processes → separate active-project slots) rather than parallel subagents within one session that each activate a different workspace. Confirmed: the race is specific to concurrent callers on *one* server process; separate CC instances each own their slot.
+
+**Within a single session:** do not have parallel subagents activate *different* workspaces. If subagents must run concurrently, keep them all in the parent's single active workspace (don't switch).
+
+**Auditing:** check the full `project_root` path, not `workspace.name` — name is identical across worktrees of one repo and hides the swap.
 ## Resume
-Trace the active-project slot: `symbols(name="ActiveProject", include_body=true)` and grep
-`src/server.rs` for where the activate handler writes it; confirm it is a single
-process-global field (not keyed by session id). Then prototype Option A (per-connection
-scoping) or Option B (reject-foreign-activate) and add the interleaved-activate regression.
 
+Mitigation shipped (drift now visible). Root-cause fix tracked in `docs/plans/2026-05-30-per-request-workspace-pinning.md` — start at Phase 0 (inventory the ~100 project-resolution call sites via `references` on `require_project_root` / `Agent::with_project` / `active_project` / `focused_project_root`). Keep this bug `mitigated` until pinning lands; then flip to `fixed` and cite the master-side SHA.
 ## References
 - Related: `docs/issues/2026-05-30-cross-worktree-kotlin-jvm-shared-system-path.md`
 - `docs/manual/src/concepts/cross-process-write-serialization.md` (per-ActiveProject mutex)
