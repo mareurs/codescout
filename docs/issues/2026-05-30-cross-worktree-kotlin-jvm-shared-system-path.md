@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-05-30
-closed:
+closed: 2026-05-30
 severity: medium
 owner: marius
 related: [2026-05-30-shared-server-global-active-project-race]
@@ -101,19 +101,26 @@ $ pgrep -af GradleDaemon | wc -l
    **Evidence:** shared-system-dir subsection.
 
 ## Fix
-Plan (not yet implemented — design decision for the owner):
-- **Option A:** parameterize `system_dir` and `gradle_home` by `workspace_hash` (per-worktree
-  isolation) — stops shared-index aliasing, at the cost of N Gradle caches + N JVMs (RAM
-  unchanged, but no silent shared-state corruption).
-- **Option B (saves RAM too):** key the mux on the worktree's **common git dir**
-  (`git rev-parse --git-common-dir`) rather than the worktree path, so worktrees of one repo
-  deliberately **share** one mux + one JVM — the original mux intent, extended to worktrees.
-- Either way, document the chosen semantics in `kotlin-lsp-multiplexer.md` (see R-11).
 
+Implemented on `experiments` in **`d68ef72a`** (cherry-pick to master pending — update this to the master-side SHA after the Standard Ship Sequence, per CLAUDE.md § "After cherry-pick").
+
+Chosen shape (user decision 2026-05-30): **system-dir per-worktree, Gradle home per-repo.**
+
+`src/lsp/servers/mod.rs` kotlin branch:
+- `--system-path` is now `codescout-mux-kotlin-lsp-<ws_hash>` where `ws_hash = crate::lsp::mux::workspace_hash(workspace_root)` — per worktree path, so distinct worktrees no longer alias one IntelliJ `system/index` dir.
+- `GRADLE_USER_HOME` is now `codescout-mux-gradle-<repo_hash>` where `repo_hash = workspace_hash(detect_worktree_info(root).main_repo ∨ root)` — worktrees of one repo share a single dependency cache (no multi-GB re-download); different repos are isolated.
+
+Keying granularity now matches the mux's own per-path socket key (`src/lsp/mux/mod.rs:20`). Same-worktree multi-instance still shares one system dir (correct — they share the JVM via the mux too).
+
+Note on RAM: N concurrently-active worktrees still need N kotlin-lsp JVMs (different code states can't share one JVM correctly). This fix removes the *silent shared-index aliasing*, not the inherent per-worktree JVM cost.
+
+Live end-to-end verification (rebuild + `/mcp` restart + two-worktree mux inspection showing distinct `--system-path`) pending a server reconnect.
 ## Tests added
-None yet. A test should assert either (A) two worktree paths produce different system-paths,
-or (B) two worktrees of one repo produce the **same** mux socket (shared JVM), per the chosen fix.
 
+`src/lsp/servers/mod.rs` `tests` module (verified red→green this session):
+- `kotlin_system_path_is_per_workspace` — distinct workspace roots produce distinct `--system-path` (this is the regression for the aliasing bug; was red on the fixed-path code).
+- `kotlin_system_path_is_stable_for_same_workspace` — same root → same system dir (deterministic; same-worktree multi-instance + per-path mux keep sharing one index).
+- `kotlin_gradle_home_shared_across_worktrees_of_one_repo` — worktree + its main repo share `GRADLE_USER_HOME` but get distinct system dirs (linked-worktree fixture exercising `detect_worktree_info`).
 ## Workarounds
 - For Kotlin, work in **one worktree per repo** at a time. Each extra concurrently-active
   worktree adds a ~2 GiB JVM against a shared, unguarded system dir.
@@ -121,11 +128,8 @@ or (B) two worktrees of one repo produce the **same** mux socket (shared JVM), p
   does not protect you across worktrees.
 
 ## Resume
-Decide Option A vs B. For B: prototype keying `socket_path_for_workspace` /
-`lock_path_for_workspace` on `git rev-parse --git-common-dir` (falling back to the path for
-non-git roots), and verify two worktrees of one repo land on one socket. Add the keying test
-in `src/lsp/mux/mod.rs` tests.
 
+Fixed. Remaining: (1) live verify after `/mcp` reconnect — activate two kotlin worktrees, confirm `pgrep -af 'kotlin-lsp'` shows distinct `--system-path` suffixes; (2) ship to master via Standard Ship Sequence and update the Fix-section SHA to master-side.
 ## References
 - Related: `docs/issues/2026-05-30-shared-server-global-active-project-race.md`
 - `src/lsp/mux/mod.rs:14,20` (per-path mux keying)
