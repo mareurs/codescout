@@ -26,15 +26,17 @@ long-form content only to sessions that ask.
 
 ## Live topics
 
-Shipped in Commit A (`e68f3a94`):
+Live as of 2026-05-31 (7 topics):
 
 | Topic | Source file | Hint trigger |
 |---|---|---|
 | `librarian` | `src/prompts/guides/librarian.md` | Any librarian-adapter call (unconditional) |
 | `tracker-conventions` | `src/prompts/guides/tracker-conventions.md` | — (manual `get_guide` only) |
-| `progressive-disclosure` | `src/prompts/guides/progressive-disclosure.md` | `run_command` / `symbols` buffer overflow |
+| `progressive-disclosure` | `src/prompts/guides/progressive-disclosure.md` | `run_command` / `symbols` / read overflow |
 | `error-handling` | `src/prompts/guides/error-handling.md` | — (manual `get_guide` only) |
-
+| `workspace-state` | `src/prompts/guides/workspace-state.md` | — (manual `get_guide` only) |
+| `iron-laws-detail` | `src/prompts/guides/iron-laws-detail.md` | — (manual `get_guide` only) |
+| `symbol-navigation` | `src/prompts/guides/symbol-navigation.md` | — (manual `get_guide` only) — shipped 2026-05-31 |
 ## Mechanism
 
 First-call hint shipped in Commit C (U8+U9). Behavior:
@@ -55,6 +57,8 @@ First-call hint shipped in Commit C (U8+U9). Behavior:
 Tests live in `src/server.rs::guide_hint_tests` (6 cases).
 
 ## Candidates
+
+**Status update (2026-05-31):** #3 `symbol-navigation` is **SHIPPED** — now the 7th live topic (`src/prompts/guides/symbol-navigation.md`, recovered from the deleted `language_nav.rs` at `69b8918d~1`). #5 `bug-tracking-workflow`, #6 `git-workflow`, #7 `release-checklist` are **server-inappropriate** — do NOT promote: their content is codescout's *own* project conventions (sourced from this repo's `CLAUDE.md`), and `get_guide` bodies are `include_str!`'d into the binary shipped to *every* consumer project, so baking them in leaks codescout's dev process into unrelated projects (Agent-Agnostic Design violation). They stay in `CLAUDE.md` / a project skill.
 
 | # | Topic slug | Source | Notes |
 |---|---|---|---|
@@ -79,7 +83,7 @@ Tests live in `src/server.rs::guide_hint_tests` (6 cases).
 ## Status
 
 
-- Last updated: 2026-05-19
+- Last updated: 2026-05-31
 - Owner: U7 (Surface D delivery) → U10 (mechanism update after U8+U9 landed)
-- Status: **shipped** — 4 live topics, first-call hint mechanism active.
-  Candidates table remains as the promotion backlog.
+- Status: **shipped** — 7 live topics (added workspace-state, iron-laws-detail, symbol-navigation since 2026-05-19), first-call hint mechanism active.
+  Candidates table remains as the promotion backlog; project-specific candidates (#5–#7) marked server-inappropriate 2026-05-31.

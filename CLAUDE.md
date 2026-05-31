@@ -127,7 +127,7 @@ Observed tool calls from real sessions judged against the ideal — our internal
 tool selection quality. Entries are T-NNN with tool, verdict (legitimate / debatable /
 wrong-tool), and prompt gap. Feeds Iron Law and Anti-Patterns updates.
 
-This file is a **librarian artifact** (id: `b3fa993849ac83ab`). Params hold the structured
+This file is a **librarian artifact** (id: `f2ecdd76a6189efb`). Params hold the structured
 T-N table; body holds full per-observation analysis. For the deep-dive on the
 augmented-artifact pattern (body / params / render_template, the `merge=false`
 foot-gun, why managed files refuse direct `read_markdown`), see
@@ -140,7 +140,7 @@ foot-gun, why managed files refuse direct `read_markdown`), see
 **How to append (Claude):**
 ```
 # 1. Add structured entry to params
-artifact_augment(id="b3fa993849ac83ab", merge=true,
+artifact_augment(id="f2ecdd76a6189efb", merge=true,
   params={observations: [...existing..., {id:"T-NNN", tool:"...", verdict:"...", ...}]})
 
 # 2. Add analysis prose to body
@@ -527,6 +527,26 @@ copy — changes take effect immediately on the next connect without any version
 **Style guide for prompt surface edits:**
 see `src/prompts/README.md` for the 7 writing rules. Load that only when actually
 editing a prompt surface — it's not needed otherwise.
+### Verify the slice before committing (shared-branch hazard)
+
+The `server_instructions` slice is under a hard **2200-byte cap**, enforced by
+`prompts::redesign_invariants::source_md_under_cap`. The gate is load-bearing —
+it catches over-cap edits that no manual review sees (Claude Code silently
+truncates the MCP `initialize.instructions` field at ~2 KB, cutting *inside*
+the slice rather than just the dynamic suffix).
+
+- **Run `cargo test --lib prompt` before any prompt-surface edit is ready to
+  commit.** If `source_md_under_cap` fails, do NOT raise the cap or bless the
+  snapshot to match — move content to a `get_guide(topic)` and leave a pointer
+  in the slice (`src/prompts/README.md` rule 8).
+- **On a shared branch, re-measure the slice on *current* HEAD.** A concurrent
+  commit can grow the slice under you. `git log --oneline -1` first, then
+  re-check the byte count, before trusting any earlier measurement or running
+  `UPDATE_PROMPT_SNAPSHOTS=1` — otherwise you bless the over-cap state into the
+  fixture and ship a truncated slice.
+
+Datapoints: the gate has fired twice on over-cap prompt edits — F-4 (2026-05-28)
+and F-8/W-5 (2026-05-31) in `docs/trackers/prompt-guide-refactor-session-log.md`.
 ## Companion Plugin: codescout-companion
 
 This project has a companion Claude Code plugin at **`../claude-plugins/codescout-companion/`** that is **always active** when working on codescout. You must be aware of it.

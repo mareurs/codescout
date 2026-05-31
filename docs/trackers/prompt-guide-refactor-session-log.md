@@ -138,6 +138,7 @@ This measurement must precede the V2 decision.
 | F-5 | 2026-05-28 | med | static-slice-cut | fixed-verified | `extract_surface` uses substring `find()`; any content quoting the marker breaks slice extraction |
 | F-6 | 2026-05-28 | med | iron-law-6 | fixed-verified | Parent should brief subagent on triggered guide topics, not just on file paths |
 | F-7 | 2026-05-28 | med | codescout-tool | fixed-verified | `edit_markdown(action='replace')` silently drops `<!-- @surface NAME -->` / `<!-- @end -->` markers from the section body |
+| F-8 | 2026-05-31 | high | 2kb-cap | fixed-verified | Concurrent Phase-5 commit (b13c8c66) pushed slice to 2272 B (over cap) + left snapshot stale; re-scout caught before bless/commit |
 
 ## Wins Index
 
@@ -147,6 +148,7 @@ This measurement must precede the V2 decision.
 | W-2 | 2026-05-28 | high | Recon revealed substrate vindicates Iron Law 6 | Avoided shipping soft-hint extension without compensating discipline; subagents would be structurally blind to parent-triggered topics | validated |
 | W-3 | 2026-05-28 | high | Project's `source_md_under_cap` invariant caught the over-cap edit before merge | Iron Law 6 would have shipped malformed (truncated mid-law); silent multi-session subagent-quality regression | validated |
 | W-4 | 2026-05-28 | high | Iron Law 6 briefing pattern empirically validated by subagent self-assessment | Without file-and-symbol-anchored brief, subagent would have spent ≥10 exploratory tool calls discovering the architecture | validated |
+| W-5 | 2026-05-31 | high | Re-measured byte budget on current HEAD (not a cached count) | Would have blessed snapshot to 2337 B + committed a red branch (cap+snapshot failing); silent prod slice truncation | validated |
 
 ---
 
@@ -521,6 +523,51 @@ Symptoms:
 **Fix idea / Pointer:** Shipped this turn (next commit on `experiments`). Future deeper fix could move surface markers to dedicated heading-separated blocks in `source.md` so they never live inside section bodies in the first place — but the gate is sufficient for now. The librarian's `artifact(update)` write path (`src/librarian/tools/update.rs:117`) ALSO benefits from the gate — call_site updated to pass `false` (defensive in depth; tracker bodies don't typically contain markers but a future tracker documenting THIS feature might quote them).
 
 ---
+
+---
+
+## F-8 — Concurrent Phase-5 commit pushed the slice over cap mid-session; re-scout caught it before bless/commit
+
+**Observed:** 2026-05-31, during a prompt-refresh task (promoting `symbol-navigation` as a 7th `get_guide` topic) on branch `feat/per-request-workspace-pinning`.
+
+**When:** Mid-task, after wiring the new topic and before re-blessing the snapshot. An early scout measured the `server_instructions` slice at 1921 B (clean HEAD `4b814627`). The user said "a lot of things checked in" and asked me to re-read the seam.
+
+**Expected (cached scout):** slice = 1921 B; adding the `symbol-navigation` Deeper-guidance line (~65 B) -> ~1986 B, comfortably under the 2200 cap.
+
+**Got (re-scout):** HEAD had advanced *twice during the session* to `b13c8c66 "Phase 5 polish — when-to-pin guidance"`, whose commit added a ~351 B "when-to-pin" paragraph to the same slice (Workspace gate section). HEAD's slice was already **2272 B — 72 over the 2200 cap** — and the commit left the snapshot fixture stale at 1921 B. So `source_md_under_cap` AND `prompt_surfaces_server_instructions_snapshot` were already red on HEAD, independent of my change. My +65 B took the working tree to 2337.
+
+**Probable cause:** Concurrent work on a shared branch (the project's documented hazard). A prompt-surface commit grew the always-loaded slice without re-running `cargo test --lib prompt` (cap) or re-blessing the snapshot — fix-then-forget, but for an invariant rather than a tracker.
+
+**Workaround / fix:** Per README rule 8 ("don't raise the cap — move content to get_guide"), relocated the verbose when-to-pin mechanism into `get_guide("workspace-state")` (new `## Per-call workspace pinning` section) and left a 2-line directive + pointer in the slice. Slice -> 2130 B (70 under cap). Re-blessed the snapshot. Then added `symbol-navigation`. `cargo test` green (2690 passed).
+
+**Secondary scout miss:** my own pre-edit scout enumerated the two drift-guard tests (`every_topic_has_non_empty_body`, `schema_enum_matches_registered_topics`) but missed the hardcoded `assert_eq!(names.len(), 6)` in `get_guide_lists_topics_with_no_arg` (`src/tools/guide.rs:124`). Caught by the test gate, not the scout — count-pinning assertions live outside the obviously-named "drift guard" tests.
+
+**Severity:** high — without the re-scout I would have blessed the snapshot to 2337 B (baking the over-cap state into the fixture) and committed a branch whose slice truncates mid-content in production.
+
+**Status:** fixed-verified — slice 2130 B, snapshot re-blessed, full suite green (2690 passed). This is the **second** firing of the `source_md_under_cap` gate on a prompt-surface edit (F-4 was the first), satisfying W-3's promote-when (see W-5).
+
+**Fix idea / Pointer:** Reconnaissance on a shared branch must re-measure byte budgets on *current* HEAD, never trust a cached count from earlier in the session — `git log --oneline -1` first, then re-`awk | wc -c` the slice.
+
+---
+
+## W-5 — Re-measuring the slice on current HEAD caught a concurrent commit's cap breach before bless/commit
+
+**Observed:** 2026-05-31, same task as F-8.
+
+**Pattern:** Before blessing a prompt-surface snapshot or committing, re-measure the `server_instructions` slice against the 2200 cap on *current* HEAD — do not trust a byte count taken earlier in the session. On a shared branch, HEAD moves under you.
+
+**Counterfactual:** The cached scout said 1921 B. Trusting it, I would have run `UPDATE_PROMPT_SNAPSHOTS=1` and blessed the fixture to 2337 B (silently encoding the over-cap state), then committed — shipping a slice that Claude Code truncates mid-content in `initialize.instructions`. The defect would have surfaced only as slow, multi-session subagent-quality degradation (the same silent-regression class as W-3's counterfactual). Instead: caught pre-bless, fixed by relocating content to `get_guide`, slice back to 2130 B.
+
+**Confirming data points:**
+1. `source_md_under_cap` fired at 2337 B the first time I ran `cargo test --lib prompts`, with the byte count and "move it to get_guide" hint.
+2. HEAD measured at `b13c8c66` (advanced from session-start `4b814627`); HEAD's own slice = 2272 B > 2200, confirming the breach predated my edit.
+3. Second time the `source_md_under_cap` invariant caught a silent over-cap prompt-surface edit (F-4 was the first) — meeting W-3's stated promote-when.
+
+**Impact:** high — gated a malformed-slice shipment, the same silent-degradation class W-3 named.
+
+**Promote-when:** W-3's promote-when is now **met** (gate fired a second time). Promote to CLAUDE.md "Verification Patterns": *"The `source_md_under_cap` invariant (`src/prompts/mod.rs`) is load-bearing. Run `cargo test --lib prompt` before any prompt-surface edit is considered ready; on a shared branch, re-measure the slice on current HEAD because concurrent commits grow it under you."*
+
+**Status:** validated
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
