@@ -624,9 +624,18 @@ impl Tool for EditMarkdown {
             .into());
         }
 
-        let root = ctx.agent.require_project_root_for(ctx.workspace_override.as_deref()).await?;
-        let security = ctx.agent.security_config_for(ctx.workspace_override.as_deref()).await;
-        let session_roots = ctx.agent.session_write_roots_snapshot_for(ctx.workspace_override.as_deref()).await;
+        let root = ctx
+            .agent
+            .require_project_root_for(ctx.workspace_override.as_deref())
+            .await?;
+        let security = ctx
+            .agent
+            .security_config_for(ctx.workspace_override.as_deref())
+            .await;
+        let session_roots = ctx
+            .agent
+            .session_write_roots_snapshot_for(ctx.workspace_override.as_deref())
+            .await;
         let resolved = crate::util::path_security::validate_write_path(
             path,
             &root,
@@ -808,10 +817,16 @@ impl Tool for EditMarkdown {
             cov.update_mtime(&resolved);
         }
 
-        ctx.agent.reload_config_if_project_toml_for(ctx.workspace_override.as_deref(), &resolved).await;
+        ctx.agent
+            .reload_config_if_project_toml_for(ctx.workspace_override.as_deref(), &resolved)
+            .await;
         ctx.lsp.notify_file_changed(&resolved).await;
-        ctx.agent.invalidate_call_edges_for(ctx.workspace_override.as_deref(), &resolved).await;
-        ctx.agent.mark_file_dirty_for(ctx.workspace_override.as_deref(), resolved.clone()).await;
+        ctx.agent
+            .invalidate_call_edges_for(ctx.workspace_override.as_deref(), &resolved)
+            .await;
+        ctx.agent
+            .mark_file_dirty_for(ctx.workspace_override.as_deref(), resolved.clone())
+            .await;
 
         // Coverage hint: warn about unread sections.
         let all_headings = crate::tools::file_summary::parse_all_headings(&new_content);

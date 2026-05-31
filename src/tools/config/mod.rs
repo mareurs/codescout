@@ -138,10 +138,15 @@ impl Tool for ActivateProject {
                 } else {
                     HintScenario::SwitchAway
                 };
-                let project_root = ctx.agent.require_project_root_for(ctx.workspace_override.as_deref()).await?;
+                let project_root = ctx
+                    .agent
+                    .require_project_root_for(ctx.workspace_override.as_deref())
+                    .await?;
                 let prewarm_langs = ctx
                     .agent
-                    .with_project_at(ctx.workspace_override.as_deref(), |p| Ok(p.config.project.languages.clone()))
+                    .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                        Ok(p.config.project.languages.clone())
+                    })
                     .await
                     .unwrap_or_default();
                 crate::lsp::prewarm_lsp_background(
@@ -171,7 +176,9 @@ impl Tool for ActivateProject {
 
         let prewarm_langs = ctx
             .agent
-            .with_project_at(ctx.workspace_override.as_deref(), |p| Ok(p.config.project.languages.clone()))
+            .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                Ok(p.config.project.languages.clone())
+            })
             .await
             .unwrap_or_default();
         crate::lsp::prewarm_lsp_background(ctx.lsp.clone(), root.clone(), &prewarm_langs);
@@ -296,7 +303,9 @@ impl Tool for ProjectStatus {
             // path returned.
             let project_id = ctx
                 .agent
-                .with_project_at(ctx.workspace_override.as_deref(), |p| Ok(p.project_id().to_string()))
+                .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                    Ok(p.project_id().to_string())
+                })
                 .await?;
             let qdrant_stats = match crate::retrieval::client::RetrievalClient::from_env().await {
                 Ok(client) => {

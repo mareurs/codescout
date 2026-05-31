@@ -40,11 +40,18 @@ impl Tool for ApproveWrite {
         super::guard_worktree_write(ctx).await?;
         let raw = super::require_str_param(&input, "path")?;
 
-        let root = ctx.agent.require_project_root_for(ctx.workspace_override.as_deref()).await.map_err(|_| {
-            RecoverableError::new("approve_write: no active project — activate a project first")
-        })?;
+        let root = ctx
+            .agent
+            .require_project_root_for(ctx.workspace_override.as_deref())
+            .await
+            .map_err(|_| {
+                RecoverableError::new("approve_write: no active project — activate a project first")
+            })?;
 
-        let security = ctx.agent.security_config_for(ctx.workspace_override.as_deref()).await;
+        let security = ctx
+            .agent
+            .security_config_for(ctx.workspace_override.as_deref())
+            .await;
 
         if !security.file_write_enabled {
             return Err(RecoverableError::new(
@@ -56,7 +63,9 @@ impl Tool for ApproveWrite {
         let resolved = crate::util::path_security::validate_approve_path(raw, &root, &security)
             .map_err(|e| RecoverableError::new(e.to_string()))?;
 
-        ctx.agent.add_session_write_root_for(ctx.workspace_override.as_deref(), resolved.clone()).await;
+        ctx.agent
+            .add_session_write_root_for(ctx.workspace_override.as_deref(), resolved.clone())
+            .await;
 
         Ok(json!({
             "approved": resolved.to_string_lossy(),

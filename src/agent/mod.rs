@@ -723,10 +723,9 @@ impl Agent {
         let ws = match workspace_override {
             Some(root) => {
                 let key = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-                inner
-                    .workspaces
-                    .get_mut(&key)
-                    .ok_or_else(|| anyhow::anyhow!("pinned workspace not resident: {}", key.display()))?
+                inner.workspaces.get_mut(&key).ok_or_else(|| {
+                    anyhow::anyhow!("pinned workspace not resident: {}", key.display())
+                })?
             }
             None => {
                 let root = inner.default_workspace_root.clone().ok_or_else(|| {
@@ -758,7 +757,8 @@ impl Agent {
             .with_project_at_mut(workspace_override, |p| {
                 let toml_path = p.root.join(".codescout").join("project.toml");
                 if path == toml_path {
-                    if let Ok(fresh) = crate::config::project::ProjectConfig::load_or_default(&p.root)
+                    if let Ok(fresh) =
+                        crate::config::project::ProjectConfig::load_or_default(&p.root)
                     {
                         p.config = fresh;
                     }
@@ -1304,7 +1304,6 @@ impl Agent {
         })
         .await;
     }
-
 }
 
 // ---------------------------------------------------------------------------

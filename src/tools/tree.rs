@@ -78,7 +78,10 @@ async fn list_dir_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
         .agent
         .project_root_for(ctx.workspace_override.as_deref())
         .await;
-    let security = ctx.agent.security_config_for(ctx.workspace_override.as_deref()).await;
+    let security = ctx
+        .agent
+        .security_config_for(ctx.workspace_override.as_deref())
+        .await;
     let path = crate::util::path_security::validate_read_path(
         raw_path,
         project_root.as_deref(),
@@ -184,7 +187,10 @@ async fn glob_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
         .agent
         .project_root_for(ctx.workspace_override.as_deref())
         .await;
-    let security = ctx.agent.security_config_for(ctx.workspace_override.as_deref()).await;
+    let security = ctx
+        .agent
+        .security_config_for(ctx.workspace_override.as_deref())
+        .await;
     let search_path = crate::util::path_security::validate_read_path(
         raw_path,
         project_root.as_deref(),

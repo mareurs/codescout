@@ -102,7 +102,9 @@ async fn create_file_concurrent_pins_no_cross_workspace_bleed() {
     }
 
     // Default (unpinned) project is workspace 0; tasks pin 0..N concurrently.
-    let agent = Agent::new(Some(dirs[0].path().to_path_buf())).await.unwrap();
+    let agent = Agent::new(Some(dirs[0].path().to_path_buf()))
+        .await
+        .unwrap();
 
     let mut handles = Vec::new();
     for (i, root_i) in roots.iter().cloned().enumerate() {
@@ -127,9 +129,15 @@ async fn create_file_concurrent_pins_no_cross_workspace_bleed() {
     // Each file lands ONLY in its own workspace root — no cross-bleed.
     for (i, root_i) in roots.iter().enumerate() {
         let own = root_i.join(format!("created-{i}.txt"));
-        assert!(own.exists(), "task {i}'s file must land in its own workspace");
+        assert!(
+            own.exists(),
+            "task {i}'s file must land in its own workspace"
+        );
         let body = std::fs::read_to_string(&own).unwrap();
-        assert!(body.contains(&format!("BODY-{i}")), "task {i} body mismatch: {body:?}");
+        assert!(
+            body.contains(&format!("BODY-{i}")),
+            "task {i} body mismatch: {body:?}"
+        );
         for (j, root_j) in roots.iter().enumerate() {
             if j != i {
                 assert!(

@@ -16,7 +16,10 @@ async fn resolve_path(input: &Value, ctx: &ToolContext) -> anyhow::Result<PathBu
         .agent
         .project_root_for(ctx.workspace_override.as_deref())
         .await;
-    let security = ctx.agent.security_config_for(ctx.workspace_override.as_deref()).await;
+    let security = ctx
+        .agent
+        .security_config_for(ctx.workspace_override.as_deref())
+        .await;
     crate::util::path_security::validate_read_path(path_str, project_root.as_deref(), &security)
 }
 

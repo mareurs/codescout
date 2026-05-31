@@ -158,8 +158,14 @@ impl Tool for RunCommand {
         let run_in_background = parse_bool_param(&input["run_in_background"]);
         let interactive = parse_bool_param(&input["interactive"]);
         let cwd_param = input["cwd"].as_str();
-        let root = ctx.agent.require_project_root_for(ctx.workspace_override.as_deref()).await?;
-        let security = ctx.agent.security_config_for(ctx.workspace_override.as_deref()).await;
+        let root = ctx
+            .agent
+            .require_project_root_for(ctx.workspace_override.as_deref())
+            .await?;
+        let security = ctx
+            .agent
+            .security_config_for(ctx.workspace_override.as_deref())
+            .await;
 
         // --- Interactive mode: elicitation-driven stdin loop ---
         if interactive {
