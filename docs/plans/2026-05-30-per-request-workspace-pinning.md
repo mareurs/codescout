@@ -389,6 +389,18 @@ external Qdrant stack — unrelated).
   `activate_registers_default_workspace_by_canonical_root` (Phase-1 invariant).
 
 ### NEXT — Phase 4 (writes + per-Workspace locking + eviction). START WITH THE LOCK-ORDERING PROOF.
+> **Phase 5 update (2026-05-31): KEYSTONE DONE (`1a65bff2`).** The `workspace` pin is now
+> **advertised** on every pinnable tool — central `Tool::pinnable()` (default true, except
+> session/global/registry + librarian) + `inject_workspace_param` in `list_tools` + tests. With
+> 4a's resolution machinery + the keystone, **the regime-3 fix is now usable** (agents can discover
+> and pass `workspace`; the injected property carries inline usage guidance). **Remaining Phase 5:**
+> (a) broader `server_instructions` / onboarding prose (a "when to pin" paragraph — the per-property
+> description already gives inline guidance, so this is refinement); (b) `ONBOARDING_VERSION` bump
+> **only if** the onboarding/`builders.rs` surface changes (server_instructions is live-on-connect, no
+> bump); (c) the unpinned-concurrent open question — recommend keeping `concurrent_activation_warning`
+> ONLY on the unpinned default path and retiring it for pinned flows; (d) **live `/mcp` end-to-end
+> verify** (user step: `cargo build --release` + reconnect, confirm a pinned subagent hits the right
+> workspace) before the ship sequence.
 > **Update (2026-05-31, session 2).** 7/7 pinned write accessors built (incl.
 > `invalidate_call_edges_for` + `call_edges_project_id_for`); the latent Phase-3 `call_graph`
 > READ `project_id` gap is **closed** (it pinned root but resolved the cache namespace ambiently).
