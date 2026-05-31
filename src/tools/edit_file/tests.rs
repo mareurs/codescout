@@ -52,6 +52,95 @@ async fn test_ctx() -> ToolContext {
     }
 }
 
+/// Phase 4a regression (regime 3, write form): a write tool pinned to workspace
+/// A must WRITE to A even when the session default is B. RED if `create_file`
+/// resolves the ambient default — which is the write-side last-writer-wins bug.
+#[tokio::test]
+async fn create_file_honors_workspace_override_pin() {
+    let dir_a = tempdir().unwrap();
+    let dir_b = tempdir().unwrap();
+    std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+    std::fs::create_dir_all(dir_b.path().join(".codescout")).unwrap();
+    let root_a = std::fs::canonicalize(dir_a.path()).unwrap();
+    let root_b = std::fs::canonicalize(dir_b.path()).unwrap();
+
+    // Default (unpinned) project is B; pin THIS request to A.
+    let agent = Agent::new(Some(dir_b.path().to_path_buf())).await.unwrap();
+    let mut ctx = test_ctx().await;
+    ctx.agent = agent;
+    ctx.workspace_override = Some(root_a.clone());
+
+    crate::tools::create_file::CreateFile
+        .call(json!({ "path": "pinned.txt", "content": "ALPHA" }), &ctx)
+        .await
+        .unwrap();
+
+    assert!(
+        root_a.join("pinned.txt").exists(),
+        "pinned write must land in workspace A"
+    );
+    assert!(
+        !root_b.join("pinned.txt").exists(),
+        "pinned write must NOT land in the default workspace B (regime-3 bleed)"
+    );
+}
+
+/// Phase 4a regression (regime 3, concurrent write form): N tasks share ONE
+/// Agent, each pins a distinct workspace and creates a file concurrently on a
+/// multi-thread runtime. Each file must land in ITS OWN workspace on disk with
+/// zero cross-bleed — the write-side of the global-slot last-writer-wins bug.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn create_file_concurrent_pins_no_cross_workspace_bleed() {
+    const N: usize = 5;
+    let mut dirs = Vec::new();
+    let mut roots = Vec::new();
+    for _ in 0..N {
+        let d = tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join(".codescout")).unwrap();
+        roots.push(std::fs::canonicalize(d.path()).unwrap());
+        dirs.push(d); // keep tempdirs alive
+    }
+
+    // Default (unpinned) project is workspace 0; tasks pin 0..N concurrently.
+    let agent = Agent::new(Some(dirs[0].path().to_path_buf())).await.unwrap();
+
+    let mut handles = Vec::new();
+    for (i, root_i) in roots.iter().cloned().enumerate() {
+        let agent = agent.clone();
+        handles.push(tokio::spawn(async move {
+            let mut ctx = test_ctx().await;
+            ctx.agent = agent;
+            ctx.workspace_override = Some(root_i);
+            crate::tools::create_file::CreateFile
+                .call(
+                    json!({ "path": format!("created-{i}.txt"), "content": format!("BODY-{i}") }),
+                    &ctx,
+                )
+                .await
+                .unwrap();
+        }));
+    }
+    for h in handles {
+        h.await.unwrap();
+    }
+
+    // Each file lands ONLY in its own workspace root — no cross-bleed.
+    for (i, root_i) in roots.iter().enumerate() {
+        let own = root_i.join(format!("created-{i}.txt"));
+        assert!(own.exists(), "task {i}'s file must land in its own workspace");
+        let body = std::fs::read_to_string(&own).unwrap();
+        assert!(body.contains(&format!("BODY-{i}")), "task {i} body mismatch: {body:?}");
+        for (j, root_j) in roots.iter().enumerate() {
+            if j != i {
+                assert!(
+                    !root_j.join(format!("created-{i}.txt")).exists(),
+                    "task {i}'s file leaked into workspace {j} (regime-3 write bleed)"
+                );
+            }
+        }
+    }
+}
+
 async fn project_ctx() -> (tempfile::TempDir, ToolContext) {
     let dir = tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();

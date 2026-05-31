@@ -15,7 +15,10 @@ pub async fn guard_worktree_write(ctx: &ToolContext) -> anyhow::Result<()> {
     if ctx.agent.is_project_explicitly_activated().await {
         return Ok(());
     }
-    let root = ctx.agent.require_project_root().await?;
+    let root = ctx
+        .agent
+        .require_project_root_for(ctx.workspace_override.as_deref())
+        .await?;
     let worktrees = crate::util::path_security::list_git_worktrees(&root);
     if worktrees.is_empty() {
         return Ok(());
