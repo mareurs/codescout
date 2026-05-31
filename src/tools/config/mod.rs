@@ -138,10 +138,10 @@ impl Tool for ActivateProject {
                 } else {
                     HintScenario::SwitchAway
                 };
-                let project_root = ctx.agent.require_project_root().await?;
+                let project_root = ctx.agent.require_project_root_for(ctx.workspace_override.as_deref()).await?;
                 let prewarm_langs = ctx
                     .agent
-                    .with_project(|p| Ok(p.config.project.languages.clone()))
+                    .with_project_at(ctx.workspace_override.as_deref(), |p| Ok(p.config.project.languages.clone()))
                     .await
                     .unwrap_or_default();
                 crate::lsp::prewarm_lsp_background(
@@ -171,7 +171,7 @@ impl Tool for ActivateProject {
 
         let prewarm_langs = ctx
             .agent
-            .with_project(|p| Ok(p.config.project.languages.clone()))
+            .with_project_at(ctx.workspace_override.as_deref(), |p| Ok(p.config.project.languages.clone()))
             .await
             .unwrap_or_default();
         crate::lsp::prewarm_lsp_background(ctx.lsp.clone(), root.clone(), &prewarm_langs);
@@ -242,7 +242,7 @@ impl Tool for ProjectStatus {
         // --- Essential config + library section ---
         let (root, languages, embeddings_model, lib_count, lib_indexed) = ctx
             .agent
-            .with_project(|p| {
+            .with_project_at(ctx.workspace_override.as_deref(), |p| {
                 let lib_count = p.library_registry.all().len();
                 let lib_indexed = p
                     .library_registry
@@ -296,7 +296,7 @@ impl Tool for ProjectStatus {
             // path returned.
             let project_id = ctx
                 .agent
-                .with_project(|p| Ok(p.project_id().to_string()))
+                .with_project_at(ctx.workspace_override.as_deref(), |p| Ok(p.project_id().to_string()))
                 .await?;
             let qdrant_stats = match crate::retrieval::client::RetrievalClient::from_env().await {
                 Ok(client) => {
@@ -330,7 +330,7 @@ impl Tool for ProjectStatus {
         // --- Memory staleness section ---
         let staleness_result = ctx
             .agent
-            .with_project(|p| {
+            .with_project_at(ctx.workspace_override.as_deref(), |p| {
                 let memories_dir = p.root.join(".codescout").join("memories");
                 crate::memory::anchors::check_all_memories(&p.root, &memories_dir)
             })
@@ -428,7 +428,7 @@ async fn build_activation_response(
         stored_onboarding_version,
     ) = ctx
         .agent
-        .with_project(|p| {
+        .with_project_at(ctx.workspace_override.as_deref(), |p| {
             let memories = p.memory.list().unwrap_or_default();
             let security = if !p.read_only {
                 Some((p.config.security.profile, p.config.security.shell_enabled))

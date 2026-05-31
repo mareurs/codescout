@@ -43,7 +43,7 @@ impl Tool for WriteMemory {
         let content = super::require_str_param(&input, "content")?;
         let private = parse_bool_param(&input["private"]);
         ctx.agent
-            .with_project(|p| {
+            .with_project_at(ctx.workspace_override.as_deref(), |p| {
                 if private {
                     p.private_memory.write(topic, content)?;
                 } else {
@@ -81,7 +81,7 @@ impl Tool for ReadMemory {
         let topic = super::require_str_param(&input, "topic")?;
         let private = parse_bool_param(&input["private"]);
         ctx.agent
-            .with_project(|p| {
+            .with_project_at(ctx.workspace_override.as_deref(), |p| {
                 let store = if private {
                     &p.private_memory
                 } else {
@@ -128,7 +128,7 @@ impl Tool for ListMemories {
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         let include_private = parse_bool_param(&input["include_private"]);
         ctx.agent
-            .with_project(|p| {
+            .with_project_at(ctx.workspace_override.as_deref(), |p| {
                 if include_private {
                     let shared = p.memory.list()?;
                     let private = p.private_memory.list()?;
@@ -211,7 +211,7 @@ impl Tool for DeleteMemory {
         let topic = super::require_str_param(&input, "topic")?;
         let private = parse_bool_param(&input["private"]);
         ctx.agent
-            .with_project(|p| {
+            .with_project_at(ctx.workspace_override.as_deref(), |p| {
                 let memories_dir = if private {
                     p.private_memory.delete(topic)?;
                     p.private_memory.dir().to_path_buf()
@@ -414,11 +414,25 @@ async fn resolve_memory_dir(
     input: &Value,
     ctx: &ToolContext,
 ) -> anyhow::Result<std::path::PathBuf> {
-    let project_param = input.get("project_id").and_then(|v| v.as_str());
+    let project_param = input
+        .get("project_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    // Pin the memory dir to the workspace named by ctx.workspace_override
+    // (resident-on-demand), else the session default (regime-3).
+    if let Some(root) = ctx.workspace_override.as_deref() {
+        let _ = ctx.agent.ensure_resident(root.to_path_buf(), None).await;
+    }
     let inner = ctx.agent.inner.read().await;
-    if let Some(ws) = inner.default_workspace() {
+    let ws = match ctx.workspace_override.as_deref() {
+        Some(root) => {
+            let key = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+            inner.workspaces.get(&key)
+        }
+        None => inner.default_workspace(),
+    };
+    if let Some(ws) = ws {
         let project_id = project_param
-            .map(|s| s.to_string())
             .or_else(|| ws.focused.clone())
             .unwrap_or_else(|| crate::workspace::ROOT_PROJECT_ID.to_string());
         Ok(ws.memory_dir_for_project(&project_id))
@@ -590,7 +604,7 @@ impl Tool for Memory {
                 // Write markdown file — route to per-project dir when `project` param given.
                 if private {
                     ctx.agent
-                        .with_project(|p| {
+                        .with_project_at(ctx.workspace_override.as_deref(), |p| {
                             p.private_memory.write(topic, content)?;
                             Ok(())
                         })
@@ -616,7 +630,7 @@ impl Tool for Memory {
 
                 // Seed/merge path anchors (best-effort, non-fatal)
                 if !private {
-                    if let Ok(root) = ctx.agent.require_project_root().await {
+                    if let Ok(root) = ctx.agent.require_project_root_for(ctx.workspace_override.as_deref()).await {
                         let memories_dir = resolve_memory_dir(&input, ctx).await.unwrap_or_else(
                             |_| root.join(".codescout").join("memories"),
                         );
@@ -632,7 +646,7 @@ impl Tool for Memory {
                 // Create semantic anchors (best-effort, non-fatal)
                 if !private {
                     let path_files: HashSet<String> = {
-                        if let Ok(root) = ctx.agent.require_project_root().await {
+                        if let Ok(root) = ctx.agent.require_project_root_for(ctx.workspace_override.as_deref()).await {
                             let memories_dir =
                                 resolve_memory_dir(&input, ctx).await.unwrap_or_else(|_| {
                                     root.join(".codescout").join("memories")
@@ -679,7 +693,7 @@ impl Tool for Memory {
                 if private {
                     let buf = std::sync::Arc::clone(&ctx.output_buffer);
                     ctx.agent
-                        .with_project(|p| {
+                        .with_project_at(ctx.workspace_override.as_deref(), |p| {
                             match p.private_memory.read(topic)? {
                                 Some(content) => {
                                     apply_sections_filter(content, topic, &sections, &buf)
@@ -714,7 +728,7 @@ impl Tool for Memory {
                     let memories_dir = resolve_memory_dir(&input, ctx).await?;
                     let shared_store = crate::memory::MemoryStore::from_dir(memories_dir)?;
                     let shared = shared_store.list()?;
-                    let private = ctx.agent.with_project(|p| p.private_memory.list()).await?;
+                    let private = ctx.agent.with_project_at(ctx.workspace_override.as_deref(), |p| p.private_memory.list()).await?;
                     Ok(json!({ "shared": shared, "private": private }))
                 } else {
                     let memories_dir = resolve_memory_dir(&input, ctx).await?;
@@ -729,7 +743,7 @@ impl Tool for Memory {
                 // Delete markdown file — route to per-project dir when `project` param given.
                 if private {
                     ctx.agent
-                        .with_project(|p| {
+                        .with_project_at(ctx.workspace_override.as_deref(), |p| {
                             p.private_memory.delete(topic)?;
                             Ok(())
                         })
@@ -790,16 +804,12 @@ impl Tool for Memory {
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| "unstructured".to_string());
 
-                let project_id = {
-                    let inner = ctx.agent.inner.read().await;
-                    let p = inner.active_project().ok_or_else(|| {
-                        super::RecoverableError::with_hint(
-                            "No active project.",
-                            "Call workspace(action='activate') first.",
-                        )
-                    })?;
-                    p.config.project.name.clone()
-                };
+                let project_id = ctx
+                    .agent
+                    .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                        Ok(p.config.project.name.clone())
+                    })
+                    .await?;
 
                 let dense = ctx.agent.memory_embedder().await.map_err(|e| {
                     super::RecoverableError::with_hint(
@@ -828,16 +838,12 @@ impl Tool for Memory {
                 let limit = super::optional_u64_param(&input, "limit").unwrap_or(5) as usize;
                 let bucket_filter = input["bucket"].as_str();
 
-                let project_id = {
-                    let inner = ctx.agent.inner.read().await;
-                    let p = inner.active_project().ok_or_else(|| {
-                        super::RecoverableError::with_hint(
-                            "No active project.",
-                            "Call workspace(action='activate') first.",
-                        )
-                    })?;
-                    p.config.project.name.clone()
-                };
+                let project_id = ctx
+                    .agent
+                    .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                        Ok(p.config.project.name.clone())
+                    })
+                    .await?;
 
                 // Embed via the shared dense-embedder seam so the query vector
                 // lives in the same space as the memories collection's stored
@@ -900,16 +906,12 @@ impl Tool for Memory {
                     )
                 })?;
 
-                let project_id = {
-                    let inner = ctx.agent.inner.read().await;
-                    let p = inner.active_project().ok_or_else(|| {
-                        super::RecoverableError::with_hint(
-                            "No active project.",
-                            "Call workspace(action='activate') first.",
-                        )
-                    })?;
-                    p.config.project.name.clone()
-                };
+                let project_id = ctx
+                    .agent
+                    .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                        Ok(p.config.project.name.clone())
+                    })
+                    .await?;
 
                 let store = ctx.agent.semantic_memory_store().await?;
                 store.delete(&project_id, id).await?;
@@ -918,7 +920,7 @@ impl Tool for Memory {
             }
             "refresh_anchors" => {
                 let topic = require_topic_param(&input)?;
-                let root = ctx.agent.require_project_root().await?;
+                let root = ctx.agent.require_project_root_for(ctx.workspace_override.as_deref()).await?;
                 let memories_dir = resolve_memory_dir(&input, ctx).await.unwrap_or_else(|_| {
                     root.join(".codescout").join("memories")
                 });
