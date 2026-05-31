@@ -394,15 +394,20 @@ external Qdrant stack — unrelated).
 > READ `project_id` gap is **closed** (it pinned root but resolved the cache namespace ambiently).
 > **6 write tools fully migrated + audited complete:** `edit_file`, `create_file`,
 > `symbol/edit_code`, `markdown/edit_markdown`, `approve_write`, `library`(register).
-> **STILL TO MIGRATE (mapped below):**
-> - `semantic/index.rs` — 5 sites: `@96`/`@199` read blocks (`inner.read()`+`active_project()`),
->   `@149` mut block (`active_project_mut()`), `@187` root, `@288` dirty. Needs `with_project_at`/
->   `with_project_at_mut` closure rewrites (the `@149` block is `.await`-free → wraps cleanly).
-> - `memory/mod.rs` — 7 sites: `@427`/`@795`/`@833`/`@905` `active_project()`, `@619`/`@635`/`@921`
->   `require_project_root()`. Classify read-vs-write per site (memory has both recall and remember).
-> - `run_command/mod.rs` `@161`/`@162` (root + security) — quick 2-swap; audit confirms no other sites.
-> - `core/guards.rs:18` `require_project_root()` — shared write guard; check `ctx.workspace_override`
->   is in scope (may need the selector threaded in).
+> **DONE (session 2 cont.):** `run_command` (@161/162) ✅, `core::guards::guard_worktree_write` (@18) ✅,
+> the read-tool `security_config` gap (`tree`/`ast`/`grep`/`read_markdown`) ✅, and the **concurrent-write
+> regression** (`create_file_concurrent_pins_no_cross_workspace_bleed` + `..._honors_workspace_override_pin`
+> in `edit_file/tests.rs`) ✅ — regime-3 writes PROVEN for the migrated surface.
+>
+> **STILL TO MIGRATE (COMPLETE audit — the earlier pattern missed `\.with_project(`; this is the re-run):**
+> - `memory/mod.rs` — **15 sites**: `with_project(` closures @46/84/131/214/593/682/717/732,
+>   `active_project()` blocks @427/795/833/905, `require_project_root()` @619/635/921. Per-request
+>   pinnable (recall/remember). Each `with_project(|p|…)` → `with_project_at(ctx override, |p|…)`.
+> - `config/mod.rs` — **7 sites**: `require_project_root()` @141, `with_project(` @144/174/245/299/333/431.
+>   Confirm `config` is per-request (vs session-level) before migrating.
+> - `semantic/index.rs` — **7 sites**: `@96`/`@199` read blocks, `@149` mut block (`.await`-free →
+>   `with_project_at_mut`), `@187` root, `@288` dirty, `@284`/`@388` `with_project(` (project_id).
+> - **Session-level — LEAVE ambient by design** (resolve default): `onboarding.rs` (16), `usage.rs` (@40).
 >
 > **Separate latent Phase-3 READ gap (not 4a, but found here):** `tree`(81/187), `ast`(19),
 > `grep`(56), `read_markdown`(80) pin their root but still call ambient `security_config()` — a pinned
