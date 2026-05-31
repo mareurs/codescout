@@ -789,8 +789,10 @@ impl Agent {
                 "active project switched from {} to {} {:?} ago — another caller \
                  (e.g. a concurrent subagent) shares this server's single \
                  active-project slot, so reads may resolve against the wrong \
-                 workspace. For parallel multi-workspace work use separate Claude \
-                 Code windows (separate processes = separate slots).",
+                 workspace. Fix: pass workspace=<absolute path> on each tool call \
+                 to pin resolution per-request instead of activating. For fully \
+                 independent parallel work, separate Claude Code windows also \
+                 isolate (separate processes = separate slots).",
                 prev_root.display(),
                 new_root.display(),
                 since
@@ -1824,10 +1826,12 @@ mod tests {
         assert!(Agent::concurrent_switch_warning(None, a, window).is_none());
 
         // Rapid switch to a DIFFERENT root → warning (the subagent-race signature).
+        // The message must recommend per-request pinning as the primary fix and
+        // separate windows as the fallback — both are guidance contracts.
         let w = Agent::concurrent_switch_warning(Some((a, Duration::from_millis(200))), b, window);
-        assert!(w
-            .as_deref()
-            .is_some_and(|s| s.contains("separate Claude Code windows")));
+        assert!(w.as_deref().is_some_and(|s| {
+            s.contains("workspace=<absolute path>") && s.contains("separate Claude Code windows")
+        }));
 
         // Same-root re-activation → silent (normal return-home / re-activate).
         assert!(

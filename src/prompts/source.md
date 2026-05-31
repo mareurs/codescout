@@ -30,6 +30,12 @@ Subagents inherit these rules. Pass them along.
 After workspace(activate, path=foreign), call workspace(activate, path=home)
 before finishing the turn. Foreign-project state otherwise leaks.
 
+For parallel subagents on DIFFERENT workspaces, do NOT activate (one shared
+active-project slot — last writer wins). Pin per call instead: pass
+workspace=<absolute path> on each tool call. The pin resolves that call
+against the named workspace regardless of the active project; concurrent pins
+never collide. Single-workspace work omits the param.
+
 ## Deeper guidance
 
 Call get_guide(topic) where topic in:

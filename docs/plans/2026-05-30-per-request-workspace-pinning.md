@@ -483,6 +483,31 @@ external Qdrant stack — unrelated).
    `library` register (`active_project_mut`). Sites in Phase 0 "Needs-pinning … WRITE" (line refs may drift).
 5. Add a concurrent-WRITE regression (two pinned writes to different workspaces: no serialize, no corrupt).
 
+> **✅ Phase 5 polish DONE (2026-05-31) — prompt surface + warning message, NO bump.**
+> - **(a) `server_instructions` "when to pin" paragraph** added to the `## Workspace gate`
+>   section of `source.md`: for parallel subagents on different workspaces, do NOT activate —
+>   pin per call with `workspace=<absolute path>`. Invariant `prompt_surfaces_reference_only_real_tools`
+>   green (no backticked snake_case non-tool token introduced).
+> - **(b) NO `ONBOARDING_VERSION` bump** — only the `server_instructions` surface changed
+>   (live-on-connect). The onboarding surface + `builders.rs` were left untouched: the `workspace`
+>   param is **operational** (concurrent subagents, every session), not onboarding-time. Per the
+>   CLAUDE.md surface table, server_instructions = no bump. This follows the *most recent* Phase-5
+>   ledger note (b), superseding the original Phase-5 line that assumed onboarding-surface docs.
+> - **(c) Open question RESOLVED.** Retain `concurrent_activation_warning` on the unpinned
+>   `activate`/`default_workspace_root` path — we do NOT declare unpinned-concurrent "unsupported"
+>   (that would silently corrupt agents who haven't adopted pinning). The plan's "remove for pinned
+>   flows" item is a **no-op**: `note_activation` has a single caller (`config/mod.rs:194`, the
+>   `activate` path), so a pinned tool call never reaches it → structurally cannot trigger the
+>   warning. The substantive change was updating the warning **message** to recommend
+>   `workspace=<absolute path>` pinning as the primary fix (separate windows = fallback); the
+>   regression test `concurrent_switch_warning_flags_rapid_foreign_switch` now asserts both strings.
+> - **(d)** live `/mcp` end-to-end verify — DONE (prior session: pinned `run_command pwd` resolved to
+>   the pinned root; default + `workspace(status)` confirmed the active project unchanged).
+>
+> **Remaining before ship:** summon Docs Lotus Frog (pre-merge rule) → Standard Ship Sequence (4a+5)
+> → flip bug `docs/issues/2026-05-30-shared-server-global-active-project-race.md` `mitigated`→`fixed`
+> (regime-3 correctness scope). **Phase 4b stays DEFERRED** (resume kit below); this plan stays
+> **active** (do NOT archive) while 4b is open.
 ### Then Phase 5
 Document the `workspace` param in the three prompt surfaces (`src/prompts/source.md`
 server_instructions + onboarding, `builders.rs`); **bump `ONBOARDING_VERSION`** (param semantics reach
