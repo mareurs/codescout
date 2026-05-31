@@ -26,17 +26,46 @@ A new Iron Law was added to `server_instructions.md`:
 
 ### Cross-project navigation patterns
 
-Two patterns are now documented and enforced via anti-pattern guidance:
+The supported cross-project navigation patterns, by need:
 
 | Need | Pattern |
 |---|---|
-| Quick lookup (1–3 calls) | Pass `project: "<id>"` on the tool call — no state change, no risk |
-| Sustained exploration | `workspace(action: activate, path: "<other>")` → work → `workspace(action: activate)` back |
+| Quick lookup / one-off cross-project call | Pass `workspace: "<absolute path>"` on the tool call — pins that one call, no state change, no risk |
+| Sustained exploration (single agent) | `workspace(action: activate, path: "<other>")` → work → `workspace(action: activate)` back |
+| Concurrent subagents on *different* workspaces | Each subagent passes `workspace: "<absolute path>"` per call (see below) — do **not** rely on `activate` |
 
 **Subagents are especially risky** — they share the MCP server instance with their parent
 conversation. A subagent that calls `workspace(action: activate)` and exits without restoring leaves the
 parent's subsequent tool calls operating against the wrong project root, with no error.
 
+### Concurrent subagents — per-request `workspace` pinning
+
+Iron Law #4 (restore the active project) is enough for *sequential* cross-project work by a
+single agent. It is **not** enough when parallel subagents share one server and operate on
+*different* workspaces. The active project is process-global, so two subagents that
+`workspace(action: activate)` different paths race — last writer wins, and the loser silently
+reads or writes the wrong workspace. "Restore when done" cannot help: the corruption happens
+mid-flight, in the window between the two activations.
+
+The fix is to **not activate at all** in that case. Every pinnable tool accepts an optional
+`workspace` parameter — an absolute path that pins *that one call* to the named workspace,
+regardless of the shared active project:
+
+```
+symbols(name: "Foo", workspace: "/home/me/project-a")
+run_command(command: "cargo test", workspace: "/home/me/project-b")
+```
+
+Concurrent pins never collide — each call resolves independently against its own workspace.
+Single-workspace work omits the parameter and is unaffected. The unpinned
+`workspace(action: activate)` path still emits a `concurrent_activation_warning` on a rapid
+foreign switch, now pointing at this pin as the primary remedy (separate Claude Code windows
+remain a clean fallback — separate processes, separate active-project slots).
+
+**Why a per-call parameter, and not a per-subagent active project?** The MCP `RequestContext`
+exposes no stable per-subagent key, so there is nowhere to hang a "this subagent's project"
+slot — the resolution has to travel *with the request*. The `workspace` parameter is that
+request-scoped carrier.
 ### `workspace(action: activate)` response hint
 
 When switching away from the home project, the `workspace(action: activate)` response now includes a
