@@ -91,14 +91,9 @@ impl Tool for IndexProject {
                 active: true,
             };
 
-            let (root, lib_path) = {
-                let inner = ctx.agent.inner.read().await;
-                let project = inner.active_project().ok_or_else(|| {
-                    crate::tools::RecoverableError::with_hint(
-                        "No active project. Use workspace(action='activate') first.",
-                        "Call workspace(action='activate', path=\"/path/to/project\") to set the active project.",
-                    )
-                })?;
+            let (root, lib_path) = ctx
+                .agent
+                .with_project_at(ctx.workspace_override.as_deref(), |project| {
                 let entry = project.library_registry.lookup(lib_name).ok_or_else(|| {
                     crate::tools::RecoverableError::with_hint(
                         format!("Library '{}' not found in registry.", lib_name),
@@ -116,8 +111,9 @@ impl Tool for IndexProject {
                     )
                     .into());
                 }
-                (project.root.clone(), entry.path.clone())
-            };
+                    Ok((project.root.clone(), entry.path.clone()))
+                })
+                .await?;
 
             let source = format!("lib:{}", lib_name);
             let lib_project_id = source.clone();
@@ -144,25 +140,21 @@ impl Tool for IndexProject {
                 );
             }
 
-            {
-                let mut inner = ctx.agent.inner.write().await;
-                let project = inner.active_project_mut().ok_or_else(|| {
-                    crate::tools::RecoverableError::with_hint(
-                        "No active project. Use workspace(action='activate') first.",
-                        "Call workspace(action='activate', path=\"/path/to/project\") to set the active project.",
-                    )
-                })?;
-                if let Some(entry) = project.library_registry.lookup_mut(lib_name) {
-                    entry.indexed = true;
-                    if let Some(ver) = &current_version {
-                        entry.version = Some(ver.clone());
-                        entry.version_indexed = Some(ver.clone());
-                        entry.nudge_dismissed = false;
+            ctx.agent
+                .with_project_at_mut(ctx.workspace_override.as_deref(), |project| {
+                    if let Some(entry) = project.library_registry.lookup_mut(lib_name) {
+                        entry.indexed = true;
+                        if let Some(ver) = &current_version {
+                            entry.version = Some(ver.clone());
+                            entry.version_indexed = Some(ver.clone());
+                            entry.nudge_dismissed = false;
+                        }
                     }
-                }
-                let registry_path = project.root.join(".codescout").join("libraries.json");
-                project.library_registry.save(&registry_path)?;
-            }
+                    let registry_path = project.root.join(".codescout").join("libraries.json");
+                    project.library_registry.save(&registry_path)?;
+                    Ok(())
+                })
+                .await?;
 
             // Read counts back from Qdrant for the response. We re-scroll
             // here rather than threading them through sync_project's return
@@ -184,7 +176,10 @@ impl Tool for IndexProject {
         }
 
         let force = parse_bool_param(&input["force"]);
-        let root = ctx.agent.require_project_root().await?;
+        let root = ctx
+            .agent
+            .require_project_root_for(ctx.workspace_override.as_deref())
+            .await?;
 
         // ── Preflight scope check ───────────────────────────────────────
         // Stat-walk the root to estimate size + detect broad roots (home, system).
@@ -194,17 +189,16 @@ impl Tool for IndexProject {
         {
             use crate::embed::preflight::{check_index_scope, PreflightVerdict};
 
-            let (max_bytes, ignored) = {
-                let inner = ctx.agent.inner.read().await;
-                let project = inner.active_project();
-                let max_bytes = project
-                    .map(|p| p.config.security.max_index_bytes)
-                    .unwrap_or(500 * 1024 * 1024);
-                let ignored = project
-                    .map(|p| p.config.ignored_paths.patterns.clone())
-                    .unwrap_or_default();
-                (max_bytes, ignored)
-            };
+            let (max_bytes, ignored) = ctx
+                .agent
+                .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                    Ok((
+                        p.config.security.max_index_bytes,
+                        p.config.ignored_paths.patterns.clone(),
+                    ))
+                })
+                .await
+                .unwrap_or((500 * 1024 * 1024, Default::default()));
             let preflight_root = root.clone();
             let verdict = tokio::task::spawn_blocking(move || {
                 check_index_scope(&preflight_root, max_bytes, &ignored)
@@ -281,11 +275,16 @@ impl Tool for IndexProject {
         // multi-tenant namespace inside the shared Qdrant collection.
         let project_id = ctx
             .agent
-            .with_project(|p| Ok(p.project_id().to_string()))
+            .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                Ok(p.project_id().to_string())
+            })
             .await?;
 
         // Capture the dirty-files Arc before spawning so the task can clear it on success.
-        let dirty_files_arc = ctx.agent.dirty_files_arc().await;
+        let dirty_files_arc = ctx
+            .agent
+            .dirty_files_arc_for(ctx.workspace_override.as_deref())
+            .await;
 
         tracing::info!(force, "spawning sync task for project");
         let sync_abort_for_task = ctx.agent.active_sync_abort.clone();
@@ -385,7 +384,9 @@ impl Tool for IndexStatus {
     async fn call(&self, _input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
         let project_id = ctx
             .agent
-            .with_project(|p| Ok(p.project_id().to_string()))
+            .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                Ok(p.project_id().to_string())
+            })
             .await?;
 
         // Try the Qdrant-backed status. If the retrieval stack is offline or

@@ -399,22 +399,20 @@ external Qdrant stack — unrelated).
 > regression** (`create_file_concurrent_pins_no_cross_workspace_bleed` + `..._honors_workspace_override_pin`
 > in `edit_file/tests.rs`) ✅ — regime-3 writes PROVEN for the migrated surface.
 >
-> **STILL TO MIGRATE (COMPLETE audit — the earlier pattern missed `\.with_project(`; this is the re-run):**
-> - `memory/mod.rs` — **15 sites**: `with_project(` closures @46/84/131/214/593/682/717/732,
->   `active_project()` blocks @427/795/833/905, `require_project_root()` @619/635/921. Per-request
->   pinnable (recall/remember). Each `with_project(|p|…)` → `with_project_at(ctx override, |p|…)`.
-> - `config/mod.rs` — **7 sites**: `require_project_root()` @141, `with_project(` @144/174/245/299/333/431.
->   Confirm `config` is per-request (vs session-level) before migrating.
-> - `semantic/index.rs` — **7 sites**: `@96`/`@199` read blocks, `@149` mut block (`.await`-free →
->   `with_project_at_mut`), `@187` root, `@288` dirty, `@284`/`@388` `with_project(` (project_id).
-> - **Session-level — LEAVE ambient by design** (resolve default): `onboarding.rs` (16), `usage.rs` (@40).
+> **✅ 4a COMPLETE (2026-05-31) — regime-3 write correctness fully closed.** All per-request tools now
+> resolve their project through `ctx.workspace_override`: `memory` (15 sites + `resolve_memory_dir`),
+> `config` (7), `semantic/index` (7 — read blocks via `with_project_at`, the mut block via
+> `with_project_at_mut`), on top of the 8 done earlier (`edit_file`/`create_file`/`edit_code`/
+> `edit_markdown`/`approve_write`/`library`/`run_command`/`core::guards`). The read-tool `security_config`
+> gap (`tree`/`ast`/`grep`/`read_markdown`) is closed. Concurrent-write regression GREEN; full lib suite
+> 2571 pass. `onboarding` (16) + `usage` (@40) left ambient by design (session-level, not per-request).
 >
-> **Separate latent Phase-3 READ gap (not 4a, but found here):** `tree`(81/187), `ast`(19),
-> `grep`(56), `read_markdown`(80) pin their root but still call ambient `security_config()` — a pinned
-> read applies the *default* project's security rules. Assess whether read-path security needs pinning
-> (likely yes for blocked-path rules); fold into a Phase-3 follow-up or here.
->
-> Then the **concurrent-WRITE regression** test (mirror `read_file_concurrent_pins_no_cross_workspace_bleed`).
+> **Remaining = Phase 4b (PERFORMANCE, not correctness):** per-`Workspace` `Arc<RwLock<Workspace>>` +
+> eviction (the ~100-site accessor ripple), gated by `## Phase 4 — Lock-Ordering Proof`. Regime-3 is
+> correctness-fixed WITHOUT it; 4b only removes different-root write serialization on the single
+> `AgentInner` lock. Then **Phase 5** (prompt surfaces + `ONBOARDING_VERSION` + retire
+> `concurrent_activation_warning`). Bug `2026-05-30-shared-server-global-active-project-race.md`:
+> flip `mitigated`→`fixed` (regime-3 correctness scope) once 4a reaches master.
 > **Phase 4 progress (2026-05-30, this session):**
 > - ✅ **Step 1 — lock-ordering proof** → see **`## Phase 4 — Lock-Ordering Proof (the gate)`** below.
 > - ✅ **4a keystone — central write-gate pinned.** `server::acquire_write_guard_if_writing` now
