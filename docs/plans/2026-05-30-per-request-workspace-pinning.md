@@ -605,3 +605,68 @@ place L0 meets L2 — so it MUST be non-blocking:
 3. **Concurrency correctness:** two different-root pinned writes do NOT serialize
    (overlap observable); two same-root pinned writes DO serialize (no interleave,
    no corrupt file).
+
+## Phase 4b — DEFERRED (resume kit, 2026-05-31)
+
+**Decision:** DEFERRED by explicit call (user, 2026-05-31), low probability of
+being needed. Regime-3 correctness is fully fixed + **live-verified** without
+4b; 4b is throughput-only for a narrow case. Preserved here so the scoping work
+is not lost. **This plan stays active (do NOT archive) while 4b is open**, even
+after Phase 4a+5 ship to master. At ship time, optionally promote this section
+to a standalone `docs/trackers/` entry if the plan would otherwise be archived.
+
+**What it does:** change `AgentInner.workspaces` from
+`HashMap<PathBuf, Workspace>` → `HashMap<PathBuf, Arc<tokio::sync::RwLock<Workspace>>>`
+so calls on *different* workspace roots stop serializing on the single
+`AgentInner` lock. Today `with_project_at_mut` takes `inner.write()` (exclusive),
+so all writes serialize globally; per-`Workspace` locking parallelizes
+different-root writes. Reads already don't serialize (shared read lock);
+same-root writes serialize on `write_lock` regardless — so the win is **only**
+concurrent cross-workspace *writes*, which are rare.
+
+**Gate (mandatory):** `## Phase 4 — Lock-Ordering Proof` above (commit `69c91896`).
+Order registry-map L0 → per-`Workspace` L1 → `write_lock` L2 → flock L3; invariant
+= never block/await on a per-entry lock while holding a registry lock; eviction
+quiescence uses `try_lock()`, never `.lock().await`.
+
+**Scouted blast radius (compiler-as-scout, 2026-05-31, then reverted):** flipping
+the field type yields **12 first-layer `cargo check` errors** — the sync-accessor
+bodies (`default_workspace`/`default_workspace_mut`), the `build_workspace` insert
+sites (~478/516/574), the lock-reuse scan's `ws.projects` (~170), the
+`with_project_at`/`with_project_at_mut` closures, and the `match` arms in
+`call_edges_project_id_for` + `memory::resolve_memory_dir`. These **cascade to
+~60 sites across 11 files** once the sync accessors change *signature*:
+`default_workspace() -> Option<&Workspace>` and `active_project() ->
+Option<&ActiveProject>` can no longer return references from behind `Arc<RwLock>`,
+rippling to their ~50 callers (mostly `agent/mod.rs`). It is **atomic** — the
+tree won't compile until all ~60 sites are migrated, so there is no safe mid-way
+checkpoint; do it in one focused session.
+
+**Re-scout recipe (reversible):**
+```bash
+# 1. flip the type in src/agent/mod.rs:
+#    pub workspaces: HashMap<PathBuf, Arc<tokio::sync::RwLock<Workspace>>>,
+# 2. enumerate the cascade (fix accessors → next layer surfaces):
+cargo check
+# 3. bail cleanly if not proceeding:
+git checkout -- src/agent/mod.rs
+```
+
+**Accessor migration shape (per the proof):** the closure accessors clone the
+`Arc<RwLock<Workspace>>` under a brief registry-map read lock, **release the map
+lock**, then `.read()/.write().await` the per-`Workspace` lock and run the
+closure. The sync accessors (`default_workspace`/`active_project`) must be
+**removed** — callers move to the closure form (they cannot return refs from
+behind the Arc).
+
+**Eviction sweep (the other half of 4b):** see `## Lifetime contract` — idle-TTL
+reusing the LSP pool's `idle_timeout_secs`; quiescence = every activated project
+has `write_lock.try_lock()` free AND `dirty_files` empty; `default_workspace_root`
+exempt. Without it, pinned-but-non-default workspaces stay resident until restart
+(observed live 2026-05-31 with `mirela`). Currently harmless — the registry
+entries are lightweight and the LSP clients self-evict on their own TTL — but it
+grows unbounded over a long session that pins many distinct workspaces.
+
+**Re-open trigger:** profiling shows different-root write serialization is a real
+bottleneck (heavy concurrent multi-workspace subagent writes), OR resident-entry
+memory growth from many pins becomes material. Until then: leave deferred.
