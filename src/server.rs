@@ -246,6 +246,23 @@ impl CodeScoutServer {
         Some(std::fs::canonicalize(&p).unwrap_or(p))
     }
 
+    /// Inject the optional `workspace` pin into a pinnable tool's advertised
+    /// input schema (regime-3). Optional (never added to `required`); idempotent —
+    /// an existing `workspace` property is left untouched.
+    fn inject_workspace_param(schema_obj: &mut serde_json::Map<String, Value>) {
+        let props = schema_obj
+            .entry("properties")
+            .or_insert_with(|| Value::Object(serde_json::Map::new()));
+        if let Some(props) = props.as_object_mut() {
+            props.entry("workspace").or_insert_with(|| {
+                serde_json::json!({
+                    "type": "string",
+                    "description": "Optional. Absolute path of the workspace this call targets, pinning project resolution to it regardless of the session default. Omit to use the active project; set it when concurrent subagents operate on different workspaces."
+                })
+            });
+        }
+    }
+
     async fn acquire_write_guard_if_writing(
         &self,
         name: &str,
@@ -693,7 +710,10 @@ impl ServerHandler for CodeScoutServer {
             .filter(|t| t.availability(&caps).is_available(&caps))
             .map(|t| {
                 let schema = t.input_schema();
-                let schema_obj = schema.as_object().cloned().unwrap_or_default();
+                let mut schema_obj = schema.as_object().cloned().unwrap_or_default();
+                if t.pinnable() {
+                    Self::inject_workspace_param(&mut schema_obj);
+                }
                 McpTool::new(t.name().to_owned(), t.description().to_owned(), schema_obj)
             })
             .collect();
@@ -1918,6 +1938,86 @@ mod tests {
                 tool.name()
             );
         }
+    }
+
+    /// Phase 5: pinnable tools must advertise the optional `workspace` pin in
+    /// their list_tools schema; session/global/librarian tools must not.
+    #[tokio::test]
+    async fn pinnable_tools_advertise_workspace_param() {
+        let (_dir, server) = make_server().await;
+        let (mut saw_pinnable, mut saw_unpinnable) = (false, false);
+        for tool in &server.tools {
+            if tool.pinnable() {
+                let mut schema_obj = tool.input_schema().as_object().cloned().unwrap_or_default();
+                CodeScoutServer::inject_workspace_param(&mut schema_obj);
+                let has_ws = schema_obj
+                    .get("properties")
+                    .and_then(|p| p.as_object())
+                    .is_some_and(|p| p.contains_key("workspace"));
+                assert!(
+                    has_ws,
+                    "pinnable tool '{}' must advertise the `workspace` param",
+                    tool.name()
+                );
+                saw_pinnable = true;
+            } else {
+                saw_unpinnable = true;
+            }
+        }
+        assert!(
+            saw_pinnable && saw_unpinnable,
+            "partition must be non-trivial"
+        );
+
+        let pinnable: std::collections::HashSet<&str> = server
+            .tools
+            .iter()
+            .filter(|t| t.pinnable())
+            .map(|t| t.name())
+            .collect();
+        for n in ["read_file", "edit_file", "memory", "grep"] {
+            assert!(pinnable.contains(n), "{n} must be pinnable");
+        }
+        for n in ["workspace", "get_guide", "librarian", "get_usage_stats"] {
+            assert!(!pinnable.contains(n), "{n} must NOT be pinnable");
+        }
+    }
+
+    /// The injected `workspace` param is optional (never added to `required`),
+    /// preserves existing properties, and is idempotent.
+    #[test]
+    fn inject_workspace_param_is_optional_and_idempotent() {
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": { "path": { "type": "string" } },
+            "required": ["path"]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        CodeScoutServer::inject_workspace_param(&mut schema);
+        let props = schema["properties"].as_object().unwrap();
+        assert!(
+            props.contains_key("workspace"),
+            "workspace must be injected"
+        );
+        assert!(
+            props.contains_key("path"),
+            "existing properties must be preserved"
+        );
+        let required: Vec<&str> = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(
+            !required.contains(&"workspace"),
+            "workspace must stay optional"
+        );
+        // Idempotent: a second injection neither duplicates nor panics.
+        CodeScoutServer::inject_workspace_param(&mut schema);
+        assert_eq!(schema["properties"].as_object().unwrap().len(), 2);
     }
 
     #[tokio::test]

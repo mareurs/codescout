@@ -406,6 +406,30 @@ pub trait Tool: Send + Sync {
         Availability::Always
     }
 
+    /// Whether this tool resolves a project per-request and therefore accepts
+    /// the optional `workspace` pin (regime-3). Drives central `workspace`-param
+    /// schema injection in `ServerHandler::list_tools`.
+    ///
+    /// Default: every tool is pinnable EXCEPT session/global/registry tools and
+    /// the librarian family (which resolve via `LIBRARIAN_WORKSPACE`, not
+    /// `ctx.workspace_override`) — those must not advertise a pin they ignore.
+    fn pinnable(&self) -> bool {
+        !matches!(
+            self.name(),
+            "workspace"
+                | "activate_project"
+                | "onboarding"
+                | "get_usage_stats"
+                | "get_guide"
+                | "artifact"
+                | "artifact_event"
+                | "artifact_refresh"
+                | "artifact_augment"
+                | "librarian"
+                | "__probe_description_cap__"
+        )
+    }
+
     /// Wire-format preference for `call_content`.
     ///
     /// Defaults to `OutputForm::Json` (pretty-printed inline, compact summary only on
