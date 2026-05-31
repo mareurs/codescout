@@ -110,6 +110,20 @@ subagent returns will see whatever workspace state the subagent left.
 Prefer not to switch workspace inside subagents; if you must, document
 in the subagent's spawn prompt that it will restore home before exit.
 
+## Per-call workspace pinning
+
+`activate_project` flips the *one* shared active-project slot, so parallel
+subagents that activate different workspaces race — last writer wins, and a
+subagent can silently read another's worktree. The fix is to **pin per call**
+instead of activating: pass `workspace=<absolute path>` on each tool call.
+
+- The pin resolves that single call against the named workspace, regardless of
+  the server's active project. Concurrent pins never collide — each call
+  carries its own target.
+- Single-workspace work omits the param; the server's active project is used.
+- Pinning is the recommended path for parallel multi-workspace fan-out. Prefer
+  it over calling `activate` inside a subagent (see Subagent semantics above),
+  which leaves the shared slot pointed wherever the subagent last set it.
 ## Anti-patterns
 
 - **Forgetting to restore home.** Iron-Law-grade. Server is shared

@@ -29,6 +29,9 @@ Subagents inherit these rules. Pass them along.
 After workspace(activate, path=foreign), call workspace(activate, path=home)
 before finishing the turn. Foreign-project state otherwise leaks.
 
+Parallel subagents on DIFFERENT workspaces: pin each call with
+workspace=<abs path>, don't activate. Full rules: get_guide("workspace-state").
+
 ## Deeper guidance
 
 Call get_guide(topic) where topic in:
@@ -38,3 +41,4 @@ Call get_guide(topic) where topic in:
 - "error-handling"          — RecoverableError vs anyhow::bail
 - "workspace-state"         — activate_project, home/foreign, ledger reset
 - "iron-laws-detail"        — per-law gate text, exceptions, edge cases
+- "symbol-navigation"       — per-language symbol/ref nav tips

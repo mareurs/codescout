@@ -30,11 +30,8 @@ Subagents inherit these rules. Pass them along.
 After workspace(activate, path=foreign), call workspace(activate, path=home)
 before finishing the turn. Foreign-project state otherwise leaks.
 
-For parallel subagents on DIFFERENT workspaces, do NOT activate (one shared
-active-project slot — last writer wins). Pin per call instead: pass
-workspace=<absolute path> on each tool call. The pin resolves that call
-against the named workspace regardless of the active project; concurrent pins
-never collide. Single-workspace work omits the param.
+Parallel subagents on DIFFERENT workspaces: pin each call with
+workspace=<abs path>, don't activate. Full rules: get_guide("workspace-state").
 
 ## Deeper guidance
 
@@ -45,6 +42,7 @@ Call get_guide(topic) where topic in:
 - "error-handling"          — RecoverableError vs anyhow::bail
 - "workspace-state"         — activate_project, home/foreign, ledger reset
 - "iron-laws-detail"        — per-law gate text, exceptions, edge cases
+- "symbol-navigation"       — per-language symbol/ref nav tips
 <!-- @end -->
 
 <!-- @surface onboarding_prompt -->

@@ -41,7 +41,8 @@ impl Tool for GetGuide {
     fn description(&self) -> &str {
         "Deep guidance for a topic. Use when the system prompt points here. \
          Topics: librarian | tracker-conventions | progressive-disclosure | \
-         error-handling | workspace-state | iron-laws-detail. No args = list \
+         error-handling | workspace-state | iron-laws-detail | \
+         symbol-navigation. No args = list \
          topics + summaries. Large bodies overflow to @tool_* buffer."
     }
 
@@ -70,7 +71,8 @@ impl Tool for GetGuide {
                     "progressive-disclosure": "MAX_INLINE_TOKENS, @ref buffer, overflow patterns",
                     "error-handling": "RecoverableError vs anyhow::bail, is_error routing",
                     "workspace-state": "activate_project semantics, home/foreign, per-session reset, subagent inheritance",
-                    "iron-laws-detail": "per-law gate text, exceptions, edge cases for Iron Laws 1-6"
+                    "iron-laws-detail": "per-law gate text, exceptions, edge cases for Iron Laws 1-6",
+                    "symbol-navigation": "per-language symbols/references/call_graph nav tips"
                 }
             })),
             Some(t) => match self.topics.get(t) {
@@ -119,7 +121,8 @@ mod tests {
         assert!(names.contains(&"error-handling"));
         assert!(names.contains(&"workspace-state"));
         assert!(names.contains(&"iron-laws-detail"));
-        assert_eq!(names.len(), 6);
+        assert!(names.contains(&"symbol-navigation"));
+        assert_eq!(names.len(), 7);
     }
 
     #[tokio::test]
