@@ -498,6 +498,32 @@ impl CodeScoutServer {
         }
     }
 
+    // Used by the peer-serve endpoint (Task 6). Suppressed until that call-site lands.
+    #[allow(dead_code)]
+    /// Dispatch a tool by name with raw JSON args, returning the full
+    /// `CallToolResult`. Routes through `call_tool_inner`, so access checks, the
+    /// write-guard, usage recording, and error routing all apply. Used by the
+    /// peer-serve endpoint; carries no rmcp request/progress/peer coupling.
+    ///
+    /// `CallToolRequestParams` has no direct constructor in this crate (it is only
+    /// ever received from rmcp), so it is rebuilt from the canonical MCP params
+    /// shape via its `Deserialize` impl.
+    pub(crate) async fn call_tool_by_name(
+        &self,
+        name: &str,
+        args: Value,
+    ) -> std::result::Result<CallToolResult, McpError> {
+        let req: CallToolRequestParams = serde_json::from_value(serde_json::json!({
+            "name": name,
+            "arguments": args,
+        }))
+        .map_err(|e| {
+            McpError::invalid_params(format!("failed to build tool request: {e}"), None)
+        })?;
+        self.call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+            .await
+    }
+
     /// Core tool dispatch, separated from the MCP trait method so tests can
     /// call it without constructing a `RequestContext`.
     ///
@@ -2777,6 +2803,24 @@ mod tests {
         assert!(!server.is_write_call("memory", &json!({"action": "list"})));
         assert!(!server.is_write_call("memory", &json!({"action": "recall"})));
         assert!(!server.is_write_call("memory", &json!({})));
+    }
+    #[tokio::test]
+    async fn call_tool_by_name_dispatches_a_read_tool() {
+        let (_dir, server) = make_server().await;
+        let result = server
+            .call_tool_by_name("tree", serde_json::json!({ "path": "." }))
+            .await
+            .expect("dispatch ok");
+        assert!(result.is_error.is_none_or(|e| !e), "tree should succeed");
+    }
+
+    #[tokio::test]
+    async fn call_tool_by_name_rejects_unknown_tool() {
+        let (_dir, server) = make_server().await;
+        let err = server
+            .call_tool_by_name("does_not_exist", serde_json::json!({}))
+            .await;
+        assert!(err.is_err(), "unknown tool must error");
     }
 }
 
