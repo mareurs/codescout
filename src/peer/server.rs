@@ -82,7 +82,7 @@ async fn serve_connection(stream: UnixStream, ctx: &PeerServe) -> Result<()> {
     }
 }
 
-/// Route one request envelope to its handler. Tasks 6-7 add more arms.
+/// Route one request envelope to its handler.
 async fn dispatch_envelope(env: &PeerEnvelope, ctx: &PeerServe) -> PeerEnvelope {
     if env.kind != EnvelopeKind::Request {
         return PeerEnvelope::error(
@@ -96,6 +96,7 @@ async fn dispatch_envelope(env: &PeerEnvelope, ctx: &PeerServe) -> PeerEnvelope 
     }
     match env.method.as_deref() {
         Some("hello") => handle_hello(&env.id, ctx).await,
+        Some("tool.call") => handle_tool_call(&env.id, env.params.clone(), ctx).await,
         Some(other) => PeerEnvelope::error(
             &env.id,
             PeerError {
@@ -124,6 +125,76 @@ async fn handle_hello(id: &str, ctx: &PeerServe) -> PeerEnvelope {
         executor_available: false, // Phase 2
     };
     PeerEnvelope::response(id, serde_json::to_value(caps).unwrap_or(json!({})))
+}
+
+async fn handle_tool_call(
+    id: &str,
+    params: Option<serde_json::Value>,
+    ctx: &PeerServe,
+) -> PeerEnvelope {
+    let params = match params {
+        Some(p) => p,
+        None => return bad_params(id, "tool.call requires params"),
+    };
+    let tool = match params.get("tool").and_then(|t| t.as_str()) {
+        Some(t) => t.to_string(),
+        None => return bad_params(id, "tool.call requires a 'tool' name"),
+    };
+    let args = params
+        .get("args")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    // Peer-layer RO/RW wall: a read-only peer refuses any mutating tool BEFORE
+    // dispatch. The Agent write-guard cannot enforce this — the served workspace
+    // is the Agent's always-read-write home (see spec D-Wall, revised 2026-06-01).
+    if ctx.read_only && ctx.server.is_write_call(&tool, &args) {
+        return PeerEnvelope::error(
+            id,
+            PeerError {
+                code: ErrorCode::AccessDenied,
+                message: format!("peer is read-only; '{tool}' is a write tool"),
+                data: None,
+            },
+        );
+    }
+
+    match ctx.server.call_tool_by_name(&tool, args).await {
+        Ok(result) => {
+            let body = serde_json::to_value(&result).unwrap_or(serde_json::Value::Null);
+            if result.is_error.unwrap_or(false) {
+                PeerEnvelope::error(
+                    id,
+                    PeerError {
+                        code: ErrorCode::ToolError,
+                        message: "tool returned an error".into(),
+                        data: Some(body),
+                    },
+                )
+            } else {
+                PeerEnvelope::response(id, body)
+            }
+        }
+        Err(e) => PeerEnvelope::error(
+            id,
+            PeerError {
+                code: ErrorCode::UnknownTool,
+                message: e.to_string(),
+                data: None,
+            },
+        ),
+    }
+}
+
+fn bad_params(id: &str, msg: &str) -> PeerEnvelope {
+    PeerEnvelope::error(
+        id,
+        PeerError {
+            code: ErrorCode::BadParams,
+            message: msg.into(),
+            data: None,
+        },
+    )
 }
 
 #[cfg(test)]
@@ -179,5 +250,92 @@ mod tests {
             .any(|t| t == "symbols"));
 
         handle.abort();
+    }
+
+    #[tokio::test]
+    async fn tool_call_runs_a_read_tool_on_the_peer_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        std::fs::write(root.join("a.txt"), "hello").unwrap();
+        let sock = root.join("peer.sock");
+
+        let (sr, ss) = (root.clone(), sock.clone());
+        let handle = tokio::spawn(async move {
+            let ctx = build_server_for(&sr, true).await.unwrap();
+            let listener = bind_peer_socket(&ss).unwrap();
+            accept_one(&listener, &ctx).await.unwrap();
+        });
+
+        let stream = connect_with_retry(&sock).await;
+        let (rd, mut wr) = stream.into_split();
+        let mut rd = BufReader::new(rd);
+
+        let req = PeerEnvelope::request(
+            "a:1",
+            "tool.call",
+            serde_json::json!({ "tool": "tree", "args": { "path": "." } }),
+        );
+        write_message(&mut wr, &serde_json::to_value(&req).unwrap())
+            .await
+            .unwrap();
+        let resp: PeerEnvelope =
+            serde_json::from_value(read_message(&mut rd).await.unwrap()).unwrap();
+        assert!(
+            resp.error.is_none(),
+            "tree should not error: {:?}",
+            resp.error
+        );
+        assert!(resp.result.is_some());
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn read_only_peer_refuses_a_write_tool() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        let ctx = build_server_for(&root, true).await.unwrap();
+
+        let reply = handle_tool_call(
+            "a:1",
+            Some(serde_json::json!({ "tool": "create_file", "args": { "path": "new.txt", "content": "x" } })),
+            &ctx,
+        )
+        .await;
+
+        let err = reply
+            .error
+            .expect("write tool must be refused on a RO peer");
+        assert_eq!(err.code, crate::peer::protocol::ErrorCode::AccessDenied);
+        assert!(
+            !root.join("new.txt").exists(),
+            "RO peer must not have written the file"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_write_peer_does_not_gate_a_write_tool() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        let ctx = build_server_for(&root, false).await.unwrap();
+
+        let reply = handle_tool_call(
+            "a:1",
+            Some(serde_json::json!({ "tool": "create_file", "args": { "path": "ok.txt", "content": "x" } })),
+            &ctx,
+        )
+        .await;
+
+        // The peer-layer wall must NOT fire when read_only=false. (The call may
+        // still succeed or fail at the tool layer, but never with AccessDenied.)
+        let code = reply.error.as_ref().map(|e| e.code);
+        assert_ne!(
+            code,
+            Some(crate::peer::protocol::ErrorCode::AccessDenied),
+            "rw peer must not gate writes; got {:?}",
+            reply.error
+        );
     }
 }

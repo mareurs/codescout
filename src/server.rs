@@ -518,8 +518,6 @@ impl CodeScoutServer {
         }
     }
 
-    // Used by the peer-serve endpoint (Task 6). Suppressed until that call-site lands.
-    #[allow(dead_code)]
     /// Dispatch a tool by name with raw JSON args, returning the full
     /// `CallToolResult`. Routes through `call_tool_inner`, so access checks, the
     /// write-guard, usage recording, and error routing all apply. Used by the
