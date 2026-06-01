@@ -132,6 +132,8 @@ impl CodeScoutServer {
             Arc::new(Library),
             // Deep-guidance tool — see docs/architecture/mcp-channel-caps.md
             Arc::new(crate::tools::guide::GetGuide::new()),
+            // Peer delegation tool
+            Arc::new(crate::tools::peer::PeerTool),
         ];
         if std::env::var("CODESCOUT_PROBE")
             .ok()
@@ -1527,6 +1529,7 @@ mod tests {
             "workspace",
             "library",
             "get_guide",
+            "peer",
         ];
         let core_count = server
             .tools
@@ -1560,8 +1563,8 @@ mod tests {
             .count();
         assert_eq!(
             core_count,
-            21,
-            "L3 target is 21 core tools; got {}: {:?}",
+            22,
+            "L3 target is 22 core tools; got {}: {:?}",
             core_count,
             server.tools.iter().map(|t| t.name()).collect::<Vec<_>>()
         );

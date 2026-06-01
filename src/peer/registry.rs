@@ -65,6 +65,9 @@ impl Registry {
     pub fn ids(&self) -> impl Iterator<Item = &str> {
         self.peers.iter().map(|p| p.id.as_str())
     }
+    pub fn entries(&self) -> &[PeerEntry] {
+        &self.peers
+    }
 }
 
 #[cfg(test)]

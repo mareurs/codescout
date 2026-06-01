@@ -35,3 +35,4 @@ pub mod tree;
 pub use onboarding::Onboarding;
 pub use run_command::RunCommand;
 pub mod guide;
+pub mod peer;
