@@ -717,4 +717,55 @@ mod tests {
             "run() must not bind the socket when the lock is held"
         );
     }
+    #[tokio::test]
+    async fn end_to_end_served_read_tool_and_write_denied() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        std::fs::write(root.join("a.txt"), "hello").unwrap();
+        let sock = root.join("peer.sock");
+        let lock = root.join("peer.lock");
+
+        let (sr, sk, lk) = (root.clone(), sock.clone(), lock.clone());
+        let serve = tokio::spawn(async move {
+            // long idle so the serve stays up for the test duration
+            let _ = run_with_lock(&sk, &lk, &sr, true, 30).await;
+        });
+
+        // Wait for the socket to accept connections.
+        let mut client = {
+            let mut c = None;
+            for _ in 0..50 {
+                if let Ok(client) = crate::peer::client::PeerClient::connect(&sock).await {
+                    c = Some(client);
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            c.expect("could not connect to served socket")
+        };
+
+        let _caps = client.hello().await.unwrap();
+
+        // Exposed read tool succeeds.
+        let ok = client
+            .call_tool("tree", serde_json::json!({ "path": "." }))
+            .await;
+        assert!(ok.is_ok(), "exposed read tool should succeed: {ok:?}");
+
+        // Non-exposed write tool is denied by the allow-list; no side effect.
+        let denied = client
+            .call_tool(
+                "create_file",
+                serde_json::json!({ "path": "x.txt", "content": "no" }),
+            )
+            .await;
+        assert!(denied.is_err(), "create_file must be rejected");
+        assert!(
+            !root.join("x.txt").exists(),
+            "denied write must have no side effect"
+        );
+
+        serve.abort();
+    }
 }
