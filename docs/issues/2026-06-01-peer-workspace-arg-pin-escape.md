@@ -1,12 +1,13 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: Peer protocol forwards a caller `workspace` arg verbatim — read-scope escape past the addressed peer
 owners: []
 tags:
   - peer-delegation
   - security
 last_observed: 2026-06-01
+closed: 2026-06-01
 ---
 
 ## Symptom
@@ -67,27 +68,21 @@ for in-process parallel subagents) is reachable by an external peer requester.
 
 (none yet — static trace only)
 
-## Fix (proposed, not yet applied)
+## Fix
 
-Defensive strip in the peer layer — force every peer-served call to resolve the
-served (default) workspace only:
+**APPLIED — experiments-side `6aaa21d4`** (re-cite the master SHA after the eventual cherry-pick). The peer layer now strips the caller-supplied `workspace` key from `args` in `handle_tool_call_inner`, before `call_tool_by_name` → `call_tool_inner` can extract it into `ctx.workspace_override`:
 
 ```rust
-// in handle_tool_call_inner, before call_tool_by_name:
-let mut args = args;
+// in handle_tool_call_inner, after the allow-list gate, before dispatch:
 if let Some(obj) = args.as_object_mut() {
-    obj.remove("workspace"); // peer calls are scoped to the served workspace
+    obj.remove("workspace");
 }
 ```
 
-~3 lines. Belongs in the peer layer (not call_tool_by_name, which has legitimate
-in-process pinning callers). Pair with a test: a peer `tool.call` carrying
-`args.workspace=/other` still resolves the served root.
-
+The strip lives in the peer layer — not in `call_tool_by_name`, which has legitimate in-process pinning callers (parallel subagents). A peer is addressed by its registry id, which maps to exactly one served workspace, so a per-request `workspace` override is never peer-controllable.
 ## Tests added
 
-(none yet)
-
+`peer::server::tests::peer_tool_call_ignores_smuggled_workspace_override` — serves workspace A and sends a `tree` `tool.call` carrying `args.workspace=<B>`; asserts the result lists A's `served_alpha_dir` and NOT B's `foreign_beta_dir`. The escape was reproduced before the fix (the call returned B's directory listing, `src/peer/server.rs:817` assertion), green after.
 ## Workarounds
 
 Only register peers you trust to behave; the requester is already a local codescout
@@ -96,7 +91,4 @@ explicitly deferred in the spec).
 
 ## Resume
 
-Noticed 2026-06-01 during the security trace of Phase 1.5 Task 2 (RO-convergence).
-Separable from the auto-spawn work. If the user wants it folded into Phase 1.5, the
-fix is the 3-line strip above + one test, naturally co-located with Task 4 (peer-tool
-wiring) or as a small dedicated task.
+Fixed 2026-06-01 (experiments-side `6aaa21d4`). The static trace was reproduced as a live exploit — the regression test failed showing the foreign workspace's listing — before the one-line strip closed it. Stays in `docs/issues/` until the fix ships to `master`; re-cite the master SHA in the Fix section after the cherry-pick, then `git mv` to `docs/issues/archive/`.
