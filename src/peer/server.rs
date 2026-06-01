@@ -47,10 +47,26 @@ pub struct PeerServe {
 }
 
 /// Construct a `CodeScoutServer` for `root` and wrap it with the read-only grant.
+///
+/// When `read_only`, flip the served (default) workspace's `read_only` flag so the
+/// Agent write-guard engages as a second layer behind the `PEER_EXPOSED_TOOLS`
+/// allow-list. `Agent::new` makes `root` the home, and home is read-write by
+/// default (`build_workspace`'s `is_home => rw` invariant); peer-serve is a pure
+/// reader, so we override that here. Peer dispatch is unpinned and resolves to
+/// the default workspace, so this covers every served call.
 pub async fn build_server_for(root: &Path, read_only: bool) -> Result<PeerServe> {
     let agent = Agent::new(Some(root.to_path_buf()))
         .await
         .context("failed to construct agent for peer workspace")?;
+    if read_only {
+        agent
+            .with_project_at_mut(None, |p| -> anyhow::Result<()> {
+                p.read_only = true;
+                Ok(())
+            })
+            .await
+            .context("failed to mark peer workspace read-only")?;
+    }
     let server = Arc::new(CodeScoutServer::new(agent).await);
     let audit_path = Some(root.join(".codescout").join("peer-audit.jsonl"));
     Ok(PeerServe {
@@ -467,6 +483,20 @@ mod tests {
             .any(|t| t == "symbols"));
 
         handle.abort();
+    }
+
+    #[tokio::test]
+    async fn build_server_for_read_only_disables_writes_on_default_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+
+        let ctx = build_server_for(&root, true).await.unwrap();
+        let sec = ctx.server.agent_security_config().await;
+        assert!(
+            !sec.file_write_enabled,
+            "read-only peer-serve must disable file writes on the served workspace"
+        );
     }
 
     #[tokio::test]

@@ -232,6 +232,13 @@ impl CodeScoutServer {
             .unwrap_or_default()
     }
 
+    #[cfg(test)]
+    pub(crate) async fn agent_security_config(
+        &self,
+    ) -> crate::util::path_security::PathSecurityConfig {
+        self.agent.security_config().await
+    }
+
     fn parse_input(arguments: Option<serde_json::Map<String, Value>>) -> Value {
         arguments
             .map(Value::Object)
