@@ -160,8 +160,12 @@ async fn run_with_lock(
     loop {
         match tokio::time::timeout(idle, listener.accept()).await {
             Ok(Ok((stream, _addr))) => {
-                if serve_connection(stream, &ctx).await.is_err() {
-                    break;
+                // A per-connection error (client disconnected mid-reply, broken
+                // pipe, etc.) must NOT tear down the whole long-lived serve — log
+                // and keep accepting. Only accept errors and the idle timeout end
+                // the loop. (Review finding I-1.)
+                if let Err(e) = serve_connection(stream, &ctx).await {
+                    tracing::warn!("peer-serve connection error (continuing): {e}");
                 }
             }
             Ok(Err(e)) => {

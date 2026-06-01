@@ -36,7 +36,7 @@ pub(crate) fn build_peer_serve_args(
 /// 2. Acquire the flock to decide whether a serve is already running.
 /// 3. If we got the lock (none running), drop it and spawn a detached
 ///    `codescout peer-serve` child; wait for its `ready\n` line (120s).
-/// 4. Connect as a client with retries (5 x 200ms).
+/// 4. Connect as a client with retries.
 ///
 /// `read_only` is reserved for Phase 1.5+ RW peers; Phase 1 always spawns
 /// read-only, so it is logged but not yet passed as a CLI flag.
@@ -121,8 +121,13 @@ pub async fn ensure_peer_serve(target: &Path, read_only: bool) -> Result<PeerCli
         }
     }
 
+    // Connect with retries. The spawn path connects on the first attempt (the
+    // child already signalled `ready`). A NON-spawning racer — found the lock held
+    // because a sibling just spawned a still-initializing child — relies on this
+    // budget to span the child's build_server_for / Agent::new startup, so keep it
+    // generous (≈10s) lest concurrent first-use fail spuriously. (Review finding I-2.)
     let mut last_err = None;
-    for attempt in 0..5u32 {
+    for attempt in 0..50u32 {
         if attempt > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         }
@@ -131,9 +136,8 @@ pub async fn ensure_peer_serve(target: &Path, read_only: bool) -> Result<PeerCli
             Err(e) => last_err = Some(e),
         }
     }
-    Err(last_err.unwrap_or_else(|| {
-        anyhow::anyhow!("failed to connect to peer-serve for {}", target.display())
-    }))
+    Err(last_err
+        .unwrap_or_else(|| anyhow::anyhow!("failed to connect to peer-serve for {}", target.display())))
 }
 
 #[cfg(test)]
