@@ -33,8 +33,13 @@ const PEER_EXPOSED_TOOLS: &[&str] = &[
     "get_guide",
 ];
 
-/// read-only grant. Read-only is enforced at THIS layer (Task 6), because the
-/// served workspace is the Agent's home and is therefore always read-write.
+/// A bound peer-serve context: the server for the served workspace, the
+/// read-only grant, and the audit-log path. The `read_only` grant is
+/// **advisory** — it is advertised via `hello` (`Capabilities.read_only`) but
+/// is NOT used for enforcement. Access is enforced by the `PEER_EXPOSED_TOOLS`
+/// allow-list in `handle_tool_call_inner`: the served workspace is the Agent's
+/// home and is therefore always read-write, so a peer-layer `read_only` gate
+/// would be redundant (see spec D-Wall, revised 2026-06-01).
 pub struct PeerServe {
     pub server: Arc<CodeScoutServer>,
     pub read_only: bool,
