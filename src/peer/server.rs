@@ -81,21 +81,83 @@ pub async fn accept_one(listener: &UnixListener, ctx: &PeerServe) -> Result<()> 
     let (stream, _addr) = listener.accept().await?;
     serve_connection(stream, ctx).await
 }
-/// Run the peer-serve process for `workspace`: bind the socket and serve
-/// connections sequentially until the listener errors. Mirrors
-/// `lsp::mux::process::run`. Phase 1 serves one requester at a time; the lock
-/// file, idle-timeout, and concurrency are Phase-1.5 follow-ups.
+/// Run the peer-serve process for `workspace`: acquire the single-instance
+/// flock, bind the socket, signal `ready`, and serve connections until the
+/// idle timeout elapses with no connection. Mirrors `lsp::mux::process::run`.
 pub async fn run(
     socket_path: &Path,
     workspace: &Path,
     read_only: bool,
-    _idle_timeout_secs: u64,
+    idle_timeout_secs: u64,
 ) -> Result<()> {
+    let lock_path = crate::socket_discovery::peer_lock_path_for_workspace(workspace);
+    run_with_lock(
+        socket_path,
+        &lock_path,
+        workspace,
+        read_only,
+        idle_timeout_secs,
+    )
+    .await
+}
+
+/// Inner form taking an explicit lock path, for tests that control the lock.
+async fn run_with_lock(
+    socket_path: &Path,
+    lock_path: &Path,
+    workspace: &Path,
+    read_only: bool,
+    idle_timeout_secs: u64,
+) -> Result<()> {
+    use fs4::fs_std::FileExt;
+
+    let lock_file = {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.create(true).write(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        opts.open(lock_path)
+            .with_context(|| format!("failed to open peer lock file: {}", lock_path.display()))?
+    };
+    if lock_file.try_lock_exclusive().is_err() {
+        tracing::info!(
+            "peer-serve already running for {}, exiting",
+            workspace.display()
+        );
+        return Ok(());
+    }
+
     let ctx = build_server_for(workspace, read_only).await?;
     let listener = bind_peer_socket(socket_path)?;
+
+    {
+        use tokio::io::AsyncWriteExt;
+        let mut stdout = tokio::io::stdout();
+        stdout.write_all(b"ready\n").await.ok();
+        stdout.flush().await.ok();
+    }
+
+    let idle = std::time::Duration::from_secs(idle_timeout_secs);
     loop {
-        if accept_one(&listener, &ctx).await.is_err() {
-            break;
+        match tokio::time::timeout(idle, listener.accept()).await {
+            Ok(Ok((stream, _addr))) => {
+                if serve_connection(stream, &ctx).await.is_err() {
+                    break;
+                }
+            }
+            Ok(Err(e)) => {
+                tracing::warn!("peer-serve accept error: {e}");
+                break;
+            }
+            Err(_elapsed) => {
+                tracing::info!(
+                    "peer-serve idle timeout reached ({idle_timeout_secs}s), shutting down"
+                );
+                break;
+            }
         }
     }
     std::fs::remove_file(socket_path).ok();
@@ -574,5 +636,55 @@ mod tests {
             "must record the denied call: {logged}"
         );
         assert!(logged.contains("\"id\":\"a:1\""));
+    }
+
+    #[tokio::test]
+    async fn run_exits_after_idle_timeout_with_no_connections() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        let sock = root.join("peer.sock");
+        let lock = root.join("peer.lock");
+
+        let res = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            run_with_lock(&sock, &lock, &root, true, 1),
+        )
+        .await;
+        assert!(
+            res.is_ok(),
+            "run() did not exit within 10s of a 1s idle timeout"
+        );
+        assert!(res.unwrap().is_ok(), "run() returned an error");
+        assert!(!sock.exists(), "socket file should be cleaned up on exit");
+    }
+
+    #[tokio::test]
+    async fn run_exits_quietly_when_lock_is_held() {
+        use fs4::fs_std::FileExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        let sock = root.join("peer.sock");
+        let lock = root.join("peer.lock");
+
+        let held = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(&lock)
+            .unwrap();
+        held.try_lock_exclusive().unwrap();
+
+        let res = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            run_with_lock(&sock, &lock, &root, true, 30),
+        )
+        .await;
+        assert!(res.is_ok(), "run() blocked despite the lock being held");
+        assert!(res.unwrap().is_ok());
+        assert!(
+            !sock.exists(),
+            "run() must not bind the socket when the lock is held"
+        );
     }
 }
