@@ -7,7 +7,6 @@ use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 
 use super::{Tool, ToolContext};
-use crate::peer::client::PeerClient;
 use crate::peer::registry::Registry;
 
 pub struct PeerTool;
@@ -79,7 +78,11 @@ impl Tool for PeerTool {
                     .and_then(|t| t.as_str())
                     .ok_or_else(|| anyhow!("action={action} requires 'tool'"))?;
                 let tool_args = input.get("args").cloned().unwrap_or_else(|| json!({}));
-                let mut client = PeerClient::connect(&entry.socket_path()).await?;
+                let mut client = crate::peer::launch::ensure_peer_serve(
+                    &entry.target,
+                    entry.default_access.is_read_only(),
+                )
+                .await?;
                 let _caps = client.hello().await?;
                 client.call_tool(tool, tool_args).await
             }
@@ -95,7 +98,11 @@ impl Tool for PeerTool {
                     .get("handle")
                     .and_then(|h| h.as_str())
                     .ok_or_else(|| anyhow!("action=knowledge requires 'handle'"))?;
-                let mut client = PeerClient::connect(&entry.socket_path()).await?;
+                let mut client = crate::peer::launch::ensure_peer_serve(
+                    &entry.target,
+                    entry.default_access.is_read_only(),
+                )
+                .await?;
                 client.read_buffer(handle).await
             }
             other => Err(anyhow!("unknown peer action: {other}")),
