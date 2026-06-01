@@ -14,6 +14,25 @@ use crate::lsp::transport::{read_message, write_message};
 use crate::peer::protocol::{Capabilities, EnvelopeKind, ErrorCode, PeerEnvelope, PeerError};
 use crate::server::CodeScoutServer;
 
+/// Tools a peer may invoke in Phase 1 — deny-by-default. Phase 1 is read-only
+/// delegation: only these explicit safe-read tools are exposed; every other tool
+/// (writes, `run_command`, `workspace`, librarian mutations) is rejected by
+/// construction, independent of the peer's `read_only` grant and robust to any
+/// `Tool::is_write` coverage gap. Write delegation is a later phase with its own
+/// explicit curated set.
+const PEER_EXPOSED_TOOLS: &[&str] = &[
+    "symbols",
+    "symbol_at",
+    "references",
+    "call_graph",
+    "tree",
+    "grep",
+    "semantic_search",
+    "read_file",
+    "read_markdown",
+    "get_guide",
+];
+
 /// A bound peer-serve context: the server for the served workspace plus the
 /// read-only grant. Read-only is enforced at THIS layer (Task 6), because the
 /// served workspace is the Agent's home and is therefore always read-write.
@@ -121,7 +140,12 @@ async fn handle_hello(id: &str, ctx: &PeerServe) -> PeerEnvelope {
         project: ctx.server.project_name().await,
         root: ctx.server.project_root_string().await,
         read_only: ctx.read_only,
-        tools: ctx.server.tool_names(),
+        tools: ctx
+            .server
+            .tool_names()
+            .into_iter()
+            .filter(|t| PEER_EXPOSED_TOOLS.contains(&t.as_str()))
+            .collect(),
         executor_available: false, // Phase 2
     };
     PeerEnvelope::response(id, serde_json::to_value(caps).unwrap_or(json!({})))
@@ -145,15 +169,18 @@ async fn handle_tool_call(
         .cloned()
         .unwrap_or_else(|| serde_json::json!({}));
 
-    // Peer-layer RO/RW wall: a read-only peer refuses any mutating tool BEFORE
-    // dispatch. The Agent write-guard cannot enforce this — the served workspace
-    // is the Agent's always-read-write home (see spec D-Wall, revised 2026-06-01).
-    if ctx.read_only && ctx.server.is_write_call(&tool, &args) {
+    // Deny-by-default: only the explicit safe-read allow-list is exposed over the
+    // peer protocol. Everything else (writes, run_command, workspace, librarian
+    // mutations) is rejected here, before dispatch — independent of read_only and
+    // robust to is_write coverage gaps. (Phase 1 = read-only delegation.)
+    if !PEER_EXPOSED_TOOLS.contains(&tool.as_str()) {
         return PeerEnvelope::error(
             id,
             PeerError {
                 code: ErrorCode::AccessDenied,
-                message: format!("peer is read-only; '{tool}' is a write tool"),
+                message: format!(
+                    "tool '{tool}' is not exposed over the peer protocol (read-only delegation)"
+                ),
                 data: None,
             },
         );
@@ -253,7 +280,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tool_call_runs_a_read_tool_on_the_peer_workspace() {
+    async fn tool_call_runs_an_exposed_read_tool() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         std::fs::create_dir_all(root.join(".codescout")).unwrap();
@@ -270,7 +297,6 @@ mod tests {
         let stream = connect_with_retry(&sock).await;
         let (rd, mut wr) = stream.into_split();
         let mut rd = BufReader::new(rd);
-
         let req = PeerEnvelope::request(
             "a:1",
             "tool.call",
@@ -283,7 +309,7 @@ mod tests {
             serde_json::from_value(read_message(&mut rd).await.unwrap()).unwrap();
         assert!(
             resp.error.is_none(),
-            "tree should not error: {:?}",
+            "tree (exposed read tool) should not error: {:?}",
             resp.error
         );
         assert!(resp.result.is_some());
@@ -291,51 +317,62 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn read_only_peer_refuses_a_write_tool() {
+    async fn peer_refuses_unexposed_tools_even_when_read_write() {
+        use crate::peer::protocol::ErrorCode;
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         std::fs::create_dir_all(root.join(".codescout")).unwrap();
-        let ctx = build_server_for(&root, true).await.unwrap();
-
-        let reply = handle_tool_call(
-            "a:1",
-            Some(serde_json::json!({ "tool": "create_file", "args": { "path": "new.txt", "content": "x" } })),
-            &ctx,
-        )
-        .await;
-
-        let err = reply
-            .error
-            .expect("write tool must be refused on a RO peer");
-        assert_eq!(err.code, crate::peer::protocol::ErrorCode::AccessDenied);
-        assert!(
-            !root.join("new.txt").exists(),
-            "RO peer must not have written the file"
-        );
-    }
-
-    #[tokio::test]
-    async fn read_write_peer_does_not_gate_a_write_tool() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().to_path_buf();
-        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        // read_only = FALSE on purpose: prove the allow-list (not read_only) is the wall.
         let ctx = build_server_for(&root, false).await.unwrap();
 
-        let reply = handle_tool_call(
-            "a:1",
-            Some(serde_json::json!({ "tool": "create_file", "args": { "path": "ok.txt", "content": "x" } })),
-            &ctx,
-        )
-        .await;
-
-        // The peer-layer wall must NOT fire when read_only=false. (The call may
-        // still succeed or fail at the tool layer, but never with AccessDenied.)
-        let code = reply.error.as_ref().map(|e| e.code);
-        assert_ne!(
-            code,
-            Some(crate::peer::protocol::ErrorCode::AccessDenied),
-            "rw peer must not gate writes; got {:?}",
-            reply.error
-        );
+        let cases: Vec<(&str, serde_json::Value, Option<&str>)> = vec![
+            (
+                "create_file",
+                serde_json::json!({"path": "new.txt", "content": "x"}),
+                Some("new.txt"),
+            ),
+            (
+                "run_command",
+                serde_json::json!({"command": "echo pwned > pwned.txt"}),
+                Some("pwned.txt"),
+            ),
+            (
+                "artifact",
+                serde_json::json!({"action": "create", "kind": "tracker", "title": "x"}),
+                None,
+            ),
+            (
+                "workspace",
+                serde_json::json!({"action": "activate", "path": "/tmp"}),
+                None,
+            ),
+            (
+                "edit_file",
+                serde_json::json!({"path": "a.txt", "old": "x", "new": "y"}),
+                None,
+            ),
+        ];
+        for (tool, args, sentinel) in cases {
+            let reply = handle_tool_call(
+                "a:1",
+                Some(serde_json::json!({"tool": tool, "args": args})),
+                &ctx,
+            )
+            .await;
+            let err = reply
+                .error
+                .unwrap_or_else(|| panic!("tool {tool} must be refused (not exposed)"));
+            assert_eq!(
+                err.code,
+                ErrorCode::AccessDenied,
+                "tool {tool} should be AccessDenied"
+            );
+            if let Some(f) = sentinel {
+                assert!(
+                    !root.join(f).exists(),
+                    "tool {tool} must not have created {f}"
+                );
+            }
+        }
     }
 }

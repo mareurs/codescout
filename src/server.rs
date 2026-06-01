@@ -199,7 +199,7 @@ impl CodeScoutServer {
     /// tools return false — they never reach dispatch (resolve_tool rejects
     /// them first), so the answer is immaterial; returning false avoids a
     /// second lookup failure.
-    pub(crate) fn is_write_call(&self, tool_name: &str, input: &serde_json::Value) -> bool {
+    fn is_write_call(&self, tool_name: &str, input: &serde_json::Value) -> bool {
         self.find_tool(tool_name)
             .map(|t| t.is_write(input))
             .unwrap_or(false)
