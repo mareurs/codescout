@@ -2,6 +2,7 @@
 //! per-workspace Unix socket. Phase 1 = synchronous remote tools.
 
 pub mod client;
+pub mod launch;
 pub mod protocol;
 pub mod registry;
 pub mod server;
