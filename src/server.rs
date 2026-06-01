@@ -208,6 +208,11 @@ impl CodeScoutServer {
     pub(crate) fn tool_names(&self) -> Vec<String> {
         self.tools.iter().map(|t| t.name().to_string()).collect()
     }
+    pub(crate) fn output_buffer_ref(
+        &self,
+    ) -> std::sync::Arc<crate::tools::output_buffer::OutputBuffer> {
+        self.output_buffer.clone()
+    }
 
     pub(crate) async fn project_root_string(&self) -> String {
         self.agent

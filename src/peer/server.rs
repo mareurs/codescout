@@ -33,12 +33,12 @@ const PEER_EXPOSED_TOOLS: &[&str] = &[
     "get_guide",
 ];
 
-/// A bound peer-serve context: the server for the served workspace plus the
 /// read-only grant. Read-only is enforced at THIS layer (Task 6), because the
 /// served workspace is the Agent's home and is therefore always read-write.
 pub struct PeerServe {
     pub server: Arc<CodeScoutServer>,
     pub read_only: bool,
+    pub audit_path: Option<std::path::PathBuf>,
 }
 
 /// Construct a `CodeScoutServer` for `root` and wrap it with the read-only grant.
@@ -47,7 +47,12 @@ pub async fn build_server_for(root: &Path, read_only: bool) -> Result<PeerServe>
         .await
         .context("failed to construct agent for peer workspace")?;
     let server = Arc::new(CodeScoutServer::new(agent).await);
-    Ok(PeerServe { server, read_only })
+    let audit_path = Some(root.join(".codescout").join("peer-audit.jsonl"));
+    Ok(PeerServe {
+        server,
+        read_only,
+        audit_path,
+    })
 }
 
 /// Bind the per-user peer socket, restricted to mode 0600.
@@ -116,6 +121,8 @@ async fn dispatch_envelope(env: &PeerEnvelope, ctx: &PeerServe) -> PeerEnvelope 
     match env.method.as_deref() {
         Some("hello") => handle_hello(&env.id, ctx).await,
         Some("tool.call") => handle_tool_call(&env.id, env.params.clone(), ctx).await,
+        Some("buffer.read") => handle_buffer_read(&env.id, env.params.clone(), ctx).await,
+        Some("buffer.grep") => handle_buffer_grep(&env.id, env.params.clone(), ctx).await,
         Some(other) => PeerEnvelope::error(
             &env.id,
             PeerError {
@@ -151,7 +158,7 @@ async fn handle_hello(id: &str, ctx: &PeerServe) -> PeerEnvelope {
     PeerEnvelope::response(id, serde_json::to_value(caps).unwrap_or(json!({})))
 }
 
-async fn handle_tool_call(
+async fn handle_tool_call_inner(
     id: &str,
     params: Option<serde_json::Value>,
     ctx: &PeerServe,
@@ -207,6 +214,102 @@ async fn handle_tool_call(
             PeerError {
                 code: ErrorCode::UnknownTool,
                 message: e.to_string(),
+                data: None,
+            },
+        ),
+    }
+}
+async fn handle_tool_call(
+    id: &str,
+    params: Option<serde_json::Value>,
+    ctx: &PeerServe,
+) -> PeerEnvelope {
+    let tool_name = params
+        .as_ref()
+        .and_then(|p| p.get("tool"))
+        .and_then(|t| t.as_str())
+        .unwrap_or("?")
+        .to_string();
+    let reply = handle_tool_call_inner(id, params, ctx).await;
+    if let Some(path) = &ctx.audit_path {
+        let record =
+            serde_json::json!({ "id": id, "tool": tool_name, "ok": reply.error.is_none() });
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            use std::io::Write as _;
+            let _ = writeln!(f, "{record}");
+        }
+    }
+    reply
+}
+
+async fn handle_buffer_read(
+    id: &str,
+    params: Option<serde_json::Value>,
+    ctx: &PeerServe,
+) -> PeerEnvelope {
+    let handle = match params
+        .as_ref()
+        .and_then(|p| p.get("handle"))
+        .and_then(|h| h.as_str())
+    {
+        Some(h) => h.to_string(),
+        None => return bad_params(id, "buffer.read requires a 'handle'"),
+    };
+    match ctx.server.output_buffer_ref().get(&handle) {
+        Some(entry) => {
+            let content = if entry.stderr.is_empty() {
+                entry.stdout
+            } else {
+                format!("{}\n{}", entry.stdout, entry.stderr)
+            };
+            PeerEnvelope::response(id, serde_json::json!({ "content": content }))
+        }
+        None => PeerEnvelope::error(
+            id,
+            PeerError {
+                code: ErrorCode::UnknownHandle,
+                message: format!("no such handle: {handle}"),
+                data: None,
+            },
+        ),
+    }
+}
+
+async fn handle_buffer_grep(
+    id: &str,
+    params: Option<serde_json::Value>,
+    ctx: &PeerServe,
+) -> PeerEnvelope {
+    let p = params.unwrap_or_else(|| serde_json::json!({}));
+    let handle = match p.get("handle").and_then(|h| h.as_str()) {
+        Some(h) => h.to_string(),
+        None => return bad_params(id, "buffer.grep requires a 'handle'"),
+    };
+    let pattern = match p.get("pattern").and_then(|h| h.as_str()) {
+        Some(s) => s.to_string(),
+        None => return bad_params(id, "buffer.grep requires a 'pattern'"),
+    };
+    let re = match regex::Regex::new(&pattern) {
+        Ok(r) => r,
+        Err(e) => return bad_params(id, &format!("invalid regex: {e}")),
+    };
+    match ctx.server.output_buffer_ref().get(&handle) {
+        Some(entry) => {
+            let matched: Vec<&str> = entry.stdout.lines().filter(|l| re.is_match(l)).collect();
+            PeerEnvelope::response(
+                id,
+                serde_json::json!({ "matches": matched, "count": matched.len() }),
+            )
+        }
+        None => PeerEnvelope::error(
+            id,
+            PeerError {
+                code: ErrorCode::UnknownHandle,
+                message: format!("no such handle: {handle}"),
                 data: None,
             },
         ),
@@ -353,7 +456,7 @@ mod tests {
             ),
         ];
         for (tool, args, sentinel) in cases {
-            let reply = handle_tool_call(
+            let reply = handle_tool_call_inner(
                 "a:1",
                 Some(serde_json::json!({"tool": tool, "args": args})),
                 &ctx,
@@ -374,5 +477,77 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[tokio::test]
+    async fn buffer_read_and_grep_proxy_stored_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        let ctx = build_server_for(&root, true).await.unwrap();
+        let handle = ctx
+            .server
+            .output_buffer_ref()
+            .store_tool("probe", "LINE_ONE\nLINE_TWO".into());
+
+        let read =
+            handle_buffer_read("a:1", Some(serde_json::json!({ "handle": handle })), &ctx).await;
+        let body = read.result.expect("buffer.read should return a result");
+        let content = body["content"].as_str().unwrap();
+        assert!(content.contains("LINE_ONE") && content.contains("LINE_TWO"));
+
+        let handle2 = ctx
+            .server
+            .output_buffer_ref()
+            .store_tool("probe", "LINE_ONE\nLINE_TWO".into());
+        let grep = handle_buffer_grep(
+            "a:2",
+            Some(serde_json::json!({ "handle": handle2, "pattern": "LINE_ONE" })),
+            &ctx,
+        )
+        .await;
+        let gbody = grep.result.expect("buffer.grep should return a result");
+        assert_eq!(gbody["count"], 1);
+
+        let missing =
+            handle_buffer_read("a:3", Some(serde_json::json!({ "handle": "@nope" })), &ctx).await;
+        assert_eq!(
+            missing.error.unwrap().code,
+            crate::peer::protocol::ErrorCode::UnknownHandle
+        );
+    }
+
+    #[tokio::test]
+    async fn served_tool_calls_are_audited() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        let ctx = build_server_for(&root, true).await.unwrap();
+
+        let _ = handle_tool_call(
+            "a:1",
+            Some(serde_json::json!({ "tool": "tree", "args": { "path": "." } })),
+            &ctx,
+        )
+        .await;
+        // a denied call is audited too
+        let _ = handle_tool_call(
+            "a:2",
+            Some(serde_json::json!({ "tool": "create_file", "args": {} })),
+            &ctx,
+        )
+        .await;
+
+        let logged =
+            std::fs::read_to_string(root.join(".codescout").join("peer-audit.jsonl")).unwrap();
+        assert!(
+            logged.contains("\"tool\":\"tree\""),
+            "must record tree: {logged}"
+        );
+        assert!(
+            logged.contains("\"tool\":\"create_file\""),
+            "must record the denied call: {logged}"
+        );
+        assert!(logged.contains("\"id\":\"a:1\""));
     }
 }
