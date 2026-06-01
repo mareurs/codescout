@@ -108,6 +108,24 @@ enum Commands {
         server_cmd: Vec<String>,
     },
 
+    /// Serve this workspace's read tools to peer codescout instances over a Unix socket.
+    #[cfg(unix)]
+    #[command(hide = true)]
+    PeerServe {
+        /// Path to the Unix socket to listen on
+        #[arg(long)]
+        socket: std::path::PathBuf,
+        /// Workspace root to serve
+        #[arg(long)]
+        workspace: std::path::PathBuf,
+        /// Serve read-only (Phase 1 is read-only regardless; flag reserved)
+        #[arg(long, default_value_t = true)]
+        read_only: bool,
+        /// Idle timeout in seconds (reserved; not yet enforced)
+        #[arg(long, default_value_t = 300)]
+        idle_timeout: u64,
+    },
+
     /// Migrate legacy sqlite-vec memories at .codescout/embeddings.db into the
     /// Qdrant `memories` collection. Idempotent — re-running overwrites by
     /// deterministic point id rather than duplicating.
@@ -360,6 +378,15 @@ async fn main() -> Result<()> {
                 &server_env,
             )
             .await?;
+        }
+        #[cfg(unix)]
+        Commands::PeerServe {
+            socket,
+            workspace,
+            read_only,
+            idle_timeout,
+        } => {
+            codescout::peer::server::run(&socket, &workspace, read_only, idle_timeout).await?;
         }
     }
 

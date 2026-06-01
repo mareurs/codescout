@@ -76,6 +76,26 @@ pub async fn accept_one(listener: &UnixListener, ctx: &PeerServe) -> Result<()> 
     let (stream, _addr) = listener.accept().await?;
     serve_connection(stream, ctx).await
 }
+/// Run the peer-serve process for `workspace`: bind the socket and serve
+/// connections sequentially until the listener errors. Mirrors
+/// `lsp::mux::process::run`. Phase 1 serves one requester at a time; the lock
+/// file, idle-timeout, and concurrency are Phase-1.5 follow-ups.
+pub async fn run(
+    socket_path: &Path,
+    workspace: &Path,
+    read_only: bool,
+    _idle_timeout_secs: u64,
+) -> Result<()> {
+    let ctx = build_server_for(workspace, read_only).await?;
+    let listener = bind_peer_socket(socket_path)?;
+    loop {
+        if accept_one(&listener, &ctx).await.is_err() {
+            break;
+        }
+    }
+    std::fs::remove_file(socket_path).ok();
+    Ok(())
+}
 
 /// Serve one client connection: read envelopes, dispatch, write replies, until EOF.
 async fn serve_connection(stream: UnixStream, ctx: &PeerServe) -> Result<()> {
