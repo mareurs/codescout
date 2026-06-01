@@ -199,10 +199,30 @@ impl CodeScoutServer {
     /// tools return false — they never reach dispatch (resolve_tool rejects
     /// them first), so the answer is immaterial; returning false avoids a
     /// second lookup failure.
-    fn is_write_call(&self, tool_name: &str, input: &serde_json::Value) -> bool {
+    pub(crate) fn is_write_call(&self, tool_name: &str, input: &serde_json::Value) -> bool {
         self.find_tool(tool_name)
             .map(|t| t.is_write(input))
             .unwrap_or(false)
+    }
+
+    pub(crate) fn tool_names(&self) -> Vec<String> {
+        self.tools.iter().map(|t| t.name().to_string()).collect()
+    }
+
+    pub(crate) async fn project_root_string(&self) -> String {
+        self.agent
+            .project_root()
+            .await
+            .map(|r| r.display().to_string())
+            .unwrap_or_default()
+    }
+
+    pub(crate) async fn project_name(&self) -> String {
+        self.agent
+            .project_root()
+            .await
+            .and_then(|r| r.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .unwrap_or_default()
     }
 
     fn parse_input(arguments: Option<serde_json::Map<String, Value>>) -> Value {
