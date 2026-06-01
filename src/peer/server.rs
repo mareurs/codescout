@@ -278,7 +278,7 @@ async fn handle_tool_call_inner(
         Some(t) => t.to_string(),
         None => return bad_params(id, "tool.call requires a 'tool' name"),
     };
-    let args = params
+    let mut args = params
         .get("args")
         .cloned()
         .unwrap_or_else(|| serde_json::json!({}));
@@ -298,6 +298,16 @@ async fn handle_tool_call_inner(
                 data: None,
             },
         );
+    }
+
+    // Scope every peer call to the SERVED workspace: strip any caller-supplied
+    // `workspace` pin so a requester cannot redirect resolution to a different
+    // loadable project on the host. The per-request `workspace` override is an
+    // in-process pinning feature (parallel subagents), never peer-controllable —
+    // a peer is addressed by its registry id, which maps to exactly one workspace.
+    // See docs/issues/2026-06-01-peer-workspace-arg-pin-escape.md.
+    if let Some(obj) = args.as_object_mut() {
+        obj.remove("workspace");
     }
 
     match ctx.server.call_tool_by_name(&tool, args).await {
@@ -772,4 +782,58 @@ mod tests {
 
         serve.abort();
     }
+    #[tokio::test]
+    async fn peer_tool_call_ignores_smuggled_workspace_override() {
+        // Served workspace A — the only project this peer-serve should expose.
+        let dir_a = tempfile::tempdir().unwrap();
+        let a = dir_a.path().to_path_buf();
+        std::fs::create_dir_all(a.join(".codescout")).unwrap();
+        std::fs::create_dir_all(a.join("served_alpha_dir")).unwrap();
+        // Foreign workspace B — a different loadable project that must stay unreachable.
+        let dir_b = tempfile::tempdir().unwrap();
+        let b = dir_b.path().to_path_buf();
+        std::fs::create_dir_all(b.join(".codescout")).unwrap();
+        std::fs::create_dir_all(b.join("foreign_beta_dir")).unwrap();
+
+        let sock = a.join("peer.sock");
+        let (sr, sk) = (a.clone(), sock.clone());
+        let serve = tokio::spawn(async move {
+            let ctx = build_server_for(&sr, true).await.unwrap();
+            let listener = bind_peer_socket(&sk).unwrap();
+            let _ = accept_one(&listener, &ctx).await;
+        });
+
+        let mut client = {
+            let mut c = None;
+            for _ in 0..50 {
+                if let Ok(client) = crate::peer::client::PeerClient::connect(&sock).await {
+                    c = Some(client);
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            c.expect("could not connect to served socket")
+        };
+
+        // Smuggle a foreign `workspace` pin in the tool args.
+        let res = client
+            .call_tool(
+                "tree",
+                serde_json::json!({ "path": ".", "workspace": b.to_string_lossy() }),
+            )
+            .await
+            .expect("tree call");
+        let text = serde_json::to_string(&res).unwrap();
+        assert!(
+            text.contains("served_alpha_dir"),
+            "peer call must resolve the SERVED workspace A: {text}"
+        );
+        assert!(
+            !text.contains("foreign_beta_dir"),
+            "peer call must NOT reach the smuggled workspace B: {text}"
+        );
+
+        serve.abort();
+    }
+
 }
