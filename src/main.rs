@@ -112,9 +112,10 @@ enum Commands {
     #[cfg(unix)]
     #[command(hide = true)]
     PeerServe {
-        /// Path to the Unix socket to listen on
+        /// Path to the Unix socket to listen on. Defaults to the per-user
+        /// derived socket for `--workspace` (codescout-peer-<hash>.sock) when omitted.
         #[arg(long)]
-        socket: std::path::PathBuf,
+        socket: Option<std::path::PathBuf>,
         /// Workspace root to serve
         #[arg(long)]
         workspace: std::path::PathBuf,
@@ -386,6 +387,9 @@ async fn main() -> Result<()> {
             read_only,
             idle_timeout,
         } => {
+            let socket = socket.unwrap_or_else(|| {
+                codescout::socket_discovery::peer_socket_path_for_workspace(&workspace)
+            });
             codescout::peer::server::run(&socket, &workspace, read_only, idle_timeout).await?;
         }
     }
