@@ -715,6 +715,7 @@ mod tests {
         let held = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
+            .truncate(true)
             .open(&lock)
             .unwrap();
         held.try_lock_exclusive().unwrap();
