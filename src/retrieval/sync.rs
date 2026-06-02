@@ -81,18 +81,8 @@ impl crate::retrieval::client::RetrievalClient {
             }
             let path = entry.path();
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            let lang = match ext {
-                "rs" => "rust",
-                "py" => "python",
-                "ts" | "tsx" => "typescript",
-                "js" | "jsx" => "javascript",
-                "go" => "go",
-                "java" => "java",
-                "kt" => "kotlin",
-                "md" | "mdx" => "markdown",
-                "sh" | "bash" => "shell",
-                "toml" => "toml",
-                _ => continue,
+            let Some(lang) = crate::embed::lang_for_ext(ext) else {
+                continue;
             };
             let source = match std::fs::read_to_string(path) {
                 Ok(s) => s,

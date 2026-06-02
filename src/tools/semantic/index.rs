@@ -189,22 +189,18 @@ impl Tool for IndexProject {
         {
             use crate::embed::preflight::{check_index_scope, PreflightVerdict};
 
-            let (max_bytes, ignored) = ctx
+            let max_bytes = ctx
                 .agent
                 .with_project_at(ctx.workspace_override.as_deref(), |p| {
-                    Ok((
-                        p.config.security.max_index_bytes,
-                        p.config.ignored_paths.patterns.clone(),
-                    ))
+                    Ok(p.config.security.max_index_bytes)
                 })
                 .await
-                .unwrap_or((500 * 1024 * 1024, Default::default()));
+                .unwrap_or(500 * 1024 * 1024);
             let preflight_root = root.clone();
-            let verdict = tokio::task::spawn_blocking(move || {
-                check_index_scope(&preflight_root, max_bytes, &ignored)
-            })
-            .await
-            .map_err(|e| anyhow::anyhow!("preflight task join error: {e}"))??;
+            let verdict =
+                tokio::task::spawn_blocking(move || check_index_scope(&preflight_root, max_bytes))
+                    .await
+                    .map_err(|e| anyhow::anyhow!("preflight task join error: {e}"))??;
 
             if let PreflightVerdict::RequiresConfirmation(info) = verdict {
                 tracing::info!(

@@ -17,6 +17,35 @@ pub use codescout_embed::{chunk_markdown, split, split_markdown, RawChunk};
 pub use codescout_embed::{chunk_size_for_model, create_embedder, create_embedder_with_config};
 pub use codescout_embed::{Embedder, Embedding};
 
+/// Map a file extension to the indexer's language tag, or `None` if the
+/// extension is not indexed.
+///
+/// **Single source of truth** for "which files get embedded", shared by the
+/// indexing walk (`crate::retrieval::sync::RetrievalClient::sync_project`) and
+/// the preflight scope estimate (`preflight::check_index_scope`). Keeping both
+/// on this one function is what guarantees the guard counts exactly the files
+/// the indexer will embed — the two previously diverged (the guard walked a
+/// different tree and counted every file regardless of extension; see
+/// `docs/issues/2026-06-02-preflight-sync-walker-divergence.md`).
+///
+/// Matching is case-sensitive on the raw extension, mirroring `sync_project`'s
+/// historical behaviour (e.g. `README.MD` is *not* treated as markdown here).
+pub fn lang_for_ext(ext: &str) -> Option<&'static str> {
+    Some(match ext {
+        "rs" => "rust",
+        "py" => "python",
+        "ts" | "tsx" => "typescript",
+        "js" | "jsx" => "javascript",
+        "go" => "go",
+        "java" => "java",
+        "kt" => "kotlin",
+        "md" | "mdx" => "markdown",
+        "sh" | "bash" => "shell",
+        "toml" => "toml",
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
 

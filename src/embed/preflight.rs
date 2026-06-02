@@ -83,33 +83,40 @@ pub(crate) fn classify_path(root: &Path) -> Option<SuspiciousReason> {
     None
 }
 
-/// Preflight scan: walk `root` (respecting `.gitignore` and hidden-file rules,
-/// matching `build_index`'s walker), accumulate file count and approximate
-/// source-byte total, then compare against `max_bytes` and classify the root.
+/// Preflight scan: walk `root` exactly as `RetrievalClient::sync_project`
+/// does — `hidden(false)` (tracked dotfiles included), `.gitignore` respected,
+/// counting only files whose extension the indexer embeds
+/// (`crate::embed::lang_for_ext`). Accumulates an eligible-file count and an
+/// approximate source-byte total, then compares against `max_bytes` and
+/// classifies the root.
 ///
-/// Returns `PreflightVerdict::Clear` if neither trigger fires — caller
-/// proceeds to `build_index`. Otherwise returns
-/// `RequiresConfirmation(PreflightInfo)`; caller must elicit user confirmation.
+/// Returns `PreflightVerdict::Clear` if neither trigger fires — caller proceeds
+/// to index. Otherwise returns `RequiresConfirmation(PreflightInfo)`; caller
+/// must elicit user confirmation.
+///
+/// The walker and extension allowlist are kept identical to `sync_project`'s
+/// (via the shared `lang_for_ext`) so the guard's estimate matches what is
+/// actually indexed. They previously diverged — the guard used `hidden(true)`,
+/// applied an `ignored_paths` filter the indexer never honoured, and counted
+/// every file regardless of extension; see
+/// `docs/issues/2026-06-02-preflight-sync-walker-divergence.md`.
 ///
 /// Per-file `metadata()` errors are silently skipped (matching `WalkBuilder::flatten`).
 /// Only failure to read the root itself propagates as an error.
-pub fn check_index_scope(
-    root: &Path,
-    max_bytes: u64,
-    ignored_paths: &[String],
-) -> anyhow::Result<PreflightVerdict> {
+pub fn check_index_scope(root: &Path, max_bytes: u64) -> anyhow::Result<PreflightVerdict> {
     if !root.exists() {
         anyhow::bail!("project root does not exist: {}", root.display());
     }
 
-    let ignored = ignored_paths.to_vec();
+    // Walk exactly as `RetrievalClient::sync_project` does: `hidden(false)` so
+    // tracked dotfiles are visited, `.gitignore` respected, and only files
+    // whose extension the indexer actually embeds (`crate::embed::lang_for_ext`)
+    // are counted. This keeps the estimate faithful to what `sync_project`
+    // will index — `.git/` internals and binary blobs are skipped because no
+    // indexable extension matches them, without any bespoke ignore list.
     let walker = ignore::WalkBuilder::new(root)
-        .hidden(true)
+        .hidden(false)
         .git_ignore(true)
-        .filter_entry(move |entry| {
-            let name = entry.file_name().to_string_lossy();
-            !ignored.iter().any(|p| p.as_str() == name.as_ref())
-        })
         .build();
 
     let mut file_count: usize = 0;
@@ -120,6 +127,14 @@ pub fn check_index_scope(
             continue;
         };
         if !ftype.is_file() {
+            continue;
+        }
+        let ext = entry
+            .path()
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        if crate::embed::lang_for_ext(ext).is_none() {
             continue;
         }
         let Ok(meta) = entry.metadata() else { continue };
@@ -188,7 +203,7 @@ impl PreflightInfo {
             format_bytes(self.approx_bytes)
         ));
 
-        // Rough estimate: build_index chunk_size ≈ 4000 chars. Integer math, no decimals.
+        // Rough estimate: indexer chunk_size ≈ 4000 chars. Integer math, no decimals.
         let est_chunks = usize::try_from(self.approx_bytes / 4000).unwrap_or(usize::MAX);
         lines.push(format!("Estimated chunks: ~{}", format_count(est_chunks)));
 
@@ -297,14 +312,14 @@ mod tests {
     #[test]
     fn check_index_scope_returns_clear_for_small_dir() {
         let dir = make_tempdir_with_bytes(1024); // 1 KB
-        let v = check_index_scope(dir.path(), 500 * 1024 * 1024, &[]).unwrap();
+        let v = check_index_scope(dir.path(), 500 * 1024 * 1024).unwrap();
         assert!(matches!(v, PreflightVerdict::Clear), "got {v:?}");
     }
 
     #[test]
     fn check_index_scope_flags_oversized_dir() {
         let dir = make_tempdir_with_bytes(2048);
-        let v = check_index_scope(dir.path(), 1024, &[]).unwrap();
+        let v = check_index_scope(dir.path(), 1024).unwrap();
         match v {
             PreflightVerdict::RequiresConfirmation(info) => {
                 assert!(info.size_exceeds_threshold);
@@ -320,24 +335,63 @@ mod tests {
     fn check_index_scope_respects_gitignore() {
         let dir = tempfile::tempdir().unwrap();
         // Initialise a real git repo so WalkBuilder (require_git=true default)
-        // actually applies .gitignore rules — matching build_index's walker.
+        // actually applies .gitignore rules — matching sync_project's walker.
         std::process::Command::new("git")
             .args(["init", "-q"])
             .current_dir(dir.path())
             .status()
             .unwrap();
-        // Big file that's gitignored
+        // Big *indexable* file (.rs) that is gitignored — so only the gitignore
+        // rule (not the extension filter) can exclude it. If gitignore were not
+        // honoured, its 2 KB would trip the 1 KB threshold.
         let mut gi = std::fs::File::create(dir.path().join(".gitignore")).unwrap();
-        gi.write_all(b"big.bin\n").unwrap();
-        let mut f = std::fs::File::create(dir.path().join("big.bin")).unwrap();
+        gi.write_all(b"ignored_big.rs\n").unwrap();
+        let mut f = std::fs::File::create(dir.path().join("ignored_big.rs")).unwrap();
         f.write_all(&vec![b'x'; 2048]).unwrap();
-        // Small real source file
+        // Small real source file that should be counted.
         let mut s = std::fs::File::create(dir.path().join("small.rs")).unwrap();
         s.write_all(b"fn main() {}\n").unwrap();
 
-        let v = check_index_scope(dir.path(), 1024, &[]).unwrap();
-        // big.bin should be ignored → under threshold → Clear.
+        let v = check_index_scope(dir.path(), 1024).unwrap();
+        // ignored_big.rs should be gitignored → under threshold → Clear.
         assert!(matches!(v, PreflightVerdict::Clear), "got {v:?}");
+    }
+
+    #[test]
+    fn check_index_scope_counts_only_indexable_extensions() {
+        // The guard estimates *indexed* size, so non-indexed extensions
+        // (.bin, .png, .git internals) must not count — matching the
+        // `lang_for_ext` allowlist that `sync_project` applies.
+        let dir = tempfile::tempdir().unwrap();
+        // Large non-indexable blob.
+        let mut blob = std::fs::File::create(dir.path().join("data.bin")).unwrap();
+        blob.write_all(&vec![b'x'; 8192]).unwrap();
+        // Small indexable source file.
+        let mut src = std::fs::File::create(dir.path().join("lib.rs")).unwrap();
+        src.write_all(b"fn main() {}\n").unwrap();
+
+        let v = check_index_scope(dir.path(), 1024).unwrap();
+        // Only lib.rs (~13 B) is counted; data.bin (8 KB) is excluded → Clear.
+        assert!(matches!(v, PreflightVerdict::Clear), "got {v:?}");
+    }
+
+    #[test]
+    fn check_index_scope_counts_hidden_non_gitignored_files() {
+        // `sync_project` walks with `hidden(false)`; the guard must match so it
+        // does not under-count tracked dotfiles. A hidden, non-gitignored,
+        // indexable file must be counted.
+        let dir = tempfile::tempdir().unwrap();
+        let mut f = std::fs::File::create(dir.path().join(".config.toml")).unwrap();
+        f.write_all(&vec![b'x'; 2048]).unwrap();
+
+        let v = check_index_scope(dir.path(), 1024).unwrap();
+        match v {
+            PreflightVerdict::RequiresConfirmation(info) => {
+                assert!(info.size_exceeds_threshold);
+                assert_eq!(info.file_count, 1, "hidden .config.toml must be counted");
+            }
+            other => panic!("expected RequiresConfirmation (hidden file counted), got {other:?}"),
+        }
     }
 
     #[test]
