@@ -151,6 +151,7 @@ This measurement must precede the V2 decision.
 | W-4 | 2026-05-28 | high | Iron Law 6 briefing pattern empirically validated by subagent self-assessment | Without file-and-symbol-anchored brief, subagent would have spent ≥10 exploratory tool calls discovering the architecture | validated |
 | W-5 | 2026-05-31 | high | Re-measured byte budget on current HEAD (not a cached count) | Would have blessed snapshot to 2337 B + committed a red branch (cap+snapshot failing); silent prod slice truncation | validated |
 | W-6 | 2026-06-03 | med | Pre-draft scout of which gates apply to a specific prompt-surface | Avoided a fabricated guide byte-cap rationale + skipped manual tool-name verification (stale name would ship unguarded) | validated |
+| W-7 | 2026-06-03 | med-high | Tier guide content by point-of-use frequency (split librarian core vs on-demand runtime) | Every artifact-session carried ~6 KB rarely-needed reference on the auto-inject; split → −31% per-session, runtime now inline-fetch | validated |
 
 ---
 
@@ -611,6 +612,26 @@ Symptoms:
 **Promote-when:** A second pre-draft scout finds a CLAUDE.md "prompt surface" claim that over- or under-states which gate covers a specific surface. At 2 datapoints, promote to CLAUDE.md: *"Prompt-surface gates are surface-specific — verify the actual `surfaces` list / invariant scope before relying on a gate; the tool-name drift guard covers 3 surfaces (not get_guide bodies), and the 2200-byte cap is slice-only."*
 
 **Status:** validated — single datapoint; both assumptions corrected against source before any edit.
+
+## W-7 — Split librarian guide into core + on-demand runtime reference (−31% per-session auto-inject)
+
+**Observed:** 2026-06-03, the prompt-surface compaction sweep (the deferred half of the session's original ask, resumed). Branch `experiments`, commit `27bf11dc`.
+
+**Pattern:** Tier prompt-surface content by *frequency-of-need-at-point-of-use*, not by topic. The librarian guide body is auto-injected on the first `artifact` call of every session (V2: `first_artifact_call_appends_librarian_guide_body_v2`), so its full size is a per-session tax. Reference-grade detail (caps, SQL semantics, catalog DB location, classifier overrides, event-authorship) belongs in an on-demand sub-topic reachable via a pointer — `get_guide("librarian-runtime")` — NOT in the always-injected body.
+
+**Counterfactual:** Without the split, every artifact-using session carried the full 19.7 KB guide (which this session had grown +1.1 KB via the augmented-tracker cue). The ~6 KB reference loaded on every first-artifact-call despite rare point-of-use need. Split → core 13.7 KB (auto-injected), runtime 6.2 KB (on-demand, now *under* the inline-fetch threshold so it no longer buffers). Net −4.9 KB / −27% vs. the 18.6 KB pre-session baseline.
+
+**Wiring captured (for the next split):** add to `GUIDE_TOPICS` + `topic_body` (`src/prompts/mod.rs`); `GetGuide` enum + registry derive automatically; bump the `get_guide_lists_topics_with_no_arg` count assertion (`src/tools/guide.rs` — the F-8 gotcha class); the capped slice (`source.md`) needs NO change (topic list is free prose, not test-enforced); no `ONBOARDING_VERSION` bump (get_guide bodies fetched fresh).
+
+**Confirming data points:**
+1. `get_guide("librarian")` body 19,756 B → 13,678 B (tool-envelope sizes).
+2. Live post-`/mcp`: no-arg lists 8 topics incl. `librarian-runtime`; the new topic serves inline; the auto-inject test is green with the smaller body.
+
+**Impact:** med-high — recurring per-session token saving for every artifact-using session across all projects on this server.
+
+**Promote-when:** a second surface gets the same point-of-use tiering (another guide split, or relocating a slice block to a guide). At 2 datapoints, promote to `src/prompts/README.md` / CLAUDE.md: *"Tier guide content by point-of-use frequency; reference-grade detail → on-demand sub-topic, not the auto-injected body."*
+
+**Status:** validated — committed `27bf11dc`, 105 prompt/guide tests green, verified live.
 
 ## Template for new entries
 
