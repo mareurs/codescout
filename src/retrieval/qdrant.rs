@@ -202,10 +202,17 @@ impl QdrantWrap {
             })
             .collect();
 
-        self.client
-            .upsert_points(UpsertPointsBuilder::new(collection, structs).wait(true))
-            .await
-            .context("upsert_points")?;
+        // Upsert in bounded chunks: a single large upsert (thousands of
+        // dense+sparse points) can exceed the Qdrant client timeout
+        // ("operation was cancelled / Timeout expired"). Smaller batches keep
+        // each gRPC call well under it.
+        const UPSERT_BATCH: usize = 256;
+        for batch in structs.chunks(UPSERT_BATCH) {
+            self.client
+                .upsert_points(UpsertPointsBuilder::new(collection, batch.to_vec()).wait(true))
+                .await
+                .context("upsert_points")?;
+        }
 
         Ok(())
     }
