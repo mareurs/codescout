@@ -139,6 +139,7 @@ This measurement must precede the V2 decision.
 | F-6 | 2026-05-28 | med | iron-law-6 | fixed-verified | Parent should brief subagent on triggered guide topics, not just on file paths |
 | F-7 | 2026-05-28 | med | codescout-tool | fixed-verified | `edit_markdown(action='replace')` silently drops `<!-- @surface NAME -->` / `<!-- @end -->` markers from the section body |
 | F-8 | 2026-05-31 | high | 2kb-cap | fixed-verified | Concurrent Phase-5 commit (b13c8c66) pushed slice to 2272 B (over cap) + left snapshot stale; re-scout caught before bless/commit |
+| F-9 | 2026-06-03 | low | get-guide-topic | open | Tool-name drift guard scans 3 surfaces only — `get_guide` body files (`prompts/guides/*.md`) are ungated |
 
 ## Wins Index
 
@@ -149,6 +150,7 @@ This measurement must precede the V2 decision.
 | W-3 | 2026-05-28 | high | Project's `source_md_under_cap` invariant caught the over-cap edit before merge | Iron Law 6 would have shipped malformed (truncated mid-law); silent multi-session subagent-quality regression | validated |
 | W-4 | 2026-05-28 | high | Iron Law 6 briefing pattern empirically validated by subagent self-assessment | Without file-and-symbol-anchored brief, subagent would have spent ≥10 exploratory tool calls discovering the architecture | validated |
 | W-5 | 2026-05-31 | high | Re-measured byte budget on current HEAD (not a cached count) | Would have blessed snapshot to 2337 B + committed a red branch (cap+snapshot failing); silent prod slice truncation | validated |
+| W-6 | 2026-06-03 | med | Pre-draft scout of which gates apply to a specific prompt-surface | Avoided a fabricated guide byte-cap rationale + skipped manual tool-name verification (stale name would ship unguarded) | validated |
 
 ---
 
@@ -568,6 +570,48 @@ Symptoms:
 **Promote-when:** W-3's promote-when is now **met** (gate fired a second time). Promote to CLAUDE.md "Verification Patterns": *"The `source_md_under_cap` invariant (`src/prompts/mod.rs`) is load-bearing. Run `cargo test --lib prompt` before any prompt-surface edit is considered ready; on a shared branch, re-measure the slice on current HEAD because concurrent commits grow it under you."*
 
 **Status:** validated
+---
+
+## F-9 — Tool-name drift guard scans 3 surfaces only — `get_guide` body files are ungated
+
+**Observed:** 2026-06-03, pre-draft reconnaissance for an augmented-tracker "dual nature" framing addition to `get_guide("librarian")` (and `docs/architecture/augmented-artifacts.md`). Branch `experiments` @ `d059f70c`.
+
+**When:** About to draft new prose containing tool-name references (`artifact_augment`, `entry_collection`, `workspace_state_at`) into `src/prompts/guides/librarian.md`.
+
+**Expected:** CLAUDE.md § "Prompt Surface Consistency" says `prompt_surfaces_reference_only_real_tools` "catches stale tool-name mentions across all three surfaces at build time." I read that as covering `get_guide` bodies too — i.e. a stale/renamed tool name in new guide prose would fail CI.
+
+**Got:** The `surfaces` array in `prompt_surfaces_reference_only_real_tools` (`src/server.rs`) holds exactly three: `SERVER_INSTRUCTIONS`, `RAW_ONBOARDING_PROMPT`, `build_system_prompt_draft`. The seven `get_guide` bodies (`src/prompts/guides/*.md`, resolved by `topic_body` at `src/prompts/mod.rs:145`) are not scanned. The only guide-file invariant, `guide_topics_have_bodies` (`mod.rs:858`), asserts each topic resolves to a non-empty body — nothing about content. Guide-body tool-name accuracy is manual discipline only.
+
+**Probable cause:** The "three surfaces" framing predates the get_guide split; guide bodies were carved out of the slice to dodge the 2200-byte cap but never added to the drift-guard's `surfaces` list. Distance-from-change: the guard lives in `server.rs`, the guides in `prompts/guides/`.
+
+**Workaround:** Manually verify every backticked tool name in any guide-body edit against the registered tool set before committing — CI will not. (Applied to the framing draft.)
+
+**Severity:** low — latent coverage gap, not an active failure. Cost materializes only if a guide ships a stale/renamed tool name: it then misleads the model on every `get_guide(topic)` read, unguarded, until a human notices.
+
+**Status:** open — gap is real; the fix (add the 7 bodies to the guard, or a sibling test) is not yet decided. Mirror-image of F-4: that *missed* a gate that does apply; this *assumed* a gate that does not.
+
+**Fix idea / Pointer:** Extend `prompt_surfaces_reference_only_real_tools` to also iterate `GUIDE_TOPICS` → `topic_body(topic)`; grow the allowlist with the get_guide topic tokens that aren't tools. TBD pending user decision.
+
+---
+
+## W-6 — Pre-draft scout of which gates apply to a specific prompt-surface caught two false gate-assumptions
+
+**Observed:** 2026-06-03, before drafting the augmented-tracker framing into `get_guide("librarian")` + `augmented-artifacts.md`. Same scout as F-9.
+
+**Pattern:** Before drafting into (or compacting) any prompt-surface file, scout *which gates actually apply to that specific surface* — read the invariant module (`prompts::redesign_invariants`) and the drift-guard's `surfaces` list directly; do not infer coverage from CLAUDE.md prose. Gates are surface-specific: the `source_md_under_cap` 2200-byte cap is slice-only (`mod.rs:1089`); the tool-name drift guard is 3-surfaces-only.
+
+**Counterfactual:** Without the scout I'd have drafted under two false assumptions: (1) cited a guide byte-cap as the rationale for "compacting" the 18.6 KB librarian guide — but no such gate exists (the overflow is token-on-read cost, not a tripwire), so the rationale would have been fabricated (the failure mode the `dont-fabricate-commit-rationale` project memory names); (2) trusted CI to catch tool-name drift in new guide prose and skipped manual verification — letting a stale name ship in the always-readable librarian guide unguarded (F-9). Avoided: one fabricated rationale baked into a commit/tracker + one class of silently-wrong guide content.
+
+**Confirming data points:**
+1. F-9 (this session) — drift guard skips guide bodies; surfaced by reading the `surfaces` array in `prompt_surfaces_reference_only_real_tools`.
+2. `MAX_INSTRUCTIONS_CHARS = 2200` confirmed slice-only at `src/prompts/mod.rs:1089` (gates `build_server_instructions`), never applied to `topic_body`.
+
+**Impact:** med — prevented a fabricated compaction rationale and established that guide tool-name accuracy is manual, which shapes how the framing edit must be verified.
+
+**Promote-when:** A second pre-draft scout finds a CLAUDE.md "prompt surface" claim that over- or under-states which gate covers a specific surface. At 2 datapoints, promote to CLAUDE.md: *"Prompt-surface gates are surface-specific — verify the actual `surfaces` list / invariant scope before relying on a gate; the tool-name drift guard covers 3 surfaces (not get_guide bodies), and the 2200-byte cap is slice-only."*
+
+**Status:** validated — single datapoint; both assumptions corrected against source before any edit.
+
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
