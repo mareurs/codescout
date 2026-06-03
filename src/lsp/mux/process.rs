@@ -244,12 +244,57 @@ pub async fn run(
     )
     .await;
 
-    // Shutdown: remove socket file
+    // Shutdown: kill the LSP server before reclaiming its analyzer HOME so no
+    // writer holds the dir, then remove the socket.
+    let _ = child.kill().await;
     std::fs::remove_file(socket_path).ok();
     // flock released when lock_file drops
 
+    // Reclaim a codescout-provisioned kotlin-lsp analyzer HOME, if any. The
+    // analyzer index escapes --system-path into <user.home>/.config/JetBrains/
+    // analyzer and grows unbounded; codescout redirects user.home per-workspace
+    // (JAVA_TOOL_OPTIONS=-Duser.home=<cache>/codescout/kotlin-lsp-home/<hash>)
+    // and reclaims it here so the churning RocksDB store can't accumulate across
+    // sessions. See docs/issues/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md.
+    reclaim_kotlin_analyzer_home(server_env);
+
     info!("mux process shutting down");
     result
+}
+
+/// Reclaim the codescout-provisioned kotlin-lsp analyzer HOME named in
+/// `server_env` (`JAVA_TOOL_OPTIONS=-Duser.home=<dir>`), if present and guarded.
+/// kotlin-lsp's analyzer index ignores `--system-path` and grows unbounded in
+/// `<user.home>/.config/JetBrains/analyzer`; codescout redirects user.home into
+/// a per-workspace cache dir, swept here on mux exit. See
+/// `docs/issues/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md`.
+fn reclaim_kotlin_analyzer_home(server_env: &[(String, String)]) {
+    let Some(home) = kotlin_home_from_env(server_env) else {
+        return;
+    };
+    match std::fs::remove_dir_all(&home) {
+        Ok(()) => info!("reclaimed kotlin-lsp analyzer home {}", home.display()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => warn!("failed to reclaim kotlin-lsp home {}: {e}", home.display()),
+    }
+}
+
+/// Extract a codescout-owned kotlin-lsp HOME from `JAVA_TOOL_OPTIONS` in the
+/// server env. Returns the path only if it passes the codescout-home guard
+/// (so we never `remove_dir_all` a real home or arbitrary directory).
+fn kotlin_home_from_env(server_env: &[(String, String)]) -> Option<std::path::PathBuf> {
+    let jto = server_env
+        .iter()
+        .find(|(k, _)| k == "JAVA_TOOL_OPTIONS")
+        .map(|(_, v)| v.as_str())?;
+    // codescout appends its -Duser.home last; take the last occurrence.
+    let dir = jto
+        .rsplit_once("-Duser.home=")?
+        .1
+        .split_whitespace()
+        .next()?;
+    let path = std::path::PathBuf::from(dir);
+    crate::lsp::servers::is_codescout_kotlin_home(&path).then_some(path)
 }
 
 /// Main event loop — accepts clients, reads from server, checks idle timeout.
@@ -720,4 +765,50 @@ fn read_proc_memory(pid: u32) -> Option<(u64, u64)> {
 #[cfg(not(target_os = "linux"))]
 fn read_proc_memory(_pid: u32) -> Option<(u64, u64)> {
     None
+}
+
+#[cfg(test)]
+mod kotlin_home_tests {
+    use super::*;
+
+    #[test]
+    fn kotlin_home_from_env_extracts_guarded_home() {
+        let home = crate::lsp::servers::kotlin_analyzer_home("abc123");
+        let env = vec![
+            ("GRADLE_USER_HOME".to_string(), "/tmp/g".to_string()),
+            (
+                "JAVA_TOOL_OPTIONS".to_string(),
+                format!("-Duser.home={}", home.display()),
+            ),
+        ];
+        assert_eq!(kotlin_home_from_env(&env), Some(home));
+    }
+
+    #[test]
+    fn kotlin_home_from_env_takes_last_user_home() {
+        // codescout appends its -Duser.home last; an earlier (foreign) one is
+        // ignored because rsplit takes the final occurrence.
+        let home = crate::lsp::servers::kotlin_analyzer_home("ws9");
+        let env = vec![(
+            "JAVA_TOOL_OPTIONS".to_string(),
+            format!(
+                "-Xmx2g -Duser.home=/home/real -Duser.home={}",
+                home.display()
+            ),
+        )];
+        assert_eq!(kotlin_home_from_env(&env), Some(home));
+    }
+
+    #[test]
+    fn kotlin_home_from_env_rejects_foreign_and_absent() {
+        // A foreign user.home (a real home) must be rejected by the guard.
+        let env = vec![(
+            "JAVA_TOOL_OPTIONS".to_string(),
+            "-Duser.home=/home/victim".to_string(),
+        )];
+        assert_eq!(kotlin_home_from_env(&env), None);
+        // No JAVA_TOOL_OPTIONS at all.
+        let env2 = vec![("GRADLE_USER_HOME".to_string(), "/tmp/g".to_string())];
+        assert_eq!(kotlin_home_from_env(&env2), None);
+    }
 }

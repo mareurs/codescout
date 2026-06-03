@@ -73,6 +73,21 @@ pub fn default_config(language: &str, workspace_root: &Path) -> Option<LspServer
                 std::env::temp_dir().join(format!("codescout-mux-kotlin-lsp-{ws_hash}"));
             let gradle_home =
                 std::env::temp_dir().join(format!("codescout-mux-gradle-{repo_hash}"));
+            // Redirect the IntelliJ analyzer index off the user's real ~/.config
+            // (it ignores --system-path / XDG / idea.config.path and grows
+            // unbounded) into a codescout-owned, per-workspace cache HOME that
+            // the mux reclaims on shutdown. See
+            // docs/issues/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md.
+            let analyzer_home = kotlin_analyzer_home(&ws_hash);
+            // Best-effort: the analyzer's PathManager creates the tree, but make
+            // sure user.home itself exists before the JVM starts.
+            let _ = std::fs::create_dir_all(&analyzer_home);
+            let java_tool_options = match std::env::var("JAVA_TOOL_OPTIONS") {
+                Ok(prev) if !prev.trim().is_empty() => {
+                    format!("{prev} -Duser.home={}", analyzer_home.display())
+                }
+                _ => format!("-Duser.home={}", analyzer_home.display()),
+            };
             Some(LspServerConfig {
                 command: crate::platform::lsp_binary_name("kotlin-lsp"),
                 args: vec![
@@ -82,10 +97,13 @@ pub fn default_config(language: &str, workspace_root: &Path) -> Option<LspServer
                 workspace_root: root,
                 init_timeout: jvm_timeout,
                 mux: true,
-                env: vec![(
-                    "GRADLE_USER_HOME".to_string(),
-                    gradle_home.to_string_lossy().to_string(),
-                )],
+                env: vec![
+                    (
+                        "GRADLE_USER_HOME".to_string(),
+                        gradle_home.to_string_lossy().to_string(),
+                    ),
+                    ("JAVA_TOOL_OPTIONS".to_string(), java_tool_options),
+                ],
                 idle_timeout_secs: Some(300),
             })
         }
@@ -201,6 +219,37 @@ pub fn has_lsp_config(lang: &str) -> bool {
     )
 }
 
+/// Root for codescout-provisioned per-workspace fake HOMEs handed to kotlin-lsp.
+///
+/// kotlin-lsp's IntelliJ analyzer index resolves to `<user.home>/.config/
+/// JetBrains/analyzer/...` and ignores `XDG_CONFIG_HOME`, `idea.config.path`,
+/// and `--system-path` (verified 2026-06-03); it also grows unbounded. We
+/// redirect `user.home` per workspace into a codescout-owned cache dir so the
+/// index (a) leaves the user's real `~/.config`, and (b) can be reclaimed
+/// wholesale on mux shutdown. See
+/// `docs/issues/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md`.
+pub(crate) fn kotlin_lsp_home_root() -> std::path::PathBuf {
+    dirs::cache_dir()
+        .or_else(dirs::data_local_dir)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("codescout")
+        .join("kotlin-lsp-home")
+}
+
+/// Per-workspace fake HOME, keyed by the same `ws_hash` as `--system-path` so
+/// the mux can locate and remove exactly this workspace's index on exit.
+pub(crate) fn kotlin_analyzer_home(ws_hash: &str) -> std::path::PathBuf {
+    kotlin_lsp_home_root().join(ws_hash)
+}
+
+/// Guard: is `path` a codescout-provisioned kotlin-lsp HOME (a per-workspace
+/// subdir of [`kotlin_lsp_home_root`])? The mux reclaims such dirs on shutdown;
+/// this guard ensures we never `remove_dir_all` a real home or arbitrary path.
+pub(crate) fn is_codescout_kotlin_home(path: &std::path::Path) -> bool {
+    let root = kotlin_lsp_home_root();
+    path.starts_with(&root) && path != root
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,5 +352,57 @@ mod tests {
             kotlin_system_path(&wt_cfg),
             "worktree and its main repo must NOT share the IntelliJ system dir"
         );
+    }
+
+    fn kotlin_java_tool_options(cfg: &LspServerConfig) -> String {
+        cfg.env
+            .iter()
+            .find(|(k, _)| k == "JAVA_TOOL_OPTIONS")
+            .map(|(_, v)| v.clone())
+            .expect("kotlin config must set JAVA_TOOL_OPTIONS")
+    }
+
+    #[test]
+    fn kotlin_redirects_user_home_off_real_config() {
+        // The IntelliJ analyzer index resolves <user.home>/.config/JetBrains/
+        // analyzer, ignoring --system-path / XDG / idea.config.path (verified
+        // 2026-06-03) and grows unbounded. We redirect user.home into a
+        // codescout-owned per-workspace cache HOME so it (a) leaves the user's
+        // real ~/.config and (b) is reclaimable on mux shutdown. See
+        // docs/issues/2026-06-01-kotlin-lsp-analyzer-index-unbounded-disk.md.
+        let ws = Path::new("/tmp/codescout-test-kt-redirect");
+        let cfg = default_config("kotlin", ws).unwrap();
+        let ws_hash = crate::lsp::mux::workspace_hash(ws);
+        let expected = kotlin_analyzer_home(&ws_hash);
+        let jto = kotlin_java_tool_options(&cfg);
+        assert!(
+            jto.contains(&format!("-Duser.home={}", expected.display())),
+            "JAVA_TOOL_OPTIONS must redirect user.home to the cache HOME; got {jto}"
+        );
+        assert!(
+            is_codescout_kotlin_home(&expected),
+            "redirected HOME must pass the codescout-home guard so the mux reclaims it"
+        );
+    }
+
+    #[test]
+    fn kotlin_analyzer_home_is_per_workspace() {
+        let a = default_config("kotlin", Path::new("/tmp/codescout-test-repo-a")).unwrap();
+        let b = default_config("kotlin", Path::new("/tmp/codescout-test-repo-b")).unwrap();
+        assert_ne!(
+            kotlin_java_tool_options(&a),
+            kotlin_java_tool_options(&b),
+            "distinct workspace roots must get distinct -Duser.home redirect dirs"
+        );
+    }
+
+    #[test]
+    fn codescout_kotlin_home_guard_rejects_foreign_paths() {
+        // The guard must never authorise removing a real home or arbitrary dir.
+        let root = kotlin_lsp_home_root();
+        assert!(is_codescout_kotlin_home(&root.join("deadbeef")));
+        assert!(!is_codescout_kotlin_home(&root)); // the root itself is off-limits
+        assert!(!is_codescout_kotlin_home(Path::new("/home/someone")));
+        assert!(!is_codescout_kotlin_home(Path::new("/tmp/unrelated")));
     }
 }
