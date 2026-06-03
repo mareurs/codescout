@@ -35,6 +35,8 @@ tests/fixtures/*/.codescout/
 # Runtime / session files
 .codescout/cc_session_id
 .codescout/tantivy/
+.codescout/peer-audit.jsonl
+.codescout/usage.db.bak-*
 
 # Benchmark artifacts (regenerated locally)
 /results-*.tsv
