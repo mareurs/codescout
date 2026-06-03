@@ -15,8 +15,7 @@ strings, and unrelated identifiers.
   `symbols(name="edit_code")` to locate it, then
   `symbols(name_path="ToolName/edit_code", include_body=true)` for the body.
 - **Kind filter + path scope:** `symbols(path="src/tools/", kind="struct")`.
-  `kind` values vary by language: `function`, `class`, `struct`, `interface`,
-  `type`, `enum`, `module`, `constant`. Run `symbols(path)` once on a
+  `kind` values vary by language (see table below). Run `symbols(path)` once on a
   representative file to see which kinds your LSP emits.
 - **Who calls X?** `references(symbol, path)` — structured call sites, not
   `grep`.
@@ -27,53 +26,23 @@ strings, and unrelated identifiers.
 - **Name unknown?** Start with `semantic_search("what it does")`, then drill
   down with `symbols(name_path=...)`.
 
-## Rust
+## Per-language quick reference
 
-- **`name_path` form:** `Type/method`, `impl Trait for Type/method`.
-- **Find a method:** `symbols(name_path="Service/handle", include_body=true)`.
-- **List by kind:** `symbols(path="src/", kind="struct")` (also `"interface"` for traits).
-- **Language note:** trait impls use `impl Trait for Type/method`; rust-analyzer reports traits as `kind="interface"`.
-- **Before refactor:** `call_graph(symbol="Service/handle", path="src/service.rs", direction="callers", max_depth=3)`.
+The generic patterns above already cover finding a method
+(`symbols(name_path="Container/member", include_body=true)`), callers, and
+impact analysis (`call_graph(symbol, path, direction="callers")` before any
+structural change) — those are identical across languages. Only three things
+vary per language: the `name_path` form, the `kind` to pass to
+`symbols(path=..., kind=...)`, and a per-language gotcha.
 
-## Python
-
-- **`name_path` form:** `Class/method`, `module_func`.
-- **Find a method:** `symbols(name_path="Service/handle", include_body=true)`.
-- **List by kind:** `symbols(path="src/", kind="class")`.
-- **Language note:** decorators are not part of the symbol — search by the decorated function's name.
-- **Before refactor:** `call_graph(symbol="Service/handle", path="src/service.py", direction="callers", max_depth=3)`.
-
-## TypeScript / JavaScript
-
-- **`name_path` form:** `Class/method`, `exportedFunction`.
-- **Find a method:** `symbols(name_path="Service/handle", include_body=true)`.
-- **List by kind:** `symbols(path="src/", kind="class")` for classes; `kind="function"` for arrow fns.
-- **Language note:** React function components are `kind="function"`, not `kind="class"`.
-- **Before refactor:** `call_graph(symbol="Service/handle", path="src/service.ts", direction="callers", max_depth=3)`.
-
-## Kotlin / Java
-
-- **`name_path` form:** `Class/method`, `Object.companion/method`.
-- **Find a method:** `symbols(name_path="Service/handle", include_body=true)`.
-- **List by kind:** `symbols(path="src/", kind="class")` (covers classes, objects, annotations).
-- **Language note:** annotations are not part of the symbol — search by method name.
-- **Before refactor:** `call_graph(symbol="Service/handle", path="src/Service.kt", direction="callers", max_depth=3)`.
-
-## Go
-
-- **`name_path` form:** `Type/Method`, `PackageFunc`.
-- **Find a method:** `symbols(name_path="Service/Handle", include_body=true)`.
-- **List by kind:** `symbols(path="./", kind="function")` (covers funcs and methods).
-- **Language note:** interfaces use `kind="interface"`; receiver methods stay in `Type/Method` form.
-- **Before refactor:** `call_graph(symbol="Service/Handle", path="service.go", direction="callers", max_depth=3)`.
-
-## C#
-
-- **`name_path` form:** `Class/Method`, `Namespace.Class/Method` for nested.
-- **Find a method:** `symbols(name_path="Service/Handle", include_body=true)`.
-- **List by kind:** `symbols(path="src/", kind="class")` (also `"interface"`).
-- **Language note:** properties surface as `kind="function"` getters/setters in some LSPs.
-- **Before refactor:** `call_graph(symbol="Service/Handle", path="src/Service.cs", direction="callers", max_depth=3)`.
+| Language | `name_path` form | `kind` for list-by-kind | Gotcha |
+|---|---|---|---|
+| **Rust** | `Type/method`, `impl Trait for Type/method` | `struct` | rust-analyzer reports traits as `kind="interface"`; trait impls use the `impl Trait for Type/method` form |
+| **Python** | `Class/method`, `module_func` | `class` | decorators aren't part of the symbol — search by the decorated function's name |
+| **TS / JS** | `Class/method`, `exportedFunction` | `class`; `function` for arrow fns | React function components are `kind="function"`, not `class` |
+| **Kotlin / Java** | `Class/method`, `Object.companion/method` | `class` (covers classes, objects, annotations) | annotations aren't part of the symbol — search by method name |
+| **Go** | `Type/Method`, `PackageFunc` | `function` (covers funcs + methods) | interfaces use `kind="interface"`; receiver methods stay `Type/Method` |
+| **C#** | `Class/Method`, `Namespace.Class/Method` (nested) | `class`, `interface` | properties surface as `function` getters/setters in some LSPs |
 
 ## Related
 
