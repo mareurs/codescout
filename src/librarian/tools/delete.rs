@@ -28,16 +28,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let row = artifact::get(&cat, &a.id)?
         .ok_or_else(|| super::RecoverableError::new(format!("unknown id `{}`", a.id)))?;
 
-    // Guard: only delete artifacts under a managed workspace root (mirrors mv).
+    // Guard: only delete artifacts under a managed root — a workspace
+    // `[[roots]]` entry or the active project. See `super::managed_roots`.
     let abs_path = row.abs_path.clone();
-    if !ctx
-        .workspace
-        .roots
-        .iter()
-        .any(|r| abs_path.starts_with(&r.path))
-    {
+    let roots = super::managed_roots(ctx);
+    if super::containing_root(&roots, &abs_path).is_none() {
         return Err(super::RecoverableError::new(format!(
-            "artifact '{}' is outside every workspace root — refusing to delete {}",
+            "artifact '{}' is outside every managed root — refusing to delete {}",
             a.id,
             abs_path.display()
         )));
@@ -199,5 +196,67 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("unknown id"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn delete_succeeds_for_active_project_absent_from_legacy_roots() {
+        // Regression for docs/issues/2026-06-03-artifact-delete-refuses-in-workspace-artifact.md:
+        // under the `[[project]]` model the active project lives in `current_project`,
+        // not in `workspace.roots`. The guard must honor it, else every delete in such
+        // a project fails with "outside every workspace root".
+        let tmp = tempfile::tempdir().unwrap();
+        let mut ctx = mk_ctx(tmp.path());
+        ctx.workspace = Arc::new(WorkspaceConfig {
+            roots: vec![],
+            ignore: vec![],
+            rules: vec![],
+            umbrellas: vec![],
+        });
+        ctx.current_project = Some(Arc::new(
+            crate::librarian::current_project::CurrentProject {
+                abs_path: tmp.path().to_path_buf(),
+                git_root: tmp.path().to_path_buf(),
+                umbrella: None,
+            },
+        ));
+
+        let file = tmp.path().join("docs/trackers/doomed.md");
+        assert!(file.exists());
+
+        // Before the fix this returned "outside every workspace root".
+        let result = delete::call(&ctx, serde_json::json!({"id": ID}))
+            .await
+            .unwrap();
+        assert_eq!(result["deleted"], true);
+        assert!(!file.exists(), "file should be removed");
+        let cat = ctx.catalog.lock();
+        assert!(artifact::get(&cat, ID).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn delete_refuses_artifact_outside_all_managed_roots() {
+        // Safety property preserved: with neither a legacy root nor an active
+        // project covering the path, delete must refuse and leave the file intact.
+        let tmp = tempfile::tempdir().unwrap();
+        let mut ctx = mk_ctx(tmp.path());
+        ctx.workspace = Arc::new(WorkspaceConfig {
+            roots: vec![],
+            ignore: vec![],
+            rules: vec![],
+            umbrellas: vec![],
+        });
+        ctx.current_project = None;
+
+        let err = delete::call(&ctx, serde_json::json!({"id": ID}))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("outside every managed root"),
+            "got: {err}"
+        );
+        assert!(
+            tmp.path().join("docs/trackers/doomed.md").exists(),
+            "refused delete must not remove the file"
+        );
     }
 }

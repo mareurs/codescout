@@ -90,6 +90,47 @@ pub struct ToolContext {
     pub current_project: Option<Arc<crate::librarian::current_project::CurrentProject>>,
 }
 
+/// Candidate "managed roots" an artifact may legitimately live under: the
+/// legacy workspace `[[roots]]` entries plus the active project's git root
+/// and project root.
+///
+/// Under the `[[project]]` workspace model the active project is resolved
+/// into `current_project` and is usually ABSENT from the legacy `roots`
+/// registry. A guard that consults only `workspace.roots` therefore rejects
+/// every delete/move performed in such a project — see
+/// `docs/issues/2026-06-03-artifact-delete-refuses-in-workspace-artifact.md`.
+///
+/// `git_root` is listed before `abs_path` so a caller that joins a
+/// repo-root-relative path (e.g. `mv`) resolves against the repo root rather
+/// than a project subdirectory.
+pub(crate) fn managed_roots(ctx: &ToolContext) -> Vec<std::path::PathBuf> {
+    let mut roots: Vec<std::path::PathBuf> =
+        ctx.workspace.roots.iter().map(|r| r.path.clone()).collect();
+    if let Some(cp) = ctx.current_project.as_deref() {
+        for candidate in [&cp.git_root, &cp.abs_path] {
+            if !roots.iter().any(|r| r == candidate) {
+                roots.push(candidate.clone());
+            }
+        }
+    }
+    roots
+}
+
+/// The first managed root that contains `abs_path`, if any.
+///
+/// Paths are compared lexically: stored `abs_path` values are
+/// canonical-absolute (upsert canonicalizes on write) and `current_project`
+/// is canonicalized at the adapter boundary (`adapter.rs`), so a lexical
+/// `Path::starts_with` is sound. We deliberately do NOT `canonicalize()`
+/// `abs_path` at call time — `delete` tolerates an already-removed file and
+/// `std::fs::canonicalize` errors on a missing path.
+pub(crate) fn containing_root<'a>(
+    roots: &'a [std::path::PathBuf],
+    abs_path: &std::path::Path,
+) -> Option<&'a std::path::PathBuf> {
+    roots.iter().find(|root| abs_path.starts_with(root))
+}
+
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
     fn name(&self) -> &'static str;

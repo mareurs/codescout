@@ -20,16 +20,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let row = artifact::get(&cat, &a.id)?
         .ok_or_else(|| super::RecoverableError::new(format!("unknown id `{}`", a.id)))?;
 
-    // Find the workspace root that contains this artifact's abs_path.
-    let root = ctx
-        .workspace
-        .roots
-        .iter()
-        .find(|r| row.abs_path.starts_with(&r.path))
-        .ok_or_else(|| anyhow::anyhow!("no workspace root contains {}", row.abs_path.display()))?;
+    // Find the managed root that contains this artifact — a workspace
+    // `[[roots]]` entry or the active project. `new_rel_path` is interpreted
+    // relative to that root. See `super::managed_roots`.
+    let roots = super::managed_roots(ctx);
+    let root_path = super::containing_root(&roots, &row.abs_path)
+        .ok_or_else(|| anyhow::anyhow!("no managed root contains {}", row.abs_path.display()))?;
 
     let old_full = row.abs_path.clone();
-    let new_full = root.path.join(&a.new_rel_path);
+    let new_full = root_path.join(&a.new_rel_path);
 
     if new_full.exists() {
         return Err(super::RecoverableError::new(format!(
@@ -206,5 +205,46 @@ mod tests {
         .unwrap_err();
 
         assert!(err.to_string().contains("unknown id"));
+    }
+
+    #[tokio::test]
+    async fn move_succeeds_for_active_project_absent_from_legacy_roots() {
+        // Regression for docs/issues/2026-06-03-artifact-delete-refuses-in-workspace-artifact.md
+        // (mv shares delete's guard): under the `[[project]]` model the active project is in
+        // `current_project`, not `workspace.roots`. `new_rel_path` must resolve relative to the
+        // active project's git_root.
+        let tmp = tempfile::tempdir().unwrap();
+        let mut ctx = mk_ctx(tmp.path());
+        ctx.workspace = Arc::new(WorkspaceConfig {
+            roots: vec![],
+            ignore: vec![],
+            rules: vec![],
+            umbrellas: vec![],
+        });
+        ctx.current_project = Some(Arc::new(
+            crate::librarian::current_project::CurrentProject {
+                abs_path: tmp.path().to_path_buf(),
+                git_root: tmp.path().to_path_buf(),
+                umbrella: None,
+            },
+        ));
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223344",
+                "new_rel_path": "docs/archive/foo.md"
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result["moved"], true);
+        assert!(tmp.path().join("docs/archive/foo.md").exists());
+        assert!(!tmp.path().join("docs/trackers/foo.md").exists());
+        let cat = ctx.catalog.lock();
+        let row = artifact::get(&cat, "aabbccdd11223344").unwrap().unwrap();
+        assert!(row.abs_path.ends_with("docs/archive/foo.md"));
     }
 }
