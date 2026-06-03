@@ -29,6 +29,40 @@ the catalog DB as structured `params`; the markdown body holds prose; an
 optional `render_template` can project params into the body whenever the
 artifact refreshes.
 
+## Two faces: time-aware log and on-demand skill
+
+An augmented tracker is more than "data + prose." Once augmented, the artifact
+carries four things, and a reader — human or LLM — gets all of them at once:
+
+1. **Data** — structured rows in `params`. Naming the array via
+   `entry_collection` makes them filterable with
+   `artifact(action="get", entry_filter=…)`.
+2. **Rendering** — an optional `render_template` projects `params` into the
+   markdown body, so the human view never drifts from the data.
+3. **An embedded skill** — the augmentation `prompt` is a standing instruction,
+   surfaced as a `[LIVE]` blockquote whenever the artifact enters a
+   `librarian(action="context")` bundle. It tells the next agent *how to
+   maintain this tracker, what its params mean, which gather sources refresh
+   it.* The artifact teaches the reader how to use the artifact.
+4. **History** — every body write emits a `field_patch` event;
+   `artifact_event(action="list")` plus `artifact(action="state_at")` /
+   `librarian(action="workspace_state_at")` answer "what did this tracker say
+   at commit X / hold last week."
+
+Read one way it is a **time-aware log** (face 4) you can replay; read another it
+is an **on-demand skill** (face 3) the agent loads just-in-time. Two living
+proofs carry all four faces: `tool-usage-patterns` (id `b3fa993849ac83ab`) and
+`doc-ref-audit` (id `fc97be512112fea4`).
+
+**Why state this explicitly.** Usage telemetry across two independent codebases
+shows the capability is *undiscovered at the point of use*: agents hand-maintain
+structured tracker tables with `edit_markdown` (380 calls across 39 files in
+codescout; 659 across 59 files in MRV-poc) while `entry_collection` is set on
+6 artifacts in one repo and **zero** in the other, and the time-travel surfaces
+sit near 0.1% of calls. The gap is discoverability, not missing mechanism — the
+measured baseline and the efficacy rubric live in
+`docs/evals/augmented-tracker-discovery.md`.
+
 ## The body / params / prompt split
 
 An augmented artifact has **three controllable channels**:
