@@ -46,7 +46,7 @@ path — yet the guard claims it is outside every registered workspace root.
 
 **Status: CONFIRMED 2026-06-03 — serial, parent context, no subagents, no parallelism.**
 
-At codescout `4c80dbce`, branch `feat/per-request-workspace-pinning`, live release binary
+At codescout `4c80dbce`, branch `experiments`, live release binary
 (built 2026-06-03T16:13):
 
 1. `artifact(action="create", kind="spec", title="probe", rel_path="docs/_delete_probe_tmp.md")`
@@ -118,7 +118,7 @@ workaround, not an investigation.
 
 ## Fix
 
-**Implemented + verified live 2026-06-03** (branch `feat/per-request-workspace-pinning`).
+**Implemented + verified live 2026-06-03** (branch `experiments`, commit `5a3e323a`).
 The create+delete probe that previously failed now succeeds through the running server; the
 file and catalog row are dropped with 0 orphan augmentation rows. Status stays `open` until
 the fix ships to `master` (archive move happens then).
