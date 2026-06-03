@@ -143,9 +143,61 @@ change. Do not claim the framing "works" without this delta.
 | < +5pp | The prose did not earn its tokens — revert. Re-investigate: maybe the cue belongs in `server_instructions` (capped) or an Anti-Pattern row, or this is a structural ceiling (the model needs a hook, not a doc). |
 | A3 stays ~0 | Time-travel may be genuinely rare, not undiscovered — downgrade that half of the framing to a one-line mention (matches the standing caveat on `state_at`). |
 
+## Run 1 (experiments @ 3e1be988, 2026-06-03) — post-change A1 probe, N=3
+
+Scope: **post-change only** (the `/mcp` reconnect closed the pre-change window) and
+**A1-reach only** (no fixtures seeded → S2–S6, S8 not run). Three fresh
+general-purpose subagents, neutral prompts (no augmentation hint, to avoid
+contaminating the reach measurement).
+
+| Prompt | first mutation tool | augmented + `entry_collection`? | hand-rolled table? | A1 |
+|---|---|---|---|---|
+| S1 (defects) | `artifact` | yes | no | **pass** |
+| S1b (queryable defects)* | `artifact` | yes | no | **pass** |
+| S7 (session log) | `create_file` | no (prose) | no | n/a — see note |
+
+A1 on the two unambiguous structured-row tasks: **2/2 reached for `artifact_augment`
++ `entry_collection`.** (*S1b is an added variant hinting "query which are still open.")
+
+**S7 is mis-specified.** A session log is a *prose* tracker by project convention
+(the reconnaissance skill + `docs/templates/session-log.md`; F-N/W-N Index rows are
+hand-maintained). The subagent correctly created a prose file and declined to
+augment — following the more-specific norm over the general cue. Rubric fix:
+reclassify S7 as a **"should NOT augment" control**, or drop it.
+
+**Why this does NOT verify efficacy:**
+
+- N=3, post-change absolute, no matched pre-change synthetic run to delta against.
+- **Confound:** the S1/S1b agents called `librarian(action="tracker_design")`, which
+  *already* teaches augmentation archetypes and pre-dates this change — so the reach
+  is not attributable to the new librarian-guide cue. All three self-reported
+  `saw_augmentation_guidance=true`, but the source is ambiguous (tracker_design vs.
+  server_instructions vs. companion hook vs. the new cue).
+- S1/S1b are "easy" prompts (explicit id/severity/status + "query open") that
+  practically signal filterable; the in-vivo baseline measured messy real tasks.
+
+**Read:** post-change reach on clean structured-row tasks is non-zero (2/2) vs. the
+in-vivo ~0% `entry_collection` baseline — directionally encouraging, not causally
+attributable. The placement worry (cue gated behind the first `artifact` call) was
+not shown harmful here, but S7 confirms the `create_file` path *does* bypass artifact
+tooling entirely. **The real efficacy check remains the in-vivo `usage.db` re-mine.**
+
+**Tooling defect observed:** `artifact(action="delete")` refused all three probe
+artifacts with "outside every workspace root" despite the active project being
+`codescout` and the files living under `docs/trackers/`. Cleanup required `rm` +
+`librarian(action="reindex", force=true)` (dropped the rows: removed 3) but left
+orphan augmentation rows in the local catalog. Possible delete-guard /
+parallel-subagent abs_path bug — root cause unconfirmed (forensic trail removed
+during cleanup).
+
+---
 ## Post-change — pending
 
-After the `augmented-artifacts.md` framing (and any `get_guide("librarian")`
-consolidation) ship and the binary is rebuilt (`cargo build --release` + MCP
-reconnect), run S1–S8 in fresh subagents and append
-`## Run 1 (<branch> @ <SHA>, <date>)` with the per-prompt table.
+Run 1 (above) covered **A1 only, post-change**. Still pending:
+
+1. **Fixtured run** of S2–S6 / S8 (the A2 update + A3 query/time-travel dimensions) —
+   needs a seeded augmented tracker (and, for S6, a tracker with prior commit history).
+2. **In-vivo `usage.db` re-mine** after a few weeks of post-change sessions accumulate
+   — re-run the two SQL queries in *Why this eval exists* and compare to today's
+   baseline. This is the only **matched-methodology** efficacy check (real tasks,
+   large N), and the one that can actually attribute a delta to the change.
