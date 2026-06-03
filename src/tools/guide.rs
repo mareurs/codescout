@@ -43,7 +43,7 @@ impl Tool for GetGuide {
          Topics: librarian | librarian-runtime | tracker-conventions | progressive-disclosure | \
          error-handling | workspace-state | iron-laws-detail | \
          symbol-navigation. No args = list \
-         topics + summaries. Large bodies overflow to @tool_* buffer."
+         topics + summaries. Large bodies overflow to @tool_*."
     }
 
     fn input_schema(&self) -> Value {
