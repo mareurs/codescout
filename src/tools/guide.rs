@@ -40,7 +40,7 @@ impl Tool for GetGuide {
 
     fn description(&self) -> &str {
         "Deep guidance for a topic. Use when the system prompt points here. \
-         Topics: librarian | tracker-conventions | progressive-disclosure | \
+         Topics: librarian | librarian-runtime | tracker-conventions | progressive-disclosure | \
          error-handling | workspace-state | iron-laws-detail | \
          symbol-navigation. No args = list \
          topics + summaries. Large bodies overflow to @tool_* buffer."
@@ -67,6 +67,7 @@ impl Tool for GetGuide {
                 "topics": self.topics.keys().collect::<Vec<_>>(),
                 "summaries": {
                     "librarian": "artifact model, filter syntax, trackers, augmentations",
+                    "librarian-runtime": "caps, scope hints, SQL filter semantics, gather sources, catalog DB location, classifier overrides, event-authorship",
                     "tracker-conventions": "frontmatter, archive flow, status vocabulary",
                     "progressive-disclosure": "MAX_INLINE_TOKENS, @ref buffer, overflow patterns",
                     "error-handling": "RecoverableError vs anyhow::bail, is_error routing",
@@ -116,13 +117,14 @@ mod tests {
         let topics = result["topics"].as_array().unwrap();
         let names: Vec<&str> = topics.iter().map(|v| v.as_str().unwrap()).collect();
         assert!(names.contains(&"librarian"));
+        assert!(names.contains(&"librarian-runtime"));
         assert!(names.contains(&"tracker-conventions"));
         assert!(names.contains(&"progressive-disclosure"));
         assert!(names.contains(&"error-handling"));
         assert!(names.contains(&"workspace-state"));
         assert!(names.contains(&"iron-laws-detail"));
         assert!(names.contains(&"symbol-navigation"));
-        assert_eq!(names.len(), 7);
+        assert_eq!(names.len(), 8);
     }
 
     #[tokio::test]

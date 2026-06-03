@@ -127,6 +127,7 @@ pub fn build_server_instructions(project_status: Option<&ProjectStatus>) -> Stri
 /// to inject the body when a `relevant_guide_topic()` hint fires.
 pub const GUIDE_TOPICS: &[&str] = &[
     "librarian",
+    "librarian-runtime",
     "tracker-conventions",
     "progressive-disclosure",
     "error-handling",
@@ -145,6 +146,7 @@ pub const GUIDE_TOPICS: &[&str] = &[
 pub fn topic_body(topic: &str) -> Option<&'static str> {
     match topic {
         "librarian" => Some(include_str!("guides/librarian.md")),
+        "librarian-runtime" => Some(include_str!("guides/librarian-runtime.md")),
         "tracker-conventions" => Some(include_str!("guides/tracker-conventions.md")),
         "progressive-disclosure" => Some(include_str!("guides/progressive-disclosure.md")),
         "error-handling" => Some(include_str!("guides/error-handling.md")),
