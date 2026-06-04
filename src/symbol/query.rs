@@ -719,4 +719,37 @@ mod backtick_match_tests {
             "LSP name (no backticks) must resolve to AST symbol (backticks); got {end:?}"
         );
     }
+
+    /// Regression for docs/issues/2026-06-04-kotlin-ast-drops-nested-classes.md:
+    /// a nested class and a method inside it must resolve to their AST end
+    /// lines. Before the fix the nested class was dropped from the AST tree, so
+    /// `find_ast_end_line_in` returned `None` and `edit_code` refused inserts on
+    /// any nested symbol with the misleading "AST parse failed".
+    #[test]
+    fn find_ast_end_line_in_resolves_nested_kotlin_symbols() {
+        let source =
+                "class Outer {\n    class Inner {\n        fun foo() {\n            val a = 1\n        }\n    }\n}\n";
+        let ast_syms = crate::ast::parser::extract_symbols_from_source(
+            source,
+            Some("kotlin"),
+            Path::new("Test.kt"),
+        )
+        .unwrap();
+
+        // Method inside the nested class: 0-based start line 2, ends at 4 (`}`).
+        let foo_end = find_ast_end_line_in(&ast_syms, "foo", 2, Some("Outer/Inner/foo"));
+        assert_eq!(
+            foo_end,
+            Some(4),
+            "nested method must resolve to its AST end line; got {foo_end:?}"
+        );
+
+        // The nested class itself: start line 1, ends at 5.
+        let inner_end = find_ast_end_line_in(&ast_syms, "Inner", 1, Some("Outer/Inner"));
+        assert_eq!(
+            inner_end,
+            Some(5),
+            "nested class must resolve to its AST end line; got {inner_end:?}"
+        );
+    }
 }

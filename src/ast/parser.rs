@@ -663,6 +663,64 @@ fn extract_go_type_children(
 // Java
 // ---------------------------------------------------------------------------
 
+/// Extract a single Java type declaration (`class` / `interface` / `enum` /
+/// `record`) node into a [`SymbolInfo`], recursing into its body for members. Used
+/// by [`extract_java_class_members`] for *nested* types; mirrors the per-kind arms
+/// in [`extract_java_symbols`] for top-level types. Returns `None` for an unnamed
+/// or unhandled node.
+///
+/// See `docs/issues/2026-06-04-kotlin-ast-drops-nested-classes.md` (Java twin): the
+/// nested arm previously called `extract_java_symbols(body)` on the *parent* body,
+/// re-scanning it once per nested type — duplicating every nested type, which then
+/// tripped `find_ast_end_line_in`'s ambiguity guard and broke `edit_code` for
+/// nested Java symbols.
+fn extract_java_type_decl(
+    node: Node,
+    source: &str,
+    file: &PathBuf,
+    prefix: &str,
+) -> Option<SymbolInfo> {
+    let name = child_name(node, source, "name")?;
+    let np = make_name_path(prefix, &name);
+    let (kind, children) = match node.kind() {
+        "class_declaration" => (
+            SymbolKind::Class,
+            find_child_by_kind(node, "class_body")
+                .map(|b| extract_java_class_members(b, source, file, &np))
+                .unwrap_or_default(),
+        ),
+        "interface_declaration" => (
+            SymbolKind::Interface,
+            find_child_by_kind(node, "interface_body")
+                .map(|b| extract_java_class_members(b, source, file, &np))
+                .unwrap_or_default(),
+        ),
+        "enum_declaration" => (
+            SymbolKind::Enum,
+            extract_java_enum_constants(node, source, file, &np),
+        ),
+        "record_declaration" => (
+            SymbolKind::Struct,
+            find_child_by_kind(node, "class_body")
+                .map(|b| extract_java_class_members(b, source, file, &np))
+                .unwrap_or_default(),
+        ),
+        _ => return None,
+    };
+    Some(SymbolInfo {
+        name_path: np,
+        name,
+        kind,
+        file: file.clone(),
+        start_line: node.start_position().row as u32,
+        end_line: node.end_position().row as u32,
+        start_col: node.start_position().column as u32,
+        children,
+        range_start_line: None,
+        detail: None,
+    })
+}
+
 fn extract_java_symbols(node: Node, source: &str, file: &PathBuf, prefix: &str) -> Vec<SymbolInfo> {
     let mut symbols = Vec::new();
     let mut cursor = node.walk();
@@ -824,8 +882,9 @@ fn extract_java_class_members(
             | "interface_declaration"
             | "enum_declaration"
             | "record_declaration" => {
-                let inner = extract_java_symbols(body, source, file, prefix);
-                members.extend(inner);
+                if let Some(sym) = extract_java_type_decl(child, source, file, prefix) {
+                    members.push(sym);
+                }
             }
             _ => {}
         }
@@ -871,6 +930,49 @@ fn extract_java_enum_constants(
 // Kotlin
 // ---------------------------------------------------------------------------
 
+/// Extract a single Kotlin `class_declaration` / `object_declaration` node into a
+/// [`SymbolInfo`], recursing into its body for members. Shared by
+/// [`extract_kotlin_symbols`] (top-level types) and [`extract_kotlin_class_members`]
+/// (nested types) so both paths emit identical shapes. Returns `None` when the node
+/// has no name.
+///
+/// See `docs/issues/2026-06-04-kotlin-ast-drops-nested-classes.md`: the nested arm
+/// previously called `extract_kotlin_symbols(node)` on the declaration node itself,
+/// which iterates the *node's children* for declarations and so matched none —
+/// silently dropping every nested class/object (and its methods) from the symbol
+/// tree, which broke `edit_code` for nested symbols.
+fn extract_kotlin_type_decl(
+    node: Node,
+    source: &str,
+    file: &PathBuf,
+    prefix: &str,
+) -> Option<SymbolInfo> {
+    let name = child_name(node, source, "name")?;
+    let np = make_name_path(prefix, &name);
+    let kind = if node.kind() == "object_declaration" {
+        SymbolKind::Class
+    } else {
+        detect_kotlin_class_kind(node, source)
+    };
+    let body = find_child_by_kind(node, "class_body")
+        .or_else(|| find_child_by_kind(node, "enum_class_body"));
+    let children = body
+        .map(|b| extract_kotlin_class_members(b, source, file, &np))
+        .unwrap_or_default();
+    Some(SymbolInfo {
+        name_path: np,
+        name,
+        kind,
+        file: file.clone(),
+        start_line: node.start_position().row as u32,
+        end_line: node.end_position().row as u32,
+        start_col: node.start_position().column as u32,
+        children,
+        range_start_line: None,
+        detail: None,
+    })
+}
+
 fn extract_kotlin_symbols(
     node: Node,
     source: &str,
@@ -882,49 +984,9 @@ fn extract_kotlin_symbols(
 
     for child in node.children(&mut cursor) {
         match child.kind() {
-            "class_declaration" => {
-                if let Some(name) = child_name(child, source, "name") {
-                    let np = make_name_path(prefix, &name);
-                    // Determine kind: check modifiers for enum/interface/annotation
-                    let kind = detect_kotlin_class_kind(child, source);
-                    let body = find_child_by_kind(child, "class_body")
-                        .or_else(|| find_child_by_kind(child, "enum_class_body"));
-                    let children = body
-                        .map(|b| extract_kotlin_class_members(b, source, file, &np))
-                        .unwrap_or_default();
-                    symbols.push(SymbolInfo {
-                        name_path: np,
-                        name,
-                        kind,
-                        file: file.clone(),
-                        start_line: child.start_position().row as u32,
-                        end_line: child.end_position().row as u32,
-                        start_col: child.start_position().column as u32,
-                        children,
-                        range_start_line: None,
-                        detail: None,
-                    });
-                }
-            }
-            "object_declaration" => {
-                if let Some(name) = child_name(child, source, "name") {
-                    let np = make_name_path(prefix, &name);
-                    let body = find_child_by_kind(child, "class_body");
-                    let children = body
-                        .map(|b| extract_kotlin_class_members(b, source, file, &np))
-                        .unwrap_or_default();
-                    symbols.push(SymbolInfo {
-                        name_path: np,
-                        name,
-                        kind: SymbolKind::Class,
-                        file: file.clone(),
-                        start_line: child.start_position().row as u32,
-                        end_line: child.end_position().row as u32,
-                        start_col: child.start_position().column as u32,
-                        children,
-                        range_start_line: None,
-                        detail: None,
-                    });
+            "class_declaration" | "object_declaration" => {
+                if let Some(sym) = extract_kotlin_type_decl(child, source, file, prefix) {
+                    symbols.push(sym);
                 }
             }
             "function_declaration" => {
@@ -1102,10 +1164,13 @@ fn extract_kotlin_class_members(
                     detail: None,
                 });
             }
-            // Nested class/object declarations
+            // Nested class/object declarations — extract the node itself; do NOT
+            // call extract_kotlin_symbols(child), which expects a container and
+            // would drop the nested type (2026-06-04-kotlin-ast-drops-nested-classes).
             "class_declaration" | "object_declaration" => {
-                let inner = extract_kotlin_symbols(child, source, file, prefix);
-                members.extend(inner);
+                if let Some(sym) = extract_kotlin_type_decl(child, source, file, prefix) {
+                    members.push(sym);
+                }
             }
             // Enum entries
             "enum_entry" => {
@@ -2287,6 +2352,122 @@ class MyTest {
             paths.contains(&"MyTest/`is carried as a constructor value`"),
             "name_path must carry backticks; got: {:?}",
             paths
+        );
+    }
+
+    #[test]
+    fn kotlin_nested_classes_and_members_are_extracted() {
+        // Regression for docs/issues/2026-06-04-kotlin-ast-drops-nested-classes.md:
+        // nested class/object declarations (and their members) must appear in the
+        // AST symbol tree. Before the fix, the nested arm of
+        // extract_kotlin_class_members called extract_kotlin_symbols(node) on the
+        // declaration node itself — which iterates the node's children for
+        // declarations, matched none, and dropped the whole nested type. That made
+        // edit_code's AST end-confirmation refuse inserts on any nested symbol.
+        let source = r#"
+class Outer {
+    @Nested
+    inner class Inner {
+        @Test
+        fun `sets isStage=false for AUTOMATIC subject`() {
+            val y = 1
+        }
+    }
+
+    object NestedObj {
+        fun helper() {}
+    }
+}
+"#;
+        let syms =
+            extract_symbols_from_source(source, Some("kotlin"), Path::new("Test.kt")).unwrap();
+        let outer = syms
+            .iter()
+            .find(|s| s.name == "Outer")
+            .expect("Outer present");
+
+        // Nested `inner class` is extracted with the correct two-level name_path.
+        let inner = outer
+            .children
+            .iter()
+            .find(|s| s.name == "Inner")
+            .expect("nested `inner class` must be extracted");
+        assert_eq!(inner.name_path, "Outer/Inner");
+
+        // Its backtick `@Test` method (with `=` in the name) is extracted one level
+        // deeper — this is the exact shape that broke edit_code in backend-kotlin.
+        let method = inner
+            .children
+            .iter()
+            .find(|s| s.name == "`sets isStage=false for AUTOMATIC subject`")
+            .expect("method inside the nested class must be extracted");
+        assert_eq!(
+            method.name_path,
+            "Outer/Inner/`sets isStage=false for AUTOMATIC subject`"
+        );
+
+        // Nested `object` is extracted too (object_declaration arm), with its member.
+        let obj = outer
+            .children
+            .iter()
+            .find(|s| s.name == "NestedObj")
+            .expect("nested object must be extracted");
+        assert!(
+            obj.children.iter().any(|s| s.name == "helper"),
+            "nested object's member must be extracted; got: {:?}",
+            obj.children
+                .iter()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn java_nested_types_are_extracted_without_duplication() {
+        // Java twin of docs/issues/2026-06-04-kotlin-ast-drops-nested-classes.md:
+        // the nested arm called extract_java_symbols(body) on the PARENT body,
+        // re-scanning it once per nested type → each nested type duplicated (2
+        // nested → each appears 2×), which tripped find_ast_end_line_in's
+        // ambiguity guard and broke edit_code for nested Java symbols.
+        let source = r#"
+class Outer {
+    static class A {
+        void a() {}
+    }
+    static class B {
+        void b() {}
+    }
+}
+"#;
+        let syms =
+            extract_symbols_from_source(source, Some("java"), Path::new("Outer.java")).unwrap();
+        let outer = syms
+            .iter()
+            .find(|s| s.name == "Outer")
+            .expect("Outer present");
+
+        // Both nested classes present EXACTLY ONCE (pre-fix each appeared twice).
+        let a_count = outer.children.iter().filter(|s| s.name == "A").count();
+        let b_count = outer.children.iter().filter(|s| s.name == "B").count();
+        assert_eq!(
+            a_count, 1,
+            "nested class A must appear exactly once; got {a_count}"
+        );
+        assert_eq!(
+            b_count, 1,
+            "nested class B must appear exactly once; got {b_count}"
+        );
+
+        // Correct nested name_path + members.
+        let a = outer.children.iter().find(|s| s.name == "A").unwrap();
+        assert_eq!(a.name_path, "Outer/A");
+        assert!(
+            a.children.iter().any(|s| s.name == "a"),
+            "A.a() must be extracted; got: {:?}",
+            a.children
+                .iter()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>()
         );
     }
 
