@@ -1386,39 +1386,36 @@ async fn line_range_past_eof_returns_recoverable_error() {
     );
 }
 
-#[tokio::test]
-async fn bogus_heading_error_carries_headings_array() {
-    let body = "# A\n\n## B\n\n## C\n";
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("h.md");
-    std::fs::write(&path, body).unwrap();
+    #[tokio::test]
+    async fn bogus_heading_error_carries_headings_array() {
+        let body = "# A\n\n## B\n\n## C\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("h.md");
+        std::fs::write(&path, body).unwrap();
 
-    let ctx = test_ctx().await;
-    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
-    let result = tool
-        .call(
-            serde_json::json!({
-                "path": path.to_str().unwrap(),
-                "heading": "## Nonexistent",
-            }),
-            &ctx,
-        )
-        .await;
+        let ctx = test_ctx().await;
+        let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
+        let result = tool
+            .call(
+                serde_json::json!({
+                    "path": path.to_str().unwrap(),
+                    "heading": "## Nonexistent",
+                }),
+                &ctx,
+            )
+            .await;
 
-    let err = result.expect_err("expected RecoverableError");
-    let rec = err
-        .downcast_ref::<crate::tools::RecoverableError>()
-        .expect("expected RecoverableError");
-    let headings = rec
-        .extra
-        .get("headings")
-        .and_then(|v| v.as_array())
-        .expect("expected `headings` array in extra");
-    assert_eq!(headings.len(), 3, "expected 3 headings, got: {headings:?}");
-    let first = &headings[0];
-    assert_eq!(first.get("h").and_then(|v| v.as_str()), Some("# A"));
-    assert_eq!(first.get("l").and_then(|v| v.as_u64()), Some(1));
-}
+        // Now returns Ok({ok:false,...}) — not Err — so the MCP layer routes through
+        // format_compact's ERROR branch and renders as clean text instead of JSON.
+        let value = result.unwrap();
+        assert_eq!(value["ok"], serde_json::json!(false));
+        assert!(
+            value["headings"]
+                .as_array()
+                .is_some_and(|a| !a.is_empty()),
+            "headings array must be present and non-empty, got: {value}"
+        );
+    }
 
 #[tokio::test]
 async fn small_file_with_multiple_sections_gets_nav_hint() {
@@ -1734,65 +1731,51 @@ async fn format_compact_live_renders_claude_md_as_map_shape() {
     );
 }
 
-#[tokio::test]
-async fn format_compact_live_renders_heading_not_found_as_error_with_headings() {
-    // Live verification of the ERROR branch: read a real file with a bogus
-    // heading, then render the error response. Validates F1 closure end-to-end.
-    use crate::tools::Tool;
+    #[tokio::test]
+    async fn format_compact_live_renders_heading_not_found_as_error_with_headings() {
+        // Live verification of the ERROR branch: read a real file with a bogus
+        // heading, then render the Ok({ok:false,...}) response through format_compact.
+        // The call now returns Ok instead of Err — no envelope reconstruction needed.
+        use crate::tools::Tool;
 
-    let body = "# A\n\n## B\n\n## C\n";
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("h.md");
-    std::fs::write(&path, body).unwrap();
+        let body = "# A\n\n## B\n\n## C\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("h.md");
+        std::fs::write(&path, body).unwrap();
 
-    let ctx = test_ctx().await;
-    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
-    let err = tool
-        .call(
-            serde_json::json!({"path": path.to_str().unwrap(), "heading": "## Nonexistent"}),
-            &ctx,
-        )
-        .await
-        .expect_err("expected RecoverableError");
+        let ctx = test_ctx().await;
+        let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
+        let value = tool
+            .call(
+                serde_json::json!({"path": path.to_str().unwrap(), "heading": "## Nonexistent"}),
+                &ctx,
+            )
+            .await
+            .unwrap();
 
-    // Reconstruct the JSON envelope the MCP server would emit for this error.
-    let rec = err
-        .downcast_ref::<crate::tools::RecoverableError>()
-        .expect("expected RecoverableError");
-    let mut envelope = serde_json::json!({
-        "ok": false,
-        "error": rec.message.clone(),
-    });
-    if let Some(hint) = rec.hint() {
-        envelope["hint"] = serde_json::json!(hint);
+        let rendered = tool
+            .format_compact(&value)
+            .expect("format_compact must return Some for ERROR shape");
+
+        assert!(
+            rendered.starts_with("error: "),
+            "ERROR must start with `error: `, got: {rendered}"
+        );
+        assert!(
+            rendered.contains("Nonexistent"),
+            "error msg must reference the missing heading"
+        );
+        assert!(
+            rendered.contains("available headings:"),
+            "ERROR with headings must show the list"
+        );
+        assert!(
+            rendered.contains("# A  L1"),
+            "ERROR must indent headings same as MAP, got: {rendered}"
+        );
+        assert!(rendered.contains("## B  L3"), "ERROR list missing entry");
+        assert!(rendered.contains("next: "), "ERROR must end with next-cue");
     }
-    for (k, v) in rec.extra.iter() {
-        envelope[k] = v.clone();
-    }
-
-    let rendered = tool
-        .format_compact(&envelope)
-        .expect("format_compact must return Some for ERROR shape");
-
-    assert!(
-        rendered.starts_with("error: "),
-        "ERROR must start with `error: `, got: {rendered}"
-    );
-    assert!(
-        rendered.contains("Nonexistent"),
-        "error msg must reference the missing heading"
-    );
-    assert!(
-        rendered.contains("available headings:"),
-        "ERROR with headings must show the list"
-    );
-    assert!(
-        rendered.contains("# A  L1"),
-        "ERROR must indent headings same as MAP, got: {rendered}"
-    );
-    assert!(rendered.contains("## B  L3"), "ERROR list missing entry");
-    assert!(rendered.contains("next: "), "ERROR must end with next-cue");
-}
 
 // ── empty file + heading arg regression ──────────────────────────────────────
 
@@ -1824,6 +1807,83 @@ async fn empty_file_with_heading_arg_returns_recoverable_error() {
             || rec.message.to_lowercase().contains("no headings"),
         "error should mention not-found / empty / no-headings, got: {}",
         rec.message
+    );
+}
+
+#[tokio::test]
+async fn heading_not_found_returns_ok_soft_error_rendering_as_text() {
+    // Regression: read_markdown(heading="## Missing") must return Ok({ok:false,...})
+    // NOT Err(RecoverableError), so format_compact routes through the ERROR branch
+    // and renders as clean text (not JSON).
+    use crate::tools::Tool;
+
+    let body = "# A\n\nsome content\n\n## B\n\nmore content\n";
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("soft.md");
+    std::fs::write(&path, body).unwrap();
+
+    let ctx = test_ctx().await;
+    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
+    let result = tool
+        .call(
+            serde_json::json!({"path": path.to_str().unwrap(), "heading": "## Nope"}),
+            &ctx,
+        )
+        .await;
+
+    // Must be Ok, not Err
+    let value = result.expect("heading-not-found must return Ok, not Err");
+
+    // The value must carry ok:false
+    assert_eq!(
+        value["ok"],
+        serde_json::json!(false),
+        "ok must be false, got: {value}"
+    );
+
+    // error field must reference the missing heading
+    let err_msg = value["error"].as_str().expect("error field must be a string");
+    assert!(
+        err_msg.contains("Nope"),
+        "error must reference the missing heading 'Nope', got: {err_msg}"
+    );
+
+    // headings array must be non-empty
+    assert!(
+        value["headings"]
+            .as_array()
+            .is_some_and(|a| !a.is_empty()),
+        "headings array must be non-empty, got: {value}"
+    );
+
+    // format_compact must render as text (ERROR branch), not JSON
+    let rendered = tool
+        .format_compact(&value)
+        .expect("format_compact must return Some for ERROR shape");
+
+    assert!(
+        rendered.starts_with("error: "),
+        "rendered output must start with 'error: ', got: {rendered}"
+    );
+    assert!(
+        rendered.contains("Nope"),
+        "rendered output must reference the missing heading 'Nope'"
+    );
+    assert!(
+        rendered.contains("available headings:"),
+        "rendered output must contain 'available headings:'"
+    );
+    assert!(
+        rendered.contains("# A  L1"),
+        "rendered output must show heading # A at L1, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("## B  L5"),
+        "rendered output must show heading ## B at L5, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("next: "),
+        "rendered output must contain 'next: ' cue"
     );
 }
 

@@ -239,12 +239,12 @@ impl Tool for ReadMarkdown {
                                     .iter()
                                     .map(|h| serde_json::json!({"h": h.text, "l": h.line}))
                                     .collect();
-                            return Err(RecoverableError::with_hint(
-                                format!("heading {:?} not found", heading_query),
-                                "pick a heading from `headings` array or use start_line/end_line",
-                            )
-                            .with_extra("headings", serde_json::json!(headings_json))
-                            .into());
+                            return Ok(json!({
+                                "ok": false,
+                                "error": format!("heading {:?} not found", heading_query),
+                                "headings": headings_json,
+                                "hint": "pick a heading from the list above, or use start_line/end_line",
+                            }));
                         }
                         return Err(e.into());
                     }
