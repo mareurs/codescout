@@ -1256,7 +1256,11 @@ fn extract_ts_symbols(node: Node, source: &str, file: &PathBuf, prefix: &str) ->
                     });
                 }
             }
-            "class_declaration" => {
+            // `abstract class X` parses as a distinct node kind from `class X`;
+            // both have a `class_body` and are extracted identically. Missing the
+            // abstract variant dropped the class AND its members
+            // (2026-06-04-ts-extractor-drops-namespace-abstract-class).
+            "class_declaration" | "abstract_class_declaration" => {
                 if let Some(name) = child_name(child, source, "name") {
                     let np = make_name_path(prefix, &name);
                     let body = find_child_by_kind(child, "class_body");
@@ -1327,8 +1331,46 @@ fn extract_ts_symbols(node: Node, source: &str, file: &PathBuf, prefix: &str) ->
                     });
                 }
             }
-            "export_statement" => {
-                // export function ..., export class ..., export default ...
+            // `namespace Foo {}` / `module Foo {}` → internal_module. Recurse into
+            // its statement_block so nested types reach the AST. The name is an
+            // `identifier` (or quoted `string` for ambient modules) child, not
+            // always under a `name` field.
+            "internal_module" | "module" => {
+                let name = child_name(child, source, "name").or_else(|| {
+                    let mut c = child.walk();
+                    let ident = child
+                        .children(&mut c)
+                        .find(|n| n.kind() == "identifier" || n.kind() == "string")?;
+                    ident
+                        .utf8_text(source.as_bytes())
+                        .ok()
+                        .map(|s| s.trim_matches('"').to_string())
+                });
+                if let Some(name) = name {
+                    let np = make_name_path(prefix, &name);
+                    let body = find_child_by_kind(child, "statement_block");
+                    let children = body
+                        .map(|b| extract_ts_symbols(b, source, file, &np))
+                        .unwrap_or_default();
+                    symbols.push(SymbolInfo {
+                        name_path: np,
+                        name,
+                        kind: SymbolKind::Module,
+                        file: file.clone(),
+                        start_line: child.start_position().row as u32,
+                        end_line: child.end_position().row as u32,
+                        start_col: child.start_position().column as u32,
+                        children,
+                        range_start_line: None,
+                        detail: None,
+                    });
+                }
+            }
+            // Statement wrappers that contain a declaration. `namespace` parses as
+            // expression_statement > internal_module; `export`/`declare` wrap the
+            // real declaration. Recursing is safe: only declaration arms match, so
+            // plain expressions contribute nothing.
+            "export_statement" | "expression_statement" | "ambient_declaration" => {
                 let inner = extract_ts_symbols(child, source, file, prefix);
                 symbols.extend(inner);
             }
@@ -1350,7 +1392,9 @@ fn extract_ts_class_members(
 
     for child in body.children(&mut cursor) {
         match child.kind() {
-            "method_definition" => {
+            // `abstract foo(): void;` is an abstract_method_signature, not a
+            // method_definition — without this arm, abstract methods are dropped.
+            "method_definition" | "abstract_method_signature" => {
                 if let Some(name) = child_name(child, source, "name") {
                     members.push(SymbolInfo {
                         name_path: make_name_path(prefix, &name),
@@ -2022,6 +2066,64 @@ type ID = string | number;
             member_names.contains(&"speak"),
             "missing speak: {:?}",
             member_names
+        );
+    }
+    #[test]
+    fn ts_namespace_and_abstract_class_are_extracted() {
+        // Regression: a TS file whose declarations live inside a `namespace`
+        // (internal_module, wrapped in expression_statement) or are `abstract
+        // class` (abstract_class_declaration) used to yield ZERO symbols — the
+        // top-level arm matched neither node kind. edit_code then refused on
+        // every symbol in the file. (2026-06-04-ts-extractor-drops-namespace-abstract-class)
+        let source = r#"
+namespace Outer {
+    export class Inner {
+        method(): void {}
+    }
+}
+
+abstract class Base {
+    abstract foo(): void;
+    bar(): number { return 1; }
+}
+"#;
+        let syms =
+            extract_symbols_from_source(source, Some("typescript"), Path::new("test.ts")).unwrap();
+
+        fn collect(syms: &[SymbolInfo], names: &mut Vec<String>, paths: &mut Vec<String>) {
+            for s in syms {
+                names.push(s.name.clone());
+                paths.push(s.name_path.clone());
+                collect(&s.children, names, paths);
+            }
+        }
+        let mut names = Vec::new();
+        let mut paths = Vec::new();
+        collect(&syms, &mut names, &mut paths);
+
+        // Namespace contents reach the AST, nested under the namespace.
+        assert!(names.contains(&"Outer".to_string()), "missing Outer: {:?}", names);
+        assert!(
+            paths.contains(&"Outer/Inner".to_string()),
+            "missing Outer/Inner: {:?}",
+            paths
+        );
+        assert!(
+            paths.contains(&"Outer/Inner/method".to_string()),
+            "missing Outer/Inner/method: {:?}",
+            paths
+        );
+        // Abstract class and BOTH its members (concrete + abstract signature).
+        assert!(names.contains(&"Base".to_string()), "missing Base: {:?}", names);
+        assert!(
+            paths.contains(&"Base/foo".to_string()),
+            "missing abstract method Base/foo: {:?}",
+            paths
+        );
+        assert!(
+            paths.contains(&"Base/bar".to_string()),
+            "missing method Base/bar: {:?}",
+            paths
         );
     }
 
