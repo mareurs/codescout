@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-06-03
-closed:
+closed: 2026-06-03
 severity: medium
 owner: marius
 related: []
@@ -120,7 +120,7 @@ workaround, not an investigation.
 
 **Implemented + verified live 2026-06-03** (branch `experiments`, commit `5a3e323a`).
 The create+delete probe that previously failed now succeeds through the running server; the
-file and catalog row are dropped with 0 orphan augmentation rows. Status stays `open` until
+file and catalog row are dropped with 0 orphan augmentation rows. Status is `fixed` (commit `5a3e323a`); the file stays in `docs/issues/` until
 the fix ships to `master` (archive move happens then).
 
 - **Shared guard helper** in `src/librarian/tools/mod.rs`: `managed_roots(ctx)` returns the
@@ -160,15 +160,10 @@ bug shipped despite test coverage.
   delete; or delete from within the creating subagent's context.
 
 ## Resume
-1. Reproduce per the hypothesized recipe; **before any cleanup**, capture the stored
-   `abs_path` of the un-deletable artifact directly from the catalog DB
-   (`sqlite3 ~/.local/share/librarian/catalog.db "SELECT id, abs_path FROM artifacts WHERE id='<id>'"`)
-   — that is the missing forensic datum.
-2. Compare against the delete-guard workspace-root check; confirm the canonicalization
-   mismatch.
-3. Inspect `abs_path` assignment in `artifact(action="create")` under a subagent context.
-4. Consider the doctor/reindex orphan-augmentation cleanup (Fix step 3).
 
+**Fixed 2026-06-03 on `experiments`** (commit `5a3e323a` — `managed_roots` helper in `src/librarian/tools/mod.rs`; `delete.rs`/`mv.rs` now honor `current_project`). 3 regression tests green (`cargo test --lib librarian::tools::` → 345 passed), clippy clean.
+
+Status flipped `open`→`fixed` on 2026-06-04 — it was a **zombie-open**: the fix shipped under a `fix(librarian):` subject and the file's `status:` was never flipped (the body wrongly conflated "stays in `docs/issues/`" with "stays `open`"). Not yet on master. Ship via Standard Ship Sequence + frog audit, then `git mv` to `docs/issues/archive/` citing the **master-side** SHA. Orphan-augmentation cleanup remains out of scope (0 orphan rows currently).
 ## References
 - `docs/evals/augmented-tracker-discovery.md` § "Run 1" — observation source.
 - CLAUDE.md § "Concurrent multi-workspace: one server, one active project" — the
