@@ -36,14 +36,20 @@ pub struct ProjectHints {
 pub fn probe_project_hints(project_root: &Path, memories: &[String]) -> ProjectHints {
     let onboarded = memories.iter().any(|m| m == "onboarding");
     let info = detect_manifest_info(project_root);
-    let (primary_language, manifest, entry_points, build_commands) = match info {
+    // primary_language reflects the dominant language by file count, not just the
+    // build manifest — a polyglot root whose manifest ≠ dominant language (e.g. a
+    // Python repo keeping package.json for tooling) was mislabeled. Manifest
+    // language is the fallback when no source files are found.
+    // (2026-06-03-project-languages-from-manifest-not-files)
+    let primary_language = crate::workspace::dominant_language(project_root)
+        .or_else(|| info.as_ref().map(|m| m.language.to_string()));
+    let (manifest, entry_points, build_commands) = match &info {
         Some(m) => (
-            Some(m.language.to_string()),
             Some(m.manifest.to_string()),
             probe_entry_points(project_root, m.language),
             m.build_commands.iter().map(|s| s.to_string()).collect(),
         ),
-        None => (None, None, Vec::new(), Vec::new()),
+        None => (None, Vec::new(), Vec::new()),
     };
     ProjectHints {
         primary_language,

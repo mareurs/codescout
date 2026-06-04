@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-06-03
-closed:
+closed: 2026-06-04
 severity: medium
 owner: marius
 related: []
@@ -111,33 +111,17 @@ N/A — direct code-inspection finding corroborated by a live `workspace(status)
 observation; not intermittent.
 
 ## Fix
-Not implemented — logged at the user's request (they chose to file the issue rather
-than patch in-session). Selected direction: *"languages reflect actual file mix;
-primary_language by dominance."*
 
-1. Add a bounded file-content language scan (lift/reuse `detect_languages` from
-   `src/dashboard/api/project.rs:28-42`) returning languages ordered by file-count
-   dominance. Keep it bounded (depth + file cap, `ignore::WalkBuilder` gitignore-aware)
-   — `discover_projects` runs on every `Agent::new`/activate, so it must stay cheap.
-2. In `src/workspace.rs::discover_projects`, keep the manifest walk for project-root
-   detection and the nesting/domination logic, but in a post-pass set each
-   `DiscoveredProject.languages = merge(file_dominance_scan(root.join(relative_root)),
-   manifest_langs)` — file-dominance order first, manifest langs unioned as fallback so
-   manifest-only dirs (and the existing fixture tests) still resolve.
-3. Derive `primary_language` from the dominant (first) language rather than the
-   manifest, in `src/mcp_resources/project_hints.rs` / `project_summary.rs` (or have
-   them consume the discovered project's ordered `languages`).
-4. Update tests (several assert manifest-derived languages on fixtures that have a
-   manifest but no/few source files — the manifest-fallback keeps those green; fixtures
-   with mismatched source files will correctly change):
-   `src/workspace.rs` tests (675-987), `src/mcp_resources/project_hints.rs` tests
-   (166-289), `src/mcp_resources/project_summary.rs` tests (206-235).
+**Implemented 2026-06-04 on `experiments`** — direction: *languages reflect actual file mix; primary_language by dominance.*
+- `src/workspace.rs`: added `scan_languages_by_dominance` (bounded depth-6 / 1000-file, gitignore-aware, file-count-ordered) + `dominant_language` (skips markdown) + `merge_languages`. `discover_projects` now runs a **post-pass** (after the manifest-based domination logic, so project detection is unperturbed) setting each `DiscoveredProject.languages = merge(dominance_scan(root), manifest_langs)` — dominance first, manifest unioned as fallback. Manifest-only dirs (empty scan) keep their manifest langs.
+- `src/mcp_resources/project_hints.rs` + `project_summary.rs`: `primary_language` / `detect_primary_language` consult `workspace::dominant_language` first, manifest/configured as fallback.
 
+Result: a Python-dominant repo with a tooling `package.json` reports `languages` led by `python` and `primary_language=python`; `python` is no longer dropped. Manifest-only fixtures unchanged (empty-scan guard), so existing tests stayed green.
+
+clippy clean; full lib suite green (2616 pass).
 ## Tests added
-N/A — not yet fixed. Regression test to add: a fixture dir with `package.json`
-(+scripts) AND `pyproject.toml` AND mostly `.py` files → assert
-`primary_language == "python"` and that `languages` lists `python` first.
 
+- `workspace::tests::polyglot_root_languages_reflect_file_dominance` — root with `package.json` as the only manifest + 4 `.py` + 1 `.ts`: `languages` leads with `python` (dropped pre-fix), `typescript` retained as fallback, `dominant_language` = `python`.
 ## Workarounds
 - Trust the top-level `workspace(action="status").languages` (file-walk) over
   `project_hints.primary_language` and the per-project `languages` — the file-walk view
@@ -147,14 +131,8 @@ N/A — not yet fixed. Regression test to add: a fixture dir with `package.json`
   likewise for `onboarding`. Done this session for `hermes-agent` and `hermes_cli`.
 
 ## Resume
-Implement the file-dominance scan + merge in `src/workspace.rs::discover_projects` as a
-post-pass over `found` (before the root-first reorder near the end of the function).
-Bound the walk like `src/dashboard/api/project.rs:28-42` (max_depth ~4–6, ~500-file cap,
-gitignore-aware). Then repoint `primary_language` in
-`src/mcp_resources/project_hints.rs:36-55` to the dominant language. Run
-`cargo test workspace`, `cargo test project_hints`, `cargo test project_summary`; update
-the manifest-only fixtures' expectations.
 
+**Fixed 2026-06-04 on `experiments`** (see ## Fix). Not yet on master — ship via Standard Ship Sequence, then `git mv` to `docs/issues/archive/` citing the **master-side** SHA. Note: the dominance scan now runs in three places (`discover_projects` + the two `primary_language` sites); a future optimization could compute once and thread it through, but each walk is bounded and acceptable on activate/status.
 ## References
 - `src/workspace.rs:29-216` (`discover_projects`, manifest→language tables)
 - `src/mcp_resources/project_hints.rs:36-55` (`probe_project_hints`, manifest-first `primary_language`)

@@ -201,6 +201,20 @@ pub fn discover_projects(
         });
     }
 
+    // File-content dominance pass (after the manifest-based domination logic, so
+    // it doesn't perturb project detection). Each project's `languages` should
+    // reflect its actual file mix (dominance-ordered), not just its build
+    // manifest — a polyglot root whose manifest ≠ dominant language (e.g. a
+    // Python repo keeping package.json for tooling) was mislabeled. Manifest-only
+    // dirs (empty scan) keep their manifest langs unchanged.
+    // (2026-06-03-project-languages-from-manifest-not-files)
+    for p in &mut found {
+        let dominance = scan_languages_by_dominance(&workspace_root.join(&p.relative_root));
+        if !dominance.is_empty() {
+            p.languages = merge_languages(dominance, &p.languages);
+        }
+    }
+
     // Ensure root project is first
     if let Some(root_idx) = found
         .iter()
@@ -213,6 +227,68 @@ pub fn discover_projects(
     }
 
     found
+}
+
+/// Source languages in `dir`, ordered by file-count dominance (most files
+/// first). Bounded — `discover_projects` runs on every `Agent::new` / activate,
+/// so the walk is depth- and count-capped and gitignore-aware. Ties broken
+/// alphabetically for deterministic output.
+/// (2026-06-03-project-languages-from-manifest-not-files)
+pub(crate) fn scan_languages_by_dominance(dir: &Path) -> Vec<String> {
+    const MAX_DEPTH: usize = 6;
+    const FILE_CAP: usize = 1000;
+    let mut counts: std::collections::HashMap<&'static str, usize> = std::collections::HashMap::new();
+    let walker = ignore::WalkBuilder::new(dir)
+        .hidden(true)
+        .git_ignore(true)
+        .max_depth(Some(MAX_DEPTH))
+        .build();
+    let mut scanned = 0usize;
+    for entry in walker.flatten() {
+        if scanned >= FILE_CAP {
+            break;
+        }
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        if entry
+            .path()
+            .components()
+            .any(|c| c.as_os_str() == "node_modules")
+        {
+            continue;
+        }
+        scanned += 1;
+        if let Some(lang) = crate::ast::detect_language(entry.path()) {
+            *counts.entry(lang).or_default() += 1;
+        }
+    }
+    let mut pairs: Vec<(&'static str, usize)> = counts.into_iter().collect();
+    pairs.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    pairs.into_iter().map(|(l, _)| l.to_string()).collect()
+}
+
+/// The dominant programming language in `dir` for `primary_language`, skipping
+/// documentation/markup kinds that should never be a project's primary language.
+pub(crate) fn dominant_language(dir: &Path) -> Option<String> {
+    const SKIP: &[&str] = &["markdown"];
+    scan_languages_by_dominance(dir)
+        .into_iter()
+        .find(|l| !SKIP.contains(&l.as_str()))
+}
+
+/// Merge file-dominance languages (ordered, most files first) with
+/// manifest-declared languages: dominance first, manifest langs appended as a
+/// fallback so manifest-only dirs (no source files) still resolve. Order-
+/// preserving and de-duplicated.
+fn merge_languages(dominance: Vec<String>, manifest: &[String]) -> Vec<String> {
+    let mut out = dominance;
+    for m in manifest {
+        if !out.iter().any(|l| l == m) {
+            out.push(m.clone());
+        }
+    }
+    out
 }
 
 /// Lexically collapse `.` / `..` components in a path without touching the
@@ -984,4 +1060,57 @@ mod tests {
         let projects = discover_projects(dir.path(), 3, &[]);
         assert!(projects.is_empty());
     }
+    #[test]
+    fn polyglot_root_languages_reflect_file_dominance() {
+        // Regression (2026-06-03-project-languages-from-manifest-not-files): a
+        // Python-dominant repo keeping a package.json for tooling was labeled
+        // typescript/javascript with Python DROPPED entirely (python is not in the
+        // package.json manifest langs). languages must reflect the actual file mix.
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("package.json"),
+            r#"{"name":"poly","scripts":{"build":"tsc"}}"#,
+        )
+        .unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        for n in 0..4 {
+            fs::write(
+                dir.path().join(format!("src/mod{n}.py")),
+                "def f():\n    pass\n",
+            )
+            .unwrap();
+        }
+        fs::write(dir.path().join("src/util.ts"), "export const x = 1;\n").unwrap();
+
+        let projects = discover_projects(dir.path(), 3, &[]);
+        assert_eq!(
+            projects.len(),
+            1,
+            "expected single root project: {:?}",
+            projects
+        );
+        // Manifest detection unchanged — package.json is the only manifest present.
+        assert_eq!(projects[0].manifest, Some("package.json".to_string()));
+        let langs = &projects[0].languages;
+        // Pre-fix: ["typescript","javascript"] — python dropped. Post-fix: python
+        // leads (4 .py vs 1 .ts), with manifest langs unioned as fallback.
+        assert_eq!(
+            langs.first().map(String::as_str),
+            Some("python"),
+            "python should lead: {:?}",
+            langs
+        );
+        assert!(
+            langs.iter().any(|l| l == "python"),
+            "python must be present (was dropped pre-fix): {:?}",
+            langs
+        );
+        assert!(
+            langs.iter().any(|l| l == "typescript"),
+            "manifest lang retained as fallback: {:?}",
+            langs
+        );
+        assert_eq!(dominant_language(dir.path()).as_deref(), Some("python"));
+    }
+
 }

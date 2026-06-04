@@ -64,6 +64,13 @@ fn detect_primary_language(
     project_root: &std::path::Path,
     configured: &[String],
 ) -> Option<String> {
+    // Prefer the dominant language by file count (skips markdown); the build
+    // manifest and configured list are only fallbacks when the directory has no
+    // source files. (2026-06-03-project-languages-from-manifest-not-files)
+    if let Some(dom) = crate::workspace::dominant_language(project_root) {
+        return Some(dom);
+    }
+
     let configured_contains = |lang: &str| configured.iter().any(|l| l.eq_ignore_ascii_case(lang));
 
     // package.json: typescript when tsconfig.json is also present, else javascript.
