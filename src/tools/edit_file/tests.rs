@@ -1440,6 +1440,36 @@ async fn read_file_empty_path_errors() {
     assert!(result.is_err(), "read_file with empty path should error");
 }
 
+#[test]
+fn reindent_shifts_base_indent() {
+    let new = "    let x = 1;\n    let y = 2;";
+    let out = reindent_block(new, "    ", "        ");
+    assert_eq!(out, "        let x = 1;\n        let y = 2;");
+}
+
+#[test]
+fn reindent_preserves_relative_deeper_indent() {
+    let new = "    if c {\n        body()\n    }";
+    let out = reindent_block(new, "    ", "        ");
+    assert_eq!(out, "        if c {\n            body()\n        }");
+}
+
+#[test]
+fn reindent_blank_lines_stay_blank() {
+    let new = "    a\n\n    b";
+    let out = reindent_block(new, "    ", "  ");
+    assert_eq!(out, "  a\n\n  b");
+}
+
+#[test]
+fn nearest_window_returns_best_ratio_region() {
+    let content = "alpha\nlet x = 1;\nlet y = 9;\nomega\n";
+    let old = "let x = 1;\nlet y = 2;"; // line 1 matches, line 2 differs
+    let (s, e, text) = nearest_window_hint(content, old).unwrap();
+    assert_eq!((s, e), (2, 3));
+    assert_eq!(text, "let x = 1;\nlet y = 9;");
+}
+
 #[tokio::test]
 async fn create_text_file_missing_params_detailed_errors() {
     let ctx = test_ctx().await;
@@ -2947,6 +2977,112 @@ fn tree_glob_format_compact_shows_count() {
     let text = tool.format_compact(&result).unwrap();
     assert!(text.contains("2 files"), "got: {text}");
 }
+// ── EditFile: whitespace-normalized fallback ──────────────────────────────
+
+#[tokio::test]
+async fn normalized_apply_lands_and_reindents_with_note() {
+    let (dir, ctx) = project_ctx().await;
+    let f = dir.path().join("a.rs");
+    // File uses tab indentation; agent supplies space-indented old_string.
+    // The space-prefixed old_string is NOT a literal substring of the tab-indented file,
+    // so match_count == 0 and the normalized fallback fires.
+    std::fs::write(&f, "fn a() {\n\t\tlet x = 1;\n}\n").unwrap();
+    let result = EditFile
+        .call(json!({ "path": f.to_str().unwrap(), "old_string": "    let x = 1;", "new_string": "    let x = 42;" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(result["applied_via"], "whitespace-normalized match");
+    assert_eq!(
+        std::fs::read_to_string(&f).unwrap(),
+        "fn a() {\n\t\tlet x = 42;\n}\n"
+    );
+}
+
+#[tokio::test]
+async fn normalized_apply_handles_trailing_newline_in_strings() {
+    let (dir, ctx) = project_ctx().await;
+    let f = dir.path().join("a.rs");
+    // Tabs in file, spaces in old_string → no exact substring → match_count == 0 →
+    // the whitespace-normalized fallback fires. old_string AND new_string end in '\n';
+    // this proves the strip_suffix('\n') fix (without it the result would gain a blank line).
+    std::fs::write(&f, "fn a() {\n\t\tlet x = 1;\n}\n").unwrap();
+    let result = EditFile
+        .call(
+            json!({
+                "path": f.to_str().unwrap(),
+                "old_string": "    let x = 1;\n",
+                "new_string": "    let x = 42;\n"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["applied_via"], "whitespace-normalized match");
+    assert_eq!(
+        std::fs::read_to_string(&f).unwrap(),
+        "fn a() {\n\t\tlet x = 42;\n}\n"
+    );
+}
+
+#[tokio::test]
+async fn exact_match_preferred_no_note() {
+    let (dir, ctx) = project_ctx().await;
+    let f = dir.path().join("a.txt");
+    std::fs::write(&f, "hello world\n").unwrap();
+    let result = EditFile
+        .call(
+            json!({ "path": f.to_str().unwrap(), "old_string": "world", "new_string": "there" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(result.get("applied_via").is_none());
+    assert_eq!(std::fs::read_to_string(&f).unwrap(), "hello there\n");
+}
+
+    #[tokio::test]
+    async fn normalized_ambiguous_errors_without_writing() {
+        let (dir, ctx) = project_ctx().await;
+        let f = dir.path().join("a.txt");
+        // Tabs in file, spaces in old_string → NO exact substring (match_count == 0) →
+        // the normalized fallback runs and matches TWO windows → ambiguous arm → error, no write.
+        let original = "\tlog()\nmid\n\t\tlog()\n";
+        std::fs::write(&f, original).unwrap();
+        let result = EditFile
+            .call(
+                json!({ "path": f.to_str().unwrap(), "old_string": "    log()", "new_string": "    trace()" }),
+                &ctx,
+            )
+            .await;
+        assert!(result.is_err(), "ambiguous normalized match must error");
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), original, "file must be untouched");
+    }
+
+#[tokio::test]
+async fn content_diff_falls_through_to_nearest_text_error() {
+    let (dir, ctx) = project_ctx().await;
+    let f = dir.path().join("a.txt");
+    let original = "    let x = 1;\n";
+    std::fs::write(&f, original).unwrap();
+    let result = EditFile
+        .call(json!({ "path": f.to_str().unwrap(), "old_string": "    let x = 2;", "new_string": "let x = 3;" }), &ctx)
+        .await;
+    assert!(result.is_err());
+    assert_eq!(std::fs::read_to_string(&f).unwrap(), original);
+}
+
+#[tokio::test]
+async fn mid_line_miss_stays_exact_only() {
+    let (dir, ctx) = project_ctx().await;
+    let f = dir.path().join("a.txt");
+    let original = "let total = a + b + c;\n";
+    std::fs::write(&f, original).unwrap();
+    let result = EditFile
+        .call(json!({ "path": f.to_str().unwrap(), "old_string": "a + X + c", "new_string": "a + b + d" }), &ctx)
+        .await;
+    assert!(result.is_err());
+    assert_eq!(std::fs::read_to_string(&f).unwrap(), original);
+}
 
 #[test]
 fn infer_edit_hint_remove_when_new_string_empty() {
@@ -3803,6 +3939,38 @@ fn list_dir_no_common_prefix() {
     assert!(result.contains("Cargo.toml"));
     assert!(result.contains("README.md"));
     assert!(result.contains("src/"));
+}
+
+#[test]
+fn normalized_window_unique_on_indentation_diff() {
+    let content = "fn a() {\n        let x = 1;\n        let y = 2;\n}\n";
+    let old = "    let x = 1;\n    let y = 2;";
+    let w = find_normalized_windows(content, old);
+    assert_eq!(w.len(), 1);
+    assert_eq!((w[0].start_line, w[0].end_line), (2, 3));
+}
+
+#[test]
+fn normalized_window_zero_on_content_diff() {
+    let content = "    let x = 1;\n";
+    let old = "    let x = 2;";
+    assert_eq!(find_normalized_windows(content, old).len(), 0);
+}
+
+#[test]
+fn normalized_window_ambiguous_returns_all() {
+    let content = "    log(x)\nmid\n        log(x)\n";
+    let old = "log(x)";
+    assert_eq!(find_normalized_windows(content, old).len(), 2);
+}
+
+#[test]
+fn normalized_window_exact_aligned_multiline() {
+    let content = "a\nb\nc\nd\n";
+    let old = "b\nc";
+    let w = find_normalized_windows(content, old);
+    assert_eq!(w.len(), 1);
+    assert_eq!((w[0].start_line, w[0].end_line), (2, 3));
 }
 
 #[test]
@@ -4710,4 +4878,53 @@ async fn edit_file_batch_all_safe_passes_through() {
     assert!(result.is_ok(), "all-safe batch must pass: {result:?}");
     let body = std::fs::read_to_string(&path).unwrap();
     assert_eq!(body, "ALPHA BRAVO charlie\n");
+}
+
+#[tokio::test]
+async fn normalized_apply_aborts_on_introduced_syntax_error() {
+    let (dir, ctx) = project_ctx().await;
+    let f = dir.path().join("a.rs");
+    let original = "fn a() {\n\t\tlet x = 1;\n}\n"; // valid Rust, tab-indented
+    std::fs::write(&f, original).unwrap();
+    // relaxed match on the body line, but new_string injects unbalanced braces → parse breaks
+    let result = EditFile
+        .call(
+            json!({
+                "path": f.to_str().unwrap(),
+                "old_string": "    let x = 1;",
+                "new_string": "    let x = 1; {{{"
+            }),
+            &ctx,
+        )
+        .await;
+    assert!(
+        result.is_err(),
+        "relaxed edit that introduces syntax errors must be rejected"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&f).unwrap(),
+        original,
+        "file must be unchanged"
+    );
+}
+
+#[tokio::test]
+async fn normalized_apply_allowed_when_file_already_broken() {
+    let (dir, ctx) = project_ctx().await;
+    let f = dir.path().join("a.rs");
+    // already broken (missing closing brace); relaxed edit adds NO new errors → should apply
+    std::fs::write(&f, "fn a() {\n\t\tlet x = 1;\n").unwrap();
+    let result = EditFile
+        .call(
+            json!({
+                "path": f.to_str().unwrap(),
+                "old_string": "    let x = 1;",
+                "new_string": "    let x = 2;"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["applied_via"], "whitespace-normalized match");
+    assert!(std::fs::read_to_string(&f).unwrap().contains("let x = 2;"));
 }

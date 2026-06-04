@@ -36,6 +36,120 @@ fn find_def_keyword(s: &str, lang: &str) -> Option<&'static str> {
         .copied()
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct NormWindow {
+    start_line: usize,
+    end_line: usize,
+    start_byte: usize,
+    end_byte: usize,
+}
+
+fn split_old_lines(old_string: &str) -> Vec<&str> {
+    let mut v: Vec<&str> = old_string.split('\n').collect();
+    if v.len() > 1 && v.last() == Some(&"") {
+        v.pop();
+    }
+    v
+}
+
+fn find_normalized_windows(content: &str, old_string: &str) -> Vec<NormWindow> {
+    let old_lines = split_old_lines(old_string);
+    let k = old_lines.len();
+    if k == 0 {
+        return Vec::new();
+    }
+    let mut spans: Vec<(&str, usize, usize)> = Vec::new();
+    let mut offset = 0usize;
+    for raw in content.split_inclusive('\n') {
+        let text = raw.strip_suffix('\n').unwrap_or(raw);
+        spans.push((text, offset, offset + text.len()));
+        offset += raw.len();
+    }
+    let mut out = Vec::new();
+    if spans.len() < k {
+        return out;
+    }
+    for i in 0..=(spans.len() - k) {
+        if (0..k).all(|j| spans[i + j].0.trim() == old_lines[j].trim()) {
+            out.push(NormWindow {
+                start_line: i + 1,
+                end_line: i + k,
+                start_byte: spans[i].1,
+                end_byte: spans[i + k - 1].2,
+            });
+        }
+    }
+    out
+}
+
+fn leading_ws(line: &str) -> &str {
+    &line[..line.len() - line.trim_start().len()]
+}
+
+fn reindent_block(new_string: &str, agent_base: &str, file_base: &str) -> String {
+    let mut out = String::with_capacity(new_string.len());
+    for (idx, line) in new_string.split('\n').enumerate() {
+        if idx > 0 {
+            out.push('\n');
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix(agent_base) {
+            out.push_str(file_base);
+            out.push_str(rest);
+        } else {
+            out.push_str(file_base);
+            out.push_str(line.trim_start());
+        }
+    }
+    out
+}
+
+/// Best-effort nearest window for an error hint when no unique normalized match
+/// exists. Returns (start_line, end_line, actual_text) of the content window with
+/// the highest count of normalized-matching lines against `old_string`.
+fn nearest_window_hint(content: &str, old_string: &str) -> Option<(usize, usize, String)> {
+    let old_lines = split_old_lines(old_string);
+    let k = old_lines.len();
+    if k == 0 {
+        return None;
+    }
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.len() < k {
+        return None;
+    }
+    let mut best: Option<(usize, usize)> = None; // (score, start_index)
+    for i in 0..=(lines.len() - k) {
+        let score = (0..k)
+            .filter(|&j| lines[i + j].trim() == old_lines[j].trim())
+            .count();
+        if best.is_none_or(|(b, _)| score > b) {
+            best = Some((score, i));
+        }
+    }
+    best.filter(|&(score, _)| score > 0)
+        .map(|(_, i)| (i + 1, i + k, lines[i..i + k].join("\n")))
+}
+async fn commit_edit(
+    ctx: &ToolContext,
+    resolved: &std::path::Path,
+    new_content: &str,
+) -> anyhow::Result<()> {
+    crate::util::fs::atomic_write(resolved, new_content)?;
+    ctx.agent
+        .reload_config_if_project_toml_for(ctx.workspace_override.as_deref(), resolved)
+        .await;
+    ctx.lsp.notify_file_changed(resolved).await;
+    ctx.agent
+        .invalidate_call_edges_for(ctx.workspace_override.as_deref(), resolved)
+        .await;
+    ctx.agent
+        .mark_file_dirty_for(ctx.workspace_override.as_deref(), resolved.to_path_buf())
+        .await;
+    Ok(())
+}
+
 /// Returns the language if the file has LSP support, None otherwise.
 fn detect_lsp_language(path: &str) -> Option<&'static str> {
     let p = std::path::Path::new(path);
@@ -138,7 +252,10 @@ impl Tool for EditFile {
 
     fn description(&self) -> &str {
         "Exact string replacement in a file. Whitespace-sensitive. \
-         Use insert: \"prepend\"/\"append\" for file boundaries."
+         Use insert: \"prepend\"/\"append\" for file boundaries. \
+         On whitespace-only mismatch, applies the unique normalized match \
+         re-indented (response: applied_via: \"whitespace-normalized match\"); \
+         0 or 2+ matches -> error."
     }
 
     fn input_schema(&self) -> Value {
@@ -477,11 +594,80 @@ async fn perform_edit(
     let match_count = content.matches(old_string).count();
 
     if match_count == 0 {
-        return Err(super::RecoverableError::with_hint(
-            format!("old_string not found in {path}"),
-            "Check whitespace and indentation — old_string must match exactly. Use grep to verify the exact text.",
-        )
-        .into());
+        let windows = find_normalized_windows(&content, old_string);
+        match windows.len() {
+            1 => {
+                let w = &windows[0];
+                let matched = &content[w.start_byte..w.end_byte];
+                let first_file_line = matched.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+                let file_base = leading_ws(first_file_line).to_string();
+                let agent_base = split_old_lines(old_string)
+                    .into_iter()
+                    .find(|l| !l.trim().is_empty())
+                    .map(|l| leading_ws(l).to_string())
+                    .unwrap_or_default();
+                // Strip one trailing newline: the matched span excludes the last line's
+                // newline (content[w.end_byte..] supplies it), so the replacement must not
+                // re-emit one or we double the newline.
+                let replacement_src = new_string.strip_suffix('\n').unwrap_or(new_string);
+                let reindented = reindent_block(replacement_src, &agent_base, &file_base);
+                let mut new_content = String::with_capacity(content.len());
+                new_content.push_str(&content[..w.start_byte]);
+                new_content.push_str(&reindented);
+                new_content.push_str(&content[w.end_byte..]);
+
+                if let Some(lang) = crate::ast::detect_language(std::path::Path::new(path)) {
+                    let before = crate::ast::has_syntax_errors(&content, lang);
+                    let after = crate::ast::has_syntax_errors(&new_content, lang);
+                    if after && !before {
+                        return Err(super::RecoverableError::with_hint(
+                            format!(
+                                "whitespace-normalized match at lines {}-{} would introduce syntax errors — not written",
+                                w.start_line, w.end_line
+                            ),
+                            "Verify the target with read_file and retry edit_file with the exact text.",
+                        )
+                        .into());
+                    }
+                }
+
+                commit_edit(ctx, &resolved, &new_content).await?;
+                if path.ends_with(".md") || path.ends_with(".markdown") {
+                    if let Ok(mut cov) = ctx.section_coverage.lock() {
+                        cov.update_mtime(&resolved);
+                    }
+                }
+                return Ok(json!({
+                    "status": "ok",
+                    "applied_via": "whitespace-normalized match",
+                    "lines": format!("{}-{}", w.start_line, w.end_line),
+                    "note": "old_string matched after normalizing indentation/line-endings; verify the result"
+                }));
+            }
+            0 => {
+                let msg = match nearest_window_hint(&content, old_string) {
+                    Some((s, e, text)) => format!(
+                        "old_string not found in {path}. Nearest content at lines {s}-{e}:\n{text}"
+                    ),
+                    None => format!("old_string not found in {path}"),
+                };
+                return Err(super::RecoverableError::with_hint(
+                    msg,
+                    "No exact or whitespace-normalized match. Copy the actual bytes shown (or from read_file) and retry.",
+                ).into());
+            }
+            _ => {
+                let ranges = windows
+                    .iter()
+                    .map(|w| format!("{}-{}", w.start_line, w.end_line))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(super::RecoverableError::with_hint(
+                    format!("old_string matches {} regions after whitespace normalization (lines {ranges})", windows.len()),
+                    "Ambiguous — add surrounding context so exactly one region matches, or fix whitespace to match one exactly.",
+                ).into());
+            }
+        }
     }
 
     if match_count > 1 && !replace_all {
@@ -504,17 +690,7 @@ async fn perform_edit(
     }
 
     let new_content = content.replace(old_string, new_string);
-    crate::util::fs::atomic_write(&resolved, &new_content)?;
-    ctx.agent
-        .reload_config_if_project_toml_for(ctx.workspace_override.as_deref(), &resolved)
-        .await;
-    ctx.lsp.notify_file_changed(&resolved).await;
-    ctx.agent
-        .invalidate_call_edges_for(ctx.workspace_override.as_deref(), &resolved)
-        .await;
-    ctx.agent
-        .mark_file_dirty_for(ctx.workspace_override.as_deref(), resolved.clone())
-        .await;
+    commit_edit(ctx, &resolved, &new_content).await?;
 
     // Syntax check: warn if the edit introduced parse errors (non-fatal).
     if let Some(lang) = crate::ast::detect_language(std::path::Path::new(path)) {
