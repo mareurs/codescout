@@ -458,6 +458,7 @@ carry `#[serial_test::serial]`. Exemplars: `EnvGuard` in
 [`docs/conventions/test-env-isolation.md`](docs/conventions/test-env-isolation.md)
 for the full rule + diagnostic shape + known cross-module gap.
 
+**Tests that exercise a fallback path gated on an exact-match miss must avoid substring overlap in their fixtures.** When a test exists to drive a branch that only fires when an exact match fails (e.g. `edit_file`'s whitespace-normalized fallback, gated on `content.matches(old_string).count() == 0`), the fixture's `old_string` must NOT be a literal substring of the file — otherwise the exact path fires first and the test silently exercises the *wrong* branch while still passing (green, but false coverage). Under-indentation alone is not enough: `"    x"` is a substring of `"        x"`. Use a fixture with no substring overlap (e.g. **tabs in the file vs spaces in `old_string`**), and assert on a path-specific marker (`applied_via`, the exact error wording) so a mis-route fails loudly instead of passing quietly. This mis-routing recurred 3× in the 2026-06-04 edit_file whitespace-fallback work — caught by spec/holistic review, never by the plan. See `docs/trackers/reconnaissance-patterns.md` R-16.
 ## Key Patterns
 
 Load-bearing rules I keep getting wrong otherwise:
