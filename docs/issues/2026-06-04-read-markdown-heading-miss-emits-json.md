@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-06-04
-closed:
+closed: 2026-06-04
 severity: low
 owner: marius
 related:
@@ -130,27 +130,14 @@ these.
    output_form" change is broader than this bug; the targeted fixes below avoid it.
 
 ## Fix
-**Plan (not yet implemented).** Two viable approaches; recommend (B) for UX, (A) if minimal
-churn is preferred. Either way, factor the heading-map text builder (`read_markdown.rs:505-565`)
-into a shared helper so both success and not-found paths use one formatter.
 
-- **(A) Render the heading list as text inside the error.** In the not-found branch
-  (`:242-246`), drop `.with_extra("headings", json!(…))` and instead embed the compact text
-  map in the error message/hint via the shared helper:
-  `format!("heading {q} not found. Available headings:\n{rendered_map}")`. Keeps the
-  `{ok:false,…}` envelope but eliminates the verbose `headings:[{h,l},…]` array.
+**Fixed** — experiments-side `03fe69f5` (re-cite the master SHA after cherry-pick). Chose **Fix B**: the single-heading not-found path now returns `Ok(json!({"ok": false, "error": …, "headings": …, "hint": …}))` instead of `Err(RecoverableError…)`. That routes through `format_compact`'s existing — but previously **dead** — `OutputForm::Text` ERROR branch, which renders `error: heading X not found` / `available headings:` / `<indented map>` / `next: <hint>`. No verbose JSON; `isError` stays false (sibling-safe), consistent with how `RecoverableError` already routes via `CallToolResult::success`.
 
-- **(B) Return the heading map as a successful response with a not-found note.** A
-  heading-not-found is functionally "here's the map, pick one" — exactly the bare
-  `read_markdown(path)` response. Return `Ok` with the heading-map (rendered by the existing
-  `OutputForm::Text` path) prefixed by a one-line `requested heading "X" not found` note. No
-  JSON, no envelope, full reuse of the success renderer. Most aligned with progressive
-  disclosure. Cost: update the tests at `tests.rs:1633-1637` / `:1503-1507` and confirm no
-  caller depends on the `ok:false` discriminator (RecoverableError is already `isError:false`,
-  so MCP-level sibling-call semantics are unaffected).
+Root cause was that the not-found path returned `Err`, and errors bypass `format_compact` (serialized as JSON by the central error layer) — even though `format_compact`'s ERROR branch was written for exactly the `{ok:false, headings}` shape (its comment: *"must run first so {ok:false, headings:[...]} doesn't fall through to MAP"*).
 
-Apply the same change to the multi-heading not-found path (`:301-312`).
+Change: `src/tools/markdown/read_markdown.rs`, the single-heading `if msg.contains("not found")` block. **Scoped** to that case — the oversized-section `Err` (carries `section_map`/`next_actions`/`breadcrumb` the ERROR branch can't render) and the empty-file path (`"no headings found in file"`, lacks the substring "not found") are intentionally unchanged. The empty-file vs file-with-headings asymmetry (Err vs Ok) is a defensible boundary, noted as a possible follow-up for uniformity.
 
+Regression test: `heading_not_found_returns_ok_soft_error_rendering_as_text` in `src/tools/markdown/tests.rs` — asserts Ok + `ok:false` + non-empty `headings` + `format_compact(&value)` renders text starting `"error: "` with the indented map. Full lib suite green (2633 passed).
 ## Tests added
 N/A — not yet fixed. When implemented: a test in `src/tools/markdown/tests.rs` asserting the
 not-found response contains the compact `<indent><heading>  L<line>` text form (and, for (B),

@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-06-04
-closed:
+closed: 2026-06-04
 severity: low
 owner: marius
 related:
@@ -133,22 +133,12 @@ telemetry. Worth ensuring the capture commit is on every branch the live binary 
    (copying leading whitespace), not staleness.
 
 ## Fix
-**Plan (not yet implemented).** In the `match_count == 0` branch of `perform_edit`
-(`src/tools/edit_file/mod.rs:479-484`), before returning, search the already-loaded
-`content` for a near-match of `old_string`:
 
-- Whitespace-normalized search (collapse/strip each line's leading whitespace on both
-  sides) to locate candidate region(s).
-- If a unique near-match is found, include its line range and the file's *actual* bytes
-  for that region in the error (a compact "you sent X / file has Y" diff), mirroring the
-  specificity the `match_count > 1` branch already provides.
-- Do NOT auto-apply a normalized match (ambiguity risk → silent wrong edit). This is an
-  error-payload improvement only; matching behavior stays exact-byte.
+**Fixed** — experiments-side `857f9fc5` (re-cite the master SHA after cherry-pick). Implemented the whitespace-normalized fallback (chosen safety posture: uniqueness-gated, not fuzzy). On a zero exact-match, `edit_file` tries a line-aligned whitespace-normalized match: a **unique** match is applied **re-indented** to the file (response `applied_via: "whitespace-normalized match"` + line range); **0** matches return the nearest actual text; **2+** return the ambiguous line ranges; and a relaxed apply that would **introduce new syntax errors** (before/after AST check, relaxed-path only) is rejected. Exact-match behavior unchanged.
 
-This collapses the `grep` + `read_file` + retry loop into the error response itself —
-the agent corrects in one retry. Aligned with codescout's progressive-disclosure /
-actionable-hint philosophy (`docs/PROGRESSIVE_DISCOVERABILITY.md`).
+Lives in `src/tools/edit_file/mod.rs` — `perform_edit`'s `match_count == 0` branch + the helpers `find_normalized_windows` / `reindent_block` / `nearest_window_hint` / `commit_edit`. Design: `docs/superpowers/specs/2026-06-04-edit-file-whitespace-normalized-fallback-design.md`; plan: `docs/superpowers/plans/2026-06-04-edit-file-whitespace-normalized-fallback.md`.
 
+Tests: 14 added in `src/tools/edit_file/tests.rs` (matcher/reindent/nearest-text units + integration: unique apply + reindent + note, exact-preferred, ambiguous-no-write, content-diff→nearest-text, mid-line-exact-only, trailing-newline, AST-abort-on-introduced-error, AST-allow-when-already-broken). 208 edit_file tests green; **live-verified via the MCP `edit_file` tool** (tab-file + space-`old_string` → applied re-indented with the note). Deferred to follow-up: batch (`edit[]`) path; tab/space-width re-indentation edge.
 ## Tests added
 N/A — not yet fixed. When implemented: a unit test in `src/tools/edit_file/mod.rs`
 `tests` module that (a) feeds an `old_string` differing only in leading whitespace from
