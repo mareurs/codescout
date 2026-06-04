@@ -1,9 +1,10 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: "LibrarianAdapter::is_write matches dead tool names — read-only write-guard bypass"
 last_observed: 2026-06-01
 tags: [librarian, security, read-only, write-guard]
+closed: 2026-06-04
 ---
 
 # LibrarianAdapter::is_write matches dead tool names
@@ -43,18 +44,20 @@ pre-2026-05-02 "tools-collapse" surface, never updated when the librarian tools
 were consolidated to `artifact`/`artifact_event`/`artifact_augment`/
 `artifact_refresh`/`librarian` with an `action` discriminant.
 
-## Fix (proposed, not yet applied)
-Rewrite `LibrarianAdapter::is_write` to match the real names and inspect `action`:
-- `artifact` → write when action ∈ {create, update, move, delete, link}
-- `artifact_event`, `artifact_augment`, `artifact_refresh` → write
-- `librarian` → write when action = reindex (audit `tracker_design` / any mutating action)
-Add a unit test mirroring `is_write_call_classifies_plain_writes` for the librarian surface.
+## Fix
 
+**Implemented + verified 2026-06-04 on `experiments`.** Rewrote `LibrarianAdapter::is_write` (`src/librarian/adapter.rs`) to match the **live** tool names and inspect `action`:
+- `artifact` → write on `create | update | move | delete | link` (find/get/graph/state_at read)
+- `artifact_event` → write on `create` (`list` reads)
+- `artifact_augment` → always write (no read action)
+- `artifact_refresh` → read-only (`gather`/`list_stale`; the write-back is `artifact(update, commit_refresh)`)
+- `librarian` → write on `reindex` and `audit_doc_refs` (unless `emit_tracker=false`); context/tracker_design/workspace_state_at/doctor read
+
+Refined from the original sketch: `artifact_event list` and *all* of `artifact_refresh` are reads (the sketch over-marked them write — safe but over-restrictive), and `librarian audit_doc_refs` also writes (it emits a tracker by default).
 ## Workarounds
 None needed for peer-delegation (allow-list excludes librarian). For the main
 server, do not rely on read-only mode to protect the librarian catalog until fixed.
 
 ## Resume
-Fix `src/librarian/adapter.rs:71`. Test alongside `is_write_call` tests in
-`src/server.rs` or in `src/librarian/adapter.rs`. To be done separately, outside
-the `feat/peer-delegation` branch (per owner decision 2026-06-01).
+
+**Fixed 2026-06-04 on `experiments`** (see ## Fix). Regression test `server::guide_hint_tests::is_write_call_classifies_librarian_surface` green; clippy clean. Not yet on master — ship via Standard Ship Sequence + frog audit, then `git mv` to `docs/issues/archive/` citing the **master-side** SHA.

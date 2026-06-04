@@ -68,16 +68,32 @@ impl crate::tools::Tool for LibrarianAdapter {
         self.inner.call(&lib_ctx, input).await
     }
 
-    fn is_write(&self, _input: &Value) -> bool {
-        matches!(
-            self.inner.name(),
-            "artifact_create"
-                | "artifact_update"
-                | "artifact_link"
-                | "artifact_observe"
-                | "artifact_event_create"
-                | "librarian_reindex"
-        )
+    fn is_write(&self, input: &Value) -> bool {
+        let action = input.get("action").and_then(Value::as_str);
+        match self.inner.name() {
+            // CRUD tool — mutating actions only; find/get/graph/state_at are reads.
+            "artifact" => matches!(
+                action,
+                Some("create" | "update" | "move" | "delete" | "link")
+            ),
+            // Append-only event log: `create` writes, `list` reads.
+            "artifact_event" => action == Some("create"),
+            // Always attaches/replaces/merges an augmentation row.
+            "artifact_augment" => true,
+            // gather / list_stale are both read-only — the write-back is
+            // artifact(update, commit_refresh=true), classified under "artifact".
+            "artifact_refresh" => false,
+            // reindex rewrites the catalog; audit_doc_refs emits a tracker unless
+            // emit_tracker=false; context/tracker_design/workspace_state_at/doctor read.
+            "librarian" => match action {
+                Some("reindex") => true,
+                Some("audit_doc_refs") => {
+                    input.get("emit_tracker").and_then(Value::as_bool) != Some(false)
+                }
+                _ => false,
+            },
+            _ => false,
+        }
     }
 
     fn relevant_guide_topic(&self) -> Option<&str> {

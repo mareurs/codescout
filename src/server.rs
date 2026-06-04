@@ -2959,6 +2959,41 @@ mod guide_hint_tests {
             "expected _guide_hint mentioning 'librarian' on first artifact call"
         );
     }
+    /// Regression for docs/issues/2026-06-01-librarian-adapter-stale-is-write.md:
+    /// LibrarianAdapter::is_write matched dead tool names, so every librarian tool
+    /// classified as a read and the main server's write-guard never engaged for
+    /// catalog mutations. Pins the real names + per-action classification.
+    #[tokio::test]
+    #[serial]
+    async fn is_write_call_classifies_librarian_surface() {
+        let (_dir, _env, server) = make_server().await;
+        // artifact: mutating actions write; queries read.
+        assert!(server.is_write_call("artifact", &json!({"action": "create"})));
+        assert!(server.is_write_call("artifact", &json!({"action": "update"})));
+        assert!(server.is_write_call("artifact", &json!({"action": "move"})));
+        assert!(server.is_write_call("artifact", &json!({"action": "delete"})));
+        assert!(server.is_write_call("artifact", &json!({"action": "link"})));
+        assert!(!server.is_write_call("artifact", &json!({"action": "find"})));
+        assert!(!server.is_write_call("artifact", &json!({"action": "get"})));
+        assert!(!server.is_write_call("artifact", &json!({"action": "graph"})));
+        assert!(!server.is_write_call("artifact", &json!({"action": "state_at"})));
+        // artifact_event: create writes, list reads.
+        assert!(server.is_write_call("artifact_event", &json!({"action": "create"})));
+        assert!(!server.is_write_call("artifact_event", &json!({"action": "list"})));
+        // artifact_augment always writes (no read action).
+        assert!(server.is_write_call("artifact_augment", &json!({"id": "x"})));
+        // artifact_refresh gather/list_stale are read-only.
+        assert!(!server.is_write_call("artifact_refresh", &json!({"action": "gather"})));
+        assert!(!server.is_write_call("artifact_refresh", &json!({"action": "list_stale"})));
+        // librarian: reindex + (default) audit_doc_refs write; the rest read.
+        assert!(server.is_write_call("librarian", &json!({"action": "reindex"})));
+        assert!(server.is_write_call("librarian", &json!({"action": "audit_doc_refs"})));
+        assert!(!server
+            .is_write_call("librarian", &json!({"action": "audit_doc_refs", "emit_tracker": false})));
+        assert!(!server.is_write_call("librarian", &json!({"action": "context"})));
+        assert!(!server.is_write_call("librarian", &json!({"action": "doctor"})));
+        assert!(!server.is_write_call("librarian", &json!({"action": "tracker_design"})));
+    }
 
     #[tokio::test]
     #[serial]
