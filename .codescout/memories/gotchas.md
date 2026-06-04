@@ -52,3 +52,27 @@ During parallel force-onboarding, subagents may overwrite each other's memories 
 `code-explorer` project slot (last writer wins when multiple subagents share the focused project).
 Verify `memory(action="read", project_id="code-explorer", topic="project-overview")` after onboarding
 to confirm the content is actually about codescout and not a fixture crate.
+
+## `symbols(path)` Routes to LSP When Available — Not Always Tree-Sitter
+
+`symbols(path)` uses the **LSP** (rust-analyzer/gopls/tsserver) when a client is available for
+that file, and falls back to the tree-sitter AST extractor
+(`src/ast/parser.rs::extract_symbols_from_source`) only when none is. LSP clients start
+**lazily**, so the same probe file can hit tree-sitter early in a session and the LSP later —
+the output shape changes under you.
+
+Tells the output came from the LSP, not the AST extractor:
+- Rust: an `impl S [Object]` container symbol appears (the AST extractor emits NO impl symbol —
+  it merges impl methods up to the parent level).
+- Go: methods named `(*Stack[T]).Push` (LSP) vs the extractor's `Stack/Push` name_path.
+- TS: arrow-fn consts reported as `Constant` incl. plain data consts (the extractor emits
+  function-valued consts as `Function` and skips data consts).
+
+**To verify a tree-sitter extractor fix:** do NOT trust `symbols(path)`. Either unit-test
+`extract_symbols_from_source` directly, or run `edit_code` on a previously-dropped symbol —
+`edit_code` resolves via LSP then **AST-confirms** the end line (`ast_confirmed_end_line` →
+`extract_symbols_from_source` → `find_ast_end_line_in`), so a successful insert where pre-fix
+returned "AST parse failed" is the proof. Datapoint: the 2026-06-04 extractor-coverage fixes
+(nested types, namespaces/abstract classes, Rust assoc items/macros, TS arrow consts, Go generic
+receivers) — `symbols` showed LSP output for all; `edit_code` on `my_macro` / impl `Output` was
+the real proof.
