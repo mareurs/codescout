@@ -192,7 +192,7 @@ ourselves.
 ## Implications
 
 1. The runtime `librarian::INSTRUCTIONS` concat at
-   `src/server.rs:from_parts:89-92` always lands in the cut zone.
+   `src/server.rs::from_parts` always lands in the cut zone.
    The librarian guide never reaches the model via this channel.
 2. The `prompt_surfaces_reference_only_real_tools` invariant in
    `CLAUDE.md` defends a phantom contract for ~95 % of the file —

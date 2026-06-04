@@ -22,7 +22,7 @@ sqlite-vec = "0.1"
 
 [package]
 name = "codescout"
-version = "0.14.0"
+version = "0.15.0"
 edition = "2021"
 description = "High-performance coding agent toolkit MCP server"
 repository = "https://github.com/mareurs/codescout"
