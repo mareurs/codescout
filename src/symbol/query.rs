@@ -752,4 +752,37 @@ mod backtick_match_tests {
             "nested class must resolve to its AST end line; got {inner_end:?}"
         );
     }
+    /// Audit guard (2026-06-04): the symbol extractor now emits TS `namespace`
+    /// members with `/`-separated name_paths (`Outer/Inner/method`), and the LSP
+    /// path builder (`client.rs`) also joins with `/` — so namespace-nested
+    /// symbols resolve through the name_path tiebreaker. Pins that contract so a
+    /// future separator change can't silently defeat `edit_code` on namespace
+    /// members. (Relates to 2026-06-04-ts-extractor-drops-namespace-abstract-class.)
+    #[test]
+    fn find_ast_end_line_in_resolves_ts_namespace_nested_symbol() {
+        let source = "namespace Outer {\n    export class Inner {\n        method(): void {\n            const a = 1;\n        }\n    }\n}\n";
+        let ast_syms = crate::ast::parser::extract_symbols_from_source(
+            source,
+            Some("typescript"),
+            Path::new("ns.ts"),
+        )
+        .unwrap();
+
+        // method(): 0-based start line 2, body ends at line 4 (`}`).
+        let method_end = find_ast_end_line_in(&ast_syms, "method", 2, Some("Outer/Inner/method"));
+        assert_eq!(
+            method_end,
+            Some(4),
+            "namespace-nested method must resolve to its AST end line; got {method_end:?}"
+        );
+
+        // The namespace itself: start line 0, ends at line 6.
+        let outer_end = find_ast_end_line_in(&ast_syms, "Outer", 0, Some("Outer"));
+        assert_eq!(
+            outer_end,
+            Some(6),
+            "namespace must resolve to its AST end line; got {outer_end:?}"
+        );
+    }
+
 }
