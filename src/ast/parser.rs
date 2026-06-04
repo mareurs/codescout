@@ -139,6 +139,17 @@ fn find_child_by_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
     result
 }
 
+/// Text of the first named child of a given kind. Used for name fallbacks where
+/// a node's name is not exposed under a `name` field (e.g. Rust macro_definition).
+fn first_named_child_text(node: Node, source: &str, kind: &str) -> Option<String> {
+    let mut cursor = node.walk();
+    let found = node.children(&mut cursor).find(|c| c.kind() == kind)?;
+    found
+        .utf8_text(source.as_bytes())
+        .ok()
+        .map(|s| s.to_string())
+}
+
 // ---------------------------------------------------------------------------
 // Rust
 // ---------------------------------------------------------------------------
@@ -331,6 +342,64 @@ fn extract_rust_symbols(node: Node, source: &str, file: &PathBuf, prefix: &str) 
                     });
                 }
             }
+            // Trait associated type: `type Item;` parses as associated_type (the
+            // impl/standalone form is type_item, handled above and in impl methods).
+            "associated_type" => {
+                if let Some(name) = child_name(child, source, "name")
+                    .or_else(|| first_named_child_text(child, source, "type_identifier"))
+                {
+                    symbols.push(SymbolInfo {
+                        name_path: make_name_path(prefix, &name),
+                        name,
+                        kind: SymbolKind::TypeParameter,
+                        file: file.clone(),
+                        start_line: child.start_position().row as u32,
+                        end_line: child.end_position().row as u32,
+                        start_col: child.start_position().column as u32,
+                        children: vec![],
+                        range_start_line: None,
+                        detail: None,
+                    });
+                }
+            }
+            // `macro_rules! name { ... }` — name is the first identifier child, not
+            // under a `name` field. (2026-06-04-rust-ast-drops-assoc-items-macros)
+            "macro_definition" => {
+                if let Some(name) = child_name(child, source, "name")
+                    .or_else(|| first_named_child_text(child, source, "identifier"))
+                {
+                    symbols.push(SymbolInfo {
+                        name_path: make_name_path(prefix, &name),
+                        name,
+                        kind: SymbolKind::Function,
+                        file: file.clone(),
+                        start_line: child.start_position().row as u32,
+                        end_line: child.end_position().row as u32,
+                        start_col: child.start_position().column as u32,
+                        children: vec![],
+                        range_start_line: None,
+                        detail: None,
+                    });
+                }
+            }
+            "union_item" => {
+                if let Some(name) = child_name(child, source, "name")
+                    .or_else(|| first_named_child_text(child, source, "type_identifier"))
+                {
+                    symbols.push(SymbolInfo {
+                        name_path: make_name_path(prefix, &name),
+                        name,
+                        kind: SymbolKind::Struct,
+                        file: file.clone(),
+                        start_line: child.start_position().row as u32,
+                        end_line: child.end_position().row as u32,
+                        start_col: child.start_position().column as u32,
+                        children: vec![],
+                        range_start_line: None,
+                        detail: None,
+                    });
+                }
+            }
             _ => {}
         }
     }
@@ -348,21 +417,29 @@ fn extract_rust_impl_methods(
     let mut cursor = body.walk();
 
     for child in body.children(&mut cursor) {
-        if child.kind() == "function_item" {
-            if let Some(name) = child_name(child, source, "name") {
-                methods.push(SymbolInfo {
-                    name_path: make_name_path(prefix, &name),
-                    name,
-                    kind: SymbolKind::Method,
-                    file: file.to_path_buf(),
-                    start_line: child.start_position().row as u32,
-                    end_line: child.end_position().row as u32,
-                    start_col: child.start_position().column as u32,
-                    children: vec![],
-                    range_start_line: None,
-                    detail: None,
-                });
-            }
+        // Associated items in an impl: methods, consts, and types. Matching only
+        // function_item dropped associated `const`/`type` (e.g. `type Item` in an
+        // Iterator impl, `const LEN` in a trait impl), so edit_code could not bound
+        // them (2026-06-04-rust-ast-drops-assoc-items-macros).
+        let (kind, name) = match child.kind() {
+            "function_item" => (SymbolKind::Method, child_name(child, source, "name")),
+            "const_item" => (SymbolKind::Constant, child_name(child, source, "name")),
+            "type_item" => (SymbolKind::TypeParameter, child_name(child, source, "name")),
+            _ => continue,
+        };
+        if let Some(name) = name {
+            methods.push(SymbolInfo {
+                name_path: make_name_path(prefix, &name),
+                name,
+                kind,
+                file: file.to_path_buf(),
+                start_line: child.start_position().row as u32,
+                end_line: child.end_position().row as u32,
+                start_col: child.start_position().column as u32,
+                children: vec![],
+                range_start_line: None,
+                detail: None,
+            });
         }
     }
 
@@ -488,20 +565,33 @@ fn extract_go_receiver<'a>(node: Node<'a>, source: &'a str) -> &'a str {
         Some(t) => t,
         None => return "",
     };
-    // Handle *Type (pointer_type) — get the inner type
-    let final_node = if type_node.kind() == "pointer_type" {
-        let mut c3 = type_node.walk();
-        let found = type_node
-            .children(&mut c3)
-            .find(|n| n.kind() == "type_identifier");
-        match found {
-            Some(n) => n,
+    // Unwrap *Type (pointer_type) to its pointee.
+    let mut t = type_node;
+    if t.kind() == "pointer_type" {
+        let mut c3 = t.walk();
+        let inner = t.children(&mut c3).find(|n| n.is_named());
+        match inner {
+            Some(n) => t = n,
             None => return "",
         }
+    }
+    // Unwrap Type[T] (generic_type) to its base type_identifier. A generic
+    // receiver like *Stack[T] previously fell through (the pointee was a
+    // generic_type, not a type_identifier), mis-pathing methods as bare `Push`
+    // instead of `Stack/Push` (2026-06-04-go-ast-generic-receiver-name-path).
+    if t.kind() == "generic_type" {
+        let mut c4 = t.walk();
+        let base = t.children(&mut c4).find(|n| n.kind() == "type_identifier");
+        match base {
+            Some(n) => t = n,
+            None => return "",
+        }
+    }
+    if t.kind() == "type_identifier" {
+        t.utf8_text(source.as_bytes()).unwrap_or("")
     } else {
-        type_node
-    };
-    final_node.utf8_text(source.as_bytes()).unwrap_or("")
+        ""
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1331,6 +1421,40 @@ fn extract_ts_symbols(node: Node, source: &str, file: &PathBuf, prefix: &str) ->
                     });
                 }
             }
+            // `const X = () => {}` / `let X = function () {}` — function-valued
+            // bindings are the dominant modern JS/TS definition idiom (React
+            // components, handlers). Extract only those (arrow_function /
+            // function_expression initializers); plain data consts are skipped.
+            // (2026-06-04-ts-extractor-drops-arrow-fn-consts)
+            "lexical_declaration" | "variable_declaration" => {
+                let mut dc = child.walk();
+                for decl in child.children(&mut dc) {
+                    if decl.kind() != "variable_declarator" {
+                        continue;
+                    }
+                    let is_fn = decl
+                        .child_by_field_name("value")
+                        .map(|v| matches!(v.kind(), "arrow_function" | "function_expression"))
+                        .unwrap_or(false);
+                    if !is_fn {
+                        continue;
+                    }
+                    if let Some(name) = child_name(decl, source, "name") {
+                        symbols.push(SymbolInfo {
+                            name_path: make_name_path(prefix, &name),
+                            name,
+                            kind: SymbolKind::Function,
+                            file: file.clone(),
+                            start_line: decl.start_position().row as u32,
+                            end_line: decl.end_position().row as u32,
+                            start_col: decl.start_position().column as u32,
+                            children: vec![],
+                            range_start_line: None,
+                            detail: None,
+                        });
+                    }
+                }
+            }
             // `namespace Foo {}` / `module Foo {}` → internal_module. Recurse into
             // its statement_block so nested types reach the AST. The name is an
             // `identifier` (or quoted `string` for ambient modules) child, not
@@ -2011,6 +2135,8 @@ type Reader interface {
         assert_eq!(reader.kind, SymbolKind::Interface);
     }
 
+
+
     #[test]
     fn typescript_symbols() {
         let source = r#"
@@ -2068,6 +2194,115 @@ type ID = string | number;
             member_names
         );
     }
+    #[test]
+    fn rust_assoc_items_and_macros_are_extracted() {
+        // Regression (2026-06-04-rust-ast-drops-assoc-items-macros): macro_rules!,
+        // union, trait associated `type`, and impl associated `const`/`type` were
+        // dropped from the AST, so edit_code could not bound them.
+        let source = r#"
+macro_rules! my_macro { () => {}; }
+union MyUnion { a: i32 }
+pub trait MyTrait {
+    const LIMIT: i32;
+    type Item;
+    fn required(&self);
+}
+struct S;
+impl S {
+    const NAME: &'static str = "s";
+    type Output = i32;
+    fn method(&self) {}
+}
+"#;
+        let syms = extract_symbols_from_source(source, Some("rust"), Path::new("t.rs")).unwrap();
+        fn collect(s: &[SymbolInfo], out: &mut Vec<String>) {
+            for x in s {
+                out.push(x.name_path.clone());
+                collect(&x.children, out);
+            }
+        }
+        let mut paths = Vec::new();
+        collect(&syms, &mut paths);
+        for expect in [
+            "my_macro",     // macro_rules!
+            "MyUnion",      // union
+            "MyTrait/Item", // trait associated type
+            "S/NAME",       // impl associated const
+            "S/Output",     // impl associated type
+            "S/method",
+        ] {
+            assert!(
+                paths.contains(&expect.to_string()),
+                "missing {}: {:?}",
+                expect,
+                paths
+            );
+        }
+    }
+
+    #[test]
+    fn ts_arrow_function_consts_are_extracted() {
+        // Regression (2026-06-04-ts-extractor-drops-arrow-fn-consts): function-valued
+        // const/let bindings (the dominant modern JS/TS idiom) were dropped. Plain
+        // data consts remain intentionally skipped.
+        let source = r#"
+const handler = () => {};
+export const Component = () => { return null; };
+let legacy = function () {};
+const COUNT = 5;
+const config = { a: 1 };
+"#;
+        let syms =
+            extract_symbols_from_source(source, Some("typescript"), Path::new("t.ts")).unwrap();
+        fn collect(s: &[SymbolInfo], out: &mut Vec<String>) {
+            for x in s {
+                out.push(x.name.clone());
+                collect(&x.children, out);
+            }
+        }
+        let mut names = Vec::new();
+        collect(&syms, &mut names);
+        let has = |n: &str| names.iter().any(|x| x == n);
+        assert!(has("handler"), "missing arrow const: {:?}", names);
+        assert!(has("Component"), "missing exported arrow const: {:?}", names);
+        assert!(has("legacy"), "missing function-expression const: {:?}", names);
+        // Non-function consts stay out by design.
+        assert!(!has("COUNT"), "data const should not be extracted: {:?}", names);
+        assert!(!has("config"), "object const should not be extracted: {:?}", names);
+    }
+
+    #[test]
+    fn go_generic_receiver_keeps_type_path() {
+        // Regression (2026-06-04-go-ast-generic-receiver-name-path): a method on a
+        // generic receiver (*Stack[T] / Stack[T]) lost its type prefix, mis-pathing
+        // as bare `Push` instead of `Stack/Push`.
+        let source = r#"
+package main
+type Stack[T any] struct { items []T }
+func (s *Stack[T]) Push(x T) {}
+func (s Stack[T]) Len() int { return 0 }
+"#;
+        let syms = extract_symbols_from_source(source, Some("go"), Path::new("t.go")).unwrap();
+        fn collect(s: &[SymbolInfo], out: &mut Vec<String>) {
+            for x in s {
+                out.push(x.name_path.clone());
+                collect(&x.children, out);
+            }
+        }
+        let mut paths = Vec::new();
+        collect(&syms, &mut paths);
+        assert!(
+            paths.contains(&"Stack/Push".to_string()),
+            "pointer generic receiver: {:?}",
+            paths
+        );
+        assert!(
+            paths.contains(&"Stack/Len".to_string()),
+            "value generic receiver: {:?}",
+            paths
+        );
+    }
+
     #[test]
     fn ts_namespace_and_abstract_class_are_extracted() {
         // Regression: a TS file whose declarations live inside a `namespace`
