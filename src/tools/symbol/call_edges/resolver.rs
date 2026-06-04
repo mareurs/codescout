@@ -349,6 +349,7 @@ fn enclosing_function_node<'tree>(
     byte_offset: usize,
     language_id: &str,
 ) -> Option<tree_sitter::Node<'tree>> {
+    let is_ts = matches!(language_id, "typescript" | "javascript" | "tsx" | "jsx");
     let fn_kinds: &[&str] = match language_id {
         "rust" => &["function_item"],
         "python" => &["function_definition"],
@@ -356,6 +357,7 @@ fn enclosing_function_node<'tree>(
             "function_declaration",
             "method_definition",
             "arrow_function",
+            "function_expression",
         ],
         "kotlin" => &["function_declaration"],
         "java" => &["method_declaration"],
@@ -367,6 +369,18 @@ fn enclosing_function_node<'tree>(
     loop {
         if fn_kinds.contains(&node.kind()) {
             return Some(node);
+        }
+        // TS/JS: `const f = () => {}` / `const f = function () {}` resolve to the
+        // binding *name*, whose ancestors do NOT include the function body (it is
+        // the declarator's sibling `value`, not an ancestor). Descend into the
+        // value so the callee scan sees the body.
+        // (2026-06-04-call-graph-ts-arrow-const-callees)
+        if is_ts && node.kind() == "variable_declarator" {
+            if let Some(value) = node.child_by_field_name("value") {
+                if matches!(value.kind(), "arrow_function" | "function_expression") {
+                    return Some(value);
+                }
+            }
         }
         match node.parent() {
             Some(p) => node = p,
@@ -920,6 +934,34 @@ mod tests {
         assert!(callees.contains(&"b"), "missing b in {:?}", callees);
         assert!(callees.contains(&"c"), "missing c in {:?}", callees);
         assert!(callees.contains(&"D"), "missing D in {:?}", callees);
+    }
+    #[tokio::test]
+    async fn resolve_callees_via_ts_function_valued_consts() {
+        // Regression (2026-06-04-call-graph-ts-arrow-const-callees): callees of
+        // function-valued const bindings must resolve via the TS fallback. The
+        // resolved symbol position is the binding *name*; the function body is the
+        // declarator's sibling `value`, not an ancestor, so an ancestor-only walk
+        // used to miss it (arrow_function in fn_kinds was unreachable from `a`).
+        let src = "const a = () => {\n    b();\n    obj.c();\n};\nconst e = function () {\n    d();\n};\nfunction b() {}\n";
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = dir.path().join("fixture.ts");
+        std::fs::write(&fixture, src).unwrap();
+        let mock = MockLspClient::new();
+
+        // `const a = () => { b(); obj.c(); }` — line 0, col 6 = `a`
+        let arrow = resolve_one_hop(&mock, "a", &fixture, 0, 6, "typescript", Direction::Callees)
+            .await
+            .unwrap();
+        let ac: Vec<&str> = arrow.iter().map(|e| e.callee_sym.as_str()).collect();
+        assert!(ac.contains(&"b"), "arrow: missing b in {:?}", ac);
+        assert!(ac.contains(&"c"), "arrow: missing c in {:?}", ac);
+
+        // `const e = function () { d(); }` — line 4, col 6 = `e`
+        let fe = resolve_one_hop(&mock, "e", &fixture, 4, 6, "typescript", Direction::Callees)
+            .await
+            .unwrap();
+        let ec: Vec<&str> = fe.iter().map(|e| e.callee_sym.as_str()).collect();
+        assert!(ec.contains(&"d"), "function_expression: missing d in {:?}", ec);
     }
 
     #[tokio::test]
