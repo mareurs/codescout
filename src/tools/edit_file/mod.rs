@@ -131,6 +131,32 @@ fn nearest_window_hint(content: &str, old_string: &str) -> Option<(usize, usize,
     best.filter(|&(score, _)| score > 0)
         .map(|(_, i)| (i + 1, i + k, lines[i..i + k].join("\n")))
 }
+/// Languages where leading whitespace is semantically significant. For these the
+/// whitespace-normalized fallback is disabled: trim-matching erases the very thing
+/// that carries meaning, and a re-indent that moves a line into a different block
+/// can still parse cleanly — so the AST gate cannot catch it. Steer the caller back
+/// to exact matching instead. Classified by extension because `detect_language`
+/// does not recognize YAML at all (it would otherwise slip through ungated).
+fn indentation_significant(path: &str) -> bool {
+    matches!(
+        std::path::Path::new(path)
+            .extension()
+            .and_then(|e| e.to_str()),
+        Some("py" | "pyi" | "hs" | "yaml" | "yml")
+    )
+}
+
+/// Shared "not found — here is the nearest content" message used by both no-match
+/// paths (the indentation-significant guard and the zero-window arm).
+fn not_found_msg(content: &str, old_string: &str, path: &str) -> String {
+    match nearest_window_hint(content, old_string) {
+        Some((s, e, text)) => {
+            format!("old_string not found in {path}. Nearest content at lines {s}-{e}:\n{text}")
+        }
+        None => format!("old_string not found in {path}"),
+    }
+}
+
 async fn commit_edit(
     ctx: &ToolContext,
     resolved: &std::path::Path,
@@ -253,9 +279,10 @@ impl Tool for EditFile {
     fn description(&self) -> &str {
         "Exact string replacement in a file. Whitespace-sensitive. \
          Use insert: \"prepend\"/\"append\" for file boundaries. \
-         On whitespace-only mismatch, applies the unique normalized match \
-         re-indented (response: applied_via: \"whitespace-normalized match\"); \
-         0 or 2+ matches -> error."
+         On whitespace-only mismatch (brace-style languages), applies the unique \
+         normalized match re-indented (response: applied_via: \"whitespace-normalized \
+         match\"); 0 or 2+ matches -> error. Exact-only for indent-significant \
+         languages (Python, YAML)."
     }
 
     fn input_schema(&self) -> Value {
@@ -594,6 +621,19 @@ async fn perform_edit(
     let match_count = content.matches(old_string).count();
 
     if match_count == 0 {
+        // Indentation-significant languages: a whitespace-normalized match could be
+        // re-indented into a different block while still parsing, so the AST gate would
+        // wave it through. Disable the fallback here and surface the nearest content so
+        // the caller can retry with an exact match.
+        if indentation_significant(path) {
+            return Err(super::RecoverableError::with_hint(
+                not_found_msg(&content, old_string, path),
+                "Whitespace-normalized matching is disabled for indentation-significant \
+                 languages (indentation is semantic). Copy the exact bytes shown (or from \
+                 read_file) and retry.",
+            )
+            .into());
+        }
         let windows = find_normalized_windows(&content, old_string);
         match windows.len() {
             1 => {
@@ -645,12 +685,7 @@ async fn perform_edit(
                 }));
             }
             0 => {
-                let msg = match nearest_window_hint(&content, old_string) {
-                    Some((s, e, text)) => format!(
-                        "old_string not found in {path}. Nearest content at lines {s}-{e}:\n{text}"
-                    ),
-                    None => format!("old_string not found in {path}"),
-                };
+                let msg = not_found_msg(&content, old_string, path);
                 return Err(super::RecoverableError::with_hint(
                     msg,
                     "No exact or whitespace-normalized match. Copy the actual bytes shown (or from read_file) and retry.",

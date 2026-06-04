@@ -3040,23 +3040,27 @@ async fn exact_match_preferred_no_note() {
     assert_eq!(std::fs::read_to_string(&f).unwrap(), "hello there\n");
 }
 
-    #[tokio::test]
-    async fn normalized_ambiguous_errors_without_writing() {
-        let (dir, ctx) = project_ctx().await;
-        let f = dir.path().join("a.txt");
-        // Tabs in file, spaces in old_string → NO exact substring (match_count == 0) →
-        // the normalized fallback runs and matches TWO windows → ambiguous arm → error, no write.
-        let original = "\tlog()\nmid\n\t\tlog()\n";
-        std::fs::write(&f, original).unwrap();
-        let result = EditFile
+#[tokio::test]
+async fn normalized_ambiguous_errors_without_writing() {
+    let (dir, ctx) = project_ctx().await;
+    let f = dir.path().join("a.txt");
+    // Tabs in file, spaces in old_string → NO exact substring (match_count == 0) →
+    // the normalized fallback runs and matches TWO windows → ambiguous arm → error, no write.
+    let original = "\tlog()\nmid\n\t\tlog()\n";
+    std::fs::write(&f, original).unwrap();
+    let result = EditFile
             .call(
                 json!({ "path": f.to_str().unwrap(), "old_string": "    log()", "new_string": "    trace()" }),
                 &ctx,
             )
             .await;
-        assert!(result.is_err(), "ambiguous normalized match must error");
-        assert_eq!(std::fs::read_to_string(&f).unwrap(), original, "file must be untouched");
-    }
+    assert!(result.is_err(), "ambiguous normalized match must error");
+    assert_eq!(
+        std::fs::read_to_string(&f).unwrap(),
+        original,
+        "file must be untouched"
+    );
+}
 
 #[tokio::test]
 async fn content_diff_falls_through_to_nearest_text_error() {
@@ -3069,6 +3073,64 @@ async fn content_diff_falls_through_to_nearest_text_error() {
         .await;
     assert!(result.is_err());
     assert_eq!(std::fs::read_to_string(&f).unwrap(), original);
+}
+#[tokio::test]
+async fn normalized_fallback_disabled_for_python() {
+    let (dir, ctx) = project_ctx().await;
+    let f = dir.path().join("g.py");
+    // Tabs in file, spaces in old_string → no exact substring (match_count == 0). A
+    // whitespace-normalized window WOULD match the body line, and pre-guard this applied
+    // (re-indenting into the file's tabs). Python is indentation-significant, so the
+    // fallback must be disabled: error, file untouched.
+    let original = "def f():\n\t\tx = 1\n";
+    std::fs::write(&f, original).unwrap();
+    let result = EditFile
+        .call(
+            json!({ "path": f.to_str().unwrap(), "old_string": "    x = 1", "new_string": "    x = 42" }),
+            &ctx,
+        )
+        .await;
+    assert!(
+        result.is_err(),
+        "normalized fallback must be disabled for Python"
+    );
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("indentation-significant"),
+        "error must explain the fallback is disabled for indentation-significant languages"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&f).unwrap(),
+        original,
+        "file must be untouched"
+    );
+}
+
+#[tokio::test]
+async fn normalized_fallback_disabled_for_yaml() {
+    let (dir, ctx) = project_ctx().await;
+    let f = dir.path().join("c.yaml");
+    // YAML isn't recognized by detect_language (so it never had an AST gate), yet its
+    // indentation is semantic. The extension-based guard must still disable the fallback.
+    let original = "root:\n\t\tkey: 1\n";
+    std::fs::write(&f, original).unwrap();
+    let result = EditFile
+        .call(
+            json!({ "path": f.to_str().unwrap(), "old_string": "    key: 1", "new_string": "    key: 42" }),
+            &ctx,
+        )
+        .await;
+    assert!(
+        result.is_err(),
+        "normalized fallback must be disabled for YAML"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&f).unwrap(),
+        original,
+        "file must be untouched"
+    );
 }
 
 #[tokio::test]
