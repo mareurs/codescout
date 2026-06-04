@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-06-02
-closed:
+closed: 2026-06-04
 severity: low
 owner: marius
 related:
@@ -73,35 +73,21 @@ Two coexisting designs were never reconciled:
 N/A — straightforward dead-code/inconsistency finding, not an intermittent bug.
 
 ## Fix
-Not implemented (logged for a decision). Two directions:
 
-1. **Delete** `search_markdown()` + any `markdown_chunks` plumbing — markdown is
-   intentionally co-mingled in `code_chunks` and reachable via `mode="full"`.
-   Smallest blast radius; removes the trap.
-2. **Wire it** — route markdown chunks to `markdown_chunks` in `sync_project` and
-   expose a `mode`/`scope` that calls `search_markdown()`. Larger; only worth it
-   if a real "search docs only" feature is wanted.
+**Implemented 2026-06-04 on `experiments`** — option 1 (delete). Removed `RetrievalClient::search_markdown` from `src/retrieval/search.rs` (zero callers, confirmed via `references`). Markdown stays intentionally co-mingled in `code_chunks` (tagged `language="markdown"`) and is reachable via `semantic_search(mode="full")`. Also corrected a `src/retrieval/config.rs` doc comment that listed `markdown_chunks` as a "live collection" example (→ `memories`).
 
-Recommendation: option 1 (delete) unless a docs-only search mode is on the roadmap.
-This also intersects the related preflight fix: if markdown stays in `code_chunks`,
-the `.codescout/`/`.claude/` markdown that `sync_project` indexes is visible under
-`mode="full"` — deciding whether the indexer should honour `ignored_paths` is the
-companion question.
-
+`library_chunks`/`search_libraries` (the sibling vestigial pair, L-12) left untouched — separate scope. clippy clean; no test churn (deletion of uncalled code).
 ## Tests added
-N/A — not yet fixed.
 
+None — dead-code deletion. `references(search_markdown)` returned only the (now-removed) definition, and `cargo clippy --all-targets -- -D warnings` confirms nothing references it.
 ## Workarounds
 To search documentation/markdown today: `semantic_search(mode="full")` (queries
 `code_chunks` without the `must_not language=markdown` filter). `search_markdown()`
 must not be relied on.
 
 ## Resume
-Decide delete-vs-wire with the user. If delete: remove `search_markdown` from
-`src/retrieval/search.rs`, confirm no external callers, `cargo clippy`/`test`. If
-wire: add a `markdown_chunks` upsert path in `src/retrieval/sync.rs::sync_project`
-and a `semantic_search` mode that routes to `search_markdown`.
 
+**Fixed 2026-06-04 on `experiments`** (deleted `search_markdown`, corrected the config doc comment). Not yet on master — ship via Standard Ship Sequence, then `git mv` to `docs/issues/archive/` citing the **master-side** SHA. The companion preflight question (whether the indexer should honour `ignored_paths` for `.codescout/`/`.claude/` markdown in `code_chunks`) remains separate — see `docs/issues/2026-06-02-preflight-sync-walker-divergence.md`.
 ## References
 - `src/retrieval/search.rs:120-129` (`search_markdown`, `markdown_chunks`)
 - `src/retrieval/search.rs:14` (`SearchOpts.exclude_languages`)

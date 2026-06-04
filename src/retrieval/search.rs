@@ -117,20 +117,6 @@ impl RetrievalClient {
         .await
     }
 
-    pub async fn search_markdown(
-        &self,
-        project_id: &str,
-        query: &str,
-        opts: SearchOpts,
-    ) -> Result<Vec<Hit>> {
-        self.search_in(
-            &self.config.collection("markdown_chunks"),
-            project_id,
-            query,
-            opts,
-        )
-        .await
-    }
 
     pub async fn search_memories(
         &self,

@@ -14,7 +14,7 @@ pub struct RetrievalConfig {
     /// Set via CODESCOUT_DISABLE_SPARSE=1 — used in matrix control cells.
     pub disable_sparse: bool,
     /// Prefix prepended to qdrant collection names. Default empty (live collections
-    /// `code_chunks`, `markdown_chunks`, etc.). Set via
+    /// `code_chunks`, `memories`, etc.). Set via
     /// CODESCOUT_QDRANT_COLLECTION_PREFIX to isolate benchmark runs (e.g.
     /// `bench_jinav2_` → `bench_jinav2_code_chunks`).
     pub collection_prefix: String,
