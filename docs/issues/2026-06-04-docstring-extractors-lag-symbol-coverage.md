@@ -1,11 +1,12 @@
 ---
-status: open
+status: fixed
 opened: 2026-06-04
 severity: low
 owner: marius
 related: [2026-06-04-rust-ast-drops-assoc-items-macros, 2026-06-04-ts-extractor-drops-arrow-fn-consts, 2026-06-04-ts-extractor-drops-namespace-abstract-class]
 tags: [ast, docstrings, tree-sitter, include_docs]
 kind: bug
+closed: 2026-06-04
 ---
 
 # BUG: docstring extractors lag the symbol extractors in node-kind coverage and are top-level-only
@@ -55,27 +56,25 @@ Verified 2026-06-04 via `extract_docstrings_from_source` (unit harness, temporar
 - All six `extract_*_docstrings` iterate only the root's direct children — no descent into
   declaration bodies. (Likely mirrors the original symbol extractors before nesting was added.)
 
-# Fix (not yet implemented)
-Two independently-shippable steps:
-1. **Cheap / consistency** — extend each docstring extractor's next-sibling match to the node
-   kinds the symbol extractors now emit (mirror the 2026-06-04 symbol fixes). Closes facet 1.
-2. **Larger** — make the docstring extractors recurse into `impl`/`trait`/`class`/`namespace`
-   bodies (or associate by line-adjacency post-hoc), mirroring how the symbol extractors recurse.
-   Closes facet 2. This is a structural change across all six language extractors.
+# Fix
 
+**Facet 1 (node-kind lag) implemented 2026-06-04 on `experiments`.** Extended `extract_rust_docstrings` and `extract_ts_docstrings` sibling-match to the kinds the symbol extractor now emits:
+- Rust: `macro_definition`, `union_item`, `associated_type` (names via the `first_named_child_text` fallback where not under a `name` field).
+- TS: `abstract_class_declaration`, `internal_module`/`module` (incl. the `expression_statement`-wrapped top-level namespace), `lexical_declaration` (first declarator's name), plus an `export_statement`/`ambient_declaration`/`expression_statement` unwrap. Existing arms (incl. `impl_item`) untouched.
+
+**Facet 2 (top-level-only / no recursion) reclassified as a documented limitation, NOT a regression — not fixed here.** Docstrings on impl methods / class members / nested decls still don't associate; all six docstring extractors walk only the root's direct children by long-standing design. Wiring recursion across all six is a separate enhancement, deferred unless `symbols(include_docs=true)` on nested symbols becomes a priority.
+
+clippy clean; full parser suite green (27 tests).
 # Tests added
-None yet (finding only).
 
+- `ast::parser::tests::docstrings_associate_new_node_kinds` — doc comments on Rust `macro_rules!`/`union` and TS arrow-const/`abstract class`/`namespace` associate with the symbol name (red pre-fix: `symbol_name=None`).
 # Workarounds
 - Read the doc comment directly with `symbols(name=..., include_body=true)` (the body includes the
   leading doc comment) instead of relying on `include_docs` association.
 
 # Resume
-Open finding from the 2026-06-04 extractor-coverage audit. Decide whether facet 1 (cheap) is worth
-shipping for consistency with the symbol fixes, and whether facet 2 (recursion) is worth the
-cross-language refactor given the low severity. If fixing, add a docstring-coverage regression test
-mirroring `rust_assoc_items_and_macros_are_extracted` / `ts_arrow_function_consts_are_extracted`.
 
+**Facet 1 fixed 2026-06-04 on `experiments`** (see ## Fix). Facet 2 (docstring recursion into bodies) is a deferred enhancement / documented limitation, not an open bug. Not yet on master — ship via Standard Ship Sequence, then `git mv` to `docs/issues/archive/` citing the **master-side** SHA.
 # References
 - `src/ast/parser.rs` `extract_docstrings_from_source` + `extract_*_docstrings` family.
 - Siblings (symbol-side, fixed): `2026-06-04-rust-ast-drops-assoc-items-macros.md`,

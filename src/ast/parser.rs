@@ -1602,6 +1602,12 @@ fn extract_rust_docstrings(node: Node, source: &str) -> Vec<DocstringInfo> {
                     | "const_item" | "static_item" | "type_item" | "impl_item" => {
                         child_name(*next, source, "name")
                     }
+                    // New top-level kinds the symbol extractor now emits — names
+                    // not always under a `name` field (2026-06-04 docstring lag).
+                    "union_item" | "associated_type" => child_name(*next, source, "name")
+                        .or_else(|| first_named_child_text(*next, source, "type_identifier")),
+                    "macro_definition" => child_name(*next, source, "name")
+                        .or_else(|| first_named_child_text(*next, source, "identifier")),
                     _ => None,
                 });
 
@@ -1769,6 +1775,29 @@ fn extract_ts_docstrings(node: Node, source: &str) -> Vec<DocstringInfo> {
     let mut cursor = node.walk();
     let children: Vec<_> = node.children(&mut cursor).collect();
 
+    // Name of the symbol declared by a sibling node, for the kinds the symbol
+    // extractor emits. Mirrors extract_ts_symbols' name handling so docstrings
+    // associate with the same name. (2026-06-04 docstring node-kind lag.)
+    fn declared_name(next: Node, source: &str) -> Option<String> {
+        match next.kind() {
+            "function_declaration"
+            | "class_declaration"
+            | "abstract_class_declaration"
+            | "interface_declaration"
+            | "enum_declaration"
+            | "type_alias_declaration" => child_name(next, source, "name"),
+            // namespace Foo {} / module Foo {} — name is an identifier child.
+            "internal_module" | "module" => child_name(next, source, "name")
+                .or_else(|| first_named_child_text(next, source, "identifier")),
+            // const X = ... / let X = ... — first declarator's name.
+            "lexical_declaration" | "variable_declaration" => {
+                find_child_by_kind(next, "variable_declarator")
+                    .and_then(|d| child_name(d, source, "name"))
+            }
+            _ => None,
+        }
+    }
+
     for (i, child) in children.iter().enumerate() {
         if child.kind() == "comment" {
             let text = child.utf8_text(source.as_bytes()).unwrap_or("");
@@ -1780,26 +1809,18 @@ fn extract_ts_docstrings(node: Node, source: &str) -> Vec<DocstringInfo> {
             let end_line = child.end_position().row as u32;
 
             let symbol_name = children.get(i + 1).and_then(|next| {
-                match next.kind() {
-                    "function_declaration"
-                    | "class_declaration"
-                    | "interface_declaration"
-                    | "enum_declaration"
-                    | "type_alias_declaration" => child_name(*next, source, "name"),
-                    "export_statement" => {
-                        // export function X ...
-                        let mut c = next.walk();
-                        let found = next.children(&mut c).find(|n| {
-                            matches!(
-                                n.kind(),
-                                "function_declaration"
-                                    | "class_declaration"
-                                    | "interface_declaration"
-                            )
-                        });
-                        found.and_then(|n| child_name(n, source, "name"))
-                    }
-                    _ => None,
+                // export/declare wrap the real declaration; a top-level `namespace`
+                // parses as expression_statement > internal_module. Descend one level
+                // into these wrappers. Safe: declared_name returns None for non-decls.
+                if matches!(
+                    next.kind(),
+                    "export_statement" | "ambient_declaration" | "expression_statement"
+                ) {
+                    let mut c = next.walk();
+                    let found = next.children(&mut c).find_map(|n| declared_name(n, source));
+                    found
+                } else {
+                    declared_name(*next, source)
                 }
             });
 
@@ -2963,6 +2984,28 @@ class Animal {
             .find(|d| d.symbol_name.as_deref() == Some("greet"))
             .unwrap();
         assert!(greet_doc.content.contains("Greet someone"));
+    }
+    #[test]
+    fn docstrings_associate_new_node_kinds() {
+        // Regression (2026-06-04-docstring-extractors-lag-symbol-coverage, facet 1):
+        // doc comments on the constructs the symbol extractor now emits must
+        // associate with the symbol name rather than record symbol_name=None.
+        fn assoc(docs: &[DocstringInfo], needle: &str) -> Option<String> {
+            docs.iter()
+                .find(|d| d.content.contains(needle))
+                .and_then(|d| d.symbol_name.clone())
+        }
+        let rust = "/// macro doc\nmacro_rules! my_macro { () => {}; }\n/// union doc\nunion MyUnion { a: i32 }\n";
+        let rdocs = extract_docstrings_from_source(rust, Some("rust"), Path::new("t.rs")).unwrap();
+        assert_eq!(assoc(&rdocs, "macro doc").as_deref(), Some("my_macro"), "{:?}", rdocs);
+        assert_eq!(assoc(&rdocs, "union doc").as_deref(), Some("MyUnion"), "{:?}", rdocs);
+
+        let ts = "/** arrow doc */\nconst Component = () => {};\n/** abstract doc */\nabstract class Base {}\n/** ns doc */\nnamespace NS {}\n";
+        let tdocs =
+            extract_docstrings_from_source(ts, Some("typescript"), Path::new("t.ts")).unwrap();
+        assert_eq!(assoc(&tdocs, "arrow doc").as_deref(), Some("Component"), "{:?}", tdocs);
+        assert_eq!(assoc(&tdocs, "abstract doc").as_deref(), Some("Base"), "{:?}", tdocs);
+        assert_eq!(assoc(&tdocs, "ns doc").as_deref(), Some("NS"), "{:?}", tdocs);
     }
 
     #[test]
