@@ -74,6 +74,8 @@ time_scope: open-ended
 | W-6 | 2026-05-24 | high | Cross-platform representation choices apply at every read AND write seam | Round 5 normalized writes only; round 6 had to fix 6 separate read-side boundaries (LIKE patterns, scope filters, substring checks). Missed read-side normalization is silent until integration. One miss (delete_orphan_repos LIKE) was destructive — wiped every catalog row. | validated |
 | W-7 | 2026-05-25 | med | Verify-open recon flips zombie-fixed entries from `open` to `fixed-verified` | Without scout, F-6 + F-7 + F-11 would have continued to be counted as actionable backlog; future "what's open?" queries would have wasted ~30 min each re-investigating already-shipped fixes, or shipped them as known-issues in release notes. 3 zombies caught in one pass — promote-when criterion fired. | promoted-to-permanent-docs |
 | W-8 | 2026-05-25 | high | `prompt_surfaces` test gate catches cap / snapshot / tool-name lint violations that `clippy`/`fmt` miss | Without `source_md_under_cap`, commit `4cc49ccb` would have shipped a server_instructions surface 339 bytes over the 2KB MCP cap, silently truncating Workspace gate + Deeper guidance in every fresh session for every project. Cost: workspace-restore slips + lost get_guide discovery surface, undetectable client-side. | validated |
+| W-9 | 2026-06-05 | high | Spot-check sibling callers of a just-fixed shared helper before closing the bug class | Insert-only fix would ship while `edit_code` replace + remove still silently corrupt the LAST method of a Python class. Live repro: replacing `C/last` left orphaned `assert x` (`replaced_lines: 5-9`, off by one). `references(clamp_range_to_parent)` found both extra callers. | validated |
+
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -1011,6 +1013,45 @@ error: couldn't read `src/../docs/PROGRESSIVE_DISCOVERABILITY.md`: No such file 
 
 **Fix idea / Pointer:** Add a CI step that runs `cargo publish --dry-run` (or at minimum `cargo package --list` with an assertion that every `include_str!("../...")` path appears in the listing). Alternatively, a `pre-commit` hook grepping `src/` for `include_str!.*"\.\./` and cross-checking against `cargo package --list`. Track as its own bug file if no such CI step exists. Cross-references: `Cargo.toml` `exclude` list at repo root, `src/server.rs:787`.
 
+## W-9 — Spot-check sibling callers of a just-fixed shared helper before closing the bug class
+
+**Observed:** 2026-06-05, after fixing the `edit_code insert-after` parent-clamp off-by-one
+(`do_insert`) for the last child of a dedent-delimited (Python) class. User asked to spot-check the
+flagged replace-path lead before declaring the class of bug closed.
+
+**Pattern:** When a fix corrects how ONE caller uses a shared boundary helper (here:
+`parent.end_line` as an *exclusive* clamp bound), `references()` every other caller of that helper
+and reproduce the same input shape against each before claiming the bug class is closed.
+`references(clamp_range_to_parent)` surfaced two more production callers — `do_remove`
+(`src/tools/symbol/edit_code.rs:454`) and `do_replace` (`:515`) — both using the identical bare
+`parent_body_end_exclusive = parent.end_line` (no `+1`).
+
+**Counterfactual:** The insert-only fix would have shipped while `edit_code action="replace"` and
+`action="remove"` still silently corrupted the LAST method of any Python class. Live repro confirmed:
+replacing `C/last` reported `replaced_lines: 5-9` — excluding line 10 (the trailing `assert x`) —
+leaving the orphaned statement after the new body. A user replacing the last test in a test class
+would get a half-replaced method + a leftover assertion: silent, `status: ok`, invisible to the
+error-rate metric. Without the spot-check, 2 more silent-corruption paths ship and are each
+re-discovered later at full debugging cost (this root-cause hunt took ~30 tool calls and 3 refuted
+hypotheses).
+
+**Confirming data points:**
+1. Three callers, one root cause: `do_insert` (fixed), `do_remove` (`edit_code.rs:454`), `do_replace`
+   (`:515`) all clamp with `parent_body_end_exclusive = parent.end_line`.
+2. Live `edit_code replace` on `C/last` reproduced the leftover `assert x` against the shipped binary
+   (`replaced_lines: 5-9`, off by one).
+
+**Impact:** high — silent file corruption across 3 `edit_code` actions; the spot-check converted a
+partial fix into a complete one.
+
+**Promote-when:** A second instance where grepping sibling callers of a just-fixed shared helper
+catches an under-scoped fix. At 2 datapoints, promote to CLAUDE.md: "When fixing a shared
+boundary/clamp helper, `references()` every caller and reproduce each input shape before closing the
+bug class."
+
+**Status:** validated
+
+---
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

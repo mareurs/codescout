@@ -40,6 +40,8 @@ skill).
 | R-14 | 2026-06-01 | hit (confirmed) | Specialist cited a dated memory (`outputguard-cross-cutting-law`, 2026-05-07) as a load-bearing design claim (`@ref` buffers process-local); scouted current code before the design rested on it — confirmed | `output_buffer.rs:42` |
 | R-15 | 2026-06-03 | hit | Scout external-tool on-disk state against bug-doc claims before a fix depends on addressing it (analyzer dir 128-bit hash ≠ codescout 64-bit `ws_hash`) | kotlin-lsp-disk F-1 |
 | R-16 | 2026-06-04 | hit → promoted | Pre-dispatch scout of the plan's OWN splice code caught a double-newline bug (+ substring-overlap test mis-routing 3× → CLAUDE.md; whole-workspace `cargo fmt` churn caught at pre-commit diff-scout) | edit_file-normalized-fallback (this session) |
+| R-17 | 2026-06-05 | hit | Spot-check sibling callers of a just-fixed shared helper before closing the bug class (`references(clamp_range_to_parent)` found `do_remove`/`do_replace` shared the off-by-one) | bug-fix W-9 + issues/2026-06-05-edit-code-insert-after-last-python-method |
+
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
 
@@ -532,6 +534,49 @@ shared constant. At 2 datapoints, promote to the skill as a Phase-1 rule:
 **Status:** open — single datapoint for the splice bug; the substring-overlap sub-pattern reached promotion (3 datapoints → CLAUDE.md).
 
 **Source:** `src/tools/edit_file/mod.rs` `perform_edit` `match_count==0` arm; plan `docs/superpowers/plans/2026-06-04-edit-file-whitespace-normalized-fallback.md`.
+
+---
+## R-17 — Spot-check sibling callers of a just-fixed shared helper before closing the bug class
+
+**Verdict:** hit (recon caught a 3× blast radius; live repro + regression tests confirmed)
+
+**Observed:** 2026-06-05, after fixing an `edit_code insert-after` parent-clamp off-by-one in
+`do_insert` (last child of a dedent-delimited Python class). About to declare the bug class closed;
+user asked to spot-check the flagged replace-path lead.
+
+**Scout (reality):** `references(clamp_range_to_parent)` surfaced two more production callers —
+`do_remove` (`edit_code.rs:454`) and `do_replace` (`:515`) — both converting `parent.end_line` into
+an exclusive clamp bound with the identical bare-`end_line` off-by-one. Reproduced live against the
+shipped binary before fixing: `edit_code replace` on the last method reported `replaced_lines: 5-9`
+(excluding the trailing-`assert` line), leaving it orphaned after the new body; `remove` left it
+behind. The AST-extractor and `do_insert`-specific reasoning were the wrong layer — the seam was the
+**shared boundary helper's call contract**.
+
+**Outcome:** Fixed all three sites (`+ 1`), added `replace_`/`remove_last_python_method_*` regression
+tests (both verified fails-without/passes-with by reverting the `+1`), all 54 `symbol_lsp` tests green
+including the `bug034_guard_*` over-extension guards. Captured as W-9 in `bug-fix-session-log.md`.
+
+**Cross-cutting lesson:** when a fix corrects how ONE caller derives an argument to a shared
+range/clamp/boundary helper, the same derivation error almost certainly lives at the other callers.
+`references(helper)` + reproduce each call site's input shape BEFORE closing the bug class. A
+single-call-site fix to a multi-caller helper-usage bug ships a partial fix that re-surfaces at full
+debugging cost on the untouched paths.
+
+**Also this session (re-confirms R-16's fmt sub-lesson):** whole-workspace `cargo fmt` churned files a
+concurrent session left rustfmt-drifted (markdown `.rs` + a `server.rs` reflow). Caught via
+`git diff --stat`; will commit file-scoped (`edit_code.rs` + `tests/symbol_lsp.rs`) rather than
+`git add -A`. Second datapoint for "scope `cargo fmt -- <files>` / `--check` in a shared repo."
+
+**Promote-when:** a second instance where `references()`-ing the callers of a just-fixed shared helper
+catches an under-scoped fix → promote to CLAUDE.md: "When fixing how a caller uses a shared
+boundary/clamp/offset helper, scout every other caller of that helper and reproduce each before
+closing the bug class."
+
+**Status:** open — single datapoint for the sibling-caller pattern.
+
+**Source:** `src/tools/symbol/edit_code.rs` (`do_insert`/`do_remove`/`do_replace`);
+`docs/issues/2026-06-05-edit-code-insert-after-last-python-method.md`; W-9 in
+`docs/trackers/bug-fix-session-log.md`.
 
 ---
 ## Template for new entries
