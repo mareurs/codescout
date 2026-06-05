@@ -451,7 +451,15 @@ impl EditCode {
 
         let (start, end) = if let Some(parent) = find_parent_symbol(&symbols, &sym.name_path) {
             let parent_body_start = parent.start_line as usize + 1;
-            let parent_body_end_exclusive = parent.end_line as usize;
+            // `+ 1`: parent.end_line is the last line the parent node SPANS
+            // (inclusive). For dedent-delimited languages (Python, ...) that is the
+            // last child's last body line, so the first line NOT in the parent body
+            // is `end_line + 1`. A bare `end_line` clamped a replace/remove of the
+            // LAST child back by one, dropping its trailing statement — a sibling of
+            // the do_insert fix (docs/issues/2026-06-05-edit-code-insert-after-last-python-method.md).
+            // Brace languages are unaffected: a child's end is always strictly below
+            // the parent closer, so the clamp never binds.
+            let parent_body_end_exclusive = parent.end_line as usize + 1;
             clamp_range_to_parent(start0, end0, parent_body_start, parent_body_end_exclusive)
         } else {
             (start0, end0)
@@ -512,7 +520,15 @@ impl EditCode {
 
         let (start, end) = if let Some(parent) = find_parent_symbol(&symbols, &sym.name_path) {
             let parent_body_start = parent.start_line as usize + 1;
-            let parent_body_end_exclusive = parent.end_line as usize;
+            // `+ 1`: parent.end_line is the last line the parent node SPANS
+            // (inclusive). For dedent-delimited languages (Python, ...) that is the
+            // last child's last body line, so the first line NOT in the parent body
+            // is `end_line + 1`. A bare `end_line` clamped a replace/remove of the
+            // LAST child back by one, dropping its trailing statement — a sibling of
+            // the do_insert fix (docs/issues/2026-06-05-edit-code-insert-after-last-python-method.md).
+            // Brace languages are unaffected: a child's end is always strictly below
+            // the parent closer, so the clamp never binds.
+            let parent_body_end_exclusive = parent.end_line as usize + 1;
             clamp_range_to_parent(start0, end0, parent_body_start, parent_body_end_exclusive)
         } else {
             (start0, end0)
@@ -754,7 +770,19 @@ impl EditCode {
 
         let insert_at = if let Some(parent) = find_parent_symbol(&symbols, &sym.name_path) {
             let parent_body_start = parent.start_line as usize + 1;
-            let parent_body_end_exclusive = parent.end_line as usize;
+            // Tree-sitter's `end_line` is the last line the parent node SPANS
+            // (inclusive): for brace languages that's the closer `}` line, for
+            // dedent-delimited languages (Python, ...) it's the last child's last
+            // body line. The first line NOT in the parent body is therefore
+            // `end_line + 1`. Using a bare `end_line` here under-extended the
+            // exclusive bound by one and, when inserting after the LAST child of a
+            // Python-style class, clamped insert_at0 (strict-AST child_end + 1)
+            // back into the child body — splicing the new sibling before the
+            // child's trailing statement and orphaning it (2026-06-05 regression).
+            // Brace languages are unaffected: a child's strict-AST end is always
+            // strictly below the parent closer, so insert_at0 never reaches this
+            // bound.
+            let parent_body_end_exclusive = parent.end_line as usize + 1;
             insert_at0
                 .max(parent_body_start)
                 .min(parent_body_end_exclusive)

@@ -1363,6 +1363,220 @@ async fn insert_code_after_caps_overextended_lsp_end() {
     );
 }
 
+/// Regression for docs/issues/2026-06-05-edit-code-insert-after-last-python-method.md:
+/// inserting after the LAST child of a dedent-delimited (Python) class spliced the
+/// new sibling *before* the method's trailing statement, orphaning it.
+///
+/// Root cause: Python classes have no closer line, so the parent's `end_line` equals
+/// the last child's `end_line`. `do_insert` used `parent.end_line` as an *exclusive*
+/// upper bound, which is off by one for inclusive node ends — it clamped
+/// `insert_at0` (strict-AST child_end + 1) back to the child's last line. The fix
+/// uses `parent.end_line + 1`. Brace languages are unaffected because a child's
+/// strict-AST end is always strictly below the parent closer.
+#[tokio::test]
+async fn insert_code_after_last_python_method_keeps_trailing_stmt() {
+    // File layout (0-indexed):
+    //  0: "class C:"
+    //  1: "    def m(self):"
+    //  2: "        x = compute("
+    //  3: "            a=1,"
+    //  4: "        )"
+    //  5: ""                       <- blank line before the trailing statement
+    //  6: "        assert x"        <- last stmt of m AND last line of class C
+    let src = "class C:\n    def m(self):\n        x = compute(\n            a=1,\n        )\n\n        assert x\n";
+
+    let (dir, ctx) = ctx_with_mock(&[("mod.py", src)], |root| {
+        let file = root.join("mod.py");
+        // Parent class and its single method share end_line=6 (no closer line).
+        let method = SymbolInfo {
+            name: "m".to_string(),
+            name_path: "C/m".to_string(),
+            kind: SymbolKind::Method,
+            file: file.clone(),
+            start_line: 1,
+            end_line: 6,
+            start_col: 4,
+            children: vec![],
+            range_start_line: None,
+            detail: None,
+        };
+        let class = SymbolInfo {
+            name: "C".to_string(),
+            name_path: "C".to_string(),
+            kind: SymbolKind::Class,
+            file: file.clone(),
+            start_line: 0,
+            end_line: 6,
+            start_col: 0,
+            children: vec![method],
+            range_start_line: None,
+            detail: None,
+        };
+        MockLspClient::new().with_symbols(file, vec![class])
+    })
+    .await;
+
+    EditCode
+        .call(
+            json!({
+                "path": "mod.py",
+                "symbol": "C/m",
+                "position": "after",
+                "action": "insert",
+                "body": "\n    def added(self):\n        assert added_marker\n"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let result = std::fs::read_to_string(dir.path().join("mod.py")).unwrap();
+    let assert_pos = result
+        .find("assert x")
+        .unwrap_or_else(|| panic!("trailing `assert x` vanished; got:\n{result}"));
+    let added_pos = result
+        .find("def added")
+        .unwrap_or_else(|| panic!("inserted method missing; got:\n{result}"));
+    // The trailing statement must stay INSIDE m — i.e. before the new sibling.
+    assert!(
+        assert_pos < added_pos,
+        "trailing `assert x` must remain in method `m`, not leak past the inserted \
+         method; got:\n{result}"
+    );
+}
+
+/// Companion to insert: `replace` of the LAST child of a Python class must replace the
+/// WHOLE method, including its trailing statement. The same `parent.end_line` off-by-one
+/// in `do_replace`'s `clamp_range_to_parent` call dropped the last line from the replaced
+/// range, leaving the old trailing statement orphaned after the new body.
+/// docs/issues/2026-06-05-edit-code-insert-after-last-python-method.md
+#[tokio::test]
+async fn replace_last_python_method_replaces_trailing_stmt() {
+    // 0: "class C:"
+    // 1: "    def m(self):"
+    // 2: "        x = compute("
+    // 3: "            a=1,"
+    // 4: "        )"
+    // 5: ""
+    // 6: "        assert x"   <- last stmt of m AND last line of class C
+    let src = "class C:\n    def m(self):\n        x = compute(\n            a=1,\n        )\n\n        assert x\n";
+
+    let (dir, ctx) = ctx_with_mock(&[("mod.py", src)], |root| {
+        let file = root.join("mod.py");
+        let method = SymbolInfo {
+            name: "m".to_string(),
+            name_path: "C/m".to_string(),
+            kind: SymbolKind::Method,
+            file: file.clone(),
+            start_line: 1,
+            end_line: 6,
+            start_col: 4,
+            children: vec![],
+            range_start_line: None,
+            detail: None,
+        };
+        let class = SymbolInfo {
+            name: "C".to_string(),
+            name_path: "C".to_string(),
+            kind: SymbolKind::Class,
+            file: file.clone(),
+            start_line: 0,
+            end_line: 6,
+            start_col: 0,
+            children: vec![method],
+            range_start_line: None,
+            detail: None,
+        };
+        MockLspClient::new().with_symbols(file, vec![class])
+    })
+    .await;
+
+    EditCode
+        .call(
+            json!({
+                "path": "mod.py",
+                "symbol": "C/m",
+                "action": "replace",
+                "body": "    def m(self):\n        return 42"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let result = std::fs::read_to_string(dir.path().join("mod.py")).unwrap();
+    assert!(
+        result.contains("return 42"),
+        "new body must be present; got:\n{result}"
+    );
+    // The old trailing statement was part of `m` and must be replaced, not orphaned.
+    assert!(
+        !result.contains("assert x"),
+        "old trailing `assert x` must be replaced with the rest of m, not left behind; got:\n{result}"
+    );
+}
+
+/// Companion to insert: `remove` of the LAST child of a Python class must remove the
+/// WHOLE method, including its trailing statement. Same off-by-one in `do_remove`.
+/// docs/issues/2026-06-05-edit-code-insert-after-last-python-method.md
+#[tokio::test]
+async fn remove_last_python_method_removes_trailing_stmt() {
+    let src = "class C:\n    def m(self):\n        x = compute(\n            a=1,\n        )\n\n        assert x\n";
+
+    let (dir, ctx) = ctx_with_mock(&[("mod.py", src)], |root| {
+        let file = root.join("mod.py");
+        let method = SymbolInfo {
+            name: "m".to_string(),
+            name_path: "C/m".to_string(),
+            kind: SymbolKind::Method,
+            file: file.clone(),
+            start_line: 1,
+            end_line: 6,
+            start_col: 4,
+            children: vec![],
+            range_start_line: None,
+            detail: None,
+        };
+        let class = SymbolInfo {
+            name: "C".to_string(),
+            name_path: "C".to_string(),
+            kind: SymbolKind::Class,
+            file: file.clone(),
+            start_line: 0,
+            end_line: 6,
+            start_col: 0,
+            children: vec![method],
+            range_start_line: None,
+            detail: None,
+        };
+        MockLspClient::new().with_symbols(file, vec![class])
+    })
+    .await;
+
+    EditCode
+        .call(
+            json!({
+                "path": "mod.py",
+                "symbol": "C/m",
+                "action": "remove"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let result = std::fs::read_to_string(dir.path().join("mod.py")).unwrap();
+    assert!(
+        !result.contains("def m"),
+        "method `m` must be fully removed; got:\n{result}"
+    );
+    // The trailing statement belonged to m and must go with it.
+    assert!(
+        !result.contains("assert x"),
+        "trailing `assert x` must be removed with its method, not orphaned; got:\n{result}"
+    );
+}
+
 /// BUG-016 regression: insert_code(after) on a nested `mod tests` function
 /// where LSP reports end_line as a line *inside* the body (truncated range).
 /// validate_symbol_range catches ast_end > sym.end_line and returns
