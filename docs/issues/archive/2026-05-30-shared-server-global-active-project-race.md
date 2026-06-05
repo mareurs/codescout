@@ -1,7 +1,7 @@
 ---
-status: mitigated
+status: fixed
 opened: 2026-05-30
-closed: 2026-05-30
+closed: 2026-06-05
 severity: high
 owner: marius
 related: [2026-05-30-cross-worktree-kotlin-jvm-shared-system-path]
@@ -118,6 +118,10 @@ an activation drift-visibility guard. `Agent::note_activation` (`src/agent/mod.r
 **Root-cause fix** is planned separately: `docs/plans/2026-05-30-per-request-workspace-pinning.md` (per-request workspace pinning — the only correct fix for concurrent subagents; ~100 call sites, phased).
 
 **Root-cause fix IN PROGRESS (2026-05-30, branch `feat/per-request-workspace-pinning`):** Phases 0–3 complete — the **READ surface (13 tools)** now resolves per-request via `ToolContext.workspace_override` → `with_project_at` / `project_root_for` / `require_project_root_for` / `security_config_for` accessors → a multi-resident `Workspace` registry (`ensure_resident`). **Regime-3 is FIXED for all reads**, proven by `read_file_concurrent_pins_no_cross_workspace_bleed` (5-task multi-thread, shared Agent, zero bleed). Writes + per-`Workspace` `Arc<RwLock>` locking + eviction remain (**Phase 4**, behind the lock-ordering gate). Status stays `mitigated` until the full fix (incl. writes) ships to `master`. Commit ledger + exact Phase-4 resume steps: the plan's "## Progress & Resume" section.
+**✅ FIXED 2026-06-05 — regime-3 correctness fully closed and on `master`.** Verified all phases are ancestors of `origin/master`: reads (`ae596995`, `1b1fcc0c`, `898853a7`), write surface (`06990af7`, `070a9edd`, `b43995c2`, `6656c09a` — "regime-3 write surface complete"), read-tool `security_config` gap (`11358e82`), lock-ordering proof (`69c91896`), Phase 5 keystone + polish (`1a65bff2`, `b13c8c66`). Every per-request tool now resolves its project through `ctx.workspace_override`; concurrent reads AND writes to different pinned workspaces are proven bleed-free. Status flipped `mitigated`→`fixed` per the plan's criterion ("flip once 4a reaches master") during the 2026-06-05 verify-open reconciliation pass.
+
+**Phase 4b (performance only — parallelize different-root writes via per-`Workspace` `Arc<RwLock>`, the ~100-site accessor ripple) remains DEFERRED by explicit call (2026-05-31).** It is NOT a correctness gap and is tracked in the still-active `docs/plans/2026-05-30-per-request-workspace-pinning.md`, not this bug. Re-open trigger lives in the plan (profiling shows different-root write serialization is a real bottleneck).
+
 ## Tests added
 None yet — bug just logged. A regression test should assert that two interleaved
 `activate(path_a)` / `activate(path_b)` + `status` sequences each observe their own root
@@ -132,15 +136,12 @@ None yet — bug just logged. A regression test should assert that two interleav
 **Auditing:** check the full `project_root` path, not `workspace.name` — name is identical across worktrees of one repo and hides the swap.
 ## Resume
 
-Mitigation shipped (drift visible). Root-cause fix **IN PROGRESS** on branch
-`feat/per-request-workspace-pinning` — **Phases 0–3 done (read surface fully pinned; regime-3 fixed
-for reads)**. Resume at **Phase 4** (writes + per-`Workspace` locking + eviction): **start with the
-lock-ordering proof**, before any write tool moves. Full commit ledger, the machinery built, the proof
-tests, and the step-by-step Phase-4/5 plan live in
-`docs/plans/2026-05-30-per-request-workspace-pinning.md` → "## Progress & Resume".
+N/A — fixed (regime-3 correctness, reads + writes, on `master`). The only remaining work, Phase 4b
+(different-root write parallelism — performance, not correctness), is deferred by explicit decision
+(2026-05-31) and tracked in `docs/plans/2026-05-30-per-request-workspace-pinning.md` (kept active for
+4b). Re-open this bug only if a NEW cross-workspace contamination is observed *despite* per-request
+pinning.
 
-Keep this bug `mitigated` until the full fix (incl. writes) lands on `master`; then flip to `fixed`
-and cite the master-side SHA.
 ## References
 - Related: `docs/issues/2026-05-30-cross-worktree-kotlin-jvm-shared-system-path.md`
 - `docs/manual/src/concepts/cross-process-write-serialization.md` (per-ActiveProject mutex)
