@@ -279,10 +279,8 @@ impl Tool for EditFile {
     fn description(&self) -> &str {
         "Exact string replacement in a file. Whitespace-sensitive. \
          Use insert: \"prepend\"/\"append\" for file boundaries. \
-         On whitespace-only mismatch (brace-style languages), applies the unique \
-         normalized match re-indented (response: applied_via: \"whitespace-normalized \
-         match\"); 0 or 2+ matches -> error. Exact-only for indent-significant \
-         languages (Python, YAML)."
+         On a whitespace-only mismatch, retries a unique re-indented match in \
+         brace-style languages (exact-only for Python/YAML); 0 or 2+ matches error."
     }
 
     fn input_schema(&self) -> Value {
