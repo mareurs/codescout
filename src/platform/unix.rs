@@ -65,6 +65,21 @@ pub fn denied_read_prefixes() -> &'static [&'static str] {
 pub fn shell_command(cmd: &str) -> (&'static str, Vec<String>) {
     ("sh", vec!["-c".to_string(), cmd.to_string()])
 }
+pub fn shell_command_configured(cmd: &str) -> tokio::process::Command {
+    let mut c = tokio::process::Command::new("sh");
+    c.arg("-c")
+        .arg(cmd)
+        .env("GIT_PAGER", "cat")
+        .process_group(0);
+    // SAFETY: pre_exec runs post-fork, pre-exec; signal() is async-signal-safe.
+    unsafe {
+        c.pre_exec(|| {
+            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+            Ok(())
+        });
+    }
+    c
+}
 
 pub fn shell_tokenize(cmd: &str) -> Result<Vec<String>, String> {
     let mut tokens = Vec::new();

@@ -66,3 +66,38 @@ pub fn rename_overwrite(from: &std::path::Path, to: &std::path::Path) -> std::io
 pub fn lsp_binary_name(base: &str) -> String {
     imp::lsp_binary_name(base)
 }
+/// Build the verbatim command-line tail handed to `cmd /C` on Windows.
+/// Wrapped in an outer quote pair so cmd's `/C` quote rule consumes exactly
+/// that pair and runs the inner command — including its own quotes — verbatim.
+/// Pure + cross-platform so it is testable on the Linux CI.
+pub fn build_windows_cmdline(cmd: &str) -> String {
+    format!("/C \"{cmd}\"")
+}
+
+/// Build a fully-configured shell `tokio::process::Command` for `cmd`.
+/// Windows: `cmd /C "<cmd>"` via raw_arg (no MSVC-CRT quote mangling).
+/// Unix: `sh -c <cmd>` in a fresh process group with SIGPIPE reset.
+/// Sets `GIT_PAGER=cat`. The caller sets cwd, stdio, and kill_on_drop.
+pub fn shell_command_configured(cmd: &str) -> tokio::process::Command {
+    imp::shell_command_configured(cmd)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_cmdline_wraps_in_outer_quotes() {
+        // cmd /C with a leading quote strips the first+last quote of the whole
+        // line and runs the remainder verbatim, so the command — including its
+        // own inner quotes — must be wrapped in exactly one outer pair.
+        assert_eq!(
+            build_windows_cmdline(r#"py -c "print(1)""#),
+            r#"/C "py -c "print(1)"""#
+        );
+        assert_eq!(
+            build_windows_cmdline("git --version"),
+            r#"/C "git --version""#
+        );
+    }
+}
