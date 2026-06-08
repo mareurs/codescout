@@ -402,19 +402,81 @@ pub(crate) async fn run_command_inner(
         (fut, pgid)
     };
 
+    // `_child_pgid` is unused on Windows — the process-group kill in the timeout
+    // arm is `#[cfg(unix)]` only. The Unix branch above binds it as `child_pgid`.
     #[cfg(windows)]
-    let (child_output_fut, child_pgid) = {
+    let (child_output_fut, _child_pgid) = {
+        use std::os::windows::process::CommandExt;
+
+        // Capture stdout/stderr via temp files instead of pipes, and wait on the
+        // *process* rather than on pipe EOF.
+        //
+        // On Windows a grandchild — git's helper exe, a Python subprocess, or an
+        // EDR/AV DLL injected into the child — inherits the write end of a
+        // captured pipe and can hold it open after our direct child has exited.
+        // `.output()` waits for pipe EOF, so it never returns even though the
+        // command finished. (The timeout hint below — "output() never gets EOF" —
+        // is exactly this failure.) Redirecting to files and waiting on the
+        // process means a lingering grandchild keeping a file handle open does
+        // not block our read.
+        //
+        // stdin is redirected to NUL so a child that reads stdin — e.g. a Python
+        // that fell into its REPL because its `-c` argument failed to parse —
+        // gets immediate EOF instead of blocking forever on the MCP server's
+        // inherited stdin pipe.
+        //
+        // The command is passed with `raw_arg` so cmd.exe receives it verbatim.
+        // Rust's normal `.arg()` quoting escapes embedded quotes as `\"` for the
+        // MSVC CRT convention, which cmd.exe does not understand — it mangled
+        // `py -c "print(1)"` into a broken `\"...\"` argument that dropped Python
+        // into its (stdin-blocked) REPL.
+        //
+        // The whole command is wrapped in an outer quote pair — `cmd /C "<cmd>"`.
+        // Per `cmd /?`: when the argument to /C starts with a quote, cmd strips
+        // the first and last quote on the line and runs the remainder verbatim.
+        // Without the wrapper a command that *itself* starts with a quoted path
+        // (`"C:\Program Files\…\python.exe" …`) gets its own first/last quotes
+        // stripped, corrupting it (`'C:\Program' is not recognized`). The wrapper
+        // is the pair cmd consumes, leaving the original command — inner quotes
+        // and all — intact.
+        let out_tmp = tempfile::Builder::new()
+            .prefix("codescout-cmd-out-")
+            .tempfile()?;
+        let err_tmp = tempfile::Builder::new()
+            .prefix("codescout-cmd-err-")
+            .tempfile()?;
+        let (out_file, out_path) = out_tmp.keep()?;
+        let (err_file, err_path) = err_tmp.keep()?;
+
+        let mut std_cmd = std::process::Command::new("cmd");
+        std_cmd
+            .raw_arg(format!("/C \"{}\"", effective_command))
+            .current_dir(&work_dir)
+            .env("GIT_PAGER", "cat")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::from(out_file))
+            .stderr(std::process::Stdio::from(err_file));
+
+        let mut tokio_cmd = tokio::process::Command::from(std_cmd);
+        tokio_cmd.kill_on_drop(true); // SIGKILLs cmd on cancel/timeout (future drop)
+        let mut child = tokio_cmd.spawn()?;
+
         let fut: std::pin::Pin<
             Box<dyn std::future::Future<Output = std::io::Result<std::process::Output>> + Send>,
-        > = Box::pin(
-            tokio::process::Command::new("cmd")
-                .arg("/C")
-                .arg(&effective_command)
-                .current_dir(&work_dir)
-                .env("GIT_PAGER", "cat")
-                .kill_on_drop(true)
-                .output(),
-        );
+        > = Box::pin(async move {
+            // Guards drop on normal completion *and* on future-drop (timeout /
+            // cancellation), cleaning up the temp files either way.
+            let _out_guard = TmpfileGuard(out_path.to_string_lossy().into_owned());
+            let _err_guard = TmpfileGuard(err_path.to_string_lossy().into_owned());
+            let status = child.wait().await?;
+            let stdout = std::fs::read(&out_path).unwrap_or_default();
+            let stderr = std::fs::read(&err_path).unwrap_or_default();
+            Ok(std::process::Output {
+                status,
+                stdout,
+                stderr,
+            })
+        });
         (fut, None::<i32>)
     };
 
