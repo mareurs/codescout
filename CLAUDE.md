@@ -610,17 +610,25 @@ subagents within a single session share that one server, so if they `workspace(a
 another's worktree. The project `name` is identical across worktrees of one repo, so only the
 full `project_root` reveals the swap.
 
-**Rule:** for parallel multi-workspace work, use **separate Claude Code windows** (separate
-processes → separate active-project slots → no race). Within a single session, do **not** have
-concurrent subagents activate *different* workspaces — keep them in the parent's active
-workspace, or serialize the activations. A `concurrent_activation_warning` now appears on
-`activate` responses when a rapid foreign switch is detected (mitigation, not a fix).
+**Rule:** pin per call. Pass `workspace=<absolute path>` on each tool call that targets a
+specific project — resolution travels with the request, so concurrent subagents on *different*
+workspaces never collide on the one shared slot. Reserve `workspace(action="activate")` for
+sustained single-agent work and restore the home workspace before turn end (Iron Law 4). For
+fully independent parallel work, **separate Claude Code windows** also isolate (separate
+processes → separate slots). The legacy hazard survives only on the *unpinned* path:
+concurrent `activate` of *different* workspaces is still last-writer-wins, and now surfaces a
+`concurrent_activation_warning` pointing at the pin.
 
-Root-cause fix (per-request workspace pinning) is tracked in
-`docs/plans/2026-05-30-per-request-workspace-pinning.md`; bug at
-`docs/issues/2026-05-30-shared-server-global-active-project-race.md`. Separate worktrees of one
-repo across separate processes are fine — the kotlin per-worktree LSP isolation bug is fixed
-(`docs/issues/2026-05-30-cross-worktree-kotlin-jvm-shared-system-path.md`).
+The root-cause fix (per-request `workspace` pinning) **shipped** — every pinnable tool now
+advertises the `workspace` param (Phase 5 keystone `1a65bff2` + polish `b13c8c66`, both on
+`master`). Rationale and the concurrent-subagent patterns live in
+[`compact-schemas-and-activate-project-safety.md`](docs/manual/src/concepts/compact-schemas-and-activate-project-safety.md);
+bug history (fixed, archived) at
+`docs/issues/archive/2026-05-30-shared-server-global-active-project-race.md`. Phase 4b
+(different-root *write* parallelism) is performance-only and stays deferred —
+`docs/plans/2026-05-30-per-request-workspace-pinning.md`. Separate worktrees of one repo across
+separate processes are fine; the kotlin per-worktree LSP isolation bug is fixed
+(`docs/issues/archive/2026-05-30-cross-worktree-kotlin-jvm-shared-system-path.md`).
 ## Language-Specific LSP Issues
 
 See codescout memory `gotchas` (LSP section) for Kotlin multi-instance conflicts,

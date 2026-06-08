@@ -93,5 +93,5 @@ The audit workflow is the same regardless of which file your agent uses.
 
 - [Memory](memory.md) — what makes a good memory entry and the full `memory` tool reference
 - [Onboarding](../tools/workflow-and-config.md) — what `onboarding` writes and when to re-run it
-- [Multi-Project Workspace](../experimental/multi-project-workspace.md) — per-project
+- [Multi-Project Workspace](multi-project-workspace.md) — per-project
   memory scoping in workspace setups
