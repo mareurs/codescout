@@ -3654,6 +3654,43 @@ async fn onboarding_triggers_refresh_when_version_stale() {
         "must be lightweight refresh"
     );
 }
+#[cfg(windows)]
+#[tokio::test]
+async fn background_command_with_quotes_captures_output() {
+    // Regression: the background path used .args() → MSVC-CRT quote mangling →
+    // a quoted -c argument dropped Python into its stdin-blocked REPL. Requires
+    // `py` on PATH (present on this VDI).
+    let (_dir, ctx) = project_ctx().await;
+    let res = RunCommand
+        .call(
+            json!({
+                "command": r#"py -c "print('bg-ok', 2+2)""#,
+                "run_in_background": true
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let ref_id = res["output_id"].as_str().unwrap().to_string();
+    // Poll the bg log buffer (same ctx → same OutputBuffer) until the line appears.
+    let mut found = false;
+    for _ in 0..50 {
+        let out = RunCommand
+            .call(
+                json!({ "command": format!("type {ref_id}"), "timeout_secs": 10 }),
+                &ctx,
+            )
+            .await;
+        if let Ok(v) = out {
+            if v["stdout"].as_str().unwrap_or("").contains("bg-ok 4") {
+                found = true;
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(found, "background command output not captured");
+}
 
 #[tokio::test]
 async fn onboarding_fast_path_when_version_current() {

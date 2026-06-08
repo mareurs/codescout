@@ -97,11 +97,10 @@ async fn spawn_background_command(
     let (log_file, _) = log_tmp.keep()?;
     let log_stderr = log_file.try_clone()?;
 
-    let (shell, shell_args) = crate::platform::shell_command(resolved_command);
-    let child = tokio::process::Command::new(shell)
-        .args(&shell_args)
+    let mut cmd = crate::platform::shell_command_configured(resolved_command);
+    let child = cmd
         .current_dir(work_dir)
-        .env("GIT_PAGER", "cat")
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::from(log_file))
         .stderr(std::process::Stdio::from(log_stderr))
         .spawn()?;
