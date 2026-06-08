@@ -450,7 +450,7 @@ pub(crate) async fn run_command_inner(
 
         let mut std_cmd = std::process::Command::new("cmd");
         std_cmd
-            .raw_arg(format!("/C \"{}\"", effective_command))
+            .raw_arg(crate::platform::build_windows_cmdline(&effective_command))
             .current_dir(&work_dir)
             .env("GIT_PAGER", "cat")
             .stdin(std::process::Stdio::null())

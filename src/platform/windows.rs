@@ -51,7 +51,8 @@ pub fn shell_command_configured(cmd: &str) -> tokio::process::Command {
     let mut std_cmd = std::process::Command::new("cmd");
     std_cmd
         .raw_arg(super::build_windows_cmdline(cmd))
-        .env("GIT_PAGER", "cat");
+        .env("GIT_PAGER", "cat")
+        .stdin(std::process::Stdio::null());
     tokio::process::Command::from(std_cmd)
 }
 

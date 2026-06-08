@@ -66,6 +66,7 @@ pub fn rename_overwrite(from: &std::path::Path, to: &std::path::Path) -> std::io
 pub fn lsp_binary_name(base: &str) -> String {
     imp::lsp_binary_name(base)
 }
+
 /// Build the verbatim command-line tail handed to `cmd /C` on Windows.
 /// Wrapped in an outer quote pair so cmd's `/C` quote rule consumes exactly
 /// that pair and runs the inner command — including its own quotes — verbatim.
@@ -78,6 +79,7 @@ pub fn build_windows_cmdline(cmd: &str) -> String {
 /// Windows: `cmd /C "<cmd>"` via raw_arg (no MSVC-CRT quote mangling).
 /// Unix: `sh -c <cmd>` in a fresh process group with SIGPIPE reset.
 /// Sets `GIT_PAGER=cat`. The caller sets cwd, stdio, and kill_on_drop.
+/// On Windows, stdin defaults to NUL (prevents inherited-pipe hangs); callers that need real stdin (interactive mode) must override with `.stdin(...)`.
 pub fn shell_command_configured(cmd: &str) -> tokio::process::Command {
     imp::shell_command_configured(cmd)
 }
@@ -88,7 +90,7 @@ mod tests {
 
     #[test]
     fn windows_cmdline_wraps_in_outer_quotes() {
-        // cmd /C with a leading quote strips the first+last quote of the whole
+        // cmd /C with a leading quote strips the outer-pair quotes of the whole
         // line and runs the remainder verbatim, so the command — including its
         // own inner quotes — must be wrapped in exactly one outer pair.
         assert_eq!(
