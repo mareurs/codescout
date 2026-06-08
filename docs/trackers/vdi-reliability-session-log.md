@@ -11,6 +11,7 @@
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-06-08 | med | plan-prose | fixed-verified | Plan Task 2 test code used a non-existent test harness shape |
+| F-2 | 2026-06-08 | med | subagent | mitigated | Broad `git add <file>` swept pre-existing WIP into the Task 1 commit |
 
 ## Wins Index
 
@@ -111,10 +112,54 @@ before dispatch.
 
 ---
 
+## F-2 — Implementer's broad `git add <file>` swept pre-existing WIP into the Task 1 commit
+
+**Observed:** 2026-06-08, Task 1 spec-compliance review (subagent-driven execution).
+
+**When:** Task 1 implementer ran `git add src/platform/windows.rs` and committed.
+
+**Expected:** Commit contains only the Task 1 deliverable (`shell_command_configured` + `build_windows_cmdline`), ~8 new lines in windows.rs.
+
+**Got:** windows.rs diff was +117/-7 — the commit also swept in pre-existing *uncommitted* WIP for `lsp_binary_name` (.exe/.cmd/.bat probing: `lsp_binary_name_with`/`find_on_path` + 5 tests) that was `M src/platform/windows.rs` in the session-start `git status`. The spec-compliance reviewer caught it (flagged "extra unrequested work") — the two-stage review did its job.
+
+**Probable cause:** Briefing told the implementer to `git add` whole files; windows.rs already had unrelated uncommitted WIP from a prior session. Whole-file `git add` cannot exclude pre-existing hunks, and interactive `git add -p` is unavailable in this environment.
+
+**Workaround:** The swept-in WIP is legitimate and in-scope (it is Task 7's binary-resolution work, bug 2026-06-06). Amended the commit message (`cd31ca76`, was `80fd8e7e`) to honestly describe both changes and re-scoped Task 7 to only the spawn/init timeout + bug-file close.
+
+**Severity:** med — committed another session's WIP into a feature commit; caught + made honest, no data loss, but the commit is non-atomic.
+
+**Status:** mitigated — message amended; not cleanly un-mixed (single file, no hunk staging available).
+
+**Fix idea / Pointer:** Future implementer briefings must (1) run `git status` first and (2) `git add` only the specific files this task created/owns, never a file already showing as pre-existing `M`. If a task must edit a file with pre-existing WIP, the controller stages it. Plan Task 7 re-scoped to spawn/init timeout + bug close.
+
+---
+
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
      edit_markdown(action="insert_before",
-                   heading="## Template for new entries",
+                   heading="## F-2 — Implementer's broad `git add <file>` swept pre-existing WIP into the Task 1 commit
+
+**Observed:** 2026-06-08, Task 1 spec-compliance review (subagent-driven execution).
+
+**When:** Task 1 implementer ran `git add src/platform/windows.rs` and committed.
+
+**Expected:** Commit contains only the Task 1 deliverable (`shell_command_configured` + `build_windows_cmdline`), ~8 new lines in windows.rs.
+
+**Got:** windows.rs diff was +117/-7 — the commit also swept in pre-existing *uncommitted* WIP for `lsp_binary_name` (.exe/.cmd/.bat probing: `lsp_binary_name_with`/`find_on_path` + 5 tests) that was `M src/platform/windows.rs` in the session-start `git status`. The spec-compliance reviewer caught it (flagged "extra unrequested work") — the two-stage review did its job.
+
+**Probable cause:** Briefing told the implementer to `git add` whole files; windows.rs already had unrelated uncommitted WIP from a prior session. Whole-file `git add` cannot exclude pre-existing hunks, and interactive `git add -p` is unavailable in this environment.
+
+**Workaround:** The swept-in WIP is legitimate and in-scope (it is Task 7's binary-resolution work, bug 2026-06-06). Amended the commit message (`cd31ca76`, was `80fd8e7e`) to honestly describe both changes and re-scoped Task 7 to only the spawn/init timeout + bug-file close.
+
+**Severity:** med — committed another session's WIP into a feature commit; caught + made honest, no data loss, but the commit is non-atomic.
+
+**Status:** mitigated — message amended; not cleanly un-mixed (single file, no hunk staging available).
+
+**Fix idea / Pointer:** Future implementer briefings must (1) run `git status` first and (2) `git add` only the specific files this task created/owns, never a file already showing as pre-existing `M`. If a task must edit a file with pre-existing WIP, the controller stages it. Plan Task 7 re-scoped to spawn/init timeout + bug close.
+
+---
+
+## Template for new entries",
                    content="## F-N — title\n...")
      Also update the matching Index / Wins Index table row at the top. -->
