@@ -160,25 +160,36 @@ In `src/tools/run_command/tests.rs`:
 async fn background_command_with_quotes_captures_output() {
     // Regression: the background path used .arg() → MSVC-CRT quote mangling →
     // a quoted -c argument dropped Python into its stdin-blocked REPL.
-    let ctx = crate::tools::test_support::test_ctx().await; // existing helper
-    let res = run_command_inner(
-        r#"py -c "print('bg-ok', 2+2)""#,
-        r#"py -c "print('bg-ok', 2+2)""#,
-        30, false, None, false, /*run_in_background=*/ true,
-        ctx.root(), ctx.security(), &ctx,
-    )
-    .await
-    .unwrap();
+    // Real harness (verified via reconnaissance — see F-1 in
+    // docs/trackers/vdi-reliability-session-log.md): project_ctx() returns
+    // (TempDir, ToolContext); drive the tool via RunCommand.call(json!(...), &ctx),
+    // NOT run_command_inner. Requires `py` on PATH (true on this VDI).
+    let (_dir, ctx) = project_ctx().await;
+    let res = RunCommand
+        .call(
+            json!({
+                "command": r#"py -c "print('bg-ok', 2+2)""#,
+                "run_in_background": true
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
     let ref_id = res["output_id"].as_str().unwrap().to_string();
-    // Poll the bg log buffer until the line appears (warm-up returns fast).
+    // Poll the bg log buffer (same ctx → same OutputBuffer) until the line appears.
     let mut found = false;
     for _ in 0..50 {
-        let out = run_command_inner(
-            &format!("type {ref_id}"), &format!("type {ref_id}"),
-            10, false, None, false, false, ctx.root(), ctx.security(), &ctx,
-        ).await;
+        let out = RunCommand
+            .call(
+                json!({ "command": format!("type {ref_id}"), "timeout_secs": 10 }),
+                &ctx,
+            )
+            .await;
         if let Ok(v) = out {
-            if v["stdout"].as_str().unwrap_or("").contains("bg-ok 4") { found = true; break; }
+            if v["stdout"].as_str().unwrap_or("").contains("bg-ok 4") {
+                found = true;
+                break;
+            }
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
@@ -186,7 +197,7 @@ async fn background_command_with_quotes_captures_output() {
 }
 ```
 
-> Note: adapt `test_ctx`/`test_support` to the existing test harness in `tests.rs` (check how sibling tests build `ToolContext`). If no async ctx helper exists, model it on the nearest existing `run_command_inner` test.
+> Harness verified by reconnaissance (F-1): `project_ctx().await -> (TempDir, ToolContext)` at `tests.rs:364`; sibling tests use `RunCommand.call(json!(...), &ctx)`. Test requires `py` on PATH (present on this VDI; the test is `#[cfg(windows)]` + manual anyway).
 
 - [ ] **Step 2: Run the test to verify it fails (Windows host)**
 
