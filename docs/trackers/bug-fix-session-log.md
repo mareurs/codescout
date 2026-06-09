@@ -59,7 +59,8 @@ time_scope: open-ended
 | F-11 | 2026-05-24 | med | release-pipeline | fixed-verified | CI runner missing `mold` linker required by `.cargo/config.toml` |
 | F-12 | 2026-05-24 | med | codescout-tool-usage | fixed-verified | Dismissed `references`'s "use call_graph for authoritative callers" warning → shipped half-fix, missed `build.rs` duplicate |
 | F-13 | 2026-05-25 | med | release-pipeline | fixed-verified | CHANGELOG entry written under wrong version label — `Cargo.toml`-as-authoritative assumption (0.13.0 already published) |
-| F-14 | 2026-05-25 | high | release-pipeline | fixed-verified | `cargo publish` failed on `include_str!("../docs/...")` path stripped by `Cargo.toml` `exclude` — pre-publish gates couldn't detect
+| F-14 | 2026-05-25 | high | release-pipeline | fixed-verified | `cargo publish` failed on `include_str!("../docs/...")` path stripped by `Cargo.toml` `exclude` — pre-publish gates couldn't detect |
+| F-15 | 2026-06-09 | med | plan-prose | open | Bug-file `project=`→`project_id=` fix plan misses 3rd test assertion (`tests.rs:257`) + cites non-existent fixture
 
 ## Wins Index
 
@@ -75,6 +76,7 @@ time_scope: open-ended
 | W-7 | 2026-05-25 | med | Verify-open recon flips zombie-fixed entries from `open` to `fixed-verified` | Without scout, F-6 + F-7 + F-11 would have continued to be counted as actionable backlog; future "what's open?" queries would have wasted ~30 min each re-investigating already-shipped fixes, or shipped them as known-issues in release notes. 3 zombies caught in one pass — promote-when criterion fired. | promoted-to-permanent-docs |
 | W-8 | 2026-05-25 | high | `prompt_surfaces` test gate catches cap / snapshot / tool-name lint violations that `clippy`/`fmt` miss | Without `source_md_under_cap`, commit `4cc49ccb` would have shipped a server_instructions surface 339 bytes over the 2KB MCP cap, silently truncating Workspace gate + Deeper guidance in every fresh session for every project. Cost: workspace-restore slips + lost get_guide discovery surface, undetectable client-side. | validated |
 | W-9 | 2026-06-05 | high | Spot-check sibling callers of a just-fixed shared helper before closing the bug class | Insert-only fix would ship while `edit_code` replace + remove still silently corrupt the LAST method of a Python class. Live repro: replacing `C/last` left orphaned `assert x` (`replaced_lines: 5-9`, off by one). `references(clamp_range_to_parent)` found both extra callers. | validated |
+| W-10 | 2026-06-09 | med | Full-tree `grep <token>` before editing beats bug-file's hand-cited line list | Plan cited only `tests.rs:286-287`; line 257 flips to red + fixture hunt wasted on a 0-match surface | validated |
 
 ## Category conventions
 
@@ -1048,6 +1050,52 @@ partial fix into a complete one.
 catches an under-scoped fix. At 2 datapoints, promote to CLAUDE.md: "When fixing a shared
 boundary/clamp helper, `references()` every caller and reproduce each input shape before closing the
 bug class."
+
+**Status:** validated
+
+---
+## F-15 — Bug-file `project=`→`project_id=` fix plan misses a build-breaking 3rd test assertion + cites a non-existent fixture
+
+**Observed:** 2026-06-09, scouting the only open bug (`docs/issues/2026-06-09-onboarding-prompt-uses-project-not-project-id.md`) before editing `src/prompts/builders.rs`.
+
+**When:** Pre-edit recon of the `project=` → `project_id=` fix across `build_per_project_prompt` / `build_synthesis_prompt` and their tests.
+
+**Expected (bug-file Fix plan):** Edit builder emissions at `builders.rs:828,872-874,893` (and "verify" `:836` semantic_search); update assertions at `src/tools/run_command/tests.rs:286-287`; "refresh the prompt-surface fixtures (`tests/fixtures/prompt_surfaces/onboarding_prompt.md`)"; "consider a version bump."
+
+**Got (scouted reality):**
+- A **third** assertion at `src/tools/run_command/tests.rs:257` — `prompt.contains("project=\"backend\"")` in `build_per_project_prompt_contains_project_context` — also pins the buggy string. The plan cites only 286-287. After the builder emits `project_id="backend"`, `project=` is no longer a substring of `project_id=`, so line 257 fails `cargo test`. Following the plan verbatim breaks the build.
+- `tests/fixtures/prompt_surfaces/` AND `src/prompts/source.md` hold **zero** `project=` occurrences (`grep project=` → 0). The builder prompts are ephemeral `.codescout/tmp/onboarding-project-<id>.md` files, NOT sliced into the `onboarding_prompt` surface. The fixture-refresh step is a dead lead; no snapshot to update, and (per CLAUDE.md surface table) NO `ONBOARDING_VERSION` bump is needed.
+- `:836` semantic_search confirmed buggy — both `memory` and `semantic_search` tool schemas use `project_id`, neither accepts `project`. Resolvable in the same edit, not "verify separately."
+- Two extra `project=` hits the plan omitted: `:715` (doc comment) and `:882` (`no \`project:\` parameter` prose).
+
+**Probable cause:** The bug file's Fix section was written from hand-cited line numbers, not a full-tree `grep project=` sweep; the fixture line was assumed by analogy to the `onboarding_prompt` surface without confirming the builder output belongs to that surface.
+
+**Workaround:** Corrected blast radius — `builders.rs` (7 hits: 715, 828, 836, 872-874, 882, 893) + `run_command/tests.rs` (3 hits: 257, 286, 287) + fixtures (0). Fix all three test assertions, skip the fixture step, no version bump.
+
+**Severity:** med — the plan as written ships a builder fix that fails `cargo test` at `tests.rs:257`; controller absorbs it on first test run, but a subagent told to "update 286-287 per the bug file" would have flailed.
+
+**Status:** open — fix not yet applied; blast radius corrected pre-edit.
+
+**Fix idea / Pointer:** `docs/issues/2026-06-09-onboarding-prompt-uses-project-not-project-id.md`; this session.
+
+---
+
+## W-10 — Full-tree `grep <token>` before editing beats the bug-file's hand-cited line list
+
+**Observed:** 2026-06-09, pre-edit recon of the `project=`→`project_id=` onboarding-prompt fix.
+
+**Pattern:** Before editing to fix a token that appears in both source and test assertions, run one workspace-root `grep <token>` rather than trusting the bug file's hand-cited line numbers. Reconcile every hit — especially test assertions that pin the OLD string and will flip from green to red when the source changes.
+
+**Counterfactual:** The bug file named `tests.rs:286-287` as the only tests to touch. Applying the builder fix + those two assertions would have left `tests.rs:257`'s `contains("project=\"backend\"")` asserting a string the new builder no longer emits → red `cargo test`, ≥1 debug round-trip to find the third assertion. It would also have burned time hunting for `project=` in `tests/fixtures/prompt_surfaces/onboarding_prompt.md` (0 occurrences — wrong surface) and possibly an unnecessary `ONBOARDING_VERSION` bump.
+
+**Confirming data points:**
+1. F-15 (this session) — grep found a 3rd build-breaking assertion + a non-existent fixture lead the bug file's Fix section missed.
+2. F-3 / W-2 (2026-05-18) — same shape: plan cited test accessors that didn't match reality; pre-edit scout caught it.
+3. codescout `reconnaissance-patterns.md` R-3 — grep scope = workspace root, not the file being modified; assertions and token substitutions cross module boundaries.
+
+**Impact:** med — saves ≥1 failed test cycle and a fixture wild-goose-chase per such fix.
+
+**Promote-when:** A third datapoint where a hand-cited bug-file line list omits a build-breaking test assertion. Then promote to CLAUDE.md bug-fix discipline: "Before fixing a token that appears in test assertions, `grep` it workspace-wide; the bug file's line list is a starting point, not the blast radius."
 
 **Status:** validated
 

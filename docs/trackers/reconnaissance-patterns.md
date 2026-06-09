@@ -42,6 +42,8 @@ skill).
 | R-16 | 2026-06-04 | hit → promoted | Pre-dispatch scout of the plan's OWN splice code caught a double-newline bug (+ substring-overlap test mis-routing 3× → CLAUDE.md; whole-workspace `cargo fmt` churn caught at pre-commit diff-scout) | edit_file-normalized-fallback (this session) |
 | R-17 | 2026-06-05 | hit | Spot-check sibling callers of a just-fixed shared helper before closing the bug class (`references(clamp_range_to_parent)` found `do_remove`/`do_replace` shared the off-by-one) | bug-fix W-9 + issues/2026-06-05-edit-code-insert-after-last-python-method |
 | R-18 | 2026-06-05 | hit | Scout a classifier's actual return type AND domain coverage before keying a feature off it (`detect_language` returns `Option<&str>` not an enum, and does not recognize YAML → guard keyed on extension, not name) | edit_file indent-significant guard (this session); commit c99d4228 |
+| R-19 | 2026-06-09 | hit, then miss (recurred post-doc) | Scout home-project internals before presenting cross-project "B benefits from A" recommendations (claim `@ref` no-dedup → confirmed; claim "summarization generic" → drift: `format_compact` is per-tool) | this session; `output_buffer.rs:250`, `types.rs:387`; kin R-14 |
+| R-20 | 2026-06-09 | hit (validates R-3) | A bug-file's hand-cited fix-plan line list is not the blast radius (workspace-root grep found a 3rd build-breaking assert at `tests.rs:257` + a 0-match fixture lead) | bug-fix F-15 + W-10 |
 
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
@@ -600,6 +602,64 @@ closing the bug class."
 
 ---
 
+## R-19 — Scout home-project internals before presenting cross-project "B benefits from A" recommendations
+
+**Verdict:** miss → hit (retroactive) — two shape claims about codescout were presented as fact during a "what can codescout learn from headroom" analysis *before* either was scouted; a user-invoked recon pass then confirmed one and refuted the other.
+
+**Observed:** 2026-06-09, after exploring the sibling `headroom` project to find codescout improvements. The prior turn delivered two recommendations resting on claims about codescout's *own* internals: (1) "`@ref` buffers are per-call handles, no content dedup" → add BLAKE3 dedup; (2) "codescout's overflow summarization is generic" → add per-tool error-keyword/path preservation. Neither claim was scouted against codescout's code before being presented — both were synthesized from memory + CLAUDE.md + the headroom comparison.
+
+**Scout (reality):**
+- Claim 1 — CONFIRMED. `src/tools/output_buffer.rs:250-251`: `id = format!("@tool_{:08x}", now.wrapping_add(inner.counter) as u32)` — time + monotonic counter, not content-addressed; identical content mints a fresh handle every call. Bonus: `content_hash()` (SHA-256, not BLAKE3 — corrected 2026-06-09; BLAKE3 was a conflation with Headroom's CCR) already exists at `src/retrieval/sync.rs:29` for embedding dedup — the primitive is present, just unwired from output buffers. Recommendation strengthened, not refuted.
+- Claim 2 — DRIFT. `src/tools/core/types.rs:387` defines `Tool::format_compact(&self, result) -> Option<String>`, a **per-tool** summary hook each tool overrides (`None` → the generic "Result stored in @tool_xxx" fallback), and `run_command` already prioritizes stderr (`run_command/tests.rs:2034`). Summaries are tool-aware *by design* — not "generic." The accurate gap is narrower: no *content-level error-keyword preservation* primitive (no `preserve_error_keywords` / `always_keep` analogue), and the per-tool summaries are hand-written rather than profile-driven.
+
+**Outcome:** 1 of 2 recommendations rested on a stale assumption. Corrected to the user before any code was written on the wrong premise.
+
+**Cross-cutting lesson:** Kin to R-14 (scout dated-*memory* citations), but the source here was an *unsourced assumption* in a comparative analysis, and the scout was *retroactive* — the user's `/reconnaissance` invocation caught it, not a pre-emptive pass. A recommendation about the home project's internals is a shape claim — a seam — even when it feels like settled knowledge. In "project B benefits from project A" framing, the home-project half of every recommendation must be scouted against home-project code *before* it is presented. The pull to state the home side from memory is strongest precisely because it's "your" project.
+
+**Recurrence (2026-06-09, same session — datapoint 2):** the pattern repeated *after this entry documented it*. I wrote "`content_hash()` is BLAKE3" into BOTH this tracker and `headroom-cross-pollination.md` without reading `src/retrieval/sync.rs:29` — it is **SHA-256** (`sha2 = "0.10"`). The BLAKE3 label was a conflation with Headroom's CCR (which genuinely uses BLAKE3). Recon did **not** catch it; it surfaced only when the user asked "what is BLAKE3?", forcing the read. Datapoint 1 ("generic summarization") was a recon *hit* — caught by a pre-emptive scout. This is a *miss*, and a wrong fact reached disk in two artifacts before correction. Recurrence-after-documentation is the signal that prose alone isn't holding the lesson.
+
+**Promote-when:** a second instance where a comparative / cross-project analysis presents a home-project shape claim that a later scout refutes → promote a Phase-1 Scout bullet: "Before presenting a recommendation that asserts how the home project currently works, scout the cited symbol/contract against current code — comparative analysis is not an exemption." (Note: R-14's own promote-when wants a second *stale dated-memory* instance specifically; this entry is adjacent, not that second datapoint.)
+
+**Status:** open — **2 datapoints, both this session** (a hit then a miss). Promote-when criterion is met; caveat: both are same-session, so a cross-session 3rd should precede the cross-repo SKILL.md sync. A local CLAUDE.md Phase-1 Scout bullet is warranted now, since the miss recurred *after* documentation.
+
+**Source:** `src/tools/output_buffer.rs:250`, `src/tools/core/types.rs:387`, `src/retrieval/sync.rs:29`, `src/tools/run_command/tests.rs:2034`; this session's headroom cross-pollination analysis. Kin: R-14.
+
+## R-20 — A bug-file's hand-cited fix-plan line list is not the blast radius
+
+**Verdict:** hit (validates R-3)
+
+**Observed:** 2026-06-09, scouting the only open bug
+(`issues/2026-06-09-onboarding-prompt-uses-project-not-project-id.md`)
+before editing `src/prompts/builders.rs`.
+
+**Pattern that worked:** R-3's "grep the workspace root, not the file being
+changed" applied verbatim — here against a *bug file's* Fix section, not a
+formal plan doc. The bug file cited tests at `run_command/tests.rs:286-287`;
+a workspace-root `grep project=` surfaced a third assertion at `:257`
+(`build_per_project_prompt_contains_project_context`) that pins the OLD
+string and flips green→red once the builder emits `project_id=`. The same
+grep proved the cited fixture (`tests/fixtures/prompt_surfaces/onboarding_prompt.md`)
+has 0 matches — the builder prompts are ephemeral `.codescout/tmp/` files,
+not part of that snapshot surface, so no fixture/`ONBOARDING_VERSION` work.
+
+**New wrinkle vs R-3:** the stale line list lived in a `docs/issues/*` bug
+file's Fix/Resume prose, which reads as authoritative ("apply edits at lines
+X,Y,Z"). A subagent handed the bug file would treat its line list as the
+blast radius. Bug-file Fix sections deserve the same "line list is a starting
+point, not the contract" skepticism as plan docs.
+
+**Cost avoided:** ≥1 red `cargo test` cycle (line 257) + a fixture hunt on a
+0-match surface + a possibly-spurious `ONBOARDING_VERSION` bump.
+
+**Promote-when:** R-3 is already promoted; this is a confirming datapoint that
+extends its scope to bug-file Fix sections. If a 3rd such case lands, widen the
+SKILL.md Phase-1 bullet to name bug-file line lists explicitly.
+
+**Status:** hit; logged. Extends promoted R-3 to bug-file fix plans.
+
+**Fix idea / Pointer:** bug-fix-session-log F-15 + W-10; this session.
+
+---
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
