@@ -24,6 +24,7 @@ follow the links for the controlling convention.
 | **U-N** | `docs/trackers/codescout-usage-frictions.md` | Friction using codescout tools / MCP server: tool slips, prompt drift, hook false-positives | `edit_markdown(action="insert_after", heading="### U-<previous>")` | H-N hookify rule, CLAUDE.md note, or prompt-surface edit |
 | **H-N** | `docs/trackers/codescout-usage-hookify.md` | Hook design proposal: warn → deny criteria, new gate ideas, false-positive carve-outs | `edit_markdown(action="insert_after", heading="### H-<previous>")` | Shipped hook in `claude-plugins/codescout-companion/hooks/` |
 | **T-N** | `docs/trackers/tool-usage-patterns.md` (augmented artifact `b3fa993849ac83ab`) | Tool-selection quality observation: legitimate / debatable / wrong-tool call with prompt gap | `artifact_augment(merge=true, params={observations: [..., {id:"T-N", ...}]})` + body prose via `edit_markdown` | `src/prompts/source.md` edits (server-instructions surface) |
+| **WIN-N** | `docs/trackers/windows-platform-support.md` (augmented artifact `42dfdfc8b1522192`) | Windows-platform issue: process-spawn / lsp / platform-gated / path-handling / build-install / test-portability / companion defect, fix, or cfg-gate decision | `artifact_augment(merge=true, params={issues: [..., {id:"WIN-N", ...}]})` + sync body `## Issue index` table | Bug file (`docs/issues/`) for new incidents; `status` flips in place as fixes land |
 | **BUG (slug)** | `docs/issues/YYYY-MM-DD-<slug>.md` | Per-bug investigation file: Symptom / Repro / Root cause / Fix / Workaround | Create from `docs/issues/_TEMPLATE.md`; status field in frontmatter | Archived to `docs/issues/archive/` after the fix ships to master (verify with `git branch --contains <fix-sha>`) |
 
 ## Work-stream-specific prefixes (not durable taxonomy slots)
@@ -48,6 +49,10 @@ You observed something. Where does it go?
 │
 ├─ Is it a bug? (wrong output, silent failure, corrupt state)
 │   → BUG file in docs/issues/  (open one per the CLAUDE.md trigger rules)
+│   → if it is Windows-specific, ALSO add a WIN-N row to windows-platform-support.md
+│
+├─ Is it a Windows-platform defect / portability gap / cfg-gate decision?
+│   → WIN-N in windows-platform-support.md (augmented artifact 42dfdfc8b1522192)
 │
 ├─ Is it a friction with codescout / MCP / hooks / Iron Laws?
 │   → U-N in codescout-usage-frictions.md
@@ -140,6 +145,7 @@ Different prefixes use slightly different status enums:
 - **H-N statuses** — `warn | deny | shipped | rejected`.
 - **R-N verdicts** — `hit | miss | proposal | promoted`.
 - **T-N verdicts** — `legitimate | debatable | wrong-tool`.
+- **WIN-N statuses** — `fixed | mitigated | open | deferred | wontfix` (canonical in the `params_schema` of `docs/trackers/windows-platform-support.md`).
 - **BUG statuses** — `open | investigating | fixed | mitigated | wontfix | zombie` (canonical in `docs/issues/_TEMPLATE.md`).
 
 When in doubt, mirror the existing entries in that file — consistency beats
