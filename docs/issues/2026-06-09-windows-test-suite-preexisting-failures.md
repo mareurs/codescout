@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-06-09
-closed:
+closed: 2026-06-09
 severity: medium
 owner: marius
 related: []
@@ -119,14 +119,35 @@ confirm none overlap the reliability stream's changed files.
    peer gating.
 
 ## Fix
-N/A — not fixed this session (out of scope for the reliability stream). Scoped
-follow-ups when someone makes the Windows suite green:
-- Class 1: normalize path comparisons in the tests (canonicalize both sides /
-  compare via `same-file`), and make the `~/.ssh` deny test + windows
-  `denied_read_prefixes` agree on HOME-prefixed paths.
-- Class 2: update the `codescout-companion` hooks to the consolidated tool names
-  (cross-repo) or refresh the sibling checkout.
+All 6 fixed; full `cargo test --lib` green on Windows (2598 passed, 0 failed).
 
+**In-repo (5 failures) — `1d8cde48` (experiments):**
+- **Real bug:** `src/util/fs.rs::detect_project_root` walked each marker across
+  the *full* ancestry, so a `.git`/`.codescout` in a distant ancestor (home,
+  `%TEMP%`'s parents) shadowed a nearer manifest. Now returns the nearest
+  ancestor with any marker.
+- **Real bug:** `src/util/path_security.rs::is_denied` compared with
+  `Path::starts_with`, but `fs::canonicalize` yields `\\?\` verbatim paths on
+  Windows while not-yet-existing inputs stay plain — a silent deny-list bypass.
+  Normalizes the `\\?\`/`\\?\UNC\` prefix on both sides.
+- **Test:** `check_index_scope_counts_hidden_non_gitignored_files` held the file
+  handle open (`File::create`+`write_all`) while walking; Windows `metadata()`
+  fails on an open write handle → dotfile skipped. Use `fs::write`.
+- **Test:** `doctor_call_surfaces_seeded_drift` seeded `/tmp` (absent on Windows
+  → fired `missing_file`, 6 vs 5). Platform-gated to `C:/Windows`.
+- **Test:** `stripped_responses_emit_paths_relative_annotation` built the payload
+  from `dir.path()`; the agent canonicalizes to an extended-length path that
+  never matched. Build the payload from the server's own `project_root()`.
+
+**Cross-repo (1 failure) — `codescout-companion:71aceeb` (branch
+`fix/windows-tool-name-drift`):**
+- `companion_surfaces_reference_only_real_tools` flagged stale tool names in the
+  companion hooks (`replace_symbol`/`insert_code`/`remove_symbol`/`edit_lines`
+  → `edit_code`; `create_or_update_file` → `create_file`). Updated 7 hook files'
+  matchers, case statement, and injected guidance.
+
+Tracked as WIN-9 (in-repo) and WIN-12 (companion) in
+`docs/trackers/windows-platform-support.md`.
 ## Tests added
 N/A — these *are* failing tests; the work is to make them pass on Windows, not
 to add new ones. The two peer-gating count tests were already made cfg-aware in
