@@ -37,4 +37,5 @@ pub use onboarding::Onboarding;
 pub use run_command::RunCommand;
 pub mod guide;
 pub mod guide_ledger;
+#[cfg(unix)]
 pub mod peer;

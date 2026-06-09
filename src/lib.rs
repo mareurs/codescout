@@ -36,6 +36,7 @@ pub mod lsp;
 pub mod mcp_resources;
 pub mod memory;
 pub mod migrate;
+#[cfg(unix)]
 pub mod peer;
 pub mod platform;
 pub mod prompts;

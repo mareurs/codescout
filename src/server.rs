@@ -132,7 +132,8 @@ impl CodeScoutServer {
             Arc::new(Library),
             // Deep-guidance tool — see docs/architecture/mcp-channel-caps.md
             Arc::new(crate::tools::guide::GetGuide::new()),
-            // Peer delegation tool
+            // Peer delegation tool (Unix-only — uses Unix domain sockets)
+            #[cfg(unix)]
             Arc::new(crate::tools::peer::PeerTool),
         ];
         if std::env::var("CODESCOUT_PROBE")
