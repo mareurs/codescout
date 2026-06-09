@@ -236,15 +236,20 @@ impl CodeScoutServer {
             .unwrap_or(false)
     }
 
+    // Peer-serve helper; the only non-test caller is the cfg(unix) peer module,
+    // so it reads as dead in non-test Windows builds. Keep compiled (tests use it).
+    #[cfg_attr(not(unix), allow(dead_code))]
     pub(crate) fn tool_names(&self) -> Vec<String> {
         self.tools.iter().map(|t| t.name().to_string()).collect()
     }
+    #[cfg_attr(not(unix), allow(dead_code))] // peer-serve helper (cfg(unix) caller)
     pub(crate) fn output_buffer_ref(
         &self,
     ) -> std::sync::Arc<crate::tools::output_buffer::OutputBuffer> {
         self.output_buffer.clone()
     }
 
+    #[cfg_attr(not(unix), allow(dead_code))] // peer-serve helper (cfg(unix) caller)
     pub(crate) async fn project_root_string(&self) -> String {
         self.agent
             .project_root()
@@ -253,6 +258,7 @@ impl CodeScoutServer {
             .unwrap_or_default()
     }
 
+    #[cfg_attr(not(unix), allow(dead_code))] // peer-serve helper (cfg(unix) caller)
     pub(crate) async fn project_name(&self) -> String {
         self.agent
             .project_root()
@@ -561,6 +567,7 @@ impl CodeScoutServer {
         }
     }
 
+    #[cfg_attr(not(unix), allow(dead_code))] // peer-serve dispatch entry (cfg(unix) caller)
     /// Dispatch a tool by name with raw JSON args, returning the full
     /// `CallToolResult`. Routes through `call_tool_inner`, so access checks, the
     /// write-guard, usage recording, and error routing all apply. Used by the

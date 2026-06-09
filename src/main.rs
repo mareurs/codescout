@@ -191,6 +191,8 @@ enum Commands {
     Doctor(codescout::cli::doctor::DoctorArgs),
 }
 
+// `--env` is only parsed by the cfg(unix) `Mux` subcommand; dead on Windows.
+#[cfg_attr(not(unix), allow(dead_code))]
 fn parse_env_kv(s: &str) -> Result<(String, String), String> {
     let (k, v) = s
         .split_once('=')

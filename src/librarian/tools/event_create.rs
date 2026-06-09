@@ -189,6 +189,9 @@ fn apply_payload_to_frontmatter(
     }
     Ok(())
 }
+// clippy 1.96 (Windows toolchain) false-positives `missing_const_for_thread_local`
+// here even though the initializer already uses `const { ... }`. Scoped allow.
+#[allow(clippy::missing_const_for_thread_local)]
 /// Generate a monotonic ULID — guarantees strict-monotonic ordering even when
 /// multiple events are created within the same millisecond. Without this,
 /// `ulid::Ulid::new()` uses fresh random bits per ID, and two IDs sharing a

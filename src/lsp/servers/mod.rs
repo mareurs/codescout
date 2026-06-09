@@ -242,6 +242,9 @@ pub(crate) fn kotlin_analyzer_home(ws_hash: &str) -> std::path::PathBuf {
     kotlin_lsp_home_root().join(ws_hash)
 }
 
+// Only caller (the kotlin-lsp mux reclaim path) is cfg(unix); on Windows the
+// guard is unreferenced in non-test builds but the tests below still exercise it.
+#[cfg_attr(not(unix), allow(dead_code))]
 /// Guard: is `path` a codescout-provisioned kotlin-lsp HOME (a per-workspace
 /// subdir of [`kotlin_lsp_home_root`])? The mux reclaims such dirs on shutdown;
 /// this guard ensures we never `remove_dir_all` a real home or arbitrary path.
