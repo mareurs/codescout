@@ -599,7 +599,7 @@ pub fn detect_il3_violation(command: &str) -> Option<String> {
          1. run_command(\"{lead}\")               — full output stored as @cmd_xxx\n  \
          2. grep PATTERN @cmd_xxx                 — query the buffer at any granularity\n  \
                                                     (also: tail -20 @cmd_xxx, head -50 @cmd_xxx)\n\n\
-         Bounded LHS (ls, cat, stat, du, diff, awk, sed, non-recursive grep, find -maxdepth) is allowed,\n\
+         Bounded LHS (ls, cat, stat, du, diff, awk, sed, non-recursive grep) is allowed,\n\
          as are pure aggregators on the RHS (wc, grep -c) — they collapse output to a summary.\n\
          Only unbounded LHS (cargo, npm, pytest, git, rg, fd, grep -r, bare find, ...) piped to a\n\
          trimmer (head, tail, grep, sort, ...) is blocked.\n\n\
