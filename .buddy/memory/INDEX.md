@@ -7,6 +7,7 @@
 - [agentic-surface-as-moat](architecture-snow-lion/agentic-surface-as-moat.md) — LLM-facing surface is the moat; weight surface changes heavier than backend
 - [tracker-as-augmented-artifact](architecture-snow-lion/tracker-as-augmented-artifact.md) — some docs are stateful artifacts with prompt+params; check before editing
 - [cross-cutting-side-effects-at-the-chokepoint](architecture-snow-lion/cross-cutting-side-effects-at-the-chokepoint.md) — side-effects live at the operation's chokepoint, gated; audit entry points with references(), not the call site in front of you
+- [platform-law-leaks-at-call-sites](architecture-snow-lion/platform-law-leaks-at-call-sites.md) — new platform/ laws leak at out-of-file call sites (Drop impls, hot paths); grep the whole tree for the old pattern
 
 ## docs-lotus-frog
 
