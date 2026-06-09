@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use serde_json::{json, Value};
 
 use crate::tools::{guard_worktree_write, require_str_param, RecoverableError, Tool, ToolContext};
+use crate::util::text::{leading_ws, reindent_to};
 
 use super::display::{
     format_insert_code, format_remove_symbol, format_rename_symbol, format_replace_symbol,
@@ -638,6 +639,15 @@ impl EditCode {
             .into());
         }
 
+        // Re-base the replacement onto the symbol's own indentation column. The
+        // caller often supplies a body dedented to column 0 (e.g. copied from a
+        // `symbols` dump); splicing that verbatim into a nested symbol breaks
+        // indentation — a hard IndentationError in Python, mis-aligned code in
+        // brace languages like Kotlin. `reindent_to` is a no-op when the body is
+        // already based at the target, so correctly-indented input is untouched.
+        let target_base = leading_ws(lines[start]).to_string();
+        let effective_body = reindent_to(&effective_body, &target_base);
+
         let pre_ast = crate::ast::extract_symbols(&full_path).ok();
         let pre_count = pre_ast
             .as_ref()
@@ -739,7 +749,18 @@ impl EditCode {
 
         let content = std::fs::read_to_string(&full_path)?;
         let lines: Vec<&str> = content.lines().collect();
-        let code_lines: Vec<&str> = code.lines().collect();
+        // Re-base the inserted code onto the indentation of the symbol we are
+        // inserting next to, so a sibling method/function lands at the right
+        // column instead of wherever the caller happened to dedent it. No-op
+        // when the code is already correctly based (e.g. top-level inserts).
+        let sibling_line = editing_start_line(&sym, &lines);
+        let target_base = lines
+            .get(sibling_line)
+            .map(|l| leading_ws(l))
+            .unwrap_or("")
+            .to_string();
+        let reindented = reindent_to(code, &target_base);
+        let code_lines: Vec<&str> = reindented.lines().collect();
         let insert_at0 = match position {
             "before" => editing_start_line(&sym, &lines),
             _ => match editing_end_line_strict(&sym) {
@@ -802,6 +823,30 @@ impl EditCode {
             }
         }
         new_lines.extend_from_slice(&lines[insert_at..]);
+
+        // Safety net: do_insert has no LSP round-trip, so a malformed insert
+        // would otherwise land silently (unlike do_replace, which re-parses and
+        // restores). Reject — without writing — if the insert introduces a parse
+        // error the file did not have before.
+        if let Some(ts_lang) = crate::ast::detect_language(&full_path) {
+            let mut candidate = new_lines.join("\n");
+            if content.ends_with('\n') && !candidate.is_empty() {
+                candidate.push('\n');
+            }
+            if crate::ast::has_syntax_errors(&candidate, ts_lang)
+                && !crate::ast::has_syntax_errors(&content, ts_lang)
+            {
+                return Err(RecoverableError::with_hint(
+                    format!(
+                        "inserting near '{}' would introduce syntax errors — not written",
+                        sym.name
+                    ),
+                    "Check the inserted code's braces/indentation; verify the target with \
+                     symbols(path) and retry.",
+                )
+                .into());
+            }
+        }
 
         write_lines(&full_path, &new_lines, content.ends_with('\n'))?;
         ctx.lsp.notify_file_changed(&full_path).await;

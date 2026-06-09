@@ -646,6 +646,42 @@ impl LspManager {
                 Ok(new_client)
             }
             Err(e) => {
+                // Record the failed start as an `outcome='failed'` lsp_events row —
+                // best-effort, never masks the real error. A server that dies during
+                // `initialize` (e.g. an expired LSP build) otherwise leaves no trace in
+                // lsp_events at all. Recorded independent of the cold-start grace /
+                // circuit-breaker below, which gate the breaker — not observability.
+                {
+                    let handshake_ms = start_time.elapsed().as_millis() as i64;
+                    // Peek (don't consume) pending_reason so the triggering reason
+                    // still labels the eventual successful retry.
+                    let reason = self
+                        .pending_reason
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .get(key)
+                        .cloned()
+                        .unwrap_or_else(|| "new_session".to_string());
+                    let project_root_opt = self.project_root.clone();
+                    #[cfg(test)]
+                    let project_root_opt = self.project_root_for_test.clone().or(project_root_opt);
+                    if let Some(root) = project_root_opt {
+                        let lang = key.language.clone();
+                        let err_str = e.to_string();
+                        let _ = tokio::task::spawn_blocking(move || {
+                            let conn = crate::usage::db::open_db(&root)?;
+                            crate::usage::db::write_lsp_failure(
+                                &conn,
+                                &lang,
+                                &reason,
+                                handshake_ms,
+                                &err_str,
+                            )
+                        })
+                        .await;
+                    }
+                }
+
                 // Circuit-breaker: record failure, but skip if we're within the
                 // cold-start grace period of the previous successful start — the
                 // server may have crashed during Gradle import and the breaker
@@ -1467,6 +1503,37 @@ mod tests {
             .unwrap();
         assert_eq!(lang, "rust");
         assert_eq!(reason, "new_session");
+    }
+
+    #[tokio::test]
+    async fn do_start_records_failure_event_when_start_fails() {
+        // A bogus command makes LspClient::start fail deterministically, so this
+        // test needs no language server installed and runs everywhere — unlike the
+        // success tests above, which skip when rust-analyzer is absent.
+        let dir = tempfile::TempDir::new().unwrap();
+        let mgr = LspManager::new_for_test_with_root(dir.path()).await;
+        let config = LspServerConfig {
+            command: "codescout-nonexistent-lsp-binary-xyz".into(),
+            args: vec![],
+            workspace_root: dir.path().to_path_buf(),
+            init_timeout: Some(std::time::Duration::from_secs(5)),
+            mux: false,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+
+        let result = mgr.get_or_start_for_test("kotlin", config).await;
+        assert!(result.is_err(), "start with a bogus binary must fail");
+
+        // The failed start must leave an `outcome='failed'` lsp_events row, not a gap.
+        let conn = crate::usage::db::open_db(dir.path()).unwrap();
+        let (outcome, error): (String, Option<String>) = conn
+            .query_row("SELECT outcome, error FROM lsp_events LIMIT 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(outcome, "failed");
+        assert!(error.is_some());
     }
 
     #[tokio::test]

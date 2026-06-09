@@ -2156,8 +2156,6 @@ type Reader interface {
         assert_eq!(reader.kind, SymbolKind::Interface);
     }
 
-
-
     #[test]
     fn typescript_symbols() {
         let source = r#"
@@ -2285,11 +2283,27 @@ const config = { a: 1 };
         collect(&syms, &mut names);
         let has = |n: &str| names.iter().any(|x| x == n);
         assert!(has("handler"), "missing arrow const: {:?}", names);
-        assert!(has("Component"), "missing exported arrow const: {:?}", names);
-        assert!(has("legacy"), "missing function-expression const: {:?}", names);
+        assert!(
+            has("Component"),
+            "missing exported arrow const: {:?}",
+            names
+        );
+        assert!(
+            has("legacy"),
+            "missing function-expression const: {:?}",
+            names
+        );
         // Non-function consts stay out by design.
-        assert!(!has("COUNT"), "data const should not be extracted: {:?}", names);
-        assert!(!has("config"), "object const should not be extracted: {:?}", names);
+        assert!(
+            !has("COUNT"),
+            "data const should not be extracted: {:?}",
+            names
+        );
+        assert!(
+            !has("config"),
+            "object const should not be extracted: {:?}",
+            names
+        );
     }
 
     #[test]
@@ -2358,7 +2372,11 @@ abstract class Base {
         collect(&syms, &mut names, &mut paths);
 
         // Namespace contents reach the AST, nested under the namespace.
-        assert!(names.contains(&"Outer".to_string()), "missing Outer: {:?}", names);
+        assert!(
+            names.contains(&"Outer".to_string()),
+            "missing Outer: {:?}",
+            names
+        );
         assert!(
             paths.contains(&"Outer/Inner".to_string()),
             "missing Outer/Inner: {:?}",
@@ -2370,7 +2388,11 @@ abstract class Base {
             paths
         );
         // Abstract class and BOTH its members (concrete + abstract signature).
-        assert!(names.contains(&"Base".to_string()), "missing Base: {:?}", names);
+        assert!(
+            names.contains(&"Base".to_string()),
+            "missing Base: {:?}",
+            names
+        );
         assert!(
             paths.contains(&"Base/foo".to_string()),
             "missing abstract method Base/foo: {:?}",
@@ -2997,15 +3019,40 @@ class Animal {
         }
         let rust = "/// macro doc\nmacro_rules! my_macro { () => {}; }\n/// union doc\nunion MyUnion { a: i32 }\n";
         let rdocs = extract_docstrings_from_source(rust, Some("rust"), Path::new("t.rs")).unwrap();
-        assert_eq!(assoc(&rdocs, "macro doc").as_deref(), Some("my_macro"), "{:?}", rdocs);
-        assert_eq!(assoc(&rdocs, "union doc").as_deref(), Some("MyUnion"), "{:?}", rdocs);
+        assert_eq!(
+            assoc(&rdocs, "macro doc").as_deref(),
+            Some("my_macro"),
+            "{:?}",
+            rdocs
+        );
+        assert_eq!(
+            assoc(&rdocs, "union doc").as_deref(),
+            Some("MyUnion"),
+            "{:?}",
+            rdocs
+        );
 
         let ts = "/** arrow doc */\nconst Component = () => {};\n/** abstract doc */\nabstract class Base {}\n/** ns doc */\nnamespace NS {}\n";
         let tdocs =
             extract_docstrings_from_source(ts, Some("typescript"), Path::new("t.ts")).unwrap();
-        assert_eq!(assoc(&tdocs, "arrow doc").as_deref(), Some("Component"), "{:?}", tdocs);
-        assert_eq!(assoc(&tdocs, "abstract doc").as_deref(), Some("Base"), "{:?}", tdocs);
-        assert_eq!(assoc(&tdocs, "ns doc").as_deref(), Some("NS"), "{:?}", tdocs);
+        assert_eq!(
+            assoc(&tdocs, "arrow doc").as_deref(),
+            Some("Component"),
+            "{:?}",
+            tdocs
+        );
+        assert_eq!(
+            assoc(&tdocs, "abstract doc").as_deref(),
+            Some("Base"),
+            "{:?}",
+            tdocs
+        );
+        assert_eq!(
+            assoc(&tdocs, "ns doc").as_deref(),
+            Some("NS"),
+            "{:?}",
+            tdocs
+        );
     }
 
     #[test]

@@ -69,6 +69,21 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
         conn.execute_batch("ALTER TABLE tool_calls ADD COLUMN cc_session_id TEXT;")?;
     }
 
+    // Migration: record failed LSP starts, not just completed handshakes.
+    // Without this, a server that dies during `initialize` (e.g. an expired LSP
+    // build) leaves zero lsp_events rows — a chronically-failing LSP is invisible
+    // to usage analytics. `outcome` defaults to 'success' so the unchanged
+    // `write_lsp_event` INSERT and every pre-existing row stay correct.
+    let has_lsp_outcome: bool = conn
+        .prepare("SELECT outcome FROM lsp_events LIMIT 0")
+        .is_ok();
+    if !has_lsp_outcome {
+        conn.execute_batch(
+            "ALTER TABLE lsp_events ADD COLUMN outcome TEXT NOT NULL DEFAULT 'success';
+             ALTER TABLE lsp_events ADD COLUMN error TEXT;",
+        )?;
+    }
+
     Ok(conn)
 }
 
@@ -126,6 +141,26 @@ pub fn write_lsp_event(
     Ok(conn.last_insert_rowid())
 }
 
+/// Record a *failed* LSP start: the server disconnected or errored during the
+/// `initialize` handshake, so no session was established. `handshake_ms` is the
+/// time elapsed until the failure. Recorded as a separate `outcome='failed'`
+/// row so a chronically-failing server (e.g. an expired LSP build) is visible
+/// in lsp_events rather than as a silent absence of `success` rows.
+pub fn write_lsp_failure(
+    conn: &Connection,
+    language: &str,
+    reason: &str,
+    handshake_ms: i64,
+    error: &str,
+) -> Result<i64> {
+    conn.execute(
+        "INSERT INTO lsp_events (language, reason, handshake_ms, outcome, error)
+         VALUES (?1, ?2, ?3, 'failed', ?4)",
+        params![language, reason, handshake_ms, error],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
 /// Fill in the first_response_ms for a previously inserted lsp_events row.
 /// Best-effort — if the row was already updated or is missing, this is a no-op.
 pub fn update_lsp_first_response(
@@ -171,6 +206,7 @@ pub struct LspReasonCounts {
 pub struct LspLanguageStats {
     pub language: String,
     pub starts: i64,
+    pub failures: i64,
     pub reasons: LspReasonCounts,
     pub avg_handshake_ms: i64,
     pub p95_handshake_ms: i64,
@@ -187,34 +223,59 @@ pub struct LspEvent {
     pub first_response_ms: Option<i64>,
 }
 
+/// A failed LSP start (server died during `initialize`). `error` is the
+/// caller-facing message (e.g. "LSP server disconnected").
+#[derive(Debug, serde::Serialize)]
+pub struct LspFailure {
+    pub language: String,
+    pub started_at: String,
+    pub reason: String,
+    pub error: Option<String>,
+}
+
 #[derive(Debug, serde::Serialize)]
 pub struct LspStats {
     pub window: String,
     pub by_language: Vec<LspLanguageStats>,
     pub recent: Vec<LspEvent>,
+    pub recent_failures: Vec<LspFailure>,
 }
 
 pub fn query_lsp_stats(conn: &Connection, window: &str) -> Result<LspStats> {
     let modifier = window_to_modifier(window);
 
-    // Aggregate per language
+    // Aggregate per language. `starts` and the handshake metrics count only
+    // successful starts; `failures` counts starts that died during `initialize`
+    // (e.g. an expired LSP build). A language that fails *every* start still
+    // appears here with starts=0, failures>0 — the case we most want visible.
     let mut agg_stmt = conn.prepare(
         "SELECT language,
-                COUNT(*) as starts,
-                SUM(CASE WHEN reason = 'new_session'  THEN 1 ELSE 0 END),
-                SUM(CASE WHEN reason = 'idle_evicted' THEN 1 ELSE 0 END),
-                SUM(CASE WHEN reason = 'lru_evicted'  THEN 1 ELSE 0 END),
-                SUM(CASE WHEN reason = 'crashed'      THEN 1 ELSE 0 END),
-                AVG(handshake_ms),
-                AVG(first_response_ms)
+                SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) as starts,
+                SUM(CASE WHEN outcome = 'failed'  THEN 1 ELSE 0 END) as failures,
+                SUM(CASE WHEN outcome = 'success' AND reason = 'new_session'  THEN 1 ELSE 0 END),
+                SUM(CASE WHEN outcome = 'success' AND reason = 'idle_evicted' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN outcome = 'success' AND reason = 'lru_evicted'  THEN 1 ELSE 0 END),
+                SUM(CASE WHEN outcome = 'success' AND reason = 'crashed'      THEN 1 ELSE 0 END),
+                AVG(CASE WHEN outcome = 'success' THEN handshake_ms END),
+                AVG(CASE WHEN outcome = 'success' THEN first_response_ms END)
          FROM lsp_events
          WHERE started_at >= datetime('now', ?)
          GROUP BY language
-         ORDER BY starts DESC",
+         ORDER BY starts DESC, failures DESC",
     )?;
 
     #[allow(clippy::type_complexity)]
-    let rows: Vec<(String, i64, i64, i64, i64, i64, f64, Option<f64>)> = agg_stmt
+    let rows: Vec<(
+        String,
+        i64,
+        i64,
+        i64,
+        i64,
+        i64,
+        i64,
+        Option<f64>,
+        Option<f64>,
+    )> = agg_stmt
         .query_map([modifier], |r| {
             Ok((
                 r.get(0)?,
@@ -225,6 +286,7 @@ pub fn query_lsp_stats(conn: &Connection, window: &str) -> Result<LspStats> {
                 r.get(5)?,
                 r.get(6)?,
                 r.get(7)?,
+                r.get(8)?,
             ))
         })?
         .collect::<rusqlite::Result<_>>()?;
@@ -233,6 +295,7 @@ pub fn query_lsp_stats(conn: &Connection, window: &str) -> Result<LspStats> {
     for (
         language,
         starts,
+        failures,
         new_session,
         idle_evicted,
         lru_evicted,
@@ -251,24 +314,28 @@ pub fn query_lsp_stats(conn: &Connection, window: &str) -> Result<LspStats> {
         by_language.push(LspLanguageStats {
             language,
             starts,
+            failures,
             reasons: LspReasonCounts {
                 new_session,
                 idle_evicted,
                 lru_evicted,
                 crashed,
             },
-            avg_handshake_ms: avg_handshake.round() as i64,
+            // None = no successful start in the window (e.g. a fail-only language) → 0.
+            avg_handshake_ms: avg_handshake.map(|v| v.round() as i64).unwrap_or(0),
             p95_handshake_ms: p95_handshake,
             avg_first_response_ms: avg_first.map(|v| v.round() as i64),
             p95_first_response_ms: p95_first,
         });
     }
 
-    // Recent events (last 20, not window-filtered — always shows the most recent cold starts
-    // regardless of the selected window, so the list is never empty while data exists)
+    // Recent successful events (last 20, not window-filtered — always shows the most
+    // recent cold starts regardless of the selected window, so the list is never empty
+    // while data exists).
     let mut recent_stmt = conn.prepare(
         "SELECT language, started_at, reason, handshake_ms, first_response_ms
          FROM lsp_events
+         WHERE outcome = 'success'
          ORDER BY started_at DESC
          LIMIT 20",
     )?;
@@ -284,10 +351,31 @@ pub fn query_lsp_stats(conn: &Connection, window: &str) -> Result<LspStats> {
         })?
         .collect::<rusqlite::Result<_>>()?;
 
+    // Recent failed starts (last 20, not window-filtered) — the actionable signal:
+    // which server keeps dying during `initialize`, and the error it reported.
+    let mut fail_stmt = conn.prepare(
+        "SELECT language, started_at, reason, error
+         FROM lsp_events
+         WHERE outcome = 'failed'
+         ORDER BY started_at DESC
+         LIMIT 20",
+    )?;
+    let recent_failures: Vec<LspFailure> = fail_stmt
+        .query_map([], |r| {
+            Ok(LspFailure {
+                language: r.get(0)?,
+                started_at: r.get(1)?,
+                reason: r.get(2)?,
+                error: r.get(3)?,
+            })
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+
     Ok(LspStats {
         window: window.to_string(),
         by_language,
         recent,
+        recent_failures,
     })
 }
 
@@ -306,7 +394,7 @@ fn lsp_percentile(
     // Only count non-NULL values for the given column
     let count: i64 = conn.query_row(
         &format!(
-            "SELECT COUNT({}) FROM lsp_events\n             WHERE language = ? AND started_at >= datetime('now', ?) AND {} IS NOT NULL",
+            "SELECT COUNT({}) FROM lsp_events\n             WHERE language = ? AND outcome = 'success' AND started_at >= datetime('now', ?) AND {} IS NOT NULL",
             column, column
         ),
         params![language, modifier],
@@ -318,7 +406,7 @@ fn lsp_percentile(
     let offset = ((count * pct + 99) / 100 - 1).max(0);
     let val: i64 = conn.query_row(
         &format!(
-            "SELECT {} FROM lsp_events\n             WHERE language = ? AND started_at >= datetime('now', ?) AND {} IS NOT NULL\n             ORDER BY {} LIMIT 1 OFFSET ?",
+            "SELECT {} FROM lsp_events\n             WHERE language = ? AND outcome = 'success' AND started_at >= datetime('now', ?) AND {} IS NOT NULL\n             ORDER BY {} LIMIT 1 OFFSET ?",
             column, column, column
         ),
         params![language, modifier, offset],
@@ -737,6 +825,101 @@ mod tests {
         let (_dir, conn) = tmp();
         let rowid = write_lsp_event(&conn, "rust", "new_session", 820).unwrap();
         assert!(rowid > 0);
+    }
+
+    #[test]
+    fn write_lsp_failure_records_failed_outcome() {
+        let (_dir, conn) = tmp();
+        let rowid = write_lsp_failure(
+            &conn,
+            "kotlin",
+            "new_session",
+            813,
+            "LSP server disconnected",
+        )
+        .unwrap();
+        assert!(rowid > 0);
+        let (outcome, error): (String, Option<String>) = conn
+            .query_row(
+                "SELECT outcome, error FROM lsp_events WHERE id = ?",
+                [rowid],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(outcome, "failed");
+        assert_eq!(error.as_deref(), Some("LSP server disconnected"));
+    }
+
+    #[test]
+    fn write_lsp_event_defaults_outcome_to_success() {
+        let (_dir, conn) = tmp();
+        let rowid = write_lsp_event(&conn, "rust", "new_session", 820).unwrap();
+        let outcome: String = conn
+            .query_row(
+                "SELECT outcome FROM lsp_events WHERE id = ?",
+                [rowid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(outcome, "success");
+    }
+
+    #[test]
+    fn query_lsp_stats_excludes_failed_starts() {
+        let (_dir, conn) = tmp();
+        write_lsp_event(&conn, "kotlin", "new_session", 3000).unwrap();
+        write_lsp_failure(
+            &conn,
+            "kotlin",
+            "new_session",
+            800,
+            "LSP server disconnected",
+        )
+        .unwrap();
+
+        let stats = query_lsp_stats(&conn, "30d").unwrap();
+        let kotlin = stats
+            .by_language
+            .iter()
+            .find(|l| l.language == "kotlin")
+            .unwrap();
+        // A failed start must not inflate the success count or skew the handshake avg.
+        assert_eq!(kotlin.starts, 1);
+        assert_eq!(kotlin.avg_handshake_ms, 3000);
+        // ...but it IS counted as a failure and surfaced in recent_failures.
+        assert_eq!(kotlin.failures, 1);
+        assert_eq!(stats.recent_failures.len(), 1);
+        assert_eq!(stats.recent_failures[0].language, "kotlin");
+        assert_eq!(
+            stats.recent_failures[0].error.as_deref(),
+            Some("LSP server disconnected")
+        );
+    }
+
+    #[test]
+    fn query_lsp_stats_surfaces_fail_only_language() {
+        let (_dir, conn) = tmp();
+        // kotlin has ONLY a failed start — it must still appear in by_language
+        // (starts=0, failures=1), not vanish the way a success-only aggregate would.
+        write_lsp_failure(
+            &conn,
+            "kotlin",
+            "new_session",
+            800,
+            "LSP server disconnected",
+        )
+        .unwrap();
+
+        let stats = query_lsp_stats(&conn, "30d").unwrap();
+        let kotlin = stats
+            .by_language
+            .iter()
+            .find(|l| l.language == "kotlin")
+            .expect("a fail-only language must still appear in by_language");
+        assert_eq!(kotlin.starts, 0);
+        assert_eq!(kotlin.failures, 1);
+        assert_eq!(kotlin.avg_handshake_ms, 0);
+        assert_eq!(stats.recent_failures.len(), 1);
     }
 
     #[test]

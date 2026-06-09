@@ -117,7 +117,6 @@ impl RetrievalClient {
         .await
     }
 
-
     pub async fn search_memories(
         &self,
         project_id: &str,

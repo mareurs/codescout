@@ -784,5 +784,4 @@ mod backtick_match_tests {
             "namespace must resolve to its AST end line; got {outer_end:?}"
         );
     }
-
 }

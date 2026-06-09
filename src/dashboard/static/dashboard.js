@@ -254,7 +254,7 @@
         if (lsp && lsp.available) {
             const langs = lsp.by_language || [];
             if (langs.length > 0) {
-                const thead = '<thead><tr><th>Language</th><th class="num">Starts</th><th>Reasons</th>' +
+                const thead = '<thead><tr><th>Language</th><th class="num">Starts</th><th class="num">Failures</th><th>Reasons</th>' +
                     '<th class="num">Avg handshake</th><th class="num">p95 handshake</th>' +
                     '<th class="num">Avg first resp</th><th class="num">p95 first resp</th></tr></thead>';
                 const rows = langs.map(l => {
@@ -267,6 +267,7 @@
                     ].filter(Boolean).join(' · ');
                     return '<tr><td>' + esc(l.language) + '</td>' +
                         '<td class="num">' + esc(String(l.starts)) + '</td>' +
+                        '<td class="num">' + (l.failures ? '<span style="color:var(--err,#c0392b)">' + esc(String(l.failures)) + '</span>' : '0') + '</td>' +
                         '<td>' + esc(badges) + '</td>' +
                         '<td class="num">' + fmtMs(l.avg_handshake_ms) + '</td>' +
                         '<td class="num">' + fmtMs(l.p95_handshake_ms) + '</td>' +
@@ -296,10 +297,25 @@
                 document.getElementById('lsp-recent').innerHTML =
                     '<p class="muted">No recent LSP events.</p>';
             }
+
+            // Failed starts — servers that died during initialize (e.g. an expired build)
+            const failures = lsp.recent_failures || [];
+            if (failures.length > 0) {
+                const fitems = failures.map(f => {
+                    const err = f.error ? ' · ' + esc(f.error) : '';
+                    return '<li>[' + esc(f.language) + '] ' + esc(f.reason) + err +
+                        ' · <span class="muted">' + esc(f.started_at) + '</span></li>';
+                }).join('');
+                document.getElementById('lsp-failures').innerHTML = '<ul>' + fitems + '</ul>';
+            } else {
+                document.getElementById('lsp-failures').innerHTML =
+                    '<p class="muted">No failed LSP starts.</p>';
+            }
         } else {
             document.getElementById('lsp-table').innerHTML =
                 '<p class="muted">' + esc((lsp && lsp.reason) || 'No LSP data available.') + '</p>';
             document.getElementById('lsp-recent').innerHTML = '';
+            document.getElementById('lsp-failures').innerHTML = '';
         }
     }
 

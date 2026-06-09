@@ -1386,36 +1386,34 @@ async fn line_range_past_eof_returns_recoverable_error() {
     );
 }
 
-    #[tokio::test]
-    async fn bogus_heading_error_carries_headings_array() {
-        let body = "# A\n\n## B\n\n## C\n";
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("h.md");
-        std::fs::write(&path, body).unwrap();
+#[tokio::test]
+async fn bogus_heading_error_carries_headings_array() {
+    let body = "# A\n\n## B\n\n## C\n";
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("h.md");
+    std::fs::write(&path, body).unwrap();
 
-        let ctx = test_ctx().await;
-        let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
-        let result = tool
-            .call(
-                serde_json::json!({
-                    "path": path.to_str().unwrap(),
-                    "heading": "## Nonexistent",
-                }),
-                &ctx,
-            )
-            .await;
+    let ctx = test_ctx().await;
+    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
+    let result = tool
+        .call(
+            serde_json::json!({
+                "path": path.to_str().unwrap(),
+                "heading": "## Nonexistent",
+            }),
+            &ctx,
+        )
+        .await;
 
-        // Now returns Ok({ok:false,...}) — not Err — so the MCP layer routes through
-        // format_compact's ERROR branch and renders as clean text instead of JSON.
-        let value = result.unwrap();
-        assert_eq!(value["ok"], serde_json::json!(false));
-        assert!(
-            value["headings"]
-                .as_array()
-                .is_some_and(|a| !a.is_empty()),
-            "headings array must be present and non-empty, got: {value}"
-        );
-    }
+    // Now returns Ok({ok:false,...}) — not Err — so the MCP layer routes through
+    // format_compact's ERROR branch and renders as clean text instead of JSON.
+    let value = result.unwrap();
+    assert_eq!(value["ok"], serde_json::json!(false));
+    assert!(
+        value["headings"].as_array().is_some_and(|a| !a.is_empty()),
+        "headings array must be present and non-empty, got: {value}"
+    );
+}
 
 #[tokio::test]
 async fn small_file_with_multiple_sections_gets_nav_hint() {
@@ -1731,51 +1729,51 @@ async fn format_compact_live_renders_claude_md_as_map_shape() {
     );
 }
 
-    #[tokio::test]
-    async fn format_compact_live_renders_heading_not_found_as_error_with_headings() {
-        // Live verification of the ERROR branch: read a real file with a bogus
-        // heading, then render the Ok({ok:false,...}) response through format_compact.
-        // The call now returns Ok instead of Err — no envelope reconstruction needed.
-        use crate::tools::Tool;
+#[tokio::test]
+async fn format_compact_live_renders_heading_not_found_as_error_with_headings() {
+    // Live verification of the ERROR branch: read a real file with a bogus
+    // heading, then render the Ok({ok:false,...}) response through format_compact.
+    // The call now returns Ok instead of Err — no envelope reconstruction needed.
+    use crate::tools::Tool;
 
-        let body = "# A\n\n## B\n\n## C\n";
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("h.md");
-        std::fs::write(&path, body).unwrap();
+    let body = "# A\n\n## B\n\n## C\n";
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("h.md");
+    std::fs::write(&path, body).unwrap();
 
-        let ctx = test_ctx().await;
-        let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
-        let value = tool
-            .call(
-                serde_json::json!({"path": path.to_str().unwrap(), "heading": "## Nonexistent"}),
-                &ctx,
-            )
-            .await
-            .unwrap();
+    let ctx = test_ctx().await;
+    let tool = crate::tools::markdown::read_markdown::ReadMarkdown;
+    let value = tool
+        .call(
+            serde_json::json!({"path": path.to_str().unwrap(), "heading": "## Nonexistent"}),
+            &ctx,
+        )
+        .await
+        .unwrap();
 
-        let rendered = tool
-            .format_compact(&value)
-            .expect("format_compact must return Some for ERROR shape");
+    let rendered = tool
+        .format_compact(&value)
+        .expect("format_compact must return Some for ERROR shape");
 
-        assert!(
-            rendered.starts_with("error: "),
-            "ERROR must start with `error: `, got: {rendered}"
-        );
-        assert!(
-            rendered.contains("Nonexistent"),
-            "error msg must reference the missing heading"
-        );
-        assert!(
-            rendered.contains("available headings:"),
-            "ERROR with headings must show the list"
-        );
-        assert!(
-            rendered.contains("# A  L1"),
-            "ERROR must indent headings same as MAP, got: {rendered}"
-        );
-        assert!(rendered.contains("## B  L3"), "ERROR list missing entry");
-        assert!(rendered.contains("next: "), "ERROR must end with next-cue");
-    }
+    assert!(
+        rendered.starts_with("error: "),
+        "ERROR must start with `error: `, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("Nonexistent"),
+        "error msg must reference the missing heading"
+    );
+    assert!(
+        rendered.contains("available headings:"),
+        "ERROR with headings must show the list"
+    );
+    assert!(
+        rendered.contains("# A  L1"),
+        "ERROR must indent headings same as MAP, got: {rendered}"
+    );
+    assert!(rendered.contains("## B  L3"), "ERROR list missing entry");
+    assert!(rendered.contains("next: "), "ERROR must end with next-cue");
+}
 
 // ── empty file + heading arg regression ──────────────────────────────────────
 
@@ -1842,7 +1840,9 @@ async fn heading_not_found_returns_ok_soft_error_rendering_as_text() {
     );
 
     // error field must reference the missing heading
-    let err_msg = value["error"].as_str().expect("error field must be a string");
+    let err_msg = value["error"]
+        .as_str()
+        .expect("error field must be a string");
     assert!(
         err_msg.contains("Nope"),
         "error must reference the missing heading 'Nope', got: {err_msg}"
@@ -1850,9 +1850,7 @@ async fn heading_not_found_returns_ok_soft_error_rendering_as_text() {
 
     // headings array must be non-empty
     assert!(
-        value["headings"]
-            .as_array()
-            .is_some_and(|a| !a.is_empty()),
+        value["headings"].as_array().is_some_and(|a| !a.is_empty()),
         "headings array must be non-empty, got: {value}"
     );
 

@@ -263,7 +263,8 @@ impl Tool for Onboarding {
     fn description(&self) -> &str {
         "Initial project discovery: languages, key files (README, build config, \
          CLAUDE.md). Returns instructions for memories + system prompt draft, \
-         OR status if already onboarded. Requires active project. force=true re-scans."
+         OR status if already onboarded. Requires active project. force=true re-scans; \
+         refresh_prompt=true rebuilds the system prompt from templates."
     }
     fn input_schema(&self) -> Value {
         json!({
@@ -600,7 +601,8 @@ async fn handle_already_onboarded(ctx: &ToolContext) -> anyhow::Result<Option<Va
         "Onboarding already performed. Available shared memories: {}. \
          Use `memory(action=\"read\", topic=...)` to read relevant ones as needed for your current task. \
          Do not read all memories at once — only read those relevant to what you're working on. \
-         Use `memory(action=\"recall\", query=\"...\")` to search memories by meaning when the topic name isn't known.",
+         Use `memory(action=\"recall\", query=\"...\")` to search memories by meaning when the topic name isn't known. \
+         To rebuild this project's stored system prompt from the current templates (e.g. after prompt-source or memory edits), call `onboarding(refresh_prompt=true)`.",
         memories.join(", ")
     );
     if !private_memories.is_empty() {

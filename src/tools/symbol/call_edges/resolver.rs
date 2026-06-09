@@ -961,7 +961,11 @@ mod tests {
             .await
             .unwrap();
         let ec: Vec<&str> = fe.iter().map(|e| e.callee_sym.as_str()).collect();
-        assert!(ec.contains(&"d"), "function_expression: missing d in {:?}", ec);
+        assert!(
+            ec.contains(&"d"),
+            "function_expression: missing d in {:?}",
+            ec
+        );
     }
 
     #[tokio::test]

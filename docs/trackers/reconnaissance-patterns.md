@@ -41,6 +41,7 @@ skill).
 | R-15 | 2026-06-03 | hit | Scout external-tool on-disk state against bug-doc claims before a fix depends on addressing it (analyzer dir 128-bit hash ≠ codescout 64-bit `ws_hash`) | kotlin-lsp-disk F-1 |
 | R-16 | 2026-06-04 | hit → promoted | Pre-dispatch scout of the plan's OWN splice code caught a double-newline bug (+ substring-overlap test mis-routing 3× → CLAUDE.md; whole-workspace `cargo fmt` churn caught at pre-commit diff-scout) | edit_file-normalized-fallback (this session) |
 | R-17 | 2026-06-05 | hit | Spot-check sibling callers of a just-fixed shared helper before closing the bug class (`references(clamp_range_to_parent)` found `do_remove`/`do_replace` shared the off-by-one) | bug-fix W-9 + issues/2026-06-05-edit-code-insert-after-last-python-method |
+| R-18 | 2026-06-05 | hit | Scout a classifier's actual return type AND domain coverage before keying a feature off it (`detect_language` returns `Option<&str>` not an enum, and does not recognize YAML → guard keyed on extension, not name) | edit_file indent-significant guard (this session); commit c99d4228 |
 
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
@@ -579,6 +580,26 @@ closing the bug class."
 `docs/trackers/bug-fix-session-log.md`.
 
 ---
+## R-18 — Scout a classifier's actual return type AND domain coverage before keying a feature off it
+
+**Verdict:** hit (recon corrected a type-shape assumption and surfaced a coverage gap before any code was written; clean compile + 210 tests + live verify confirmed)
+
+**Observed:** 2026-06-05, pre-edit scout for the `edit_file` whitespace-normalized-fallback guard (disable the fallback for indentation-significant languages). About to write a guard keyed on `crate::ast::detect_language`.
+
+**Scout (reality):** My mental model assumed `detect_language` returned a `Language` enum I would `matches!` on. Reading the real signature: it returns `Option<&'static str>` (canonical name strings), and — load-bearing — it does **not recognize YAML at all** (`.yaml`/`.yml` → `None`), so YAML currently takes the fallback with no AST gate either. The recognized indentation-significant set is just `python`/`haskell`.
+
+**Outcome:** Changed the guard from enum-variant matching to **extension-based** classification (`py`/`pyi`/`hs`/`yaml`/`yml`) before a line was written. A name-based check (`detect_language(path) == Some("python")`) — the natural fix after the compile error — would have shipped the guard with YAML still ungated: a hole in exactly the language I had named in my own review critique. Shipped as `c99d4228`; 210 edit_file tests + live `.py`-refused / `.rs`-applied verification through the rebuilt server.
+
+**Cross-cutting lesson:** when a new feature keys behavior off an existing classifier/predicate, scout TWO things, not one: (1) the function's actual return *type* (enum vs string vs bool — the assumption that bites at compile time), and (2) its *domain coverage* — which inputs return `None` / fall through (the gap that is invisible from the function name and silently survives a green build). The coverage gap is the dangerous half: it does not fail loudly. Here YAML's absence from `detect_language` was the whole reason to classify by extension instead.
+
+**Promote-when:** a second instance where scouting a classifier/predicate's return shape AND domain coverage (not merely its existence) changes a feature's implementation → promote to CLAUDE.md: "Before keying behavior off an existing classifier, read its return type and enumerate which inputs it does NOT cover."
+
+**Status:** open — single datapoint.
+
+**Source:** `src/ast/mod.rs::detect_language`; `src/tools/edit_file/mod.rs::indentation_significant`; commit `c99d4228`.
+
+---
+
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:

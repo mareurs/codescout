@@ -228,27 +228,29 @@ impl Tool for ReadMarkdown {
 
         // ── Single-heading navigation ────────────────────────────────────
         if let Some(heading_query) = heading {
-            let section_result =
-                match crate::tools::file_summary::extract_markdown_section(&text, heading_query) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        let msg = e.message.clone();
-                        if msg.contains("not found") {
-                            let headings_json: Vec<serde_json::Value> =
-                                crate::tools::file_summary::parse_all_headings(&text)
-                                    .iter()
-                                    .map(|h| serde_json::json!({"h": h.text, "l": h.line}))
-                                    .collect();
-                            return Ok(json!({
-                                "ok": false,
-                                "error": format!("heading {:?} not found", heading_query),
-                                "headings": headings_json,
-                                "hint": "pick a heading from the list above, or use start_line/end_line",
-                            }));
-                        }
-                        return Err(e.into());
+            let section_result = match crate::tools::file_summary::extract_markdown_section(
+                &text,
+                heading_query,
+            ) {
+                Ok(s) => s,
+                Err(e) => {
+                    let msg = e.message.clone();
+                    if msg.contains("not found") {
+                        let headings_json: Vec<serde_json::Value> =
+                            crate::tools::file_summary::parse_all_headings(&text)
+                                .iter()
+                                .map(|h| serde_json::json!({"h": h.text, "l": h.line}))
+                                .collect();
+                        return Ok(json!({
+                            "ok": false,
+                            "error": format!("heading {:?} not found", heading_query),
+                            "headings": headings_json,
+                            "hint": "pick a heading from the list above, or use start_line/end_line",
+                        }));
                     }
-                };
+                    return Err(e.into());
+                }
+            };
             let cov = crate::tools::read_file::markdown_coverage(
                 &text, &resolved, ctx, heading, None, None,
             );

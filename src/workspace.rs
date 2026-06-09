@@ -237,7 +237,8 @@ pub fn discover_projects(
 pub(crate) fn scan_languages_by_dominance(dir: &Path) -> Vec<String> {
     const MAX_DEPTH: usize = 6;
     const FILE_CAP: usize = 1000;
-    let mut counts: std::collections::HashMap<&'static str, usize> = std::collections::HashMap::new();
+    let mut counts: std::collections::HashMap<&'static str, usize> =
+        std::collections::HashMap::new();
     let walker = ignore::WalkBuilder::new(dir)
         .hidden(true)
         .git_ignore(true)
@@ -1112,5 +1113,4 @@ mod tests {
         );
         assert_eq!(dominant_language(dir.path()).as_deref(), Some("python"));
     }
-
 }

@@ -2988,8 +2988,10 @@ mod guide_hint_tests {
         // librarian: reindex + (default) audit_doc_refs write; the rest read.
         assert!(server.is_write_call("librarian", &json!({"action": "reindex"})));
         assert!(server.is_write_call("librarian", &json!({"action": "audit_doc_refs"})));
-        assert!(!server
-            .is_write_call("librarian", &json!({"action": "audit_doc_refs", "emit_tracker": false})));
+        assert!(!server.is_write_call(
+            "librarian",
+            &json!({"action": "audit_doc_refs", "emit_tracker": false})
+        ));
         assert!(!server.is_write_call("librarian", &json!({"action": "context"})));
         assert!(!server.is_write_call("librarian", &json!({"action": "doctor"})));
         assert!(!server.is_write_call("librarian", &json!({"action": "tracker_design"})));

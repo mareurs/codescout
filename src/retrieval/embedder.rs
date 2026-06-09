@@ -235,46 +235,47 @@ impl EmbedderHttp {
             let nonempty: Vec<&str> = inputs.iter().copied().filter(|s| !s.is_empty()).collect();
             let sparse_body = serde_json::json!({ "inputs": &nonempty });
 
-            let (dense_batch, sparse_nonempty) = tokio::try_join!(self.dense_batch(&inputs), async {
-                if nonempty.is_empty() {
-                    return Ok(Vec::<Vec<SparseEntry>>::new());
-                }
-                let mut attempt: u32 = 0;
-                loop {
-                    let resp = self
-                        .client
-                        .post(&sparse_url)
-                        .json(&sparse_body)
-                        .send()
-                        .await
-                        .context("embed_batch sparse send")?;
-                    let status = resp.status();
-                    if status.is_success() {
-                        return resp
-                            .json::<Vec<Vec<SparseEntry>>>()
+            let (dense_batch, sparse_nonempty) =
+                tokio::try_join!(self.dense_batch(&inputs), async {
+                    if nonempty.is_empty() {
+                        return Ok(Vec::<Vec<SparseEntry>>::new());
+                    }
+                    let mut attempt: u32 = 0;
+                    loop {
+                        let resp = self
+                            .client
+                            .post(&sparse_url)
+                            .json(&sparse_body)
+                            .send()
                             .await
-                            .context("embed_batch sparse json");
+                            .context("embed_batch sparse send")?;
+                        let status = resp.status();
+                        if status.is_success() {
+                            return resp
+                                .json::<Vec<Vec<SparseEntry>>>()
+                                .await
+                                .context("embed_batch sparse json");
+                        }
+                        // The shared sparse server returns 424/429/5xx when momentarily
+                        // overloaded by concurrent callers; retry those with backoff
+                        // before surfacing a detailed error.
+                        let code = status.as_u16();
+                        let retryable = code == 424 || code == 429 || status.is_server_error();
+                        attempt += 1;
+                        if !retryable || attempt >= 8 {
+                            let body = resp.text().await.unwrap_or_default();
+                            return Err(anyhow!(
+                                "embed_batch sparse status {} (inputs={}): {}",
+                                status,
+                                nonempty.len(),
+                                body.chars().take(200).collect::<String>()
+                            ));
+                        }
+                        let backoff =
+                            std::time::Duration::from_millis(100u64 * (1u64 << attempt.min(6)));
+                        tokio::time::sleep(backoff).await;
                     }
-                    // The shared sparse server returns 424/429/5xx when momentarily
-                    // overloaded by concurrent callers; retry those with backoff
-                    // before surfacing a detailed error.
-                    let code = status.as_u16();
-                    let retryable = code == 424 || code == 429 || status.is_server_error();
-                    attempt += 1;
-                    if !retryable || attempt >= 8 {
-                        let body = resp.text().await.unwrap_or_default();
-                        return Err(anyhow!(
-                            "embed_batch sparse status {} (inputs={}): {}",
-                            status,
-                            nonempty.len(),
-                            body.chars().take(200).collect::<String>()
-                        ));
-                    }
-                    let backoff =
-                        std::time::Duration::from_millis(100u64 * (1u64 << attempt.min(6)));
-                    tokio::time::sleep(backoff).await;
-                }
-            })?;
+                })?;
 
             let mut sparse_nonempty = sparse_nonempty.into_iter();
             let sparse_resp: Vec<Vec<SparseEntry>> = inputs

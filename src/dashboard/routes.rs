@@ -258,6 +258,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn lsp_response_exposes_failures_and_recent_failures() {
+        let dir = tempfile::TempDir::new().unwrap();
+        // One successful start + one failed start for the same language.
+        let conn = crate::usage::db::open_db(dir.path()).unwrap();
+        crate::usage::db::write_lsp_event(&conn, "kotlin", "new_session", 3000).unwrap();
+        crate::usage::db::write_lsp_failure(
+            &conn,
+            "kotlin",
+            "new_session",
+            800,
+            "LSP server disconnected",
+        )
+        .unwrap();
+        drop(conn);
+
+        let app = test_router(dir.path());
+        let req = Request::builder()
+            .uri("/api/lsp")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), 200);
+        let body = axum::body::to_bytes(resp.into_body(), 1_000_000)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        // Field names here are the contract the dashboard JS reads.
+        assert_eq!(json["available"], true);
+        let kotlin = json["by_language"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["language"] == "kotlin")
+            .expect("kotlin row present");
+        assert_eq!(kotlin["starts"], 1);
+        assert_eq!(kotlin["failures"], 1);
+        let failures = json["recent_failures"].as_array().unwrap();
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0]["language"], "kotlin");
+        assert_eq!(failures[0]["error"], "LSP server disconnected");
+    }
+
+    #[tokio::test]
     async fn memories_list_returns_empty_for_fresh_project() {
         let dir = tempfile::TempDir::new().unwrap();
         let app = test_router(dir.path());

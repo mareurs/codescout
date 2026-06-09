@@ -136,8 +136,9 @@ pub async fn ensure_peer_serve(target: &Path, read_only: bool) -> Result<PeerCli
             Err(e) => last_err = Some(e),
         }
     }
-    Err(last_err
-        .unwrap_or_else(|| anyhow::anyhow!("failed to connect to peer-serve for {}", target.display())))
+    Err(last_err.unwrap_or_else(|| {
+        anyhow::anyhow!("failed to connect to peer-serve for {}", target.display())
+    }))
 }
 
 #[cfg(test)]

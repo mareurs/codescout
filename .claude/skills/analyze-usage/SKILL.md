@@ -45,7 +45,7 @@ Note: `find` may return nested DBs (e.g. `codescout/crates/librarian-mcp/.codesc
 
 Store the list of DB paths — loop over each one in Steps 2–4.
 
-### 2. For Each DB — Run SQL Queries (8 total)
+### 2. For Each DB — Run SQL Queries (9 total)
 
 Run each query below via `run_command`. Replace `<db>` with the full DB path.
 
@@ -123,15 +123,25 @@ FROM tool_calls WHERE session_id IS NOT NULL
 GROUP BY session_id ORDER BY total_calls DESC LIMIT 15;
 ```
 
-**H. LSP events**
+**H. LSP starts** (successful handshakes only — failures are query I)
 ```sql
 SELECT language, reason, COUNT(*) as starts,
        ROUND(AVG(handshake_ms)) as avg_handshake_ms,
        MAX(handshake_ms) as max_handshake_ms,
        ROUND(AVG(first_response_ms)) as avg_first_response_ms
-FROM lsp_events GROUP BY language, reason ORDER BY avg_handshake_ms DESC;
+FROM lsp_events WHERE outcome='success' GROUP BY language, reason ORDER BY avg_handshake_ms DESC;
 ```
 
+
+**I. LSP failed starts** — servers that died during `initialize` (e.g. an expired LSP build). Empty is healthy; rows here are the failure signal `lsp_events` previously dropped (the `symbols`→`LSP server disconnected` case).
+```sql
+SELECT language, reason, error, COUNT(*) as failures,
+       MAX(started_at) as last_failure
+FROM lsp_events WHERE outcome='failed'
+GROUP BY language, reason, error ORDER BY failures DESC;
+```
+
+> `outcome`/`error` columns exist as of the lsp_events failure-recording migration (auto-applied when codescout next opens a project). If a stale DB errors with `no such column: outcome`, drop the `outcome` clause from query H and skip query I for that DB.
 ### 3. Cross-Project Aggregation (in-context)
 
 After collecting all per-DB results, compute in-context:
@@ -187,6 +197,9 @@ Total calls: X | Error rate: Y% | Sessions: Z
 
 ### LSP Events
 <output of query H — OMIT this section if table is empty>
+
+### LSP Failed Starts
+<output of query I — OMIT this section if no rows>
 ```
 
 Repeat the `## Project:` block for each DB. Cross-project summary **always at the top**.
@@ -352,7 +365,7 @@ Total removed: X calls
 - **Skipping LSP events** — `lsp_events` has its own schema; separate query required.
 - **Cross-project summary at the bottom** — it always goes at the TOP.
 - **Not passing `overwrite: true`** to `create_file` on re-run same day.
-- **Printing empty sections** — if D/F/H return no rows, omit those sections entirely.
+- **Printing empty sections** — if D/F/H/I return no rows, omit those sections entirely.
 - **Clearing without confirmation** — always show what will be removed and wait for explicit "yes" before running DELETE.
 - **Deleting the .db file** — use `DELETE + VACUUM`, not `rm`. Deleting the file works but forces codescout to recreate it on next activation; DELETE preserves the schema cleanly.
 - **Forgetting `call_edges`** — three tables need clearing: `tool_calls`, `lsp_events`, `call_edges`.

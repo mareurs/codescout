@@ -4,6 +4,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use super::{parse_bool_param, Tool, ToolContext};
+use crate::util::text::{leading_ws, reindent_block};
 
 /// Returns definition keywords for a specific language.
 /// Only includes keywords that actually introduce definitions in that language.
@@ -77,30 +78,6 @@ fn find_normalized_windows(content: &str, old_string: &str) -> Vec<NormWindow> {
                 start_byte: spans[i].1,
                 end_byte: spans[i + k - 1].2,
             });
-        }
-    }
-    out
-}
-
-fn leading_ws(line: &str) -> &str {
-    &line[..line.len() - line.trim_start().len()]
-}
-
-fn reindent_block(new_string: &str, agent_base: &str, file_base: &str) -> String {
-    let mut out = String::with_capacity(new_string.len());
-    for (idx, line) in new_string.split('\n').enumerate() {
-        if idx > 0 {
-            out.push('\n');
-        }
-        if line.trim().is_empty() {
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix(agent_base) {
-            out.push_str(file_base);
-            out.push_str(rest);
-        } else {
-            out.push_str(file_base);
-            out.push_str(line.trim_start());
         }
     }
     out

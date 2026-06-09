@@ -31,6 +31,65 @@ pub fn extract_lines(text: &str, start_line: usize, end_line: usize) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+/// Leading whitespace (indentation) of a line — the prefix before the first
+/// non-whitespace character. Empty for an unindented or all-blank line.
+pub fn leading_ws(line: &str) -> &str {
+    &line[..line.len() - line.trim_start().len()]
+}
+
+/// The common base indentation of a block: the leading whitespace of the
+/// least-indented non-blank line. Blank lines carry no indentation signal and
+/// are ignored. Returns `""` for an empty or all-blank block.
+///
+/// Picking the *minimum* (rather than the first line's indent) keeps re-basing
+/// correct even when the first line is more indented than a later one.
+pub fn min_indent(block: &str) -> &str {
+    block
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(leading_ws)
+        .min_by_key(|ws| ws.len())
+        .unwrap_or("")
+}
+
+/// Re-base an indented block from `agent_base` to `file_base`, preserving the
+/// relative (inner) indentation of every line.
+///
+/// For each non-blank line: strip the `agent_base` prefix if present and prepend
+/// `file_base`; for a ragged line that does not start with `agent_base`, fall
+/// back to `file_base` + the trimmed line. Blank lines are emitted empty.
+pub fn reindent_block(new_string: &str, agent_base: &str, file_base: &str) -> String {
+    let mut out = String::with_capacity(new_string.len());
+    for (idx, line) in new_string.split('\n').enumerate() {
+        if idx > 0 {
+            out.push('\n');
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix(agent_base) {
+            out.push_str(file_base);
+            out.push_str(rest);
+        } else {
+            out.push_str(file_base);
+            out.push_str(line.trim_start());
+        }
+    }
+    out
+}
+
+/// Re-base a block so its least-indented line sits at `target_base`, preserving
+/// inner structure. Returns the block **unchanged** when it is already based at
+/// `target_base` — so correctly-indented input is never disturbed (which, in
+/// particular, keeps the transform off lines inside multi-line string literals
+/// in the common path).
+pub fn reindent_to(block: &str, target_base: &str) -> String {
+    let agent_base = min_indent(block);
+    if agent_base == target_base {
+        return block.to_string();
+    }
+    reindent_block(block, agent_base, target_base)
+}
 
 /// Extract lines from `start_line` to `end_line` (1-indexed, inclusive) without
 /// exceeding `byte_budget` bytes. Returns `(content, lines_shown, complete)`.
@@ -87,6 +146,52 @@ mod tests {
     #[test]
     fn truncate_short_unchanged() {
         assert_eq!(truncate("hello", 10), "hello");
+    }
+    #[test]
+    fn leading_ws_extracts_indent() {
+        assert_eq!(leading_ws("    x"), "    ");
+        assert_eq!(leading_ws("\t\tx"), "\t\t");
+        assert_eq!(leading_ws("x"), "");
+        assert_eq!(leading_ws("   "), "   ");
+    }
+
+    #[test]
+    fn min_indent_picks_least_indented_nonblank() {
+        // signature at 4, body at 8 -> base is the shallower 4.
+        assert_eq!(min_indent("    def f():\n        return 1"), "    ");
+        // blank lines carry no signal and are ignored.
+        assert_eq!(min_indent("\n    a\n\n        b\n"), "    ");
+        // all-blank / empty -> "".
+        assert_eq!(min_indent("\n  \n"), "");
+        assert_eq!(min_indent(""), "");
+    }
+
+    #[test]
+    fn reindent_to_shifts_dedented_body_to_target() {
+        // The reported bug: a method body dedented to column 0, re-based into a
+        // class at column 4 — the inner +4 step is preserved (lands at 8).
+        let body = "def method(self):\n    return self.x";
+        let out = reindent_to(body, "    ");
+        assert_eq!(out, "    def method(self):\n        return self.x");
+    }
+
+    #[test]
+    fn reindent_to_noop_when_already_based() {
+        let body = "    def method(self):\n        return self.x";
+        // Already at the target column -> returned byte-for-byte unchanged.
+        assert_eq!(reindent_to(body, "    "), body);
+    }
+
+    #[test]
+    fn reindent_to_dedents_when_target_shallower() {
+        let body = "        a = 1\n            b = 2";
+        assert_eq!(reindent_to(body, ""), "a = 1\n    b = 2");
+    }
+
+    #[test]
+    fn reindent_to_preserves_blank_lines() {
+        let body = "a\n\nb";
+        assert_eq!(reindent_to(body, "  "), "  a\n\n  b");
     }
 
     #[test]
