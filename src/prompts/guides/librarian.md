@@ -181,7 +181,7 @@ index. **Editing the body has three surfaces, with different blast radius:**
 
 | Surface | Shape | Effect | When to use |
 |---|---|---|---|
-| `artifact(update, patch={body_edits: [...]})` | Surgical, per-section | Each entry mirrors `edit_markdown`'s batch shape: `{heading, action, content?\|old_string+new_string?, at?, replace_all?, include_subsections?}`. Atomic. | **Default choice for tracker maintenance.** Adding a new section, fixing a typo, replacing one section. |
+| `artifact(update, patch={body_edits: [...]})` | Surgical, per-section | Each entry mirrors `edit_markdown`'s batch shape: `{heading, action, content?\|old_string+new_string?, at?, replace_all?, include_subsections?}`. action is one of replace, insert_before, insert_after, remove, edit - `edit` = scoped text swap (old_string/new_string), `replace` = whole-section overwrite (content). Atomic. | **Default choice for tracker maintenance.** Adding a new section, fixing a typo, replacing one section. |
 | `artifact(update, patch={body: "..."})` | Total overwrite | The new string replaces the entire body. **Gated by the 50% shrink guard** unless `force=true` is passed. | Initial body authoring, intentional full rewrite. |
 | `edit_markdown` | Refused on managed files | Returns a `librarian_guard` error pointing back at `artifact(update)`. | Never on augmented artifacts. |
 

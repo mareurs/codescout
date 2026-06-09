@@ -96,7 +96,7 @@ pub fn perform_section_edit_ext(
     match action {
         "replace" => {
             let new = new_content
-                .ok_or_else(|| anyhow::anyhow!("content is required for the replace action"))?;
+                .ok_or_else(|| anyhow::anyhow!("content is required for the 'replace' action (it overwrites the whole section body); for a scoped text swap pass action='edit' with old_string + new_string"))?;
 
             // F-7: surface-marker-preservation gate.
             // The section's body may contain `<!-- @surface NAME -->` or

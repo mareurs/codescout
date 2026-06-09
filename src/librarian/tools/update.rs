@@ -669,6 +669,24 @@ mod tests {
         let body = "Just prose, no dated headers.\n";
         assert_eq!(trim_history(body, 2), body);
     }
+    #[test]
+    fn body_edits_replace_without_content_points_at_edit_action() {
+        // Regression (2026-06-09): old_string/new_string with action="replace"
+        // is the intuitive-but-wrong guess for a scoped text swap. It used to
+        // fail with a bare "content is required" and no recovery path; the
+        // error must now name action='edit' so the caller recovers in one step.
+        let edits = vec![serde_json::json!({
+            "heading": "## Foo",
+            "action": "replace",
+            "old_string": "x",
+            "new_string": "y",
+        })];
+        let msg = apply_body_edits("## Foo", &edits).unwrap_err().to_string();
+        assert!(
+            msg.contains("action='edit'"),
+            "replace-without-content error must name action='edit'; got: {msg}"
+        );
+    }
 
     async fn seed_with_augment(
         ctx: &ToolContext,

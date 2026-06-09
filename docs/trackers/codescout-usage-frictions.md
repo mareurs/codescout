@@ -1073,3 +1073,25 @@ to be recorded after cherry-pick).
 relaxes), [[U-24]] (the docstring-vs-runtime follow-up on the same
 post_process surface). Bug file:
 `docs/issues/2026-05-28-path-annotation-spam.md`.
+
+### U-26 — `artifact(update, patch={body_edits})` action grammar undocumented; `edit` vs `replace` found only via 3 sequential errors
+
+**When:** 2026-06-09 session, flipping the F-15 `**Status:**` line in `bug-fix-session-log.md` via `artifact(action="update", patch={body_edits:[...]})`. A scoped string swap took **three rejected calls** to land:
+1. `{action:"replace", old_string, new_string}` → "missing required 'heading' field"
+2. `{heading, action:"replace", old_string, new_string}` → "content is required for the replace action" (bare, no hint) — the old_string/new_string intent was silently discarded
+3. `{heading, old_string, new_string}` (no action) → "missing required 'action' field — Allowed actions: replace, insert_before, insert_after, remove, edit" — only here did the enum surface, revealing `edit` is the string-swap verb
+4. `{heading, action:"edit", old_string, new_string}` → ok
+
+**Iron Law / pattern:** not an Iron Law violation — a **schema discoverability gap**. The intuitive guess for "replace this string" is `action="replace"`, but `replace` is whole-section overwrite (needs `content`); the old_string/new_string verb is the non-obvious `edit`. Neither the `patch.body_edits` schema description nor `get_guide("librarian")` § Body Editing Surfaces enumerated the actions or paired old_string/new_string with `edit` — both said only "mirrors edit_markdown's batch shape."
+
+**Resolution shape (this session, experiments-side):**
+1. `src/librarian/tools/artifact.rs` — `patch` description now enumerates `replace|insert_before|insert_after|remove|edit` and disambiguates `edit` (scoped swap: heading + old_string + new_string) vs `replace` (whole-section overwrite: heading + content).
+2. `src/prompts/guides/librarian.md` § Body Editing Surfaces — same action grammar added to the `body_edits` row.
+3. `src/tools/markdown/edit_markdown.rs:99` — the bare `anyhow!("content is required for the replace action")` now appends "...for a scoped text swap pass action='edit' with old_string + new_string" (shared by `edit_markdown` direct calls and the `artifact` body_edits path); the "content is required" prefix is preserved so no assertion breaks.
+4. Regression test `body_edits_replace_without_content_points_at_edit_action` (`update.rs`) pins the recovery contract — newline-free fixture, chosen to dodge the `\n`-payload hazard.
+
+**Severity:** low — discoverability friction, no correctness or data risk. Cost: ~3 wasted calls per agent that guesses `replace`.
+
+**Status:** fixed (this session, experiments-side; uncommitted at time of writing). Pika note: whistled late (after slip #3, not slip #1) — a watch-miss to do better on.
+
+**Related:** surfaced jointly by the Prompt Hamsa + Pika. Touches three surfaces — schema description, `get_guide("librarian")` body, and the shared error message.
