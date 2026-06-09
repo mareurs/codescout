@@ -254,8 +254,13 @@ fn build_per_project_prompt_contains_project_context() {
         "must contain memory phase"
     );
     assert!(
-        prompt.contains("project=\"backend\""),
+        prompt.contains("project_id=\"backend\""),
         "must scope memories to project"
+    );
+
+    assert!(
+        !prompt.contains("project=\""),
+        "must NOT emit the bare project= param - it is silently ignored (2026-06-09 onboarding bug)"
     );
 
     // Must contain iron law
@@ -283,8 +288,13 @@ fn build_synthesis_prompt_contains_readback_and_claude_md() {
     let prompt = build_synthesis_prompt(&projects);
 
     // Must contain memory readback commands for each project
-    assert!(prompt.contains("memory(action=\"read\", project=\"backend\""));
-    assert!(prompt.contains("memory(action=\"read\", project=\"mcp-server\""));
+    assert!(prompt.contains("memory(action=\"read\", project_id=\"backend\""));
+    assert!(prompt.contains("memory(action=\"read\", project_id=\"mcp-server\""));
+
+    assert!(
+        !prompt.contains("project=\""),
+        "synthesis prompt must NOT emit the bare project= param (2026-06-09 onboarding bug)"
+    );
 
     // Must contain workspace memory topics
     assert!(prompt.contains("architecture"));

@@ -407,7 +407,7 @@ async fn create_semantic_anchors(
 
 /// Resolve the memory directory for a `memory` tool call.
 ///
-/// If the `project` parameter is provided, route to the per-project directory via
+/// If `project_id` (or its `project` alias) is provided, route to the per-project directory via
 /// `Workspace::memory_dir_for_project`. Otherwise use the focused project's memory dir.
 /// Falls back gracefully when no workspace is loaded.
 async fn resolve_memory_dir(
@@ -416,6 +416,7 @@ async fn resolve_memory_dir(
 ) -> anyhow::Result<std::path::PathBuf> {
     let project_param = input
         .get("project_id")
+        .or_else(|| input.get("project")) // "project" accepted as an alias for project_id (2026-06-09 onboarding-prompt bug)
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     // Pin the memory dir to the workspace named by ctx.workspace_override
@@ -588,7 +589,7 @@ impl Tool for Memory {
                 "query": { "type": "string", "description": "For recall. Search query." },
                 "limit": { "type": "integer", "description": "For recall. Max results (default 5)." },
                 "id": { "type": "string", "description": "For forget. UUID string from a recall result." },
-                "project_id": { "type": "string", "description": "Scope to a workspace project ID. Default: focused project." }
+                "project_id": { "type": "string", "description": "Scope to a workspace project ID (key is project_id; project accepted as an alias). Default: focused project." }
             }
         })
     }

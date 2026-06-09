@@ -712,7 +712,7 @@ When done, report: \"System prompt refreshed (vN → vM).\"",
 /// Each per-project subagent gets this prompt. It includes:
 /// - Iron Law, exploration steps, red flags (from the shared template)
 /// - Project-specific context (id, root, languages, siblings)
-/// - Per-project memory writing instructions (scoped with project= param)
+/// - Per-project memory writing instructions (scoped with project_id= param)
 /// - Return contract
 #[allow(dead_code)]
 pub(crate) fn build_per_project_prompt(
@@ -825,7 +825,7 @@ pub(crate) fn build_per_project_prompt(
     // Phase 3: Write per-project memories
     prompt.push_str("## Phase 3: Write the Memories\n\n");
     prompt.push_str(&format!(
-        "Write these memories using `memory(action=\"write\", project=\"{id}\", topic=\"...\", content=\"...\")`.\n\n",
+        "Write these memories using `memory(action=\"write\", project_id=\"{id}\", topic=\"...\", content=\"...\")`.\n\n",
         id = project.id
     ));
     prompt.push_str(
@@ -833,7 +833,7 @@ pub(crate) fn build_per_project_prompt(
          Purpose, tech stack, key dependencies, runtime requirements. 15-30 lines.\n\n\
          ### 2. `architecture`\n\
          Module structure, key abstractions, data flow, design patterns. 20-40 lines.\n\
-         Include 3-5 good `semantic_search(query, project=\"{id}\")` examples.\n\n\
+         Include 3-5 good `semantic_search(query, project_id=\"{id}\")` examples.\n\n\
          ### 3. `conventions`\n\
          Language/framework patterns, naming, testing approach. 15-30 lines.\n\n",
     );
@@ -869,9 +869,9 @@ pub(crate) fn build_synthesis_prompt(projects: &[(String, Vec<String>)]) -> Stri
     prompt.push_str("Read these memories to understand what each subagent discovered:\n\n");
     for (id, _langs) in projects {
         prompt.push_str(&format!(
-            "- `memory(action=\"read\", project=\"{id}\", topic=\"project-overview\")`\n\
-             - `memory(action=\"read\", project=\"{id}\", topic=\"architecture\")`\n\
-             - `memory(action=\"read\", project=\"{id}\", topic=\"conventions\")`\n"
+            "- `memory(action=\"read\", project_id=\"{id}\", topic=\"project-overview\")`\n\
+             - `memory(action=\"read\", project_id=\"{id}\", topic=\"architecture\")`\n\
+             - `memory(action=\"read\", project_id=\"{id}\", topic=\"conventions\")`\n"
         ));
     }
     prompt.push_str("\n---\n\n");
@@ -879,7 +879,7 @@ pub(crate) fn build_synthesis_prompt(projects: &[(String, Vec<String>)]) -> Stri
     // Step 2: Write workspace-level memories
     prompt.push_str("## Write Workspace Memories\n\n");
     prompt.push_str(
-        "Write these 5 workspace-level memories (no `project:` parameter = workspace-level):\n\n",
+        "Write these 5 workspace-level memories (no `project_id:` parameter = workspace-level):\n\n",
     );
     prompt.push_str(
         "### 1. `architecture`\n\
@@ -890,7 +890,7 @@ pub(crate) fn build_synthesis_prompt(projects: &[(String, Vec<String>)]) -> Stri
          15-30 lines.\n\n\
          ### 2. `conventions`\n\
          Shared patterns across projects: commit style, PR process, CI rules.\n\
-         Per-project: reference `memory(project=\"{id}\", topic=\"conventions\")`.\n\
+         Per-project: reference `memory(project_id=\"{id}\", topic=\"conventions\")`.\n\
          15-30 lines.\n\n\
          ### 3. `development-commands`\n\
          Workspace-level build/test/lint commands. Per-project commands go in per-project memories.\n\

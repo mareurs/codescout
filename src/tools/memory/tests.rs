@@ -1109,6 +1109,76 @@ async fn memory_write_routes_to_project_dir() {
         .unwrap();
     assert!(!project_mem_path.exists(), "memory should be deleted");
 }
+#[tokio::test]
+async fn memory_write_accepts_project_alias_for_project_id() {
+    use crate::agent::Agent;
+    use std::sync::Arc;
+
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+
+    // Multi-project: root gradle project + mcp-server sub-project.
+    std::fs::write(root.join("build.gradle.kts"), "").unwrap();
+    let mcp = root.join("mcp-server");
+    std::fs::create_dir_all(&mcp).unwrap();
+    std::fs::write(mcp.join("package.json"), "{}").unwrap();
+    std::fs::create_dir_all(root.join(".codescout")).unwrap();
+
+    let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+    let lsp: Arc<dyn crate::lsp::LspProvider> = crate::lsp::LspManager::new_arc();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    // Write using the `project` ALIAS (not project_id). Regression for the 2026-06-09
+    // onboarding bug: the unknown `project` key was silently dropped and the write
+    // misrouted to the focused/root project.
+    Memory
+        .call(
+            json!({
+                "action": "write",
+                "topic": "conventions",
+                "content": "Use camelCase",
+                "project": "mcp-server"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    // Alias must land in the per-project dir that project_id= would use.
+    let project_mem_path = root.join(".codescout/projects/mcp-server/memories/conventions.md");
+    assert!(
+        project_mem_path.exists(),
+        "project= alias must route to per-project dir (not silently dropped): {project_mem_path:?}"
+    );
+
+    // And must NOT misroute to the workspace-level/root dir.
+    let root_mem_path = root.join(".codescout/memories/conventions.md");
+    assert!(
+        !root_mem_path.exists(),
+        "project= alias must NOT misroute to the root memory dir: {root_mem_path:?}"
+    );
+
+    // Read back via the canonical project_id= key returns the same content.
+    let read_result = Memory
+        .call(
+            json!({ "action": "read", "topic": "conventions", "project_id": "mcp-server" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(read_result["content"], "Use camelCase");
+}
 
 #[tokio::test]
 async fn memory_read_sections_filter_integration() {
