@@ -158,9 +158,31 @@ fn denied_read_paths(_config: &PathSecurityConfig) -> Vec<PathBuf> {
 
 /// Check if `resolved` falls under any denied path.
 fn is_denied(resolved: &Path, denied: &[PathBuf]) -> bool {
-    denied
-        .iter()
-        .any(|d| resolved.starts_with(d) || resolved == d.as_path())
+    // On Windows, `fs::canonicalize` yields extended-length (`\\?\C:\...`) paths
+    // while a not-yet-existing input stays plain. `Path::starts_with` is
+    // component-wise and treats `\\?\` as a distinct leading component, so a plain
+    // input never `starts_with` a verbatim deny prefix even when they denote the
+    // same location — a silent deny-list bypass. Normalise both sides to the same
+    // form before comparing. No-op off Windows and on already-plain paths.
+    fn normalize(p: &Path) -> PathBuf {
+        #[cfg(windows)]
+        {
+            if let Some(s) = p.to_str() {
+                if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+                    return PathBuf::from(format!(r"\\{rest}"));
+                }
+                if let Some(rest) = s.strip_prefix(r"\\?\") {
+                    return PathBuf::from(rest);
+                }
+            }
+        }
+        p.to_path_buf()
+    }
+    let resolved = normalize(resolved);
+    denied.iter().any(|d| {
+        let d = normalize(d);
+        resolved.starts_with(&d) || resolved == d
+    })
 }
 
 /// Best-effort canonicalization: use `fs::canonicalize` when the path exists

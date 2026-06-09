@@ -2424,8 +2424,19 @@ mod tests {
         // annotation — the agent already carries the signal via the
         // `Active project` line in `build_server_instructions`, which
         // compaction preserves in the system-prompt slot.
-        let (dir, server) = make_server().await;
-        let root = dir.path().to_string_lossy().to_string();
+        let (_dir, server) = make_server().await;
+        // Build the payload from the server's *own* project-root form — the exact
+        // string post_process strips against. On Windows the agent canonicalizes to
+        // an extended-length path that differs from dir.path()'s plain/8.3 form, so
+        // using dir.path() here would never match the strip prefix and the
+        // annotation would never fire.
+        let root = server
+            .agent
+            .project_root()
+            .await
+            .expect("server has an active project root")
+            .display()
+            .to_string();
         let trimmed_root = root.trim_end_matches('/');
 
         let make_payload = || {

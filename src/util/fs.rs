@@ -17,8 +17,15 @@ pub fn find_ancestor_with(start: &Path, marker: &str) -> Option<PathBuf> {
     }
 }
 
-/// Auto-detect the project root by looking for `.codescout/`, `.git/`,
-/// `Cargo.toml`, `pyproject.toml`, or `package.json` — in that priority order.
+/// Auto-detect the project root by walking upward and returning the **nearest**
+/// ancestor that contains any of `.codescout/`, `.git/`, `Cargo.toml`,
+/// `pyproject.toml`, `package.json`, or `go.mod`.
+///
+/// Distance wins over marker kind: a `.git`/`.codescout` in a *distant* ancestor
+/// (e.g. the user's home directory, or `%TEMP%`'s parents on Windows) must not
+/// shadow a nearer language manifest that marks the actual project. When a single
+/// directory holds several markers it is simply returned (the kind doesn't matter
+/// once the nearest marked directory is found).
 pub fn detect_project_root(from: &Path) -> Option<PathBuf> {
     let markers = [
         ".codescout",
@@ -28,12 +35,15 @@ pub fn detect_project_root(from: &Path) -> Option<PathBuf> {
         "package.json",
         "go.mod",
     ];
-    for marker in markers {
-        if let Some(root) = find_ancestor_with(from, marker) {
-            return Some(root);
+    let mut current = from.to_path_buf();
+    loop {
+        if markers.iter().any(|marker| current.join(marker).exists()) {
+            return Some(current);
+        }
+        if !current.pop() {
+            return None;
         }
     }
-    None
 }
 
 /// Read a file as UTF-8, returning an error with the path on failure.

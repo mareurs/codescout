@@ -381,8 +381,13 @@ mod tests {
         // does not under-count tracked dotfiles. A hidden, non-gitignored,
         // indexable file must be counted.
         let dir = tempfile::tempdir().unwrap();
-        let mut f = std::fs::File::create(dir.path().join(".config.toml")).unwrap();
-        f.write_all(&vec![b'x'; 2048]).unwrap();
+        // Write via `fs::write` so the file handle is closed before the walk.
+        // On Windows a still-open write handle makes the walker's per-entry
+        // `metadata()` call fail, so the dotfile gets silently skipped and the
+        // count comes back 0 (the original Windows-only failure). `fs::write`
+        // opens-writes-closes atomically; Unix never saw this because it has no
+        // mandatory file locking.
+        std::fs::write(dir.path().join(".config.toml"), vec![b'x'; 2048]).unwrap();
 
         let v = check_index_scope(dir.path(), 1024).unwrap();
         match v {
