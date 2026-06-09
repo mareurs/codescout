@@ -31,7 +31,6 @@ pub(crate) async fn run_command_interactive(
     ctx: &ToolContext,
 ) -> anyhow::Result<Value> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::process::Command;
 
     // Gate: elicitation must be available.
     if ctx.peer.is_none() {
@@ -64,12 +63,12 @@ pub(crate) async fn run_command_interactive(
         root.to_path_buf()
     };
 
-    // Spawn with piped stdin/stdout/stderr.
-    let (shell, shell_args) = crate::platform::shell_command(command);
-    let mut child = Command::new(shell)
-        .args(&shell_args)
+    // Spawn with piped stdin/stdout/stderr via the hardened shell builder.
+    // Interactive overrides the builder's default stdin (NUL on Windows) with a
+    // real pipe, since it drives the child's stdin.
+    let mut cmd = crate::platform::shell_command_configured(command);
+    let mut child = cmd
         .current_dir(&work_dir)
-        .env("GIT_PAGER", "cat")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
