@@ -44,6 +44,7 @@ skill).
 | R-18 | 2026-06-05 | hit | Scout a classifier's actual return type AND domain coverage before keying a feature off it (`detect_language` returns `Option<&str>` not an enum, and does not recognize YAML → guard keyed on extension, not name) | edit_file indent-significant guard (this session); commit c99d4228 |
 | R-19 | 2026-06-09 | hit, then miss (recurred post-doc) | Scout home-project internals before presenting cross-project "B benefits from A" recommendations (claim `@ref` no-dedup → confirmed; claim "summarization generic" → drift: `format_compact` is per-tool) | this session; `output_buffer.rs:250`, `types.rs:387`; kin R-14 |
 | R-20 | 2026-06-09 | hit (validates R-3) | A bug-file's hand-cited fix-plan line list is not the blast radius (workspace-root grep found a 3rd build-breaking assert at `tests.rs:257` + a 0-match fixture lead) | bug-fix F-15 + W-10 |
+| R-21 | 2026-06-09 | hit | Verify a side-effect through its real production entry point (CLI/MCP), not a unit harness that bypasses `main.rs`; `references()` the operation to enumerate ALL call sites before placing it (`sync_project`: 5 sites, write reached 1 of 3 project paths) | index-freshness F-1 + W-1; commit 10dcfb9f |
 
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
@@ -620,7 +621,7 @@ closing the bug class."
 
 **Promote-when:** a second instance where a comparative / cross-project analysis presents a home-project shape claim that a later scout refutes → promote a Phase-1 Scout bullet: "Before presenting a recommendation that asserts how the home project currently works, scout the cited symbol/contract against current code — comparative analysis is not an exemption." (Note: R-14's own promote-when wants a second *stale dated-memory* instance specifically; this entry is adjacent, not that second datapoint.)
 
-**Status:** open — **2 datapoints, both this session** (a hit then a miss). Promote-when criterion is met; caveat: both are same-session, so a cross-session 3rd should precede the cross-repo SKILL.md sync. A local CLAUDE.md Phase-1 Scout bullet is warranted now, since the miss recurred *after* documentation.
+**Status:** open — **2 datapoints, both this session** (a hit then a miss). **Acted 2026-06-09 (user decision):** rejected the project-local CLAUDE.md route as too narrow for a systemic lesson; instead tightened the recon SKILL.md `When NOT to Use` Read-only-Q&A exemption to draw the *describe-vs-assert* line (Hamsa-audited — a cut/bound, not an added trigger; `claude-plugins` working tree, uncommitted). This front-runs the cross-session-3rd caveat by deliberate choice (recurrence-after-documentation judged strong enough). **Efficacy unverified — N=0**: no behavioral eval (`docs/evals/reconnaissance-output.md` not yet authored); the existing trigger eval scores the description string, not body guidance, so it does not measure this change. Formal sync flow (PR + pinned SKILL.md commit SHA + skill version) still pending a commit.
 
 **Source:** `src/tools/output_buffer.rs:250`, `src/tools/core/types.rs:387`, `src/retrieval/sync.rs:29`, `src/tools/run_command/tests.rs:2034`; this session's headroom cross-pollination analysis. Kin: R-14.
 
@@ -660,6 +661,24 @@ SKILL.md Phase-1 bullet to name bug-file line lists explicitly.
 **Fix idea / Pointer:** bug-fix-session-log F-15 + W-10; this session.
 
 ---
+## R-21 — Verify a side-effect through its real entry point; `references()` the operation before placing it
+
+**Verdict:** hit — live verification caught a gap that 46 unit tests + a functional test could not.
+
+**Observed:** 2026-06-09, index-freshness scope-a. The sidecar write was placed in `IndexProject::call` (the MCP tool path) and "verified" by unit tests on `write_index_state` / `git_sync_status` + a hook functional test — all green.
+
+**Scout (reality):** A live `codescout index` (CLI) produced no sidecar (`No such file or directory`). `references(RetrievalClient/sync_project)` enumerated **5 call sites** — 3 project (`index.rs:304` MCP, `main.rs:259` CLI, `bin/sync_project.rs:29`) + 2 library (`index.rs:130`, `agent/mod.rs:1493`). The write reached **1 of 3** project paths; the CLI (which the companion hook invokes) and the standalone bin wrote nothing.
+
+**Outcome:** GAP. Moved the write to the `sync_project` chokepoint, gated by `SyncOpts.record_index_state`; live-verified `behind:1 → reindex → up_to_date` through the reconnected MCP server. Commit `10dcfb9f`.
+
+**Cross-cutting lesson:** Two scouts the plan skipped. (1) `references()` the operation that *owns* the side-effect to enumerate ALL entry points before deciding where the effect lives — a unit test proves one path; `references()` proves coverage. (2) Verify through the real production entry point (the CLI/MCP path the consumer uses), not a unit harness that bypasses `main.rs`. Kin to R-17 (spot-check sibling callers of a shared helper) and the Snow Lion memory `cross-cutting-side-effects-at-the-chokepoint`.
+
+**Promote-when:** a second instance where a `references()` entry-point audit or live-entry-point verification catches a gap unit tests missed → promote a verification-discipline bullet to CLAUDE.md / SKILL.md.
+
+**Status:** open — single strong datapoint (live proof + `references()` both load-bearing this session).
+
+**Source:** `references(RetrievalClient/sync_project)` → 5 sites; `src/retrieval/sync.rs`, `src/main.rs:259`, `src/bin/sync_project.rs:29`; commit `10dcfb9f`; index-freshness session-log F-1 + W-1. Kin: R-17, Snow Lion `cross-cutting-side-effects-at-the-chokepoint`.
+
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
