@@ -78,6 +78,10 @@ to master — the tracker outlives them.
 | WIN-11 | test-portability | fixed | server tool-count tests hardcoded Unix count of 22 (incl. peer); made cfg(unix)-aware (21 on Windows) | 5881ed09 | 2026-06-09 |
 | WIN-12 | companion | fixed | codescout-companion hooks referenced consolidated-away tool names; updated to edit_code/edit_file/edit_markdown/create_file | codescout-companion:71aceeb | 2026-06-09 |
 | WIN-13 | path-handling | mitigated | librarian + guide_hint emitted mixed-slash paths on Windows (18 historical test failures) | docs/issues/archive/2026-05-24-ci-windows-default-feature-failures.md | 2026-05-24 |
+| WIN-14 | process-spawn | fixed | resolve_head_sha shelled out to `git rev-parse --short HEAD` at every project activation (unbounded .output(), no timeout → EDR hang risk); now libgit2 revparse_single().short_id() like sibling probe_has_git_remote | bcc712ae (experiments) | 2026-06-09 |
+| WIN-15 | process-spawn | open | hardware GPU probe spawns nvidia-smi/rocm-smi at onboarding (2s timeout each; EDR tax + spawn_blocking thread leak on hang); skip/cache on Windows VDI | src/hardware.rs:114 | 2026-06-09 |
+| WIN-16 | build-install | open | .cargo/config.toml has no Windows linker override (uses slow MSVC link.exe) and jobs=64 oversubscribes a low-core VDI; add rust-lld target section + tune jobs | .cargo/config.toml | 2026-06-09 |
+| WIN-17 | test-portability | fixed | cargo clippy -D warnings failed on Windows: cfg(unix)-gated peer + mux left is_codescout_kotlin_home + 5 peer-serve CodeScoutServer methods + parse_env_kv dead; plus missing_const_for_thread_local FP (clippy 1.96); annotated cfg_attr(not(unix), allow(dead_code)) + scoped allow | 2f6e35c3 (experiments) | 2026-06-09 |
 ## Currently stable on Windows
 
 What works now (post the VDI reliability stream, on `experiments`):
@@ -94,6 +98,18 @@ What works now (post the VDI reliability stream, on `experiments`):
 
 - **WIN-5** — LSP spawn-timeout under EDR: needs a `spawn_blocking` spec before
   implementation. *(the only remaining open/deferred item)*
+- **Linux/CI compile of the cfg(unix) changes** — the WIN-3/WIN-6/WIN-11 + WIN-9
+  work was authored & tested only on Windows, where the `cfg(unix)` paths are
+  excluded from compilation. A static audit (2026-06-09) reviewed every
+  unix-only surface the Windows compiler skipped — `unix.rs::shell_command_configured`
+  (stdin=null add), peer `cfg(unix)` gating (no-op on Linux), `is_denied`
+  `normalize` (reduces to `to_path_buf` off-Windows), `inner.rs` foreground
+  `child_pgid`/`_child_pgid` branches, `build_windows_cmdline` (`pub`, no
+  dead-code lint), and `Cargo.toml` target-gating — and found **no Linux-compile
+  hazards** (no missing imports, dead-code lints, dangling refs to the removed
+  `shell_command` builder, or unbalanced cfg). Remaining gate is mechanical:
+  `cargo build` + `cargo clippy -- -D warnings` + `cargo test` on Linux must pass
+  before any cherry-pick of these commits to `master`.
 
 _WIN-9 and WIN-12 were fixed 2026-06-09 — see History._
 ## Relationships
@@ -135,3 +151,24 @@ absent on Windows; payload built from the agent's canonical root) — in
 `1d8cde48`. Fixed WIN-12 companion-hook tool-name drift in
 `codescout-companion:71aceeb` (branch `fix/windows-tool-name-drift`). Full
 `cargo test --lib` now green on Windows: 2598 passed, 0 failed, 13 ignored.
+
+
+### 2026-06-09 — WIN-14/15/16 opened (VDI speed: remaining spawn + build levers)
+After the AV/EDR exclusion lever was ruled out (cannot modify on this VDI),
+opened the three in-our-control speed issues a spawn audit surfaced: WIN-14
+(git-spawn on every activation → libgit2), WIN-15 (GPU-probe spawns at
+onboarding), WIN-16 (Windows build linker + jobs tuning). Ranked WIN-14 first
+(small, removes a spawn *and* an unbounded-hang risk from the activation path).
+
+
+### 2026-06-09 — WIN-14 + WIN-17 fixed (VDI speed pass, part 1)
+WIN-14: `resolve_head_sha` now uses libgit2 (`revparse_single("HEAD").short_id()`)
+instead of spawning `git rev-parse` at every activation — removes an EDR-taxed
+spawn and an unbounded-`.output()` hang risk (`bcc712ae`). WIN-17: discovered
+while running the clippy gate for WIN-14 — `cargo clippy -- -D warnings` was red
+on Windows because the cfg(unix) peer + mux gating left `is_codescout_kotlin_home`,
+five `CodeScoutServer` peer-serve helpers, and `parse_env_kv` dead, plus a
+`missing_const_for_thread_local` clippy-1.96 false positive; fixed with scoped
+`cfg_attr(not(unix), allow(dead_code))` + one `allow` (`2f6e35c3`). Verified on
+Windows: clippy green (lib + bins), `cargo test --lib` green (2598 passed).
+WIN-15 (GPU-probe spawns) and WIN-16 (.cargo linker/jobs) remain open.
