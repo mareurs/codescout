@@ -254,6 +254,7 @@ async fn main() -> Result<()> {
             let client = codescout::retrieval::client::RetrievalClient::from_env().await?;
             let opts = codescout::retrieval::sync::SyncOpts {
                 force_reindex: force,
+                record_index_state: true,
                 ..Default::default()
             };
             let report = client.sync_project(&project_id, &root, opts).await?;

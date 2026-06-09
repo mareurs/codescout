@@ -4,6 +4,7 @@
 /.mcp.json
 # code-explorer data dir: ignore generated/personal files, track shareable ones
 /.codescout/project.toml
+/.codescout/index-state.json
 /.codescout/embeddings.db
 /.codescout/embeddings.db-wal
 /.codescout/embeddings.db-shm

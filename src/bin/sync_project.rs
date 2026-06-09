@@ -19,6 +19,7 @@ async fn main() -> Result<()> {
     let opts = SyncOpts {
         languages: None,
         force_reindex: false,
+        record_index_state: true,
     };
 
     eprintln!(

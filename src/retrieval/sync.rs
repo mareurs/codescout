@@ -6,6 +6,11 @@ use std::path::Path;
 pub struct SyncOpts {
     pub languages: Option<Vec<String>>,
     pub force_reindex: bool,
+    /// When true, `sync_project` records the indexed git HEAD to
+    /// `.codescout/index-state.json` on success (the freshness sidecar that
+    /// external consumers and `index(action="status")` read). Set by *project*
+    /// syncs; left false by *library* syncs so library checkouts aren't polluted.
+    pub record_index_state: bool,
 }
 
 #[derive(Debug, Default)]
@@ -179,6 +184,17 @@ impl crate::retrieval::client::RetrievalClient {
 
         let elapsed_ms = started.elapsed().as_millis();
         tracing::info!(added, deleted, elapsed_ms, "retrieval sync finished");
+
+        // Record the indexed HEAD for external-change freshness detection
+        // (checkout/pull/HEAD move). Gated to *project* syncs — library syncs
+        // leave record_index_state false so library checkouts aren't polluted.
+        // Fail-soft: a sidecar write must never break the sync.
+        if opts.record_index_state {
+            if let Err(e) = crate::retrieval::index_state::write_index_state(root) {
+                tracing::warn!(error = %e, "failed to write index-state sidecar");
+            }
+        }
+
         Ok(SyncReport {
             added,
             deleted,

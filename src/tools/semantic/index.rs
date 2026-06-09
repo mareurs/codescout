@@ -299,6 +299,7 @@ impl Tool for IndexProject {
                 tracing::info!("RetrievalClient ready, calling sync_project");
                 let opts = crate::retrieval::sync::SyncOpts {
                     force_reindex: force,
+                    record_index_state: true,
                     ..Default::default()
                 };
                 client.sync_project(&project_id, &root, opts).await
@@ -319,12 +320,6 @@ impl Tool for IndexProject {
                         // Indexing succeeded — files are now fresh, clear the dirty set.
                         if let Some(ref arc) = dirty_files_arc {
                             arc.lock().unwrap_or_else(|e| e.into_inner()).clear();
-                        }
-                        // Record the indexed HEAD so external git moves (checkout/
-                        // pull/HEAD change) become detectable by index(action="status")
-                        // and the companion session-start hook. Fail-soft.
-                        if let Err(e) = crate::retrieval::index_state::write_index_state(&root) {
-                            tracing::warn!(error = %e, "failed to write index-state sidecar");
                         }
                         IndexingState::Done {
                             files_indexed: report.added + report.updated,
