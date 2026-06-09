@@ -98,8 +98,8 @@ read.
 - [x] Decide O-1 vs O-2 (vs both) — **O-1 (sidecar)** chosen (2026-06-09)
 - [x] Implement the chosen signal; write it on every `sync_project` completion — new `src/retrieval/index_state.rs` (write/read/`git_sync_status`); write-site in `IndexProject::call`'s success arm; `git_sync` envelope revived in `IndexStatus::call`. 3 unit tests (three-query sandwich) + 43 semantic tests green; `clippy -D warnings` clean. Uncommitted on `experiments`.
 - [x] Document the signal's path/format in `docs/state-protocol.md` — added `index-state.json` schema section + `.codescout/` table row; updated the legacy `embeddings.db` section to note the reindex-trigger port
-- [ ] Update `codescout-companion/hooks/session-start.sh` to read the new signal (claude-plugins repo)
-- [ ] Resolve the companion-side blocks flagged in the claude-plugins audit (currently slated for removal pending this signal)
+- [x] Update `codescout-companion/hooks/session-start.sh` to read the new signal (claude-plugins repo) — auto-reindex block now reads `.codescout/index-state.json` via `jq` (was the frozen `embeddings.db` `meta`). `bash -n` clean; functional test (sidecar==HEAD → up-to-date; HEAD moved → behind=1) PASS. **Uncommitted in claude-plugins.**
+- [~] Resolve the companion-side blocks — auto-reindex block **resolved**; the **drift-report** block left inert (its `embeddings.db` no longer exists, so the `[ -f ]` guard skips it) pending a per-chunk-drift port or formal removal. Deferred by decision, not forgotten.
 
 ## Cross-references
 
