@@ -1074,7 +1074,7 @@ bug class."
 
 **Severity:** med — the plan as written ships a builder fix that fails `cargo test` at `tests.rs:257`; controller absorbs it on first test run, but a subagent told to "update 286-287 per the bug file" would have flailed.
 
-**Status:** open — fix not yet applied; blast radius corrected pre-edit.
+**Status:** fixed-verified — shipped 2026-06-09 (experiments `890da4d6`); the 3rd assertion at `tests.rs:257` and all blast-radius hits corrected, no version bump. Reconciled.
 
 **Fix idea / Pointer:** `docs/issues/2026-06-09-onboarding-prompt-uses-project-not-project-id.md`; this session.
 

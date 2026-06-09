@@ -1,7 +1,7 @@
 ---
 id: '64f10cc45d802a11'
 kind: tracker
-status: draft
+status: archived
 title: I1 Refactor — Task List
 owners: []
 tags:
@@ -71,6 +71,10 @@ remains the source of truth for *how* to execute each task.
   branch; `unknown` status splits from `*` glob with distinct fail-open
   signal. Hamsa S-1 + S-2.
 
+## ✅ Reconciled 2026-06-09 — COMPLETE (archived)
+
+All 14 tasks shipped. T-1–T-13 landed in codescout (`d11e830e`…`d8b38f26`, 2026-05-17 → 06-05; e.g. T-2 `goal_aggregation::child_status_pure` = `d11e830e`, T-13 `audit_issues` schema widen = `d8b38f26`). T-14 shipped 2026-05-17 (`codescout-companion:0b75991`). Verified via git log + reconciliation scout. The per-task notes below predate the shipped work (zombie-open).
+
 ## History
 
 ### 2026-05-17 — Plan written, T-14 shipped
@@ -80,4 +84,3 @@ Plan doc created at `docs/superpowers/plans/2026-05-17-i1-refactor.md`.
 in the companion plugin repo. T-1 through T-13 pending — they live in
 the codescout repo and Phase 1 (T-1 to T-5) is the minimum-viable I1
 landing.
-

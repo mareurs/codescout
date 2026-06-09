@@ -1,9 +1,12 @@
 ---
+id: null
+kind: null
+status: archived
 title: LSP tools (hover / goto_definition) high error rate
-status: draft
-owner: marius
-created: 2026-04-29
-related: [src/tools/symbol/hover.rs, src/tools/symbol/goto_definition.rs]
+owners: []
+tags: []
+topic: null
+time_scope: null
 ---
 
 # LSP tools error-rate fixes
@@ -86,6 +89,15 @@ infrastructure errors in the LSP mux supervisor. Separate from UX —
 tracking here so the count is preserved, but the fix lives in
 `src/lsp/mux.rs` and `src/lsp/client.rs`. Likely causes: idle-timeout race,
 mux crash on second client reconnect after Kotlin LSP cold start.
+
+## ✅ Reconciled 2026-06-09 — COMPLETE (archived)
+
+All three root causes fixed (verified in `src/tools/symbol/symbol_at.rs` + `src/fs/mod.rs`):
+1. Empty hover/goto now returns `Ok({definitions:[] / content:null, hint})`, not `RecoverableError` — `fetch_definition` (symbol_at.rs:71).
+2. `col` param accepted; resolution order col > identifier > first-non-whitespace — `read_position_inputs` (symbol_at.rs:53).
+3. `retry_on_mux_disconnect` (src/fs/mod.rs:308) retries once on mux disconnect.
+
+The action plan below is now executed.
 
 ## Action plan (future session)
 
