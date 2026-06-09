@@ -3376,6 +3376,124 @@ async fn edit_file_allows_literal_substitution_when_debug_enforce_symbol_tools()
     let content = std::fs::read_to_string(&src_file).unwrap();
     assert!(content.contains("\"new_value\""), "file should be updated");
 }
+// --- Frictionless escape-decode auto-repair (2026-06-09) ---
+
+async fn repair_ctx(dir: &std::path::Path) -> ToolContext {
+    std::fs::create_dir_all(dir.join(".codescout")).unwrap();
+    let agent = Agent::new(Some(dir.to_path_buf())).await.unwrap();
+    ToolContext {
+        agent,
+        lsp: LspManager::new_arc(),
+        output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    }
+}
+
+#[tokio::test]
+async fn edit_file_auto_repairs_literal_newline_in_new_string() {
+    let dir = tempdir().unwrap();
+    let ctx = repair_ctx(dir.path()).await;
+    let src_file = dir.path().join("src/lib.rs");
+    std::fs::create_dir_all(src_file.parent().unwrap()).unwrap();
+    std::fs::write(&src_file, "fn a() {}\n").unwrap();
+
+    // new_string's line breaks arrived as literal backslash-n escapes; as-is the
+    // insert collapses to one physical line and breaks syntax. The tool must
+    // auto-decode the escapes and write valid multi-line code.
+    let result = EditFile
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "old_string": "fn a() {}",
+                "new_string": "fn a() {\\n    let x = 1;\\n    let _ = x;\\n}"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let content = std::fs::read_to_string(&src_file).unwrap();
+    assert!(content.contains("let x = 1;"), "body inserted: {content}");
+    assert!(
+        !content.contains("\\n"),
+        "literal backslash-n must be decoded to real newlines: {content}"
+    );
+    assert!(
+        result.get("note").is_some(),
+        "a repair should surface a note: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn edit_file_matches_old_string_with_literal_newline_escapes() {
+    let dir = tempdir().unwrap();
+    let ctx = repair_ctx(dir.path()).await;
+    let src_file = dir.path().join("src/lib.rs");
+    std::fs::create_dir_all(src_file.parent().unwrap()).unwrap();
+    std::fs::write(&src_file, "fn a() {\n    let x = 1;\n}\n").unwrap();
+
+    // old_string carries literal backslash-n where the file has real newlines.
+    // Exact + whitespace-normalized matching both miss; the decode fallback
+    // must recover the match.
+    let result = EditFile
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "old_string": "    let x = 1;\\n}",
+                "new_string": "    let x = 2;\\n}"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let content = std::fs::read_to_string(&src_file).unwrap();
+    assert!(
+        content.contains("let x = 2;"),
+        "decode-fallback match should apply the edit: {content}"
+    );
+    assert_eq!(
+        result.get("applied_via").and_then(|v| v.as_str()),
+        Some("escape-decoded match"),
+        "should report the decode-fallback path: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn edit_file_preserves_legitimate_backslash_n_in_valid_edit() {
+    let dir = tempdir().unwrap();
+    let ctx = repair_ctx(dir.path()).await;
+    let src_file = dir.path().join("src/lib.rs");
+    std::fs::create_dir_all(src_file.parent().unwrap()).unwrap();
+    std::fs::write(&src_file, "fn a() { let s = \"x\"; }\n").unwrap();
+
+    // The new_string is valid as-is and legitimately contains a \n escape inside
+    // a Rust string literal. The repair must NOT trigger (no syntax error) and
+    // must leave the escape intact.
+    EditFile
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "old_string": "let s = \"x\";",
+                "new_string": "let s = \"line1\\nline2\";"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let content = std::fs::read_to_string(&src_file).unwrap();
+    assert!(
+        content.contains("line1\\nline2"),
+        "a legitimate \\n inside a string literal must be preserved verbatim: {content}"
+    );
+}
 
 #[tokio::test]
 async fn edit_file_prepend_adds_text_at_start() {

@@ -12,6 +12,7 @@ pub mod command_summary;
 pub mod config;
 pub mod create_file;
 pub mod edit_file;
+pub(crate) mod edit_repair;
 pub mod file_group;
 pub mod file_summary;
 pub(crate) mod format;

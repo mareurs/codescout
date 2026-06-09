@@ -824,18 +824,39 @@ impl EditCode {
         }
         new_lines.extend_from_slice(&lines[insert_at..]);
 
-        // Safety net: do_insert has no LSP round-trip, so a malformed insert
-        // would otherwise land silently (unlike do_replace, which re-parses and
-        // restores). Reject — without writing — if the insert introduces a parse
-        // error the file did not have before.
-        if let Some(ts_lang) = crate::ast::detect_language(&full_path) {
-            let mut candidate = new_lines.join("\n");
-            if content.ends_with('\n') && !candidate.is_empty() {
-                candidate.push('\n');
+        // Safety net + frictionless repair, shared with edit_file through
+        // edit_repair::finalize_edit_content. do_insert has no LSP round-trip to
+        // self-heal a malformed insert (unlike do_replace, which re-parses and
+        // restores): an insert that introduces an unrepairable parse error is
+        // rejected without writing, while an insert whose body arrived with
+        // literal escape sequences (a backslash-n instead of a real newline) is
+        // auto-decoded and written.
+        let mut candidate = new_lines.join("\n");
+        if content.ends_with('\n') && !candidate.is_empty() {
+            candidate.push('\n');
+        }
+        let reassemble = |decoded_code: &str| -> String {
+            let reindented = reindent_to(decoded_code, &target_base);
+            let decoded_lines: Vec<&str> = reindented.lines().collect();
+            let mut rl: Vec<&str> = Vec::new();
+            rl.extend_from_slice(&lines[..insert_at]);
+            rl.extend(decoded_lines.iter().copied());
+            if position == "before" || lines.get(insert_at).is_some_and(|l| !l.trim().is_empty()) {
+                rl.push("");
             }
-            if crate::ast::has_syntax_errors(&candidate, ts_lang)
-                && !crate::ast::has_syntax_errors(&content, ts_lang)
-            {
+            rl.extend_from_slice(&lines[insert_at..]);
+            let mut out = rl.join("\n");
+            if content.ends_with('\n') && !out.is_empty() {
+                out.push('\n');
+            }
+            out
+        };
+        let (final_content, repaired) = match crate::tools::edit_repair::finalize_edit_content(
+            &full_path, &content, candidate, code, reassemble,
+        ) {
+            crate::tools::edit_repair::RepairResult::Repaired(c) => (c, true),
+            crate::tools::edit_repair::RepairResult::Clean(c) => (c, false),
+            crate::tools::edit_repair::RepairResult::Introduced(_) => {
                 return Err(RecoverableError::with_hint(
                     format!(
                         "inserting near '{}' would introduce syntax errors — not written",
@@ -846,9 +867,9 @@ impl EditCode {
                 )
                 .into());
             }
-        }
+        };
 
-        write_lines(&full_path, &new_lines, content.ends_with('\n'))?;
+        crate::util::fs::atomic_write(&full_path, &final_content)?;
         ctx.lsp.notify_file_changed(&full_path).await;
         ctx.agent
             .invalidate_call_edges_for(ctx.workspace_override.as_deref(), &full_path)
@@ -856,6 +877,11 @@ impl EditCode {
         ctx.agent
             .mark_file_dirty_for(ctx.workspace_override.as_deref(), full_path)
             .await;
-        Ok(json!({ "status": "ok", "inserted_at_line": insert_at + 1, "position": position }))
+        let mut response =
+            json!({ "status": "ok", "inserted_at_line": insert_at + 1, "position": position });
+        if repaired {
+            response["note"] = json!(crate::tools::edit_repair::REPAIR_NOTE);
+        }
+        Ok(response)
     }
 }

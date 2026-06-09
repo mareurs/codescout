@@ -4,6 +4,9 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use super::{parse_bool_param, Tool, ToolContext};
+use crate::tools::edit_repair::{
+    decode_literal_escapes, finalize_edit_content, RepairResult, REPAIR_NOTE,
+};
 use crate::util::text::{leading_ws, reindent_block};
 
 /// Returns definition keywords for a specific language.
@@ -596,6 +599,32 @@ async fn perform_edit(
     let match_count = content.matches(old_string).count();
 
     if match_count == 0 {
+        // Frictionless recovery: an old_string delivered with literal escape
+        // sequences (newline/tab as backslash-n / backslash-t) will not match
+        // the file's real control characters. If decoding makes it match
+        // uniquely, apply the decoded pair instead of failing.
+        if let Some(decoded_old) = decode_literal_escapes(old_string) {
+            let dcount = content.matches(decoded_old.as_str()).count();
+            if dcount == 1 || (replace_all && dcount >= 1) {
+                let decoded_new =
+                    decode_literal_escapes(new_string).unwrap_or_else(|| new_string.to_string());
+                let candidate = content.replace(decoded_old.as_str(), &decoded_new);
+                let new_content = finalize_edit_content(
+                    std::path::Path::new(path),
+                    &content,
+                    candidate,
+                    &decoded_new,
+                    |d| content.replace(decoded_old.as_str(), d),
+                )
+                .into_content();
+                commit_edit(ctx, &resolved, &new_content).await?;
+                return Ok(json!({
+                    "status": "ok",
+                    "applied_via": "escape-decoded match",
+                    "note": "old_string matched after decoding literal newline/tab escapes; verify the result"
+                }));
+            }
+        }
         // Indentation-significant languages: a whitespace-normalized match could be
         // re-indented into a different block while still parsing, so the AST gate would
         // wave it through. Disable the fallback here and surface the nearest content so
@@ -699,8 +728,21 @@ async fn perform_edit(
         .into());
     }
 
-    let new_content = content.replace(old_string, new_string);
+    let candidate = content.replace(old_string, new_string);
+    let (new_content, repair_note) = match finalize_edit_content(
+        std::path::Path::new(path),
+        &content,
+        candidate,
+        new_string,
+        |decoded| content.replace(old_string, decoded),
+    ) {
+        RepairResult::Repaired(c) => (c, Some(REPAIR_NOTE)),
+        RepairResult::Clean(c) | RepairResult::Introduced(c) => (c, None),
+    };
     commit_edit(ctx, &resolved, &new_content).await?;
+    if let Some(note) = repair_note {
+        return Ok(json!({ "status": "ok", "note": note }));
+    }
 
     // Syntax check: warn if the edit introduced parse errors (non-fatal).
     if let Some(lang) = crate::ast::detect_language(std::path::Path::new(path)) {
