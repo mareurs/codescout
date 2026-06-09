@@ -78,31 +78,46 @@ pub fn shell_tokenize(cmd: &str) -> Result<Vec<String>, String> {
 }
 
 pub fn terminate_process(pid: u32) -> std::io::Result<()> {
-    let status = std::process::Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/F"])
-        .output()?;
-    if status.status.success() {
-        Ok(())
-    } else {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!(
-                "taskkill failed: {}",
-                String::from_utf8_lossy(&status.stderr)
-            ),
-        ))
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+    // SAFETY: OpenProcess returns a null handle on failure (checked below); the
+    // handle is closed on every path before returning. bInheritHandle = 0 (FALSE).
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if handle.is_null() {
+            // Process already gone (or we lack rights) — treat "gone" as success,
+            // matching the old taskkill semantics where a dead PID is not an error.
+            return Ok(());
+        }
+        let ok = TerminateProcess(handle, 1);
+        CloseHandle(handle);
+        if ok == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
     }
+    Ok(())
 }
 
 pub fn process_alive(pid: u32) -> bool {
-    std::process::Command::new("tasklist")
-        .args(["/FI", &format!("PID eq {}", pid), "/NH"])
-        .output()
-        .map(|o| {
-            let stdout = String::from_utf8_lossy(&o.stdout);
-            stdout.contains(&pid.to_string())
-        })
-        .unwrap_or(false)
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    // GetExitCodeProcess reports STILL_ACTIVE (259) for a running process.
+    // Defined locally to avoid windows-sys version drift in its export path.
+    const STILL_ACTIVE: u32 = 259;
+    // SAFETY: handle is null-checked and closed before returning; exit_code is a
+    // valid out-param for the duration of the call. bInheritHandle = 0 (FALSE).
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let mut exit_code: u32 = 0;
+        let got = GetExitCodeProcess(handle, &mut exit_code);
+        CloseHandle(handle);
+        got != 0 && exit_code == STILL_ACTIVE
+    }
 }
 
 pub fn rename_overwrite(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
@@ -167,6 +182,30 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn win32_terminate_and_liveness() {
+        // Spawn a long sleeper, confirm alive, terminate, confirm dead.
+        let child = std::process::Command::new("cmd")
+            .args(["/C", "ping -n 30 127.0.0.1 >nul"])
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        assert!(process_alive(pid), "sleeper should be alive");
+        terminate_process(pid).unwrap();
+        // Give the OS a moment to reap the terminated process.
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(
+            !process_alive(pid),
+            "sleeper should be dead after terminate"
+        );
+    }
+
+    #[test]
+    fn win32_liveness_false_for_dead_pid() {
+        // A PID that almost certainly does not exist.
+        assert!(!process_alive(0xFFFF_FFF0));
+    }
 
     #[test]
     fn pyright_prefers_exe_when_only_exe_present() {

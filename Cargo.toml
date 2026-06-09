@@ -154,6 +154,16 @@ jsonschema     = { version = "0.30", default-features = false, optional = true }
 [target.'cfg(unix)'.dependencies]
 tikv-jemallocator = "0.6"
 
+# Windows: direct Win32 process control (OpenProcess/TerminateProcess/
+# GetExitCodeProcess) so terminate_process/process_alive never spawn
+# taskkill/tasklist — process creation is the operation EDR/AV injects into
+# and stalls on this VDI. windows-sys 0.61 is already resolved transitively.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+] }
+
 [features]
 default = ["remote-embed", "http", "librarian"]
 # Embedded librarian (workspace doc/spec/plan index). Compiled in by
