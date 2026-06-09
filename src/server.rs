@@ -1550,7 +1550,10 @@ mod tests {
     #[tokio::test]
     async fn server_registers_all_tools() {
         let (_dir, server) = make_server().await;
-        let expected_tools = [
+        // `peer` is Unix-only (cfg(unix); Unix-domain-socket); it is not
+        // registered on Windows, so only assert it on Unix.
+        #[allow(unused_mut)]
+        let mut expected_tools = vec![
             "read_file",
             "tree",
             "grep",
@@ -1572,8 +1575,9 @@ mod tests {
             "workspace",
             "library",
             "get_guide",
-            "peer",
         ];
+        #[cfg(unix)]
+        expected_tools.push("peer");
         let core_count = server
             .tools
             .iter()
@@ -1604,10 +1608,16 @@ mod tests {
             .iter()
             .filter(|t| !is_librarian_tool(t.name()))
             .count();
+        // `peer` is Unix-only (cfg(unix); Unix-domain-socket), so the L3 target
+        // is 22 core tools on Unix and 21 on Windows where peer is not registered.
+        #[cfg(unix)]
+        let expected = 22;
+        #[cfg(not(unix))]
+        let expected = 21;
         assert_eq!(
             core_count,
-            22,
-            "L3 target is 22 core tools; got {}: {:?}",
+            expected,
+            "L3 target is {expected} core tools; got {}: {:?}",
             core_count,
             server.tools.iter().map(|t| t.name()).collect::<Vec<_>>()
         );
