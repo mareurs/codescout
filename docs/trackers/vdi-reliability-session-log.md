@@ -12,6 +12,7 @@
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-06-08 | med | plan-prose | fixed-verified | Plan Task 2 test code used a non-existent test harness shape |
 | F-2 | 2026-06-08 | med | subagent | mitigated | Broad `git add <file>` swept pre-existing WIP into the Task 1 commit |
+| F-3 | 2026-06-08 | low | architectural | documented | Task 7 spawn-level timeout deferred (`initialize()` already bounded; `spawn()` needs `spawn_blocking`) |
 
 ## Wins Index
 
@@ -131,6 +132,53 @@ before dispatch.
 **Status:** mitigated — message amended; not cleanly un-mixed (single file, no hunk staging available).
 
 **Fix idea / Pointer:** Future implementer briefings must (1) run `git status` first and (2) `git add` only the specific files this task created/owns, never a file already showing as pre-existing `M`. If a task must edit a file with pre-existing WIP, the controller stages it. Plan Task 7 re-scoped to spawn/init timeout + bug close.
+
+---
+
+## F-3 — Task 7 spawn-level timeout deferred: `initialize()` already bounded, `spawn()` needs `spawn_blocking`
+
+**Observed:** 2026-06-08, executing Task 7 (LSP spawn hardening) inline.
+
+**When:** Verifying the two remaining Task 7 sub-steps after the binary-resolution
+fix had already shipped (cd31ca76).
+
+**Expected (plan Task 7 Step 3):** "Wrap the LSP `spawn()` + initialize handshake
+in `tokio::time::timeout(...)`."
+
+**Got (scouted reality):**
+1. The **initialize handshake is already bounded** — `LspClient::initialize`
+   (`src/lsp/client.rs:762`) calls
+   `request_with_timeout("initialize", params, self.init_timeout)` with
+   `init_timeout` defaulting to 30s, wrapped in a 5×-retry loop with
+   `fatal_stderr_hint()` short-circuiting. No new init timeout is needed.
+2. **`cmd.spawn()` cannot be meaningfully wrapped in `tokio::time::timeout`** —
+   it is a synchronous call (`cmd.spawn().with_context(...)?`, no `.await`) that
+   performs `CreateProcessW` on the calling thread. An EDR-induced hang blocks
+   that thread; `tokio::time::timeout` only cancels *futures* and would not
+   preempt the blocking syscall. A real spawn timeout requires
+   `tokio::task::spawn_blocking` + abandoning the hung thread (the tokio blocking
+   pool is bounded, so repeated hangs would exhaust it) — a design decision with
+   its own trade-offs.
+
+**Decision:** Per the plan's explicit STOP rule ("If this task grows beyond
+'verify abs-path + add a bounded timeout,' STOP and split it into its own
+spec/plan; ship Tasks 1-6 first"), the spawn-level timeout is **deferred** to a
+dedicated spec. Task 7 ships with: abs-path resolution verified wired (✅,
+cd31ca76) + init handshake confirmed already-bounded (✅) + bug
+`2026-06-06-windows-lsp-binary-hardcoded-cmd-extension.md` (already `fixed`)
+committed.
+
+**Severity:** low — no regression; the riskiest sub-task was correctly scoped out
+rather than bolted on. The bug the task set out to fix is resolved.
+
+**Status:** documented — spawn-timeout split out; re-open trigger is an observed
+LSP spawn hang on this VDI (none seen yet; the binary-resolution fix removed the
+known failure mode).
+
+**Fix idea / Pointer:** If a spawn hang is ever observed, open a spec for a
+`spawn_blocking`-based bounded spawn with a thread-abandonment budget. Until
+then, the cold-start retry budget (`cold_start_max_retries`, 20 on Windows) +
+tree-sitter fallback already covers query-time degradation.
 
 ---
 
