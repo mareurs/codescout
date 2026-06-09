@@ -48,9 +48,11 @@ impl Drop for BackgroundKillGuard {
             }
             #[cfg(windows)]
             {
-                let _ = std::process::Command::new("taskkill")
-                    .args(["/F", "/PID", &pid.to_string()])
-                    .status();
+                // Win32 TerminateProcess (forced, ≈ `taskkill /F`) with no child
+                // spawn. Spawning taskkill here would stall under EDR at the worst
+                // possible moment — a cancellation Drop — defeating the guard's
+                // cancel-fast intent. Mirrors the no-spawn unix SIGKILL arm above.
+                let _ = crate::platform::terminate_process(pid);
             }
         }
     }
@@ -354,23 +356,14 @@ pub(crate) async fn run_command_inner(
     // keeps draining curl's output into the tmpfile until the download completes.
     #[cfg(unix)]
     let (child_output_fut, child_pgid) = {
-        let mut cmd = tokio::process::Command::new("sh");
-        cmd.arg("-c")
-            .arg(&effective_command)
-            .current_dir(&work_dir)
-            .env("GIT_PAGER", "cat")
+        // Base config (sh -c, GIT_PAGER, process_group(0), SIGPIPE reset,
+        // stdin=null) comes from the shared platform builder; foreground only
+        // adds piped stdio + kill_on_drop.
+        let mut cmd = crate::platform::shell_command_configured(&effective_command);
+        cmd.current_dir(&work_dir)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .process_group(0) // new process group; PGID = child PID
             .kill_on_drop(true); // SIGKILL on Drop — reaps shell on cancel
-                                 // SAFETY: pre_exec runs in the child after fork(), before exec().
-                                 // signal() is async-signal-safe (POSIX).  No locks are held at this point.
-        unsafe {
-            cmd.pre_exec(|| {
-                libc::signal(libc::SIGPIPE, libc::SIG_DFL);
-                Ok(())
-            });
-        }
         let child = cmd.spawn()?;
         let pgid: Option<i32> = child.id().map(|id| id as i32);
         // Drop guard: if the future is cancelled, we want the *entire pipeline*
@@ -405,8 +398,6 @@ pub(crate) async fn run_command_inner(
     // arm is `#[cfg(unix)]` only. The Unix branch above binds it as `child_pgid`.
     #[cfg(windows)]
     let (child_output_fut, _child_pgid) = {
-        use std::os::windows::process::CommandExt;
-
         // Capture stdout/stderr via temp files instead of pipes, and wait on the
         // *process* rather than on pipe EOF.
         //
@@ -419,25 +410,11 @@ pub(crate) async fn run_command_inner(
         // process means a lingering grandchild keeping a file handle open does
         // not block our read.
         //
-        // stdin is redirected to NUL so a child that reads stdin — e.g. a Python
-        // that fell into its REPL because its `-c` argument failed to parse —
-        // gets immediate EOF instead of blocking forever on the MCP server's
-        // inherited stdin pipe.
-        //
-        // The command is passed with `raw_arg` so cmd.exe receives it verbatim.
-        // Rust's normal `.arg()` quoting escapes embedded quotes as `\"` for the
-        // MSVC CRT convention, which cmd.exe does not understand — it mangled
-        // `py -c "print(1)"` into a broken `\"...\"` argument that dropped Python
-        // into its (stdin-blocked) REPL.
-        //
-        // The whole command is wrapped in an outer quote pair — `cmd /C "<cmd>"`.
-        // Per `cmd /?`: when the argument to /C starts with a quote, cmd strips
-        // the first and last quote on the line and runs the remainder verbatim.
-        // Without the wrapper a command that *itself* starts with a quoted path
-        // (`"C:\Program Files\…\python.exe" …`) gets its own first/last quotes
-        // stripped, corrupting it (`'C:\Program' is not recognized`). The wrapper
-        // is the pair cmd consumes, leaving the original command — inner quotes
-        // and all — intact.
+        // The cmd /C invocation, verbatim raw_arg cmdline (no MSVC-CRT quote
+        // mangling — see the `cmd /?` outer-quote rule), GIT_PAGER, and stdin=NUL
+        // all come from the shared platform builder
+        // (`platform::shell_command_configured` / `build_windows_cmdline`).
+        // Foreground only adds the file-capture stdio + kill_on_drop.
         let out_tmp = tempfile::Builder::new()
             .prefix("codescout-cmd-out-")
             .tempfile()?;
@@ -447,18 +424,12 @@ pub(crate) async fn run_command_inner(
         let (out_file, out_path) = out_tmp.keep()?;
         let (err_file, err_path) = err_tmp.keep()?;
 
-        let mut std_cmd = std::process::Command::new("cmd");
-        std_cmd
-            .raw_arg(crate::platform::build_windows_cmdline(&effective_command))
-            .current_dir(&work_dir)
-            .env("GIT_PAGER", "cat")
-            .stdin(std::process::Stdio::null())
+        let mut cmd = crate::platform::shell_command_configured(&effective_command);
+        cmd.current_dir(&work_dir)
             .stdout(std::process::Stdio::from(out_file))
-            .stderr(std::process::Stdio::from(err_file));
-
-        let mut tokio_cmd = tokio::process::Command::from(std_cmd);
-        tokio_cmd.kill_on_drop(true); // SIGKILLs cmd on cancel/timeout (future drop)
-        let mut child = tokio_cmd.spawn()?;
+            .stderr(std::process::Stdio::from(err_file))
+            .kill_on_drop(true); // SIGKILLs cmd on cancel/timeout (future drop)
+        let mut child = cmd.spawn()?;
 
         let fut: std::pin::Pin<
             Box<dyn std::future::Future<Output = std::io::Result<std::process::Output>> + Send>,

@@ -73,7 +73,9 @@ pub fn build_windows_cmdline(cmd: &str) -> String {
 /// Windows: `cmd /C "<cmd>"` via raw_arg (no MSVC-CRT quote mangling).
 /// Unix: `sh -c <cmd>` in a fresh process group with SIGPIPE reset.
 /// Sets `GIT_PAGER=cat`. The caller sets cwd, stdio, and kill_on_drop.
-/// On Windows, stdin defaults to NUL (prevents inherited-pipe hangs); callers that need real stdin (interactive mode) must override with `.stdin(...)`.
+/// stdin defaults to null on **both** platforms (prevents inherited-pipe / REPL
+/// hangs on the MCP stdio server); callers that need real stdin (interactive
+/// mode) override with `.stdin(...)`.
 pub fn shell_command_configured(cmd: &str) -> tokio::process::Command {
     imp::shell_command_configured(cmd)
 }

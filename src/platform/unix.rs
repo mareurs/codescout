@@ -67,6 +67,7 @@ pub fn shell_command_configured(cmd: &str) -> tokio::process::Command {
     c.arg("-c")
         .arg(cmd)
         .env("GIT_PAGER", "cat")
+        .stdin(std::process::Stdio::null())
         .process_group(0);
     // SAFETY: pre_exec runs post-fork, pre-exec; signal() is async-signal-safe.
     unsafe {
