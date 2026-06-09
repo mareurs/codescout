@@ -62,9 +62,6 @@ pub fn denied_read_prefixes() -> &'static [&'static str] {
     ]
 }
 
-pub fn shell_command(cmd: &str) -> (&'static str, Vec<String>) {
-    ("sh", vec!["-c".to_string(), cmd.to_string()])
-}
 pub fn shell_command_configured(cmd: &str) -> tokio::process::Command {
     let mut c = tokio::process::Command::new("sh");
     c.arg("-c")
@@ -152,8 +149,10 @@ mod tests {
 
     #[test]
     fn shell_command_uses_sh() {
-        let (prog, args) = shell_command("echo hello");
-        assert_eq!(prog, "sh");
+        let cmd = shell_command_configured("echo hello");
+        let std_cmd = cmd.as_std();
+        assert_eq!(std_cmd.get_program().to_str().unwrap(), "sh");
+        let args: Vec<&str> = std_cmd.get_args().map(|a| a.to_str().unwrap()).collect();
         assert_eq!(args, vec!["-c", "echo hello"]);
     }
 

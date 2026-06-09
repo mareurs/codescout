@@ -43,9 +43,6 @@ pub fn denied_read_prefixes() -> &'static [&'static str] {
     ]
 }
 
-pub fn shell_command(cmd: &str) -> (&'static str, Vec<String>) {
-    ("cmd.exe", vec!["/C".to_string(), cmd.to_string()])
-}
 pub fn shell_command_configured(cmd: &str) -> tokio::process::Command {
     use std::os::windows::process::CommandExt;
     let mut std_cmd = std::process::Command::new("cmd");

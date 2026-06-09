@@ -31,12 +31,6 @@ pub fn denied_read_prefixes() -> &'static [&'static str] {
     imp::denied_read_prefixes()
 }
 
-/// Build a shell command for executing a string.
-/// Returns `(program, args)` — e.g. `("sh", ["-c", cmd])` on Unix.
-pub fn shell_command(cmd: &str) -> (&'static str, Vec<String>) {
-    imp::shell_command(cmd)
-}
-
 /// Tokenize a command string into arguments using platform-appropriate rules.
 /// Unix: shell_words::split. Windows: custom tokenizer (no backslash escapes).
 pub fn shell_tokenize(cmd: &str) -> Result<Vec<String>, String> {
