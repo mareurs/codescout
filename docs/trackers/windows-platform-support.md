@@ -79,9 +79,10 @@ to master — the tracker outlives them.
 | WIN-12 | companion | fixed | codescout-companion hooks referenced consolidated-away tool names; updated to edit_code/edit_file/edit_markdown/create_file | codescout-companion:71aceeb | 2026-06-09 |
 | WIN-13 | path-handling | mitigated | librarian + guide_hint emitted mixed-slash paths on Windows (18 historical test failures) | docs/issues/archive/2026-05-24-ci-windows-default-feature-failures.md | 2026-05-24 |
 | WIN-14 | process-spawn | fixed | resolve_head_sha shelled out to `git rev-parse --short HEAD` at every project activation (unbounded .output(), no timeout → EDR hang risk); now libgit2 revparse_single().short_id() like sibling probe_has_git_remote | bcc712ae (experiments) | 2026-06-09 |
-| WIN-15 | process-spawn | open | hardware GPU probe spawns nvidia-smi/rocm-smi at onboarding (2s timeout each; EDR tax + spawn_blocking thread leak on hang); skip/cache on Windows VDI | src/hardware.rs:114 | 2026-06-09 |
-| WIN-16 | build-install | open | .cargo/config.toml has no Windows linker override (uses slow MSVC link.exe) and jobs=64 oversubscribes a low-core VDI; add rust-lld target section + tune jobs | .cargo/config.toml | 2026-06-09 |
+| WIN-15 | process-spawn | fixed | hardware GPU probe spawned nvidia-smi/rocm-smi at onboarding (sync CreateProcessW in 2s timeout that can't preempt a hung spawn → tokio-worker stall); now skipped on Windows unless CODESCOUT_GPU_PROBE set, via pure gpu_probe_enabled() | 8ceb908f (experiments) | 2026-06-09 |
+| WIN-16 | build-install | mitigated | windows-gnu (MinGW), not MSVC: jobs=64 caused 16x oversubscription on the 4-core VDI (64 EDR-taxed rustc on 4 cores); removed the hardcoded cap so cargo auto-detects logical CPUs. lld fast-linker deferred (bundled-lld link on windows-gnu unverified + fresh-binary EDR quarantine risk — WIN-18) | 20aa7df3 (experiments) | 2026-06-09 |
 | WIN-17 | test-portability | fixed | cargo clippy -D warnings failed on Windows: cfg(unix)-gated peer + mux left is_codescout_kotlin_home + 5 peer-serve CodeScoutServer methods + parse_env_kv dead; plus missing_const_for_thread_local FP (clippy 1.96); annotated cfg_attr(not(unix), allow(dead_code)) + scoped allow | 2f6e35c3 (experiments) | 2026-06-09 |
+| WIN-18 | build-install | open | CrowdStrike EDR quarantines freshly-built unsigned binaries: a 3-line hello-world test exe was deleted as malware seconds after rustc produced it. Large cargo outputs (codescout.exe, test deps) survive — ML heuristic targets tiny isolated PEs. Avoid throwaway standalone exes; spurious build/test-failure risk; AV unchangeable (target/ exclusion out of our control) | session 2026-06-09 observation | 2026-06-09 |
 ## Currently stable on Windows
 
 What works now (post the VDI reliability stream, on `experiments`):
@@ -172,3 +173,19 @@ five `CodeScoutServer` peer-serve helpers, and `parse_env_kv` dead, plus a
 `cfg_attr(not(unix), allow(dead_code))` + one `allow` (`2f6e35c3`). Verified on
 Windows: clippy green (lib + bins), `cargo test --lib` green (2598 passed).
 WIN-15 (GPU-probe spawns) and WIN-16 (.cargo linker/jobs) remain open.
+
+
+### 2026-06-09 — WIN-15 + WIN-16 + WIN-18 (VDI speed pass, part 2)
+WIN-15: GPU subprocess probes (nvidia-smi/rocm-smi) skipped on Windows unless
+`CODESCOUT_GPU_PROBE` is set — sync CreateProcessW in a 2s timeout can't preempt a
+hung spawn, so a stalled probe blocked a tokio worker; pure `gpu_probe_enabled()`
++ test (`8ceb908f`). WIN-16: the toolchain is windows-gnu (MinGW), not MSVC —
+framing corrected. The real win was removing `jobs = 64` from `.cargo/config.toml`:
+on a 4-core VDI that was 16x oversubscription (64 EDR-taxed rustc on 4 cores);
+cargo now auto-detects logical CPUs (`20aa7df3`). The lld fast-linker half is
+deferred. WIN-18 (new): while probing the linker I compiled a 3-line hello-world
+to a standalone exe — CrowdStrike quarantined it as malware within seconds. A
+textbook EDR false positive on tiny unsigned PEs; large cargo outputs survive.
+Lesson: do not produce throwaway standalone binaries on this VDI, and there is a
+latent risk of spurious build/test failures if a real artifact is ever flagged.
+AV exclusions are out of our control here.
