@@ -317,17 +317,19 @@ fn load_discover_settings(root: &std::path::Path) -> (usize, Vec<String>) {
     (3, vec![])
 }
 
-/// Resolve the short git HEAD SHA for a directory. Returns None if not a git repo.
+/// Resolve the short git HEAD SHA for a directory. Returns None if not a git
+/// repo or if HEAD is unborn (no commits yet).
+///
+/// Uses libgit2 (no subprocess): on this project's locked-down Windows VDI,
+/// every `CreateProcessW` is taxed by EDR injection, and a raw `git rev-parse`
+/// with no timeout could hang activation outright. `short_id()` respects
+/// `core.abbrev`, matching `git rev-parse --short HEAD` semantics. Mirrors the
+/// sibling `probe_has_git_remote`, which already opens a libgit2 repo.
 fn resolve_head_sha(root: &Path) -> Option<String> {
-    std::process::Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
-        .current_dir(root)
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+    let repo = git2::Repository::open(root).ok()?;
+    let head = repo.revparse_single("HEAD").ok()?;
+    let short = head.short_id().ok()?;
+    short.as_str().map(str::to_string).filter(|s| !s.is_empty())
 }
 
 /// Does `root` contain a git repository with at least one configured remote?
