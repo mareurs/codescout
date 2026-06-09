@@ -55,6 +55,7 @@ Primary writer: codescout server. Resides at `<project_root>/.codescout/`.
 | `anchors/<topic>.toml` | codescout memory anchor system | codescout staleness check | TOML sidecars for memory↔source-file anchors. Internal to codescout. |
 | `embeddings.db` (legacy) | codescout legacy index | codescout legacy retrieval, companion `session-start.sh` (queries `meta.last_indexed_commit` and `drift_report` view) | sqlite-vec virtual tables. **Being removed** — see `docs/trackers/2026-05-07-legacy-retrieval-removal.md` (L-01..L-15). Companion's drift query depends on `meta` table and `drift_report` view; when the legacy index goes, companion drift detection must move to the new stack or be removed. |
 | `embeddings/project.db` | codescout `sync_project` binary, retrieval stack writers | codescout `semantic_search` | sqlite-format Qdrant per-project store (post-Phase 6). |
+| `index-state.json` | codescout `sync_project` completion (`index_state::write_index_state`) | codescout `index(action="status")` (`git_sync` envelope); **companion** `session-start.sh` (planned, scope-b) | JSON `{ last_indexed_commit, last_indexed_at (RFC3339), schema_version }`. `last_indexed_commit` = full git HEAD oid at sync time (`""` for non-git roots). Qdrant-era replacement for the legacy `meta.last_indexed_commit` reindex trigger — lets an out-of-process consumer detect external HEAD moves (checkout/pull/HEAD change) via a single file read, no internal-DB access. |
 | `embeddings/lib/<name>.db` | codescout library indexing | codescout library-scoped search | Per-registered-library embeddings. |
 | `libraries.json` | codescout `library(action="register")` | codescout library scope resolution | JSON array of registered libraries with paths and versions. |
 | `cc_session_id` | **companion** `session-start.sh` | codescout `usage` tracking | Plain-text Claude Code session UUID. **Cross-plugin write into a codescout-owned directory** — only companion writes here. Codescout reads it during usage.db correlation. |
@@ -69,10 +70,40 @@ The companion reads two read-only surfaces of this database:
 - `drift_report` view, columns: `file_path`, `max_drift`. Filtered by `max_drift > 0.1`
   to surface session-start drift warnings.
 
-Both surfaces are **stable until L-01 ships and the legacy index is removed.** When the
-legacy index goes, the companion's drift query and reindex trigger must be ported to the
-new stack's equivalents (Qdrant `last_synced` timestamps; per-chunk drift) or removed.
+Both surfaces are **stable until L-01 ships and the legacy index is removed.** The
+**reindex trigger** has now been ported to `.codescout/index-state.json` (see the next
+section); the **drift-report** surface is still pending (port to per-chunk drift, or
+remove from the companion).
 
+### `.codescout/index-state.json` schema (freshness signal — supersedes the `embeddings.db` `meta` read)
+
+Written by codescout on every successful project `sync_project` completion
+(`src/retrieval/index_state.rs::write_index_state`); the Qdrant-era replacement for the
+now-frozen legacy `meta.last_indexed_commit`.
+
+```json
+{
+  "last_indexed_commit": "<full git HEAD oid; empty string when the project root is not a git repo>",
+  "last_indexed_at": "<RFC3339 timestamp>",
+  "schema_version": 1
+}
+```
+
+- **Reindex trigger (consumer):** compare `last_indexed_commit` to `git rev-parse HEAD`.
+  Behind ⇒ trigger a background `codescout index`. A single file read — no internal-DB
+  access, no process spawn.
+- **codescout `index(action="status")`** reads the same file and emits a
+  `git_sync: { status, behind_commits, last_indexed_commit, head_commit }` envelope
+  (`index_state::git_sync_status`); `behind_commits` is computed via
+  `git2::graph_ahead_behind`.
+- **Indeterminate freshness** (no sidecar, non-git root, recorded commit unresolvable) ⇒
+  `git_sync` is omitted rather than reported as up-to-date.
+- `schema_version` lets consumers degrade gracefully on a shape they don't recognise.
+
+> Covers *external* changes (checkout / pull / HEAD move) only; edits made *through*
+> codescout's own write tools are handled by the on-edit reindex
+> (`docs/superpowers/specs/2026-05-02-auto-reindex-on-edit-design.md`). The two are
+> complementary, not redundant.
 ## `.buddy/` — per-project, buddy-managed
 
 Resides at `<project_root>/.buddy/`. Buddy is sole writer; nothing else writes here.

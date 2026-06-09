@@ -2,6 +2,7 @@ pub mod client;
 pub mod config;
 pub mod drift;
 pub mod embedder;
+pub mod index_state;
 pub mod memory;
 pub mod memory_payload;
 pub mod payload;

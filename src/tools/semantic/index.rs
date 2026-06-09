@@ -320,6 +320,12 @@ impl Tool for IndexProject {
                         if let Some(ref arc) = dirty_files_arc {
                             arc.lock().unwrap_or_else(|e| e.into_inner()).clear();
                         }
+                        // Record the indexed HEAD so external git moves (checkout/
+                        // pull/HEAD change) become detectable by index(action="status")
+                        // and the companion session-start hook. Fail-soft.
+                        if let Err(e) = crate::retrieval::index_state::write_index_state(&root) {
+                            tracing::warn!(error = %e, "failed to write index-state sidecar");
+                        }
                         IndexingState::Done {
                             files_indexed: report.added + report.updated,
                             files_deleted: report.deleted,
@@ -474,6 +480,21 @@ impl Tool for IndexStatus {
         let lib_states = ctx.agent.library_states_summary();
         if !lib_states.is_empty() {
             result["libraries"] = serde_json::to_value(&lib_states)?;
+        }
+
+        // Index freshness vs git HEAD — surfaces external checkout/pull/HEAD
+        // moves that the on-edit reindex never observes. Resilient: any failure
+        // (no project root, no sidecar, non-git root) simply omits git_sync.
+        if result["indexed"].as_bool() == Some(true) {
+            if let Ok(root) = ctx
+                .agent
+                .require_project_root_for(ctx.workspace_override.as_deref())
+                .await
+            {
+                if let Some(gs) = crate::retrieval::index_state::git_sync_status(&root) {
+                    result["git_sync"] = gs;
+                }
+            }
         }
 
         Ok(result)
