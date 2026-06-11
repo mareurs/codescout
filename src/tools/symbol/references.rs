@@ -33,6 +33,80 @@ pub(crate) fn references_completeness_hint(refs_total: usize, call_sites: usize)
         None
     }
 }
+/// True if `needle` occurs in `haystack` bounded by non-identifier characters
+/// on both sides, so `foo` matches `foo(` but not `foobar` or `barfoo`.
+pub(crate) fn contains_word(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    let bytes = haystack.as_bytes();
+    let nlen = needle.len();
+    let mut from = 0;
+    while let Some(rel) = haystack[from..].find(needle) {
+        let i = from + rel;
+        let before_ok = i == 0 || !is_ident_byte(bytes[i - 1]);
+        let after = i + nlen;
+        let after_ok = after >= bytes.len() || !is_ident_byte(bytes[after]);
+        if before_ok && after_ok {
+            return true;
+        }
+        from = i + nlen;
+    }
+    false
+}
+
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// LSP-independent corroboration for a zero-external-callers `references` result
+/// (BUG 2026-06-09 references-false-zero-stale-graph). After an incremental
+/// reindex the LSP reference graph can lag the on-disk text, so
+/// `textDocument/references` returns only the definition for a symbol that has
+/// callers — the signal an agent uses to delete supposedly-dead code. The
+/// LSP/chunk indices share that staleness; raw source text does not. Walks the
+/// project for same-language source files (mirroring call_graph Phase B bounds)
+/// and returns up to a few files OTHER than `def_file` where `ident` appears as
+/// a whole word. A non-empty result proves the empty LSP set is incomplete.
+pub(crate) fn corroborate_zero_references(
+    root: &std::path::Path,
+    def_file: &std::path::Path,
+    ident: &str,
+    lang: &str,
+) -> Vec<std::path::PathBuf> {
+    const MAX_FILES_SCAN: usize = 5_000;
+    const MAX_HITS: usize = 5;
+    let mut hits: Vec<std::path::PathBuf> = Vec::new();
+    let mut scanned = 0usize;
+    for entry in ignore::WalkBuilder::new(root)
+        .hidden(true)
+        .git_ignore(true)
+        .build()
+        .flatten()
+    {
+        if hits.len() >= MAX_HITS || scanned >= MAX_FILES_SCAN {
+            break;
+        }
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        let path = entry.path();
+        if path == def_file {
+            continue;
+        }
+        if crate::ast::detect_language(path) != Some(lang) {
+            continue;
+        }
+        scanned += 1;
+        let Ok(src) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        if contains_word(&src, ident) {
+            hits.push(path.to_path_buf());
+        }
+    }
+    hits
+}
 
 #[async_trait::async_trait]
 impl Tool for References {
@@ -209,6 +283,34 @@ impl Tool for References {
                 if let Some(hint) = references_completeness_hint(total, call_sites) {
                     result["completeness_warning"] = json!(hint);
                 }
+            }
+        }
+
+        // Zero-external-callers corroboration (BUG 2026-06-09 references-false-zero-stale-graph):
+        // no callers OUTSIDE the definition file is the high-consequence failure mode — after an
+        // incremental reindex the LSP reference graph can lag the on-disk text and return only the
+        // definition, and an agent reads a 0-callers result as dead code and deletes it. The
+        // call-hierarchy cross-check above is also LSP-backed (shares the staleness), so corroborate
+        // with an LSP-independent text scan.
+        let external_refs = refs
+            .iter()
+            .filter(|loc| {
+                uri_to_path(loc.uri.as_str())
+                    .map(|p| p != full_path)
+                    .unwrap_or(false)
+            })
+            .count();
+        if external_refs == 0 && result.get("completeness_warning").is_none() {
+            let ident = name_path.rsplit('/').next().unwrap_or(name_path);
+            let others = corroborate_zero_references(&root, &full_path, ident, raw_lang);
+            if !others.is_empty() {
+                let sample = others
+                    .iter()
+                    .take(3)
+                    .map(|p| p.strip_prefix(&root).unwrap_or(p).display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                result["completeness_warning"] = json!(format!("LSP returned 0 references outside the definition file, but `{ident}` appears as a whole word in {n}+ other source file(s) (e.g. {sample}) — the reference index may still be warming after a reindex. Re-run, or corroborate with grep / call_graph(direction='callers') before treating this symbol as unused.", n = others.len()));
             }
         }
 

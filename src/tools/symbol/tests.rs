@@ -4935,6 +4935,55 @@ fn references_completeness_hint_warns_only_when_calls_exceed_refs() {
     // Equal counts are not proof of incompleteness.
     assert!(references_completeness_hint(5, 5).is_none());
 }
+#[test]
+fn contains_word_respects_identifier_boundaries() {
+    use crate::tools::symbol::references::contains_word;
+    assert!(contains_word("a = getLabel();", "getLabel"));
+    assert!(contains_word("getLabel", "getLabel"));
+    assert!(!contains_word("getLabelExtra()", "getLabel"));
+    assert!(!contains_word("myGetLabel()", "getLabel"));
+    assert!(!contains_word("", "getLabel"));
+}
+
+#[test]
+fn corroborate_zero_references_finds_callers_via_text_scan() {
+    // BUG 2026-06-09: the LSP-independent corroboration for a false 0-callers
+    // result must find callers in OTHER files, exclude the definition file, and
+    // honour word boundaries (not match a superstring).
+    use crate::tools::symbol::references::corroborate_zero_references;
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join("def.rs"), "pub fn getStudentGroupLabel() {}").unwrap();
+    std::fs::write(root.join("a.rs"), "fn x() { getStudentGroupLabel(); }").unwrap();
+    std::fs::write(
+        root.join("b.rs"),
+        "fn y() { let _ = getStudentGroupLabel; }",
+    )
+    .unwrap();
+    std::fs::write(root.join("c.rs"), "fn z() { getStudentGroupLabelExtra(); }").unwrap();
+    let def = root.join("def.rs");
+    let hits = corroborate_zero_references(root, &def, "getStudentGroupLabel", "rust");
+    let names: std::collections::HashSet<String> = hits
+        .iter()
+        .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        names.contains("a.rs"),
+        "should find caller a.rs; got {names:?}"
+    );
+    assert!(
+        names.contains("b.rs"),
+        "should find caller b.rs; got {names:?}"
+    );
+    assert!(
+        !names.contains("def.rs"),
+        "must exclude the definition file"
+    );
+    assert!(
+        !names.contains("c.rs"),
+        "must not match superstring; got {names:?}"
+    );
+}
 
 #[test]
 fn references_format_compact_appends_completeness_warning() {
