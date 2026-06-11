@@ -6731,7 +6731,6 @@ fn format_search_symbols_single_file_no_global_header() {
     assert!(out.starts_with("a.rs (1)\n"), "got:\n{out}");
 }
 
-
 // ── symbols single-match focus + search-mode include_docs ──────────────────
 
 #[tokio::test]
@@ -6873,6 +6872,56 @@ fn format_search_symbols_renders_docs_members_and_hint() {
     assert!(
         text.contains("-> 1 direct member"),
         "members_hint should render:\n{text}"
+    );
+}
+
+#[test]
+fn attach_docs_from_array_sets_docs_recursively() {
+    use super::list_overview::attach_docs_from_array;
+    let mut symbols = vec![json!({
+        "name": "Outer", "symbol": "Outer", "kind": "Class",
+        "start_line": 1, "end_line": 20,
+        "children": [
+            {"name": "inner_method", "symbol": "Outer/inner_method", "kind": "Method",
+             "start_line": 5, "end_line": 7}
+        ]
+    })];
+    let docstrings = vec![
+        json!({"symbol_name": "Outer", "content": "The outer class.", "start_line": 1, "end_line": 1}),
+        json!({"symbol_name": "inner_method", "content": "An inner method.", "start_line": 4, "end_line": 4}),
+    ];
+    attach_docs_from_array(&mut symbols, &docstrings);
+    assert_eq!(symbols[0]["docs"].as_str(), Some("The outer class."));
+    assert_eq!(
+        symbols[0]["children"][0]["docs"].as_str(),
+        Some("An inner method."),
+        "docs must attach to nested children too"
+    );
+}
+
+#[test]
+fn format_overview_symbols_renders_per_symbol_doc() {
+    use crate::tools::symbol::display::format_overview_symbols;
+    let val = json!({
+        "file": "lib.rs",
+        "symbols": [{
+            "name": "documented_fn", "symbol": "documented_fn", "kind": "Function",
+            "start_line": 2, "end_line": 4,
+            "docs": "Does a thing.\nMore detail."
+        }]
+    });
+    let text = format_overview_symbols(&val);
+    assert!(
+        text.contains("documented_fn"),
+        "symbol should render:\n{text}"
+    );
+    assert!(
+        text.contains("// Does a thing."),
+        "first doc line should render inline:\n{text}"
+    );
+    assert!(
+        !text.contains("More detail"),
+        "only the first doc line belongs in overview:\n{text}"
     );
 }
 

@@ -327,6 +327,15 @@ fn format_symbol_tree(out: &mut String, symbols: &[Value], indent: usize) {
 
     let pad = " ".repeat(indent);
 
+    // First non-empty line of a docstring — overview shows a one-line summary
+    // per symbol; the full text lives in the symbol's `docs` JSON field.
+    let doc_summary = |v: &Value| -> Option<String> {
+        v["docs"]
+            .as_str()
+            .and_then(|d| d.lines().find(|l| !l.trim().is_empty()))
+            .map(|l| l.trim().to_string())
+    };
+
     for sym in symbols {
         let kind = sym["kind"].as_str().unwrap_or("?");
         let name = sym["symbol"]
@@ -352,6 +361,10 @@ fn format_symbol_tree(out: &mut String, symbols: &[Value], indent: usize) {
         }
         out.push_str("  ");
         out.push_str(&line_range);
+        if let Some(doc) = doc_summary(sym) {
+            out.push_str("  // ");
+            out.push_str(&doc);
+        }
 
         if let Some(children) = sym["children"].as_array() {
             let child_indent = indent + 5;
@@ -388,6 +401,10 @@ fn format_symbol_tree(out: &mut String, symbols: &[Value], indent: usize) {
                 }
                 out.push_str("  ");
                 out.push_str(&child_lr);
+                if let Some(doc) = doc_summary(child) {
+                    out.push_str("  // ");
+                    out.push_str(&doc);
+                }
             }
         }
     }

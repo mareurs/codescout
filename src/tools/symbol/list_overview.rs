@@ -219,7 +219,8 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
 
     // If the path contains glob metacharacters, expand and aggregate
     if is_glob(rel_path) {
-        let files = resolve_glob_for(&ctx.agent, ctx.workspace_override.as_deref(), rel_path).await?;
+        let files =
+            resolve_glob_for(&ctx.agent, ctx.workspace_override.as_deref(), rel_path).await?;
         let mut guard = guard;
         guard.max_files = guard.max_files.min(LIST_SYMBOLS_MAX_FILES);
         let (files, file_overflow) =
@@ -273,7 +274,8 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
         return Ok(result_json);
     }
 
-    let full_path = resolve_read_path_for(&ctx.agent, ctx.workspace_override.as_deref(), rel_path).await?;
+    let full_path =
+        resolve_read_path_for(&ctx.agent, ctx.workspace_override.as_deref(), rel_path).await?;
 
     if full_path.is_file() {
         let raw_lang = ast::detect_language(&full_path)
@@ -328,11 +330,17 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
             .iter()
             .map(|s| symbol_to_json(s, include_body, source.as_deref(), depth, false))
             .collect();
-        let json_symbols = if raw_lang == "bash" {
+        let mut json_symbols = if raw_lang == "bash" {
             filter_variable_symbols(json_symbols)
         } else {
             json_symbols
         };
+        // Attach each symbol's own docstring inline (in addition to the flat
+        // file-level `docstrings` array below) so a single-file overview surfaces
+        // docs per-symbol.
+        if include_docs {
+            attach_docs_from_array(&mut json_symbols, &collect_docstrings(&full_path));
+        }
 
         // Cap single-file results to prevent large files blowing the context window.
         let total = json_symbols.len();
@@ -593,5 +601,28 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
             "Verify the path exists with tree.",
         )
         .into())
+    }
+}
+
+/// Attach each symbol's own docstring (matched by `symbol_name`) as a `docs`
+/// field, recursing into children. Surfaces docs per-symbol in overview rather
+/// than only as the flat file-level `docstrings` array.
+pub(crate) fn attach_docs_from_array(symbols: &mut [Value], docstrings: &[Value]) {
+    for sym in symbols.iter_mut() {
+        let Some(obj) = sym.as_object_mut() else {
+            continue;
+        };
+        if let Some(name) = obj.get("name").and_then(|v| v.as_str()).map(str::to_string) {
+            if let Some(content) = docstrings
+                .iter()
+                .find(|d| d["symbol_name"].as_str() == Some(name.as_str()))
+                .and_then(|d| d["content"].as_str())
+            {
+                obj.insert("docs".to_string(), json!(content));
+            }
+        }
+        if let Some(children) = obj.get_mut("children").and_then(|c| c.as_array_mut()) {
+            attach_docs_from_array(children, docstrings);
+        }
     }
 }
