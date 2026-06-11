@@ -249,6 +249,89 @@ fn kotlin_index_lock_held(language: &str, workspace_root: &std::path::Path) -> b
         .any(|e| e.file_name() == "LOCK" && posix_write_lock_is_held(e.path()))
 }
 
+/// Find every process holding an open fd on `lock_path` (via `/proc/<pid>/fd`)
+/// and terminate it: SIGTERM, then SIGKILL after a 2s grace. Returns whether any
+/// holder was signalled. Linux `/proc` fd scan.
+///
+/// SAFETY of killing: callers invoke this ONLY after winning the mux ownership
+/// `flock` (so no live mux exists), making any holder an orphaned dead-mux JVM.
+#[cfg(unix)]
+async fn reap_holders_of_lock(lock_path: &std::path::Path) -> anyhow::Result<bool> {
+    if !posix_write_lock_is_held(lock_path) {
+        return Ok(false);
+    }
+    let canon = std::fs::canonicalize(lock_path).unwrap_or_else(|_| lock_path.to_path_buf());
+    let mut holders: Vec<i32> = Vec::new();
+    for entry in std::fs::read_dir("/proc")?.flatten() {
+        let name = entry.file_name();
+        let Some(pid) = name.to_str().and_then(|s| s.parse::<i32>().ok()) else {
+            continue;
+        };
+        if pid == std::process::id() as i32 {
+            continue;
+        }
+        let Ok(fds) = std::fs::read_dir(entry.path().join("fd")) else {
+            continue;
+        };
+        for fd in fds.flatten() {
+            if let Ok(target) = std::fs::read_link(fd.path()) {
+                if target == canon || target == lock_path {
+                    holders.push(pid);
+                    break;
+                }
+            }
+        }
+    }
+    if holders.is_empty() {
+        // Held per POSIX probe but no /proc fd match (perms?) — cannot reap.
+        return Ok(false);
+    }
+    for &pid in &holders {
+        unsafe {
+            libc::kill(pid, libc::SIGTERM);
+        }
+        tracing::warn!("reaped orphan index-lock holder pid={pid} (SIGTERM)");
+    }
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    for &pid in &holders {
+        if unsafe { libc::kill(pid, 0) } == 0 {
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
+            tracing::warn!("orphan index-lock holder pid={pid} survived SIGTERM → SIGKILL");
+        }
+    }
+    Ok(true)
+}
+
+/// Reap an orphaned RocksDB index-lock holder for a kotlin workspace, if any.
+/// No-op for non-kotlin or when the index is free. Returns whether a reap ran.
+#[cfg(unix)]
+async fn reap_orphan_index_holder(
+    language: &str,
+    workspace_root: &std::path::Path,
+) -> anyhow::Result<bool> {
+    if language != "kotlin" {
+        return Ok(false);
+    }
+    let ws_hash = crate::lsp::mux::workspace_hash(workspace_root);
+    let analyzer_dir =
+        crate::lsp::servers::kotlin_analyzer_home(&ws_hash).join(".config/JetBrains/analyzer");
+    if !analyzer_dir.exists() {
+        return Ok(false);
+    }
+    let mut any = false;
+    for e in walkdir::WalkDir::new(&analyzer_dir)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        if e.file_name() == "LOCK" {
+            any |= reap_holders_of_lock(e.path()).await?;
+        }
+    }
+    Ok(any)
+}
+
 /// Build the CLI argv passed to a spawned `codescout mux` child. Factored out
 /// for unit-testability; `get_or_start_via_mux` is the only caller.
 #[cfg(unix)]
@@ -638,6 +721,18 @@ impl LspManager {
         if need_spawn {
             let exe =
                 std::env::current_exe().context("Failed to determine codescout binary path")?;
+
+            // We hold the ownership lock → no live mux exists. Any process
+            // still holding this workspace's RocksDB index LOCK is therefore an
+            // orphan (a dead mux's JVM). Reap it before spawning, or the new
+            // mux's LSP child will fail to open the index. (S1/S2 net.)
+            match reap_orphan_index_holder(language, workspace_root).await {
+                Ok(true) => {
+                    tracing::info!("reaped orphan index holder for {language} before mux spawn")
+                }
+                Ok(false) => {}
+                Err(e) => tracing::warn!("orphan reap probe failed (continuing): {e}"),
+            }
 
             let mux_args = build_mux_args(workspace_root, &socket_path, &lock_path, &config);
 
@@ -1999,6 +2094,54 @@ mod tests {
         assert!(
             held,
             "probe must detect a POSIX write-lock held by another process"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    #[ignore = "spawns a python3 fcntl holder; gated like posix_write_lock tests"]
+    async fn reap_holders_of_lock_kills_an_orphan_holder() {
+        use std::io::Read;
+        let dir = tempfile::tempdir().unwrap();
+        let lock = dir.path().join("LOCK");
+        std::fs::write(&lock, b"").unwrap();
+        let mut holder = std::process::Command::new("python3")
+            .arg("-c")
+            .arg(format!(
+                "import fcntl,time; f=open(r'{}', 'r+'); \
+                 fcntl.lockf(f, fcntl.LOCK_EX | fcntl.LOCK_NB); \
+                 print('held', flush=True); time.sleep(30)",
+                lock.display()
+            ))
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn holder");
+        {
+            let mut b = [0u8; 4];
+            let _ = holder.stdout.as_mut().unwrap().read(&mut b);
+        }
+        // Query 1 — baseline: held.
+        assert!(super::posix_write_lock_is_held(&lock), "precondition: held");
+        // Query 2 — reap.
+        let reaped = super::reap_holders_of_lock(&lock).await.expect("reap ok");
+        assert!(reaped, "should report a reap happened");
+        // Query 3 — fresh: released.
+        assert!(
+            !super::posix_write_lock_is_held(&lock),
+            "lock freed after reap"
+        );
+        let _ = holder.wait();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reap_holders_of_lock_noop_when_unheld() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock = dir.path().join("LOCK");
+        std::fs::write(&lock, b"").unwrap();
+        assert!(
+            !super::reap_holders_of_lock(&lock).await.unwrap(),
+            "no holder → no reap"
         );
     }
 
