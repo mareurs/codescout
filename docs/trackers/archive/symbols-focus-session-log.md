@@ -1,12 +1,15 @@
 ---
+id: null
 kind: tracker
-status: active
-title: "Session Log — symbols single-match focus + docs"
+status: archived
+title: Session Log — symbols single-match focus + docs
 owners: []
 tags:
-  - symbols
-  - tool-ux
-  - reconnaissance
+- symbols
+- tool-ux
+- reconnaissance
+topic: null
+time_scope: null
 ---
 
 # Session Log — symbols single-match focus + docs

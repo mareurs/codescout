@@ -1,3 +1,13 @@
+---
+id: null
+kind: null
+status: archived
+title: null
+owners: []
+tags: []
+topic: null
+time_scope: null
+---
 # Session Log — Concurrency Fixes (multi-instance / multi-worktree)
 
 > Work stream: the codescout concurrency defects found 2026-05-30 while probing

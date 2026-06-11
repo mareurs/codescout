@@ -1,9 +1,17 @@
 ---
+id: null
 kind: tracker
-status: active
+status: archived
 title: Index Freshness Signal — Session Log
 owners: []
-tags: [index, retrieval, freshness, autoindex, sync_project]
+tags:
+- index
+- retrieval
+- freshness
+- autoindex
+- sync_project
+topic: null
+time_scope: null
 ---
 
 # Index Freshness Signal — Session Log
