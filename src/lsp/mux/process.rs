@@ -83,6 +83,11 @@ pub async fn run(
     writeln!(&lock_file, "{}", std::process::id())?;
 
     // 2. Spawn LSP server
+    // process_group(0) puts the LSP server in its OWN process group (PGID = child
+    // PID), so a killpg() on shutdown reaps the JVM AND its grandchildren (kotlin-lsp
+    // forks) — kill_on_drop only kills the direct child and only on graceful Drop.
+    // tokio's Command exposes process_group() inherently (no CommandExt import needed;
+    // see the matching idiom in src/tools/run_command/inner.rs).
     let mut child = Command::new(server_command)
         .args(server_args)
         .envs(server_env.iter().map(|(k, v)| (k, v)))
@@ -90,9 +95,12 @@ pub async fn run(
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
+        .process_group(0) // own group so killpg reaps grandchildren (JVM forks)
         .kill_on_drop(true)
         .spawn()
         .with_context(|| format!("failed to spawn LSP server: {server_command}"))?;
+    // Capture the PGID (== child PID) so the shutdown path can killpg the whole group.
+    let child_pgid: Option<libc::pid_t> = child.id().map(|id| id as libc::pid_t);
 
     let server_stdin = child.stdin.take().context("no stdin on child")?;
     let server_stdout = child.stdout.take().context("no stdout on child")?;
@@ -247,6 +255,22 @@ pub async fn run(
     // Shutdown: kill the LSP server before reclaiming its analyzer HOME so no
     // writer holds the dir, then remove the socket.
     let _ = child.kill().await;
+    // Kill the whole LSP process group (JVM + forks). kill_on_drop / child.kill()
+    // only reap the direct child; grandchildren would orphan and squat the RocksDB
+    // index. Runs on EVERY event_loop exit path (idle timeout, server disconnect,
+    // SIGTERM/SIGINT). SIGKILL of the mux itself is uncatchable and is covered by
+    // the reap-before-spawn net on the next mux start.
+    // killpg on an already-dead group returns ESRCH — harmless.
+    if let Some(pgid) = child_pgid {
+        // SAFETY: pgid was created with process_group(0); signalling our own group is safe.
+        unsafe {
+            libc::killpg(pgid, libc::SIGTERM);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        unsafe {
+            libc::killpg(pgid, libc::SIGKILL);
+        }
+    }
     std::fs::remove_file(socket_path).ok();
     // flock released when lock_file drops
 
@@ -309,6 +333,14 @@ async fn event_loop(
     let watchdog_interval = tokio::time::Duration::from_secs(10);
     let mut watchdog_tick = tokio::time::interval(watchdog_interval);
     watchdog_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    // Install signal handlers ONCE (not per loop iteration — re-registering each
+    // select pass would leak handler registrations). Breaking the loop on
+    // SIGTERM/SIGINT lets `run` killpg the LSP process group on graceful shutdown.
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .context("install SIGTERM handler")?;
+    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+        .context("install SIGINT handler")?;
 
     loop {
         tokio::select! {
@@ -379,6 +411,16 @@ async fn event_loop(
                         break;
                     }
                 }
+            }
+
+            // Signalled shutdown — break so `run` can killpg the LSP process group.
+            _ = sigterm.recv() => {
+                info!("mux received SIGTERM, exiting event loop");
+                break;
+            }
+            _ = sigint.recv() => {
+                info!("mux received SIGINT, exiting event loop");
+                break;
             }
         }
     }
@@ -810,5 +852,118 @@ mod kotlin_home_tests {
         // No JAVA_TOOL_OPTIONS at all.
         let env2 = vec![("GRADLE_USER_HOME".to_string(), "/tmp/g".to_string())];
         assert_eq!(kotlin_home_from_env(&env2), None);
+    }
+}
+
+/// Tests for the process-group reaping mechanism that `run`'s shutdown relies on (leak S2).
+///
+/// HONESTY NOTE: these exercise the *OS primitive* the fix is built on —
+/// `process_group(0)` (own group, PGID == child PID) plus `killpg`, which is exactly
+/// how `run` spawns the LSP child and tears down the group on signalled exit. They do
+/// NOT spin up a real mux + LSP handshake + Unix socket: faking an LSP that completes
+/// the framed `initialize` handshake AND forks a trackable grandchild was judged too
+/// heavy to write honestly (see Task 3 report). The end-to-end JVM-orphan path is
+/// verified manually via `/mcp` (Step 5). A direct SIGKILL-of-the-mux test is
+/// impossible (SIGKILL is uncatchable) and is covered by Task 2's reap-before-spawn.
+#[cfg(all(test, unix))]
+mod process_group_reaping_tests {
+    use tokio::process::Command;
+
+    /// `kill(pid, 0)` probes existence without sending a signal: 0 = alive,
+    /// ESRCH = gone. (EPERM would also mean "exists"; not reachable here since we
+    /// only probe our own descendants.)
+    fn pid_alive(pid: libc::pid_t) -> bool {
+        unsafe { libc::kill(pid, 0) == 0 }
+    }
+
+    /// The fix's core claim: a child spawned with `process_group(0)` that forks a
+    /// grandchild puts the grandchild in the SAME group, so a single `killpg` on the
+    /// group PGID reaps BOTH — which is why `run`'s shutdown kills the JVM *and* its
+    /// kotlin-lsp forks, not just the direct child.
+    #[tokio::test]
+    async fn killpg_reaps_grandchild_in_child_process_group() {
+        // Child shell forks a grandchild that sleeps 60s, prints the grandchild PID,
+        // then waits — so both child and grandchild are alive and in the new group.
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg("sleep 60 & echo $! ; wait")
+            .stdout(std::process::Stdio::piped())
+            .process_group(0) // same wiring as run()'s LSP child
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn group leader");
+
+        let pgid = child.id().expect("child has a pid") as libc::pid_t;
+
+        // Read the grandchild PID the shell printed (one bounded line).
+        use tokio::io::AsyncReadExt as _;
+        let mut stdout = child.stdout.take().expect("child stdout");
+        let grandchild_pid = {
+            let mut buf = Vec::new();
+            // Bound the wait so a hung shell can't hang the test.
+            let read = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                let mut byte = [0u8; 1];
+                loop {
+                    let n = stdout.read(&mut byte).await.expect("read stdout");
+                    if n == 0 || byte[0] == b'\n' {
+                        break;
+                    }
+                    buf.push(byte[0]);
+                }
+            })
+            .await;
+            read.expect("timed out reading grandchild pid");
+            String::from_utf8(buf)
+                .expect("utf8 pid")
+                .trim()
+                .parse::<libc::pid_t>()
+                .expect("parse grandchild pid")
+        };
+
+        assert!(
+            pid_alive(grandchild_pid),
+            "grandchild should be alive before killpg"
+        );
+
+        // The exact teardown run() performs on signalled exit.
+        unsafe {
+            libc::killpg(pgid, libc::SIGTERM);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        unsafe {
+            libc::killpg(pgid, libc::SIGKILL);
+        }
+        // Reap the direct child so it is not left a zombie.
+        let _ = child.wait().await;
+
+        // Give the kernel a moment to tear the grandchild down.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert!(
+            !pid_alive(grandchild_pid),
+            "grandchild (pid {grandchild_pid}) should be reaped by killpg on the group; \
+             it orphaned instead — process_group(0) wiring is broken"
+        );
+    }
+
+    /// `killpg` on an already-dead group is harmless (returns ESRCH), so the shutdown
+    /// path is safe to run on every event_loop exit even if the child died on its own.
+    #[tokio::test]
+    async fn killpg_on_dead_group_is_harmless() {
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg("exit 0")
+            .process_group(0)
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn short-lived child");
+        let pgid = child.id().expect("child has a pid") as libc::pid_t;
+        let _ = child.wait().await; // child exits immediately
+
+        // Signalling the now-empty group must not panic / must be tolerated.
+        unsafe {
+            libc::killpg(pgid, libc::SIGTERM);
+            libc::killpg(pgid, libc::SIGKILL);
+        }
+        // No assertion on errno — the contract is "does not blow up". ESRCH is expected.
     }
 }
