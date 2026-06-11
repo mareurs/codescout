@@ -270,24 +270,41 @@ compilation + the manager suite; end-to-end behavior is pending a live `/mcp` re
 
 ## Resume
 
-**Implemented on `experiments`** (Fix steps 1 + 3 + 4; step 2 dropped — see Fix). Unit-tested
-(3 new tests), `clippy -D warnings` clean, full lib suite green (2675). **Not yet shipped to
-master, not yet live-verified.**
+**Committed + pushed to `experiments`** (Fix steps 1 + 3 + 4; step 2 dropped — see Fix):
+`c5fb3979` (fix) + `3bc1009d` (trackers). Unit-tested (3 new tests), `clippy -D warnings` clean,
+full lib suite green (2675). Rebuilt + `/mcp`-reconnected; **happy path live-verified** (a
+`references` on backend-kotlin connects to the healthy mux through the rewritten path). **Not
+yet on master.**
 
 Next:
-1. `cargo build --release` + `/mcp` restart, then reproduce the deadlock against
-   `backend-kotlin` (start a 2nd kotlin-lsp holding the RocksDB lock, trigger `edit_code` from
-   another server) and confirm: (a) the error now reads `mux process failed to start: …
-   RocksDBException … Resource temporarily unavailable` with the index-lock hint, and (b) no
-   poisoning direct-LSP squatter is created (the caller gets the actionable error, not
-   `LSP server disconnected`).
-2. Standard Ship Sequence to master (frog audit first); cite the **master-side** SHA in Fix.
-3. `git mv` to `docs/issues/archive/` once shipped; flip frontmatter `status: fixed`.
+1. (pre-master gate) Live-reproduce the *failure* path: a 2nd kotlin-lsp holding the RocksDB
+   lock → trigger `edit_code` from another server → confirm (a) the error reads `mux process
+   failed to start: … RocksDBException … Resource temporarily unavailable` + index-lock hint,
+   and (b) no poisoning direct-LSP squatter. (Couldn't run live this session without disrupting
+   the user's working backend-kotlin mux — R-23.)
+2. Standard Ship Sequence to master (frog audit first); cite the **master-side** SHA in Fix;
+   `git mv` to `docs/issues/archive/`; flip frontmatter `status: fixed`.
 
-Deferred follow-up (own design decision, not blocking): auto-resolution of the deadlock —
-e.g. an isolated LSP home for the direct fallback, or reaping a stale direct-fallback LSP whose
-owning server has exited — so a contended index self-heals without a manual `kill`. Today's fix
-makes it *actionable* (clear error + no new squatter), not *auto-healing*.
+### Self-heal decision (Architecture Snow Lion, 2026-06-11)
+
+Asked to auto-heal the deadlock. Outcome: **the load-bearing self-heal already shipped at Fix
+4** — every session is routed onto the single shared mux, whose 300s idle-timeout + `kill_on_drop`
+(`process.rs:93,376`) free the lock on abandon/exit; concurrent sessions *connect* rather than
+contend. Two candidate additions were evaluated against the change-scenario test:
+
+- **A — isolate the direct-fallback index home: DROPPED.** Wall in an empty field. Fix 4 already
+  prevents the direct fallback from running on contention, so a shared-home direct LSP is
+  near-impossible in production; A absorbs no scenario Fix 4 doesn't. *Revisit-when:* a
+  shared-home direct LSP is observed holding the lock after Fix 4 is live. Confidence: high.
+- **B — reap a provably-orphaned lock-holder + retry: DEFERRED.** The one real residual scenario
+  (a `SIGKILL`'d/OOM-killed mux orphans its LSP → immortal lock-holder, no idle-timeout, no live
+  owner) stands alone, and B's design (scan `/proc` for our `--system-path`, reap only holders
+  with no live `codescout` ancestor, retry once, at the `get_or_start_via_mux` chokepoint) is
+  *correct*. But it adds a cross-process scan+kill surface (Linux-bound) against the project's
+  structural grain, for a rare event the shipped **actionable error** already lets a human
+  recover (today's manual `fuser` + `kill`). Two-strike discipline. *Revisit-when:* a second
+  observed SIGKILL-orphan deadlock — then build B as specced. Confidence the design is right:
+  high; that it's worth building now: medium → defer.
 ## References
 - `src/lsp/manager.rs:432-539` (`get_or_start_via_mux`), `:318` (direct-LSP fallback),
   `:456` (flock-only liveness), `:485` (stderr→null), `:502-508` (blank error).
