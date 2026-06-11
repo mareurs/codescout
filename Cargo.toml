@@ -186,6 +186,9 @@ remote-embed = ["codescout-embed/remote-embed"]
 # Local CPU embedding via fastembed-rs (ONNX Runtime + HuggingFace model hub).
 # First use downloads the chosen model (~20-300MB) to ~/.cache/huggingface/hub/.
 local-embed = ["codescout-embed/local-embed"]
+# Same, but via runtime-loaded onnxruntime.dll (windows-gnu / custom ONNX). The
+# caller supplies the DLL at runtime (ORT_DYLIB_PATH); see codescout-embed.
+local-embed-dynamic = ["codescout-embed/local-embed-dynamic"]
 # Local embedding via candle (HuggingFace Rust ML — adds significant compile time)
 # candle-embed = ["dep:candle-core", "dep:candle-transformers", "dep:candle-nn", "dep:hf-hub", "dep:tokenizers"]
 

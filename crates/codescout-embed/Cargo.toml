@@ -14,7 +14,23 @@ description = "Shared embedding primitives for codescout + librarian-mcp"
 remote-embed = ["dep:reqwest", "dep:rustls"]
 # Local CPU embedding via fastembed-rs (ONNX Runtime + HuggingFace model hub).
 # First use downloads the chosen model (~20-300MB) to ~/.cache/huggingface/hub/.
-local-embed = ["dep:fastembed"]
+# Two ONNX backends — mutually exclusive, pick one:
+#   local-embed         — static prebuilt ONNX Runtime (linux/macos/windows-msvc).
+#   local-embed-dynamic — runtime-loaded onnxruntime.dll via the C ABI; required on
+#                         windows-gnu (MinGW), where ort ships no prebuilt. Caller
+#                         supplies onnxruntime.dll at runtime (ORT_DYLIB_PATH).
+#                         Drops the image-models tree (codescout embeds text only).
+local-embed = [
+    "dep:fastembed",
+    "fastembed/ort-download-binaries-native-tls",
+    "fastembed/hf-hub-native-tls",
+    "fastembed/image-models",
+]
+local-embed-dynamic = [
+    "dep:fastembed",
+    "fastembed/ort-load-dynamic",
+    "fastembed/hf-hub-native-tls",
+]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -28,5 +44,7 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "htt
 # rustls + ring: required because reqwest uses `rustls-no-provider`. The
 # embedder installs the ring provider on first use (idempotent via `Once`).
 rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
-# Local CPU embeddings via ONNX Runtime (fastembed model hub)
-fastembed = { version = "5", optional = true }
+# Local CPU embeddings via ONNX Runtime (fastembed model hub). default-features
+# off so the ONNX backend (download-binaries vs load-dynamic) is selected by the
+# local-embed / local-embed-dynamic features above.
+fastembed = { version = "5", optional = true, default-features = false }

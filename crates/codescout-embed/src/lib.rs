@@ -4,7 +4,7 @@ pub mod chunker;
 
 mod embedder;
 
-#[cfg(feature = "local-embed")]
+#[cfg(any(feature = "local-embed", feature = "local-embed-dynamic"))]
 pub mod local;
 
 #[cfg(feature = "remote-embed")]
@@ -69,7 +69,7 @@ pub fn chunk_size_for_model(model_spec: &str) -> usize {
 
     // Local fastembed models use their documented sequence lengths.
     // These are listed here rather than in local.rs to avoid a feature-gate
-    // dependency (local.rs is #[cfg(feature = "local-embed")]).
+    // dependency (local.rs is #[cfg(any(feature = "local-embed", feature = "local-embed-dynamic"))]).
     if let Some(local_name) = model_spec.strip_prefix("local:") {
         let max_tokens = match local_name.to_lowercase().as_str() {
             "nomicembedtextv15" | "nomicembedtextv15q" => 8192,
@@ -144,7 +144,7 @@ pub async fn create_embedder_with_config(
     }
 
     // 2. local: prefix
-    #[cfg(feature = "local-embed")]
+    #[cfg(any(feature = "local-embed", feature = "local-embed-dynamic"))]
     if let Some(model_id) = model.strip_prefix("local:") {
         return Ok(Box::new(local::LocalEmbedder::new(model_id).await?));
     }
@@ -185,7 +185,7 @@ pub async fn create_embedder_with_config(
     }
 
     // 6. No prefix — try as local model name
-    #[cfg(feature = "local-embed")]
+    #[cfg(any(feature = "local-embed", feature = "local-embed-dynamic"))]
     {
         // Try parsing as a local model name directly
         if local::LocalEmbedder::new(model).await.is_ok() {

@@ -539,7 +539,11 @@ impl CodeScoutServer {
         // is compiled in. Both local-embed and remote-embed are in the default feature set.
         // No runtime "model loaded?" check exists without actually attempting a connection,
         // so we rely on the feature flags alone.
-        let has_embeddings = cfg!(any(feature = "local-embed", feature = "remote-embed"));
+        let has_embeddings = cfg!(any(
+            feature = "local-embed",
+            feature = "local-embed-dynamic",
+            feature = "remote-embed"
+        ));
 
         // has_git_remote: read the value cached at activation time. The original
         // implementation called `git2::Repository::open(&root)` here, which ran
@@ -2782,7 +2786,11 @@ mod tests {
         }
     }
 
-    #[cfg(any(feature = "local-embed", feature = "remote-embed"))]
+    #[cfg(any(
+        feature = "local-embed",
+        feature = "local-embed-dynamic",
+        feature = "remote-embed"
+    ))]
     #[tokio::test]
     async fn current_capabilities_returns_without_panic() {
         // Smoke test: current_capabilities must not panic even for a fresh project.
