@@ -48,6 +48,7 @@ skill).
 | R-22 | 2026-06-11 | hit | Scout the LSP call path to confirm a staleness mechanism before choosing the fix layer (references false-zero: `did_open` syncs def-file only, no barrier; all LSP signals share the staleness so the fix must be LSP-independent) | issues/2026-06-09-references-false-zero; commit ddc7e3f1; kin R-21 |
 | R-23 | 2026-06-11 | hit, then miss | Re-derive an inherited diagnosis from usage.db telemetry (hit); verify a shared single-holder-resource recovery by READING lock/process state, not by issuing a call from a 2nd client which re-creates the contention (miss) | bug-fix F-16 + W-12; issues/2026-06-11-mux-failure-masks-rocksdb-lock-collision |
 | R-24 | 2026-06-11 | hit | Scout the resource-key derivation before designing a concurrency test; path-keyed hashing makes worktrees a safe fan-out fixture | bug-fix W-13 + F-18; issues/2026-06-11-lsp-tools-ignore-workspace-pin-path |
+| R-25 | 2026-06-11 | hit | Scout the catalog's status source + id-keying before archiving a librarian tracker (status lives in the catalog row not the file; `id=sha256(abs_path)` so `git mv`+reindex orphans history) → `artifact(update)`+`artifact(move)` | this session; commit `b487a69c`; kin R-24/R-15 |
 
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
@@ -724,6 +725,12 @@ SKILL.md Phase-1 bullet to name bug-file line lists explicitly.
 (hit) Before testing shared-LSP behavior under concurrency, I scouted how the mux lock/socket + RocksDB home are keyed: `workspace_hash(workspace_root)` — the path (`src/lsp/mux/mod.rs:15-28`; `servers/mod.rs:81`; regression `socket_path_deterministic_for_same_workspace`). That single fact determined the whole test design — isolated worktree hashes cannot collide with the live mux, so a 3-agent concurrent cold-start runs safely on a working machine. Directly answers last session's R-23 miss (verifying shared-resource recovery by contending on the live hash). The same run also surfaced a 4-site `workspace=` pin gap and a concurrent-cold-start kotlin-lsp failure.
 
 **Evidence:** bug-fix W-13 + F-18; `issues/2026-06-11-lsp-tools-ignore-workspace-pin-path`.
+## R-25 — Scout the catalog's status source + id-keying before archiving a librarian tracker
+
+(hit) `/reconnaissance` invoked as I was about to archive 3 session-logs by hand-editing `status: archived` frontmatter + `git mv` to `archive/`. Scouting the librarian first overturned the plan: `artifact(find)`'s active-vs-hidden verdict reads the **catalog DB row's** `status`, not the file (`find.rs:90` → `{nin: HIDDEN_STATUSES}`, defined `mod.rs:27`). A `git mv` + frontmatter edit touches neither the catalog status nor — until someone runs `reindex` — anything the librarian queries, so all 3 would have kept showing `active`. Worse: `id = sha256(abs_path)[..16]` (`ids.rs:17-23`), so the eventual reindex mints a NEW id for the moved file and the cleanup `DELETE … id NOT IN seen_ids` (`indexer.rs:56-237`, `index_repo_sync`) drops the old row — orphaning its `events`/augmentation. Correct mechanism: `artifact(action="update", patch={status:"archived"})` (writes catalog row + frontmatter now) then `artifact(action="move")` (atomic rename + abs_path re-point, `mv.rs:14-75`). Path-keyed-id kin of R-24 and R-15.
+
+**Evidence:** this session — archived `kotlin-lsp-disk` + `metadata-filtering` + `mcp-prompt-redesign` session-logs; commit `b487a69c`. Doc gap (promotion candidate): CLAUDE.md's archive instruction ("set `status: archived` AND `git mv`") is file-only — it omits that the librarian's catalog status needs a *tool* write, so following it literally produces a cosmetically-archived-but-still-active tracker. Fix → prescribe `artifact(update)`+`artifact(move)` for librarian-tracked files.
+
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
