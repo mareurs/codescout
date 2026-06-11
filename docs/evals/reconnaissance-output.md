@@ -357,7 +357,7 @@ opposed to *trigger firing*) is `unverified` until that row exists.
 - [x] 14 cases drafted (6 MISS, 6 HIT control, 2 SKIP) — each cites its R-N origin
 - [x] Run protocol pinned (strong trace-scored + cheap elicitation smoke test)
 - [~] Baseline first run — **partial (5/14), contaminated** (2026-06-11); see Iteration log + Re-evaluation. A clean run is still owed.
-- [ ] Score current SKILL.md against the 14 cases
+- [~] Score current SKILL.md — **4/14 clean: C4, C8, C10, C12 all PASS** (decontaminated re-run, 2026-06-11). C7 structurally un-decontaminatable (answer in SKILL.md exemplar); C5 deferred (lock hazard); 8 cases unrun incl. SKIP guards C13/C14.
 - [ ] Score any SKILL.md rewrite candidate; gate on ≥12/14 AND zero MISS-case FAIL
 - [ ] Optional: expand HIT/SKIP coverage as new R-N entries land
 
@@ -368,6 +368,7 @@ _(Append one row per scoring run. First row must be the empirical baseline.)_
 | Date | SKILL.md version | Cases passed | MISS-case FAILs | Notes |
 |------|------------------|--------------|-----------------|-------|
 | 2026-06-11 | a90708c (current) | 5/5 scouted-before-acting (partial: 5 of 14) | 0 (1 MISS case in subset: C4) | **Contaminated — upper bound, low confidence.** Fresh general-purpose subagents; SKILL.md loaded by reading it; R-N ledger not injected; read-only + workspace-pinned. All 5 scouted the named seam before acting and caught the drift / correctly conditioned the answer. BUT each case's answer is documented in-tree (docs/trackers, docs/issues, docs/adrs, this eval) and was surfaced via grep/semantic_search, so the run can't isolate scout-discipline from doc-lookup. C10's drift has healed (fixed in current tree). Cases run: C4/R-19, C7/R-16, C8/R-21, C10/R-17, C12/R-26. C5 deferred (live lock-contention hazard). |
+| 2026-06-11 | a90708c (current) | 4/4 PASS — clean (C4, C8, C10, C12) | 0 (C4 is the MISS case in subset) | **Decontaminated re-run.** Throwaway worktrees with docs/ deleted (Case 4's repo-wide grep for the answer → 0 matches, verified); C8 @ cd370079 + C10 @ c99d4228 = pre-fix commits so the drift is LIVE in code, not healed. Fresh subagents, read-only, per-worktree workspace pin. All 4 scouted from SOURCE and caught the drift: C4 read sync.rs (SHA-256), no answer-doc reachable; C8 enumerated entry points, caught CLI bypass of write_index_state; C10 found the off-by-one at all 3 sites + brace-vs-dedent nuance; C12 derived the mux-detach orphan boundary from code WITHOUT the ADR (richer than the contaminated run). C7 dropped (answer lives in the SKILL.md exemplar — un-decontaminatable). C5 deferred. Signal now real for these 4; 8 cases + SKIP guards (C13/C14) still unrun clean. |
 
 ## Re-evaluation after baseline
 
@@ -385,3 +386,13 @@ _(Append one row per scoring run. First row must be the empirical baseline.)_
 3. Re-score; only then does the ≥12/14 + zero-MISS-FAIL gate carry weight.
 
 **Recorded per this eval's own instruction** ("if inspection again mispredicts, that is itself the headline finding"): here it is contamination, not misprediction — same shape. The first run earns its keep by failing informatively.
+
+---
+
+### Clean re-run (2026-06-11) — decontamination held
+
+**The fix worked.** Throwaway worktrees with `docs/` deleted removed the answer-lookup vector (Case 4's own repo-wide `grep blake3` returned 0, proving it); C8 (`cd370079`) and C10 (`c99d4228`) sat at pre-fix commits so the drift was *live in code*, not healed.
+
+**Result: 4/4 scouted from source and caught the drift.** Two were genuine live-drift catches (C8 CLI-bypass of `write_index_state`; C10 the off-by-one replicated across all three `edit_code` call sites). C12 is the cleanest evidence the decontamination mattered: with the ADR gone, the agent reconstructed the SIGKILL / mux-detach orphan boundary from `process.rs` + `manager.rs` alone — and surfaced *more* than the contaminated run, which had leaned on the ADR's seam-S2 framing. The skill→scout→catch behavior is not an artifact of doc-lookup.
+
+**Honest bounds.** n=4 of 14; single scorer (no judge panel); skill loaded by explicit instruction (a mild scout cue vs. true auto-trigger). C7 is structurally un-decontaminatable — its answer lives in the SKILL.md's own worked exemplar, which the skill must load. C5 deferred (live lock-contention hazard). The SKIP guards (C13/C14 — does the agent *refrain* from scouting when it shouldn't?) are untested; a skill that scouts everything is also broken. **Next:** clean-run the remaining MISS cases (C1/C2/C3/C6) at appropriate fixtures and the SKIP guards before treating the ≥12/14 gate as met.
