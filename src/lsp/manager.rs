@@ -285,6 +285,17 @@ pub(super) fn resolve_mux_flag(default: bool, override_: Option<bool>) -> bool {
     override_.unwrap_or(default)
 }
 
+/// True when the current executable is NOT the codescout binary — i.e. a cargo
+/// test runner, where spawning a `codescout mux` child (via `current_exe()`)
+/// would re-exec the test binary instead of the server. The direct-LSP fallback
+/// in `get_or_start` is retained ONLY for this case; in production it is removed
+/// so a mux language can never spawn a competing direct LSP on the shared index.
+fn is_test_runner_exe(exe: &std::path::Path) -> bool {
+    exe.file_name()
+        .map(|n| !n.to_string_lossy().starts_with("codescout"))
+        .unwrap_or(true)
+}
+
 impl LspManager {
     /// Maximum consecutive startup failures before the circuit-breaker trips.
     const CIRCUIT_BREAKER_MAX_FAILURES: usize = 5;
@@ -442,11 +453,28 @@ impl LspManager {
                         )
                         .into());
                     }
-                    // Otherwise the mux is merely unavailable (e.g. a test env where
-                    // current_exe() is the test runner, not the codescout binary) —
-                    // fall back to direct mode rather than failing the caller.
+                    // For mux languages, a silent direct fallback spawns a
+                    // competing LSP on the shared index (S3) — refuse it in
+                    // production. Retain the fallback ONLY when current_exe() is a
+                    // test runner (spawning a `codescout mux` child would re-exec
+                    // the test binary). See ADR-2026-06-11-mux-single-owner-invariant.
+                    let exe_is_test = std::env::current_exe()
+                        .map(|p| is_test_runner_exe(&p))
+                        .unwrap_or(true);
+                    if !exe_is_test {
+                        return Err(crate::tools::RecoverableError::with_hint(
+                            format!("mux startup failed for {language}: {e}"),
+                            "codescout will not fall back to a direct LSP for a \
+                             multiplexed language — that would open a second process \
+                             on the shared index. Retry in a moment; if it persists, \
+                             check for an orphaned LSP with \
+                             `fuser <kotlin-lsp-home>/.../rocks/*/LOCK` and stop it.",
+                        )
+                        .into());
+                    }
                     tracing::warn!(
-                        "Mux startup failed for {language}, falling back to direct LSP: {e}"
+                        "Mux startup failed for {language} in a test runner, \
+                         falling back to direct LSP: {e}"
                     );
                     config.mux = false;
                 }
@@ -2041,6 +2069,38 @@ mod tests {
     fn resolve_mux_flag_none_uses_default() {
         assert!(crate::lsp::manager::resolve_mux_flag(true, None));
         assert!(!crate::lsp::manager::resolve_mux_flag(false, None));
+    }
+
+    #[test]
+    fn is_test_runner_exe_true_for_non_codescout_basename() {
+        use std::path::Path;
+        assert!(
+            !super::is_test_runner_exe(Path::new(
+                "/repo/target/debug/deps/codescout_lib-9f2a1b3c4d5e6f70"
+            )),
+            "lib test binary starts with 'codescout' → treated as prod-ish"
+        );
+        assert!(super::is_test_runner_exe(Path::new("/usr/bin/cargo")));
+        assert!(super::is_test_runner_exe(Path::new(
+            "/tmp/x/some-test-runner"
+        )));
+        assert!(!super::is_test_runner_exe(Path::new(
+            "/home/u/.cargo/bin/codescout"
+        )));
+    }
+
+    #[test]
+    fn mux_language_fallback_decision_table() {
+        let prod = std::path::Path::new("/home/u/.cargo/bin/codescout");
+        let test = std::path::Path::new("/repo/target/debug/deps/some_test-abc123");
+        assert!(
+            !super::is_test_runner_exe(prod),
+            "prod exe must NOT fall back"
+        );
+        assert!(
+            super::is_test_runner_exe(test),
+            "test exe MUST keep the fallback"
+        );
     }
 
     #[tokio::test]
