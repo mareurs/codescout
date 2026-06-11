@@ -182,6 +182,39 @@ making the debugging session the new squatter and breaking the user's *first* MC
 (`tool_calls` 16948, `lsp_events` 354/355 at 07:55). Lesson: a shared-resource recovery cannot
 be verified by issuing a call from a second client — the call re-creates the contention.
 
+### Failure-path repro run live — Fix 4 detection gap (2026-06-11)
+
+Ran the pre-master gate (Resume step 1) on an isolated throwaway worktree (cs-fix4,
+hash `35337242d11ee704`): held its RocksDB `LOCK` with an external `fcntl.lockf` holder
+(POSIX `F_SETLK`, the same lock RocksDB uses), then fired `references` pinned to cs-fix4.
+**Fix 4's contention guard did NOT engage.**
+
+Sequence from `.codescout/debug.log` (12:01:28–34):
+1. cs-fix4 mux spawned; its kotlin-lsp could not open RocksDB (lock held) and the mux failed
+   with `Error: initialize response missing 'result'` — a *generic* handshake error. The
+   drained mux stderr held the IntelliJ startup banner only; the `RocksDBException` went to the
+   LSP's own `intellij-server.log`, **not** the drained stderr.
+2. `mux_failure_is_index_contention("…initialize response missing 'result'…")` → **false** (no
+   `Resource temporarily unavailable` / `RocksDBException` in the error string) → guard bypassed;
+   `get_or_start` logged `Mux startup failed for kotlin, falling back to direct LSP`.
+3. The direct fallback LSP then hit the lock: `org.rocksdb.RocksDBException: While lock file:
+   …/rocks/v492/LOCK: Resource temporarily unavailable` (`lsp_stderr`) → `LSP server
+   disconnected` returned to the tool.
+
+**Conclusion:** Fix 4's stderr-signature detection is timing/log-routing fragile. When the
+kotlin-lsp fails RocksDB *during initialize*, the signature is absent from the drained stderr,
+so contention is misclassified as a generic failure, the no-fallback guard is bypassed, and the
+direct fallback re-hits the lock. No squatter resulted here only because the external holder
+kept the lock held throughout; had the lock been transiently free, the direct fallback would
+have grabbed it and re-created the original deadlock. **Fix 4 does not pass its own pre-master
+gate — do NOT ship as-is.**
+
+**Proposed robust fix:** detect contention by *probing lock state*, not by parsing stderr.
+Before the direct fallback, attempt a non-blocking `flock`/`lockf` (or scan `/proc` holders) on
+the workspace's RocksDB `LOCK`; if held, return the actionable index-lock error and do not fall
+back. Detection-by-state is immune to the stderr timing/log-routing race. The unit tests pass
+because they feed `mux_failure_report` a stderr tail that already contains the signature — they
+cannot catch this gap; only the live repro did.
 ## Hypotheses tried
 1. **Hypothesis:** `edit_code`'s write path crashes the Kotlin LSP (prior session's claim).
    **Test:** read `tool_calls` for the failing window. **Verdict:** REJECTED — `symbols`
@@ -243,6 +276,21 @@ pending live `/mcp` verify + master ship — see Resume). Steps **1, 3, 4** belo
   contention addressed by 1/3/4.
 
 The original plan (now historical) follows.
+### Robust contention detection (lock-probe) — implemented 2026-06-11
+
+The live repro (Evidence § "Failure-path repro run live") proved the stderr-signature detection
+misses the `initialize response missing 'result'` failure mode. Fixed by adding
+**detection-by-state**: `kotlin_index_lock_held(language, workspace_root)` +
+`posix_write_lock_is_held(path)` in `src/lsp/manager.rs` probe the workspace's RocksDB `LOCK`
+with a non-blocking `fcntl(F_SETLK, F_WRLCK)` — the SAME lock family RocksDB uses (`fs4`'s
+`flock` API is blind to it). `get_or_start`'s fallback arm now returns the actionable index-lock
+error when EITHER the stderr signature OR the live lock-probe detects contention, so the
+direct-fallback collision can no longer occur regardless of where the failing LSP logged its
+exception. Tests: `posix_write_lock_is_held_false_on_unlocked_file`,
+`kotlin_index_lock_held_false_for_non_kotlin_and_missing_home`, and `#[ignore]`
+`posix_write_lock_is_held_true_when_another_process_holds_it` (spawns a python3 fcntl holder;
+passes under `--ignored`). `clippy --all-targets -D warnings` clean. Pending: live re-run of the
+repro to confirm the guard now engages end-to-end.
 ## Tests added
 
 Implemented on `experiments` (`src/lsp/manager.rs`, in `mod tests`):
@@ -269,6 +317,23 @@ compilation + the manager suite; end-to-end behavior is pending a live `/mcp` re
   down; `edit_code`/`references` do not.
 
 ## Resume
+**UPDATE 2026-06-11 — pre-master gate RUN, FAILED. Do NOT ship Fix 4 to master yet.** The
+failure-path repro (step 1 below) was executed live on an isolated worktree and exposed a
+detection gap: when the kotlin-lsp fails RocksDB during `initialize`, the mux fails with
+`initialize response missing 'result'` (no RocksDB signature in drained stderr), so
+`mux_failure_is_index_contention` returns false, the no-fallback guard is bypassed, and the
+direct fallback re-hits the lock → `LSP server disconnected`. See Evidence § "Failure-path repro
+run live". **Next action (DONE 2026-06-11):** lock-state probing implemented — see Fix § "Robust
+contention detection (lock-probe)". **VERIFIED live 2026-06-11:** re-ran the failure-path repro after the lock-probe fix — held
+cs-fix4's RocksDB `LOCK` (external `fcntl.lockf`), fired `references` pinned to cs-fix4 → got the
+actionable index-lock error (`kotlin LSP index is locked by another process …` + `fuser` hint)
+in **1.6s**, with **no `falling back to direct LSP`** and **no squatter** (`debug.log` id=8). Same
+failure mode that returned `LSP server disconnected` pre-fix; the lock-probe catches it where the
+stderr signature can't. Fix 4 + lock-probe complete and end-to-end verified; full `cargo test`
+green (2683 passed, 8 ignored). Step 1 below is now DONE. Next gate: Standard Ship Sequence to
+master. The pin fix
+(separate bug `2026-06-11-lsp-tools-ignore-workspace-pin-path`, defects #1/#2) can ship
+independently; this Fix-4 work cannot.
 
 **Committed + pushed to `experiments`** (Fix steps 1 + 3 + 4; step 2 dropped — see Fix):
 `c5fb3979` (fix) + `3bc1009d` (trackers). Unit-tested (3 new tests), `clippy -D warnings` clean,

@@ -188,6 +188,66 @@ pub(super) fn mux_failure_report(stdout_line: &str, stderr_tail: &[String]) -> (
     };
     (message, hint)
 }
+/// Non-blocking POSIX (`fcntl(F_SETLK, F_WRLCK)`) whole-file write-lock probe —
+/// the SAME lock family RocksDB uses, so it detects a held RocksDB index `LOCK`
+/// (which `fs4`'s `flock`-based API is blind to). Opens `path` and attempts a
+/// write lock; if it would block (`EAGAIN`/`EACCES`) another process holds it →
+/// returns `true`. On success it releases immediately (drops the fd) so the probe
+/// never becomes a squatter. Returns `false` if the file can't be opened.
+#[cfg(unix)]
+fn posix_write_lock_is_held(path: &std::path::Path) -> bool {
+    use std::os::unix::io::AsRawFd;
+    let file = match std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+    {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    let mut fl: libc::flock = unsafe { std::mem::zeroed() };
+    fl.l_type = libc::F_WRLCK as libc::c_short;
+    fl.l_whence = libc::SEEK_SET as libc::c_short;
+    fl.l_start = 0;
+    fl.l_len = 0; // 0 = lock to EOF → whole file (matches RocksDB)
+    let rc = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETLK, &fl) };
+    if rc == -1 {
+        return matches!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::EAGAIN) | Some(libc::EACCES)
+        );
+    }
+    // Acquired → nobody else holds it. Release before returning.
+    let mut unlock: libc::flock = unsafe { std::mem::zeroed() };
+    unlock.l_type = libc::F_UNLCK as libc::c_short;
+    unlock.l_whence = libc::SEEK_SET as libc::c_short;
+    unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETLK, &unlock) };
+    false
+}
+
+/// True when the kotlin workspace's RocksDB analyzer index `LOCK` is held by
+/// another process. Detection-by-state: robust to *where* a failing kotlin-lsp
+/// logged its `RocksDBException` (stderr vs `intellij-server.log`), unlike the
+/// stderr-signature match in [`mux_failure_is_index_contention`], which misses the
+/// "initialize response missing 'result'" failure mode (verified by the live repro
+/// in issues/2026-06-11-mux-failure-masks-rocksdb-lock-collision). Returns `false`
+/// for non-kotlin languages and when no analyzer home / `LOCK` exists.
+#[cfg(unix)]
+fn kotlin_index_lock_held(language: &str, workspace_root: &std::path::Path) -> bool {
+    if language != "kotlin" {
+        return false;
+    }
+    let ws_hash = crate::lsp::mux::workspace_hash(workspace_root);
+    let analyzer_dir =
+        crate::lsp::servers::kotlin_analyzer_home(&ws_hash).join(".config/JetBrains/analyzer");
+    if !analyzer_dir.exists() {
+        return false;
+    }
+    walkdir::WalkDir::new(&analyzer_dir)
+        .into_iter()
+        .filter_map(Result::ok)
+        .any(|e| e.file_name() == "LOCK" && posix_write_lock_is_held(e.path()))
+}
 
 /// Build the CLI argv passed to a spawned `codescout mux` child. Factored out
 /// for unit-testability; `get_or_start_via_mux` is the only caller.
@@ -362,6 +422,25 @@ impl LspManager {
                     // Surface the (now-actionable) error instead of poison-falling-back.
                     if mux_failure_is_index_contention(&e.to_string()) {
                         return Err(e);
+                    }
+                    // The stderr-signature check above is timing/log-routing fragile:
+                    // when the kotlin LSP fails to open RocksDB *during initialize* the
+                    // mux reports a generic "initialize response missing 'result'" and the
+                    // RocksDBException lands in intellij-server.log, not the drained stderr
+                    // (issues/2026-06-11-mux-failure-masks-rocksdb-lock-collision). Probe the
+                    // index LOCK directly (detection-by-state) before falling back.
+                    if kotlin_index_lock_held(language, workspace_root) {
+                        return Err(crate::tools::RecoverableError::with_hint(
+                            format!(
+                                "kotlin LSP index is locked by another process — the mux \
+                                 could not start: {e}"
+                            ),
+                            "Another kotlin-lsp holds this workspace's RocksDB index lock. \
+                             Close other sessions on this workspace, or locate the holder \
+                             with `fuser <kotlin-lsp-home>/.../rocks/*/LOCK` and stop it, \
+                             then retry.",
+                        )
+                        .into());
                     }
                     // Otherwise the mux is merely unavailable (e.g. a test env where
                     // current_exe() is the test runner, not the codescout binary) —
@@ -1782,6 +1861,110 @@ mod tests {
         assert!(
             hint.contains("another codescout mux isn't already running"),
             "generic hint expected when no contention signature, got: {hint}"
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn mux_contention_report_round_trips_through_get_or_start_guard() {
+        // Fix 4 wiring (see `get_or_start`): the no-fallback guard re-classifies the
+        // ERROR STRING that `get_or_start_via_mux` returns, via
+        // `mux_failure_is_index_contention(&e.to_string())`. That error is a
+        // `RecoverableError` built from `mux_failure_report`. This proves the
+        // round-trip survives `RecoverableError`'s Display: a held-RocksDB-lock stderr
+        // → report → RecoverableError → to_string() must STILL trip the contention
+        // guard, so `get_or_start` returns Err instead of poison-falling-back to a
+        // direct-LSP squatter on the locked index. A Display-format or hint-wording
+        // drift that broke this would silently restore the squatter bug.
+        use super::{mux_failure_is_index_contention, mux_failure_report};
+        let tail = vec!["org.rocksdb.RocksDBException: While lock file: \
+             …/analyzer/workspaces/<h>/rocks/v492/LOCK: \
+             Resource temporarily unavailable"
+            .to_string()];
+        let (message, hint) = mux_failure_report("", &tail);
+        let err = crate::tools::RecoverableError::with_hint(message, hint);
+        assert!(
+            mux_failure_is_index_contention(&err.to_string()),
+            "the error get_or_start_via_mux returns for a held RocksDB lock must itself \
+             trip get_or_start's contention guard (→ return Err, no direct fallback); got: {err}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_contention_mux_report_does_not_trip_get_or_start_guard() {
+        // Complement: a generic mux startup failure (no RocksDB/EAGAIN/flock signature)
+        // must NOT be classified as contention, so `get_or_start` correctly FALLS BACK
+        // to direct mode rather than failing the caller (the test-env path where
+        // current_exe() is the test runner, not the codescout binary).
+        use super::{mux_failure_is_index_contention, mux_failure_report};
+        let (message, hint) =
+            mux_failure_report("", &["failed to spawn LSP server: kotlin-lsp".to_string()]);
+        let err = crate::tools::RecoverableError::with_hint(message, hint);
+        assert!(
+            !mux_failure_is_index_contention(&err.to_string()),
+            "a generic mux failure must NOT trip the contention guard (get_or_start should \
+             fall back to direct mode); got: {err}"
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn posix_write_lock_is_held_false_on_unlocked_file() {
+        // No holder → not-held, so a genuine mux-infra-unavailable failure still
+        // falls back to direct (a false positive here would break that fallback).
+        let dir = tempfile::tempdir().unwrap();
+        let lock = dir.path().join("LOCK");
+        std::fs::write(&lock, b"").unwrap();
+        assert!(!super::posix_write_lock_is_held(&lock));
+        // Missing file → not-held (don't block the fallback).
+        assert!(!super::posix_write_lock_is_held(&dir.path().join("nope")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kotlin_index_lock_held_false_for_non_kotlin_and_missing_home() {
+        // Non-kotlin: no IntelliJ index → never contention.
+        assert!(!super::kotlin_index_lock_held(
+            "rust",
+            std::path::Path::new("/tmp/cs-nonexistent-ws")
+        ));
+        // Kotlin but a fresh workspace whose analyzer home doesn't exist → false.
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!super::kotlin_index_lock_held("kotlin", dir.path()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "spawns a python3 fcntl holder; gated like the rust-analyzer mux test"]
+    fn posix_write_lock_is_held_true_when_another_process_holds_it() {
+        // fcntl(F_SETLK) locks are per-process, so a same-process holder wouldn't
+        // conflict with the probe. Spawn a SEPARATE python3 process that takes the
+        // POSIX write lock (the mechanism RocksDB uses), then probe → must be held.
+        // Guards against a silently-broken probe that always reports not-held.
+        let dir = tempfile::tempdir().unwrap();
+        let lock = dir.path().join("LOCK");
+        std::fs::write(&lock, b"").unwrap();
+        let mut holder = std::process::Command::new("python3")
+            .arg("-c")
+            .arg(format!(
+                "import fcntl,time; f=open(r'{}', 'r+'); \
+                 fcntl.lockf(f, fcntl.LOCK_EX | fcntl.LOCK_NB); \
+                 print('held', flush=True); time.sleep(10)",
+                lock.display()
+            ))
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn python3 holder");
+        {
+            use std::io::Read;
+            let mut buf = [0u8; 4];
+            let _ = holder.stdout.as_mut().unwrap().read(&mut buf); // barrier: wait for "held"
+        }
+        let held = super::posix_write_lock_is_held(&lock);
+        let _ = holder.kill();
+        let _ = holder.wait();
+        assert!(
+            held,
+            "probe must detect a POSIX write-lock held by another process"
         );
     }
 
