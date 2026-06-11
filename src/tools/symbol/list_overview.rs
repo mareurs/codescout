@@ -284,7 +284,13 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
             .agent
             .require_project_root_for(ctx.workspace_override.as_deref())
             .await?;
-        let (client, lang) = get_lsp_client(&ctx.agent, &*ctx.lsp, &full_path).await?;
+        let (client, lang) = get_lsp_client(
+            &ctx.agent,
+            &*ctx.lsp,
+            &full_path,
+            ctx.workspace_override.as_deref(),
+        )
+        .await?;
         let timer = LspTimer::start();
         // I-4: single-retry on transient LSP-mux disconnect (covers Kotlin LSP
         // eviction churn). Closure is idempotent — document_symbols is a pure
@@ -293,6 +299,7 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
             &ctx.agent,
             &*ctx.lsp,
             &full_path,
+            ctx.workspace_override.as_deref(),
             client,
             lang.clone(),
             |c, l| {

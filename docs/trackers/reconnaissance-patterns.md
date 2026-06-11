@@ -47,6 +47,7 @@ skill).
 | R-21 | 2026-06-09 | hit | Verify a side-effect through its real production entry point (CLI/MCP), not a unit harness that bypasses `main.rs`; `references()` the operation to enumerate ALL call sites before placing it (`sync_project`: 5 sites, write reached 1 of 3 project paths) | index-freshness F-1 + W-1; commit 10dcfb9f |
 | R-22 | 2026-06-11 | hit | Scout the LSP call path to confirm a staleness mechanism before choosing the fix layer (references false-zero: `did_open` syncs def-file only, no barrier; all LSP signals share the staleness so the fix must be LSP-independent) | issues/2026-06-09-references-false-zero; commit ddc7e3f1; kin R-21 |
 | R-23 | 2026-06-11 | hit, then miss | Re-derive an inherited diagnosis from usage.db telemetry (hit); verify a shared single-holder-resource recovery by READING lock/process state, not by issuing a call from a 2nd client which re-creates the contention (miss) | bug-fix F-16 + W-12; issues/2026-06-11-mux-failure-masks-rocksdb-lock-collision |
+| R-24 | 2026-06-11 | hit | Scout the resource-key derivation before designing a concurrency test; path-keyed hashing makes worktrees a safe fan-out fixture | bug-fix W-13 + F-18; issues/2026-06-11-lsp-tools-ignore-workspace-pin-path |
 
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
@@ -718,6 +719,11 @@ SKILL.md Phase-1 bullet to name bug-file line lists explicitly.
 
 **Source:** `docs/issues/2026-06-11-mux-failure-masks-rocksdb-lock-collision.md`; `src/lsp/manager.rs:432-539` (`get_or_start_via_mux`), `:456` (flock-only liveness), `:485` (stderr→null); bug-fix session-log F-16 + W-12. Kin: R-15 (external-tool on-disk state), R-21, R-22.
 
+## R-24 — Scout the resource-key derivation before designing a concurrency test; path-keyed hashing makes worktrees a safe fan-out fixture
+
+(hit) Before testing shared-LSP behavior under concurrency, I scouted how the mux lock/socket + RocksDB home are keyed: `workspace_hash(workspace_root)` — the path (`src/lsp/mux/mod.rs:15-28`; `servers/mod.rs:81`; regression `socket_path_deterministic_for_same_workspace`). That single fact determined the whole test design — isolated worktree hashes cannot collide with the live mux, so a 3-agent concurrent cold-start runs safely on a working machine. Directly answers last session's R-23 miss (verifying shared-resource recovery by contending on the live hash). The same run also surfaced a 4-site `workspace=` pin gap and a concurrent-cold-start kotlin-lsp failure.
+
+**Evidence:** bug-fix W-13 + F-18; `issues/2026-06-11-lsp-tools-ignore-workspace-pin-path`.
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:

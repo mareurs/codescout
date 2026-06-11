@@ -37,23 +37,9 @@ pub(crate) fn is_glob(path: &str) -> bool {
     path.contains(['*', '?', '['])
 }
 
-/// Resolve a path for reading, with security validation.
-///
-/// `"."` and `""` resolve to the project root directly (not `root.join(".")`)
-/// to avoid spurious `./` prefixes when stripping the root later.
-///
-/// Resolves against the session-default project. For per-request `workspace=`
-/// pinning, use [`resolve_read_path_for`] — this is exactly that with `None`.
-pub(crate) async fn resolve_read_path(
-    agent: &Agent,
-    relative_path: &str,
-) -> anyhow::Result<PathBuf> {
-    resolve_read_path_for(agent, None, relative_path).await
-}
-
-/// Override-aware twin of [`resolve_read_path`]: resolves the path against the
-/// workspace named by `workspace_override` (resident-on-demand) rather than the
-/// session default. Pass `None` for the default.
+/// Resolves a relative read path against the workspace named by
+/// `workspace_override` (resident-on-demand) rather than the session default.
+/// Pass `None` for the default.
 ///
 /// Without this, an overview/read pinned with `workspace=` would resolve the
 /// path against the *active* project and miss the pinned one (the per-request
@@ -299,6 +285,7 @@ pub(crate) async fn get_lsp_client(
     agent: &Agent,
     lsp: &dyn LspProvider,
     path: &Path,
+    workspace_override: Option<&Path>,
 ) -> anyhow::Result<(std::sync::Arc<dyn crate::lsp::LspClientOps>, String)> {
     let lang = ast::detect_language(path).ok_or_else(|| {
         RecoverableError::with_hint(
@@ -308,7 +295,7 @@ pub(crate) async fn get_lsp_client(
              Use list_functions for a tree-sitter fallback on other file types.",
         )
     })?;
-    let root = agent.require_project_root().await?;
+    let root = agent.require_project_root_for(workspace_override).await?;
     let mux_override = agent.lsp_mux_override(lang).await;
     let client = lsp.get_or_start(lang, &root, mux_override).await?;
     let language_id = crate::lsp::servers::lsp_language_id(lang);
@@ -341,6 +328,7 @@ pub(crate) async fn retry_on_mux_disconnect<F, Fut, T>(
     agent: &Agent,
     lsp: &dyn LspProvider,
     path: &Path,
+    workspace_override: Option<&Path>,
     initial_client: std::sync::Arc<dyn crate::lsp::LspClientOps>,
     initial_lang: String,
     op: F,
@@ -352,7 +340,7 @@ where
     match op(initial_client, initial_lang).await {
         Err(e) if is_mux_disconnect(&e) => {
             tracing::warn!("LSP mux disconnect, retrying once: {}", e);
-            let (client, lang) = get_lsp_client(agent, lsp, path).await?;
+            let (client, lang) = get_lsp_client(agent, lsp, path, workspace_override).await?;
             op(client, lang).await
         }
         other => other,
@@ -479,7 +467,9 @@ mod tests {
 
         // Unpinned → resolves against B → miss (the bug surface).
         assert!(
-            resolve_read_path(&agent, "only_in_a.rs").await.is_err(),
+            resolve_read_path_for(&agent, None, "only_in_a.rs")
+                .await
+                .is_err(),
             "unpinned resolution should look in default workspace B and miss A's file"
         );
         // Pinned to A → resolves against A → hit.
@@ -490,6 +480,61 @@ mod tests {
             resolved.ends_with("only_in_a.rs"),
             "got: {}",
             resolved.display()
+        );
+    }
+    #[tokio::test]
+    async fn get_lsp_client_honors_workspace_override_for_lsp_root() {
+        // Per-request pin regression, defect #2
+        // (docs/issues/2026-06-11-lsp-tools-ignore-workspace-pin-path): get_lsp_client
+        // resolved the LSP root via the UNPINNED require_project_root(), so every
+        // pinned LSP op (references/symbol_at/call_graph/edit_code) silently routed to
+        // the ACTIVE project's LSP. We capture the root passed to get_or_start and
+        // assert it is the PINNED workspace A, not the default project B.
+        use crate::lsp::{LspClientOps, MockLspClient};
+
+        struct RecordingProvider {
+            client: std::sync::Arc<MockLspClient>,
+            seen_root: std::sync::Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
+        }
+        #[async_trait::async_trait]
+        impl LspProvider for RecordingProvider {
+            async fn get_or_start(
+                &self,
+                _language: &str,
+                workspace_root: &std::path::Path,
+                _mux_override: Option<bool>,
+            ) -> anyhow::Result<std::sync::Arc<dyn LspClientOps>> {
+                *self.seen_root.lock().unwrap() = Some(workspace_root.to_path_buf());
+                Ok(std::sync::Arc::clone(&self.client) as std::sync::Arc<dyn LspClientOps>)
+            }
+            async fn notify_file_changed(&self, _path: &std::path::Path) {}
+            async fn shutdown_all(&self) {}
+        }
+
+        let dir_a = tempfile::tempdir().unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+        std::fs::create_dir_all(dir_b.path().join(".codescout")).unwrap();
+        std::fs::write(dir_a.path().join("only_in_a.rs"), "fn f() {}\n").unwrap();
+        let root_a = std::fs::canonicalize(dir_a.path()).unwrap();
+
+        // Default (unpinned) project is B; pin THIS request to A.
+        let agent = Agent::new(Some(dir_b.path().to_path_buf())).await.unwrap();
+        let seen_root = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let lsp = RecordingProvider {
+            client: std::sync::Arc::new(MockLspClient::new()),
+            seen_root: seen_root.clone(),
+        };
+
+        let file_a = root_a.join("only_in_a.rs");
+        get_lsp_client(&agent, &lsp, &file_a, Some(root_a.as_path()))
+            .await
+            .expect("pinned get_lsp_client should succeed");
+
+        assert_eq!(
+            seen_root.lock().unwrap().clone(),
+            Some(root_a.clone()),
+            "get_lsp_client must pass the PINNED workspace A as the LSP root, not default B"
         );
     }
 }

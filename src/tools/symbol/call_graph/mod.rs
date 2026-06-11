@@ -371,7 +371,7 @@ impl Tool for CallGraph {
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        use crate::fs::{get_lsp_client, require_path_param, resolve_read_path};
+        use crate::fs::{get_lsp_client, require_path_param, resolve_read_path_for};
         use crate::symbol::query::find_unique_symbol_by_name_path;
         use crate::tools::symbol::call_graph::traversal::{bfs, TraversalConfig};
         use crate::tools::{require_str_param, RecoverableError};
@@ -399,8 +399,15 @@ impl Tool for CallGraph {
         };
 
         // Resolve seed path and language
-        let seed_path = resolve_read_path(&ctx.agent, rel_path).await?;
-        let (client, lang) = get_lsp_client(&ctx.agent, &*ctx.lsp, &seed_path).await?;
+        let seed_path =
+            resolve_read_path_for(&ctx.agent, ctx.workspace_override.as_deref(), rel_path).await?;
+        let (client, lang) = get_lsp_client(
+            &ctx.agent,
+            &*ctx.lsp,
+            &seed_path,
+            ctx.workspace_override.as_deref(),
+        )
+        .await?;
 
         // Find the seed symbol's position in the file
         let doc_symbols = client.document_symbols(&seed_path, &lang).await?;

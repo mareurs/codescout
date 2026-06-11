@@ -5918,6 +5918,114 @@ fn classify_reference_path_external() {
     assert_eq!(display, "/somewhere/else.rs");
 }
 
+/// Regression (issues/2026-06-11-lsp-tools-ignore-workspace-pin-path): the
+/// LSP-position tools must resolve a relative `path` against the per-request
+/// `workspace=` pin, not the session-default project. Before the fix they
+/// called the unpinned `resolve_read_path` and returned `path not found` for a
+/// file that exists only in the pinned workspace. Each test pins workspace A
+/// (which holds the marker) while the default project is B (which does not),
+/// and asserts resolution gets PAST the path stage — never `path not found`.
+#[tokio::test]
+async fn references_honors_workspace_override_for_relative_path() {
+    use crate::tools::symbol::references::References;
+
+    let dir_a = tempdir().unwrap();
+    let dir_b = tempdir().unwrap();
+    std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+    std::fs::create_dir_all(dir_b.path().join(".codescout")).unwrap();
+    // Marker exists ONLY in pinned workspace A, NOT in default workspace B.
+    std::fs::write(dir_a.path().join("pin_marker.txt"), "x").unwrap();
+    let root_a = std::fs::canonicalize(dir_a.path()).unwrap();
+
+    // Default (unpinned) project is B; pin THIS request to A.
+    let agent = Agent::new(Some(dir_b.path().to_path_buf())).await.unwrap();
+    let mut ctx = test_ctx_with_agent(agent);
+    ctx.workspace_override = Some(root_a);
+
+    let err = References
+        .call(
+            json!({ "symbol": "Whatever", "path": "pin_marker.txt" }),
+            &ctx,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        !err.contains("path not found"),
+        "pinned relative path must resolve against workspace A, not default B; got: {err}"
+    );
+    assert!(
+        err.contains("unsupported language"),
+        "resolution should reach the language guard on the .txt marker; got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn symbol_at_honors_workspace_override_for_relative_path() {
+    use crate::tools::symbol::symbol_at::SymbolAt;
+
+    let dir_a = tempdir().unwrap();
+    let dir_b = tempdir().unwrap();
+    std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+    std::fs::create_dir_all(dir_b.path().join(".codescout")).unwrap();
+    std::fs::write(dir_a.path().join("pin_marker.txt"), "x").unwrap();
+    let root_a = std::fs::canonicalize(dir_a.path()).unwrap();
+
+    let agent = Agent::new(Some(dir_b.path().to_path_buf())).await.unwrap();
+    let mut ctx = test_ctx_with_agent(agent);
+    ctx.workspace_override = Some(root_a);
+
+    let err = SymbolAt
+        .call(json!({ "path": "pin_marker.txt", "line": 1 }), &ctx)
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        !err.contains("path not found"),
+        "pinned relative path must resolve against workspace A, not default B; got: {err}"
+    );
+    assert!(
+        err.contains("unsupported language"),
+        "resolution should reach the language guard on the .txt marker; got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn call_graph_honors_workspace_override_for_relative_path() {
+    use crate::tools::symbol::call_graph::CallGraph;
+
+    let dir_a = tempdir().unwrap();
+    let dir_b = tempdir().unwrap();
+    std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+    std::fs::create_dir_all(dir_b.path().join(".codescout")).unwrap();
+    std::fs::write(dir_a.path().join("pin_marker.txt"), "x").unwrap();
+    let root_a = std::fs::canonicalize(dir_a.path()).unwrap();
+
+    let agent = Agent::new(Some(dir_b.path().to_path_buf())).await.unwrap();
+    let mut ctx = test_ctx_with_agent(agent);
+    ctx.workspace_override = Some(root_a);
+
+    let err = CallGraph
+        .call(
+            json!({ "symbol": "Whatever", "path": "pin_marker.txt" }),
+            &ctx,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        !err.contains("path not found"),
+        "pinned relative path must resolve against workspace A, not default B; got: {err}"
+    );
+    assert!(
+        err.contains("unsupported file type"),
+        "resolution should reach get_lsp_client's language guard on the .txt marker; got: {err}"
+    );
+}
+
 fn test_ctx_with_agent(agent: Agent) -> ToolContext {
     ToolContext {
         agent,

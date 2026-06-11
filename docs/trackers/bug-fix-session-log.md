@@ -62,6 +62,8 @@ time_scope: open-ended
 | F-14 | 2026-05-25 | high | release-pipeline | fixed-verified | `cargo publish` failed on `include_str!("../docs/...")` path stripped by `Cargo.toml` `exclude` — pre-publish gates couldn't detect |
 | F-15 | 2026-06-09 | med | plan-prose | open | Bug-file `project=`→`project_id=` fix plan misses 3rd test assertion (`tests.rs:257`) + cites non-existent fixture |
 | F-16 | 2026-06-11 | high | self-friction | fixed-verified | Inherited "`edit_code` crashes Kotlin LSP" claim was a misdiagnosis — real cause was a kotlin-lsp RocksDB-lock deadlock |
+| F-17 | 2026-06-11 | med | codescout-tool | promoted-to-bug-tracker | `references`/`symbol_at`/`call_graph` ignore the `workspace=` pin for relative path resolution |
+| F-18 | 2026-06-11 | med | codescout-tool | open | Kotlin-lsp cold-start failed under 3× concurrent (6-JVM) load; tree-sitter masked it on `symbols` |
 
 ## Wins Index
 
@@ -80,6 +82,7 @@ time_scope: open-ended
 | W-10 | 2026-06-09 | med | Full-tree `grep <token>` before editing beats bug-file's hand-cited line list | Plan cited only `tests.rs:286-287`; line 257 flips to red + fixture hunt wasted on a 0-match surface | validated |
 | W-11 | 2026-06-11 | high | Verify-open reconciliation against code+git de-zombies a backlog at scale | i1-refactor self-reported 13-of-14 pending but all 14 shipped; lsp-tools 3/3 fixed; both archived; ~46 open items mostly DONE-SINCE | validated |
 | W-12 | 2026-06-11 | high | Re-derive an inherited "tool X breaks Y" claim from usage.db `tool_calls.outcome`+`lsp_events` before acting | Would have opened a bug against `edit_code`/AST (neither broken) + normalized a `create_file` workaround while the real cause (kotlin-lsp RocksDB-lock deadlock) left the LSP dead; transcript adjacency ≠ causation | validated |
+| W-13 | 2026-06-11 | high | Test shared-LSP behavior via isolated worktree hashes, not contention on the live hash | Only alternative was N clients on the live hash = the R-23 move that SIGKILLed the user's working mux last session | validated |
 
 ## Category conventions
 
@@ -1159,6 +1162,63 @@ bug class."
 **Promote-when:** A second inherited tool-behavior claim is overturned by re-deriving from usage.db telemetry. At 2 datapoints, promote to CLAUDE.md as "Before acting on an inherited 'tool X breaks Y' claim, re-derive it from usage.db `tool_calls.outcome` + `lsp_events` — transcript adjacency is not causation."
 
 **Status:** validated — diagnosis overturned via telemetry; environment recovered + confirmed (`edit_code` success in usage.db). Verification-method caveat logged as R-23.
+## F-17 — `references`/`symbol_at`/`call_graph` ignore the `workspace=` pin for relative path resolution
+
+**Observed:** 2026-06-11, during a 3-worktree concurrent kotlin-lsp stress test (3 subagents pinned to backend-kotlin worktrees + one controller call against the warm live mux).
+
+**When:** each agent called `references(symbol, path=<project-relative>, workspace=<worktree abs>)` right after `symbols(path=<same relative>, workspace=<worktree>)` had succeeded.
+
+**Expected:** the `workspace=` pin resolves the relative `path` against the pinned workspace, as `symbols`/`read_file` do.
+
+**Got:** `path not found: ktor-server/.../CalendarService.kt` — 4/4 reproductions (3 agents + controller; warm 100-min mux and cold worktree muxes). Absolute path resolves.
+
+**Root cause:** `references.rs:143` (and `symbol_at.rs:74/202`, `call_graph/mod.rs:402`) call the unpinned `resolve_read_path(&ctx.agent, rel_path)`; the pinned `resolve_read_path_for(…, ctx.workspace_override, …)` used by `list_overview.rs:277` was not propagated. `src/fs/mod.rs:44-51` documents the trap; `read_file` already closed the same gap.
+
+**Severity:** med — three core LSP-nav tools silently fail under the documented per-request `workspace=` pin (the safe-concurrency mechanism). Workaround: absolute path.
+
+**Status:** promoted-to-bug-tracker — `docs/issues/2026-06-11-lsp-tools-ignore-workspace-pin-path.md` (open; 4-site swap + 3 per-tool regression tests planned).
+
+**Fix idea / Pointer:** swap to `resolve_read_path_for` at the 4 sites; mirror `read_file_honors_workspace_override_pin`.
+
+## F-18 — Kotlin-lsp cold-start did not survive 3× concurrent (6-JVM) cold start; tree-sitter fallback masked it on `symbols`
+
+**Observed:** 2026-06-11, same 3-worktree stress test. Each backend-kotlin worktree is polyglot (Kotlin `ktor-server` + Rust `eduplanner-mcp`), so 3 kotlin-lsp + 3 rust-analyzer cold starts fired at once.
+
+**When:** all three agents' first `symbols(path=<.kt file>)` triggered a kotlin-lsp cold start (`get_lsp_client`, `list_overview.rs:287`).
+
+**Expected:** each worktree's kotlin mux comes up and persists (300s idle).
+
+**Got:** agent #2's first call returned `LSP server disconnected` (recovered next call); all three worktree kotlin muxes ended as **orphan sockets** (bound, then exited via error path — no listener, no process) within ~3 min, well under idle timeout. `symbols` still returned correct data via tree-sitter fallback (masking the LSP failure); `references` (needs the LSP) returned definition-only.
+
+**Root cause:** unconfirmed — codescout logs to stderr (host-captured, no file log this session). Strong hypothesis: 6 heavy LSP-JVM cold-starts at once → kotlin (IntelliJ) JVMs lost the init race under resource pressure → muxes errored after binding the socket. NOT RocksDB-lock contention (each worktree = isolated hash, no shared lock) and NO "mux process failed to start" cascade — a milder, different failure mode than the deadlock in `issues/2026-06-11-mux-failure-masks-rocksdb-lock-collision`.
+
+**Severity:** med — kotlin-lsp effectively unavailable under heavy concurrent cold start, silently masked on `symbols` by tree-sitter.
+
+**Status:** open — mechanism log-unconfirmed.
+
+**Probe (2026-06-11):** single-worktree cold-start probe (cs-probe) was INCONCLUSIVE via black-box. The pinned `symbols`+`references` calls touched NO kotlin-lsp-home dir (`find -mmin -5` empty) and spawned NO mux — the kotlin LSP was not exercised at all; results came from tree-sitter + grep. The probe symbol `CalendarService` is also non-discriminating: the warm live mux (`26a9e85d`, 100-min-old) returns the IDENTICAL "0 cross-file + warming" output, so `references` cannot tell LSP-up from LSP-absent. Proper confirmation needs `RUST_LOG=codescout::lsp=debug` + stderr capture, or a gated integration test asserting on `LspManager::get_or_start`. **Lead:** the 3× orphan-mux deaths were NON-index-contention init failures; Fix 4 only blocks poisoning for index-contention, so `config.mux` may have been poisoned to false after the stress run — which would explain cs-probe never attempting a mux. Confirm whether non-index-contention mux failures still poison the direct-fallback.
+
+**Lead resolved (code, 2026-06-11) — FALSIFIED.** `config` in `LspManager::get_or_start` (`src/lsp/manager.rs:332`) is a per-CALL local; `config.mux = false` (`:372`) only redirects THIS call to direct mode — there is no cross-call/persistent poisoning. Fix 4's early-return on index-contention (`:363-365`) prevents THIS call's direct fallback from becoming a RocksDB-lock SQUATTER (per its comment), NOT config poisoning. So Fix 4 is correctly scoped; no broadening needed. The cs-probe no-mux behavior is therefore NOT poisoning and remains unexplained (candidates: cold-start exceeding the tool's internal LSP timeout → tree-sitter fallback returned before the mux bound; circuit-breaker window already expired at +30min). Resolve via the RUST_LOG harness.
+
+**Fix idea / Pointer:** confirm with a single-worktree cold-start probe (expected to succeed) vs the 3× burst. If real, consider cold-start admission control / serialized JVM spawn, or surfacing "LSP warming, retry" instead of bare "disconnected".
+
+## W-13 — Test shared-LSP behavior via isolated worktree hashes, not contention on the live hash
+
+**Observed:** 2026-06-11, designing the "test the kotlin-lsp mux under multi-agent load" run after last session's R-23 miss (a 2nd-client call re-created contention on the live hash and SIGKILLed the user's working mux).
+
+**Pattern:** the mux lock/socket + RocksDB home are keyed on `workspace_hash(workspace_root)` — the PATH (`src/lsp/mux/mod.rs:15-28`, `servers/mod.rs:81`; regression `socket_path_deterministic_for_same_workspace`). Scout that FIRST, then `git worktree add` N paths → N isolated hashes → fan out N agents pinned per-worktree. Concurrent cold starts are exercised without any path able to collide with the live working mux.
+
+**Counterfactual:** without the isolation insight the only way to drive concurrent cold-start was N clients on the live `26a9e85d` hash — exactly the R-23 move that broke the env last session. The scout converted an unsafe-to-run test into a safe one; the live mux was verified untouched (same PIDs + lock timestamps) before and after.
+
+**Confirming data points:**
+1. This session — 3 worktrees, 3 concurrent agents; live mux PIDs 3071881/3071947/3071949 unchanged throughout.
+2. R-23 (last session) — the negative: 2nd-client-on-live-hash broke the env.
+
+**Impact:** high — unblocks all future concurrent-LSP testing on a live machine.
+
+**Promote-when:** a second concurrent-LSP test reuses the worktree-isolation harness. At 2 datapoints, promote to CLAUDE.md (Testing Patterns) as the canonical concurrent-LSP test method.
+
+**Status:** validated — single datapoint; harness worked, live mux provably untouched.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

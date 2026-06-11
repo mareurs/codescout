@@ -167,7 +167,13 @@ impl EditCode {
     ) -> anyhow::Result<Value> {
         let full_path = resolve_write_path(&ctx.agent, rel_path).await?;
         guard_not_markdown(&full_path)?;
-        let (client, lang) = get_lsp_client(&ctx.agent, &*ctx.lsp, &full_path).await?;
+        let (client, lang) = get_lsp_client(
+            &ctx.agent,
+            &*ctx.lsp,
+            &full_path,
+            ctx.workspace_override.as_deref(),
+        )
+        .await?;
 
         let symbols = client.document_symbols(&full_path, &lang).await?;
         let sym = find_unique_symbol_by_name_path(&symbols, name_path)?;
@@ -440,7 +446,13 @@ impl EditCode {
     ) -> anyhow::Result<Value> {
         let full_path = resolve_write_path(&ctx.agent, rel_path).await?;
         guard_not_markdown(&full_path)?;
-        let (client, lang) = get_lsp_client(&ctx.agent, &*ctx.lsp, &full_path).await?;
+        let (client, lang) = get_lsp_client(
+            &ctx.agent,
+            &*ctx.lsp,
+            &full_path,
+            ctx.workspace_override.as_deref(),
+        )
+        .await?;
 
         let (sym, symbols) = fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
 
@@ -509,7 +521,13 @@ impl EditCode {
     ) -> anyhow::Result<Value> {
         let full_path = resolve_write_path(&ctx.agent, rel_path).await?;
         guard_not_markdown(&full_path)?;
-        let (client, lang) = get_lsp_client(&ctx.agent, &*ctx.lsp, &full_path).await?;
+        let (client, lang) = get_lsp_client(
+            &ctx.agent,
+            &*ctx.lsp,
+            &full_path,
+            ctx.workspace_override.as_deref(),
+        )
+        .await?;
 
         let (sym, symbols) = fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
 
@@ -743,7 +761,13 @@ impl EditCode {
     ) -> anyhow::Result<Value> {
         let full_path = resolve_write_path(&ctx.agent, rel_path).await?;
         guard_not_markdown(&full_path)?;
-        let (client, lang) = get_lsp_client(&ctx.agent, &*ctx.lsp, &full_path).await?;
+        let (client, lang) = get_lsp_client(
+            &ctx.agent,
+            &*ctx.lsp,
+            &full_path,
+            ctx.workspace_override.as_deref(),
+        )
+        .await?;
 
         let (sym, symbols) = fetch_validated_symbol(&client, &full_path, &lang, name_path).await?;
 

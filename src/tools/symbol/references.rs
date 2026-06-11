@@ -8,7 +8,7 @@ use crate::tools::{require_str_param, OutputForm, Tool, ToolContext};
 
 use crate::fs::{
     classify_reference_path, get_lsp_client, path_in_excluded_dir, require_path_param,
-    resolve_library_roots, resolve_read_path, retry_on_mux_disconnect, uri_to_path, LspTimer,
+    resolve_library_roots, resolve_read_path_for, retry_on_mux_disconnect, uri_to_path, LspTimer,
 };
 use crate::symbol::query::find_unique_symbol_by_name_path;
 
@@ -140,14 +140,21 @@ impl Tool for References {
         let rel_path = require_path_param(&input)?;
         let scope = crate::library::scope::Scope::parse(input["scope"].as_str());
 
-        let full_path = resolve_read_path(&ctx.agent, rel_path).await?;
+        let full_path =
+            resolve_read_path_for(&ctx.agent, ctx.workspace_override.as_deref(), rel_path).await?;
         let raw_lang = ast::detect_language(&full_path)
             .ok_or_else(|| anyhow::anyhow!("unsupported language"))?;
         let root = ctx
             .agent
             .require_project_root_for(ctx.workspace_override.as_deref())
             .await?;
-        let (client, lang) = get_lsp_client(&ctx.agent, &*ctx.lsp, &full_path).await?;
+        let (client, lang) = get_lsp_client(
+            &ctx.agent,
+            &*ctx.lsp,
+            &full_path,
+            ctx.workspace_override.as_deref(),
+        )
+        .await?;
 
         // Find the symbol's position by walking document symbols, then resolve
         // references. I-4: wrap the whole symbol-then-references flow in a
@@ -160,6 +167,7 @@ impl Tool for References {
             &ctx.agent,
             &*ctx.lsp,
             &full_path,
+            ctx.workspace_override.as_deref(),
             client.clone(),
             lang.clone(),
             |c, l| {
