@@ -212,8 +212,12 @@ fn sync_append(path: &Path, msg: &str) {
 pub fn init(debug: bool) -> LoggingGuards {
     let mut guards = Vec::new();
 
+    // ANSI colouring is disabled unconditionally: codescout's stderr is captured by the
+    // MCP client (e.g. the VS Code "server stderr" panel), which renders escape codes
+    // literally rather than as colours. The file layers below already pass with_ansi(false).
     let stderr_layer = tracing_subscriber::fmt::layer()
         .with_writer(std::io::stderr)
+        .with_ansi(false)
         .with_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")));
 
     let log_dir = std::env::current_dir()
