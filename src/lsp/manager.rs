@@ -1529,6 +1529,10 @@ mod tests {
     ///
     /// Uses `sleep 99999` as a fake LSP: it starts immediately but never writes
     /// to stdout, so `initialize()` blocks until the external timeout fires.
+    #[cfg_attr(
+        windows,
+        ignore = "`sleep` is not available in Windows cmd.exe; fake-LSP needs a platform-native infinite-blocker"
+    )]
     #[tokio::test]
     async fn cancelled_get_or_start_cleans_up_starting_map() {
         let dir = tempfile::tempdir().unwrap();

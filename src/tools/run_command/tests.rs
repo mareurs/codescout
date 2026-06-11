@@ -2449,6 +2449,9 @@ async fn buffer_query_returns_up_to_200_lines_inline() {
     let output_id = ctx.output_buffer.store("cmd".into(), content, "".into(), 0);
 
     // Query the buffer — 100 lines is within the BUFFER_QUERY_INLINE_CAP
+    #[cfg(windows)]
+    let query = format!("type {output_id}");
+    #[cfg(not(windows))]
     let query = format!("cat {output_id}");
     let result2 = RunCommand
         .call(json!({ "command": query, "timeout_secs": 5 }), &ctx)
@@ -2477,6 +2480,9 @@ async fn buffer_query_truncation_hint_shows_next_page() {
     let output_id = ctx.output_buffer.store("cmd".into(), content, "".into(), 0);
 
     // Query it — output exceeds 100-line cap, so hint should show next-page command
+    #[cfg(windows)]
+    let query = format!("type {output_id}");
+    #[cfg(not(windows))]
     let query = format!("cat {output_id}");
     let result2 = RunCommand
         .call(json!({ "command": query, "timeout_secs": 5 }), &ctx)
