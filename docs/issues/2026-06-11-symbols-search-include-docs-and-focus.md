@@ -111,11 +111,20 @@ Pre-fix: pass `include_body=true` to see a body; for docs, use overview mode
 `symbol_name`.
 
 ## Resume
-N/A — fixed. Possible follow-ups: (1) overview mode still returns docs as a
-separate file-level array rather than per-symbol; (2) `symbols` search ignored a
-`workspace=` pin in one observation (overview path-existence check resolved against
-the active project) — worth a dedicated tracker if it recurs.
 
+N/A — fixed. Both follow-ups from this investigation are now also fixed:
+(1) overview attaches docs **per-symbol** and renders them inline (commit
+`60352696`); (2) overview **honors the `workspace=` pin** (commit `9fa4d482` —
+adds `resolve_read_path_for` / `resolve_glob_for`, regression test
+`resolve_read_path_for_honors_workspace_override`).
+
+Remaining follow-up (newly surfaced while fixing #2): `symbol_at`, `call_graph`,
+`references`, and the `symbols` **search**-glob path (`symbols.rs:253`) still
+resolve their path args via the non-override wrappers (`resolve_read_path` /
+`resolve_glob`), so they advertise `workspace=` but silently ignore it — the same
+family-wide "distance from change" gap. Migration is a one-liner each (swap to the
+`_for` twins, which now exist). Worth a dedicated tracker if pinned cross-workspace
+reads through those tools get exercised.
 ## References
 - Fix: `src/tools/symbol/symbols.rs` (`focus_single_symbol`, `attach_docstrings`),
   `src/tools/symbol/display.rs` (`format_search_symbols`); commit `5927b65d`.

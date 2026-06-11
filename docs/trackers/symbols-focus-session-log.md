@@ -22,7 +22,7 @@ tags:
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
-| — | | | | | (no frictions yet) |
+| F-1 | 2026-06-11 | med | architectural | mitigated | `workspace=` pin honored only by read_file, not the symbols family |
 
 ## Wins Index
 
@@ -79,6 +79,41 @@ renders."
 **Status:** validated
 
 ---
+
+## F-1 — `workspace=` pin honored by read_file but silently ignored across the symbols family
+
+**Observed:** 2026-06-11, fixing side-finding #2 (overview ignored a `workspace=` pin).
+
+**When:** Scouting why a pinned `symbols(path=…, workspace=B)` resolved against the
+active project A instead of B.
+
+**Expected:** Per CLAUDE.md "Concurrent multi-workspace", every pinnable tool honors
+a per-request `workspace=` pin; `symbols` advertises the param.
+
+**Got:** Only `read_file` was wired for it (Phase 3, guard test
+`read_file_honors_workspace_override_pin`). The symbols family resolves path args
+via `resolve_read_path` / `resolve_glob`, which use the *active* project — so
+`list_overview`, `symbol_at`, `call_graph`, `references`, and the `symbols`
+search-glob path (`symbols.rs:253`) all silently fell back to the default
+workspace. `list_overview` surfaced it as "path not found, relative to <default>".
+
+**Probable cause:** Phase 3 pinning wired the override into `read_file`'s inlined
+resolution but not into the shared `resolve_read_path`/`resolve_glob` helpers, so
+every other read tool calling them inherited the gap ("distance from change").
+
+**Workaround:** Fixed overview (commit `9fa4d482`) via override-aware
+`resolve_read_path_for` / `resolve_glob_for`; siblings still pending.
+
+**Severity:** med — a pinned read silently returns the wrong project's data (or
+errors), the exact last-writer-wins hazard the per-request pin was meant to remove;
+contained because the common single-project path is unaffected.
+
+**Status:** mitigated — overview fixed + tested; `symbol_at` / `call_graph` /
+`references` / search-glob still call the non-override wrappers.
+
+**Fix idea / Pointer:** swap those four call sites to the `_for` twins (one-liner
+each) + a per-tool pin guard test. See
+`docs/issues/2026-06-11-symbols-search-include-docs-and-focus.md` Resume.
 
 ## Template for new entries
 
