@@ -1,3 +1,13 @@
+---
+id: null
+kind: null
+status: archived
+title: Session Log — Metadata Filtering
+owners: []
+tags: []
+topic: null
+time_scope: null
+---
 # Session Log — Template
 
 > **Purpose:** Two-sided observation log for a multi-session work stream.

@@ -1,3 +1,13 @@
+---
+id: null
+kind: null
+status: archived
+title: null
+owners: []
+tags: []
+topic: null
+time_scope: null
+---
 # Session Log — MCP Prompt Channel Redesign
 
 > **Topic:** MCP prompt channel redesign (Surfaces A/B/C/D + sever librarian concat).

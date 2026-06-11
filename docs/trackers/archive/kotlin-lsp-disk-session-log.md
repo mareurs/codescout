@@ -1,3 +1,13 @@
+---
+id: null
+kind: null
+status: archived
+title: null
+owners: []
+tags: []
+topic: null
+time_scope: null
+---
 # Session Log — kotlin-lsp analyzer disk growth
 
 > **Purpose:** Two-sided observation log for the kotlin-lsp unbounded-disk
