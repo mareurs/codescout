@@ -144,6 +144,51 @@ impl Drop for StartingCleanup<'_> {
     }
 }
 
+/// Max lines of the mux child's stderr retained for diagnostics on failure.
+#[cfg(unix)]
+const MUX_STDERR_TAIL_LINES: usize = 40;
+
+/// True when a mux/LSP startup failure was caused by the workspace's index lock
+/// already being held — RocksDB `LOCK` (`EAGAIN`/"Resource temporarily unavailable")
+/// or the mux's own flock. In that case a direct-LSP fallback against the same
+/// shared index is futile and would leave a squatter that deadlocks every future
+/// mux, so the caller surfaces the error instead of falling back.
+#[cfg(unix)]
+pub(super) fn mux_failure_is_index_contention(detail: &str) -> bool {
+    detail.contains("Resource temporarily unavailable")
+        || detail.contains("RocksDBException")
+        || detail.contains("another mux instance holds the lock")
+}
+
+/// Build a `(message, hint)` describing a mux startup failure from the (possibly
+/// empty) stdout "ready" line and the tail of the mux child's captured stderr.
+/// Pure so the classification is unit-tested; `get_or_start_via_mux` only formats.
+#[cfg(unix)]
+pub(super) fn mux_failure_report(stdout_line: &str, stderr_tail: &[String]) -> (String, String) {
+    let detail = stderr_tail.join("\n");
+    // Prefer the mux's own stderr (the real cause) over the empty stdout line.
+    let summary = if !detail.trim().is_empty() {
+        detail.trim().to_string()
+    } else if !stdout_line.trim().is_empty() {
+        stdout_line.trim().to_string()
+    } else {
+        "(no diagnostic output — mux exited silently)".to_string()
+    };
+    let message = format!("mux process failed to start: {summary}");
+    let hint = if mux_failure_is_index_contention(&format!("{stdout_line}\n{detail}")) {
+        "The workspace's LSP index is locked by another running server (RocksDB/mux lock). \
+         A stale or concurrent LSP for this workspace holds it. Close other sessions on this \
+         workspace, or locate the holder with `fuser <lsp-home>/.../rocks/*/LOCK` and stop it, \
+         then retry."
+            .to_string()
+    } else {
+        "Check that another codescout mux isn't already running for this workspace and that \
+         the lock-file directory is writable; the detail above is the mux child's own stderr."
+            .to_string()
+    };
+    (message, hint)
+}
+
 /// Build the CLI argv passed to a spawned `codescout mux` child. Factored out
 /// for unit-testability; `get_or_start_via_mux` is the only caller.
 #[cfg(unix)]
@@ -311,9 +356,16 @@ impl LspManager {
                     return Ok(client);
                 }
                 Err(e) => {
-                    // Mux is an optimization — fall back to direct mode rather than
-                    // failing the caller. Happens in test environments where
-                    // current_exe() is the test runner (not the codescout binary).
+                    // If the mux failed because the workspace's LSP index lock is
+                    // already held, a direct fallback would also fail to open the
+                    // index AND leave a squatter that deadlocks every future mux.
+                    // Surface the (now-actionable) error instead of poison-falling-back.
+                    if mux_failure_is_index_contention(&e.to_string()) {
+                        return Err(e);
+                    }
+                    // Otherwise the mux is merely unavailable (e.g. a test env where
+                    // current_exe() is the test runner, not the codescout binary) —
+                    // fall back to direct mode rather than failing the caller.
                     tracing::warn!(
                         "Mux startup failed for {language}, falling back to direct LSP: {e}"
                     );
@@ -476,50 +528,95 @@ impl LspManager {
 
             let mux_args = build_mux_args(workspace_root, &socket_path, &lock_path, &config);
 
-            // Spawn mux as a detached process — do NOT set kill_on_drop
+            // Spawn mux as a detached process — do NOT set kill_on_drop.
+            // Capture stderr: a startup failure's real cause (e.g. a held RocksDB
+            // index lock) is written there, not to stdout. Without this the caller
+            // only saw a blank "mux process failed to start:".
             let mut child = tokio::process::Command::new(&exe)
                 .args(&mux_args)
                 .stdout(std::process::Stdio::piped())
                 .stdin(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
+                .stderr(std::process::Stdio::piped())
                 .spawn()
                 .context("Failed to spawn mux process")?;
 
-            // Wait for "ready" signal on stdout
+            // Drain the mux child's stderr into a bounded ring buffer. On success
+            // the mux lives for its idle-timeout and keeps logging, so the drain
+            // also prevents a full-pipe write stall; on failure it holds the cause.
+            let stderr_tail = std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::VecDeque::<String>::with_capacity(MUX_STDERR_TAIL_LINES),
+            ));
+            let stderr_drain = child.stderr.take().map(|stderr| {
+                let tail = stderr_tail.clone();
+                tokio::spawn(async move {
+                    use tokio::io::AsyncBufReadExt;
+                    let mut reader = tokio::io::BufReader::new(stderr);
+                    let mut line = String::new();
+                    loop {
+                        line.clear();
+                        match reader.read_line(&mut line).await {
+                            Ok(0) | Err(_) => break,
+                            Ok(_) => {
+                                let mut tail = tail.lock().unwrap_or_else(|e| e.into_inner());
+                                if tail.len() == MUX_STDERR_TAIL_LINES {
+                                    tail.pop_front();
+                                }
+                                tail.push_back(line.trim_end().to_string());
+                            }
+                        }
+                    }
+                })
+            });
+
+            // Wait for the "ready" signal on stdout.
             let stdout = child.stdout.take().expect("stdout piped");
             let mut reader = tokio::io::BufReader::new(stdout);
             let mut line = String::new();
-            match tokio::time::timeout(
+            let read_result = tokio::time::timeout(
                 std::time::Duration::from_secs(120),
                 tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line),
             )
-            .await
-            {
-                Ok(Ok(_)) if line.trim().starts_with("ready") => {
-                    tracing::info!("mux process ready for {} at {:?}", language, socket_path);
+            .await;
+
+            let is_ready =
+                matches!(read_result, Ok(Ok(n)) if n > 0) && line.trim().starts_with("ready");
+            if is_ready {
+                tracing::info!("mux process ready for {} at {:?}", language, socket_path);
+            } else {
+                // Let the stderr drain settle so we capture the mux's own cause.
+                if let Some(handle) = stderr_drain {
+                    let _ =
+                        tokio::time::timeout(std::time::Duration::from_millis(500), handle).await;
                 }
-                Ok(Ok(_)) => {
-                    return Err(crate::tools::RecoverableError::with_hint(
-                        format!("mux process failed to start: {}", line.trim()),
-                        "Check that another codescout mux isn't already running for this \
-                         workspace, and that the lock file directory is writable.",
-                    )
-                    .into());
-                }
-                Ok(Err(e)) => {
-                    return Err(crate::tools::RecoverableError::new(format!(
-                        "mux process stdout error: {e}"
-                    ))
-                    .into());
-                }
-                Err(_) => {
-                    return Err(crate::tools::RecoverableError::with_hint(
-                        "mux process timed out waiting for ready (120s)",
-                        "The LSP server is slow to initialize (Gradle/Cargo index?). \
-                         Retry in a moment; if the problem persists, check server logs.",
-                    )
-                    .into());
-                }
+                let tail: Vec<String> = stderr_tail
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .iter()
+                    .cloned()
+                    .collect();
+                return Err(match read_result {
+                    Err(_) => {
+                        let extra = if tail.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" — mux stderr: {}", tail.join(" | "))
+                        };
+                        crate::tools::RecoverableError::with_hint(
+                            format!("mux process timed out waiting for ready (120s){extra}"),
+                            "The LSP server is slow to initialize (Gradle/Cargo index?). \
+                             Retry in a moment; if the problem persists, check server logs.",
+                        )
+                        .into()
+                    }
+                    Ok(read) => {
+                        let stdout_line = match read {
+                            Ok(_) => line.trim().to_string(),
+                            Err(e) => format!("(stdout read error: {e})"),
+                        };
+                        let (message, hint) = mux_failure_report(&stdout_line, &tail);
+                        crate::tools::RecoverableError::with_hint(message, hint).into()
+                    }
+                });
             }
             // Detach child — mux runs independently
         }
@@ -1632,6 +1729,60 @@ mod tests {
             .unwrap();
         // Should still be 9100 — second call didn't overwrite
         assert_eq!(val, Some(9100));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mux_failure_is_index_contention_detects_lock_signatures() {
+        use super::mux_failure_is_index_contention as is_contention;
+        // RocksDB index LOCK held (EAGAIN) — the live backend-kotlin failure.
+        assert!(is_contention(
+            "org.rocksdb.RocksDBException: While lock file: …/rocks/v492/LOCK: \
+             Resource temporarily unavailable"
+        ));
+        assert!(is_contention(
+            "Resource temporarily unavailable (os error 11)"
+        ));
+        // The mux's own flock, surfaced by `process::run`.
+        assert!(is_contention("Error: another mux instance holds the lock"));
+        // A genuine spawn failure is NOT contention — direct fallback is still correct.
+        assert!(!is_contention("failed to spawn LSP server: kotlin-lsp"));
+        assert!(!is_contention(""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mux_failure_report_surfaces_stderr_cause_with_index_hint() {
+        use super::mux_failure_report;
+        // Empty stdout "ready" line + the real cause on stderr (the bug: this used
+        // to render a blank "mux process failed to start:").
+        let tail = vec![
+            "Error: another mux instance holds the lock".to_string(),
+            "Caused by:".to_string(),
+            "    Resource temporarily unavailable (os error 11)".to_string(),
+        ];
+        let (message, hint) = mux_failure_report("", &tail);
+        assert!(message.starts_with("mux process failed to start:"));
+        assert!(
+            message.contains("Resource temporarily unavailable"),
+            "real cause must be surfaced, got: {message}"
+        );
+        assert!(
+            hint.contains("index is locked"),
+            "index-contention hint expected, got: {hint}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mux_failure_report_handles_silent_exit_with_generic_hint() {
+        use super::mux_failure_report;
+        let (message, hint) = mux_failure_report("", &[]);
+        assert!(message.contains("no diagnostic output"), "got: {message}");
+        assert!(
+            hint.contains("another codescout mux isn't already running"),
+            "generic hint expected when no contention signature, got: {hint}"
+        );
     }
 
     #[cfg(unix)]
