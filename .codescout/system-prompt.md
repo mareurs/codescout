@@ -7,6 +7,7 @@
 - `src/agent/mod.rs::Agent::new` — project activation and state wiring
 - `crates/codescout-embed/src/lib.rs` — embedding factory + chunk size formula
 - `src/librarian/` — SQLite artifact catalog (find.rs, get.rs, update.rs, events.rs)
+
 ## Key Abstractions
 
 - `Tool` trait + `ToolContext` (`src/tools/core/`) — every tool implements `call()`; `call_content()` is the MCP entry point
@@ -14,6 +15,7 @@
 - `RecoverableError` — maps to `isError: false`; prevents sibling parallel tool call abort
 - `Agent` / `ActiveProject` (`src/agent/mod.rs`) — project state; tools access via `ctx.agent.with_project()`
 - `CodeScoutServer` (`src/server.rs`) — MCP `ServerHandler`; all `CallToolRequest`s flow through `call_tool_inner()`
+
 ## Search Tips
 
 - Good queries: "OutputGuard cap_items", "route_tool_error", "RecoverableError", "strip_project_root"
@@ -22,6 +24,8 @@
 - Avoid: "tool", "error", "file" (too broad)
 - For a specific tool: `symbols("src/tools/<category>.rs")` + `symbols(name=..., include_body=true)`
 - Fixture projects have no semantic index — use `grep(pattern, path="tests/fixtures/<name>/src")` or `symbols(path=...)` directly
+- `symbols(path)` routes to LSP when available; to verify a tree-sitter extractor fix, use `edit_code` on the target symbol — LSP output masks AST extractor bugs
+
 ## Navigation Strategy
 
 1. New task on a tool → `symbols("src/tools/<file>.rs")` + `symbols(name=..., include_body=true)`
@@ -31,6 +35,7 @@
 5. LSP behavior question → `symbols("src/lsp/")` then targeted body reads
 6. Embedding question → `symbols("crates/codescout-embed/src/")` first
 7. Fixture inspection → `symbols("tests/fixtures/<lang>-library/src/")` — read-only targets
+
 ## Project Rules
 
 - `cargo fmt && cargo clippy -- -D warnings && cargo test` before every completion — use `cargo test`, NOT `--lib` (integration tests live in `tests/`)
