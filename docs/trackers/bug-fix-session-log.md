@@ -77,6 +77,7 @@ time_scope: open-ended
 | W-8 | 2026-05-25 | high | `prompt_surfaces` test gate catches cap / snapshot / tool-name lint violations that `clippy`/`fmt` miss | Without `source_md_under_cap`, commit `4cc49ccb` would have shipped a server_instructions surface 339 bytes over the 2KB MCP cap, silently truncating Workspace gate + Deeper guidance in every fresh session for every project. Cost: workspace-restore slips + lost get_guide discovery surface, undetectable client-side. | validated |
 | W-9 | 2026-06-05 | high | Spot-check sibling callers of a just-fixed shared helper before closing the bug class | Insert-only fix would ship while `edit_code` replace + remove still silently corrupt the LAST method of a Python class. Live repro: replacing `C/last` left orphaned `assert x` (`replaced_lines: 5-9`, off by one). `references(clamp_range_to_parent)` found both extra callers. | validated |
 | W-10 | 2026-06-09 | med | Full-tree `grep <token>` before editing beats bug-file's hand-cited line list | Plan cited only `tests.rs:286-287`; line 257 flips to red + fixture hunt wasted on a 0-match surface | validated |
+| W-11 | 2026-06-11 | high | Verify-open reconciliation against code+git de-zombies a backlog at scale | i1-refactor self-reported 13-of-14 pending but all 14 shipped; lsp-tools 3/3 fixed; both archived; ~46 open items mostly DONE-SINCE | validated |
 
 ## Category conventions
 
@@ -1098,6 +1099,23 @@ bug class."
 **Promote-when:** A third datapoint where a hand-cited bug-file line list omits a build-breaking test assertion. Then promote to CLAUDE.md bug-fix discipline: "Before fixing a token that appears in test assertions, `grep` it workspace-wide; the bug file's line list is a starting point, not the blast radius."
 
 **Status:** validated
+
+---
+## W-11 — Verify-open reconciliation against code+git de-zombies a backlog at scale
+
+**Observed:** 2026-06-09 to 06-11, a full survey of all trackers/bugs for remaining work; ran a 4-scout verify-open reconciliation across ~46 open friction/work items.
+
+**Pattern:** Do not trust a tracker's `Status`/`open` field for a backlog report — reconcile each open item against current code + git history (`git log -S`/`--grep`, `symbols`, `grep`) and classify STILL-OPEN vs DONE-SINCE with evidence.
+
+**Counterfactual:** Most open items were already shipped. `i1-refactor-tasks` self-reported 13 of 14 pending; reconciliation found ALL 14 shipped (`d11e830e`..`d8b38f26`). `lsp-tools-error-rate` listed 3 open root causes, all fixed (`78d1e392` + `retry_on_mux_disconnect`). Without the reconciliation a triage would have re-investigated (or re-implemented) dozens of done items and reported a falsely-huge still-to-do list.
+
+**Confirming data points:** (1) i1-refactor 14/14 done, archived. (2) lsp-tools-error-rate 3/3 done, archived. (3) skill-frictions `/onboarding` F-001/F-002 reported open by a scout but marked (FIXED 2026-05-07) inline. (4) F-15 flipped to fixed-verified once the project_id fix shipped (`890da4d6`).
+
+**Impact:** high — converted an untrustworthy ~46-item open list into a small real backlog; prevented rework on shipped features.
+
+**Promote-when:** already partially codified (CLAUDE.md verify-open cadence, W-7). On a third large zombie-open sweep, promote a reindex-then-reconcile-before-any-backlog-report line into the Standard Ship Sequence.
+
+**Status:** validated — single large sweep this session; reinforces the existing verify-open cadence (W-7, 2026-05-25).
 
 ---
 ## Template for new entries

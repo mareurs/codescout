@@ -192,3 +192,10 @@ controller drift mid-dispatch.
 the drift, W-2 is the win-from-catching-it. The fact that both could be
 *one* friction in the right place (writing-plans pre-write scout) and
 not just a recon-saves-the-day story is the substantive complaint.
+
+## `/buddy:summon`
+
+### F-001 — Summon protocol assumes native Bash/Read; codescout-companion hard-denies both
+**When:** 2026-06-11, `/buddy:summon hamsa` in the codescout project. The SKILL protocol steps say to use the Bash tool (discover-specialists.sh, track_specialist.py, summons.log append) and the Read tool (SKILL.md, lens addenda, memories, memory-protocol.md, gates.md).
+**Got:** codescout-companion hard-denies native `Bash` and native `Read` on this project (and `read_file` on `.md` via IL4). Every step had to be translated: `run_command` for the scripts, `cat` for the foreign-repo markdown (SKILL.md / memory-protocol.md / gates.md), `printf >> summons.log`. It worked, but a less-adapted agent would stall on the first blocked Bash/Read call.
+**Fix idea:** Have the buddy:summon protocol name codescout-aware fallbacks (if native Bash/Read are gated, use run_command / cat / read_markdown), or detect a codescout-companion project and emit the adapted tool list up front. Low urgency — the adaptation is mechanical once known.

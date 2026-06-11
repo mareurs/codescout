@@ -45,6 +45,7 @@ skill).
 | R-19 | 2026-06-09 | hit, then miss (recurred post-doc) | Scout home-project internals before presenting cross-project "B benefits from A" recommendations (claim `@ref` no-dedup → confirmed; claim "summarization generic" → drift: `format_compact` is per-tool) | this session; `output_buffer.rs:250`, `types.rs:387`; kin R-14 |
 | R-20 | 2026-06-09 | hit (validates R-3) | A bug-file's hand-cited fix-plan line list is not the blast radius (workspace-root grep found a 3rd build-breaking assert at `tests.rs:257` + a 0-match fixture lead) | bug-fix F-15 + W-10 |
 | R-21 | 2026-06-09 | hit | Verify a side-effect through its real production entry point (CLI/MCP), not a unit harness that bypasses `main.rs`; `references()` the operation to enumerate ALL call sites before placing it (`sync_project`: 5 sites, write reached 1 of 3 project paths) | index-freshness F-1 + W-1; commit 10dcfb9f |
+| R-22 | 2026-06-11 | hit | Scout the LSP call path to confirm a staleness mechanism before choosing the fix layer (references false-zero: `did_open` syncs def-file only, no barrier; all LSP signals share the staleness so the fix must be LSP-independent) | issues/2026-06-09-references-false-zero; commit ddc7e3f1; kin R-21 |
 
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
@@ -679,6 +680,23 @@ SKILL.md Phase-1 bullet to name bug-file line lists explicitly.
 
 **Source:** `references(RetrievalClient/sync_project)` → 5 sites; `src/retrieval/sync.rs`, `src/main.rs:259`, `src/bin/sync_project.rs:29`; commit `10dcfb9f`; index-freshness session-log F-1 + W-1. Kin: R-17, Snow Lion `cross-cutting-side-effects-at-the-chokepoint`.
 
+## R-22 — Scout the LSP call path to confirm a staleness mechanism before choosing the fix layer
+
+**Verdict:** hit — reading `References/call` + `LspClient::references` confirmed the false-zero mechanism, which determined the fix layer (LSP-independent corroboration, not an LSP retry).
+
+**Observed:** 2026-06-11, scoping the `references-false-zero-stale-graph` bug (co-author-filed, severity high); asked to confirm the mechanism before fixing.
+
+**Scout (reality):** `LspClient::references` calls `did_open` on the DEFINITION file only, then `textDocument/references` — no project-load / post-reindex barrier, so caller files the LSP has not yet loaded are absent (false `0`). The pre-existing completeness cross-check (`references_completeness_hint`) compares against `callHierarchy/incomingCalls`, ALSO LSP-backed, so it shares the staleness and is blind to a shared-zero. The cold-start retry budget includes references, but a definition-only result is a *successful* response, so it never retries.
+
+**Outcome:** HIT. The scout ruled out the tempting-but-wrong fixes (add an LSP retry; trust the call-hierarchy guard) and pointed at the only trustworthy second opinion — an LSP-INDEPENDENT text scan, mirroring `call_graph` Phase B. Fix landed (`ddc7e3f1`) and live-reproduced: cold call returned `0` + guard warning; warm call returned 8 refs in 4 files, no warning.
+
+**Cross-cutting lesson:** When the symptom is a same-query-different-result-over-time, scout whether the answering path shares a freshness root with every candidate corroboration signal. If all cross-checks are backed by the same lagging index/LSP, only an out-of-band source (text / tree-sitter) can corroborate. Kin to R-21 — both are the-obvious-second-opinion-is-not-independent.
+
+**Promote-when:** a second instance where a shared-staleness scout redirects a fix from the lagging layer to an independent corroboration, then promote a corroborate-with-an-out-of-band-source bullet to CLAUDE.md / SKILL.md.
+
+**Status:** open — single strong datapoint (scout + live repro both load-bearing). Same-session sibling: scouting `apply_body_edits` + `edit_markdown` validation before the U-26 fix (got the action grammar right pre-edit).
+
+**Source:** `src/tools/symbol/references.rs` (`References/call`), `src/lsp/client.rs` (`references`), `src/tools/symbol/call_graph/mod.rs` (Phase B); bug `docs/issues/2026-06-09-references-false-zero-stale-graph.md`; commit `ddc7e3f1`. Kin: R-21.
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
