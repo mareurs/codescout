@@ -90,10 +90,10 @@ impl Tool for Symbols {
              - `name` / `query`: substring match (e.g. `\"handle\"` finds `handle_request`, `handle_error`).\n\
              - `symbol` / `name_path`: exact name-path (e.g. `\"MyStruct/my_method\"`) — skips substring search, ignores `kind`.\n\
              - `kind`: filter to `function`, `struct`, `interface`, `enum`, `module`, `constant`, `type`, `class`.\n\
-             - `include_body=true`: returns full source of each match.\n\
+             - `include_body=true`: returns full source of each match. Even without it, a search resolving to exactly ONE symbol auto-shows its code (a leaf's body, or a large container's direct-member shape).\n\
              - `path`: file, directory, or glob. Without a name argument, returns an overview of that path.\n\
              - `depth`: children depth (overview default 1, search default 0).\n\
-             - `include_docs=true` (overview only): attach tree-sitter docstrings to each symbol.\n\
+             - `include_docs=true`: attach each symbol's own docstring (works in both overview and search modes).\n\
              \n\
              ## Output and pagination\n\
              \n\
@@ -125,7 +125,7 @@ impl Tool for Symbols {
                 },
                 "include_body": { "type": "boolean", "default": false },
                 "depth": { "type": "integer", "description": "Children depth (overview default 1; search default 0)." },
-                "include_docs": { "type": "boolean", "default": false, "description": "Overview only: include tree-sitter docstrings." },
+                "include_docs": { "type": "boolean", "default": false, "description": "Attach each symbol's own docstring (overview and search modes)." },
                 "force_mode": {
                     "type": "string",
                     "enum": ["auto", "symbols"],
@@ -560,8 +560,22 @@ impl Tool for Symbols {
             }
         }
 
+        let include_docs = optional_bool_param(&input, "include_docs").unwrap_or(false);
         if include_body_explicit.is_none() && !include_body {
-            auto_inline_small_bodies(&mut matches, &root);
+            // A search that resolves to exactly one symbol is a "focus" request:
+            // show that symbol's code (leaf body, or a large container's member
+            // shape) rather than a bare locator. Multi-match keeps the
+            // conservative small-bodies inlining.
+            if matches.len() == 1 {
+                focus_single_symbol(&mut matches, &root);
+            } else {
+                auto_inline_small_bodies(&mut matches, &root);
+            }
+        }
+        // Honor include_docs in search mode too (previously consumed only by the
+        // overview path). Attaches each symbol's own docstring as a `docs` field.
+        if include_docs {
+            attach_docstrings(&mut matches, &root);
         }
 
         // Per-file presentation: when every match shares the same `file`,
@@ -711,5 +725,183 @@ pub(crate) fn auto_inline_small_bodies(matches: &mut [Value], root: &std::path::
         }
         let body = lines[s..e].join("\n");
         obj.insert("body".to_string(), json!(body));
+    }
+}
+
+/// When a search resolves to exactly one symbol, show its code rather than a bare
+/// locator. A leaf (function/method/property/…) gets its full body inlined
+/// (progressive disclosure buffers an oversized body to an `@ref`). A container
+/// (class/struct/object/enum/interface/module) gets its body if small, otherwise
+/// its direct-member signatures (`children`) plus a drill-in hint — the member
+/// shape is far more useful than dumping a 500-line type body.
+///
+/// Runs only when the caller did not pass `include_body` (which already inlines).
+pub(crate) fn focus_single_symbol(matches: &mut [Value], root: &std::path::Path) {
+    const CONTAINER_KINDS: &[&str] = &[
+        "Class",
+        "Struct",
+        "Object",
+        "Enum",
+        "Interface",
+        "Module",
+        "Namespace",
+        "Package",
+    ];
+    // Above this many lines, a container shows members instead of its full body.
+    const CONTAINER_INLINE_MAX_LINES: u64 = 80;
+
+    let Some(item) = matches.first_mut() else {
+        return;
+    };
+    let Some(obj) = item.as_object_mut() else {
+        return;
+    };
+    if obj.contains_key("body") || obj.contains_key("children") {
+        return;
+    }
+    let Some(file) = obj.get("file").and_then(|v| v.as_str()).map(str::to_string) else {
+        return;
+    };
+    if file.starts_with("lib:") {
+        return;
+    }
+    let kind = obj
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let name = obj
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let start = obj.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
+    let end = obj.get("end_line").and_then(|v| v.as_u64()).unwrap_or(0);
+    if start == 0 || end < start {
+        return;
+    }
+    let abs = if std::path::Path::new(&file).is_absolute() {
+        std::path::PathBuf::from(&file)
+    } else {
+        root.join(&file)
+    };
+    let line_span = end - start + 1;
+    let is_container = CONTAINER_KINDS.contains(&kind.as_str());
+
+    if is_container && line_span > CONTAINER_INLINE_MAX_LINES {
+        // Large container: attach direct members as the navigable shape.
+        if let Ok(syms) = crate::ast::extract_symbols(&abs) {
+            if let Some(found) = find_symbol_recursive(&syms, &name) {
+                if !found.children.is_empty() {
+                    let members: Vec<Value> = found
+                        .children
+                        .iter()
+                        .map(|c| symbol_to_json(c, false, None, 0, false))
+                        .collect();
+                    let n = members.len();
+                    obj.insert("children".to_string(), json!(members));
+                    obj.insert(
+                        "members_hint".to_string(),
+                        json!(format!(
+                            "{n} direct members ({line_span}-line {}). \
+                             symbols(symbol=\"{name}/<member>\", include_body=true) for a member body, \
+                             or include_body=true for the full source.",
+                            kind.to_lowercase()
+                        )),
+                    );
+                    return;
+                }
+            }
+        }
+        // No members extractable — leave a hint rather than dumping the body.
+        obj.insert(
+            "members_hint".to_string(),
+            json!(format!(
+                "{line_span}-line {} — pass include_body=true for the full source.",
+                kind.to_lowercase()
+            )),
+        );
+        return;
+    }
+
+    // Leaf (any size) or a small container: inline the full body.
+    if let Ok(src) = std::fs::read_to_string(&abs) {
+        let lines: Vec<&str> = src.lines().collect();
+        let s = (start as usize).saturating_sub(1);
+        let e = (end as usize).min(lines.len());
+        if s < lines.len() && e > s {
+            obj.insert("body".to_string(), json!(lines[s..e].join("\n")));
+        }
+    }
+}
+
+/// Find a symbol by name anywhere in an extracted symbol tree (DFS, first match).
+fn find_symbol_recursive<'a>(
+    syms: &'a [crate::lsp::SymbolInfo],
+    name: &str,
+) -> Option<&'a crate::lsp::SymbolInfo> {
+    for s in syms {
+        if s.name == name {
+            return Some(s);
+        }
+        if let Some(found) = find_symbol_recursive(&s.children, name) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Attach each match's own docstring as a `docs` field (search-mode `include_docs`).
+/// Associates a docstring to a symbol by `symbol_name`, falling back to a docstring
+/// whose last line immediately precedes the symbol declaration (≤3-line gap, to
+/// tolerate blank lines / annotations between doc and decl).
+pub(crate) fn attach_docstrings(matches: &mut [Value], root: &std::path::Path) {
+    // Cache parsed docstrings per file as (symbol_name, end_line_0indexed, content).
+    let mut cache: std::collections::HashMap<String, Vec<(Option<String>, u64, String)>> =
+        std::collections::HashMap::new();
+    for item in matches.iter_mut() {
+        let Some(obj) = item.as_object_mut() else {
+            continue;
+        };
+        if obj.contains_key("docs") {
+            continue;
+        }
+        let Some(file) = obj.get("file").and_then(|v| v.as_str()).map(str::to_string) else {
+            continue;
+        };
+        if file.starts_with("lib:") {
+            continue;
+        }
+        let name = obj
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let start = obj.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
+        let docs = cache.entry(file.clone()).or_insert_with(|| {
+            let abs = if std::path::Path::new(&file).is_absolute() {
+                std::path::PathBuf::from(&file)
+            } else {
+                root.join(&file)
+            };
+            crate::ast::extract_docstrings(&abs)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|d| (d.symbol_name, d.end_line as u64, d.content))
+                .collect()
+        });
+        let doc = docs
+            .iter()
+            .find(|(sn, _, _)| sn.as_deref() == Some(name.as_str()))
+            .or_else(|| {
+                docs.iter().find(|(_, end_0, _)| {
+                    let doc_end_1 = end_0 + 1; // 0-indexed → 1-indexed
+                    start > 0 && doc_end_1 < start && start - doc_end_1 <= 3
+                })
+            });
+        if let Some((_, _, content)) = doc {
+            let content = content.clone();
+            obj.insert("docs".to_string(), json!(content));
+        }
     }
 }

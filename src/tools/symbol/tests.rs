@@ -6731,6 +6731,151 @@ fn format_search_symbols_single_file_no_global_header() {
     assert!(out.starts_with("a.rs (1)\n"), "got:\n{out}");
 }
 
+
+// ── symbols single-match focus + search-mode include_docs ──────────────────
+
+#[tokio::test]
+async fn include_docs_attaches_docs_in_search_mode() {
+    // Regression (docs/issues/2026-06-11-symbols-search-include-docs-and-focus):
+    // include_docs was consumed only by the overview path; a search (name given)
+    // silently dropped it. End-to-end proof through Symbols::call that the live
+    // search path now attaches a per-symbol `docs` field.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("lib.rs"),
+        "/// Adds two numbers together.\nfn my_documented_add(a: i32, b: i32) -> i32 { a + b }\n",
+    )
+    .unwrap();
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = test_ctx_with_agent(agent);
+    let result = Symbols
+        .call(
+            json!({ "query": "my_documented_add", "path": "lib.rs", "include_docs": true }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let syms = result["symbols"].as_array().expect("symbols array");
+    assert!(!syms.is_empty(), "expected a match for my_documented_add");
+    let docs = syms[0]["docs"]
+        .as_str()
+        .expect("include_docs must attach a `docs` field in SEARCH mode (was ignored; only overview honored it)");
+    assert!(docs.contains("Adds two numbers"), "got: {docs}");
+}
+
+#[test]
+fn focus_single_symbol_inlines_large_leaf_body() {
+    use super::symbols::focus_single_symbol;
+    let dir = tempfile::TempDir::new().unwrap();
+    // A function longer than the conservative 40-line auto-inline cap.
+    let mut content = String::from("fn big() {\n");
+    for i in 0..50 {
+        content.push_str(&format!("    let _x{i} = {i};\n"));
+    }
+    content.push_str("}\n");
+    let n_lines = content.lines().count() as u64;
+    std::fs::write(dir.path().join("big.rs"), &content).unwrap();
+    let mut matches = vec![json!({
+        "name": "big", "symbol": "big", "kind": "Function",
+        "file": "big.rs", "start_line": 1, "end_line": n_lines,
+    })];
+    focus_single_symbol(&mut matches, dir.path());
+    let body = matches[0]["body"]
+        .as_str()
+        .expect("a single leaf match should inline its full body even past the 40-line cap");
+    assert!(body.contains("let _x0"));
+    assert!(matches[0].get("children").is_none());
+}
+
+#[test]
+fn focus_single_symbol_shows_members_for_large_container() {
+    use super::symbols::focus_single_symbol;
+    let dir = tempfile::TempDir::new().unwrap();
+    // A Kotlin object whose enclosing range exceeds the 80-line container cap.
+    let mut content =
+        String::from("object Big {\n    fun alpha() {}\n    fun beta() {}\n    fun gamma() {}\n");
+    for i in 0..90 {
+        content.push_str(&format!("    // pad {i}\n"));
+    }
+    content.push_str("}\n");
+    let n_lines = content.lines().count() as u64;
+    std::fs::write(dir.path().join("Big.kt"), &content).unwrap();
+    let mut matches = vec![json!({
+        "name": "Big", "symbol": "Big", "kind": "Object",
+        "file": "Big.kt", "start_line": 1, "end_line": n_lines,
+    })];
+    focus_single_symbol(&mut matches, dir.path());
+    assert!(
+        matches[0].get("body").is_none(),
+        "a large container should expose members, not dump its full body"
+    );
+    let children = matches[0]["children"]
+        .as_array()
+        .expect("large container should expose its direct members");
+    let names: Vec<&str> = children.iter().filter_map(|c| c["name"].as_str()).collect();
+    assert!(
+        names.contains(&"alpha") && names.contains(&"beta") && names.contains(&"gamma"),
+        "expected the object's methods as members, got: {names:?}"
+    );
+    assert!(matches[0]["members_hint"]
+        .as_str()
+        .unwrap_or("")
+        .contains("members"));
+}
+
+#[test]
+fn attach_docstrings_attaches_symbol_doc() {
+    use super::symbols::attach_docstrings;
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("m.rs"),
+        "/// Adds two numbers.\nfn add(a: i32, b: i32) -> i32 { a + b }\n",
+    )
+    .unwrap();
+    // `add` is declared on line 2; its doc occupies line 1.
+    let mut matches = vec![json!({
+        "name": "add", "symbol": "add", "kind": "Function",
+        "file": "m.rs", "start_line": 2, "end_line": 2,
+    })];
+    attach_docstrings(&mut matches, dir.path());
+    let docs = matches[0]["docs"]
+        .as_str()
+        .expect("docs should be attached");
+    assert!(docs.contains("Adds two numbers"), "got: {docs}");
+}
+
+#[test]
+fn format_search_symbols_renders_docs_members_and_hint() {
+    use crate::tools::symbol::display::format_search_symbols;
+    let val = json!({
+        "symbols": [{
+            "name": "Big", "symbol": "Big", "kind": "Object",
+            "file": "Big.kt", "start_line": 1, "end_line": 200,
+            "docs": "A big thing.",
+            "children": [
+                {"name": "alpha", "symbol": "Big/alpha", "kind": "Method",
+                 "start_line": 2, "end_line": 2, "signature": "fun alpha()"}
+            ],
+            "members_hint": "1 direct member (200-line object)."
+        }],
+        "total": 1
+    });
+    let text = format_search_symbols(&val);
+    assert!(
+        text.contains("// A big thing."),
+        "docs should render as a comment line:\n{text}"
+    );
+    assert!(text.contains("Big/alpha"), "member should render:\n{text}");
+    assert!(
+        text.contains("fun alpha()"),
+        "member signature should render:\n{text}"
+    );
+    assert!(
+        text.contains("-> 1 direct member"),
+        "members_hint should render:\n{text}"
+    );
+}
+
 // ---------- auto_inline_small_bodies ----------
 
 fn fixture_with_class(dir: &std::path::Path, lines: usize) -> std::path::PathBuf {

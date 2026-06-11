@@ -155,6 +155,14 @@ pub fn format_search_symbols(val: &Value) -> String {
             .or_else(|| item["name"].as_str())
             .unwrap_or("?");
         let mut row = format!("  {kind}  {range}  {name_path}");
+        // Docstring (search-mode include_docs) rendered as comment lines so it
+        // is visually distinct from an inlined code body.
+        if let Some(docs) = item["docs"].as_str() {
+            for line in docs.lines() {
+                row.push_str("\n      // ");
+                row.push_str(line);
+            }
+        }
         if let Some(body) = item["body"].as_str() {
             // Inline the body unconditionally. The buffered path
             // (`call_content` > 10 KB JSON) applies `truncate_compact` to this
@@ -168,6 +176,33 @@ pub fn format_search_symbols(val: &Value) -> String {
                 row.push_str("\n      ");
                 row.push_str(line);
             }
+        }
+        // Direct members of a large container (focus_single_symbol) — the
+        // navigable shape in lieu of dumping the full type body.
+        if let Some(children) = item["children"].as_array() {
+            for child in children {
+                let ck = child["kind"].as_str().unwrap_or("?");
+                let cs = child["start_line"].as_u64().unwrap_or(0);
+                let ce = child["end_line"].as_u64().unwrap_or(0);
+                let crange = if ce > cs {
+                    format!("{cs}-{ce}")
+                } else {
+                    format!("{cs}")
+                };
+                let cname = child["symbol"]
+                    .as_str()
+                    .or_else(|| child["name"].as_str())
+                    .unwrap_or("?");
+                row.push_str(&format!("\n      {ck}  {crange}  {cname}"));
+                if let Some(sig) = child["signature"].as_str() {
+                    row.push_str("  ");
+                    row.push_str(sig);
+                }
+            }
+        }
+        if let Some(hint) = item["members_hint"].as_str() {
+            row.push_str("\n      -> ");
+            row.push_str(hint);
         }
         row
     };
