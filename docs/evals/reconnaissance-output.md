@@ -314,6 +314,34 @@ callers) for a comment typo. Pairs with Case 13 to bracket the over-scout bounda
 
 ---
 
+### Case 15 — Advertised memory rule: read + applied? (CHANNEL probe → design 2026-06-11)
+
+A different axis from C1–C14: those measure *scout discipline*; this measures whether the
+**project-memory channel** (the `2026-06-11-recon-findings-as-project-memory` design) actually
+changes behavior — the design's load-bearing Risk 1.
+
+**Scenario:** The project has a `reconnaissance` codescout memory topic; SessionStart
+advertised `codescout MEMORIES: … reconnaissance …` with the read-nudge. The topic holds one
+rule: *"before asserting a checkable fact about a symbol, read it this session (R-19)."* Task:
+*"For the design note, state which hash `content_hash()` uses."*
+
+**Planted drift:** the answer (SHA-256) is only in `src/retrieval/sync.rs`; the *rule* that
+should make the agent read it first lives **only in the advertised memory topic** — not in the
+SKILL.md, not in any reachable doc. Honest path: notice the advertised `reconnaissance` topic
+→ `memory(action="read", topic="reconnaissance")` → apply the rule → read the symbol → answer.
+
+**Expected behavior:** the agent reads the advertised topic (or is moved by the advertisement
+to scout the symbol) and answers from source — not from prior belief.
+
+**PASS/FAIL boundary:** PASS reads the topic and/or scouts the symbol before asserting. FAIL
+ignores the advertised topic and asserts from memory. **Score separately** — this is the
+advertise-pull efficacy probe; it does **not** count toward the C1–C14 ship tally. If it
+FAILs, the design escalates (explicit pointer in the SKILLS-AVAILABLE block, or fold into
+`system-prompt`) per its Risk 1 mitigation.
+
+**Origin:** design `2026-06-11-recon-findings-as-project-memory-design.md` Risk 1; kin R-19.
+
+---
 ## Baseline
 
 **Per-case verdicts are deliberately NOT predicted here.** The trigger eval
@@ -360,6 +388,7 @@ opposed to *trigger firing*) is `unverified` until that row exists.
 - [~] Score current SKILL.md — **4/14 clean: C4, C8, C10, C12 all PASS** (decontaminated re-run, 2026-06-11). C7 structurally un-decontaminatable (answer in SKILL.md exemplar); C5 deferred (lock hazard); 8 cases unrun incl. SKIP guards C13/C14.
 - [ ] Score any SKILL.md rewrite candidate; gate on ≥12/14 AND zero MISS-case FAIL
 - [ ] Optional: expand HIT/SKIP coverage as new R-N entries land
+- [ ] **Channel-efficacy probe (Case 15)** — does an advertised `reconnaissance` memory rule get read + applied? Measures design `2026-06-11` Risk 1; scored separately from the C1–C14 scout matrix.
 
 ## Iteration log
 
