@@ -41,15 +41,34 @@ pub(crate) fn is_glob(path: &str) -> bool {
 ///
 /// `"."` and `""` resolve to the project root directly (not `root.join(".")`)
 /// to avoid spurious `./` prefixes when stripping the root later.
+///
+/// Resolves against the session-default project. For per-request `workspace=`
+/// pinning, use [`resolve_read_path_for`] — this is exactly that with `None`.
 pub(crate) async fn resolve_read_path(
     agent: &Agent,
     relative_path: &str,
 ) -> anyhow::Result<PathBuf> {
+    resolve_read_path_for(agent, None, relative_path).await
+}
+
+/// Override-aware twin of [`resolve_read_path`]: resolves the path against the
+/// workspace named by `workspace_override` (resident-on-demand) rather than the
+/// session default. Pass `None` for the default.
+///
+/// Without this, an overview/read pinned with `workspace=` would resolve the
+/// path against the *active* project and miss the pinned one (the per-request
+/// pinning gap that `read_file` already closed; see
+/// `read_file_honors_workspace_override_pin`).
+pub(crate) async fn resolve_read_path_for(
+    agent: &Agent,
+    workspace_override: Option<&Path>,
+    relative_path: &str,
+) -> anyhow::Result<PathBuf> {
     if relative_path == "." || relative_path.is_empty() {
-        return agent.require_project_root().await;
+        return agent.require_project_root_for(workspace_override).await;
     }
-    let project_root = agent.project_root().await;
-    let security = agent.security_config().await;
+    let project_root = agent.project_root_for(workspace_override).await;
+    let security = agent.security_config_for(workspace_override).await;
     let full = crate::util::path_security::validate_read_path(
         relative_path,
         project_root.as_deref(),
@@ -160,14 +179,27 @@ pub(crate) fn classify_reference_path(
 /// Resolve a path that may be a glob pattern, returning all matching files.
 /// If the path is a literal file/directory, returns it as a single-element vec.
 /// If it contains glob metacharacters (* ? [), expands against the project root.
+///
+/// Resolves against the session-default project. For `workspace=` pinning use
+/// [`resolve_glob_for`] — this is that with `None`.
 pub(crate) async fn resolve_glob(
     agent: &Agent,
     path_or_glob: &str,
 ) -> anyhow::Result<Vec<PathBuf>> {
-    let root = agent.require_project_root().await?;
+    resolve_glob_for(agent, None, path_or_glob).await
+}
+
+/// Override-aware twin of [`resolve_glob`]: expands against the workspace named
+/// by `workspace_override` (resident-on-demand) rather than the session default.
+pub(crate) async fn resolve_glob_for(
+    agent: &Agent,
+    workspace_override: Option<&Path>,
+    path_or_glob: &str,
+) -> anyhow::Result<Vec<PathBuf>> {
+    let root = agent.require_project_root_for(workspace_override).await?;
 
     if !is_glob(path_or_glob) {
-        let full = resolve_read_path(agent, path_or_glob).await?;
+        let full = resolve_read_path_for(agent, workspace_override, path_or_glob).await?;
         return Ok(vec![full]);
     }
 
@@ -428,4 +460,38 @@ mod tests {
         let e = anyhow::anyhow!("file not found: src/foo.rs");
         assert!(!is_mux_disconnect(&e));
     }
+
+
+    #[tokio::test]
+    async fn resolve_read_path_for_honors_workspace_override() {
+        // Per-request pin regression (docs/issues/2026-06-11-symbols-search-include-docs-and-focus):
+        // the symbols overview path resolved via resolve_read_path against the
+        // *active* project, so a `workspace=` pin was silently ignored. The _for
+        // twin closes that, mirroring read_file's pin support.
+        let dir_a = tempfile::tempdir().unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+        std::fs::create_dir_all(dir_b.path().join(".codescout")).unwrap();
+        std::fs::write(dir_a.path().join("only_in_a.rs"), "fn f() {}\n").unwrap();
+        let root_a = std::fs::canonicalize(dir_a.path()).unwrap();
+
+        // Default (unpinned) project is B, which has no `only_in_a.rs`.
+        let agent = Agent::new(Some(dir_b.path().to_path_buf())).await.unwrap();
+
+        // Unpinned → resolves against B → miss (the bug surface).
+        assert!(
+            resolve_read_path(&agent, "only_in_a.rs").await.is_err(),
+            "unpinned resolution should look in default workspace B and miss A's file"
+        );
+        // Pinned to A → resolves against A → hit.
+        let resolved = resolve_read_path_for(&agent, Some(root_a.as_path()), "only_in_a.rs")
+            .await
+            .expect("a workspace-pinned resolution must find A's file");
+        assert!(
+            resolved.ends_with("only_in_a.rs"),
+            "got: {}",
+            resolved.display()
+        );
+    }
+
 }

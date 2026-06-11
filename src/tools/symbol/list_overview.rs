@@ -12,8 +12,8 @@ use crate::tools::output::{OutputGuard, OverflowInfo};
 use crate::tools::{optional_u64_param, parse_bool_param, RecoverableError, ToolContext};
 
 use crate::fs::{
-    format_library_path, get_lsp_client, get_path_param, is_glob, resolve_glob,
-    resolve_library_roots, resolve_read_path, retry_on_mux_disconnect, LspTimer,
+    format_library_path, get_lsp_client, get_path_param, is_glob, resolve_glob_for,
+    resolve_library_roots, resolve_read_path_for, retry_on_mux_disconnect, LspTimer,
 };
 use crate::symbol::query::{filter_variable_symbols, symbol_to_json};
 
@@ -219,7 +219,7 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
 
     // If the path contains glob metacharacters, expand and aggregate
     if is_glob(rel_path) {
-        let files = resolve_glob(&ctx.agent, rel_path).await?;
+        let files = resolve_glob_for(&ctx.agent, ctx.workspace_override.as_deref(), rel_path).await?;
         let mut guard = guard;
         guard.max_files = guard.max_files.min(LIST_SYMBOLS_MAX_FILES);
         let (files, file_overflow) =
@@ -273,7 +273,7 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
         return Ok(result_json);
     }
 
-    let full_path = resolve_read_path(&ctx.agent, rel_path).await?;
+    let full_path = resolve_read_path_for(&ctx.agent, ctx.workspace_override.as_deref(), rel_path).await?;
 
     if full_path.is_file() {
         let raw_lang = ast::detect_language(&full_path)
