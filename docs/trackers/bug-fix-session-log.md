@@ -60,7 +60,8 @@ time_scope: open-ended
 | F-12 | 2026-05-24 | med | codescout-tool-usage | fixed-verified | Dismissed `references`'s "use call_graph for authoritative callers" warning → shipped half-fix, missed `build.rs` duplicate |
 | F-13 | 2026-05-25 | med | release-pipeline | fixed-verified | CHANGELOG entry written under wrong version label — `Cargo.toml`-as-authoritative assumption (0.13.0 already published) |
 | F-14 | 2026-05-25 | high | release-pipeline | fixed-verified | `cargo publish` failed on `include_str!("../docs/...")` path stripped by `Cargo.toml` `exclude` — pre-publish gates couldn't detect |
-| F-15 | 2026-06-09 | med | plan-prose | open | Bug-file `project=`→`project_id=` fix plan misses 3rd test assertion (`tests.rs:257`) + cites non-existent fixture
+| F-15 | 2026-06-09 | med | plan-prose | open | Bug-file `project=`→`project_id=` fix plan misses 3rd test assertion (`tests.rs:257`) + cites non-existent fixture |
+| F-16 | 2026-06-11 | high | self-friction | fixed-verified | Inherited "`edit_code` crashes Kotlin LSP" claim was a misdiagnosis — real cause was a kotlin-lsp RocksDB-lock deadlock |
 
 ## Wins Index
 
@@ -78,6 +79,7 @@ time_scope: open-ended
 | W-9 | 2026-06-05 | high | Spot-check sibling callers of a just-fixed shared helper before closing the bug class | Insert-only fix would ship while `edit_code` replace + remove still silently corrupt the LAST method of a Python class. Live repro: replacing `C/last` left orphaned `assert x` (`replaced_lines: 5-9`, off by one). `references(clamp_range_to_parent)` found both extra callers. | validated |
 | W-10 | 2026-06-09 | med | Full-tree `grep <token>` before editing beats bug-file's hand-cited line list | Plan cited only `tests.rs:286-287`; line 257 flips to red + fixture hunt wasted on a 0-match surface | validated |
 | W-11 | 2026-06-11 | high | Verify-open reconciliation against code+git de-zombies a backlog at scale | i1-refactor self-reported 13-of-14 pending but all 14 shipped; lsp-tools 3/3 fixed; both archived; ~46 open items mostly DONE-SINCE | validated |
+| W-12 | 2026-06-11 | high | Re-derive an inherited "tool X breaks Y" claim from usage.db `tool_calls.outcome`+`lsp_events` before acting | Would have opened a bug against `edit_code`/AST (neither broken) + normalized a `create_file` workaround while the real cause (kotlin-lsp RocksDB-lock deadlock) left the LSP dead; transcript adjacency ≠ causation | validated |
 
 ## Category conventions
 
@@ -1118,6 +1120,45 @@ bug class."
 **Status:** validated — single large sweep this session; reinforces the existing verify-open cadence (W-7, 2026-05-25).
 
 ---
+## F-16 — Inherited "`edit_code` crashes the Kotlin LSP" claim was a misdiagnosis; real cause was an orphaned RocksDB index-lock holder
+
+**Observed:** 2026-06-11, debugging a foreign project (`~/work/mirela/backend-kotlin`) whose prior session concluded "the `edit_code` write-path reliably crashes the Kotlin LSP (read-path `symbols` works), and `edit_file` refuses new `fun` definitions — so I'll use `create_file` instead."
+
+**When:** Start of a systematic-debugging pass, before accepting the inherited diagnosis or filing any bug.
+
+**Expected (inherited claim):** `edit_code` apply disconnects the Kotlin LSP; `symbols` (read) is unaffected — i.e. a write-path defect in `edit_code`.
+
+**Got (scouted reality):** `<project>/.codescout/usage.db` `tool_calls` + `lsp_events` show `symbols` disconnecting *identically* (`LSP server disconnected`, rows 16934/16935/16944) and **every** `kotlin new_session` failing at ~4.9s. `debug.log` `lsp_stderr`: `org.rocksdb.RocksDBException: … rocks/v492/LOCK: Resource temporarily unavailable`. `fuser` on that LOCK named PID 2699281 — an orphaned direct-fallback `intellij-server` (owned by a 20h-old session's `codescout start --debug`) squatting on the shared RocksDB index lock. `edit_code` differs from `symbols` only because path-`symbols` can fall back to tree-sitter AST when the LSP is dead; `edit_code` needs `document_symbols` and cannot. `edit_file`'s "refuses `fun`" is the by-design structural-edit gate, not a fault.
+
+**Probable cause:** The prior session inferred causation from transcript adjacency — an `edit_code` call was *interrupted by the user*, then narrated as "crashes the LSP" — without checking per-call `outcome` in usage.db. Correlation-in-transcript ≠ causation.
+
+**Workaround:** `kill 2699281 2699279` freed the lock; a fresh `intellij-server` (PID 3029079) started and `fuser`-confirmed it holds the lock — Kotlin LSP recovered. Codescout-side defects filed in `docs/issues/2026-06-11-mux-failure-masks-rocksdb-lock-collision.md`.
+
+**Severity:** high — accepting the claim would have sent the session hunting/patching `edit_code` + the AST extractor (neither broken) and normalized the `create_file` workaround, while the actual fix (kill the lock holder) was never attempted, leaving the user's Kotlin LSP dead indefinitely. Wrong-target-fix risk.
+
+**Status:** fixed-verified — misdiagnosis corrected, root cause confirmed via `fuser`/process state, environment recovered + verified live, bug filed.
+
+**Fix idea / Pointer:** `docs/issues/2026-06-11-mux-failure-masks-rocksdb-lock-collision.md`; `src/lsp/manager.rs:456` (flock-only liveness), `:485` (stderr→null), `:318` (direct-LSP fallback collision).
+
+## W-12 — Re-derive an inherited "tool X breaks Y" claim from usage.db outcomes before acting on it
+
+**Observed:** 2026-06-11, inheriting a prior session's conclusion that `edit_code` crashes the Kotlin LSP in `~/work/mirela/backend-kotlin`.
+
+**Pattern:** When a session inherits a causal claim about tool behavior ("`edit_code` crashes the LSP", "`symbols` is fine"), re-derive it from the ground-truth telemetry — `<project>/.codescout/usage.db` `tool_calls.outcome`/`error_msg` and `lsp_events.outcome` — before filing a bug or attempting a fix. A transcript shows *order*, not *cause*; the per-call `outcome` columns show cause.
+
+**Counterfactual:** Without the usage.db scout, this session would have accepted "edit_code write-path crashes the LSP" and (a) opened a bug against `edit_code` / the AST extractor (neither is broken), (b) treated the `create_file` workaround as the norm, and (c) left the *actual* cause — a kotlin-lsp deadlock on the shared RocksDB index lock — untouched. The scout (3 SQL queries against usage.db + 1 `fuser`) flipped the entire diagnosis from a non-existent `edit_code` defect to an environmental RocksDB-lock deadlock, which was ultimately resolved by clearing the deadlock + a fresh mux spawn (`edit_code` success confirmed: usage.db rows 16949/16950).
+
+**Correction (same session):** the first "recovery verified" claim was wrong and is logged as its own lesson — a single `kill` only *rotates* the RocksDB lock-holder, and "verifying" recovery by issuing a call from a second client re-creates the contention (it spawned a squatter that broke the user's first restart). Captured as R-23 in `docs/trackers/reconnaissance-patterns.md`. The *re-derive-from-telemetry* pattern itself held; only the verification method was flawed.
+
+**Confirming data points:**
+1. F-16 (this session) — `symbols` disconnects identically to `edit_code` in usage.db; the claimed write-path asymmetry was a tree-sitter-AST-fallback artifact, not causation.
+2. F-7 (this log, 2026-05-21) — a similar "tool X undercounts" surface claim whose root was live-LSP incompleteness, not the tool; resolved by checking the actual data path rather than the surface symptom.
+
+**Impact:** high — converts a wrong-target debugging spiral into an environmental fix and prevents a spurious bug against a correct tool.
+
+**Promote-when:** A second inherited tool-behavior claim is overturned by re-deriving from usage.db telemetry. At 2 datapoints, promote to CLAUDE.md as "Before acting on an inherited 'tool X breaks Y' claim, re-derive it from usage.db `tool_calls.outcome` + `lsp_events` — transcript adjacency is not causation."
+
+**Status:** validated — diagnosis overturned via telemetry; environment recovered + confirmed (`edit_code` success in usage.db). Verification-method caveat logged as R-23.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

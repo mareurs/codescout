@@ -46,6 +46,7 @@ skill).
 | R-20 | 2026-06-09 | hit (validates R-3) | A bug-file's hand-cited fix-plan line list is not the blast radius (workspace-root grep found a 3rd build-breaking assert at `tests.rs:257` + a 0-match fixture lead) | bug-fix F-15 + W-10 |
 | R-21 | 2026-06-09 | hit | Verify a side-effect through its real production entry point (CLI/MCP), not a unit harness that bypasses `main.rs`; `references()` the operation to enumerate ALL call sites before placing it (`sync_project`: 5 sites, write reached 1 of 3 project paths) | index-freshness F-1 + W-1; commit 10dcfb9f |
 | R-22 | 2026-06-11 | hit | Scout the LSP call path to confirm a staleness mechanism before choosing the fix layer (references false-zero: `did_open` syncs def-file only, no barrier; all LSP signals share the staleness so the fix must be LSP-independent) | issues/2026-06-09-references-false-zero; commit ddc7e3f1; kin R-21 |
+| R-23 | 2026-06-11 | hit, then miss | Re-derive an inherited diagnosis from usage.db telemetry (hit); verify a shared single-holder-resource recovery by READING lock/process state, not by issuing a call from a 2nd client which re-creates the contention (miss) | bug-fix F-16 + W-12; issues/2026-06-11-mux-failure-masks-rocksdb-lock-collision |
 
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
@@ -697,6 +698,26 @@ SKILL.md Phase-1 bullet to name bug-file line lists explicitly.
 **Status:** open — single strong datapoint (scout + live repro both load-bearing). Same-session sibling: scouting `apply_body_edits` + `edit_markdown` validation before the U-26 fix (got the action grammar right pre-edit).
 
 **Source:** `src/tools/symbol/references.rs` (`References/call`), `src/lsp/client.rs` (`references`), `src/tools/symbol/call_graph/mod.rs` (Phase B); bug `docs/issues/2026-06-09-references-false-zero-stale-graph.md`; commit `ddc7e3f1`. Kin: R-21.
+## R-23 — Re-derive an inherited diagnosis from telemetry (hit); verify a shared single-holder-resource recovery by reading state, not by calling from a 2nd client (miss)
+
+**Verdict:** hit, then miss — the diagnostic scout was load-bearing and correct; the *recovery-verification* scout was self-defeating and caused a real regression.
+
+**Observed:** 2026-06-11, debugging a foreign project (`~/work/mirela/backend-kotlin`) whose prior session concluded "`edit_code` crashes the Kotlin LSP." Asked to debug systematically.
+
+**Scout (reality):**
+- *Hit:* re-derived the inherited claim from `<project>/.codescout/usage.db` (`tool_calls.outcome`/`error_msg`) + `lsp_events.outcome` + `debug.log` `lsp_stderr` + live `fuser`/`ps`/`ss`. `symbols` disconnected identically to `edit_code`; the real cause was a kotlin-lsp **RocksDB index-lock deadlock** (a direct-fallback LSP grabbed the lock before any mux could establish), not a write-path defect. The transcript's `edit_code`-then-failure adjacency was correlation, not cause (the call had been user-*interrupted*).
+- *Miss:* to "verify recovery" after killing the orphan lock-holder, I issued a `references` call from the **debugging session's** codescout server (workspace-pinned). That call spawned a direct-fallback LSP **owned by the debugging session**, which grabbed the just-freed RocksDB lock — making me the new squatter and breaking the user's *first* MCP restart (`tool_calls` 16948; `lsp_events` 354/355).
+
+**Outcome:** The diagnostic hit prevented a wrong-target fix (a bug against `edit_code`/AST, neither broken). The verification miss cost one user-visible regression cycle; recovery only became durable after clearing the *entire* deadlock (kill all kotlin-lsp for the hash + remove the stale mux `.lock`) and a fresh `codescout start` spawned a healthy shared mux — `edit_code` then succeeded (`tool_calls` 16949/16950).
+
+**Cross-cutting lesson:** A *recovery* scout of a **shared, single-holder resource** (an OS lock, a singleton LSP/mux, a RocksDB index) must be **read-only** — inspect process/lock/socket state (`fuser`, `ss -xlp`, `ps`), never issue an operational call from a second client. The call is itself a mutation that re-acquires the contended resource, so it both invalidates the test and can re-break the very thing you "verified." Hand operational verification to the owning client; the debugger only reads state. Kin to R-21/R-22 (the obvious second opinion is not independent) — here the obvious verification is not side-effect-free.
+
+**Promote-when:** a second instance where a recovery/verification call from a non-owning client perturbs a shared resource. At 2 datapoints, promote a "verify shared-resource recovery by reading state, not by calling" bullet to SKILL.md (Phase 4 / verification composition) and CLAUDE.md.
+
+**Status:** open — single strong datapoint; both the hit (diagnosis flip) and the miss (self-inflicted regression) are load-bearing and live-confirmed.
+
+**Source:** `docs/issues/2026-06-11-mux-failure-masks-rocksdb-lock-collision.md`; `src/lsp/manager.rs:432-539` (`get_or_start_via_mux`), `:456` (flock-only liveness), `:485` (stderr→null); bug-fix session-log F-16 + W-12. Kin: R-15 (external-tool on-disk state), R-21, R-22.
+
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
