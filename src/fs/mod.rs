@@ -461,7 +461,6 @@ mod tests {
         assert!(!is_mux_disconnect(&e));
     }
 
-
     #[tokio::test]
     async fn resolve_read_path_for_honors_workspace_override() {
         // Per-request pin regression (docs/issues/2026-06-11-symbols-search-include-docs-and-focus):
@@ -493,5 +492,4 @@ mod tests {
             resolved.display()
         );
     }
-
 }
