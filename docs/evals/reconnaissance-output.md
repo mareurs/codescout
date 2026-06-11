@@ -356,7 +356,7 @@ opposed to *trigger firing*) is `unverified` until that row exists.
 - [x] Rubric pinned (PASS / PARTIAL / FAIL; PARTIAL → FAIL for tally)
 - [x] 14 cases drafted (6 MISS, 6 HIT control, 2 SKIP) — each cites its R-N origin
 - [x] Run protocol pinned (strong trace-scored + cheap elicitation smoke test)
-- [ ] **Baseline empirical run (n=0 — UNVERIFIED until done)**
+- [~] Baseline first run — **partial (5/14), contaminated** (2026-06-11); see Iteration log + Re-evaluation. A clean run is still owed.
 - [ ] Score current SKILL.md against the 14 cases
 - [ ] Score any SKILL.md rewrite candidate; gate on ≥12/14 AND zero MISS-case FAIL
 - [ ] Optional: expand HIT/SKIP coverage as new R-N entries land
@@ -367,11 +367,21 @@ _(Append one row per scoring run. First row must be the empirical baseline.)_
 
 | Date | SKILL.md version | Cases passed | MISS-case FAILs | Notes |
 |------|------------------|--------------|-----------------|-------|
-| _pending_ | _current_ | _n=0_ | _n=0_ | Not yet run. Cases pinned from R-N ledger; baseline deliberately not predicted (see `## Baseline`). |
+| 2026-06-11 | a90708c (current) | 5/5 scouted-before-acting (partial: 5 of 14) | 0 (1 MISS case in subset: C4) | **Contaminated — upper bound, low confidence.** Fresh general-purpose subagents; SKILL.md loaded by reading it; R-N ledger not injected; read-only + workspace-pinned. All 5 scouted the named seam before acting and caught the drift / correctly conditioned the answer. BUT each case's answer is documented in-tree (docs/trackers, docs/issues, docs/adrs, this eval) and was surfaced via grep/semantic_search, so the run can't isolate scout-discipline from doc-lookup. C10's drift has healed (fixed in current tree). Cases run: C4/R-19, C7/R-16, C8/R-21, C10/R-17, C12/R-26. C5 deferred (live lock-contention hazard). |
 
 ## Re-evaluation after baseline
 
-_(Author after the first empirical run, mirroring the trigger eval's "Re-evaluation" section:
-which Expected behaviors the model actually produced, which MISS cases still FAIL, and whether the
-inspection-derived case design held up against a real trace. If inspection again mispredicts, that
-is itself the headline finding — record it.)_
+**First run (2026-06-11) — outcome: a methodology flaw surfaced, not a trustworthy score.** This mirrors the trigger eval's first-run lesson: the value was exposing a design defect, not the number.
+
+**What held up.** All 5 subagents, with the SKILL.md loaded and the R-N ledger withheld, scouted the named seam (read the symbol body / enumerated entry points / read the function) *before* committing to the assertion or action, and each surfaced the planted gap or correctly conditioned the answer. The skill→scout behavior fired. Two scouts exceeded the case spec: C7 found **two** same-named `RecoverableError` types (a contract the case author missed); C8 and C10 each handled a `references()` false-zero by falling back to grep (R-3) instead of trusting the 0.
+
+**Why the number is an upper bound, not a measurement — contamination.** Every case is drawn from an incident codescout documents *in-tree* (`docs/trackers/reconnaissance-patterns.md`, `docs/issues/*`, `docs/adrs/*`, and now this eval file). All five agents surfaced the recorded answer via `grep` / `semantic_search`, so the run cannot distinguish *scouted the code* from *found the write-up*. The Contamination note above covered injecting the R-N ledger; it missed that the answers also live in sibling docs the agent can reach. That is the more severe vector.
+
+**Stale-fixture problem.** HIT cases drawn from *resolved* incidents have healed in the current tree (C10's off-by-one is fixed at all three sites; C8's premise is the post-fix state). They now test "confirm-already-fixed," not "catch-live-drift."
+
+**Fixes owed before a meaningful run:**
+1. Run against a git worktree pinned to each case's *pre-fix* commit (drift live in code), or synthetic fixtures whose symbols are documented nowhere.
+2. Deny the agent `docs/trackers`, `docs/issues`, `docs/adrs`, `docs/evals` (the answer surfaces there).
+3. Re-score; only then does the ≥12/14 + zero-MISS-FAIL gate carry weight.
+
+**Recorded per this eval's own instruction** ("if inspection again mispredicts, that is itself the headline finding"): here it is contamination, not misprediction — same shape. The first run earns its keep by failing informatively.
