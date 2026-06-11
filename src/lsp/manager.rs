@@ -249,20 +249,15 @@ fn kotlin_index_lock_held(language: &str, workspace_root: &std::path::Path) -> b
         .any(|e| e.file_name() == "LOCK" && posix_write_lock_is_held(e.path()))
 }
 
-/// Find every process holding an open fd on `lock_path` (via `/proc/<pid>/fd`)
-/// and terminate it: SIGTERM, then SIGKILL after a 2s grace. Returns whether any
-/// holder was signalled. Linux `/proc` fd scan.
-///
-/// SAFETY of killing: callers invoke this ONLY after winning the mux ownership
-/// `flock` (so no live mux exists), making any holder an orphaned dead-mux JVM.
+/// PIDs (other than ours) holding an open fd on `lock_path`, via `/proc/<pid>/fd`.
+/// Returns empty if `/proc` is unreadable (cannot reap → caller proceeds to spawn).
 #[cfg(unix)]
-async fn reap_holders_of_lock(lock_path: &std::path::Path) -> anyhow::Result<bool> {
-    if !posix_write_lock_is_held(lock_path) {
-        return Ok(false);
-    }
-    let canon = std::fs::canonicalize(lock_path).unwrap_or_else(|_| lock_path.to_path_buf());
-    let mut holders: Vec<i32> = Vec::new();
-    for entry in std::fs::read_dir("/proc")?.flatten() {
+fn pids_holding_fd_on(lock_path: &std::path::Path, canon: &std::path::Path) -> Vec<i32> {
+    let mut pids = Vec::new();
+    let Ok(proc_dir) = std::fs::read_dir("/proc") else {
+        return pids;
+    };
+    for entry in proc_dir.flatten() {
         let name = entry.file_name();
         let Some(pid) = name.to_str().and_then(|s| s.parse::<i32>().ok()) else {
             continue;
@@ -275,15 +270,38 @@ async fn reap_holders_of_lock(lock_path: &std::path::Path) -> anyhow::Result<boo
         };
         for fd in fds.flatten() {
             if let Ok(target) = std::fs::read_link(fd.path()) {
-                if target == canon || target == lock_path {
-                    holders.push(pid);
+                if target == *canon || target == *lock_path {
+                    pids.push(pid);
                     break;
                 }
             }
         }
     }
+    pids
+}
+
+/// Terminate every process holding an open fd on `lock_path`: SIGTERM, a 2s
+/// grace, then SIGKILL any process STILL holding it (re-scanned — a PID that
+/// exited and was possibly reused during the grace is never killed). Returns
+/// whether any holder was signalled; `Ok(false)` if the lock is unheld or no
+/// holder fd can be identified.
+///
+/// SAFETY of killing: the analyzer home this lock lives under is codescout-private
+/// (`<cache>/codescout/kotlin-lsp-home/<ws_hash>/…`), so any holder is a
+/// codescout-spawned JVM, never a user's own IDE/standalone kotlin-lsp. Callers
+/// reach this only after observing the mux ownership flock was free at probe time
+/// (no mux was running); the flock is released before reaping so the mux child can
+/// re-acquire it. Together: a holder here is a dead-mux orphan, not a live server.
+#[cfg(unix)]
+async fn reap_holders_of_lock(lock_path: &std::path::Path) -> anyhow::Result<bool> {
+    if !posix_write_lock_is_held(lock_path) {
+        return Ok(false);
+    }
+    let canon = std::fs::canonicalize(lock_path).unwrap_or_else(|_| lock_path.to_path_buf());
+    let holders = pids_holding_fd_on(lock_path, &canon);
     if holders.is_empty() {
-        // Held per POSIX probe but no /proc fd match (perms?) — cannot reap.
+        // Held per the POSIX probe but no /proc fd match (perms, or /proc
+        // unreadable) — cannot identify a holder to reap. Proceed to spawn.
         return Ok(false);
     }
     for &pid in &holders {
@@ -293,13 +311,14 @@ async fn reap_holders_of_lock(lock_path: &std::path::Path) -> anyhow::Result<boo
         tracing::warn!("reaped orphan index-lock holder pid={pid} (SIGTERM)");
     }
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-    for &pid in &holders {
-        if unsafe { libc::kill(pid, 0) } == 0 {
-            unsafe {
-                libc::kill(pid, libc::SIGKILL);
-            }
-            tracing::warn!("orphan index-lock holder pid={pid} survived SIGTERM → SIGKILL");
+    // Re-scan and SIGKILL only PIDs STILL holding an fd on this lock. A PID that
+    // exited during the grace (and may have been reused by an unrelated process)
+    // is no longer in the holder set, so we never SIGKILL the wrong process.
+    for pid in pids_holding_fd_on(lock_path, &canon) {
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
         }
+        tracing::warn!("orphan index-lock holder pid={pid} survived SIGTERM → SIGKILL");
     }
     Ok(true)
 }
@@ -722,10 +741,11 @@ impl LspManager {
             let exe =
                 std::env::current_exe().context("Failed to determine codescout binary path")?;
 
-            // We hold the ownership lock → no live mux exists. Any process
-            // still holding this workspace's RocksDB index LOCK is therefore an
-            // orphan (a dead mux's JVM). Reap it before spawning, or the new
-            // mux's LSP child will fail to open the index. (S1/S2 net.)
+            // We observed the ownership flock was free (no live mux). The
+            // analyzer home is codescout-private, so any process still holding
+            // this workspace's RocksDB index LOCK is an orphaned dead-mux JVM.
+            // Reap it before spawning, or the new mux's LSP child can't open the
+            // index. (S1/S2 net.) Non-fatal: log and continue.
             match reap_orphan_index_holder(language, workspace_root).await {
                 Ok(true) => {
                     tracing::info!("reaped orphan index holder for {language} before mux spawn")
