@@ -53,7 +53,7 @@ MCP `run_command` output instead of using the `@cmd_*` buffer system.
 - The `warn` rule has shipped and run for ≥1 session without false-positive
   complaints on script-internal pipes; then promote `warn` → `deny`.
 
-**Status:** **shipped (deny) — 2026-05-18.**
+**Status:** **shipped (deny) — 2026-05-18.** — ⚠️ **Stale (pika audit 2026-06-11):** `hooks.json` currently registers `il3-warn-hook.sh`, NOT `il3-deny-hook.sh` (the deny script is present on disk but unwired). The hard *deny* observed in practice comes from codescout's **server-side `run_command` gate**, not this companion hook — companion IL3 is warn-only. Whether the deny-hook was reverted or never registered is unconfirmed; re-verify `hooks.json` before citing this as an active deny rule.
 
 **Promotion evidence:**
 - U-1: 45 strikes in one session (session `753e9a4a`), warn-mode caught all.

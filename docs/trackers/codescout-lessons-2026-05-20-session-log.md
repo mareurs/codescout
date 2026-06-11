@@ -42,8 +42,8 @@ tags: ["foreign-session-feedback", "bugs", "agentic-surface", "hints"]
 |----|------|---------:|----------|--------|-------|
 | F-0 | 2026-05-20 | n/a | anchor | pinned-as-eval-baseline | `codescout-lessons.md` foreign-session feedback artifact |
 | F-1 | 2026-05-20 | high | codescout-tool | fixed-verified | `symbols(name=..., include_body=true)` returns stub + recipe, recipe doesn't resolve — fix shipped on experiments at `bfa2f8bc`, awaits cherry-pick to master |
-| F-2 | 2026-05-20 | med | codescout-tool | open | `edit_file` rejects entire batch on a single def-containing edit; safe edits in same batch also rolled back |
-| F-3 | 2026-05-20 | med | codescout-tool | open | `edit_markdown(action="replace", heading=...)` silently absorbs trailing `---` horizontal-rule separator into next section |
+| F-2 | 2026-05-20 | med | codescout-tool | fixed-verified | `edit_file` rejects entire batch on a single def-containing edit; safe edits in same batch also rolled back (shipped `dd120fc5`) |
+| F-3 | 2026-05-20 | med | codescout-tool | fixed-verified | `edit_markdown(action="replace", heading=...)` silently absorbs trailing `---` horizontal-rule separator into next section (shipped `462ad1e4`) |
 | F-4 | 2026-05-20 | med | codescout-tool | fixed-verified | `json_path="$.symbols[0].body"` on `symbols(include_body=true)` returns summary not body — same root cause as F-1, same fix (`bfa2f8bc`) |
 | F-5 | 2026-05-20 | med | codescout-tool | promoted-to-bug-tracker | LSP-backed tools return opaque `"LSP server disconnected"` when rust-analyzer rustup component is missing; actionable rustup-error stderr is dropped |
 | F-6 | 2026-05-20 | med | architecture | fixed-verified | Lessons-file's 3-primitive proposal (Decisions / Session logs / Current state) is a category collapse — 12 observed shapes across 3 projects do not fit cleanly |
@@ -300,7 +300,7 @@ The `edit[1]:` prefix correctly identifies the offending edit. But `edit_0` was 
 
 **Severity:** med — not data-loss; the workaround is straightforward; but every mixed batch costs a round-trip and the LLM has to notice the failure and re-plan. Compounds in agentic loops.
 
-**Status:** open
+**Status:** fixed-verified — shipped `dd120fc5` (2026-05-20), "fix(edit_file): batch detect-&-advise lists safe-edit indices" — the author's recommended option (3). Verified by commit subject during the 2026-06-11 verify-open pass.
 
 **Fix idea / Pointer:** Three options ranked by author (lessons file Bug 2):
 
@@ -335,7 +335,7 @@ edit_markdown(path="docs/trackers/mrv-chat-watch/README.md",
 
 **Severity:** med — silent in the success case. The tool returns `"ok"` but the resulting markdown is structurally degraded. A less-attentive caller would not notice. Compounds across long-form documents where horizontal rules carry semantic weight (section delimiters in trackers, ADRs, session logs).
 
-**Status:** open
+**Status:** fixed-verified — shipped `462ad1e4` (2026-05-20), "fix(edit_markdown): replace preserves trailing horizontal-rule separator" — the preferred fix (1) boundary detection. Verified by commit subject during the 2026-06-11 verify-open pass.
 
 **Fix idea / Pointer:** Two paths:
 

@@ -79,9 +79,20 @@ fallback for any bug file that omits the field.
 | `superseded` | Replaced by a successor artifact | **hidden by default** |
 
 `done`, `in-progress`, etc. are NOT special-cased — they appear as active.
-When a tracker is wrapped, set `status: archived` AND `git mv` to
-`docs/trackers/archive/`. The frontmatter status drives librarian visibility;
-the path move keeps the filesystem clean.
+When a tracker is wrapped, archive it **through the librarian tools**, not by
+hand: `artifact(action="update", id=…, patch={status:"archived"})` (sets the
+catalog row status AND writes frontmatter) then `artifact(action="move", id=…,
+new_rel_path="docs/trackers/archive/…")` (atomic rename + catalog re-point). A
+bare `status:` edit + `git mv` does NOT touch the catalog, and the librarian
+reads visibility from the catalog row — so the tracker keeps showing `active`
+until someone runs `reindex`; and because `id = sha256(abs_path)`
+(`src/librarian/ids.rs`), that reindex mints a NEW id and orphans the row's
+events/augmentation. The catalog status drives visibility now; frontmatter
+status drives it after a reindex. See `docs/trackers/reconnaissance-patterns.md`
+R-25. Verify the returned `new_abs_path` lands inside the project before trusting
+`moved:true` — in a project nested under a registered ancestor `[[roots]]` entry,
+`move` can join `new_rel_path` against the ancestor and silently relocate the
+file outside the repo.
 
 **Frontmatter shape** (required for new trackers):
 

@@ -60,7 +60,7 @@ time_scope: open-ended
 | F-12 | 2026-05-24 | med | codescout-tool-usage | fixed-verified | Dismissed `references`'s "use call_graph for authoritative callers" warning → shipped half-fix, missed `build.rs` duplicate |
 | F-13 | 2026-05-25 | med | release-pipeline | fixed-verified | CHANGELOG entry written under wrong version label — `Cargo.toml`-as-authoritative assumption (0.13.0 already published) |
 | F-14 | 2026-05-25 | high | release-pipeline | fixed-verified | `cargo publish` failed on `include_str!("../docs/...")` path stripped by `Cargo.toml` `exclude` — pre-publish gates couldn't detect |
-| F-15 | 2026-06-09 | med | plan-prose | open | Bug-file `project=`→`project_id=` fix plan misses 3rd test assertion (`tests.rs:257`) + cites non-existent fixture |
+| F-15 | 2026-06-09 | med | plan-prose | fixed-verified | Bug-file `project=`→`project_id=` fix plan misses 3rd test assertion (`tests.rs:257`) + cites non-existent fixture (shipped `890da4d6`; index row synced to body 2026-06-11) |
 | F-16 | 2026-06-11 | high | self-friction | fixed-verified | Inherited "`edit_code` crashes Kotlin LSP" claim was a misdiagnosis — real cause was a kotlin-lsp RocksDB-lock deadlock |
 | F-17 | 2026-06-11 | med | codescout-tool | promoted-to-bug-tracker | `references`/`symbol_at`/`call_graph` ignore the `workspace=` pin for relative path resolution |
 | F-18 | 2026-06-11 | med | codescout-tool | open | Kotlin-lsp cold-start failed under 3× concurrent (6-JVM) load; tree-sitter masked it on `symbols` |

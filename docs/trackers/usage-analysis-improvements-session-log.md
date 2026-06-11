@@ -32,7 +32,7 @@
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-05-27 | med | architectural | mitigated | Cargo incremental cache masked prompt-surface drift; snapshot test passed on stale binary |
-| F-2 | 2026-05-27 | med | codescout-tool | open | IL3 piping habit recurred 6× in single turn despite warn-mode prompts (hookify candidate H-1) |
+| F-2 | 2026-05-27 | med | codescout-tool | mitigated | IL3 piping habit recurred 6× in single turn despite warn-mode prompts — mitigated by server-side run_command gate, not the proposed deny-hook (pika audit 2026-06-11) |
 | F-3 | 2026-05-27 | low | plan-prose | open | CLAUDE.md cites non-existent Kotlin LSP issue tracker path |
 | F-3a | 2026-05-27 | med | architectural | open | I-4 retry coverage incomplete for edit_code (27/43 disconnect errors unaddressed; pairs with I-2 deeper redesign) |
 ## Wins Index
@@ -288,7 +288,7 @@ buffer is still created) AND a warn/deny that goes in the transcript. The
 buffer-query workflow is genuinely faster than re-piping; the slip is pure
 muscle memory.
 
-**Status:** open — needs substrate fix or stronger session-start prompting.
+**Status:** mitigated (pika audit 2026-06-11) — codescout's server-side `run_command` gate now hard-denies the high-value piped-LHS patterns (cargo/git/etc.), stronger than at write-time when only 1 of 6 slips blocked; re-confirmed this session (two IL3 pipes denied server-side). NOTE: enforcement is the **server-side gate**, NOT the proposed companion deny-hook H-1 — `il3-deny-hook.sh` is on disk but unregistered (`hooks.json` wires only the warn variant). The pipe-reach habit persists but is caught. An earlier session-sweep claim of "fixed via deny-hook" was a wrong mechanism attribution (see `codescout-usage-hookify.md` H-1 correction).
 
 **Fix idea / Pointer (Hookify proposal H-1, candidate for codescout-companion):**
 
