@@ -50,7 +50,7 @@ Activation clears these per-session sets:
 
 | State | Owner | Behavior |
 |---|---|---|
-| `guide_hints_emitted` | `CodeScoutServer` | Cleared on every activation. Next first-touch of a tool with `relevant_guide_topic()` re-emits `_guide_hint`. |
+| `guide_hints_emitted` | `CodeScoutServer` | Cleared on every activation. Written by **both** an explicit `get_guide(topic)` fetch and the first-touch auto-inject of a tool with `relevant_guide_topic()` — one shared keyspace, so either path suppresses the other's re-emit. After a clear, the next of either re-emits. |
 | `path_note_emitted_since_activation` | `CodeScoutServer` | Cleared on every activation. Next stripped response re-emits the path-relative banner. |
 | `section_coverage` | `CodeScoutServer` | NOT cleared. Section-read tracking persists across activations. |
 | Output buffers (`@tool_*`, `@cmd_*`) | `OutputBuffer` | NOT cleared. Buffers from before the switch remain readable. |

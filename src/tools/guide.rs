@@ -60,7 +60,7 @@ impl Tool for GetGuide {
         })
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<Value> {
+    async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
         let topic = input.get("topic").and_then(|v| v.as_str());
         match topic {
             None => Ok(json!({
@@ -77,7 +77,32 @@ impl Tool for GetGuide {
                 }
             })),
             Some(t) => match self.topics.get(t) {
-                Some(body) => Ok(json!({ "topic": t, "body": *body })),
+                Some(body) => {
+                    // Participate in the per-session `guide_hints_emitted` ledger so
+                    // explicit fetches and auto-injected hints share one keyspace:
+                    //  - first fetch of `t` marks it emitted, so a later auto-inject of
+                    //    the same topic is suppressed (and an auto-inject suppresses a
+                    //    later explicit fetch's "first" status);
+                    //  - a repeat fetch is flagged so the model re-reads its existing
+                    //    copy instead of re-spending context on static content.
+                    // The body is NEVER withheld: the ledger is not cleared on `/compact`,
+                    // so a legitimate post-compaction re-fetch must still return the guide.
+                    // `insert` returns false when the topic was already present.
+                    let first_fetch = ctx.guide_hints_emitted.lock().insert(t.to_string());
+                    let note = if first_fetch {
+                        format!(
+                            "This guide is static and now in your context. Don't re-call \
+                             get_guide(\"{t}\") this session unless your context was compacted."
+                        )
+                    } else {
+                        format!(
+                            "You already fetched get_guide(\"{t}\") earlier this session. This \
+                             guide is static — if the earlier copy is still in your context, no \
+                             need to re-read it. (Re-fetch is only needed after compaction.)"
+                        )
+                    };
+                    Ok(json!({ "topic": t, "body": *body, "note": note }))
+                }
                 None => {
                     let available = self.topics.keys().cloned().collect::<Vec<_>>().join(", ");
                     Err(RecoverableError::with_hint(
@@ -219,6 +244,50 @@ mod tests {
         assert_eq!(
             schema_topics, registered_topics,
             "input_schema enum drifted from GetGuide::topics map — add the new topic to both or neither"
+        );
+    }
+
+    #[tokio::test]
+    async fn repeat_fetch_keeps_body_and_flags_static() {
+        // Regression (docs/issues/2026-06-11-get-guide-no-session-dedup): get_guide
+        // must participate in the guide_hints_emitted ledger. Two fetches of the same
+        // topic in one session (SHARED ctx) must (1) both return the full body — never
+        // withhold, so post-/compact recovery still works — and (2) carry a note that
+        // flips from "don't re-call" on the first fetch to "already fetched" on the repeat.
+        let g = GetGuide::new();
+        let tc = ctx().await;
+
+        let first = g
+            .call(json!({"topic": "tracker-conventions"}), &tc)
+            .await
+            .unwrap();
+        assert!(!first["body"].as_str().unwrap().is_empty());
+        let first_note = first["note"].as_str().expect("first fetch has a note");
+        assert!(
+            first_note.contains("Don't re-call"),
+            "first fetch should discourage re-calling, got: {first_note}"
+        );
+
+        // The fetch registered the topic in the shared ledger.
+        assert!(tc
+            .guide_hints_emitted
+            .lock()
+            .contains("tracker-conventions"));
+
+        let second = g
+            .call(json!({"topic": "tracker-conventions"}), &tc)
+            .await
+            .unwrap();
+        // Body is still returned in full on the repeat — never a stub.
+        assert_eq!(
+            second["body"].as_str(),
+            first["body"].as_str(),
+            "repeat fetch must return the identical full body, not a stub"
+        );
+        let second_note = second["note"].as_str().expect("repeat fetch has a note");
+        assert!(
+            second_note.contains("already fetched"),
+            "repeat fetch note should flag the prior fetch, got: {second_note}"
         );
     }
 }
