@@ -43,8 +43,7 @@ impl Tool for GetGuide {
          Topics: librarian | librarian-runtime | tracker-conventions | progressive-disclosure | \
          error-handling | workspace-state | iron-laws-detail | \
          symbol-navigation. No args = list \
-         topics + summaries. The full guide is always returned inline, \
-         never buffered to a @ref."
+         topics + summaries. Full guide returned inline."
     }
 
     fn input_schema(&self) -> Value {
