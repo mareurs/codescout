@@ -23,6 +23,7 @@
 | W-1 | 2026-06-08 | med | Pre-dispatch scout of the test harness before subagent run | Task 2 subagent would fail cargo check + flail | validated |
 | W-2 | 2026-06-09 | high | Treated Windows "environmental" test failures as suspects, not noise | dismissing them would have shipped a silent deny-list bypass + project-root shadowing | validated |
 | W-3 | 2026-06-09 | med | Adversarial architecture review (Snow Lion) before ship | 2 real gaps (taskkill-in-Drop, foreground bypassing the builder) would have shipped | validated |
+| W-4 | 2026-06-12 | med | Diffed the review surface against `git merge-base`, not the `experiments` tip | reviewing `experiments..vdi-windows` would have scrutinized ~1800 phantom "deletions" (the LSP-mux refactor that lives on experiments, never touched by this branch) | validated |
 
 ---
 
@@ -313,6 +314,35 @@ reverted before commit.
 failure to a batch theme — the name and neighbours mislead.
 
 ---
+
+## W-4 — Merge-base diff, not sibling-tip diff, scoped the Windows review to real changes
+
+**Observed:** 2026-06-12, scoping the Linux-side review of the vdi-windows stack.
+
+**Pattern:** When reviewing a feature branch that has diverged from its sibling, diff
+against `git merge-base <sibling> <branch>`, never `<sibling>..<branch>`. The two-dot
+sibling-tip diff conflates *what this branch changed* with *what the sibling advanced
+after the fork*, reporting the latter as spurious deletions.
+
+**Counterfactual:** `git diff experiments..vdi-windows` reported `src/lsp/manager.rs`
+−230, `src/lsp/mux/process.rs` −155, and five doc files deleted — none of which
+vdi-windows touched; they are the mux-single-owner-invariant refactor that landed on
+`experiments` *after* vdi-windows forked. Reviewing that surface would have meant
+auditing ~1800 phantom deletions (LSP-mux teardown logic) instead of the 559 real
+Windows insertions. The merge-base diff (`0c84c1a4..vdi-windows`) showed
+`src/lsp/manager.rs` at its true +4.
+
+**Confirming data points:**
+1. This session — phantom −1800 vs real +559; `manager.rs` −230 (phantom) vs +4 (real).
+
+**Impact:** med — saves a whole misdirected review pass; also surfaced the
+branch-divergence fact relevant to the eventual graduation rebase.
+
+**Promote-when:** a second divergent-branch review where the sibling-tip diff misleads.
+At 2 datapoints, promote to CLAUDE.md review guidance: "diff feature branches against
+merge-base, not the sibling tip."
+
+**Status:** validated — single datapoint, drift caught before any review effort wasted.
 
 ## Template for new entries
 
