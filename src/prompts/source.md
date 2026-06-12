@@ -318,7 +318,7 @@ are always excluded from protection.
 
 Apply the **project-scope** sections of the included memory templates below. Write all 6 project-scope memories. Use the empty stub for `domain-glossary` and `gotchas` if nothing project-specific applies — do NOT skip them.
 
-For `system-prompt`, apply the `workspace-scope: system-prompt` section (single-project flow treats the project as its own workspace).
+For the **system prompt**, generate the content per the `workspace-scope: system-prompt` section below (single-project flow treats the project as its own workspace), then write it **directly** to `.codescout/system-prompt.md` with `create_file`. Do NOT use `memory(action: "write", topic: "system-prompt")` — the system prompt is the always-on root file injected into every session, not an on-demand memory topic.
 
 {{include: memory-templates.md}}
 

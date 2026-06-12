@@ -906,7 +906,7 @@ pub(crate) fn build_synthesis_prompt(projects: &[(String, Vec<String>)]) -> Stri
     // Step 3: System prompt
     prompt.push_str("---\n\n## Generate System Prompt\n\n");
     prompt.push_str(
-        "Write `system-prompt.md` using `memory(action=\"write\", topic=\"system-prompt\", content=\"...\")`.\n\
+        "Write the system prompt directly to `.codescout/system-prompt.md` with `create_file` (NOT `memory(action=\"write\", topic=\"system-prompt\")` — it is the always-on root file injected into every session, not a memory topic).\n\
          Include: entry points per project, key abstractions, search tips scoped by project,\n\
          navigation strategy for the workspace.\n\n",
     );

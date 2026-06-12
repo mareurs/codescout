@@ -924,6 +924,48 @@ mod tests {
     }
 
     #[test]
+    fn onboarding_prompts_write_system_prompt_to_root_not_memory() {
+        // Regression (2026-06-12): onboarding must write the system prompt directly
+        // to the root `.codescout/system-prompt.md` via `create_file` — that is the
+        // always-on injection's read path (`Agent::project_status`). It must NOT route
+        // through `memory(write, topic="system-prompt")`, which lands in
+        // `.codescout/memories/` and never reaches `server_instructions`.
+        // See docs/issues/2026-06-12-onboarding-writes-system-prompt-to-memory-not-root.md.
+        // The corrective prompts mention the prohibited call inside a "Do NOT" clause,
+        // so we assert the POSITIVE `create_file` instruction plus absence of the
+        // affirmative `topic: "system-prompt", content: ...)` form, not bare absence.
+        for name in ["onboarding_prompt.md", "workspace_onboarding_prompt.md"] {
+            let prompt = load_prompt(name);
+            assert!(
+                prompt.contains("create_file"),
+                "{name} must instruct a direct `create_file` write of the system prompt"
+            );
+            assert!(
+                !prompt.contains("topic: \"system-prompt\", content"),
+                "{name} must NOT instruct memory(write, topic=\"system-prompt\", content=...) \
+                 for the system prompt"
+            );
+        }
+    }
+
+    #[test]
+    fn synthesis_prompt_writes_system_prompt_to_root_not_memory() {
+        // Regression (2026-06-12): same root cause as the onboarding-prompt guard —
+        // workspace synthesis writes the system prompt to the root file directly,
+        // not via the memory store.
+        let prompt =
+            builders::build_synthesis_prompt(&[("proj-a".to_string(), vec!["rust".to_string()])]);
+        assert!(
+            prompt.contains(".codescout/system-prompt.md") && prompt.contains("create_file"),
+            "synthesis prompt must instruct a direct create_file write to the root system-prompt.md"
+        );
+        assert!(
+            !prompt.contains("topic=\"system-prompt\", content"),
+            "synthesis prompt must NOT instruct memory(write, topic=\"system-prompt\", content=...)"
+        );
+    }
+
+    #[test]
     fn workspace_prompt_requires_six_memories_per_project() {
         let workspace = load_prompt("workspace_onboarding_prompt.md");
         assert!(

@@ -254,8 +254,10 @@ manifest:
 
 ### workspace-scope: system-prompt
 
-Purpose: the per-project system prompt rendered into `.codescout/system-prompt.md`.
-Generated from the prompt-builder logic, not authored directly.
+Purpose: the per-project system prompt. Write it **directly** to the root file
+`.codescout/system-prompt.md` with `create_file` — NOT via `memory(action:
+"write", topic: "system-prompt")`. It is the always-on file injected into every
+session (read by `project_status` from the project root), not a memory topic.
 
 Required subsections:
 - `## Entry Points`

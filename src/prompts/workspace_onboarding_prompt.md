@@ -200,7 +200,7 @@ Read per-project memories that feed cross-project synthesis:
 - `memory(action: "read", project_id: "<id>", topic: "conventions")` for each project
 - (Read other topics only when needed for cross-project content.)
 
-Then write the 6 workspace-scope memories from `memory-templates.md`:
+Then write the 5 workspace-scope memories from `memory-templates.md`:
 - `architecture` (with all 5 required subsections — Project Map,
   Cross-Project Dependencies, Shared Infrastructure, Top-Level Code Map,
   Generic Navigation)
@@ -208,16 +208,20 @@ Then write the 6 workspace-scope memories from `memory-templates.md`:
 - `development-commands`
 - `domain-glossary` (empty stub if no cross-project terms)
 - `gotchas` (empty stub if no cross-project pitfalls)
-- `system-prompt` — write to `.codescout/system-prompt.md` via
-  `memory(action: "write", topic: "system-prompt", content: ...)`
+
+Then generate the **system prompt** per the `workspace-scope: system-prompt`
+section and write it **directly** to `.codescout/system-prompt.md` with
+`create_file` — NOT `memory(action: "write", topic: "system-prompt")`. The
+system prompt is the always-on root file injected into every session, not a
+memory topic.
 
 After writing, read each back and verify:
 - 5 markdown memories non-empty (or eligible-EMPTY)
 - system-prompt file exists and contains its required subsections
 
 <HARD-GATE>
-Phase 5 is complete only when all 6 workspace memories are written and
-verified. On failure, retry once; if still failing, abort to user.
+Phase 5 is complete only when all 5 workspace memories and the system prompt
+are written and verified. On failure, retry once; if still failing, abort to user.
 </HARD-GATE>
 
 ---

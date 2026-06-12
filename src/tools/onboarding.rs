@@ -24,7 +24,12 @@ use super::{parse_bool_param, Tool, ToolContext};
 // Bumped 2026-05-07 (server-instructions consolidation): removed ## Language Navigation
 // from build_system_prompt_draft; language nav now injected dynamically via server_instructions.
 // Bumped 2026-05-08 (scope ladder): librarian-guide updated for new project/repo/umbrella/all ladder.
-pub(crate) const ONBOARDING_VERSION: u32 = 28;
+// Bumped 2026-06-12 (system-prompt root-file fix): onboarding + synthesis now write
+// .codescout/system-prompt.md directly via create_file instead of memory(write,
+// topic="system-prompt"). The bump triggers regeneration so already-onboarded projects
+// write the root file the always-on injection actually reads. See
+// docs/issues/2026-06-12-onboarding-writes-system-prompt-to-memory-not-root.md.
+pub(crate) const ONBOARDING_VERSION: u32 = 29;
 
 /// Returns true if the stored onboarding version is stale (needs refresh).
 /// `None` means pre-versioning project — always stale.
