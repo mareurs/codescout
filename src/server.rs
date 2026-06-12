@@ -267,7 +267,7 @@ impl CodeScoutServer {
             .unwrap_or_default()
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) async fn agent_security_config(
         &self,
     ) -> crate::util::path_security::PathSecurityConfig {

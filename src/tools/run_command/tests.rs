@@ -7,6 +7,7 @@ use crate::prompts::builders::{
     build_subagent_epilogue, build_subagent_preamble, build_synthesis_prompt,
     build_system_prompt_draft, build_workspace_instructions, language_patterns,
 };
+#[cfg(unix)]
 use crate::tools::command_summary::BUFFER_QUERY_INLINE_CAP;
 use crate::tools::core::types::is_subagent_capable_name;
 use crate::tools::onboarding::{
@@ -1024,9 +1025,12 @@ async fn execute_shell_command_timeout_is_enforced() {
 
 // --- run_command progress test (T11) ---
 
+#[cfg(unix)]
 use crate::tools::progress::test_support::CountingSink;
+#[cfg(unix)]
 use std::sync::atomic::Ordering;
 
+#[cfg(unix)]
 async fn project_ctx_with_progress(
 ) -> (tempfile::TempDir, ToolContext, std::sync::Arc<CountingSink>) {
     let dir = tempdir().unwrap();

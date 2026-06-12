@@ -12,9 +12,10 @@ use super::list_overview::{
 use super::symbols::{build_by_file, make_search_symbols_hint};
 use super::*;
 use crate::agent::Agent;
+#[cfg(unix)]
+use crate::fs::uri_to_path;
 use crate::fs::{
     classify_reference_path, format_library_path, resolve_library_roots, tag_external_path,
-    uri_to_path,
 };
 use crate::lsp::SymbolInfo;
 use crate::symbol::edit::{

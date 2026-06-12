@@ -1244,7 +1244,9 @@ mod tests {
                 return; // skip if no .ssh directory
             }
 
+            #[cfg(unix)]
             let dir = tempdir().unwrap();
+            #[cfg(unix)]
             let link = dir.path().join("sneaky_link");
             #[cfg(unix)]
             {
@@ -1278,11 +1280,13 @@ mod tests {
 
     #[test]
     fn symlink_write_escape_caught() {
+        #[cfg(unix)]
         let project = tempdir().unwrap();
 
         // Create symlink inside the project pointing to /var/tmp — a real
         // directory that is outside both the project root and /tmp, so the
         // path-security check should still block the write.
+        #[cfg(unix)]
         let link = project.path().join("sneaky");
         #[cfg(unix)]
         {
