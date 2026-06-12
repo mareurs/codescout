@@ -64,6 +64,7 @@ time_scope: open-ended
 | F-16 | 2026-06-11 | high | self-friction | fixed-verified | Inherited "`edit_code` crashes Kotlin LSP" claim was a misdiagnosis — real cause was a kotlin-lsp RocksDB-lock deadlock |
 | F-17 | 2026-06-11 | med | codescout-tool | promoted-to-bug-tracker | `references`/`symbol_at`/`call_graph` ignore the `workspace=` pin for relative path resolution |
 | F-18 | 2026-06-11 | med | codescout-tool | open | Kotlin-lsp cold-start failed under 3× concurrent (6-JVM) load; tree-sitter masked it on `symbols` |
+| F-19 | 2026-06-12 | med | plan-prose | fixed-verified | Explore-subagent report claimed `OutputForm::Text` bypasses the output buffer; `call_content` buffers unconditionally before the form branch |
 
 ## Wins Index
 
@@ -83,6 +84,7 @@ time_scope: open-ended
 | W-11 | 2026-06-11 | high | Verify-open reconciliation against code+git de-zombies a backlog at scale | i1-refactor self-reported 13-of-14 pending but all 14 shipped; lsp-tools 3/3 fixed; both archived; ~46 open items mostly DONE-SINCE | validated |
 | W-12 | 2026-06-11 | high | Re-derive an inherited "tool X breaks Y" claim from usage.db `tool_calls.outcome`+`lsp_events` before acting | Would have opened a bug against `edit_code`/AST (neither broken) + normalized a `create_file` workaround while the real cause (kotlin-lsp RocksDB-lock deadlock) left the LSP dead; transcript adjacency ≠ causation | validated |
 | W-13 | 2026-06-11 | high | Test shared-LSP behavior via isolated worktree hashes, not contention on the live hash | Only alternative was N clients on the live hash = the R-23 move that SIGKILLed the user's working mux last session | validated |
+| W-14 | 2026-06-12 | med | Verify a subagent's control-flow *mechanism* claim against the actual fn body before building a fix | Report's "Option A: set `output_form=Text`" compiles but leaves the 14 KB guide buffered → behavioral test fails → wrong-impl + re-debug cycle; reading `call_content` showed `exceeds_inline_limit` gates the branch unconditionally | validated |
 
 ## Category conventions
 
@@ -1219,6 +1221,47 @@ bug class."
 **Promote-when:** a second concurrent-LSP test reuses the worktree-isolation harness. At 2 datapoints, promote to CLAUDE.md (Testing Patterns) as the canonical concurrent-LSP test method.
 
 **Status:** validated — single datapoint; harness worked, live mux provably untouched.
+## F-19 — Explore-subagent report claimed `OutputForm::Text` bypasses the output buffer; `call_content` buffers unconditionally before the form branch
+
+**Observed:** 2026-06-12, fixing `get_guide` returning a `@tool_*` handle ("Result stored in @tool_babfbd35 (14618 bytes)") instead of the full guide.
+
+**When:** About to implement the fix, having dispatched an `Explore` subagent to map the buffer-routing mechanism.
+
+**Expected (subagent report):** The report stated *"OutputForm::Text forces inline output always"*, listed `symbols` / `read_markdown` / `memory` / `call_graph` as tools that *"force inline output always"*, and recommended **Option A: override `output_form()` to `OutputForm::Text`** as the idiomatic fix.
+
+**Got (scouted reality):** `Tool::call_content` (`src/tools/core/types.rs:485-615`) checks `exceeds_inline_limit(&json)` **unconditionally** at line ~554, *before* any form-based branching. `OutputForm::Text` only selects `format_compact` vs pretty-JSON inside the small-output `else` branch — it does **not** skip the overflow→buffer branch. So `symbols`/`memory` ARE buffered when large, and Option A would have left the 14 KB librarian guide buffered exactly as before.
+
+**Probable cause:** The subagent inferred the mechanism from doc comments + the list of `output_form` override sites without tracing the branch *order* in the function body. The `output_form` doc comment ("compact summary only on buffered overflow") reads as if `Text` alters the overflow path — a plausible-but-wrong reading.
+
+**Workaround:** Read the `call_content` body directly (`symbols(Tool/call_content, include_body=true)`), then implemented a dedicated `force_inline()` trait hook (default `false`) gating the overflow branch — `if exceeds_inline_limit(&json) && !self.force_inline()` — overridden `true` on `GetGuide`. Verified: new regression test + all 54 core `call_content` tests pass; clippy clean.
+
+**Severity:** med — trusting the report would have compiled clean (a valid `output_form` override) but the large-topic behavioral test would have failed, costing a full wrong-implementation + re-debug cycle. Controller-absorbable, but real rework.
+
+**Status:** fixed-verified — gap caught pre-implementation by scouting the actual fn body; correct fix landed + tested this session.
+
+**Fix idea / Pointer:** `force_inline()` in `src/tools/core/types.rs`; `GetGuide` override + regression test in `src/tools/guide.rs`. Commit pending (cite master SHA after cherry-pick). Cross-cutting lesson → R-27 in `reconnaissance-patterns.md`.
+
+---
+
+## W-14 — Verify a subagent's control-flow *mechanism* claim against the actual fn body before building a fix on it
+
+**Observed:** 2026-06-12, about to implement the `get_guide` inline-output fix off an `Explore` subagent's investigation report.
+
+**Pattern:** When a subagent (or any prose artifact) asserts *how* control flow behaves — "X bypasses Y", "branch B fires when C" — read the actual function body before building a fix on the claim, especially when the claim names a specific branch/ordering. A `symbols(Sym, include_body=true)` is one call; an internally-inconsistent report is the "sounds right" red flag from CLAUDE.md's Iron Rules.
+
+**Counterfactual:** The report recommended "Option A: set `output_form = Text`" and even flagged it "Recommended". It also contradicted itself (claimed Text "forces inline always" yet noted "the buffering check still applies"). Acting on Option A: GetGuide gets an `output_form() -> Text` override (compiles fine), tests run, the 14 KB librarian topic *still* returns a `@tool_` handle → behavioral test fails → re-debug, discover `exceeds_inline_limit` gates the branch unconditionally → redo the fix. Reading `Tool/call_content` (130 lines) up front collapsed that loop to zero.
+
+**Confirming data points:**
+1. F-19 (this session) — the report's core mechanism claim was false; the unconditional `exceeds_inline_limit` check at `types.rs:~554` runs before the `OutputForm` branch.
+2. F-3 / W-2 (2026-05-18) — same family: a prose artifact (plan) asserted a code shape (`RecoverableError.hint` field) that scouting the body refuted before any wrong code was written.
+
+**Impact:** med — saved one wrong-implementation + re-debug cycle; prevented shipping a non-fix that passes compile but not behavior.
+
+**Promote-when:** A third datapoint where scouting the body refutes a subagent's *mechanism* (not just *shape*) claim. At that point promote to CLAUDE.md: "A subagent's description of control flow is a hypothesis; read the fn body before building a fix on it."
+
+**Status:** validated — single fresh datapoint (F-19) plus the prior shape-claim family (F-3/W-2).
+
+---
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
