@@ -65,6 +65,7 @@ time_scope: open-ended
 | F-17 | 2026-06-11 | med | codescout-tool | promoted-to-bug-tracker | `references`/`symbol_at`/`call_graph` ignore the `workspace=` pin for relative path resolution |
 | F-18 | 2026-06-11 | med | codescout-tool | open | Kotlin-lsp cold-start failed under 3× concurrent (6-JVM) load; tree-sitter masked it on `symbols` |
 | F-19 | 2026-06-12 | med | plan-prose | fixed-verified | Explore-subagent report claimed `OutputForm::Text` bypasses the output buffer; `call_content` buffers unconditionally before the form branch |
+| F-20 | 2026-06-12 | med | self-friction | fixed-verified | Targeted `cargo test --lib guide::` missed `server::tests::tool_descriptions_stay_under_budget`; shipped a 329-char get_guide description (cap 300) in `c799e887` |
 
 ## Wins Index
 
@@ -85,6 +86,7 @@ time_scope: open-ended
 | W-12 | 2026-06-11 | high | Re-derive an inherited "tool X breaks Y" claim from usage.db `tool_calls.outcome`+`lsp_events` before acting | Would have opened a bug against `edit_code`/AST (neither broken) + normalized a `create_file` workaround while the real cause (kotlin-lsp RocksDB-lock deadlock) left the LSP dead; transcript adjacency ≠ causation | validated |
 | W-13 | 2026-06-11 | high | Test shared-LSP behavior via isolated worktree hashes, not contention on the live hash | Only alternative was N clients on the live hash = the R-23 move that SIGKILLed the user's working mux last session | validated |
 | W-14 | 2026-06-12 | med | Verify a subagent's control-flow *mechanism* claim against the actual fn body before building a fix | Report's "Option A: set `output_form=Text`" compiles but leaves the 14 KB guide buffered → behavioral test fails → wrong-impl + re-debug cycle; reading `call_content` showed `exceeds_inline_limit` gates the branch unconditionally | validated |
+| W-15 | 2026-06-12 | med | Enumerate a prompt surface's full gate set (byte-for-byte slice, snapshot, cap, version-pin, content tests) before editing | Blind edit hits ONBOARDING_VERSION==28 pin + snapshot + "6 memories" surprises as sequential red tests; pre-scout bundled all gate updates into one commit | validated |
 
 ## Category conventions
 
@@ -1260,6 +1262,48 @@ bug class."
 **Promote-when:** A third datapoint where scouting the body refutes a subagent's *mechanism* (not just *shape*) claim. At that point promote to CLAUDE.md: "A subagent's description of control flow is a hypothesis; read the fn body before building a fix on it."
 
 **Status:** validated — single fresh datapoint (F-19) plus the prior shape-claim family (F-3/W-2).
+
+---
+## F-20 — Targeted `cargo test --lib guide::` missed the `tool_descriptions_stay_under_budget` server gate; shipped an over-budget get_guide description
+
+**Observed:** 2026-06-12, after the get_guide inline-output fix (commit `c799e887`).
+
+**When:** Verifying the get_guide description edit before committing — ran `cargo test --lib guide::` + `cargo test --lib tools::core::` + clippy, all green.
+
+**Expected:** A green run of the tool's own module tests covers a one-line description edit.
+
+**Got:** The description ("…The full guide is always returned inline, never buffered to a @ref.") was 329 chars, over the 300-char cap enforced by `server::tests::tool_descriptions_stay_under_budget` (`src/server.rs:1598`). That gate lives in `server::tests`, not `tools::guide::`/`tools::core::`, so the targeted filters never ran it. The over-budget description shipped in `c799e887`; the regression surfaced only when the *onboarding* task later ran the full `cargo test --lib` suite.
+
+**Probable cause:** A tool field's validating gate often lives in a different module (`server::tests`) than the code it guards; a per-module `cargo test --lib <module>` filter silently skips it.
+
+**Workaround:** Trimmed to "Full guide returned inline." (commit `31a655e5`); full suite green.
+
+**Severity:** med — shipped to experiments but caught before any master cherry-pick; no user impact, one extra fix commit. Good that the get_guide work hadn't been cherry-picked to master yet.
+
+**Status:** fixed-verified — `31a655e5` on experiments; full lib suite (2690) passes.
+
+**Fix idea / Pointer:** After editing any tool's `description()`/`input_schema()`, run `cargo test --lib server::` (or the full suite), not just the tool's module. Cross-cutting lesson → R-28 in `reconnaissance-patterns.md`.
+
+---
+
+## W-15 — Pre-edit recon of a prompt surface's full gate set before touching source.md
+
+**Observed:** 2026-06-12, implementing the onboarding system-prompt root-file fix across `source.md` + 3 prompt files + `builders.rs`.
+
+**Pattern:** Before editing a prompt surface, enumerate ALL its gates — not just the obvious cap. Scouted: the `@surface` markers (which surface drives the stored prompt → version bump), `extracts_onboarding_prompt_byte_for_byte`, the `prompt_surfaces_onboarding_snapshot` fixture, `source_md_under_cap` (2200-byte server_instructions cap), the `assert_eq!(ONBOARDING_VERSION, 28)` version-pin, `memory_templates_have_all_workspace_scope_sections` (heading-presence), and `workspace_prompt_requires_six_memories_per_project` (the `"6 memories"` string).
+
+**Counterfactual:** Editing blind would have surfaced these as sequential red-test surprises: the `ONBOARDING_VERSION == 28` assert fails on the 28→29 bump (debug round-trip to locate a test in a different module); the "6 workspace-scope memories"→"5" Phase 5 edit *looks* like it might trip `workspace_prompt_requires_six_memories_per_project` until you confirm that test keys on Phase 3's `"6 memories"` string — without the scout you'd either avoid a correct edit or break the test. Pre-scouting bundled all gate updates into one commit; only the snapshot needed a (legitimate) re-bless.
+
+**Confirming data points:**
+1. `ONBOARDING_VERSION == 28` pin found pre-edit and updated in the same commit (no red surprise).
+2. `"6 memories"` test scope confirmed Phase-3-only → Phase 5 "6→5" edit made safely.
+3. Bug-file mechanism (all 4 claims) verified against code before implementing (applies R-27).
+
+**Impact:** med — converted ~3 would-be iterative test failures into one planned edit set.
+
+**Promote-when:** A 2nd prompt-surface session citing the full-gate-set scout → promote a "prompt-surface gate checklist" to CLAUDE.md § Prompt Surface Consistency (partial overlap with R-1/R-7 already).
+
+**Status:** validated.
 
 ---
 ## Template for new entries
