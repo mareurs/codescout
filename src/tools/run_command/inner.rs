@@ -423,6 +423,12 @@ pub(crate) async fn run_command_inner(
             .tempfile()?;
         let (out_file, out_path) = out_tmp.keep()?;
         let (err_file, err_path) = err_tmp.keep()?;
+        // Establish cleanup guards BEFORE spawn so an early `?` (spawn failure)
+        // still deletes the just-`keep()`d temp files. They are moved into the
+        // future below, where they also drop on normal completion and on
+        // future-drop (timeout / cancellation).
+        let out_guard = TmpfileGuard(out_path.to_string_lossy().into_owned());
+        let err_guard = TmpfileGuard(err_path.to_string_lossy().into_owned());
 
         let mut cmd = crate::platform::shell_command_configured(&effective_command);
         cmd.current_dir(&work_dir)
@@ -434,10 +440,10 @@ pub(crate) async fn run_command_inner(
         let fut: std::pin::Pin<
             Box<dyn std::future::Future<Output = std::io::Result<std::process::Output>> + Send>,
         > = Box::pin(async move {
-            // Guards drop on normal completion *and* on future-drop (timeout /
-            // cancellation), cleaning up the temp files either way.
-            let _out_guard = TmpfileGuard(out_path.to_string_lossy().into_owned());
-            let _err_guard = TmpfileGuard(err_path.to_string_lossy().into_owned());
+            // Guards (created before spawn) move in here; they drop on normal
+            // completion *and* on future-drop (timeout / cancellation).
+            let _out_guard = out_guard;
+            let _err_guard = err_guard;
             let status = child.wait().await?;
             let stdout = std::fs::read(&out_path).unwrap_or_default();
             let stderr = std::fs::read(&err_path).unwrap_or_default();

@@ -4,6 +4,16 @@ pub mod chunker;
 
 mod embedder;
 
+// The two ONNX backends are mutually exclusive: `local-embed` statically links a
+// prebuilt ONNX Runtime; `local-embed-dynamic` dlopens onnxruntime.dll at runtime
+// (windows-gnu). Enabling both hands `ort` conflicting backend features
+// (ort-download-binaries + ort-load-dynamic) → a cryptic link error. Fail loud.
+#[cfg(all(feature = "local-embed", feature = "local-embed-dynamic"))]
+compile_error!(
+    "features `local-embed` and `local-embed-dynamic` are mutually exclusive — \
+     pick exactly one ONNX backend (static `local-embed` vs runtime-loaded `local-embed-dynamic`)"
+);
+
 #[cfg(any(feature = "local-embed", feature = "local-embed-dynamic"))]
 pub mod local;
 

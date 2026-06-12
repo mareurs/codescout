@@ -156,8 +156,11 @@ fn lsp_binary_name_with(base: &str, exists: impl Fn(&str) -> bool) -> String {
         return format!("{base}.exe");
     }
 
-    // Preference order: npm shim (`.cmd`), native binary (`.exe`), then `.bat`.
-    for ext in ["cmd", "exe", "bat"] {
+    // Preference order: native binary (`.exe`) first — it spawns directly,
+    // avoiding the extra `cmd.exe` shim layer a `.cmd` batch wrapper forces
+    // (the EDR grandchild-spawn hazard from WIN-1). Then the npm shim (`.cmd`),
+    // then `.bat`.
+    for ext in ["exe", "cmd", "bat"] {
         let candidate = format!("{base}.{ext}");
         if exists(&candidate) {
             return candidate;
@@ -230,12 +233,13 @@ mod tests {
     }
 
     #[test]
-    fn pyright_prefers_cmd_when_both_present() {
-        // Both packagings on PATH: keep the historical npm choice.
+    fn pyright_prefers_exe_when_both_present() {
+        // Both packagings on PATH: prefer the native `.exe`, which spawns
+        // directly instead of through a `cmd.exe` shim (the WIN-1 EDR hazard).
         let both = |_: &str| true;
         assert_eq!(
             lsp_binary_name_with("pyright-langserver", both),
-            "pyright-langserver.cmd"
+            "pyright-langserver.exe"
         );
     }
 
