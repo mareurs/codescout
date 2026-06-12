@@ -24,6 +24,7 @@
 | W-2 | 2026-06-09 | high | Treated Windows "environmental" test failures as suspects, not noise | dismissing them would have shipped a silent deny-list bypass + project-root shadowing | validated |
 | W-3 | 2026-06-09 | med | Adversarial architecture review (Snow Lion) before ship | 2 real gaps (taskkill-in-Drop, foreground bypassing the builder) would have shipped | validated |
 | W-4 | 2026-06-12 | med | Diffed the review surface against `git merge-base`, not the `experiments` tip | reviewing `experiments..vdi-windows` would have scrutinized ~1800 phantom "deletions" (the LSP-mux refactor that lives on experiments, never touched by this branch) | validated |
+| W-5 | 2026-06-12 | low | Pure platform logic kept in `platform::mod` (cross-platform compiled), not cfg-gated submodules, so its tests run on every CI | the 5 `lsp_binary_name_with` tests ran only on Windows despite testing pure string logic; the move added +5 Linux-gate assertions covering WIN-19 | validated |
 
 ---
 
@@ -343,6 +344,34 @@ At 2 datapoints, promote to CLAUDE.md review guidance: "diff feature branches ag
 merge-base, not the sibling tip."
 
 **Status:** validated — single datapoint, drift caught before any review effort wasted.
+
+## W-5 — Pure platform logic belongs in `platform::mod`, not cfg-gated submodules
+
+**Observed:** 2026-06-12, after the WIN-19 `.exe`-first fix landed in `cfg(windows) platform::windows`.
+
+**Pattern:** Pure, side-effect-free platform logic (string/decision functions) should live in
+the cross-platform `platform::mod`, with only the actual OS side-effect in the `cfg(windows)` /
+`cfg(unix)` submodule. Then the logic's unit tests compile and run on *every* platform's CI, not
+just the target one.
+
+**Counterfactual:** `lsp_binary_name_with` (pure extension-resolution) + its 5 tests lived in
+`#[cfg(windows)] platform::windows`, so the tests only ran on a Windows host. The WIN-19 fix was
+therefore "verified by reasoning" on the Linux dev machine — no running assertion. Moving the
+function to `platform::mod` (368aa9df) made the 5 tests run on the Linux gate (lib 2685→2690),
+turning the fix into a checked behavior.
+
+**Confirming data points:**
+1. `build_windows_cmdline` — already in `platform::mod`, pure, Linux-tested (pre-existing; the model for this).
+2. `lsp_binary_name_with` — moved this session (368aa9df); +5 Linux assertions covering WIN-19.
+
+**Impact:** low per-instance, compounding — each pure-logic function kept cross-platform is
+permanent CI coverage a Linux-only dev box would otherwise never exercise.
+
+**Promote-when:** 2 datapoints reached. Promote to CLAUDE.md / a platform convention: "Pure
+platform logic goes in `platform::mod` (cross-platform tested); only the OS side-effect goes in
+the `cfg`-gated submodule." The next platform-logic addition should follow this by default.
+
+**Status:** validated — 2 datapoints; ripe for promotion to a written convention.
 
 ## Template for new entries
 
