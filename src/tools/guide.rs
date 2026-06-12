@@ -43,7 +43,8 @@ impl Tool for GetGuide {
          Topics: librarian | librarian-runtime | tracker-conventions | progressive-disclosure | \
          error-handling | workspace-state | iron-laws-detail | \
          symbol-navigation. No args = list \
-         topics + summaries. Large bodies overflow to @tool_*."
+         topics + summaries. The full guide is always returned inline, \
+         never buffered to a @ref."
     }
 
     fn input_schema(&self) -> Value {
@@ -114,6 +115,13 @@ impl Tool for GetGuide {
             },
         }
     }
+
+    fn force_inline(&self) -> bool {
+        // A guide is documentation the agent explicitly asked to READ; handing
+        // back a `@tool_*` buffer reference defeats that. Always return the full
+        // body inline, regardless of size.
+        true
+    }
 }
 
 #[cfg(test)]
@@ -165,6 +173,43 @@ mod tests {
         assert!(
             body.contains("artifact"),
             "should mention artifact in librarian guide"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_guide_large_topic_returns_full_body_inline_not_buffered() {
+        // Regression: get_guide must return the ENTIRE guide inline regardless of
+        // size — never a `@tool_*` buffer handle. The `librarian` topic is ~14 KB,
+        // well above the ~10 KB (MAX_INLINE_TOKENS * 4) inline-buffer threshold, so
+        // without GetGuide's `force_inline()` override, call_content's overflow
+        // branch would divert it to the output buffer and return only a ref handle.
+        let g = GetGuide::new();
+        let ctx = ctx().await;
+
+        // Sanity: the body must actually exceed the inline threshold, otherwise
+        // this test would still pass even if `force_inline()` were removed.
+        let val = g.call(json!({"topic": "librarian"}), &ctx).await.unwrap();
+        let json_len = serde_json::to_string(&val).unwrap().len();
+        assert!(
+            json_len > 10_000,
+            "librarian guide must exceed the ~10 KB inline threshold for this \
+             test to be meaningful, got {json_len} bytes"
+        );
+
+        let content = g
+            .call_content(json!({"topic": "librarian"}), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(content.len(), 1, "guide must be a single inline block");
+        let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+        assert!(
+            !text.contains("@tool_"),
+            "guide must NOT be diverted to a @tool_ buffer handle, got: {}",
+            &text[..text.len().min(200)]
+        );
+        assert!(
+            text.contains("artifact"),
+            "the full librarian guide body must be present inline"
         );
     }
 

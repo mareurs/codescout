@@ -440,6 +440,18 @@ pub trait Tool: Send + Sync {
         OutputForm::Json
     }
 
+    /// When true, this tool's output is never diverted to the `@tool_*` output
+    /// buffer on overflow — the full result is always returned inline, no matter
+    /// how large. Default false (large output buffers, per progressive-disclosure).
+    ///
+    /// Reserve for tools whose entire value IS the payload the caller asked to
+    /// read and that cannot be meaningfully paginated or field-extracted — e.g.
+    /// `get_guide`, where a buffer handle defeats the purpose (the agent asked to
+    /// READ the guide, not to receive a reference it must then fetch).
+    fn force_inline(&self) -> bool {
+        false
+    }
+
     /// Returns true if this tool call will mutate project state and therefore
     /// must acquire the cross-process write lock before dispatch.
     ///
@@ -551,7 +563,9 @@ pub trait Tool: Send + Sync {
         }
 
         // Build the primary response block (the tool's actual output).
-        let primary = if exceeds_inline_limit(&json) {
+        // `force_inline` tools (e.g. get_guide) opt out of overflow buffering:
+        // their full payload is always returned inline regardless of size.
+        let primary = if exceeds_inline_limit(&json) && !self.force_inline() {
             let json_len = json.len();
             let ref_id = ctx.output_buffer.store_tool(self.name(), json);
             let raw_summary = self
