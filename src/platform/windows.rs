@@ -136,39 +136,11 @@ pub fn rename_overwrite(from: &std::path::Path, to: &std::path::Path) -> std::io
 /// Falls back to `.cmd` for those dual-packaged servers when nothing resolves
 /// (preserving the historical default and spawn-failure message), and `.exe`
 /// for everything else.
+///
+/// The pure resolution logic lives in `super::lsp_binary_name_with` (testable on
+/// any platform); this wrapper supplies the Windows `PATH`-probe.
 pub fn lsp_binary_name(base: &str) -> String {
-    lsp_binary_name_with(base, |name| find_on_path(name).is_some())
-}
-
-/// Core resolution logic, parameterized over an existence probe so the
-/// extension-preference behavior is unit-testable without touching `PATH`.
-fn lsp_binary_name_with(base: &str, exists: impl Fn(&str) -> bool) -> String {
-    let dual_packaged = matches!(
-        base,
-        "typescript-language-server"
-            | "vscode-json-language-server"
-            | "yaml-language-server"
-            | "bash-language-server"
-            | "pyright-langserver"
-    );
-
-    if !dual_packaged {
-        return format!("{base}.exe");
-    }
-
-    // Preference order: native binary (`.exe`) first — it spawns directly,
-    // avoiding the extra `cmd.exe` shim layer a `.cmd` batch wrapper forces
-    // (the EDR grandchild-spawn hazard from WIN-1). Then the npm shim (`.cmd`),
-    // then `.bat`.
-    for ext in ["exe", "cmd", "bat"] {
-        let candidate = format!("{base}.{ext}");
-        if exists(&candidate) {
-            return candidate;
-        }
-    }
-    // Nothing on PATH — keep the historical default so npm installs and the
-    // prior failure message are unchanged.
-    format!("{base}.cmd")
+    super::lsp_binary_name_with(base, |name| find_on_path(name).is_some())
 }
 
 /// Search `PATH` for a file with the exact given name (extension included).
@@ -208,57 +180,5 @@ mod tests {
     fn win32_liveness_false_for_dead_pid() {
         // A PID that almost certainly does not exist.
         assert!(!process_alive(0xFFFF_FFF0));
-    }
-
-    #[test]
-    fn pyright_prefers_exe_when_only_exe_present() {
-        // Regression: a pip/pipx/standalone pyright install ships
-        // `pyright-langserver.exe`, not the npm `.cmd` shim. The old
-        // hardcoded `.cmd` named a file that did not exist, so the LSP
-        // spawn failed with "Failed to start LSP server: pyright-langserver.cmd".
-        let only_exe = |name: &str| name == "pyright-langserver.exe";
-        assert_eq!(
-            lsp_binary_name_with("pyright-langserver", only_exe),
-            "pyright-langserver.exe"
-        );
-    }
-
-    #[test]
-    fn pyright_prefers_cmd_when_npm_shim_present() {
-        let only_cmd = |name: &str| name == "pyright-langserver.cmd";
-        assert_eq!(
-            lsp_binary_name_with("pyright-langserver", only_cmd),
-            "pyright-langserver.cmd"
-        );
-    }
-
-    #[test]
-    fn pyright_prefers_exe_when_both_present() {
-        // Both packagings on PATH: prefer the native `.exe`, which spawns
-        // directly instead of through a `cmd.exe` shim (the WIN-1 EDR hazard).
-        let both = |_: &str| true;
-        assert_eq!(
-            lsp_binary_name_with("pyright-langserver", both),
-            "pyright-langserver.exe"
-        );
-    }
-
-    #[test]
-    fn dual_packaged_falls_back_to_cmd_when_absent() {
-        // Nothing resolves — preserve the prior default + error message.
-        let none = |_: &str| false;
-        assert_eq!(
-            lsp_binary_name_with("pyright-langserver", none),
-            "pyright-langserver.cmd"
-        );
-    }
-
-    #[test]
-    fn non_dual_packaged_server_uses_exe() {
-        let none = |_: &str| false;
-        assert_eq!(
-            lsp_binary_name_with("rust-analyzer", none),
-            "rust-analyzer.exe"
-        );
     }
 }
