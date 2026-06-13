@@ -26,6 +26,8 @@ pub mod fs;
 
 pub mod git;
 pub mod hardware;
+pub mod legibility;
+
 #[cfg(feature = "librarian")]
 pub mod librarian;
 pub mod library;
