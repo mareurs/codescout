@@ -586,7 +586,7 @@ This test builds a temp `usage.db` via the Phase-1 `open_db`/`write_record` API 
                 Some("Foo/bar"), Some(1000), None, Some("/repo")).unwrap();
         }
         // 1 code-class edit fail on the same target, this repo
-        write_record(&conn, "edit_code", 1, "error", Some("ambiguous name_path \"Foo/bar\" matches 2 symbols"),
+        write_record(&conn, "edit_code", 1, "error", false, Some("ambiguous name_path \"Foo/bar\" matches 2 symbols"),
             "cs", None, "s1", None, None, Some("ccs1"),
             Some("Foo/bar"), None, Some("ambiguous_name_path"), Some("/repo")).unwrap();
         // a FOREIGN-project row for the same target — must be excluded (F-1)
