@@ -52,7 +52,7 @@ DELIVERABLE 1: honest logging (src/usage/, src/tools/core/types.rs)
 DELIVERABLE 2: librarian(action="legibility_scan")
   RECORDER LANE (biting-now)            INDEX LANE (latent)
   SQL over structured fields,           walk project symbol index:
-  WHERE project_root = <repo>           bodies > budget, files > symbol-cap,
+  WHERE project_root = <repo>           bodies > budget, files whose overview overflows,
   → friction per overflow_target        ambiguous name_paths
                 └────────┬───────────────────┘
                          ▼
@@ -133,7 +133,14 @@ retry chains (same input, same session), edit-fail counts by `err_family`. Rolli
 Pure symbol-index walk, no usage.db needed:
 - every function/method: `body_tokens > MAX_INLINE_TOKENS` (2,500; read from
   `src/tools/core/types.rs` — single source of truth) → `over_budget_body`.
-- every file: `symbols > ~100` or very large → `un_mappable_file`.
+- every file: its `symbols(path)` **overview overflows** the inline budget (the map
+  can't be returned in one call) → `un_mappable_file`. **Line count is NOT a trigger.**
+  A cleanly-mapped large file (e.g. 1,500 lines, 30 symbols, overview fits) is left
+  alone — raw LoC is a near-zero predictor of comprehension (β≈−0.002), cohesive long
+  files comprehend *better* at large context (`longer-files-better`, verified
+  2026-06-13), and shattering one only adds cross-file dependency chasing. The trigger
+  is the map, not the length: the symbol is the unit of a body, the overview is the
+  unit of a file.
 - ambiguous `name_path` (matches > 1 symbol) → `name_collision`.
 
 ### Scorer
@@ -246,6 +253,15 @@ the probe, scoring, and tracker conventions live in the repo (source of truth).
 - **`err_family` normalization:** table-test `error_msg → tag`.
 - **Index lane:** fixture with an over-budget function → listed in tier 2; a small
   function → not listed.
+- **No-line-count regression test (encodes the verified `longer-files-better` finding):**
+  a long file (e.g. 1,500 lines) whose `symbols(path)` overview still fits the inline
+  budget → NOT flagged `un_mappable_file`; only a file whose overview *overflows* is
+  flagged. Guards against line-count folklore creeping back into the trigger.
+- **Behavior verification trusts tests, not a re-read:** the reconcile loop closes a
+  candidate on a *mechanical re-measurement* (tokens, overview shape), never on a model
+  judging "looks unchanged" — models are measurably blind to semantics-altering edits
+  (`blind-to-semantics`, δ 0.07–0.10, verified 2026-06-13). The Yak's safety net (green
+  tests) is the behavior gate; the probe's re-measurement is the structural gate.
 - Env-resolved config (`LIBRARIAN_DB`, `LIBRARIAN_WORKSPACE`, …) → `EnvGuard` +
   `#[serial_test::serial]` per `docs/conventions/test-env-isolation.md`.
 
@@ -260,6 +276,36 @@ the probe, scoring, and tracker conventions live in the repo (source of truth).
 - Prompt-surface review: adding a new `librarian` action requires the standard
   prompt-surface review (server_instructions / onboarding / builders) — tracked as a
   plan task, not a design decision.
+
+## Research grounding (verified 2026-06-13)
+
+The Dzo heuristics this design mechanizes were deep-research verified: **22 confirmed /
+3 refuted / 0 unverified**. The 3 refuted claims were the most folklore-shaped ones
+(naming ambiguous-vs-alpha *ordering*; "models read comments not code"; a misread
+docstring δ-threshold) — none load-bearing here. Load-bearing confirmations for *this*
+spec:
+
+- **Heuristic 1 — split for budget, not line count** (`loc-cyclomatic-small`, 3/3): raw
+  LoC is a near-zero comprehension predictor (β≈−0.002); *total retrieved context*
+  drives the collapse. → the `over_budget_body` gate is **token-based**
+  (`MAX_INLINE_TOKENS`), never line-count.
+- **Heuristic 2 — longer-files-better** (3/3): cohesive long files comprehend *better*
+  at large context (~40-pt gap at 512K); the hazard is total context length +
+  cross-file fragmentation, not within-file length. → `un_mappable_file` keys on
+  **overview-overflow**, not line count; shattering a cleanly-mapped file would *add*
+  cross-file dependency chasing. (The inter-file-dependency mechanism is labeled
+  inference, not measured.)
+- **`blind-to-semantics`** (δ 0.07–0.10): models are measurably blind to
+  semantics-altering edits. → behavior is proven by **green tests**, never by a model
+  re-reading the diff; the probe closes candidates by mechanical re-measurement only.
+
+The full verified synthesis is **craft-shaped** and lives in the Dzo's own heuristics
+(the global buddy skill), per the reconnaissance promotion routing — it is deliberately
+**not** duplicated into a codescout project memory. This spec is its project-shaped
+projection: the lens (codescout) decides which properties matter — naming amplified
+(address + retrieval key + isolated-symbol comprehension), raw file length neutralized
+(the map is the unit, the symbol is the body), graph structure carried by
+`references`/`call_graph` not prose, types kept for the LSP.
 
 ## References
 
