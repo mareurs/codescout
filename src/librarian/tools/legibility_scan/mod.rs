@@ -42,6 +42,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         })?
         .abs_path
         .clone();
+    // `project` re-scopes the RECORDER lane's `project_root` filter only. The index
+    // lane, git head, and the backlog tracker stay tied to the active project
+    // (`repo_root`); cross-project redirection is not wired in v1. Defaults to the
+    // active project's path so the recorder scope matches what the index lane walked.
     let project_root = args
         .project
         .clone()
@@ -58,15 +62,20 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let friction = crate::legibility::recorder_lane(&conn, &project_root).unwrap_or_default();
 
     let candidates = crate::legibility::score_and_rank(structural, &friction);
-    let mut grouped = group_by_key(candidates);
-    if let Some(limit) = args.limit {
-        grouped.truncate(limit);
-    }
+    let grouped = group_by_key(candidates);
 
     if !args.write {
-        return Ok(build_dry_run(&grouped));
+        // `limit` caps the OUTPUT head only — dry-run path.
+        let head: &[GroupedCandidate] = match args.limit {
+            Some(n) => &grouped[..grouped.len().min(n)],
+            None => &grouped,
+        };
+        return Ok(build_dry_run(head));
     }
 
+    // NB: `reconcile` ALWAYS receives the full grouped set — never truncated by
+    // `limit`. Truncating here would make below-the-cut candidates absent from the
+    // current scan and wrongly auto-close them as "defect gone".
     let today = now_date();
     let (id, rel) = ensure_tracker(ctx).await?;
     let prior = load_backlog(ctx, &id).await.unwrap_or_default();
@@ -697,5 +706,60 @@ mod tests {
             row.after
         );
         assert!(row.before.tokens > 2500, "before preserved");
+    }
+
+    #[tokio::test]
+    async fn limit_does_not_auto_close_below_cut_candidates_on_write() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        // two over-budget functions of different sizes → deterministic ranking
+        let big_fn = |n: usize, lines: usize| {
+            let mut s = format!("fn huge{n}() {{\n");
+            for i in 0..lines {
+                s.push_str(&format!("    let v{i} = \"{}\";\n", "x".repeat(80)));
+            }
+            s.push_str("}\n");
+            s
+        };
+        std::fs::write(tmp.path().join("a.rs"), big_fn(1, 260)).unwrap();
+        std::fs::write(tmp.path().join("b.rs"), big_fn(2, 210)).unwrap();
+
+        // scan 1: no limit → both open
+        let out1 = call(&ctx, json!({ "action": "legibility_scan", "write": true }))
+            .await
+            .unwrap();
+        let id = out1["tracker_id"].as_str().unwrap().to_string();
+        let b1 = load_backlog(&ctx, &id).await.unwrap();
+        assert_eq!(
+            b1.candidates.iter().filter(|c| c.status == "open").count(),
+            2,
+            "scan 1 should open both over-budget fns: {:?}",
+            b1.candidates
+        );
+
+        // scan 2: limit=1 on the write path must NOT auto-close the below-cut
+        // (still over-budget) candidate.
+        call(
+            &ctx,
+            json!({ "action": "legibility_scan", "write": true, "limit": 1 }),
+        )
+        .await
+        .unwrap();
+        let b2 = load_backlog(&ctx, &id).await.unwrap();
+        assert_eq!(
+            b2.candidates
+                .iter()
+                .filter(|c| c.status == "closed")
+                .count(),
+            0,
+            "limit must not auto-close still-defective candidates: {:?}",
+            b2.candidates
+        );
+        assert_eq!(
+            b2.candidates.iter().filter(|c| c.status == "open").count(),
+            2,
+            "both candidates must remain open: {:?}",
+            b2.candidates
+        );
     }
 }
