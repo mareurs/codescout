@@ -209,6 +209,39 @@ pub fn un_mappable_files(files: &[FileSymbols]) -> Vec<StructuralDefect> {
     out
 }
 
+/// Walk the project (gitignore-aware), parse every recognized source file's symbols.
+pub fn parse_project(root: &Path) -> Vec<FileSymbols> {
+    let mut out = Vec::new();
+    for entry in ignore::WalkBuilder::new(root).hidden(true).git_ignore(true).build().flatten() {
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        let path = entry.path();
+        let Some(lang) = crate::ast::detect_language(path) else {
+            continue;
+        };
+        let Ok(source) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let Ok(symbols) = crate::ast::parser::extract_symbols_from_source(&source, Some(lang), path) else {
+            continue; // unparseable / unsupported → skip, never fail the whole scan
+        };
+        let rel_file = path.strip_prefix(root).unwrap_or(path).to_string_lossy().to_string();
+        let lines = source.lines().map(str::to_string).collect();
+        out.push(FileSymbols { rel_file, lines, symbols });
+    }
+    out
+}
+
+/// Run all three structural detectors over the parsed project.
+pub fn index_lane(root: &Path) -> Vec<StructuralDefect> {
+    let files = parse_project(root);
+    let mut defects = over_budget_bodies(&files);
+    defects.extend(name_collisions(&files));
+    defects.extend(un_mappable_files(&files));
+    defects
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -304,6 +337,24 @@ mod tests {
         assert_eq!(defects[0].rel_file, "src/huge.rs");
         assert_eq!(defects[0].name_path, "(file)");
         assert_eq!(defects[0].defect, Defect::UnMappableFile);
+    }
+
+    #[test]
+    fn index_lane_finds_over_budget_body_in_real_file() {
+        let dir = tempfile::tempdir().unwrap();
+        // a Rust file with one huge function (each line padded so the body exceeds budget)
+        let mut src = String::from("fn huge() {\n");
+        for i in 0..200 {
+            src.push_str(&format!("    let v{i} = \"{}\";\n", "x".repeat(80)));
+        }
+        src.push_str("}\n");
+        std::fs::write(dir.path().join("huge.rs"), src).unwrap();
+
+        let defects = index_lane(dir.path());
+        assert!(
+            defects.iter().any(|d| d.defect == Defect::OverBudgetBody && d.name_path.contains("huge")),
+            "expected an over-budget-body defect for `huge`, got: {defects:?}"
+        );
     }
 
 }
