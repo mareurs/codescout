@@ -43,8 +43,55 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         })?
         .abs_path
         .clone();
-    let _ = (&args, &repo_root); // wired in later tasks
-    Ok(json!({ "ok": true }))
+    let project_root = args
+        .project
+        .clone()
+        .unwrap_or_else(|| repo_root.to_string_lossy().into_owned());
+
+    // Index lane — parse ONCE, keep `files` for auto-close re-measurement.
+    let files = crate::legibility::parse_project(&repo_root);
+    let mut structural = crate::legibility::over_budget_bodies(&files);
+    structural.extend(crate::legibility::name_collisions(&files));
+    structural.extend(crate::legibility::un_mappable_files(&files));
+
+    // Recorder lane — open_db creates an empty db if absent (graceful degrade).
+    let conn = crate::usage::db::open_db(&repo_root)?;
+    let friction = crate::legibility::recorder_lane(&conn, &project_root).unwrap_or_default();
+
+    let candidates = crate::legibility::score_and_rank(structural, &friction);
+    let mut grouped = group_by_key(candidates);
+    if let Some(limit) = args.limit {
+        grouped.truncate(limit);
+    }
+
+    if !args.write {
+        return Ok(build_dry_run(&grouped));
+    }
+
+    let today = now_date();
+    let (id, rel) = ensure_tracker(ctx).await?;
+    let prior = load_backlog(ctx, &id).await.unwrap_or_default();
+    let new_rows = reconcile(&prior, &grouped, &files, &today);
+    let n_open = new_rows.iter().filter(|r| r.status == "open").count() as u32;
+    let n_closed = new_rows.iter().filter(|r| r.status == "closed").count();
+    let backlog = BacklogParams {
+        candidates: new_rows,
+        scan_meta: ScanMeta {
+            last_scan_at: Some(today.clone()),
+            last_scan_commit: git_head(&repo_root),
+            n_candidates: n_open,
+            project_root,
+        },
+    };
+    write_backlog(ctx, &id, &backlog).await?;
+
+    Ok(json!({
+        "ok": true,
+        "tracker_id": id,
+        "tracker_path": rel,
+        "open": n_open,
+        "closed": n_closed,
+    }))
 }
 
 /// One backlog target after collapsing its per-defect `Candidate`s. `defects` holds
@@ -297,6 +344,44 @@ async fn write_backlog(ctx: &ToolContext, id: &str, params: &BacklogParams) -> R
     Ok(())
 }
 
+fn now_date() -> String {
+    chrono::Utc::now().format("%Y-%m-%d").to_string()
+}
+
+fn git_head(root: &std::path::Path) -> Option<String> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn build_dry_run(grouped: &[GroupedCandidate]) -> Value {
+    let rows: Vec<Value> = grouped
+        .iter()
+        .map(|c| {
+            json!({
+                "key": c.key,
+                "defects": c.defects.iter().map(|d| defect_str(*d)).collect::<Vec<_>>(),
+                "tier": c.tier.rank(),
+                "tokens": c.tokens,
+                "budget": c.budget,
+                "lines": c.lines,
+                "score": c.score,
+                "cost": { "truncations": c.friction.truncations,
+                          "edit_fails": c.friction.code_class_edit_fails,
+                          "sessions": c.friction.sessions },
+            })
+        })
+        .collect();
+    json!({ "ok": true, "dry_run": true, "candidates": rows, "n": rows.len() })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -431,6 +516,34 @@ mod tests {
         assert_eq!(rel, "docs/trackers/legibility-backlog.md");
         let prior = load_backlog(&ctx, &id).await.unwrap_or_default();
         assert!(prior.candidates.is_empty());
+    }
+
+    #[tokio::test]
+    async fn scan_writes_ranked_backlog_for_a_real_over_budget_body() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        // a real over-budget function in the project
+        let mut src = String::from("fn huge() {\n");
+        for i in 0..200 {
+            src.push_str(&format!("    let v{i} = \"{}\";\n", "x".repeat(80)));
+        }
+        src.push_str("}\n");
+        std::fs::write(tmp.path().join("huge.rs"), src).unwrap();
+        // friction on the target
+        std::fs::create_dir_all(tmp.path().join(".codescout")).unwrap();
+        let conn = crate::usage::db::open_db(tmp.path()).unwrap();
+        crate::usage::db::write_record(&conn, "symbols", 1, "success", true, None, "cs", None,
+            "s1", None, None, Some("ccs1"), Some("huge"), Some(3500), None,
+            Some(&tmp.path().to_string_lossy())).unwrap();
+        drop(conn);
+
+        let out = call(&ctx, json!({ "action": "legibility_scan", "write": true })).await.unwrap();
+        let id = out.get("tracker_id").and_then(|x| x.as_str()).expect("tracker_id");
+        let backlog = load_backlog(&ctx, id).await.unwrap();
+        assert!(
+            backlog.candidates.iter().any(|c| c.name_path.contains("huge") && c.status == "open"),
+            "expected an open backlog row for huge: {:?}", backlog.candidates
+        );
     }
 
 }
