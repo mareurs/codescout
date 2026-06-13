@@ -378,7 +378,11 @@ pub fn scan(
 /// it is still a defect. Used by Phase 2b to fill the `after` delta when a candidate
 /// auto-closes (its defect is gone). For a symbol key, measures the body; for an
 /// un-mappable file (`name_path == "(file)"`), measures the overview size.
-pub fn measure_target(files: &[FileSymbols], rel_file: &str, name_path: &str) -> Option<(usize, u32)> {
+pub fn measure_target(
+    files: &[FileSymbols],
+    rel_file: &str,
+    name_path: &str,
+) -> Option<(usize, u32)> {
     let f = files.iter().find(|f| f.rel_file == rel_file)?;
     if name_path == "(file)" {
         let mut all = Vec::new();
@@ -706,5 +710,4 @@ mod tests {
         assert_eq!(lines, 71);
         assert!(measure_target(&files, "src/foo.rs", "Foo/missing").is_none());
     }
-
 }
