@@ -52,6 +52,7 @@ skill).
 | R-26 | 2026-06-11 | hit | A grep line-match locates a symbol; it doesn't confirm a mechanism — read the body before narrating "confirmed" (`kill_on_drop`→SIGKILL-orphan verified at `process.rs:66-135`, no reaper in the spawn path) | this session — mux-LSP-sharing brainstorm; kin R-19/R-5/R-23 |
 | R-27 | 2026-06-12 | hit | A subagent's prose control-flow claim is a hypothesis, not a finding — read the fn body before a fix rests on its mechanism (Explore report: "`OutputForm::Text` forces inline always" + recommended it as the fix; `call_content` gates the buffer on `exceeds_inline_limit` UNCONDITIONALLY before the form branch) | bug-fix F-19 + W-14; kin R-26/R-19/R-9 |
 | R-28 | 2026-06-12 | hit + miss | Enumerate a prompt surface's full gate set before editing (byte-for-byte slice, snapshot fixture, cap, ONBOARDING_VERSION pin, content tests); targeted `cargo test --lib <module>` filters miss cross-cutting gates in `server::tests` (over-budget get_guide description shipped via a narrow filter) | bug-fix F-20 + W-15; kin R-1/R-7/R-27 |
+| R-29 | 2026-06-13 | hit | Verify a flight-recorder-harvested target exists in the active repo before ranking/acting on it — `.codescout/usage.db` is keyed by commit-SHA and mixes every project the process served (40 project_shas; a mirela `CalendarService` phantom surfaced in a codescout survey) | dzo-legibility F-1 + W-1; kin R-23 |
 
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
@@ -750,6 +751,24 @@ SKILL.md Phase-1 bullet to name bug-file line lists explicitly.
 (hit + miss) Editing the onboarding system-prompt instructions touched `source.md` (onboarding_prompt surface), `memory-templates.md` (`{{include}}`'d into both single + workspace flows), `workspace_onboarding_prompt.md`, and `builders.rs`. **Hit:** pre-edit recon enumerated the gate set — `extracts_onboarding_prompt_byte_for_byte`, the `prompt_surfaces_onboarding_snapshot` fixture, the 2200-byte `source_md_under_cap`, the `assert_eq!(ONBOARDING_VERSION, 28)` version-pin, the workspace-scope heading-presence test, and the `"6 memories"` content test — so every gate update landed in one commit and only the snapshot needed a legitimate re-bless. **Miss:** a sibling change earlier the same session (get_guide description, `c799e887`) was verified with a *targeted* `cargo test --lib guide::` that did not include `server::tests::tool_descriptions_stay_under_budget` (`src/server.rs:1598`); the 329-char (cap 300) description shipped and was caught only by the onboarding task's full-suite run (bug-fix F-20). Lesson: a tool/field's validating gate often lives in a DIFFERENT module (`server::tests`) than the code it guards; `cargo test --lib <module>` filters silently skip it. Enumerate gates by what they assert on, not by where the edit sits — and run the full suite (or `server::`) for anything a global budget/snapshot gate validates. Kin R-1/R-7 (include_str'd-constant invariants), R-27 (verify before building on a claim).
 
 **Evidence:** bug-fix F-20 + W-15; commits `8427ae4a` (onboarding fix), `31a655e5` (description-budget), `c799e887` (where the gap shipped); verified read-only against `src/prompts/source.rs`, `src/prompts/mod.rs`, `src/server.rs:1598`.
+## R-29 — Verify a flight-recorder-harvested target exists in the active repo before ranking it
+
+**Date:** 2026-06-13 · **Verdict:** hit · **Kin:** R-23 (usage.db telemetry re-derivation), R-19 (cross-project recommendation scouting)
+
+**Context:** Dzo Phase-1 legibility survey — ranking refactor targets by truncated-`symbols` recurrence harvested from `.codescout/usage.db`.
+
+**Scout:** Before ranking, existence-checked each harvested target against the repo (`grep -rl <symbol> --include=*.rs`, `wc -l <path>`, `symbols` resolution). `CalendarService` (3 truncated fetches) failed the check; a follow-up `project_sha` query traced it to `project_sha=1e8b9eb1`, path `/home/marius/work/mirela/backend-kotlin/.worktrees/cs-stress-*/.../CalendarService.kt` — a mirela Kotlin stress-test session.
+
+**Finding:** `.codescout/usage.db` is **not** single-project. It is keyed by commit-SHA-at-call-time and holds 40 distinct `project_sha` values, mixing every project the process-global server served. A symbol/path harvested from telemetry is a *candidate*, not a confirmed in-repo target.
+
+**Lesson (the recon rule):** Telemetry-harvested targets need an in-repo existence verification before they drive a ranking or a refactor. The verification is one `grep -rl` per path-less candidate; the filter for a clean survey is `WHERE project_sha IN (<repo's shas>)` or a path-prefix match.
+
+**Counterfactual:** Without the check, `CalendarService` (tied with mid-tier real targets at 3 fetches) ranks ~#4, and the Dzo runs `symbols`/`semantic_search` readings that return empty against code not in the repo — churn, and a possible phantom tracker.
+
+**Proposal:** Bake a `project_sha`/path-prefix filter into the Pika + Dzo survey queries so the contamination is excluded at the source, not caught per-symbol. Promote-when: a second cross-project phantom surfaces in a flight-recorder survey.
+
+**Evidence:** `docs/trackers/dzo-legibility-session-log.md` F-1 + W-1.
+
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
