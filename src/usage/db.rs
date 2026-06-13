@@ -115,10 +115,14 @@ pub fn write_record(
     input_json: Option<&str>,
     output_json: Option<&str>,
     cc_session_id: Option<&str>,
+    friction_target: Option<&str>,
+    overflow_tokens: Option<i64>,
+    err_family: Option<&str>,
+    project_root: Option<&str>,
 ) -> Result<()> {
     conn.execute(
-        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, project_sha, session_id, input_json, output_json, cc_session_id)
-         VALUES (?1, datetime('now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, project_sha, session_id, input_json, output_json, cc_session_id, friction_target, overflow_tokens, err_family, project_root)
+         VALUES (?1, datetime('now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             tool_name,
             latency_ms,
@@ -131,6 +135,10 @@ pub fn write_record(
             input_json,
             output_json,
             cc_session_id,
+            friction_target,
+            overflow_tokens,
+            err_family,
+            project_root,
         ],
     )?;
     conn.execute(
@@ -575,6 +583,10 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
+            None,
+            None,
         )
         .unwrap();
         let count: i64 = conn
@@ -596,6 +608,10 @@ mod tests {
             "unknown",
             None,
             "test-session",
+            None,
+            None,
+            None,
+            None,
             None,
             None,
             None,
@@ -628,6 +644,10 @@ mod tests {
             "unknown",
             None,
             "test-session",
+            None,
+            None,
+            None,
+            None,
             None,
             None,
             None,
@@ -665,6 +685,10 @@ mod tests {
             "unknown",
             None,
             "test-session",
+            None,
+            None,
+            None,
+            None,
             None,
             None,
             None,
@@ -770,6 +794,10 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
+            None,
+            None,
         )
         .unwrap();
         write_record(
@@ -785,6 +813,10 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
+            None,
+            None,
         )
         .unwrap();
         write_record(
@@ -797,6 +829,10 @@ mod tests {
             "unknown",
             None,
             "test-session",
+            None,
+            None,
+            None,
+            None,
             None,
             None,
             None,
@@ -824,6 +860,10 @@ mod tests {
                 "unknown",
                 None,
                 "test-session",
+                None,
+                None,
+                None,
+                None,
                 None,
                 None,
                 None,
@@ -1095,6 +1135,10 @@ mod tests {
             Some("{\"query\":\"foo\"}"),
             Some("{\"error\":\"not found\"}"),
             None,
+            None,
+            None,
+            None,
+            None,
         )
         .unwrap();
         let (cs, ps, sid, inp, out): (String, String, String, String, String) = conn
@@ -1116,7 +1160,7 @@ mod tests {
         let (_dir, conn) = tmp();
         write_record(
             &conn, "symbols", 42, "success", false, None, "abc1234", None, "sess-1", None, None,
-            None,
+            None, None, None, None, None,
         )
         .unwrap();
         let (ps, inp, out): (Option<String>, Option<String>, Option<String>) = conn
@@ -1129,5 +1173,27 @@ mod tests {
         assert!(ps.is_none());
         assert!(inp.is_none());
         assert!(out.is_none());
+    }
+
+    #[test]
+    fn write_record_stores_friction_fields() {
+        let (_dir, conn) = tmp();
+        write_record(
+            &conn, "symbols", 42, "success", true, None,
+            "cs-sha", Some("proj-sha"), "sess-1", None, None, None,
+            Some("LspManager/get_or_start"), Some(1045), None, Some("/repo"),
+        )
+        .unwrap();
+        let (ft, tok, ef, pr): (Option<String>, Option<i64>, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT friction_target, overflow_tokens, err_family, project_root FROM tool_calls",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(ft.as_deref(), Some("LspManager/get_or_start"));
+        assert_eq!(tok, Some(1045));
+        assert_eq!(ef, None);
+        assert_eq!(pr.as_deref(), Some("/repo"));
     }
 }

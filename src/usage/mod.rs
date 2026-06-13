@@ -55,6 +55,21 @@ impl UsageRecorder {
         let conn = db::open_db(&project_root)?;
         let (outcome, overflowed, error_msg) = classify_content_result(result);
 
+        // Friction fields (Phase 1 of the legibility probe).
+        let is_friction = overflowed || outcome != "success";
+        let friction_target = if is_friction {
+            extract_friction_target(input)
+        } else {
+            None
+        };
+        let overflow_tokens = if overflowed {
+            extract_overflow_tokens(result)
+        } else {
+            None
+        };
+        let err_family = error_msg.as_deref().and_then(normalize_err_family);
+        let project_root_str = project_root.to_string_lossy().to_string();
+
         let input_json = if self.debug {
             serde_json::to_string(input).ok()
         } else {
@@ -89,6 +104,10 @@ impl UsageRecorder {
             input_json.as_deref(),
             output_json.as_deref(),
             cc_session_id.as_deref(),
+            friction_target.as_deref(),
+            overflow_tokens,
+            err_family,
+            Some(project_root_str.as_str()),
         )?;
         Ok(())
     }
@@ -119,8 +138,6 @@ fn classify_content_result(result: &Result<Vec<Content>>) -> (&'static str, bool
 }
 
 /// Token estimate of a buffered (overflowed) result: `buffered_bytes / 4`.
-// wired into write_content in the next task
-#[allow(dead_code)]
 fn extract_overflow_tokens(result: &Result<Vec<Content>>) -> Option<i64> {
     let blocks = result.as_ref().ok()?;
     let text = blocks.first().and_then(|c| c.as_text()).map(|t| t.text.as_str())?;
@@ -131,8 +148,6 @@ fn extract_overflow_tokens(result: &Result<Vec<Content>>) -> Option<i64> {
 
 /// Map an error message to a stable, low-cardinality family tag for the probe.
 /// Order matters: more specific patterns first. `None` for unrecognized messages.
-// wired into write_content in the next task
-#[allow(dead_code)]
 fn normalize_err_family(msg: &str) -> Option<&'static str> {
     // infra / tool-class (excluded from the probe's code-class score)
     if msg.contains("index is locked") {
@@ -165,8 +180,6 @@ fn normalize_err_family(msg: &str) -> Option<&'static str> {
 
 /// The symbol/path a call addressed, for friction attribution. Priority order:
 /// the most specific address first (name_path/symbol), then name, then path/query/pattern.
-// wired into write_content in the next task
-#[allow(dead_code)]
 fn extract_friction_target(input: &Value) -> Option<String> {
     const KEYS: [&str; 6] = ["name_path", "symbol", "name", "query", "path", "pattern"];
     for k in KEYS {
@@ -393,5 +406,36 @@ mod content_tests {
         assert!(inp.is_none(), "input_json should be None in normal mode");
         assert_eq!(sid, "test-session", "session_id should always be set");
         assert!(!cs.is_empty(), "codescout_sha should always be set");
+    }
+
+    #[tokio::test]
+    async fn record_content_populates_friction_fields_on_overflow() {
+        use serde_json::json;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let recorder = UsageRecorder::new(agent.clone(), false, "test-session".to_string());
+        let input = json!({"name_path": "LspManager/get_or_start", "path": "src/lsp/manager.rs"});
+
+        let _ = recorder
+            .record_content("symbols", &input, || async {
+                Ok(vec![Content::text(
+                    r#"{"output_id":"@tool_x","summary":"...","buffered_bytes":10000}"#.to_string(),
+                )])
+            })
+            .await;
+
+        let conn = crate::usage::db::open_db(dir.path()).unwrap();
+        let (overflowed, ft, tok, pr): (i64, Option<String>, Option<i64>, Option<String>) = conn
+            .query_row(
+                "SELECT overflowed, friction_target, overflow_tokens, project_root FROM tool_calls",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(overflowed, 1, "output_id envelope -> overflowed");
+        assert_eq!(ft.as_deref(), Some("LspManager/get_or_start"));
+        assert_eq!(tok, Some(2500), "10000 bytes / 4");
+        assert!(pr.is_some(), "project_root always set");
     }
 }
