@@ -119,8 +119,8 @@ still unreconciled and left for the fixer; it does not change the diagnosis.)
 
 ## Fix
 
-Applied on `experiments` this session (commit SHA pending — cite the master-side
-SHA after cherry-pick, per the project's after-cherry-pick rule). Mirrored
+Shipped to master as `4586374a` (cherry-picked from experiments-side `b716d664`;
+the code lands on master, the experiments-only bug file does not). Mirrored
 `ca57869e` (the sibling embedder fix):
 
 - Added `RerankerHttp::with_protocol(base, protocol, model_id)` — an explicit
