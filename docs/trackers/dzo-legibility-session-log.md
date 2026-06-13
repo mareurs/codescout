@@ -36,6 +36,7 @@ tags:
 | F-6 | 2026-06-13 | high | correctness | fixed-verified | 2b `limit` corrupted reconcile (auto-closed below-cut defects); review caught it |
 | F-7 | 2026-06-13 | low | process | mitigated | Interrupted dispatch may have run; verify state before re-dispatch |
 | F-8 | 2026-06-13 | low-med | ux/render | fixed-verified | `render_template` attached but not auto-applied; backlog body stays a placeholder after write |
+| F-9 | 2026-06-13 | med | phantom-limitation | fixed-verified | Relocated 11 trait impls to clear a "collision" `edit_code` already resolved via the qualified name_path |
 
 ## Wins Index
 
@@ -44,7 +45,8 @@ tags:
 | W-1 | 2026-06-13 | med | Existence-check a flight-recorder target before ranking it | A mirela phantom (`CalendarService`, 3 truncated fetches) would have ranked ~#4 and opened a campaign against code not in the repo | validated |
 | W-2 | 2026-06-13 | med | Independent adversarial review after verbatim-spec subagent execution | Key-uniqueness + `collect_bodies` leaf-invariant assumptions would carry silently into Phase 2b's consumer as dedup/double-flag bugs | validated |
 | W-3 | 2026-06-13 | high | Whole-module review after verbatim-spec execution caught a Critical per-task tests missed (W-2 promote-when MET) | `limit`/reconcile data-corruption bug would have silently corrupted the backlog on first real limit+write scan | validated |
-| W-4 | 2026-06-13 | high | First full legibility loop closed: a same-file trait-forwarder collision must be cleared (relocate the trait impl) before the body refactor it blocks | `get_or_start`'s collision would hard-fail every `edit_code` on the body; the #1 target was un-refactorable by its own tool until the forwarder moved out | validated |
+| W-4 | 2026-06-13 | high | First full legibility loop closed; trait-forwarder collision cleared by relocating the impl ~~before the body refactor it blocks~~ | ~~un-refactorable until the forwarder moved out~~ | **CORRECTED by F-9** — the move was *sufficient but unnecessary*; `edit_code` resolves the qualified `impl Trait for Type/method` form, so the body was editable in place |
+| W-5 | 2026-06-13 | high | name_collision removed: language-agnostic by subtraction (a per-language signal cannot live in a language-agnostic AST scanner) | 19+ collision rows kept tempting idiomatic-code relocations; two such moves were already done before the council's audit caught the phantom | promoted-to-docs |
 
 ---
 
@@ -295,9 +297,39 @@ tags:
 
 **Impact:** high — closed the first full loop AND produced a reusable, tested template for the largest remaining collision cluster.
 
-**Status:** validated — **2 datapoints.** (1) `get_or_start` body-refactor (`b946171d`+`95ea8e0e`); (2) the `LspClientOps` cluster (`2b35f2a1`) — one trait-impl move → **10 collisions cleared** at near-zero cost (template amortized the recon). The *trait-move-clears-same-file-collision* template's promote-when is MET → route to a reconnaissance/refactor rule: *"`count_symbols_by_name_path` > 1 on `<Type>/<method>` means a same-file trait forwarder shares the name_path and `edit_code` is blocked; relocate the trait-impl block to its own file."* (The body-refactor-blocking *variant* specifically still has 1 datapoint — get_or_start — since the `LspClientOps` rows were collision-only.)
+**Status:** validated — **2 datapoints.** (1) `get_or_start` body-refactor (`b946171d`+`95ea8e0e`); (2) the `LspClientOps` cluster (`2b35f2a1`) — one trait-impl move → **10 collisions cleared** at near-zero cost (template amortized the recon). The *trait-move-clears-same-file-collision* template's promote-when is MET → route to a reconnaissance/refactor rule: *"`count_symbols_by_name_path` > 1 on `<Type>/<method>` means a same-file trait forwarder shares the name_path and `edit_code` is blocked; relocate the trait-impl block to its own file."* (The body-refactor-blocking *variant* specifically still has 1 datapoint — get_or_start — since the `LspClientOps` rows were collision-only.)\n\n**CORRECTION (F-9, 2026-06-13):** the framing above overstates the move. `edit_code` resolves the qualified `impl Trait for Type/method` form, so `get_or_start`'s body was editable **in place** — the relocation was *sufficient but unnecessary*, not required. The LspClientOps cluster had zero observed friction, so its move was metric-driven (violates principle 2). Both moves kept (idiomatic, harmless) but earned nothing. The collision was never a real `edit_code` block; the defect class itself was removed (W-5, ADR `docs/adrs/2026-06-13-drop-name-collision-defect.md`).
 
 ---
+
+## F-9 — Relocated 11 trait impls to clear a "collision" edit_code could already resolve via the qualified form
+
+**Observed:** 2026-06-13, the council's "was the Ops refactoring worth it?" audit, after the get_or_start + LspClientOps moves.
+
+**Expected (my working assumption, recorded in W-4):** the bare name_path `LspManager/get_or_start` was the only handle; the inherent + trait-forwarder collision *blocked* `edit_code`, so the trait impl had to be relocated before the body could be shrunk.
+
+**Got (verified live):** `edit_code` resolves a colliding sibling by the *qualified* name_path — `find_unique_symbol_by_name_path("impl fmt::Display for SensitiveString/fmt")` returns exactly one symbol. The capability always existed. I read the resolver (`find_unique_symbol_by_name_path`, `symbol_name_matches`, `count_symbols_by_name_path`) but never *tested* the qualified path — and the resolver's own not-found hint already *documents* the form ("Trait impl methods use format 'impl Trait for Struct/method'"). So the two relocations (`b946171d`, `2b35f2a1`) were unnecessary; the bodies were editable in place. Worse, the LspClientOps cluster had **zero** observed friction — a metric-driven move, not a friction-driven one (violates the Dzo's principle 2).
+
+**Severity:** med — real wasted work (11 trait impls moved); caught + corrected, no wrong code shipped. The moves were kept (idiomatic, harmless) but earned nothing.
+
+**Status:** fixed-verified — the misleading ambiguity hint fixed (`c21ad73b`), and the AST-level name_collision detector removed (`919dbe5c`, ADR `docs/adrs/2026-06-13-drop-name-collision-defect.md`).
+
+**Fix idea / pointer:** R-30 in `docs/trackers/reconnaissance-patterns.md` — when a structural feature appears to block a tool, *test the tool's documented alternate addressing form* before refactoring code around it.
+
+## W-5 — name_collision removed: "language-agnostic by subtraction"
+
+**Observed:** 2026-06-13, the worth-it audit escalated (with the Architecture Snow Lion) into "where does the fix belong?"
+
+**Pattern:** A quality signal in a *language-agnostic* AST scanner must be measurable uniformly across every language it serves. `name_collision`'s disambiguator is per-language (Rust trait/impl context, TS declaration kind, Java overload signature); the tree-sitter AST collapses all of them, and for TS declaration-merging the "collision" is idiomatic, not a defect. The right move was **removal (subtraction)**, not building per-language machinery the stateless scanner can't run (the LSP already does it per-language, but importing it defeats the fast index lane).
+
+**Counterfactual:** Without the catch, the backlog kept presenting 19+ `name_collision` rows as actionable, each tempting another zero-friction, metric-driven relocation (the F-9 pattern). Two were already done.
+
+**Confirming data points:**
+1. F-9 — two relocations for a collision `edit_code` already resolved.
+2. TS `BookMetadata` — interface+namespace merge flagged as a "defect" it isn't.
+
+**Impact:** high — removed a false-priority signal at the source (`919dbe5c`), shipped the real remediation (the qualified-form hint `c21ad73b`), added a guard test (`index_lane_does_not_flag_name_collisions`).
+
+**Status:** promoted-to-permanent-docs — ADR `docs/adrs/2026-06-13-drop-name-collision-defect.md` (Decision + Alternatives carry the reusable rule).
 
 ## Template for new entries
 
