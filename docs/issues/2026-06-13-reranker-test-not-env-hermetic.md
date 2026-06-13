@@ -1,7 +1,7 @@
 ---
-status: investigating
+status: fixed
 opened: 2026-06-13
-closed:
+closed: 2026-06-14
 severity: low
 owner: marius
 related: []
@@ -118,18 +118,46 @@ still unreconciled and left for the fixer; it does not change the diagnosis.)
    a raw-body / resolved-Protocol dump.
 
 ## Fix
-*Plan (retrieval work-stream's call — not applied here to avoid editing another
-session's in-flight subsystem blindly):* mirror `ca57869e` for the reranker —
-either (a) a test-only `RerankerHttp` constructor that takes an explicit
-`Protocol` (no env read), or (b) make the test `#[serial_test::serial]` and wrap
-an `EnvGuard` that pins `CODESCOUT_RERANKER_PROTOCOL`/`_MODEL` to the TEI default
-for the duration. Option (a) matches the embedder fix and is preferred.
 
+Applied on `experiments` this session (commit SHA pending — cite the master-side
+SHA after cherry-pick, per the project's after-cherry-pick rule). Mirrored
+`ca57869e` (the sibling embedder fix):
+
+- Added `RerankerHttp::with_protocol(base, protocol, model_id)` — an explicit
+  constructor that reads **no** process env. `crate::install_default_crypto_provider()`
+  moved into it so both construction paths initialise it.
+- `RerankerHttp::new` still reads env (`Protocol::from_env()` +
+  `CODESCOUT_RERANKER_MODEL`) for production callers, then delegates to
+  `with_protocol` for field init.
+- Exported `Protocol` (`pub enum`) so integration tests can name `Protocol::Tei`
+  — mirrors the already-`pub` `DenseProtocol` from the embedder fix.
+- Both reranker integration tests (`reranker_returns_scores_in_input_order`,
+  `reranker_503_returns_error`) switched to
+  `with_protocol(server.url(), Protocol::Tei, None)`, making them env-independent
+  by construction.
+
+**Verification (under the breaking env, not a cleared one):**
+`cargo test --test retrieval_integration` → 4 passed with
+`CODESCOUT_RERANKER_PROTOCOL=llama-server` **still set** (the exact var that
+triggered the failure). Full `cargo test` → 2838 passed, 0 failed;
+`cargo clippy --all-targets -- -D warnings` clean.
+
+**Hypothesis 4 (serde error-direction) — now moot, not reconciled.** The causal
+chain is proven (env-read present → fail; env-read removed → pass), but the exact
+"invalid type: map, expected a sequence" *direction* was never reconciled by
+static reading — and is no longer reachable, because the hermetic test never
+reads env, so the protocol-selection path that produced the symptom is no longer
+exercised. Closed without the `dbg!` forensics: the regression bar (green under
+an arbitrary host env) is met, and the open question now points at dead code
+from the test's perspective.
 ## Tests added
-N/A — not fixed. The fix *is* making the existing test hermetic; a green
-`reranker_returns_scores_in_input_order` under an arbitrary host env is the
-regression bar.
 
+No new test. The existing `reranker_returns_scores_in_input_order` is the
+regression test — it was the symptom and is now the verification, green under an
+arbitrary host env via the hermetic `with_protocol` ctor. `reranker_503_returns_error`
+was already protocol-agnostic (it short-circuits on the 503 status before any
+decode) but was converted too, so the whole reranker test surface is hermetic by
+construction rather than by luck.
 ## Workarounds
 Run the suite with the reranker env cleared:
 ```
