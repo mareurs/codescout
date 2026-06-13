@@ -1179,9 +1179,22 @@ mod tests {
     fn write_record_stores_friction_fields() {
         let (_dir, conn) = tmp();
         write_record(
-            &conn, "symbols", 42, "success", true, None,
-            "cs-sha", Some("proj-sha"), "sess-1", None, None, None,
-            Some("LspManager/get_or_start"), Some(1045), None, Some("/repo"),
+            &conn,
+            "symbols",
+            42,
+            "success",
+            true,
+            None,
+            "cs-sha",
+            Some("proj-sha"),
+            "sess-1",
+            None,
+            None,
+            None,
+            Some("LspManager/get_or_start"),
+            Some(1045),
+            None,
+            Some("/repo"),
         )
         .unwrap();
         let (ft, tok, ef, pr): (Option<String>, Option<i64>, Option<String>, Option<String>) = conn

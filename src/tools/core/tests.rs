@@ -630,7 +630,10 @@ async fn overflow_envelope_carries_buffered_bytes() {
     let parsed: serde_json::Value =
         serde_json::from_str(text).expect("overflow must return a JSON envelope");
     assert!(
-        parsed["output_id"].as_str().unwrap_or("").starts_with("@tool_"),
+        parsed["output_id"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("@tool_"),
         "result must overflow: {parsed}"
     );
     let bytes = parsed["buffered_bytes"]

@@ -140,7 +140,10 @@ fn classify_content_result(result: &Result<Vec<Content>>) -> (&'static str, bool
 /// Token estimate of a buffered (overflowed) result: `buffered_bytes / 4`.
 fn extract_overflow_tokens(result: &Result<Vec<Content>>) -> Option<i64> {
     let blocks = result.as_ref().ok()?;
-    let text = blocks.first().and_then(|c| c.as_text()).map(|t| t.text.as_str())?;
+    let text = blocks
+        .first()
+        .and_then(|c| c.as_text())
+        .map(|t| t.text.as_str())?;
     let v: Value = serde_json::from_str(text).ok()?;
     let bytes = v.get("buffered_bytes").and_then(Value::as_i64)?;
     Some(bytes / 4)
@@ -228,7 +231,10 @@ mod content_tests {
         // legacy key must NOT trigger (guards the exact wrong-key regression)
         let legacy = Ok(vec![Content::text(r#"{"overflow":true}"#.to_string())]);
         let (_o2, overflowed_legacy, _) = classify_content_result(&legacy);
-        assert!(!overflowed_legacy, "legacy 'overflow' key must not be treated as overflow");
+        assert!(
+            !overflowed_legacy,
+            "legacy 'overflow' key must not be treated as overflow"
+        );
 
         // normal result
         let normal = Ok(vec![Content::text(r#"{"result":"ok"}"#.to_string())]);
@@ -261,7 +267,9 @@ mod content_tests {
         )]);
         assert_eq!(extract_overflow_tokens(&env), Some(2500));
 
-        let no_bytes = Ok(vec![Content::text(r#"{"output_id":"@tool_x"}"#.to_string())]);
+        let no_bytes = Ok(vec![Content::text(
+            r#"{"output_id":"@tool_x"}"#.to_string(),
+        )]);
         assert_eq!(extract_overflow_tokens(&no_bytes), None);
 
         let err: Result<Vec<Content>> = Err(anyhow::anyhow!("boom"));
@@ -271,14 +279,32 @@ mod content_tests {
     #[test]
     fn normalize_err_family_maps_known_messages() {
         let cases = [
-            ("cannot determine end of 'Inner' for insert-after — AST parse failed", Some("ast_extent_fail")),
-            ("ambiguous name_path \"LspManager/get_or_start\" matches 2 symbols", Some("ambiguous_name_path")),
-            ("edit_code replace('X') would have dropped sibling", Some("replace_dropped_sibling")),
+            (
+                "cannot determine end of 'Inner' for insert-after — AST parse failed",
+                Some("ast_extent_fail"),
+            ),
+            (
+                "ambiguous name_path \"LspManager/get_or_start\" matches 2 symbols",
+                Some("ambiguous_name_path"),
+            ),
+            (
+                "edit_code replace('X') would have dropped sibling",
+                Some("replace_dropped_sibling"),
+            ),
             ("LSP server disconnected", Some("lsp_disconnect")),
-            ("kotlin LSP index is locked by another process", Some("lsp_index_locked")),
-            ("mux startup failed for kotlin: Failed to spawn mux process", Some("mux_startup_fail")),
+            (
+                "kotlin LSP index is locked by another process",
+                Some("lsp_index_locked"),
+            ),
+            (
+                "mux startup failed for kotlin: Failed to spawn mux process",
+                Some("mux_startup_fail"),
+            ),
             ("LSP server is not running", Some("lsp_not_running")),
-            ("symbol not found: ActionContribution/toDTO", Some("symbol_not_found")),
+            (
+                "symbol not found: ActionContribution/toDTO",
+                Some("symbol_not_found"),
+            ),
             ("some unrecognized failure", None),
         ];
         for (msg, want) in cases {
@@ -413,7 +439,9 @@ mod content_tests {
         use serde_json::json;
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
-        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
         let recorder = UsageRecorder::new(agent.clone(), false, "test-session".to_string());
         let input = json!({"name_path": "LspManager/get_or_start", "path": "src/lsp/manager.rs"});
 
