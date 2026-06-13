@@ -44,6 +44,7 @@ tags:
 | W-1 | 2026-06-13 | med | Existence-check a flight-recorder target before ranking it | A mirela phantom (`CalendarService`, 3 truncated fetches) would have ranked ~#4 and opened a campaign against code not in the repo | validated |
 | W-2 | 2026-06-13 | med | Independent adversarial review after verbatim-spec subagent execution | Key-uniqueness + `collect_bodies` leaf-invariant assumptions would carry silently into Phase 2b's consumer as dedup/double-flag bugs | validated |
 | W-3 | 2026-06-13 | high | Whole-module review after verbatim-spec execution caught a Critical per-task tests missed (W-2 promote-when MET) | `limit`/reconcile data-corruption bug would have silently corrupted the backlog on first real limit+write scan | validated |
+| W-4 | 2026-06-13 | high | First full legibility loop closed: a same-file trait-forwarder collision must be cleared (relocate the trait impl) before the body refactor it blocks | `get_or_start`'s collision would hard-fail every `edit_code` on the body; the #1 target was un-refactorable by its own tool until the forwarder moved out | validated |
 
 ---
 
@@ -273,6 +274,28 @@ tags:
 **Status:** open — 2b / librarian follow-up.
 
 **Fix idea:** either (a) `write_backlog` renders `render_template` against `params` and writes the body via `body_edits` after the params update, or (b) the librarian auto-applies `render_template` on `commit_refresh` without requiring a body `patch`. Also validate the MiniJinja template syntax (the `{% for c in candidates if ... %}` form) once a real render path exists — it is currently untested against an actual render.
+
+---
+
+## W-4 — First full legibility loop closed: get_or_start auto-closed (3036→2463 tok) via trait-move-then-extract
+
+**Observed:** 2026-06-13, executing "use it" — refactor the #1 backlog target and watch the engine auto-close it.
+
+**Pattern:** When a target carries BOTH `over_budget_body` and `name_collision`, and the collision is an inherent-impl + same-file trait-forwarder pair, fix the collision FIRST by relocating the trait-impl *block* to its own file — then the body becomes editable. The collision otherwise blocks the very `edit_code` calls the body refactor needs.
+
+**Why the order is forced:** `edit_code` resolves a symbol via LSP `document_symbols` (per-file) → `find_unique_symbol_by_name_path`, which hard-errors "ambiguous name_path matches 2 symbols" when an inherent method and a trait forwarder share the `<Type>/<method>` name_path in one file. Renaming the inherent method to break the tie is *also* blocked — `edit_code(action=rename)` must resolve the symbol first. The trait-impl block has a distinct name_path (`impl Trait for Type`) — the only collision-free handle. Move it out → per-file collision clears (both the legibility detector and LSP `document_symbols` are per-file) → the body is uniquely addressable.
+
+**Counterfactual:** Without scouting the collision pre-edit, the first body-extraction `edit_code(symbol="LspManager/get_or_start", action=replace)` would have hard-failed "matches 2 symbols" — and logged an `ambiguous_name_path` edit_fail against the very row being fixed. Reconnaissance (reading `find_unique_symbol_by_name_path` + `count_symbols_by_name_path` + the trait block) caught it before any blind edit and reframed the refactor as trait-move-then-extract.
+
+**Outcome:** 2 transformations (`b946171d` move, `95ea8e0e` extract), behavior-preserving (39 `lsp::manager` tests green throughout). Re-scan auto-closed `get_or_start` (3036→2463 tok, 242→196 ln) and swept up the `notify_file_changed` + `shutdown_all` collisions in the same forwarder block — 3 rows closed. First end-to-end run of the instrument: logs → rank → refactor → auto-close with a measured delta.
+
+**Reusable template:** the identical move clears the `LspClientOps` cluster (10 collisions in `client.rs`) — captured as a Dzo verdict in the backlog. One relocation → 10 cleared.
+
+**Promote-when:** a second target where a same-file trait-forwarder collision blocks a needed body refactor and the move-first sequence resolves it. At 2 datapoints, promote to a recon/refactor rule: *"before refactoring a method body, a `count_symbols_by_name_path` > 1 means a trait forwarder shares the name_path and `edit_code` is blocked — relocate the trait-impl block first."* Craft-shaped (Rust trait-impl pattern) → reconnaissance memory / skill, not a one-off.
+
+**Impact:** high — closed the first full loop AND produced a reusable, tested template for the largest remaining collision cluster.
+
+**Status:** validated — single datapoint; loop verified closed via `params` (status:closed, before/after recorded).
 
 ---
 
