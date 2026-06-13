@@ -35,7 +35,7 @@ tags:
 | F-5 | 2026-06-13 | med | plan-drift | fixed-verified | 2b Task 8 missed adapter `is_write` write-gating + get_guide table, caught pre-dispatch |
 | F-6 | 2026-06-13 | high | correctness | fixed-verified | 2b `limit` corrupted reconcile (auto-closed below-cut defects); review caught it |
 | F-7 | 2026-06-13 | low | process | mitigated | Interrupted dispatch may have run; verify state before re-dispatch |
-| F-8 | 2026-06-13 | low-med | ux/render | fixed | `render_template` attached but not auto-applied; backlog body stays a placeholder after write |
+| F-8 | 2026-06-13 | low-med | ux/render | fixed-verified | `render_template` attached but not auto-applied; backlog body stays a placeholder after write |
 
 ## Wins Index
 
@@ -271,7 +271,7 @@ tags:
 
 **Severity:** low-med — UX/readability gap; the data is correct in `params` and the reconcile/auto-close logic is unaffected (it reads `params`, never the rendered body).
 
-**Status:** fixed (`1d82ec14`, fix idea (a)) — `write_backlog` now renders the `.j2` over `params` and writes the managed region, preserving everything from the `## Verdicts` heading onward. New test `scan_write_renders_body_and_preserves_verdicts` pins both halves (managed region re-renders; verdict prose survives) **and** validates the MiniJinja `{% for c in candidates if ... %}` form against a real render — the untested-syntax worry in the fix idea is now closed. Best-effort: a render failure warns and leaves `params` authoritative, never failing the scan. Live re-render of the codescout backlog pending a `/mcp` restart (release binary rebuilt at `1d82ec14`).
+**Status:** fixed (`1d82ec14`, fix idea (a)) — `write_backlog` now renders the `.j2` over `params` and writes the managed region, preserving everything from the `## Verdicts` heading onward. New test `scan_write_renders_body_and_preserves_verdicts` pins both halves (managed region re-renders; verdict prose survives) **and** validates the MiniJinja `{% for c in candidates if ... %}` form against a real render — the untested-syntax worry in the fix idea is now closed. Best-effort: a render failure warns and leaves `params` authoritative, never failing the scan. **Verified live:** after the `/mcp` reconnect to the rebuilt binary, a re-scan auto-rendered the codescout backlog body (managed table + `### Closed` section, 29 open / 13 closed) and preserved the two Dzo verdicts verbatim; the hand-rendered table and the F-8 note are gone. The body is now self-maintaining.
 
 **Fix idea:** either (a) `write_backlog` renders `render_template` against `params` and writes the body via `body_edits` after the params update, or (b) the librarian auto-applies `render_template` on `commit_refresh` without requiring a body `patch`. Also validate the MiniJinja template syntax (the `{% for c in candidates if ... %}` form) once a real render path exists — it is currently untested against an actual render.
 

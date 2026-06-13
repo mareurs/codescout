@@ -11,71 +11,60 @@ topic: null
 time_scope: null
 ---
 
-
 ## Backlog (auto-managed)
 
-Ranked by the legibility engine — **Tier 1** = biting-now (structural defect + observed `usage.db` friction); **Tier 2** = latent (structural only). Scanned 2026-06-13 @ `2b35f2a1` · **29 open, 13 closed**. Re-run `librarian(action="legibility_scan")` to reconcile — refactored targets auto-close with a before→after delta. (`—` in tokens/lines = a non-body defect, e.g. a name collision.)
+Ranked by the legibility engine — **Tier 1** = biting-now (structural defect + observed `usage.db` friction); **Tier 2** = latent (structural only). Scanned 2026-06-13 · **29 open**. Re-run `librarian(action="legibility_scan")` to reconcile — refactored targets auto-close with a before→after delta. (`—` in tokens/lines = a non-body defect, e.g. a name collision.) The Dzo's verdicts are below.
 
-| # | key | tier | defects | score | tok/budget | lines | tr/ed/se |
-|--:|---|:--:|---|--:|--:|--:|:--:|
-| 1 | `src/ast/parser.rs::extract_rust_symbols` | 1 | over_budget_body | 1 | 2948/2500 | 252 | 0/0/1 |
-| 2 | `src/tools/symbol/symbols.rs::Symbols/call` | 2 | over_budget_body | 0 | 5789/2500 | 469 | 0/0/0 |
-| 3 | `src/tools/markdown/read_markdown.rs::ReadMarkdown/call` | 2 | over_budget_body | 0 | 4798/2500 | 446 | 0/0/0 |
-| 4 | `tests/librarian/timemachine_smoke.rs::timemachine_full_chain` | 2 | over_budget_body | 0 | 4438/2500 | 499 | 0/0/0 |
-| 5 | `src/tools/symbol/tests.rs::(file)` | 2 | un_mappable_file | 0 | 4310/2500 | 7143 | 0/0/0 |
-| 6 | `src/tools/memory/mod.rs::Memory/call` | 2 | over_budget_body | 0 | 4301/2500 | 355 | 0/0/0 |
-| 7 | `src/tools/symbol/list_overview.rs::list_overview` | 2 | over_budget_body | 0 | 4207/2500 | 416 | 0/0/0 |
-| 8 | `src/tools/onboarding.rs::perform_full_onboarding` | 2 | over_budget_body | 0 | 3839/2500 | 393 | 0/0/0 |
-| 9 | `src/tools/semantic/index.rs::IndexProject/call` | 2 | over_budget_body | 0 | 3659/2500 | 312 | 0/0/0 |
-| 10 | `tests/e2e/edit_eval/cases.rs::all` | 2 | over_budget_body | 0 | 3506/2500 | 320 | 0/0/0 |
-| 11 | `src/librarian/tools/tracker_design.rs::archetype_goal` | 2 | over_budget_body | 0 | 3440/2500 | 92 | 0/0/0 |
-| 12 | `src/tools/edit_file/mod.rs::EditFile/call` | 2 | over_budget_body | 0 | 3275/2500 | 280 | 0/0/0 |
-| 13 | `src/tools/edit_file/tests.rs::(file)` | 2 | un_mappable_file | 0 | 3267/2500 | 5110 | 0/0/0 |
-| 14 | `src/librarian/tools/augment.rs::ArtifactAugment/call` | 2 | over_budget_body | 0 | 3188/2500 | 263 | 0/0/0 |
-| 15 | `src/prompts/builders.rs::build_system_prompt_draft` | 2 | over_budget_body | 0 | 3135/2500 | 270 | 0/0/0 |
-| 16 | `src/librarian/tools/get.rs::call` | 2 | over_budget_body | 0 | 3054/2500 | 329 | 0/0/0 |
-| 17 | `src/tools/grep.rs::Grep/call` | 2 | over_budget_body | 0 | 2918/2500 | 266 | 0/0/0 |
-| 18 | `src/tools/symbol/edit_code.rs::EditCode/do_rename` | 2 | over_budget_body | 0 | 2778/2500 | 279 | 0/0/0 |
-| 19 | `src/tools/symbol/edit_code.rs::EditCode/do_replace` | 2 | over_budget_body | 0 | 2762/2500 | 239 | 0/0/0 |
-| 20 | `src/tools/run_command/inner.rs::run_command_inner` | 2 | over_budget_body | 0 | 2714/2500 | 238 | 0/0/0 |
-| 21 | `src/tools/run_command/tests.rs::(file)` | 2 | un_mappable_file | 0 | 2612/2500 | 3753 | 0/0/0 |
-| 22 | `src/tools/markdown/edit_markdown.rs::EditMarkdown/call` | 2 | over_budget_body | 0 | 2593/2500 | 230 | 0/0/0 |
-| 23 | `src/config/sensitive.rs::SensitiveString/fmt` | 2 | name_collision | 0 | — | — | 0/0/0 |
-| 24 | `src/config/sensitive.rs::SensitiveString/from` | 2 | name_collision | 0 | — | — | 0/0/0 |
-| 25 | `src/lsp/mux/process.rs::read_proc_memory` | 2 | name_collision | 0 | — | — | 0/0/0 |
-| 26 | `src/util/fs.rs::RepoPath/from` | 2 | name_collision | 0 | — | — | 0/0/0 |
-| 27 | `src/util/path_security.rs::DEFAULT_DENIED_EXACT` | 2 | name_collision | 0 | — | — | 0/0/0 |
-| 28 | `tests/fixtures/nav-eval-rust/src/trait_dispatch.rs::Counter/next` | 2 | name_collision | 0 | — | — | 0/0/0 |
-| 29 | `tests/fixtures/typescript-library/src/extensions/advanced.ts::BookMetadata` | 2 | name_collision | 0 | — | — | 0/0/0 |
+| key | tier | defects | score | tok/budget | lines | tr/ed/se |
+|---|:--:|---|--:|--:|--:|:--:|
+| `src/ast/parser.rs::extract_rust_symbols` | 1 | over_budget_body | 1 | 2948/2500 | 252 | 0/0/1 |
+| `src/tools/symbol/symbols.rs::Symbols/call` | 2 | over_budget_body | 0 | 5789/2500 | 469 | 0/0/0 |
+| `src/tools/markdown/read_markdown.rs::ReadMarkdown/call` | 2 | over_budget_body | 0 | 4798/2500 | 446 | 0/0/0 |
+| `tests/librarian/timemachine_smoke.rs::timemachine_full_chain` | 2 | over_budget_body | 0 | 4438/2500 | 499 | 0/0/0 |
+| `src/tools/symbol/tests.rs::(file)` | 2 | un_mappable_file | 0 | 4310/2500 | 7143 | 0/0/0 |
+| `src/tools/memory/mod.rs::Memory/call` | 2 | over_budget_body | 0 | 4301/2500 | 355 | 0/0/0 |
+| `src/tools/symbol/list_overview.rs::list_overview` | 2 | over_budget_body | 0 | 4207/2500 | 416 | 0/0/0 |
+| `src/tools/onboarding.rs::perform_full_onboarding` | 2 | over_budget_body | 0 | 3839/2500 | 393 | 0/0/0 |
+| `src/tools/semantic/index.rs::IndexProject/call` | 2 | over_budget_body | 0 | 3659/2500 | 312 | 0/0/0 |
+| `tests/e2e/edit_eval/cases.rs::all` | 2 | over_budget_body | 0 | 3506/2500 | 320 | 0/0/0 |
+| `src/librarian/tools/tracker_design.rs::archetype_goal` | 2 | over_budget_body | 0 | 3440/2500 | 92 | 0/0/0 |
+| `src/tools/edit_file/mod.rs::EditFile/call` | 2 | over_budget_body | 0 | 3275/2500 | 280 | 0/0/0 |
+| `src/tools/edit_file/tests.rs::(file)` | 2 | un_mappable_file | 0 | 3267/2500 | 5110 | 0/0/0 |
+| `src/librarian/tools/augment.rs::ArtifactAugment/call` | 2 | over_budget_body | 0 | 3188/2500 | 263 | 0/0/0 |
+| `src/prompts/builders.rs::build_system_prompt_draft` | 2 | over_budget_body | 0 | 3135/2500 | 270 | 0/0/0 |
+| `src/librarian/tools/get.rs::call` | 2 | over_budget_body | 0 | 3054/2500 | 329 | 0/0/0 |
+| `src/tools/grep.rs::Grep/call` | 2 | over_budget_body | 0 | 2918/2500 | 266 | 0/0/0 |
+| `src/tools/symbol/edit_code.rs::EditCode/do_rename` | 2 | over_budget_body | 0 | 2778/2500 | 279 | 0/0/0 |
+| `src/tools/symbol/edit_code.rs::EditCode/do_replace` | 2 | over_budget_body | 0 | 2762/2500 | 239 | 0/0/0 |
+| `src/tools/run_command/inner.rs::run_command_inner` | 2 | over_budget_body | 0 | 2714/2500 | 238 | 0/0/0 |
+| `src/tools/run_command/tests.rs::(file)` | 2 | un_mappable_file | 0 | 2612/2500 | 3753 | 0/0/0 |
+| `src/tools/markdown/edit_markdown.rs::EditMarkdown/call` | 2 | over_budget_body | 0 | 2593/2500 | 230 | 0/0/0 |
+| `src/config/sensitive.rs::SensitiveString/fmt` | 2 | name_collision | 0 | — | — | 0/0/0 |
+| `src/config/sensitive.rs::SensitiveString/from` | 2 | name_collision | 0 | — | — | 0/0/0 |
+| `src/lsp/mux/process.rs::read_proc_memory` | 2 | name_collision | 0 | — | — | 0/0/0 |
+| `src/util/fs.rs::RepoPath/from` | 2 | name_collision | 0 | — | — | 0/0/0 |
+| `src/util/path_security.rs::DEFAULT_DENIED_EXACT` | 2 | name_collision | 0 | — | — | 0/0/0 |
+| `tests/fixtures/nav-eval-rust/src/trait_dispatch.rs::Counter/next` | 2 | name_collision | 0 | — | — | 0/0/0 |
+| `tests/fixtures/typescript-library/src/extensions/advanced.ts::BookMetadata` | 2 | name_collision | 0 | — | — | 0/0/0 |
 
-> **Note:** table hand-rendered from `params` (re-render @ `2b35f2a1`). The `render_template` is attached but the write path does not yet auto-project it onto the body — **this body has now been hand-re-rendered twice in one session (F-8 toil).** `params` is the source of truth; query it with `artifact(action="get", id="cd886c414f6751b4", entry_filter=...)`.
 
-## Closed (auto-closed with before→after delta)
-
-The instrument's loop, run twice on 2026-06-13 — **13 rows closed across 3 commits.** Logs/AST flagged them → refactor under a green baseline → re-scan auto-closed.
-
-**Run 1 — `get_or_start`, the flagship (`b946171d` move + `95ea8e0e` extract):**
+### Closed (refactored — before → after)
 
 | key | defects cleared | before → after | closed |
 |---|---|---|:--:|
-| `src/lsp/manager.rs::LspManager/get_or_start` | over_budget_body + name_collision | **3036 tok / 242 ln → 2463 tok / 196 ln** | 2026-06-13 |
-| `src/lsp/manager.rs::LspManager/notify_file_changed` | name_collision | structural (— → —) | 2026-06-13 |
-| `src/lsp/manager.rs::LspManager/shutdown_all` | name_collision | structural (— → —) | 2026-06-13 |
-
-**Run 2 — the `LspClientOps` cluster (`2b35f2a1`, one trait-impl move → 10 collisions cleared):**
-
-| key | defects cleared | closed |
-|---|---|:--:|
-| `src/lsp/client.rs::LspClient/document_symbols` | name_collision | 2026-06-13 |
-| `src/lsp/client.rs::LspClient/workspace_symbols` | name_collision | 2026-06-13 |
-| `src/lsp/client.rs::LspClient/references` | name_collision | 2026-06-13 |
-| `src/lsp/client.rs::LspClient/goto_definition` | name_collision | 2026-06-13 |
-| `src/lsp/client.rs::LspClient/hover` | name_collision | 2026-06-13 |
-| `src/lsp/client.rs::LspClient/rename` | name_collision | 2026-06-13 |
-| `src/lsp/client.rs::LspClient/did_change` | name_collision | 2026-06-13 |
-| `src/lsp/client.rs::LspClient/prepare_call_hierarchy` | name_collision | 2026-06-13 |
-| `src/lsp/client.rs::LspClient/incoming_calls` | name_collision | 2026-06-13 |
-| `src/lsp/client.rs::LspClient/outgoing_calls` | name_collision | 2026-06-13 |
+| `src/lsp/manager.rs::LspManager/get_or_start` | over_budget_body, name_collision | 3036 → 2463 tok | 2026-06-13 |
+| `src/lsp/client.rs::LspClient/did_change` | name_collision | structural | 2026-06-13 |
+| `src/lsp/client.rs::LspClient/document_symbols` | name_collision | structural | 2026-06-13 |
+| `src/lsp/client.rs::LspClient/goto_definition` | name_collision | structural | 2026-06-13 |
+| `src/lsp/client.rs::LspClient/hover` | name_collision | structural | 2026-06-13 |
+| `src/lsp/client.rs::LspClient/incoming_calls` | name_collision | structural | 2026-06-13 |
+| `src/lsp/client.rs::LspClient/outgoing_calls` | name_collision | structural | 2026-06-13 |
+| `src/lsp/client.rs::LspClient/prepare_call_hierarchy` | name_collision | structural | 2026-06-13 |
+| `src/lsp/client.rs::LspClient/references` | name_collision | structural | 2026-06-13 |
+| `src/lsp/client.rs::LspClient/rename` | name_collision | structural | 2026-06-13 |
+| `src/lsp/client.rs::LspClient/workspace_symbols` | name_collision | structural | 2026-06-13 |
+| `src/lsp/manager.rs::LspManager/notify_file_changed` | name_collision | structural | 2026-06-13 |
+| `src/lsp/manager.rs::LspManager/shutdown_all` | name_collision | structural | 2026-06-13 |
 
 ---
 
