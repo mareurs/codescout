@@ -163,6 +163,22 @@ fn normalize_err_family(msg: &str) -> Option<&'static str> {
     None
 }
 
+/// The symbol/path a call addressed, for friction attribution. Priority order:
+/// the most specific address first (name_path/symbol), then name, then path/query/pattern.
+// wired into write_content in the next task
+#[allow(dead_code)]
+fn extract_friction_target(input: &Value) -> Option<String> {
+    const KEYS: [&str; 6] = ["name_path", "symbol", "name", "query", "path", "pattern"];
+    for k in KEYS {
+        if let Some(s) = input.get(k).and_then(Value::as_str) {
+            if !s.is_empty() {
+                return Some(s.to_string());
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod content_tests {
     use super::*;
@@ -255,6 +271,25 @@ mod content_tests {
         for (msg, want) in cases {
             assert_eq!(normalize_err_family(msg), want, "msg: {msg}");
         }
+    }
+
+    #[test]
+    fn extract_friction_target_coalesces_input_keys() {
+        use serde_json::json;
+        assert_eq!(
+            extract_friction_target(&json!({"name_path": "A/b", "path": "src/x.rs"})),
+            Some("A/b".to_string()),
+            "name_path wins over path"
+        );
+        assert_eq!(
+            extract_friction_target(&json!({"symbol": "Foo/bar"})),
+            Some("Foo/bar".to_string())
+        );
+        assert_eq!(
+            extract_friction_target(&json!({"path": "src/lib.rs"})),
+            Some("src/lib.rs".to_string())
+        );
+        assert_eq!(extract_friction_target(&json!({"unrelated": 1})), None);
     }
 
     #[tokio::test]
