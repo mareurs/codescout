@@ -594,7 +594,7 @@ mod tests {
         );
         assert_eq!(fr.code_class_edit_fails, 1);
         assert_eq!(fr.sessions, 1);
-        assert_eq!(fr.score(), 3 * 2 + 2 * 1); // 8
+        assert_eq!(fr.score(), 3 * 2 + 2); // 8 = 3·2 (code-class fails) + 2·1 (session)
         assert!(!map.contains_key(""), "empty friction_target excluded");
     }
 
