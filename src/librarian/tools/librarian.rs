@@ -82,7 +82,7 @@ impl Tool for Librarian {
     async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
         let action = args["action"].as_str().ok_or_else(|| {
             RecoverableError::new(
-                "action required — one of: context, reindex, tracker_design, workspace_state_at, audit_doc_refs, doctor",
+                "action required — one of: context, reindex, tracker_design, workspace_state_at, audit_doc_refs, legibility_scan, doctor",
             )
         })?;
         match action {
@@ -91,9 +91,10 @@ impl Tool for Librarian {
             "tracker_design"     => super::tracker_design::call(ctx, args).await,
             "workspace_state_at" => super::workspace_state_at::call(ctx, args).await,
             "audit_doc_refs"     => super::audit_doc_refs::call(ctx, args).await,
+            "legibility_scan"    => super::legibility_scan::call(ctx, args).await,
             "doctor"             => super::doctor::call(ctx, args).await,
             other => Err(RecoverableError::new(format!(
-                "unknown action '{other}' — expected one of: context, reindex, tracker_design, workspace_state_at, audit_doc_refs, doctor"
+                "unknown action '{other}' — expected one of: context, reindex, tracker_design, workspace_state_at, audit_doc_refs, legibility_scan, doctor"
             ))),
         }
     }
@@ -174,4 +175,15 @@ mod tests {
         assert_eq!(result["exit_code"], 0);
         assert!(result["findings"].is_array());
     }
+
+    #[tokio::test]
+    async fn legibility_scan_action_routes() {
+        let ctx = mk_ctx();
+        let args = serde_json::json!({ "action": "legibility_scan", "write": false });
+        // No active project in mk_ctx → RecoverableError, NOT "unknown action".
+        let err = Librarian.call(&ctx, args).await.unwrap_err();
+        let msg = format!("{err}");
+        assert!(!msg.contains("unknown action"), "should route, got: {msg}");
+    }
+
 }
