@@ -175,6 +175,40 @@ pub fn name_collisions(files: &[FileSymbols]) -> Vec<StructuralDefect> {
     out
 }
 
+/// Estimated byte size of a `symbols(path)` overview: ~one line per symbol,
+/// dominated by the name_path + the optional detail (signature), plus a fixed
+/// per-line overhead (kind label, line range, indentation).
+fn overview_bytes(files_syms: &[&SymbolInfo]) -> usize {
+    const PER_SYMBOL_OVERHEAD: usize = 24;
+    files_syms
+        .iter()
+        .map(|s| PER_SYMBOL_OVERHEAD + s.name_path.len() + s.detail.as_deref().map_or(0, str::len))
+        .sum()
+}
+
+/// Index-lane detector: a file whose `symbols(path)` overview would exceed the
+/// inline budget (can't be mapped in one call). Driven by symbol count/size, NOT
+/// line count — a cleanly-mapped long file is left alone (verified: longer files
+/// comprehend better; the hazard is total context, not within-file length).
+pub fn un_mappable_files(files: &[FileSymbols]) -> Vec<StructuralDefect> {
+    let mut out = Vec::new();
+    for f in files {
+        let mut all = Vec::new();
+        collect_all(&f.symbols, &mut all);
+        let bytes = overview_bytes(&all);
+        if bytes > crate::tools::MAX_INLINE_TOKENS * 4 {
+            out.push(StructuralDefect {
+                rel_file: f.rel_file.clone(),
+                name_path: "(file)".to_string(),
+                defect: Defect::UnMappableFile,
+                tokens: bytes / 4,
+                lines: f.lines.len() as u32,
+            });
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,6 +282,28 @@ mod tests {
         assert_eq!(defects.len(), 1);
         assert_eq!(defects[0].name_path, "LspManager/get_or_start");
         assert_eq!(defects[0].defect, Defect::NameCollision);
+    }
+
+    #[test]
+    fn un_mappable_files_flags_overview_over_budget_not_line_count() {
+        // Many symbols → estimated overview exceeds the budget.
+        let many: Vec<SymbolInfo> = (0..400)
+            .map(|i| sym(&format!("Mod/sym_{i:04}_with_a_longish_name"), SymbolKind::Function, i, i))
+            .collect();
+        let big_map = file_with("src/huge.rs", 400, many);
+
+        // A long file (1500 lines) with FEW symbols maps cleanly → NOT flagged.
+        // (Encodes the verified longer-files-better finding: line count is not a trigger.)
+        let long_clean = file_with("src/long_clean.rs", 1500, vec![
+            sym("A/f", SymbolKind::Function, 0, 700),
+            sym("A/g", SymbolKind::Function, 701, 1499),
+        ]);
+
+        let defects = un_mappable_files(&[big_map, long_clean]);
+        assert_eq!(defects.len(), 1, "only the many-symbol file");
+        assert_eq!(defects[0].rel_file, "src/huge.rs");
+        assert_eq!(defects[0].name_path, "(file)");
+        assert_eq!(defects[0].defect, Defect::UnMappableFile);
     }
 
 }
