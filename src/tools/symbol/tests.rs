@@ -1356,6 +1356,58 @@ fn replace_symbol_with_ambiguous_name_path_returns_error() {
     );
 }
 
+
+#[test]
+fn find_unique_resolves_trait_impl_method_by_qualified_name_path() {
+    // Two trait-impl methods on the same type share the bare name_path
+    // "SensitiveString/fmt" but carry DISTINCT trait-qualified name_paths. The
+    // resolver already disambiguates via the qualified form — relocating the
+    // impl out of the file was never required to make edit_code target it. This
+    // pins both halves: the bare form errors with an actionable hint that points
+    // at the qualified form; the qualified form resolves to exactly one symbol.
+    let f = std::env::temp_dir().join("sensitive_fmt_test.rs");
+    let method = |np: &str, line: u32| SymbolInfo {
+        name: "fmt".to_string(),
+        name_path: np.to_string(),
+        kind: crate::lsp::SymbolKind::Method,
+        file: f.clone(),
+        start_line: line,
+        end_line: line + 5,
+        start_col: 0,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    let symbols = vec![
+        method("impl fmt::Debug for SensitiveString/fmt", 40),
+        method("impl fmt::Display for SensitiveString/fmt", 50),
+    ];
+
+    // Bare form is ambiguous — the error must list the qualified alternatives to
+    // copy AND hint toward the "impl Trait for Type/method" form (not the bare one).
+    let err = find_unique_symbol_by_name_path(&symbols, "SensitiveString/fmt")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("ambiguous"), "ambiguity surfaced: {err}");
+    assert!(
+        err.contains("impl fmt::Display for SensitiveString/fmt"),
+        "error lists the qualified paths to copy: {err}"
+    );
+    assert!(
+        err.contains("impl Trait for Type/method"),
+        "hint points at the qualified form, not the ambiguous bare form: {err}"
+    );
+
+    // Qualified form resolves to exactly the intended sibling — no code move needed.
+    let display =
+        find_unique_symbol_by_name_path(&symbols, "impl fmt::Display for SensitiveString/fmt")
+            .expect("qualified name_path resolves uniquely");
+    assert_eq!(display.start_line, 50, "resolved the Display impl, not Debug");
+    let debug = find_unique_symbol_by_name_path(&symbols, "impl fmt::Debug for SensitiveString/fmt")
+        .expect("qualified name_path resolves uniquely");
+    assert_eq!(debug.start_line, 40, "resolved the Debug impl");
+}
+
 #[tokio::test]
 async fn find_referencing_symbols_returns_references() {
     if !std::process::Command::new("rust-analyzer")

@@ -663,7 +663,7 @@ pub fn find_unique_symbol_by_name_path<'a>(
                     paths.len(),
                     paths.join(", ")
                 ),
-                "Provide the full name_path (e.g. \"StructName/method_name\") to disambiguate.",
+                "Re-run with one of the fully-qualified name_paths listed above, copied verbatim — a trait-impl method is addressable as \"impl Trait for Type/method\"; the bare \"Type/method\" form stays ambiguous.",
             )
             .into())
         }
