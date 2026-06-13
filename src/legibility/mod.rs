@@ -8,11 +8,12 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// A structural legibility defect kind — the entry gate. A candidate must have one.
+/// (`NameCollision` retired 2026-06-13 — only language-agnostic, AST-measurable
+/// defects remain; rationale in `docs/adrs/2026-06-13-drop-name-collision-defect.md`.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Defect {
     OverBudgetBody,
-    NameCollision,
     UnMappableFile,
 }
 
@@ -154,36 +155,6 @@ fn collect_all<'a>(syms: &'a [SymbolInfo], out: &mut Vec<&'a SymbolInfo>) {
     }
 }
 
-/// Index-lane detector: a name_path that resolves to more than one symbol within
-/// the same file (e.g. an inherent impl + a trait impl method) — the ambiguity
-/// that hard-fails `edit_code`. Cross-file ambiguity is a softer signal, deferred.
-pub fn name_collisions(files: &[FileSymbols]) -> Vec<StructuralDefect> {
-    let mut out = Vec::new();
-    for f in files {
-        let mut all = Vec::new();
-        collect_all(&f.symbols, &mut all);
-        let mut counts: HashMap<&str, u32> = HashMap::new();
-        for s in &all {
-            *counts.entry(s.name_path.as_str()).or_insert(0) += 1;
-        }
-        let mut keys: Vec<&str> = counts
-            .iter()
-            .filter(|(_, c)| **c > 1)
-            .map(|(k, _)| *k)
-            .collect();
-        keys.sort_unstable(); // deterministic output order
-        for np in keys {
-            out.push(StructuralDefect {
-                rel_file: f.rel_file.clone(),
-                name_path: np.to_string(),
-                defect: Defect::NameCollision,
-                tokens: 0,
-                lines: 0,
-            });
-        }
-    }
-    out
-}
 
 /// Estimated byte size of a `symbols(path)` overview: ~one line per symbol,
 /// dominated by the name_path + the optional detail (signature), plus a fixed
@@ -258,11 +229,11 @@ pub fn parse_project(root: &Path) -> Vec<FileSymbols> {
     out
 }
 
-/// Run all three structural detectors over the parsed project.
+/// Run the structural detectors over the parsed project. (NameCollision retired
+/// 2026-06-13 — see the `Defect` docs + ADR; only AST-measurable defects remain.)
 pub fn index_lane(root: &Path) -> Vec<StructuralDefect> {
     let files = parse_project(root);
     let mut defects = over_budget_bodies(&files);
-    defects.extend(name_collisions(&files));
     defects.extend(un_mappable_files(&files));
     defects
 }
@@ -468,18 +439,6 @@ mod tests {
         assert!(over_budget_bodies(&files).is_empty());
     }
 
-    #[test]
-    fn name_collisions_flags_same_file_duplicate_name_path() {
-        // inherent impl + trait impl both expose "LspManager/get_or_start"
-        let a = sym("LspManager/get_or_start", SymbolKind::Method, 0, 5);
-        let b = sym("LspManager/get_or_start", SymbolKind::Method, 10, 15);
-        let unique = sym("LspManager/do_start", SymbolKind::Method, 20, 25);
-        let files = vec![file_with("src/lsp/manager.rs", 30, vec![a, b, unique])];
-        let defects = name_collisions(&files);
-        assert_eq!(defects.len(), 1);
-        assert_eq!(defects[0].name_path, "LspManager/get_or_start");
-        assert_eq!(defects[0].defect, Defect::NameCollision);
-    }
 
     #[test]
     fn un_mappable_files_flags_overview_over_budget_not_line_count() {
@@ -531,6 +490,29 @@ mod tests {
                 .iter()
                 .any(|d| d.defect == Defect::OverBudgetBody && d.name_path.contains("huge")),
             "expected an over-budget-body defect for `huge`, got: {defects:?}"
+        );
+    }
+
+
+    #[test]
+    fn index_lane_does_not_flag_name_collisions() {
+        // Guard for docs/adrs/2026-06-13-drop-name-collision-defect.md: a file with two
+        // same-name methods (the classic inherent + trait `fmt` collision) must produce
+        // ZERO defects. name_collision was retired — its disambiguator is per-language
+        // and the qualified symbol form already resolves the ambiguity, so flagging it
+        // is per-language-incorrect (TypeScript declaration merging is benign, not a bug).
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("s.rs"),
+            "struct S;\n\
+             impl std::fmt::Debug for S {\n    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {\n        Ok(())\n    }\n}\n\
+             impl std::fmt::Display for S {\n    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {\n        Ok(())\n    }\n}\n",
+        )
+        .unwrap();
+        let defects = index_lane(tmp.path());
+        assert!(
+            defects.is_empty(),
+            "a name collision must not be flagged after NameCollision was retired: {defects:?}"
         );
     }
 

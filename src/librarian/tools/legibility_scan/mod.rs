@@ -54,7 +54,6 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // Index lane — parse ONCE, keep `files` for auto-close re-measurement.
     let files = crate::legibility::parse_project(&repo_root);
     let mut structural = crate::legibility::over_budget_bodies(&files);
-    structural.extend(crate::legibility::name_collisions(&files));
     structural.extend(crate::legibility::un_mappable_files(&files));
 
     // Recorder lane — open_db creates an empty db if absent (graceful degrade).
@@ -133,8 +132,7 @@ pub struct GroupedCandidate {
 fn defect_rank(d: Defect) -> u8 {
     match d {
         Defect::OverBudgetBody => 0,
-        Defect::NameCollision => 1,
-        Defect::UnMappableFile => 2,
+        Defect::UnMappableFile => 1,
     }
 }
 
@@ -228,7 +226,6 @@ pub struct BacklogParams {
 fn defect_str(d: Defect) -> &'static str {
     match d {
         Defect::OverBudgetBody => "over_budget_body",
-        Defect::NameCollision => "name_collision",
         Defect::UnMappableFile => "un_mappable_file",
     }
 }
@@ -506,14 +503,14 @@ mod tests {
         let k = "src/lsp/manager.rs::LspManager/get_or_start";
         let cands = vec![
             cand(k, Defect::OverBudgetBody, 4180, 42, fr.clone()),
-            cand(k, Defect::NameCollision, 0, 42, fr.clone()),
+            cand(k, Defect::UnMappableFile, 0, 42, fr.clone()),
         ];
         let grouped = group_by_key(cands);
         assert_eq!(grouped.len(), 1, "same key collapses to one row");
         let g = &grouped[0];
         assert_eq!(
             g.defects,
-            vec![Defect::OverBudgetBody, Defect::NameCollision]
+            vec![Defect::OverBudgetBody, Defect::UnMappableFile]
         );
         assert_eq!(g.tokens, 4180, "max structural magnitude across defects");
         assert_eq!(g.tier, Tier::BitingNow);
