@@ -118,6 +118,17 @@ fn classify_content_result(result: &Result<Vec<Content>>) -> (&'static str, bool
     }
 }
 
+/// Token estimate of a buffered (overflowed) result: `buffered_bytes / 4`.
+// wired into write_content in the next task
+#[allow(dead_code)]
+fn extract_overflow_tokens(result: &Result<Vec<Content>>) -> Option<i64> {
+    let blocks = result.as_ref().ok()?;
+    let text = blocks.first().and_then(|c| c.as_text()).map(|t| t.text.as_str())?;
+    let v: Value = serde_json::from_str(text).ok()?;
+    let bytes = v.get("buffered_bytes").and_then(Value::as_i64)?;
+    Some(bytes / 4)
+}
+
 #[cfg(test)]
 mod content_tests {
     use super::*;
@@ -178,6 +189,20 @@ mod content_tests {
         assert_eq!(outcome, "success");
         assert!(!overflowed);
         assert!(msg.is_none());
+    }
+
+    #[test]
+    fn extract_overflow_tokens_reads_buffered_bytes_over_four() {
+        let env = Ok(vec![Content::text(
+            r#"{"output_id":"@tool_x","buffered_bytes":10000}"#.to_string(),
+        )]);
+        assert_eq!(extract_overflow_tokens(&env), Some(2500));
+
+        let no_bytes = Ok(vec![Content::text(r#"{"output_id":"@tool_x"}"#.to_string())]);
+        assert_eq!(extract_overflow_tokens(&no_bytes), None);
+
+        let err: Result<Vec<Content>> = Err(anyhow::anyhow!("boom"));
+        assert_eq!(extract_overflow_tokens(&err), None);
     }
 
     #[tokio::test]
