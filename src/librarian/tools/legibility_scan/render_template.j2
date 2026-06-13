@@ -1,17 +1,17 @@
 ## Backlog (auto-managed)
 
-Ranked by the legibility engine. Tier 1 = biting-now (structural defect + observed friction); Tier 2 = latent. The Dzo's verdicts are below.
+Ranked by the legibility engine — **Tier 1** = biting-now (structural defect + observed `usage.db` friction); **Tier 2** = latent (structural only). Scanned {{ scan_meta.last_scan_at }} · **{{ scan_meta.n_candidates }} open**. Re-run `librarian(action="legibility_scan")` to reconcile — refactored targets auto-close with a before→after delta. (`—` in tokens/lines = a non-body defect, e.g. a name collision.) The Dzo's verdicts are below.
 
-| key | tier | defects | score | tokens/budget | lines | trunc/edit/sess |
-|---|---|---|---|---|---|---|
+| key | tier | defects | score | tok/budget | lines | tr/ed/se |
+|---|:--:|---|--:|--:|--:|:--:|
 {% for c in candidates if c.status == "open" -%}
-| `{{ c.key }}` | {{ c.tier }} | {{ c.defects | join(", ") }} | {{ c.score }} | {{ c.measure.tokens }}/{{ c.measure.budget }} | {{ c.measure.lines }} | {{ c.cost.truncations }}/{{ c.cost.edit_fails }}/{{ c.cost.sessions }} |
+| `{{ c.key }}` | {{ c.tier }} | {{ c.defects | join(", ") }} | {{ c.score }} | {% if c.measure.tokens %}{{ c.measure.tokens }}/{{ c.measure.budget }}{% else %}—{% endif %} | {% if c.measure.lines %}{{ c.measure.lines }}{% else %}—{% endif %} | {{ c.cost.truncations }}/{{ c.cost.edit_fails }}/{{ c.cost.sessions }} |
 {% endfor %}
 
-### Closed (refactored — before → after tokens)
+### Closed (refactored — before → after)
 
-| key | before → after | closed |
-|---|---|---|
+| key | defects cleared | before → after | closed |
+|---|---|---|:--:|
 {% for c in candidates if c.status == "closed" -%}
-| `{{ c.key }}` | {{ c.before.tokens }} → {{ c.after.tokens if c.after else "?" }} | {{ c.closed_at }} |
+| `{{ c.key }}` | {{ c.defects | join(", ") }} | {% if c.before.tokens %}{{ c.before.tokens }} → {{ c.after.tokens if c.after else "?" }} tok{% else %}structural{% endif %} | {{ c.closed_at }} |
 {% endfor %}

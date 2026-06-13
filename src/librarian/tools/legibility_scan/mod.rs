@@ -345,7 +345,7 @@ async fn ensure_tracker(ctx: &ToolContext) -> Result<(String, String)> {
         "title": "Legibility Backlog",
         "rel_path": TRACKER_REL_PATH,
         "tags": ["legibility", "dzo"],
-        "body": "Auto-managed by `librarian(action=\"legibility_scan\")`. Dzo verdicts below the table.\n",
+        "body": "## Backlog (auto-managed)\n\n_Pending first scan._\n\n---\n\n## Verdicts (Dzo-owned)\n\n_Per-key triage goes here — classify code-class vs tool-class, name the move, note human-cost. One `### <key>` section per target the Dzo picks up._\n",
         "augment": { "prompt": include_str!("./render_prompt.md"), "params": empty }
     });
     let created = crate::librarian::tools::create::call(ctx, create_args).await?;
@@ -377,11 +377,61 @@ async fn load_backlog(ctx: &ToolContext, id: &str) -> Option<BacklogParams> {
     serde_json::from_value::<BacklogParams>(params.clone()).ok()
 }
 
+/// Heading that separates the auto-rendered managed region from the Dzo's
+/// hand-written verdicts. Everything from this heading to EOF is preserved
+/// verbatim across every `write_backlog` render. Fixes F-8.
+const VERDICTS_HEADING: &str = "## Verdicts";
+
+/// Fallback used only when a backlog body somehow lacks a verdicts section
+/// (e.g. a hand-edit removed it). The normal path preserves the live prose.
+const DEFAULT_VERDICTS: &str = "## Verdicts (Dzo-owned)\n\n_Per-key triage goes here — classify code-class vs tool-class, name the move, note human-cost. One `### <key>` section per target the Dzo picks up._";
+
 async fn write_backlog(ctx: &ToolContext, id: &str, params: &BacklogParams) -> Result<()> {
-    let augment_args = json!({ "id": id, "merge": true, "params": serde_json::to_value(params)? });
+    let params_value = serde_json::to_value(params)?;
+    let augment_args = json!({ "id": id, "merge": true, "params": params_value.clone() });
     crate::librarian::tools::augment::ArtifactAugment
         .call(ctx, augment_args)
         .await?;
+    // F-8: project params onto the body's managed region (preserving the Dzo
+    // verdicts prose). Best-effort — params is the source of truth, so a render
+    // failure must warn, not fail the scan.
+    if let Err(e) = render_managed_body(ctx, id, &params_value).await {
+        tracing::warn!("legibility_scan: body render failed (params still updated): {e:#}");
+    }
+    Ok(())
+}
+
+/// Project `params` onto the managed region of the backlog body via the
+/// attached `render_template`, preserving everything from `VERDICTS_HEADING`
+/// onward. Fixes F-8: previously `params` updated but the body stayed stale,
+/// forcing a manual re-render after every scan.
+async fn render_managed_body(ctx: &ToolContext, id: &str, params: &serde_json::Value) -> Result<()> {
+    let managed = crate::librarian::tools::render::render_params(
+        include_str!("./render_template.j2"),
+        params,
+    )?;
+
+    let current_body = crate::librarian::tools::get::call(
+        ctx,
+        json!({ "action": "get", "id": id, "full": true }),
+    )
+    .await
+    .ok()
+    .and_then(|v| v.get("body").and_then(|b| b.as_str()).map(str::to_string))
+    .unwrap_or_default();
+
+    let verdicts = match current_body.find(VERDICTS_HEADING) {
+        Some(i) => current_body[i..].trim_end().to_string(),
+        None => DEFAULT_VERDICTS.to_string(),
+    };
+
+    let new_body = format!("{}\n\n---\n\n{}\n", managed.trim_end(), verdicts);
+
+    crate::librarian::tools::update::call(
+        ctx,
+        json!({ "action": "update", "id": id, "force": true, "patch": { "body": new_body } }),
+    )
+    .await?;
     Ok(())
 }
 
@@ -762,4 +812,65 @@ mod tests {
             b2.candidates
         );
     }
+
+
+    #[tokio::test]
+    async fn scan_write_renders_body_and_preserves_verdicts() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        // one real over-budget body → at least one open row to render
+        let mut src = String::from("fn huge() {\n");
+        for i in 0..200 {
+            src.push_str(&format!("    let v{i} = \"{}\";\n", "x".repeat(80)));
+        }
+        src.push_str("}\n");
+        std::fs::write(tmp.path().join("huge.rs"), &src).unwrap();
+
+        let out = call(&ctx, json!({ "action": "legibility_scan", "write": true }))
+            .await
+            .unwrap();
+        let id = out["tracker_id"].as_str().unwrap().to_string();
+
+        // Inject a hand-written verdict into the prose region, then re-scan.
+        crate::librarian::tools::update::call(
+            &ctx,
+            json!({ "action": "update", "id": id, "force": true, "patch": { "body":
+                "## Backlog (auto-managed)\n\n_stale managed region_\n\n---\n\n## Verdicts (Dzo-owned)\n\n### huge — keep me\nDzo says: do not lose this prose.\n" }}),
+        )
+        .await
+        .unwrap();
+
+        let _ = call(&ctx, json!({ "action": "legibility_scan", "write": true }))
+            .await
+            .unwrap();
+
+        let got = crate::librarian::tools::get::call(
+            &ctx,
+            json!({ "action": "get", "id": id, "full": true }),
+        )
+        .await
+        .unwrap();
+        let body = got.get("body").and_then(|b| b.as_str()).unwrap();
+
+        // managed region re-rendered from params: stale text gone, fresh row in
+        assert!(body.contains("## Backlog (auto-managed)"), "managed header: {body}");
+        assert!(
+            body.contains("huge") && body.contains("over_budget_body"),
+            "rendered open row for huge: {body}"
+        );
+        assert!(
+            !body.contains("_stale managed region_"),
+            "stale managed region replaced: {body}"
+        );
+        // hand-written verdict prose preserved verbatim
+        assert!(
+            body.contains("### huge — keep me"),
+            "verdict heading preserved: {body}"
+        );
+        assert!(
+            body.contains("do not lose this prose"),
+            "verdict body preserved: {body}"
+        );
+    }
+
 }
