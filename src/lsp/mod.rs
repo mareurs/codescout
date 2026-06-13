@@ -3,6 +3,7 @@
 
 pub mod client;
 pub mod manager;
+pub mod manager_provider;
 pub mod mock;
 pub mod servers;
 pub mod symbols;
