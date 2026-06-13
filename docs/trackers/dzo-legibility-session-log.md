@@ -32,6 +32,9 @@ tags:
 | F-2 | 2026-06-13 | med | plan-drift | fixed-verified | Plan Task 6 test omits `overflowed` arg in a `write_record` call |
 | F-3 | 2026-06-13 | low | plan-drift | fixed-verified | Plan Task 2 `is_body_bearing` won't compile — non-Copy enum moved behind shared ref |
 | F-4 | 2026-06-13 | med | plan-drift | fixed-verified | 2b plan: wrong `ToolContext` import + fictional `mk_project_ctx` harness, caught pre-dispatch |
+| F-5 | 2026-06-13 | med | plan-drift | fixed-verified | 2b Task 8 missed adapter `is_write` write-gating + get_guide table, caught pre-dispatch |
+| F-6 | 2026-06-13 | high | correctness | fixed-verified | 2b `limit` corrupted reconcile (auto-closed below-cut defects); review caught it |
+| F-7 | 2026-06-13 | low | process | mitigated | Interrupted dispatch may have run; verify state before re-dispatch |
 
 ## Wins Index
 
@@ -39,6 +42,7 @@ tags:
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-06-13 | med | Existence-check a flight-recorder target before ranking it | A mirela phantom (`CalendarService`, 3 truncated fetches) would have ranked ~#4 and opened a campaign against code not in the repo | validated |
 | W-2 | 2026-06-13 | med | Independent adversarial review after verbatim-spec subagent execution | Key-uniqueness + `collect_bodies` leaf-invariant assumptions would carry silently into Phase 2b's consumer as dedup/double-flag bugs | validated |
+| W-3 | 2026-06-13 | high | Whole-module review after verbatim-spec execution caught a Critical per-task tests missed (W-2 promote-when MET) | `limit`/reconcile data-corruption bug would have silently corrupted the backlog on first real limit+write scan | validated |
 
 ---
 
@@ -174,6 +178,80 @@ tags:
 **Status:** fixed-verified — plan edits + briefs landed before any subagent ran.
 
 **Fix idea / Pointer:** Recon-miss-then-caught class: when authoring a plan against a template module, scout the template's `use` block + `mod tests` harness, not just its function shapes. Sibling to F-2 (2a plan-drift, same root: plan written from shape without scouting). Phase-2b plan, this session.
+
+---
+
+## F-5 — 2b plan Task 8 understated scope: missed adapter `is_write` write-gating + the get_guide librarian table, caught pre-dispatch
+
+**Observed:** 2026-06-13, pre-dispatch reconnaissance for Phase-2b Task 8 (advertise the new librarian action).
+
+**When:** Scouting what a new librarian action actually requires — the plan's Task 8 listed only `librarian.rs` `description`/`input_schema` + a `source.md` grep.
+
+**Expected (plan):** add `legibility_scan` to the librarian tool's `description` + `input_schema`; grep prompt surfaces.
+
+**Got (scouted reality):** two more required edits. (1) `src/librarian/adapter.rs::is_write` (L71) classifies librarian write-actions for write-gating — `reindex`=write, `audit_doc_refs`=write-unless-`emit_tracker:false`, everything else read. `legibility_scan` with `write:true` MUTATES the backlog tracker but is unlisted → would be misclassified as a READ, bypassing the write guard (read-only mode / write serialization). Needs `Some("legibility_scan") => input.get("write") != Some(false)`. (2) `src/prompts/guides/librarian.md` (L227-229) is a get_guide action TABLE listing `tracker_design`/`audit_doc_refs` — needs a `legibility_scan` row. (`source.md` only name-drops `tracker_design` as an example, not an exhaustive list → no change; the `prompt_surfaces_reference_only_real_tools` test checks tool NAMES, not actions, so it won't trip.)
+
+**Probable cause:** the plan was written from the `audit_doc_refs` *handler* shape (which I scouted) but not its *registration surface* — the adapter `is_write` arm and the guide table are one level out from the handler module.
+
+**Workaround / fix:** Task 8 brief expanded to cover all four surfaces (description, input_schema, adapter is_write + its test, guide table). The is_write gap is the load-bearing one (write-gating correctness).
+
+**Severity:** med — the is_write omission is a silent correctness bug (write op treated as read), not a compile error; only a scouting pass or a write-gating test would catch it. Caught before dispatch.
+
+**Status:** fixed-verified — expanded scope briefed before any subagent ran.
+
+**Fix idea / Pointer:** "new librarian action" checklist = handler module + dispatch arm + error lists + description + input_schema + **adapter is_write arm** + **get_guide table row**. Sibling to F-4 (both: plan scouted the handler shape, missed the registration surface). Phase-2b Task 8, this session.
+
+---
+
+## F-6 — 2b handler `limit` corrupted the reconcile (auto-closed still-defective below-cut candidates); per-task tests missed it, the whole-module review caught it
+
+**Observed:** 2026-06-13, post-implementation independent review of the 2b `legibility_scan` module (after all 9 tasks landed green).
+
+**When:** Tracing the `call` handler's data flow — both the controller (me) and the adversarial reviewer independently flagged it.
+
+**Bug:** `call` did `grouped.truncate(limit)` BEFORE `reconcile`. On a `write:true` scan with a `limit`, candidates ranked below the cut were absent from the current scan, so reconcile's auto-close pass closed them as "defect gone" — `status:closed` + a bogus `after` re-measure — even though they were still over budget. Silent data corruption of the backlog.
+
+**Why per-task tests missed it:** no task exercised `limit` on the `write:true` path. All 7 module tests stayed green; the bug only fires when `limit` is passed with `write:true`. The plan's own self-review even *claimed* "limit caps the dry-run head only; history never dropped" — the implementation contradicted the spec the plan asserted.
+
+**Fix:** reconcile ALWAYS receives the full grouped set; `limit` slices only the dry-run output head (`&grouped[..n]`). Added a RED→GREEN regression test (`limit_does_not_auto_close_below_cut_candidates_on_write`): two over-budget fns, scan with no limit (both open), re-scan with `limit:1` → assert closed-count == 0.
+
+**Severity:** high — silent data corruption (still-defective targets marked resolved) on a supported param combination. Caught before any real use (no consumer yet).
+
+**Status:** fixed-verified — `eaf341d0`, regression test guards it.
+
+**Fix idea / Pointer:** logic bugs in verbatim-spec plans survive per-task TDD (the tests assert the cases the author imagined); only a whole-module review or a param-combination test catches them. Pairs with W-3. Plan self-reviews can assert a property the code violates — trust the trace, not the claim.
+
+---
+
+## F-7 — Interrupted subagent dispatch may have already run; re-dispatching without verifying state risks double-apply
+
+**Observed:** 2026-06-13, Task 7. The first Task-7 dispatch was interrupted (to summon the Pika); I re-dispatched the same task without first checking the working tree.
+
+**Got:** the interrupted first dispatch had actually run far enough to leave its edits in the working tree before the interrupt landed; the second dispatch found the work done and committed it (and mis-attributed it to a "concurrent session"). End state was correct, but only by luck — a less idempotent task could have double-applied.
+
+**Lesson:** after an interrupted subagent dispatch, scout `git status` / the target file BEFORE re-dispatching. An interrupted Agent tool-use can still have mutated disk. Verify, then decide resume-vs-redispatch.
+
+**Severity:** low — no harm this session (the re-dispatch was idempotent and I verified the git state afterward). Mitigated by the post-hoc forensic check (git log + grep confirmed one clean commit, no duplication).
+
+**Status:** mitigated — lesson captured; verify-before-redispatch is the rule.
+
+---
+
+## W-3 — 2b's post-implementation review caught a Critical the 7 per-task tests missed — W-2's promote-when criterion is now MET
+
+**Observed:** 2026-06-13, end of Phase-2b subagent-driven execution.
+
+**Pattern (same as W-2):** after executing a plan whose per-task code was handed to subagents verbatim, run ONE independent adversarial whole-module review before calling it done. Per-task TDD only checks the author's imagined cases.
+
+**Counterfactual (stronger than W-2's):** W-2 (2a) surfaced *latent* risks. W-3 (2b) caught a **confirmed Critical data-corruption bug** (F-6, the `limit`/reconcile interaction) that all 7 green per-task tests missed — it would have silently corrupted the backlog on the first real `limit`+`write` scan. The review cost one subagent; the bug would have cost a debugging session against a corrupted tracker once a consumer existed.
+
+**Plus the pre-dispatch recon wins this phase:** F-4 (wrong `ToolContext` import + fictional `mk_smoke_ctx` harness) and F-5 (missing adapter `is_write` write-gating + get_guide table) were both caught BEFORE dispatch by scouting the template's `use` block, test harness, and registration surface — not just its handler shape.
+
+**Promote-when (W-2's criterion): MET.** Two independent post-execution reviews (2a latent, 2b Critical) have now caught what per-task tests missed. Promote the practice to a permanent surface: **"after verbatim-spec subagent execution, a whole-module independent review is non-optional — per-task spec-compliance is vacuous when the controller supplied the code."** Craft-shaped (true for any repo) → route to the subagent-driven-development skill / CLAUDE.md, not project memory.
+
+**Impact:** high — prevented shipping a silent data-corruption bug; establishes the review-after-verbatim-execution practice with 2 datapoints.
+
+**Status:** validated — promotion criterion met; awaiting the sync PR to the skill/CLAUDE.md.
 
 ---
 
