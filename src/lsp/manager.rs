@@ -590,53 +590,7 @@ impl LspManager {
         }
 
         // LRU eviction: if at capacity, shut down the least-recently-used client.
-        // Lock ordering: never nest clients → last_used.  Check capacity first,
-        // find the oldest under last_used alone, then re-acquire clients to remove.
-        let evict_info: Option<(LspKey, Option<Arc<LspClient>>)> = {
-            let at_capacity = self.clients.lock().await.len() >= self.max_clients;
-            if at_capacity {
-                // Find the LRU key under last_used lock alone.
-                // I-2: cost-aware selection — sort by (restart_cost_tier ASC, last_used ASC).
-                // Cheap-restart languages get evicted before Kotlin/Java; only when
-                // every pool entry is expensive do we evict an expensive one by LRU.
-                let oldest_key = {
-                    let last_used = self.last_used.lock().await;
-                    last_used
-                        .iter()
-                        .min_by_key(|(k, t)| (restart_cost_tier(&k.language), *t))
-                        .map(|(k, _)| k.clone())
-                };
-                if let Some(oldest_key) = oldest_key {
-                    let mut clients = self.clients.lock().await;
-                    // Re-check: another task may have evicted between locks.
-                    if clients.len() >= self.max_clients {
-                        self.pending_reason
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .insert(oldest_key.clone(), "lru_evicted".to_string());
-                        self.pending_first_response
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .remove(&oldest_key);
-                        let evict_client = clients.remove(&oldest_key);
-                        Some((oldest_key, evict_client))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        };
-        if let Some((oldest_key, evict_client)) = evict_info {
-            self.last_used.lock().await.remove(&oldest_key);
-            if let Some(old) = evict_client {
-                tracing::info!("LRU evicting LSP client: {}", oldest_key);
-                let _ = old.shutdown().await;
-            }
-        }
+        self.evict_lru_if_at_capacity().await;
 
         // Slow path: need to start (or wait for someone else starting).
         // Use a per-key watch channel: the first caller creates a sender,
@@ -687,6 +641,60 @@ impl LspManager {
         // We're the starter.
         self.do_start(&key, config, tx_opt.expect("tx_opt is always Some when rx_opt is None — set in the same exclusive branch above"))
             .await
+    }
+
+    /// LRU eviction: if the pool is at capacity, shut down the least-recently-used
+    /// client to make room. Extracted from `get_or_start` to keep that function
+    /// under the symbol inline budget.
+    async fn evict_lru_if_at_capacity(&self) {
+        // LRU eviction: if at capacity, shut down the least-recently-used client.
+        // Lock ordering: never nest clients → last_used.  Check capacity first,
+        // find the oldest under last_used alone, then re-acquire clients to remove.
+        let evict_info: Option<(LspKey, Option<Arc<LspClient>>)> = {
+            let at_capacity = self.clients.lock().await.len() >= self.max_clients;
+            if at_capacity {
+                // Find the LRU key under last_used lock alone.
+                // I-2: cost-aware selection — sort by (restart_cost_tier ASC, last_used ASC).
+                // Cheap-restart languages get evicted before Kotlin/Java; only when
+                // every pool entry is expensive do we evict an expensive one by LRU.
+                let oldest_key = {
+                    let last_used = self.last_used.lock().await;
+                    last_used
+                        .iter()
+                        .min_by_key(|(k, t)| (restart_cost_tier(&k.language), *t))
+                        .map(|(k, _)| k.clone())
+                };
+                if let Some(oldest_key) = oldest_key {
+                    let mut clients = self.clients.lock().await;
+                    // Re-check: another task may have evicted between locks.
+                    if clients.len() >= self.max_clients {
+                        self.pending_reason
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .insert(oldest_key.clone(), "lru_evicted".to_string());
+                        self.pending_first_response
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .remove(&oldest_key);
+                        let evict_client = clients.remove(&oldest_key);
+                        Some((oldest_key, evict_client))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+        if let Some((oldest_key, evict_client)) = evict_info {
+            self.last_used.lock().await.remove(&oldest_key);
+            if let Some(old) = evict_client {
+                tracing::info!("LRU evicting LSP client: {}", oldest_key);
+                let _ = old.shutdown().await;
+            }
+        }
     }
 
     /// Start or connect to a multiplexed LSP server.
