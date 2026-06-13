@@ -83,7 +83,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             project_root,
         },
     };
-    write_backlog(ctx, &id, &backlog).await?;
+
+    // Tracker-write failure must not fail the whole scan — return results + a note.
+    if let Err(e) = write_backlog(ctx, &id, &backlog).await {
+        tracing::warn!("legibility_scan: backlog write failed: {e:#}");
+        return Ok(json!({
+            "ok": true,
+            "tracker_error": format!("{e:#}"),
+            "open": n_open,
+            "closed": n_closed,
+        }));
+    }
 
     Ok(json!({
         "ok": true,
@@ -543,6 +553,28 @@ mod tests {
         assert!(
             backlog.candidates.iter().any(|c| c.name_path.contains("huge") && c.status == "open"),
             "expected an open backlog row for huge: {:?}", backlog.candidates
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_usage_db_still_runs_index_lane() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let mut src = String::from("fn huge() {\n");
+        for i in 0..200 {
+            src.push_str(&format!("    let v{i} = \"{}\";\n", "x".repeat(80)));
+        }
+        src.push_str("}\n");
+        std::fs::write(tmp.path().join("huge.rs"), src).unwrap();
+        // NO usage.db rows written at all.
+        let out = call(&ctx, json!({ "action": "legibility_scan", "write": false }))
+            .await
+            .unwrap();
+        let cands = out.get("candidates").and_then(|c| c.as_array()).unwrap();
+        // present as latent (tier 2 — structural defect, zero friction)
+        assert!(
+            cands.iter().any(|c| c["tier"] == 2 && c["key"].as_str().unwrap().contains("huge")),
+            "expected a latent (tier 2) candidate for huge: {cands:?}"
         );
     }
 
