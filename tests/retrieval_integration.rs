@@ -68,7 +68,7 @@ async fn embedder_dim_mismatch_errors() {
     assert!(err.to_string().contains("dim"), "got: {err}");
 }
 
-use codescout::retrieval::reranker::RerankerHttp;
+use codescout::retrieval::reranker::{Protocol, RerankerHttp};
 
 #[tokio::test]
 async fn reranker_returns_scores_in_input_order() {
@@ -81,7 +81,7 @@ async fn reranker_returns_scores_in_input_order() {
         .create_async()
         .await;
 
-    let rr = RerankerHttp::new(server.url());
+    let rr = RerankerHttp::with_protocol(server.url(), Protocol::Tei, None);
     let scores = rr
         .rerank("query", &["a".to_string(), "b".to_string()])
         .await
@@ -99,7 +99,7 @@ async fn reranker_503_returns_error() {
         .with_status(503)
         .create_async()
         .await;
-    let rr = RerankerHttp::new(server.url());
+    let rr = RerankerHttp::with_protocol(server.url(), Protocol::Tei, None);
     let err = rr.rerank("q", &["a".to_string()]).await.unwrap_err();
     assert!(err.to_string().contains("rerank"), "got {err}");
 }

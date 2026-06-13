@@ -9,7 +9,7 @@ pub struct RerankerHttp {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Protocol {
+pub enum Protocol {
     Tei,
     Infinity,
 }
@@ -62,8 +62,21 @@ struct InfinityRerankItem {
 impl RerankerHttp {
     pub fn new(base: impl Into<String>) -> Self {
         let protocol = Protocol::from_env();
-        crate::install_default_crypto_provider();
         let model_id = std::env::var("CODESCOUT_RERANKER_MODEL").ok();
+        Self::with_protocol(base, protocol, model_id)
+    }
+
+    /// Construct without reading process env vars.
+    ///
+    /// Use this from tests and any caller that wants explicit control over
+    /// the reranker protocol and model id. `new()` is the env-reading
+    /// convenience for production callers.
+    pub fn with_protocol(
+        base: impl Into<String>,
+        protocol: Protocol,
+        model_id: Option<String>,
+    ) -> Self {
+        crate::install_default_crypto_provider();
         Self {
             base: base.into(),
             client: reqwest::Client::new(),
