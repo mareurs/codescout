@@ -35,6 +35,7 @@ tags:
 | F-5 | 2026-06-13 | med | plan-drift | fixed-verified | 2b Task 8 missed adapter `is_write` write-gating + get_guide table, caught pre-dispatch |
 | F-6 | 2026-06-13 | high | correctness | fixed-verified | 2b `limit` corrupted reconcile (auto-closed below-cut defects); review caught it |
 | F-7 | 2026-06-13 | low | process | mitigated | Interrupted dispatch may have run; verify state before re-dispatch |
+| F-8 | 2026-06-13 | low-med | ux/render | open | `render_template` attached but not auto-applied; backlog body stays a placeholder after write |
 
 ## Wins Index
 
@@ -252,6 +253,26 @@ tags:
 **Impact:** high — prevented shipping a silent data-corruption bug; establishes the review-after-verbatim-execution practice with 2 datapoints.
 
 **Status:** validated — promotion criterion met; awaiting the sync PR to the skill/CLAUDE.md.
+
+---
+
+## F-8 — `render_template` attached but not auto-applied; backlog body stays a placeholder after write (dogfood finding)
+
+**Observed:** 2026-06-13, dogfooding `legibility_scan(write:true)` on codescout (first real backlog).
+
+**When:** After the write succeeded (42 candidates in `params`), reading the rendered markdown body.
+
+**Expected (2b design):** "the librarian renders the sorted table at the top; the Dzo's body prose beneath."
+
+**Got:** body is the initial placeholder (`Auto-managed by ...`); the `render_template` table is NOT projected. `write_backlog` updates `params` via `artifact_augment(merge=true)` but never renders the body. The refresh cycle (`artifact_refresh(gather)` → `artifact(update, commit_refresh=true)`) requires a hand-synthesized body `patch` — `render_template` is not auto-applied even there. Same behavior as `audit_doc_refs` (render_template attached, body = placeholder), so this is a librarian-level gap that 2b inherits, not 2b-specific.
+
+**Workaround:** hand-rendered the 42-row table into the body for the dogfood (`artifact(update, patch={body})`). `params` remains the source of truth — queryable via `artifact(get, entry_filter=...)` and the dashboard.
+
+**Severity:** low-med — UX/readability gap; the data is correct in `params` and the reconcile/auto-close logic is unaffected (it reads `params`, never the rendered body).
+
+**Status:** open — 2b / librarian follow-up.
+
+**Fix idea:** either (a) `write_backlog` renders `render_template` against `params` and writes the body via `body_edits` after the params update, or (b) the librarian auto-applies `render_template` on `commit_refresh` without requiring a body `patch`. Also validate the MiniJinja template syntax (the `{% for c in candidates if ... %}` form) once a real render path exists — it is currently untested against an actual render.
 
 ---
 
