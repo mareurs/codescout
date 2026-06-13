@@ -31,6 +31,7 @@ tags:
 | F-1 | 2026-06-13 | med | flight-recorder-hygiene | mitigated | `.codescout/usage.db` is cross-project; ranking needs an in-repo existence check |
 | F-2 | 2026-06-13 | med | plan-drift | fixed-verified | Plan Task 6 test omits `overflowed` arg in a `write_record` call |
 | F-3 | 2026-06-13 | low | plan-drift | fixed-verified | Plan Task 2 `is_body_bearing` won't compile — non-Copy enum moved behind shared ref |
+| F-4 | 2026-06-13 | med | plan-drift | fixed-verified | 2b plan: wrong `ToolContext` import + fictional `mk_project_ctx` harness, caught pre-dispatch |
 
 ## Wins Index
 
@@ -151,6 +152,28 @@ tags:
 **Promote-when:** a second verbatim-spec plan's post-execution review catches a forward-design risk the per-task tests missed → promote to subagent-driven-development practice as "after verbatim-spec execution, the final whole-module review is non-optional; per-task spec-compliance is vacuous when the controller supplied the code."
 
 **Status:** validated — review complete, verdict APPROVED, carry-forward captured.
+
+---
+
+## F-4 — 2b plan code drifted from librarian internals (wrong `ToolContext` import + fictional test harness), caught pre-dispatch
+
+**Observed:** 2026-06-13, pre-dispatch reconnaissance for the Phase-2b legibility_scan plan, before dispatching Task 1 subagent-driven.
+
+**When:** Scouting the librarian handler conventions against the plan's skeleton (the plan was written from the `audit_doc_refs` *shape* without reading its exact `use` lines or test harness).
+
+**Expected (plan):** handler imports `use crate::tools::core::ToolContext;` + `use crate::librarian::tools::RecoverableError;`; tests use a `mk_project_ctx() -> (ToolContext, EnvGuard, TempDir)` harness with `#[serial_test::serial]`.
+
+**Got (scouted reality):** (1) `ToolContext` is the **librarian's OWN** struct (`src/librarian/tools/mod.rs:82`), distinct from `crate::tools::core::types::ToolContext` (`src/tools/core/types.rs:58`) — two different types. `audit_doc_refs` imports `crate::librarian::tools::{RecoverableError, Tool, ToolContext}`; the plan's path is the wrong type and would fail to compile against `find/create/get/augment::call`. (2) The real test harness is `mk_smoke_ctx(root: PathBuf) -> ToolContext` (audit_doc_refs tests L652) using an **in-memory** catalog (`Catalog::open_in_memory()`) — NO `EnvGuard`, NO `#[serial_test::serial]`. The plan's `mk_project_ctx()` tuple + serial attributes were fictional/over-cautious.
+
+**Probable cause:** the 2b plan was authored from the `audit_doc_refs` *structure* (functions, reconcile shape) which I scouted, but I did not read its `use` block or `mod tests` harness before writing the skeleton — so the import path and harness were guessed from the more-common `crate::tools::core` convention.
+
+**Workaround / fix:** plan corrected inline this session — Task 1 import merged to `use crate::librarian::tools::{RecoverableError, ToolContext};`, and a "## Pre-execution corrections" section instructs copying `mk_smoke_ctx` (in-memory, no serial) wherever the plan said `mk_project_ctx`. Implementers briefed with the corrected forms.
+
+**Severity:** med — (1) is a hard compile error the Task-1 implementer would inherit; (2) would have caused test-harness flailing across Tasks 5/6/7/9. Both caught before any dispatch.
+
+**Status:** fixed-verified — plan edits + briefs landed before any subagent ran.
+
+**Fix idea / Pointer:** Recon-miss-then-caught class: when authoring a plan against a template module, scout the template's `use` block + `mod tests` harness, not just its function shapes. Sibling to F-2 (2a plan-drift, same root: plan written from shape without scouting). Phase-2b plan, this session.
 
 ---
 

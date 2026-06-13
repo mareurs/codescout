@@ -32,6 +32,11 @@
 - `ToolContext` has `ctx.current_project: Option<...>` with `.abs_path: PathBuf`.
 - `RecoverableError::new(msg)` / `RecoverableError::with_hint(msg, hint)` → `isError:false`.
 
+## Pre-execution corrections (2026-06-13 recon, caught before dispatch)
+
+1. **Imports** — `ToolContext` and `RecoverableError` are the **librarian's own** types (defined in `src/librarian/tools/mod.rs`), re-exported from `crate::librarian::tools` and DISTINCT from `crate::tools::core::types::ToolContext`. Every file under `src/librarian/tools/` uses `use crate::librarian::tools::{RecoverableError, ToolContext};` (as `audit_doc_refs` does). The Task 1 skeleton import is corrected accordingly. Using `crate::tools::core::ToolContext` would be the WRONG type and fail to compile against `find/create/get/augment::call`.
+
+2. **Test harness** — the real ctx helper is `mk_smoke_ctx(root: std::path::PathBuf) -> ToolContext` (`audit_doc_refs/mod.rs` tests, ~L652). It builds an **in-memory** catalog (`Catalog::open_in_memory()`), so there is **NO `EnvGuard`/`LIBRARIAN_DB` and NO `#[serial_test::serial]`** — each ctx is self-isolated. **Wherever this plan says `mk_project_ctx()` (Tasks 5/6/7/9), instead copy `mk_smoke_ctx` + its imports (`std::sync::Arc`, `parking_lot::Mutex`, `Catalog`, `WorkspaceConfig`, `Root`, `CurrentProject`, `tempfile::TempDir`) from the audit_doc_refs tests** and write bodies as: `let tmp = TempDir::new().unwrap(); /* fixtures under tmp.path() */ let ctx = mk_smoke_ctx(tmp.path().to_path_buf());`. **Drop all `#[serial_test::serial]` attributes shown in this plan's test snippets** — unnecessary with an in-memory catalog. (Note: `mk_smoke_ctx` returns the `ctx` only, not a tuple — keep the `TempDir` alive in a local binding so the temp dir is not dropped mid-test.)
 ## File structure
 
 | File | Responsibility |
@@ -94,8 +99,7 @@ Add `legibility_scan` to BOTH error-message action lists in the same function (t
 //! reconciles the `docs/trackers/legibility-backlog.md` augmented artifact.
 //! Phase 2b of docs/superpowers/specs/2026-06-13-dzo-friction-probes-design.md.
 
-use crate::librarian::tools::RecoverableError;
-use crate::tools::core::ToolContext;
+use crate::librarian::tools::{RecoverableError, ToolContext};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
