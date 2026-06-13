@@ -109,7 +109,7 @@ fn classify_content_result(result: &Result<Vec<Content>>) -> (&'static str, bool
                 if let Some(msg) = v.get("error").and_then(Value::as_str) {
                     return ("recoverable_error", false, Some(msg.to_string()));
                 }
-                if v.get("overflow").is_some() {
+                if v.get("output_id").is_some() {
                     return ("success", true, None);
                 }
             }
@@ -143,13 +143,23 @@ mod content_tests {
     }
 
     #[test]
-    fn classify_content_overflow() {
-        let text = serde_json::json!({"symbols": [], "overflow": {"shown": 200, "total": 500}})
-            .to_string();
-        let r: anyhow::Result<Vec<Content>> = Ok(vec![Content::text(text)]);
-        let (outcome, overflowed, _) = classify_content_result(&r);
-        assert_eq!(outcome, "success");
-        assert!(overflowed);
+    fn classify_detects_overflow_by_output_id_not_legacy_key() {
+        // real overflow envelope marker
+        let real = Ok(vec![Content::text(
+            r#"{"output_id":"@tool_abc","summary":"...","buffered_bytes":12000}"#.to_string(),
+        )]);
+        let (_outcome, overflowed, _) = classify_content_result(&real);
+        assert!(overflowed, "output_id envelope must set overflowed=true");
+
+        // legacy key must NOT trigger (guards the exact wrong-key regression)
+        let legacy = Ok(vec![Content::text(r#"{"overflow":true}"#.to_string())]);
+        let (_o2, overflowed_legacy, _) = classify_content_result(&legacy);
+        assert!(!overflowed_legacy, "legacy 'overflow' key must not be treated as overflow");
+
+        // normal result
+        let normal = Ok(vec![Content::text(r#"{"result":"ok"}"#.to_string())]);
+        let (_o3, overflowed_normal, _) = classify_content_result(&normal);
+        assert!(!overflowed_normal);
     }
 
     #[test]
