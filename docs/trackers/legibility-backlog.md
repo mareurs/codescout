@@ -13,7 +13,7 @@ time_scope: null
 
 ## Backlog (auto-managed)
 
-Ranked by the legibility engine — **Tier 1** = biting-now (structural defect + observed `usage.db` friction); **Tier 2** = latent (structural only). Scanned 2026-06-13 · **29 open**. Re-run `librarian(action="legibility_scan")` to reconcile — refactored targets auto-close with a before→after delta. (`—` in tokens/lines = a non-body defect, e.g. a name collision.) The Dzo's verdicts are below.
+Ranked by the legibility engine — **Tier 1** = biting-now (structural defect + observed `usage.db` friction); **Tier 2** = latent (structural only). Scanned 2026-06-13 · **22 open**. Re-run `librarian(action="legibility_scan")` to reconcile — refactored targets auto-close with a before→after delta. (`—` in tokens/lines = a non-body defect, e.g. a name collision.) The Dzo's verdicts are below.
 
 | key | tier | defects | score | tok/budget | lines | tr/ed/se |
 |---|:--:|---|--:|--:|--:|:--:|
@@ -21,7 +21,7 @@ Ranked by the legibility engine — **Tier 1** = biting-now (structural defect +
 | `src/tools/symbol/symbols.rs::Symbols/call` | 2 | over_budget_body | 0 | 5789/2500 | 469 | 0/0/0 |
 | `src/tools/markdown/read_markdown.rs::ReadMarkdown/call` | 2 | over_budget_body | 0 | 4798/2500 | 446 | 0/0/0 |
 | `tests/librarian/timemachine_smoke.rs::timemachine_full_chain` | 2 | over_budget_body | 0 | 4438/2500 | 499 | 0/0/0 |
-| `src/tools/symbol/tests.rs::(file)` | 2 | un_mappable_file | 0 | 4310/2500 | 7143 | 0/0/0 |
+| `src/tools/symbol/tests.rs::(file)` | 2 | un_mappable_file | 0 | 4332/2500 | 7195 | 0/0/0 |
 | `src/tools/memory/mod.rs::Memory/call` | 2 | over_budget_body | 0 | 4301/2500 | 355 | 0/0/0 |
 | `src/tools/symbol/list_overview.rs::list_overview` | 2 | over_budget_body | 0 | 4207/2500 | 416 | 0/0/0 |
 | `src/tools/onboarding.rs::perform_full_onboarding` | 2 | over_budget_body | 0 | 3839/2500 | 393 | 0/0/0 |
@@ -39,13 +39,6 @@ Ranked by the legibility engine — **Tier 1** = biting-now (structural defect +
 | `src/tools/run_command/inner.rs::run_command_inner` | 2 | over_budget_body | 0 | 2714/2500 | 238 | 0/0/0 |
 | `src/tools/run_command/tests.rs::(file)` | 2 | un_mappable_file | 0 | 2612/2500 | 3753 | 0/0/0 |
 | `src/tools/markdown/edit_markdown.rs::EditMarkdown/call` | 2 | over_budget_body | 0 | 2593/2500 | 230 | 0/0/0 |
-| `src/config/sensitive.rs::SensitiveString/fmt` | 2 | name_collision | 0 | — | — | 0/0/0 |
-| `src/config/sensitive.rs::SensitiveString/from` | 2 | name_collision | 0 | — | — | 0/0/0 |
-| `src/lsp/mux/process.rs::read_proc_memory` | 2 | name_collision | 0 | — | — | 0/0/0 |
-| `src/util/fs.rs::RepoPath/from` | 2 | name_collision | 0 | — | — | 0/0/0 |
-| `src/util/path_security.rs::DEFAULT_DENIED_EXACT` | 2 | name_collision | 0 | — | — | 0/0/0 |
-| `tests/fixtures/nav-eval-rust/src/trait_dispatch.rs::Counter/next` | 2 | name_collision | 0 | — | — | 0/0/0 |
-| `tests/fixtures/typescript-library/src/extensions/advanced.ts::BookMetadata` | 2 | name_collision | 0 | — | — | 0/0/0 |
 
 
 ### Closed (refactored — before → after)
@@ -53,6 +46,8 @@ Ranked by the legibility engine — **Tier 1** = biting-now (structural defect +
 | key | defects cleared | before → after | closed |
 |---|---|---|:--:|
 | `src/lsp/manager.rs::LspManager/get_or_start` | over_budget_body, name_collision | 3036 → 2463 tok | 2026-06-13 |
+| `src/config/sensitive.rs::SensitiveString/fmt` | name_collision | structural | 2026-06-13 |
+| `src/config/sensitive.rs::SensitiveString/from` | name_collision | structural | 2026-06-13 |
 | `src/lsp/client.rs::LspClient/did_change` | name_collision | structural | 2026-06-13 |
 | `src/lsp/client.rs::LspClient/document_symbols` | name_collision | structural | 2026-06-13 |
 | `src/lsp/client.rs::LspClient/goto_definition` | name_collision | structural | 2026-06-13 |
@@ -65,10 +60,17 @@ Ranked by the legibility engine — **Tier 1** = biting-now (structural defect +
 | `src/lsp/client.rs::LspClient/workspace_symbols` | name_collision | structural | 2026-06-13 |
 | `src/lsp/manager.rs::LspManager/notify_file_changed` | name_collision | structural | 2026-06-13 |
 | `src/lsp/manager.rs::LspManager/shutdown_all` | name_collision | structural | 2026-06-13 |
+| `src/lsp/mux/process.rs::read_proc_memory` | name_collision | structural | 2026-06-13 |
+| `src/util/fs.rs::RepoPath/from` | name_collision | structural | 2026-06-13 |
+| `src/util/path_security.rs::DEFAULT_DENIED_EXACT` | name_collision | structural | 2026-06-13 |
+| `tests/fixtures/nav-eval-rust/src/trait_dispatch.rs::Counter/next` | name_collision | structural | 2026-06-13 |
+| `tests/fixtures/typescript-library/src/extensions/advanced.ts::BookMetadata` | name_collision | structural | 2026-06-13 |
 
 ---
 
 ## Verdicts (Dzo-owned)
+
+**2026-06-13 — `name_collision` retired as a defect class.** (ADR `docs/adrs/2026-06-13-drop-name-collision-defect.md`, commit `919dbe5c`.) The 7 open `name_collision` rows that closed on this scan closed because the **detector was removed, not because the code was refactored** — their before→after deltas are not meaningful (they render as "structural"). The earlier `name_collision` closes (the `LspClient` cluster + the two `LspManager` forwarders) *were* genuine trait-impl relocations, but those moves are now known to have been unnecessary: `edit_code` resolves the qualified `impl Trait for Type/method` form (hint fixed in `c21ad73b`), so the collision never blocked it. The engine now emits only language-agnostic, AST-measurable defects (`over_budget_body`, `un_mappable_file`).
 
 _Per-key triage goes here — classify code-class vs tool-class, name the move, note human-cost. One `### <key>` section per target the Dzo picks up._
 
@@ -84,4 +86,3 @@ _Per-key triage goes here — classify code-class vs tool-class, name the move, 
 **Was:** code-class (real `edit_code` ambiguity). Ten `LspClient` methods resolved to TWO symbols each — an inherent `impl LspClient` plus a trait `impl crate::lsp::ops::LspClientOps for LspClient` exposing the same names (verified: `LspClient/hover` at `client.rs:1155` and `:1498`). Any `edit_code(symbol="LspClient/<m>")` hard-failed "matches 2 symbols".
 **Move (`2b35f2a1`, behavior-preserving, 22 lsp::client tests green):** applied the `get_or_start` template verbatim — confirmed pure-forwarder + all 10 inherent methods `pub`, then relocated `impl LspClientOps for LspClient` → new `src/lsp/client_ops.rs`. One move cleared all ten collisions and unblocked `edit_code` on every `LspClient` method; public API unchanged.
 **Human-cost:** low — the template amortized the `get_or_start` reconnaissance to near-zero. The legibility win is navigational: every `LspClient` method is now uniquely `edit_code`-addressable by name.
-
