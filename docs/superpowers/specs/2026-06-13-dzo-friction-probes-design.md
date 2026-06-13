@@ -28,7 +28,7 @@ refactoring lands**.
 | 1 | Probe engine | **Hybrid** — code finds candidates mechanically, the Dzo triages the top-N (drops tool-class noise, ranks). Separate from `pika_observations`. |
 | 2 | Tracker update | **Auto-reconcile by re-measurement** — re-running the probe re-measures every open candidate; metric-moved → auto-close with before→after delta. |
 | 3 | Importance | **Structural defect gates entry, observed cost ranks** — two tiers: biting-now (has recorder friction) above latent (over budget, not yet fetched). |
-| 4 | Logging scope | **Fix `overflowed` + structured friction capture** (`overflow_target`, `overflow_tokens`, `err_family`). |
+| 4 | Logging scope | **Fix `overflowed` + structured friction capture** (`friction_target`, `overflow_tokens`, `err_family`). |
 | 5 | Probe home | **`librarian(action="legibility_scan")`** — native in-process MCP action; reuses the librarian artifact machinery for reconcile. |
 
 ### Relationship to `pika_observations`
@@ -45,7 +45,7 @@ They are deliberately kept separate; both read `tool_calls`.
 ```
 DELIVERABLE 1: honest logging (src/usage/, src/tools/core/types.rs)
   every tool call → record_content → tool_calls row
-    now writes: overflowed (fixed), overflow_target, overflow_tokens,
+    now writes: overflowed (fixed), friction_target, overflow_tokens,
                 err_family, project_root
         │ rolling 30-day evidence
         ▼
@@ -53,7 +53,7 @@ DELIVERABLE 2: librarian(action="legibility_scan")
   RECORDER LANE (biting-now)            INDEX LANE (latent)
   SQL over structured fields,           walk project symbol index:
   WHERE project_root = <repo>           bodies > budget, files whose overview overflows,
-  → friction per overflow_target        ambiguous name_paths
+  → friction per friction_target        ambiguous name_paths
                 └────────┬───────────────────┘
                          ▼
         SCORER: structural gate → observed-cost rank → 2 tiers
@@ -95,14 +95,14 @@ envelope never emits. The real marker is `output_id` (the buffer handle), built 
 
 | Column | Type | Source | Always captured? |
 |---|---|---|---|
-| `overflow_target` | TEXT | symbol/path the call addressed, extracted from input at write time | **yes** (not debug-gated) |
+| `friction_target` | TEXT | symbol/path a frictionful call addressed (overflow OR error), extracted from input at write time | **yes**, on friction rows (not debug-gated) |
 | `overflow_tokens` | INTEGER | `json_len / 4`, exposed on the envelope as `buffered_bytes` at `types.rs:568` | yes, when overflowed |
 | `err_family` | TEXT | normalized tag from `error_msg` (`ast_extent_fail`, `ambiguous_name_path`, `lsp_disconnect`, `replace_dropped_sibling`, …) | yes, on error |
 | `project_root` | TEXT | the agent's project root (the F-1 contamination fix; enables `WHERE project_root = <repo>`) | **yes** |
 
 `overflow_tokens` requires the overflow envelope to carry the size — a one-field
 addition (`"buffered_bytes": json_len`) at `types.rs:568` that the recorder reads.
-`overflow_target` must be extracted **always**, not via full `input_json` (which is
+`friction_target` is extracted on any friction row (overflow OR error) from `input` directly — it must NOT depend on the full `input_json` (which is
 debug-gated — `record_content_no_input_in_normal_mode` proves it is `None` in normal
 mode). `err_family` is a pure function over `error_msg`; a column (not read-time
 computation) makes the probe a plain `GROUP BY` and lets Pika reuse it.
@@ -124,7 +124,7 @@ Retention (30 days) and the debug-gating of full `input_json`/`output_json` are
 
 ### Recorder lane (biting-now evidence)
 
-`WHERE project_root = <repo>` (F-1 fix), `GROUP BY overflow_target`: truncation count,
+`WHERE project_root = <repo>` (F-1 fix), `GROUP BY friction_target`: truncation count,
 retry chains (same input, same session), edit-fail counts by `err_family`. Rolling
 30-day window.
 
