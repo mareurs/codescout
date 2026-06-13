@@ -2995,6 +2995,15 @@ mod guide_hint_tests {
         assert!(!server.is_write_call("librarian", &json!({"action": "context"})));
         assert!(!server.is_write_call("librarian", &json!({"action": "doctor"})));
         assert!(!server.is_write_call("librarian", &json!({"action": "tracker_design"})));
+        assert!(server.is_write_call("librarian", &json!({"action": "legibility_scan"})));
+        assert!(server.is_write_call(
+            "librarian",
+            &json!({"action": "legibility_scan", "write": true})
+        ));
+        assert!(!server.is_write_call(
+            "librarian",
+            &json!({"action": "legibility_scan", "write": false})
+        ));
     }
 
     #[tokio::test]

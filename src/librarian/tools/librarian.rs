@@ -14,7 +14,7 @@ impl Tool for Librarian {
 
     fn description(&self) -> &'static str {
         "Workspace-level librarian operations. \
-         action: context | reindex | tracker_design | workspace_state_at | audit_doc_refs | doctor. \
+         action: context | reindex | tracker_design | workspace_state_at | audit_doc_refs | legibility_scan | doctor. \
          context: pack topic/anchor neighbourhood into a markdown bundle. \
          reindex: re-scan and classify markdown artifacts. \
          tracker_design: return teaching prompt + archetype library (call BEFORE artifact(create) for trackers). \
@@ -24,6 +24,11 @@ impl Tool for Librarian {
          against current filesystem + LSP symbol index. Manual cadence — run \
          when a doc-heavy PR is about to merge or when drift is suspected. \
          Output is an `audit_issues` tracker. \
+         legibility_scan: rank code-legibility refactor candidates from usage.db \
+         friction + the AST symbol index. Writes/updates the legibility-backlog \
+         tracker — open targets ranked by observed cost (tier 1 biting-now, tier 2 \
+         latent), auto-closing refactored ones with a before/after delta. \
+         write=false for a dry-run JSON. \
          doctor: read-only catalog drift scanner. Checks abs_path columns for \
          absolute-form, forward-slash form, NTFS ADS colons, '..' segments, \
          and missing files on disk; checks commits.git_root for forward-slash \
@@ -39,7 +44,7 @@ impl Tool for Librarian {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["context", "reindex", "tracker_design", "workspace_state_at", "audit_doc_refs", "doctor"],
+                    "enum": ["context", "reindex", "tracker_design", "workspace_state_at", "audit_doc_refs", "legibility_scan", "doctor"],
                     "description": "Operation to perform"
                 },
                 "topic": { "type": "string", "description": "context: subject for semantic/LIKE search across titles and topics" },
@@ -74,7 +79,10 @@ impl Tool for Librarian {
                 },
                 "emit_tracker": { "type": "boolean", "default": true, "description": "audit_doc_refs: create/update an audit_issues tracker artifact with results" },
                 "tracker_id": { "type": "string", "description": "audit_doc_refs: existing tracker id to update (creates new if omitted)" },
-                "fail_on": { "type": "string", "default": "never", "description": "audit_doc_refs: exit_code 1 when findings reach this severity (high | med | low | never)" }
+                "fail_on": { "type": "string", "default": "never", "description": "audit_doc_refs: exit_code 1 when findings reach this severity (high | med | low | never)" },
+                "write": { "type": "boolean", "default": true, "description": "legibility_scan: reconcile the backlog tracker (false = dry-run JSON only)" },
+                "project": { "type": "string", "description": "legibility_scan: project root path; defaults to active project. Scopes the recorder lane." },
+                "limit": { "type": "integer", "description": "legibility_scan: cap candidates returned/written" }
             }
         })
     }

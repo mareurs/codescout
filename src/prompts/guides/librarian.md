@@ -227,6 +227,7 @@ Accepted keys: `status, title, owners, tags, topic, body, body_edits, params`.
 | `tracker_design` | Returns teaching prompt + archetype library. Call BEFORE creating a tracker. |
 | `workspace_state_at` | Time-travel snapshot of all artifacts at a commit or timestamp. |
 | `audit_doc_refs` | Lint markdown for stale code refs (paths, symbols, link targets, line refs). Manual — run before doc-heavy merges or when drift is suspected. Emits an `audit_issues` tracker. |
+| `legibility_scan` | Rank code-legibility refactor candidates from usage.db friction + the symbol index. Writes the `legibility-backlog` tracker (open targets by observed cost; auto-closes refactored ones). `write=false` for dry-run. |
 | `doctor` | Read-only catalog drift scan (forward-slash form, NTFS ADS colons, `..` segments, missing-on-disk files, `abs_path_must_be_absolute`). Manual — run after large refactors or when downstream LIKE queries return empty. Returns a per-check JSON report; does NOT mutate catalog state. |
 
 **context params:**

@@ -84,11 +84,15 @@ impl crate::tools::Tool for LibrarianAdapter {
             // artifact(update, commit_refresh=true), classified under "artifact".
             "artifact_refresh" => false,
             // reindex rewrites the catalog; audit_doc_refs emits a tracker unless
-            // emit_tracker=false; context/tracker_design/workspace_state_at/doctor read.
+            // emit_tracker=false; legibility_scan reconciles the backlog unless
+            // write=false; context/tracker_design/workspace_state_at/doctor read.
             "librarian" => match action {
                 Some("reindex") => true,
                 Some("audit_doc_refs") => {
                     input.get("emit_tracker").and_then(Value::as_bool) != Some(false)
+                }
+                Some("legibility_scan") => {
+                    input.get("write").and_then(Value::as_bool) != Some(false)
                 }
                 _ => false,
             },
