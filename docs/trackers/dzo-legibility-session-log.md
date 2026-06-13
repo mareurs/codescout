@@ -295,7 +295,7 @@ tags:
 
 **Impact:** high — closed the first full loop AND produced a reusable, tested template for the largest remaining collision cluster.
 
-**Status:** validated — single datapoint; loop verified closed via `params` (status:closed, before/after recorded).
+**Status:** validated — **2 datapoints.** (1) `get_or_start` body-refactor (`b946171d`+`95ea8e0e`); (2) the `LspClientOps` cluster (`2b35f2a1`) — one trait-impl move → **10 collisions cleared** at near-zero cost (template amortized the recon). The *trait-move-clears-same-file-collision* template's promote-when is MET → route to a reconnaissance/refactor rule: *"`count_symbols_by_name_path` > 1 on `<Type>/<method>` means a same-file trait forwarder shares the name_path and `edit_code` is blocked; relocate the trait-impl block to its own file."* (The body-refactor-blocking *variant* specifically still has 1 datapoint — get_or_start — since the `LspClientOps` rows were collision-only.)
 
 ---
 
