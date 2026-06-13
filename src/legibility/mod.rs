@@ -47,7 +47,10 @@ pub struct Friction {
 
 impl Friction {
     pub fn is_empty(&self) -> bool {
-        self.truncations == 0 && self.retries == 0 && self.code_class_edit_fails == 0 && self.other == 0
+        self.truncations == 0
+            && self.retries == 0
+            && self.code_class_edit_fails == 0
+            && self.other == 0
     }
     /// score = 3*truncations + 2*retries + 2*code_class_edit_fails + 1*other.
     /// Infra-class err_family never reaches `code_class_edit_fails` (excluded in the
@@ -90,7 +93,10 @@ pub struct Candidate {
 }
 
 fn is_body_bearing(kind: &SymbolKind) -> bool {
-    matches!(kind, SymbolKind::Function | SymbolKind::Method | SymbolKind::Constructor)
+    matches!(
+        kind,
+        SymbolKind::Function | SymbolKind::Method | SymbolKind::Constructor
+    )
 }
 
 /// Recurse the symbol tree, collecting body-bearing symbols.
@@ -160,7 +166,11 @@ pub fn name_collisions(files: &[FileSymbols]) -> Vec<StructuralDefect> {
         for s in &all {
             *counts.entry(s.name_path.as_str()).or_insert(0) += 1;
         }
-        let mut keys: Vec<&str> = counts.iter().filter(|(_, c)| **c > 1).map(|(k, _)| *k).collect();
+        let mut keys: Vec<&str> = counts
+            .iter()
+            .filter(|(_, c)| **c > 1)
+            .map(|(k, _)| *k)
+            .collect();
         keys.sort_unstable(); // deterministic output order
         for np in keys {
             out.push(StructuralDefect {
@@ -212,7 +222,12 @@ pub fn un_mappable_files(files: &[FileSymbols]) -> Vec<StructuralDefect> {
 /// Walk the project (gitignore-aware), parse every recognized source file's symbols.
 pub fn parse_project(root: &Path) -> Vec<FileSymbols> {
     let mut out = Vec::new();
-    for entry in ignore::WalkBuilder::new(root).hidden(true).git_ignore(true).build().flatten() {
+    for entry in ignore::WalkBuilder::new(root)
+        .hidden(true)
+        .git_ignore(true)
+        .build()
+        .flatten()
+    {
         if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
             continue;
         }
@@ -223,12 +238,22 @@ pub fn parse_project(root: &Path) -> Vec<FileSymbols> {
         let Ok(source) = std::fs::read_to_string(path) else {
             continue;
         };
-        let Ok(symbols) = crate::ast::parser::extract_symbols_from_source(&source, Some(lang), path) else {
+        let Ok(symbols) =
+            crate::ast::parser::extract_symbols_from_source(&source, Some(lang), path)
+        else {
             continue; // unparseable / unsupported → skip, never fail the whole scan
         };
-        let rel_file = path.strip_prefix(root).unwrap_or(path).to_string_lossy().to_string();
+        let rel_file = path
+            .strip_prefix(root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .to_string();
         let lines = source.lines().map(str::to_string).collect();
-        out.push(FileSymbols { rel_file, lines, symbols });
+        out.push(FileSymbols {
+            rel_file,
+            lines,
+            symbols,
+        });
     }
     out
 }
@@ -245,7 +270,8 @@ pub fn index_lane(root: &Path) -> Vec<StructuralDefect> {
 /// `err_family` values that indicate a code/extractor-shape problem (count toward
 /// the score). Infra families (lsp_disconnect, …) are tool-class and excluded.
 const CODE_FAMILIES: &str = "'ast_extent_fail','ambiguous_name_path','replace_dropped_sibling'";
-const INFRA_FAMILIES: &str = "'lsp_disconnect','lsp_index_locked','mux_startup_fail','lsp_not_running'";
+const INFRA_FAMILIES: &str =
+    "'lsp_disconnect','lsp_index_locked','mux_startup_fail','lsp_not_running'";
 
 /// Recorder lane: aggregate per-`friction_target` cost from usage.db, scoped to
 /// this repo by `project_root` (the F-1 cross-project contamination fix).
@@ -288,6 +314,66 @@ pub fn recorder_lane(
     Ok(map)
 }
 
+/// Combine structural defects with recorder friction → tiered, scored, ranked
+/// candidates. A candidate's friction is matched by its name_path, falling back to
+/// its rel_file (for un-mappable files, whose `friction_target` is the path).
+pub fn score_and_rank(
+    structural: Vec<StructuralDefect>,
+    friction: &HashMap<String, Friction>,
+) -> Vec<Candidate> {
+    let mut cands: Vec<Candidate> = structural
+        .into_iter()
+        .map(|d| {
+            let fr = friction
+                .get(&d.name_path)
+                .or_else(|| friction.get(&d.rel_file))
+                .cloned()
+                .unwrap_or_default();
+            let tier = if fr.is_empty() {
+                Tier::Latent
+            } else {
+                Tier::BitingNow
+            };
+            let score = fr.score();
+            Candidate {
+                key: format!("{}::{}", d.rel_file, d.name_path),
+                rel_file: d.rel_file,
+                name_path: d.name_path,
+                defect: d.defect,
+                tier,
+                tokens: d.tokens,
+                budget: crate::tools::MAX_INLINE_TOKENS,
+                lines: d.lines,
+                friction: fr,
+                score,
+            }
+        })
+        .collect();
+
+    // Tier 1 before Tier 2; within tier 1 by score desc; ties and tier 2 by tokens
+    // over budget (proxy: tokens) desc; final tie-break by key for determinism.
+    cands.sort_by(|a, b| {
+        a.tier
+            .rank()
+            .cmp(&b.tier.rank())
+            .then(b.score.cmp(&a.score))
+            .then(b.tokens.cmp(&a.tokens))
+            .then(a.key.cmp(&b.key))
+    });
+    cands
+}
+
+/// The engine entry point: index lane + recorder lane → ranked candidates.
+pub fn scan(
+    conn: &rusqlite::Connection,
+    root: &Path,
+    project_root: &str,
+) -> anyhow::Result<Vec<Candidate>> {
+    let structural = index_lane(root);
+    let friction = recorder_lane(conn, project_root)?;
+    Ok(score_and_rank(structural, &friction))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,7 +384,13 @@ mod tests {
         assert!(empty.is_empty());
         assert_eq!(empty.score(), 0);
 
-        let f = Friction { truncations: 14, retries: 0, code_class_edit_fails: 1, other: 2, sessions: 2 };
+        let f = Friction {
+            truncations: 14,
+            retries: 0,
+            code_class_edit_fails: 1,
+            other: 2,
+            sessions: 2,
+        };
         assert!(!f.is_empty());
         // 3*14 + 2*0 + 2*1 + 1*2 = 46
         assert_eq!(f.score(), 46);
@@ -306,7 +398,11 @@ mod tests {
 
     fn sym(name_path: &str, kind: SymbolKind, start: u32, end: u32) -> SymbolInfo {
         SymbolInfo {
-            name: name_path.rsplit('/').next().unwrap_or(name_path).to_string(),
+            name: name_path
+                .rsplit('/')
+                .next()
+                .unwrap_or(name_path)
+                .to_string(),
             name_path: name_path.to_string(),
             kind,
             file: std::path::PathBuf::from("x.rs"),
@@ -367,16 +463,27 @@ mod tests {
     fn un_mappable_files_flags_overview_over_budget_not_line_count() {
         // Many symbols → estimated overview exceeds the budget.
         let many: Vec<SymbolInfo> = (0..400)
-            .map(|i| sym(&format!("Mod/sym_{i:04}_with_a_longish_name"), SymbolKind::Function, i, i))
+            .map(|i| {
+                sym(
+                    &format!("Mod/sym_{i:04}_with_a_longish_name"),
+                    SymbolKind::Function,
+                    i,
+                    i,
+                )
+            })
             .collect();
         let big_map = file_with("src/huge.rs", 400, many);
 
         // A long file (1500 lines) with FEW symbols maps cleanly → NOT flagged.
         // (Encodes the verified longer-files-better finding: line count is not a trigger.)
-        let long_clean = file_with("src/long_clean.rs", 1500, vec![
-            sym("A/f", SymbolKind::Function, 0, 700),
-            sym("A/g", SymbolKind::Function, 701, 1499),
-        ]);
+        let long_clean = file_with(
+            "src/long_clean.rs",
+            1500,
+            vec![
+                sym("A/f", SymbolKind::Function, 0, 700),
+                sym("A/g", SymbolKind::Function, 701, 1499),
+            ],
+        );
 
         let defects = un_mappable_files(&[big_map, long_clean]);
         assert_eq!(defects.len(), 1, "only the many-symbol file");
@@ -398,7 +505,9 @@ mod tests {
 
         let defects = index_lane(dir.path());
         assert!(
-            defects.iter().any(|d| d.defect == Defect::OverBudgetBody && d.name_path.contains("huge")),
+            defects
+                .iter()
+                .any(|d| d.defect == Defect::OverBudgetBody && d.name_path.contains("huge")),
             "expected an over-budget-body defect for `huge`, got: {defects:?}"
         );
     }
@@ -412,26 +521,161 @@ mod tests {
 
         // 2 truncations on the same target, this repo
         for _ in 0..2 {
-            write_record(&conn, "symbols", 1, "success", true, None,
-                "cs", None, "s1", None, None, Some("ccs1"),
-                Some("Foo/bar"), Some(1000), None, Some("/repo")).unwrap();
+            write_record(
+                &conn,
+                "symbols",
+                1,
+                "success",
+                true,
+                None,
+                "cs",
+                None,
+                "s1",
+                None,
+                None,
+                Some("ccs1"),
+                Some("Foo/bar"),
+                Some(1000),
+                None,
+                Some("/repo"),
+            )
+            .unwrap();
         }
         // 1 code-class edit fail on the same target, this repo
-        write_record(&conn, "edit_code", 1, "error", false, Some("ambiguous name_path \"Foo/bar\" matches 2 symbols"),
-            "cs", None, "s1", None, None, Some("ccs1"),
-            Some("Foo/bar"), None, Some("ambiguous_name_path"), Some("/repo")).unwrap();
+        write_record(
+            &conn,
+            "edit_code",
+            1,
+            "error",
+            false,
+            Some("ambiguous name_path \"Foo/bar\" matches 2 symbols"),
+            "cs",
+            None,
+            "s1",
+            None,
+            None,
+            Some("ccs1"),
+            Some("Foo/bar"),
+            None,
+            Some("ambiguous_name_path"),
+            Some("/repo"),
+        )
+        .unwrap();
         // a FOREIGN-project row for the same target — must be excluded (F-1)
-        write_record(&conn, "symbols", 1, "success", true, None,
-            "cs", None, "s9", None, None, Some("ccs9"),
-            Some("Foo/bar"), Some(9999), None, Some("/other-repo")).unwrap();
+        write_record(
+            &conn,
+            "symbols",
+            1,
+            "success",
+            true,
+            None,
+            "cs",
+            None,
+            "s9",
+            None,
+            None,
+            Some("ccs9"),
+            Some("Foo/bar"),
+            Some(9999),
+            None,
+            Some("/other-repo"),
+        )
+        .unwrap();
 
         let map = recorder_lane(&conn, "/repo").unwrap();
         let fr = map.get("Foo/bar").expect("Foo/bar present");
-        assert_eq!(fr.truncations, 2, "foreign-repo truncation must be excluded");
+        assert_eq!(
+            fr.truncations, 2,
+            "foreign-repo truncation must be excluded"
+        );
         assert_eq!(fr.code_class_edit_fails, 1);
         assert_eq!(fr.sessions, 1);
         assert_eq!(fr.score(), 3 * 2 + 2 * 1); // 8
         assert!(!map.contains_key(""), "empty friction_target excluded");
     }
 
+    #[test]
+    fn score_and_rank_tiers_and_orders() {
+        let structural = vec![
+            // biting-now: has friction
+            StructuralDefect {
+                rel_file: "src/a.rs".into(),
+                name_path: "A/hot".into(),
+                defect: Defect::OverBudgetBody,
+                tokens: 4000,
+                lines: 242,
+            },
+            // latent: no friction, bigger body
+            StructuralDefect {
+                rel_file: "src/b.rs".into(),
+                name_path: "B/cold".into(),
+                defect: Defect::OverBudgetBody,
+                tokens: 6000,
+                lines: 331,
+            },
+        ];
+        let mut friction = HashMap::new();
+        friction.insert(
+            "A/hot".to_string(),
+            Friction {
+                truncations: 5,
+                ..Default::default()
+            },
+        );
+
+        let ranked = score_and_rank(structural, &friction);
+        assert_eq!(ranked.len(), 2);
+        // biting-now (A/hot) ranks above latent (B/cold) despite smaller body
+        assert_eq!(ranked[0].name_path, "A/hot");
+        assert_eq!(ranked[0].tier, Tier::BitingNow);
+        assert_eq!(ranked[0].key, "src/a.rs::A/hot");
+        assert_eq!(ranked[0].score, 15); // 3*5
+        assert_eq!(ranked[1].name_path, "B/cold");
+        assert_eq!(ranked[1].tier, Tier::Latent);
+    }
+
+    #[test]
+    fn scan_end_to_end_ranks_a_real_over_budget_body() {
+        use crate::usage::db::{open_db, write_record};
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+
+        // a real over-budget function in a source file
+        let mut src = String::from("fn huge() {\n");
+        for i in 0..200 {
+            src.push_str(&format!("    let v{i} = \"{}\";\n", "x".repeat(80)));
+        }
+        src.push_str("}\n");
+        std::fs::write(dir.path().join("huge.rs"), src).unwrap();
+
+        let conn = open_db(dir.path()).unwrap();
+        // friction targeting the function's name_path (whatever the extractor calls it: "huge")
+        write_record(
+            &conn,
+            "symbols",
+            1,
+            "success",
+            true,
+            None,
+            "cs",
+            None,
+            "s1",
+            None,
+            None,
+            Some("ccs1"),
+            Some("huge"),
+            Some(3500),
+            None,
+            Some(&dir.path().to_string_lossy()),
+        )
+        .unwrap();
+
+        let cands = scan(&conn, dir.path(), &dir.path().to_string_lossy()).unwrap();
+        assert!(
+            cands
+                .iter()
+                .any(|c| c.defect == Defect::OverBudgetBody && c.name_path.contains("huge")),
+            "expected ranked over-budget candidate for huge: {cands:?}"
+        );
+    }
 }
