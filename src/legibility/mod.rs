@@ -89,6 +89,57 @@ pub struct Candidate {
     pub score: u32,
 }
 
+fn is_body_bearing(kind: &SymbolKind) -> bool {
+    matches!(kind, SymbolKind::Function | SymbolKind::Method | SymbolKind::Constructor)
+}
+
+/// Recurse the symbol tree, collecting body-bearing symbols.
+fn collect_bodies<'a>(syms: &'a [SymbolInfo], out: &mut Vec<&'a SymbolInfo>) {
+    for s in syms {
+        if is_body_bearing(&s.kind) {
+            out.push(s);
+        }
+        collect_bodies(&s.children, out);
+    }
+}
+
+/// The source text of a symbol's body, plus its line count. Empty when the range
+/// is degenerate or out of bounds.
+fn body_text(lines: &[String], sym: &SymbolInfo) -> (String, u32) {
+    if lines.is_empty() {
+        return (String::new(), 0);
+    }
+    let start = sym.range_start_line.unwrap_or(sym.start_line) as usize;
+    let end = (sym.end_line as usize).min(lines.len() - 1);
+    if start > end {
+        return (String::new(), 0);
+    }
+    (lines[start..=end].join("\n"), (end - start + 1) as u32)
+}
+
+/// Index-lane detector: function/method bodies that exceed the inline budget
+/// (so `symbols(include_body=true)` truncates them).
+pub fn over_budget_bodies(files: &[FileSymbols]) -> Vec<StructuralDefect> {
+    let mut out = Vec::new();
+    for f in files {
+        let mut bodies = Vec::new();
+        collect_bodies(&f.symbols, &mut bodies);
+        for sym in bodies {
+            let (body, lines) = body_text(&f.lines, sym);
+            if !body.is_empty() && crate::tools::exceeds_inline_limit(&body) {
+                out.push(StructuralDefect {
+                    rel_file: f.rel_file.clone(),
+                    name_path: sym.name_path.clone(),
+                    defect: Defect::OverBudgetBody,
+                    tokens: body.len() / 4,
+                    lines,
+                });
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,4 +155,51 @@ mod tests {
         // 3*14 + 2*0 + 2*1 + 1*2 = 46
         assert_eq!(f.score(), 46);
     }
+
+    fn sym(name_path: &str, kind: SymbolKind, start: u32, end: u32) -> SymbolInfo {
+        SymbolInfo {
+            name: name_path.rsplit('/').next().unwrap_or(name_path).to_string(),
+            name_path: name_path.to_string(),
+            kind,
+            file: std::path::PathBuf::from("x.rs"),
+            start_line: start,
+            end_line: end,
+            range_start_line: None,
+            start_col: 0,
+            children: vec![],
+            detail: None,
+        }
+    }
+
+    fn file_with(rel: &str, body_lines: usize, syms: Vec<SymbolInfo>) -> FileSymbols {
+        // each line is 200 bytes so `body_lines` lines ≈ body_lines*200 bytes
+        FileSymbols {
+            rel_file: rel.to_string(),
+            lines: (0..body_lines).map(|_| "x".repeat(200)).collect(),
+            symbols: syms,
+        }
+    }
+
+    #[test]
+    fn over_budget_bodies_flags_only_over_budget_functions() {
+        // big fn spans lines 0..=70 → ~70*201 ≈ 14k bytes > 10k budget
+        let big = sym("Foo/big", SymbolKind::Method, 0, 70);
+        // small fn spans lines 0..=5 → ~6*201 ≈ 1.2k bytes < budget
+        let small = sym("Foo/small", SymbolKind::Method, 0, 5);
+        let files = vec![file_with("src/foo.rs", 71, vec![big, small])];
+        let defects = over_budget_bodies(&files);
+        assert_eq!(defects.len(), 1, "only the big body");
+        assert_eq!(defects[0].name_path, "Foo/big");
+        assert_eq!(defects[0].defect, Defect::OverBudgetBody);
+        assert!(defects[0].tokens > crate::tools::MAX_INLINE_TOKENS);
+    }
+
+    #[test]
+    fn over_budget_ignores_non_body_kinds() {
+        // a Struct spanning many lines is NOT a body-bearing symbol
+        let s = sym("BigStruct", SymbolKind::Struct, 0, 70);
+        let files = vec![file_with("src/foo.rs", 71, vec![s])];
+        assert!(over_budget_bodies(&files).is_empty());
+    }
+
 }
