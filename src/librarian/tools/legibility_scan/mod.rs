@@ -2,7 +2,7 @@
 //! reconciles the `docs/trackers/legibility-backlog.md` augmented artifact.
 //! Phase 2b of docs/superpowers/specs/2026-06-13-dzo-friction-probes-design.md.
 
-use crate::librarian::tools::{RecoverableError, ToolContext};
+use crate::librarian::tools::{RecoverableError, Tool, ToolContext};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -232,6 +232,71 @@ pub fn reconcile(
     rows
 }
 
+
+const TRACKER_REL_PATH: &str = "docs/trackers/legibility-backlog.md";
+
+async fn ensure_tracker(ctx: &ToolContext) -> Result<(String, String)> {
+    let find_args = json!({
+        "action": "find",
+        "filter": { "rel_path": { "contains": TRACKER_REL_PATH } },
+        "include_archived": true
+    });
+    if let Ok(v) = crate::librarian::tools::find::call(ctx, find_args).await {
+        if let Some(first) = v.get("items").and_then(|x| x.as_array()).and_then(|a| a.first()) {
+            if let Some(id) = first.get("id").and_then(|x| x.as_str()) {
+                return Ok((id.to_string(), TRACKER_REL_PATH.to_string()));
+            }
+        }
+    }
+    let project_root = ctx
+        .current_project
+        .as_ref()
+        .ok_or_else(|| RecoverableError::new("legibility_scan: no active project"))?
+        .abs_path
+        .clone();
+    std::fs::create_dir_all(project_root.join("docs/trackers"))?;
+    let empty = serde_json::to_value(BacklogParams::default())?;
+    let create_args = json!({
+        "action": "create",
+        "kind": "tracker",
+        "title": "Legibility Backlog",
+        "rel_path": TRACKER_REL_PATH,
+        "tags": ["legibility", "dzo"],
+        "body": "Auto-managed by `librarian(action=\"legibility_scan\")`. Dzo verdicts below the table.\n",
+        "augment": { "prompt": include_str!("./render_prompt.md"), "params": empty }
+    });
+    let created = crate::librarian::tools::create::call(ctx, create_args).await?;
+    let id = created
+        .get("id")
+        .and_then(|x| x.as_str())
+        .ok_or_else(|| anyhow::anyhow!("artifact create returned no id: {created}"))?
+        .to_string();
+    let augment_args = json!({
+        "id": id,
+        "prompt": include_str!("./render_prompt.md"),
+        "params": serde_json::to_value(BacklogParams::default())?,
+        "render_template": include_str!("./render_template.j2")
+    });
+    if let Err(e) = crate::librarian::tools::augment::ArtifactAugment.call(ctx, augment_args).await {
+        tracing::warn!("legibility_scan: failed to attach render_template: {e:#}");
+    }
+    Ok((id, TRACKER_REL_PATH.to_string()))
+}
+
+async fn load_backlog(ctx: &ToolContext, id: &str) -> Option<BacklogParams> {
+    let v = crate::librarian::tools::get::call(ctx, json!({ "action": "get", "id": id }))
+        .await
+        .ok()?;
+    let params = v.get("augmentation").and_then(|a| a.get("params"))?;
+    serde_json::from_value::<BacklogParams>(params.clone()).ok()
+}
+
+async fn write_backlog(ctx: &ToolContext, id: &str, params: &BacklogParams) -> Result<()> {
+    let augment_args = json!({ "id": id, "merge": true, "params": serde_json::to_value(params)? });
+    crate::librarian::tools::augment::ArtifactAugment.call(ctx, augment_args).await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,6 +394,43 @@ mod tests {
         assert_eq!(rows2[0].before.tokens, 4180, "before preserved");
         let after = rows2[0].after.as_ref().expect("after delta recorded");
         assert!(after.tokens < 2500, "after is the now-sub-budget measure");
+    }
+
+
+    use crate::librarian::catalog::Catalog;
+    use crate::librarian::current_project::CurrentProject;
+    use crate::librarian::workspace::{Root, WorkspaceConfig};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    fn mk_smoke_ctx(root: std::path::PathBuf) -> ToolContext {
+        ToolContext {
+            catalog: Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap())),
+            workspace: Arc::new(WorkspaceConfig {
+                roots: vec![Root { name: "r".into(), path: root.clone() }],
+                ignore: vec![],
+                rules: vec![],
+                umbrellas: vec![],
+            }),
+            rules: Arc::new(vec![]),
+            embedding: None,
+            current_project: Some(Arc::new(CurrentProject {
+                abs_path: root.clone(),
+                git_root: root,
+                umbrella: None,
+            })),
+        }
+    }
+
+    #[tokio::test]
+    async fn ensure_tracker_creates_backlog_artifact() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let (id, rel) = ensure_tracker(&ctx).await.unwrap();
+        assert!(!id.is_empty());
+        assert_eq!(rel, "docs/trackers/legibility-backlog.md");
+        let prior = load_backlog(&ctx, &id).await.unwrap_or_default();
+        assert!(prior.candidates.is_empty());
     }
 
 }
