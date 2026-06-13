@@ -140,6 +140,41 @@ pub fn over_budget_bodies(files: &[FileSymbols]) -> Vec<StructuralDefect> {
     out
 }
 
+/// Recurse the symbol tree, collecting ALL symbols (any kind).
+fn collect_all<'a>(syms: &'a [SymbolInfo], out: &mut Vec<&'a SymbolInfo>) {
+    for s in syms {
+        out.push(s);
+        collect_all(&s.children, out);
+    }
+}
+
+/// Index-lane detector: a name_path that resolves to more than one symbol within
+/// the same file (e.g. an inherent impl + a trait impl method) — the ambiguity
+/// that hard-fails `edit_code`. Cross-file ambiguity is a softer signal, deferred.
+pub fn name_collisions(files: &[FileSymbols]) -> Vec<StructuralDefect> {
+    let mut out = Vec::new();
+    for f in files {
+        let mut all = Vec::new();
+        collect_all(&f.symbols, &mut all);
+        let mut counts: HashMap<&str, u32> = HashMap::new();
+        for s in &all {
+            *counts.entry(s.name_path.as_str()).or_insert(0) += 1;
+        }
+        let mut keys: Vec<&str> = counts.iter().filter(|(_, c)| **c > 1).map(|(k, _)| *k).collect();
+        keys.sort_unstable(); // deterministic output order
+        for np in keys {
+            out.push(StructuralDefect {
+                rel_file: f.rel_file.clone(),
+                name_path: np.to_string(),
+                defect: Defect::NameCollision,
+                tokens: 0,
+                lines: 0,
+            });
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,6 +235,19 @@ mod tests {
         let s = sym("BigStruct", SymbolKind::Struct, 0, 70);
         let files = vec![file_with("src/foo.rs", 71, vec![s])];
         assert!(over_budget_bodies(&files).is_empty());
+    }
+
+    #[test]
+    fn name_collisions_flags_same_file_duplicate_name_path() {
+        // inherent impl + trait impl both expose "LspManager/get_or_start"
+        let a = sym("LspManager/get_or_start", SymbolKind::Method, 0, 5);
+        let b = sym("LspManager/get_or_start", SymbolKind::Method, 10, 15);
+        let unique = sym("LspManager/do_start", SymbolKind::Method, 20, 25);
+        let files = vec![file_with("src/lsp/manager.rs", 30, vec![a, b, unique])];
+        let defects = name_collisions(&files);
+        assert_eq!(defects.len(), 1);
+        assert_eq!(defects[0].name_path, "LspManager/get_or_start");
+        assert_eq!(defects[0].defect, Defect::NameCollision);
     }
 
 }
