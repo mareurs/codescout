@@ -2,6 +2,7 @@
 //! unified async interface for symbol operations.
 
 pub mod client;
+pub mod client_ops;
 pub mod manager;
 pub mod manager_provider;
 pub mod mock;
