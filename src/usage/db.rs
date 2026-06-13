@@ -84,6 +84,20 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
         )?;
     }
 
+    // Migration: legibility friction fields (v0.11). Additive + nullable so every
+    // pre-existing row and the unchanged INSERTs stay correct.
+    let has_friction_target: bool = conn
+        .prepare("SELECT friction_target FROM tool_calls LIMIT 0")
+        .is_ok();
+    if !has_friction_target {
+        conn.execute_batch(
+            "ALTER TABLE tool_calls ADD COLUMN friction_target TEXT;
+             ALTER TABLE tool_calls ADD COLUMN overflow_tokens INTEGER;
+             ALTER TABLE tool_calls ADD COLUMN err_family TEXT;
+             ALTER TABLE tool_calls ADD COLUMN project_root TEXT;",
+        )?;
+    }
+
     Ok(conn)
 }
 
@@ -1040,6 +1054,29 @@ mod tests {
         assert_eq!(sid.as_deref(), Some("sess-1"));
         assert_eq!(inp.as_deref(), Some("{\"q\":\"x\"}"));
         assert!(out.is_none());
+    }
+
+    #[test]
+    fn open_db_migrates_friction_columns() {
+        let dir = TempDir::new().unwrap();
+        let conn = open_db(dir.path()).unwrap();
+        conn.execute(
+            "INSERT INTO tool_calls (tool_name, latency_ms, outcome, friction_target, overflow_tokens, err_family, project_root)
+             VALUES ('symbols', 10, 'success', 'LspManager/get_or_start', 1045, NULL, '/repo')",
+            [],
+        )
+        .unwrap();
+        let (ft, tok, ef, pr): (Option<String>, Option<i64>, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT friction_target, overflow_tokens, err_family, project_root FROM tool_calls",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(ft.as_deref(), Some("LspManager/get_or_start"));
+        assert_eq!(tok, Some(1045));
+        assert_eq!(ef, None);
+        assert_eq!(pr.as_deref(), Some("/repo"));
     }
 
     #[test]
