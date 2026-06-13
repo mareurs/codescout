@@ -242,6 +242,52 @@ pub fn index_lane(root: &Path) -> Vec<StructuralDefect> {
     defects
 }
 
+/// `err_family` values that indicate a code/extractor-shape problem (count toward
+/// the score). Infra families (lsp_disconnect, …) are tool-class and excluded.
+const CODE_FAMILIES: &str = "'ast_extent_fail','ambiguous_name_path','replace_dropped_sibling'";
+const INFRA_FAMILIES: &str = "'lsp_disconnect','lsp_index_locked','mux_startup_fail','lsp_not_running'";
+
+/// Recorder lane: aggregate per-`friction_target` cost from usage.db, scoped to
+/// this repo by `project_root` (the F-1 cross-project contamination fix).
+pub fn recorder_lane(
+    conn: &rusqlite::Connection,
+    project_root: &str,
+) -> rusqlite::Result<HashMap<String, Friction>> {
+    let sql = format!(
+        "SELECT friction_target,
+                SUM(CASE WHEN overflowed = 1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN err_family IN ({code}) THEN 1 ELSE 0 END),
+                SUM(CASE WHEN outcome != 'success'
+                          AND (err_family IS NULL OR err_family NOT IN ({code}, {infra}))
+                         THEN 1 ELSE 0 END),
+                COUNT(DISTINCT cc_session_id)
+         FROM tool_calls
+         WHERE project_root = ?1 AND friction_target IS NOT NULL AND friction_target != ''
+         GROUP BY friction_target",
+        code = CODE_FAMILIES,
+        infra = INFRA_FAMILIES,
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([project_root], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            Friction {
+                truncations: r.get::<_, i64>(1)? as u32,
+                retries: 0,
+                code_class_edit_fails: r.get::<_, i64>(2)? as u32,
+                other: r.get::<_, i64>(3)? as u32,
+                sessions: r.get::<_, i64>(4)? as u32,
+            },
+        ))
+    })?;
+    let mut map = HashMap::new();
+    for row in rows {
+        let (k, fr) = row?;
+        map.insert(k, fr);
+    }
+    Ok(map)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -355,6 +401,37 @@ mod tests {
             defects.iter().any(|d| d.defect == Defect::OverBudgetBody && d.name_path.contains("huge")),
             "expected an over-budget-body defect for `huge`, got: {defects:?}"
         );
+    }
+
+    #[test]
+    fn recorder_lane_aggregates_friction_and_filters_by_project_root() {
+        use crate::usage::db::{open_db, write_record};
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let conn = open_db(dir.path()).unwrap();
+
+        // 2 truncations on the same target, this repo
+        for _ in 0..2 {
+            write_record(&conn, "symbols", 1, "success", true, None,
+                "cs", None, "s1", None, None, Some("ccs1"),
+                Some("Foo/bar"), Some(1000), None, Some("/repo")).unwrap();
+        }
+        // 1 code-class edit fail on the same target, this repo
+        write_record(&conn, "edit_code", 1, "error", false, Some("ambiguous name_path \"Foo/bar\" matches 2 symbols"),
+            "cs", None, "s1", None, None, Some("ccs1"),
+            Some("Foo/bar"), None, Some("ambiguous_name_path"), Some("/repo")).unwrap();
+        // a FOREIGN-project row for the same target — must be excluded (F-1)
+        write_record(&conn, "symbols", 1, "success", true, None,
+            "cs", None, "s9", None, None, Some("ccs9"),
+            Some("Foo/bar"), Some(9999), None, Some("/other-repo")).unwrap();
+
+        let map = recorder_lane(&conn, "/repo").unwrap();
+        let fr = map.get("Foo/bar").expect("Foo/bar present");
+        assert_eq!(fr.truncations, 2, "foreign-repo truncation must be excluded");
+        assert_eq!(fr.code_class_edit_fails, 1);
+        assert_eq!(fr.sessions, 1);
+        assert_eq!(fr.score(), 3 * 2 + 2 * 1); // 8
+        assert!(!map.contains_key(""), "empty friction_target excluded");
     }
 
 }
