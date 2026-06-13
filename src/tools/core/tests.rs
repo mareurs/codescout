@@ -610,6 +610,35 @@ async fn call_content_caps_compact_summary() {
     );
 }
 
+// ---- buffered_bytes field tests ----
+
+#[tokio::test]
+async fn overflow_envelope_carries_buffered_bytes() {
+    let ctx = bare_ctx().await;
+    let items: Vec<serde_json::Value> = (0..200)
+        .map(|i| serde_json::json!({ "idx": i, "name": "x".repeat(50) }))
+        .collect();
+    let tool = EchoTool {
+        result: serde_json::json!({ "items": items }),
+        user_summary: None,
+    };
+    let content = tool
+        .call_content(serde_json::json!({}), &ctx)
+        .await
+        .unwrap();
+    let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+    let parsed: serde_json::Value =
+        serde_json::from_str(text).expect("overflow must return a JSON envelope");
+    assert!(
+        parsed["output_id"].as_str().unwrap_or("").starts_with("@tool_"),
+        "result must overflow: {parsed}"
+    );
+    let bytes = parsed["buffered_bytes"]
+        .as_u64()
+        .expect("envelope must carry buffered_bytes");
+    assert!(bytes > 0, "buffered_bytes must be positive: {parsed}");
+}
+
 // ---- truncate_compact tests ----
 
 #[test]

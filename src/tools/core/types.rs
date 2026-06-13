@@ -586,6 +586,7 @@ pub trait Tool: Send + Sync {
                 "output_id": ref_id,
                 "summary": summary,
                 "hint": hint,
+                "buffered_bytes": json_len,
             });
             if let Some(topic) = &hint_topic {
                 inject_hint(&mut buffered, topic);
