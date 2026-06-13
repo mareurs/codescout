@@ -50,7 +50,7 @@ Activation clears these per-session sets:
 
 | State | Owner | Behavior |
 |---|---|---|
-| `guide_hints_emitted` | `CodeScoutServer` | Cleared on every activation. Written by **both** an explicit `get_guide(topic)` fetch and the first-touch auto-inject of a tool with `relevant_guide_topic()` — one shared keyspace, so either path suppresses the other's re-emit. After a clear, the next of either re-emits. |
+| `guide_hints_emitted` | `CodeScoutServer` | Cleared on every activation **and on `workspace(post_compact=true)`** (compaction re-arm); **persisted** per `CLAUDE_CODE_SESSION_ID` (`.codescout/guide_hints/<id>.json`), so it survives `/mcp` restarts within one conversation instead of re-injecting guide bodies the conversation already holds. Written by **both** an explicit `get_guide(topic)` fetch and the first-touch auto-inject of a tool with `relevant_guide_topic()` — one shared keyspace, so either path suppresses the other's re-emit. After a clear, the next of either re-emits. |
 | `path_note_emitted_since_activation` | `CodeScoutServer` | Cleared on every activation. Next stripped response re-emits the path-relative banner. |
 | `section_coverage` | `CodeScoutServer` | NOT cleared. Section-read tracking persists across activations. |
 | Output buffers (`@tool_*`, `@cmd_*`) | `OutputBuffer` | NOT cleared. Buffers from before the switch remain readable. |
@@ -133,7 +133,7 @@ instead of activating: pass `workspace=<absolute path>` on each tool call.
 - **Switching workspaces inside a subagent without restoration.**
   Parent's next tool call lands in the subagent's workspace. Caller
   has no way to detect this without an extra `workspace(status)` call.
-- **Relying on `guide_hints_emitted` to survive activation.** Every
+- **Relying on `guide_hints_emitted` to survive activation or compaction.** (It now *does* survive `/mcp` restarts — persisted per `CLAUDE_CODE_SESSION_ID`.) Every
   `activate_project` resets it. If a hint was useful, capture the
   guide content in the parent's prompt or call `get_guide(topic)`
   again after activation.

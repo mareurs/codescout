@@ -69,7 +69,7 @@ pub struct ToolContext {
         std::sync::Arc<std::sync::Mutex<crate::tools::section_coverage::SectionCoverage>>,
     /// Session-scoped set of guide topics already hinted to the model.
     /// Reset on workspace(action="activate").
-    pub guide_hints_emitted: Arc<parking_lot::Mutex<std::collections::HashSet<String>>>,
+    pub guide_hints_emitted: Arc<parking_lot::Mutex<crate::tools::guide_ledger::GuideLedger>>,
     /// Per-request workspace pin (Phase 2 plumbing for per-request workspace
     /// resolution). Populated in `call_tool_inner` from an optional `workspace`
     /// input field, canonicalized to match the registry's canonical-root keys.

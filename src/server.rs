@@ -58,7 +58,7 @@ pub struct CodeScoutServer {
     section_coverage: Arc<std::sync::Mutex<crate::tools::section_coverage::SectionCoverage>>,
     /// Session-scoped set of guide topics already hinted to the model.
     /// Reset on workspace(action="activate").
-    guide_hints_emitted: Arc<parking_lot::Mutex<std::collections::HashSet<String>>>,
+    guide_hints_emitted: Arc<parking_lot::Mutex<crate::tools::guide_ledger::GuideLedger>>,
     session_id: String,
     debug: bool,
     /// Last capabilities snapshot that was broadcast to the client via
@@ -156,7 +156,35 @@ impl CodeScoutServer {
         let section_coverage = Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         ));
-        let guide_hints_emitted = Arc::new(parking_lot::Mutex::new(Default::default()));
+        // Persisted guide-hint ledger keyed by the Claude Code conversation id,
+        // so it survives /mcp restarts within one conversation instead of
+        // re-injecting every guide body. Prefer CLAUDE_CODE_SESSION_ID (set in
+        // the MCP subprocess env since CC v2.1.154; per-process, so concurrent
+        // CC windows don't collide), fall back to the companion's
+        // .codescout/cc_session_id file, then a random uuid. See
+        // docs/issues/2026-06-14-get-guide-reinjects-on-mcp-restart.md and
+        // memory `claude-code-mcp-env`.
+        let guide_project_root = agent.project_root().await;
+        let cc_session_id = std::env::var("CLAUDE_CODE_SESSION_ID")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                guide_project_root
+                    .as_ref()
+                    .and_then(|r| {
+                        std::fs::read_to_string(r.join(".codescout").join("cc_session_id")).ok()
+                    })
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+            })
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let guide_hints_dir = guide_project_root
+            .as_ref()
+            .map(|r| r.join(".codescout").join("guide_hints"));
+        let guide_hints_emitted = Arc::new(parking_lot::Mutex::new(
+            crate::tools::guide_ledger::GuideLedger::load(&cc_session_id, guide_hints_dir),
+        ));
         let resources = Arc::new(tokio::sync::RwLock::new(Arc::new(
             build_resource_registry(&agent, Arc::clone(&lsp), &tools).await,
         )));
@@ -3141,6 +3169,98 @@ mod guide_hint_tests {
                 .unwrap_or_default()
                 .contains("librarian"),
             "activate should reset emitted set; first post-activate call should re-emit"
+        );
+    }
+
+    /// The fix for docs/issues/2026-06-14-get-guide-reinjects-on-mcp-restart.md:
+    /// the guide-hint ledger is persisted per CLAUDE_CODE_SESSION_ID, so a `/mcp`
+    /// reconnect (which re-spawns the codescout process) reloads it instead of
+    /// re-injecting every guide body the conversation already holds.
+    #[tokio::test]
+    #[serial]
+    async fn guide_ledger_survives_mcp_restart() {
+        // Pin the CC conversation id so both server incarnations key on the same
+        // persisted file (otherwise the fallback mints a random uuid and the test
+        // is non-deterministic between dev — where the var is set — and CI).
+        let _sid = EnvGuard::set("CLAUDE_CODE_SESSION_ID", "restart-survival-session");
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let _db = EnvGuard::set("LIBRARIAN_DB", dir.path().join("librarian.db"));
+
+        // First MCP process: record a guide topic (write-through persists to disk).
+        {
+            let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+                .await
+                .unwrap();
+            let server = CodeScoutServer::new(agent).await;
+            assert!(
+                !server.guide_hints_emitted.lock().contains("librarian"),
+                "a fresh session starts with an empty ledger"
+            );
+            server
+                .guide_hints_emitted
+                .lock()
+                .insert("librarian".to_string());
+        } // server dropped — simulates a /mcp reconnect re-spawning the process.
+
+        // Second MCP process, same project + same session id: must RELOAD the
+        // persisted ledger, not re-arm. This is the regression bar.
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server2 = CodeScoutServer::new(agent).await;
+        assert!(
+            server2.guide_hints_emitted.lock().contains("librarian"),
+            "guide ledger must survive MCP restart within one conversation"
+        );
+
+        // A different conversation id on the same project sees a fresh ledger —
+        // concurrent CC windows must not inherit each other's emitted set.
+        let _sid2 = EnvGuard::set("CLAUDE_CODE_SESSION_ID", "other-session");
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server3 = CodeScoutServer::new(agent).await;
+        assert!(
+            !server3.guide_hints_emitted.lock().contains("librarian"),
+            "a different session must not inherit another session's ledger"
+        );
+    }
+
+    /// The compaction side of the fix: `/compact` summarizes the guide bodies
+    /// out of context, so `workspace(post_compact=true)` must clear the ledger to
+    /// let them re-inject (a bare `/mcp` restart keeps them via persistence; only
+    /// compaction re-arms).
+    #[tokio::test]
+    #[serial]
+    async fn post_compact_rearms_guide_hints() {
+        let (_dir, _env, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        let artifact = tool_by_name(&server, "artifact");
+        let workspace = tool_by_name(&server, "workspace");
+
+        // Emit once — topic is now in the ledger.
+        let _ = artifact
+            .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
+            .await
+            .unwrap();
+
+        // Compaction signal: must clear the ledger.
+        let _ = workspace
+            .call_content(json!({"action": "status", "post_compact": true}), &ctx)
+            .await
+            .unwrap();
+
+        // Next call re-emits, because the body was summarized out of context.
+        let result = artifact
+            .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            extract_hint(&result)
+                .unwrap_or_default()
+                .contains("librarian"),
+            "post_compact must re-arm guide hints so they re-inject after compaction"
         );
     }
 

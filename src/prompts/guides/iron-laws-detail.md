@@ -136,7 +136,8 @@ whose first tool call is `get_guide(topic)` for a topic obviously
 needed by its task indicates the parent underbriefed.
 
 **Substrate fact this compensates for:** the `guide_hints_emitted`
-ledger is per-MCP-session (`CodeScoutServer.guide_hints_emitted`,
+ledger is process-wide — now persisted per `CLAUDE_CODE_SESSION_ID` so it
+survives `/mcp` restarts (`CodeScoutServer.guide_hints_emitted`,
 shared via `Arc` clone in every per-request `ToolContext`). Once
 the parent triggers a topic hint, NO subagent receives that hint
 independently — the ledger says "already delivered." Iron Law 6
