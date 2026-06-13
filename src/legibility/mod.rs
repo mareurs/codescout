@@ -374,6 +374,24 @@ pub fn scan(
     Ok(score_and_rank(structural, &friction))
 }
 
+/// Re-measure a single target's current cost (tokens, lines), independent of whether
+/// it is still a defect. Used by Phase 2b to fill the `after` delta when a candidate
+/// auto-closes (its defect is gone). For a symbol key, measures the body; for an
+/// un-mappable file (`name_path == "(file)"`), measures the overview size.
+pub fn measure_target(files: &[FileSymbols], rel_file: &str, name_path: &str) -> Option<(usize, u32)> {
+    let f = files.iter().find(|f| f.rel_file == rel_file)?;
+    if name_path == "(file)" {
+        let mut all = Vec::new();
+        collect_all(&f.symbols, &mut all);
+        return Some((overview_bytes(&all) / 4, f.lines.len() as u32));
+    }
+    let mut all = Vec::new();
+    collect_all(&f.symbols, &mut all);
+    let sym = all.iter().find(|s| s.name_path == name_path)?;
+    let (body, lines) = body_text(&f.lines, sym);
+    Some((body.len() / 4, lines))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -678,4 +696,15 @@ mod tests {
             "expected ranked over-budget candidate for huge: {cands:?}"
         );
     }
+
+    #[test]
+    fn measure_target_returns_body_size_for_a_symbol() {
+        let big = sym("Foo/big", SymbolKind::Method, 0, 70);
+        let files = vec![file_with("src/foo.rs", 71, vec![big])];
+        let (tokens, lines) = measure_target(&files, "src/foo.rs", "Foo/big").unwrap();
+        assert!(tokens > crate::tools::MAX_INLINE_TOKENS);
+        assert_eq!(lines, 71);
+        assert!(measure_target(&files, "src/foo.rs", "Foo/missing").is_none());
+    }
+
 }
