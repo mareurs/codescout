@@ -1,19 +1,19 @@
 ---
-status: open
-opened: 2026-06-11
-closed:
-severity: high
-owner: marius
-related:
-  - 2026-06-03-artifact-delete-refuses-in-workspace-artifact
-tags:
-  - librarian
-  - artifact
-  - mv
-  - workspace-roots
-  - path-resolution
-  - nested-project
+id: null
 kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- librarian
+- artifact
+- mv
+- workspace-roots
+- path-resolution
+- nested-project
+topic: null
+time_scope: null
+closed: 2026-06-14
 ---
 
 # BUG: `artifact(action="move")` joins `new_rel_path` against an ancestor `[[roots]]` entry, silently relocating files OUTSIDE the active project
@@ -149,27 +149,19 @@ join base is the ancestor root.
    ancestor root.
 
 ## Fix
-Not yet implemented — status `open`. Candidate directions:
-1. **Prefer the most-specific root.** `containing_root` should return the
-   **longest** matching prefix (deepest root) rather than the first — so a nested
-   `current_project` wins over an ancestor `[[roots]]` entry.
-2. **Order `current_project` first** in `managed_roots` (prepend git_root/abs_path
-   ahead of the legacy `workspace.roots`), so a `find`-first match prefers the
-   active project.
-3. **Guard for cross-project escape:** after computing `new_full`, reject (or warn)
-   if it does not start with `current_project` when one is set — converts a silent
-   misplacement into a recoverable error.
 
-Either (1) or (2) fixes the resolution; (3) is defense-in-depth against the silent
-`moved: true` on an out-of-project destination. Mirror any change to the `delete`
-guard, which shares `managed_roots`/`containing_root`.
+**Shipped on `experiments` in `a3198893`** (`fix(librarian): resolve mv/delete against the nested project, not an ancestor [[roots]] entry`). Not yet on `master` — archive after cherry-pick, cite the master-side SHA then.
 
+Implemented **option 2** (order `current_project` first). `managed_roots` (`src/librarian/tools/mod.rs`) now lists the active `current_project` (`git_root`, then `abs_path`) **ahead of** the legacy `workspace.roots`, so `containing_root`'s first-prefix-match prefers the active project over an ancestor `[[roots]]` entry that also contains the artifact. `mv` and `delete` share `managed_roots` / `containing_root`, so the one change fixes both. Plus **option 3** (defense-in-depth): `mv::call` rejects a `new_rel_path` that is empty, absolute, or contains a `..` segment — a move can no longer escape its resolved root.
+
+Chose option 2 over option 1 (longest-prefix): when a project is a *subdir* of its git repo, `abs_path` is deeper than `git_root`, so longest-prefix would resolve a repo-root-relative path against the subdir instead of the repo root — wrong. Ordering preserves the documented git_root-before-abs_path intent.
 ## Tests added
-N/A — not yet fixed. A regression test should activate a project nested under a
-registered ancestor root and assert `move` with a bare project-relative
-`new_rel_path` lands inside the project (the existing `mv.rs` tests at
-`src/librarian/tools/mv.rs:78-250` don't cover the nested-under-ancestor-root case).
 
+`src/librarian/tools/mv.rs` tests:
+- `move_resolves_under_nested_project_not_ancestor_root` — active project nested under an ancestor `[[roots]]` entry; the move lands under the project, NOT the ancestor.
+- `move_rejects_new_rel_path_escape` — `../escape/foo.md` is refused.
+
+Full lib suite 2741 pass; clippy `-D warnings` clean. `delete` shares the helper; its existing tests stay green.
 ## Workarounds
 Prefix `new_rel_path` with the active project's subdir name relative to the
 ancestor root — e.g. `new_rel_path="MRV-poc/docs/trackers/archive/foo.md"` instead
