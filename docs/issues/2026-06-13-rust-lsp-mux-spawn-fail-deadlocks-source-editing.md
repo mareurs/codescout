@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-06-13
-closed:
+closed: 2026-06-14
 severity: high
 owner: marius
 related: []
@@ -39,13 +39,14 @@ mux startup failed for rust: Failed to spawn mux process
 - Release binary launched via `~/.cargo/bin/codescout` symlink → `target/release/codescout`.
 
 ## Root cause
-Unknown — under investigation. The mux child process does not come up and leaves no
-socket in `/tmp`. Candidate leads: stale/exited mux from a prior session not reaped;
-the release binary's mux spawn path failing silently; an environment/permission issue
-on the socket dir. The LSP-disconnect / mux-startup failure family is exactly the
-`mux_startup_fail` / `lsp_disconnect` `err_family` the new legibility probe will surface
-in `usage.db` (see `docs/superpowers/specs/2026-06-13-dzo-friction-probes-design.md`).
 
+**CONFIRMED 2026-06-14** (during the "solve all open bugs" pass — `edit_code` failed live, so the cause was diagnosed from `/proc`).
+
+The mux is spawned via `std::env::current_exe()` (`src/lsp/manager.rs:749`), passed to `tokio::process::Command::new(&exe)...spawn()` (`:771`, `.context("Failed to spawn mux process")`). When the **running server's binary is replaced on disk** — which `cargo build --release` does on every rebuild (rename-replace of `target/release/codescout`) — the server's `/proc/self/exe` resolves to the **old, now-deleted inode** (shown as `.../target/release/codescout (deleted)`). `Command::new(<deleted-path>).spawn()` then fails with `ENOENT`, surfaced as `Failed to spawn mux process`. The earlier "no socket in /tmp" symptom is downstream: the child never execs, so it never creates its socket (sockets actually live under `/run/user/1000`, not `/tmp`).
+
+NOT a resource/permission issue: 78Gi RAM free, `ulimit -u` 513893.
+
+**Evidence (2026-06-14):** of 21 live `codescout start` processes, **20 had `(deleted)` exe** via `readlink /proc/<pid>/exe`, all `.../target/release/codescout (deleted)` — every server started before the latest `cargo build --release`. Only the one started after the most recent build had a live exe. `edit_code` failed on the deleted-exe servers. This is the generic mechanism behind the `mux_startup_fail` family, shared with bug `3fc22ad2` (which adds the kotlin/RocksDB-lock-specific layer on top).
 ## Evidence
 Reported independently by three implementer subagents during the 2026-06-13 plan
 execution (Exec 1/2/3/4-5), each citing `mux startup failed for rust: Failed to spawn
@@ -57,9 +58,12 @@ mux process` and falling back to non-`edit_code` editing.
    consistently across the whole session.
 
 ## Fix
-Unknown — not addressed this session (out of scope of the logging plan). Workaround only;
-status stays `open`.
 
+**Shipped on `experiments` in `b2115c4f`** (`fix(lsp): spawn the mux from a live binary when current_exe() is a deleted inode`). Not yet on `master` — archive after cherry-pick, cite the master-side SHA then. (This bug file is not currently in the librarian catalog index; the status flip is frontmatter-only and will reconcile on the next `reindex`.)
+
+`resolve_mux_binary()` (`src/lsp/manager.rs`) replaces the bare `current_exe()` at the mux-spawn site: it prefers `current_exe()`, but when that resolves to a deleted inode (the rebuilt-mid-session case) it strips the ` (deleted)` marker to recover the live binary at the same path, then falls back to a stable install path (`$CARGO_HOME/bin` / `~/.cargo/bin/codescout`), and only then bails with an actionable "reconnect /mcp" message. A `cargo build` mid-session no longer deadlocks all source editing.
+
+Test: `strip_deleted_suffix_recovers_rebuilt_path` (`src/lsp/manager.rs`). Full lib suite 2742 pass; clippy `-D warnings` clean. Live verification of the deleted-exe recovery requires a release build followed by another rebuild — the unit test plus the confirmed `/proc` evidence (20 of 21 live servers had a `(deleted)` exe) stand in for it here.
 ## Tests added
 N/A — diagnostic/tooling bug; no code change made. A regression test belongs with the
 mux-spawn fix, not here.
@@ -76,12 +80,10 @@ mux-spawn fix, not here.
   `symbols(name=…)` may 0-match freshly-edited code until reindex — read raw text to verify.
 
 ## Resume
-Investigate the mux spawn path: check `src/lsp/mux/process.rs` (spawn + `PR_SET_PDEATHSIG`
-path) for why the child exits before creating its `/tmp` socket; look for a stale mux PID
-or leftover socket from a prior session. Restart the MCP server (`/mcp`) and retry a
-single `edit_code` to see if a fresh server process spawns the mux. Cross-check against
-the Kotlin mux-collision history in `docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md`.
 
+**Immediate unblock:** `/mcp` restart — a fresh server process has a live (non-deleted) `current_exe()`, so mux spawns succeed.
+
+**Real fix** (make mux-spawn resilient to a mid-session rebuild), in `src/lsp/manager.rs` around `:749`/`:771`, shared with `3fc22ad2`: when `current_exe()` is unusable — its resolved path ends in ` (deleted)` or does not exist on disk — fall back to a known-good codescout binary path (the `~/.cargo/bin/codescout` install symlink, or a `CARGO_BIN`/config-resolved path) before spawning. Add a regression test that a deleted/nonexistent exe path triggers the fallback rather than erroring. Secondary cleanup: 20 leaked deleted-exe `codescout start` servers + hundreds of stale `/run/user/1000/codescout-*-mux-*.lock` files accumulated across sessions — a reaper for orphaned servers/locks is a separate hygiene task.
 ## References
 - `docs/superpowers/plans/2026-06-13-honest-usage-db-logging.md` (the plan during which this surfaced).
 - `.codescout/project.toml` `debug_enforce_symbol_tools` flag.

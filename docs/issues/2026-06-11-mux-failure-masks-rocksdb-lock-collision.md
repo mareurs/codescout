@@ -291,6 +291,15 @@ exception. Tests: `posix_write_lock_is_held_false_on_unlocked_file`,
 `posix_write_lock_is_held_true_when_another_process_holds_it` (spawns a python3 fcntl holder;
 passes under `--ignored`). `clippy --all-targets -D warnings` clean. Pending: live re-run of the
 repro to confirm the guard now engages end-to-end.
+### Update 2026-06-14 — shared spawn-failure root cause fixed (Kotlin core still open)
+
+The `Failed to spawn mux process` symptom this bug shares with the rust mux had a **confirmed cross-cutting cause**: `std::env::current_exe()` resolves to a *deleted inode* after a mid-session `cargo build` rename-replaces the running binary, so `spawn()` fails with ENOENT. Fixed in `b2115c4f` — `resolve_mux_binary()` in `src/lsp/manager.rs` (strip the ` (deleted)` marker → stable install path → actionable error). See `docs/issues/2026-06-13-rust-lsp-mux-spawn-fail-deadlocks-source-editing.md`.
+
+This does **not** address this bug's Kotlin-specific core. **Still open:**
+- **Defect #1** — mux liveness inferred from the advisory `flock` alone, never socket connectability (`src/lsp/manager.rs:456`): a stale `.lock` with a held flock but no live `.sock` routes to the connect path and fails all retries.
+- **Defect #3** — the direct-LSP fallback collides on the held RocksDB index lock and reports a generic `LSP server disconnected` instead of naming the lock holder.
+
+Both deferred — verification requires a live multi-instance Kotlin workspace (not reproducible from this session). Already shipped earlier: stderr capture (defect #2) + the lock-probe orphan reap (2026-06-11). Status stays `open` to keep defects #1/#3 visible as actionable work.
 ## Tests added
 
 Implemented on `experiments` (`src/lsp/manager.rs`, in `mod tests`):
