@@ -1,12 +1,19 @@
 ---
-status: open
-opened: 2026-06-11
-closed:
-severity: high
-owner: marius
-related: [2026-06-05-lsp-failed-starts-not-recorded, 2026-05-30-cross-worktree-kotlin-jvm-shared-system-path]
-tags: [lsp, mux, kotlin, rocksdb, observability, multi-instance, circuit-breaker]
+id: null
 kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- lsp
+- mux
+- kotlin
+- rocksdb
+- observability
+- multi-instance
+- circuit-breaker
+topic: null
+time_scope: null
 ---
 
 # BUG: Kotlin mux startup failure is unobservable, and the direct-LSP fallback collides on a held RocksDB lock that masquerades as "LSP server disconnected"
@@ -350,6 +357,32 @@ not run this session to avoid disrupting the user's live backend-kotlin mux (R-2
 the fix is not yet in the running binary. **Status stays `open`** until that live e2e lands
 (Resume step 1). Both #1 (code) and #3 (pre-existing) now have fixes; the only residue is live
 verification.
+
+### Verified live 2026-06-14 — defect #1 e2e PASSED (all four states)
+
+Re-ran after the fix went live (release binary rebuilt post-`c8746b70`, fresh `/mcp`). Verified
+end-to-end against the running server on a **throwaway rust workspace** (`/tmp/cs-wedge-test`) —
+the user's live kotlin muxes were never touched. Rust routes through the same
+`get_or_start_via_mux`, so it exercises the identical code path.
+
+| State | How induced | Result |
+|---|---|---|
+| Happy (flock held + healthy socket) | `references` on codescout's own live rust mux | resolved correctly |
+| Fresh spawn (flock free) | `references` on a brand-new workspace | mux spawned (hash `de91bfca…`), resolved |
+| **Wedged (flock held + dead socket)** | killed the mux, held its flock from an external `flock(1)`, removed the `.sock` | **`mux startup failed for rust: mux for rust holds its lock (…) but its socket (…) is unreachable — the mux process is wedged or mid-restart … locate the holder with` `fuser` `…`** — the exact actionable error; pre-fix this returned a bare `ECONNREFUSED`/`ENOENT` |
+| Recovery (holder cleared) | `fuser -k` the holder → `references` | flock freed → round-0 respawn → resolved |
+
+This also live-confirmed **defect #3's production guard**: the wedged error was wrapped by
+`get_or_start`'s single-owner refusal (`codescout will not fall back to a direct LSP for a
+multiplexed language`), proving the fallback is gated off in production exactly as the ADR intends.
+
+Bystander note (test-harness only, NOT a codescout bug): the `flock(1)` CLI leaks the lock fd to
+its `sleep` child (no `O_CLOEXEC`), so killing `flock` didn't free the lock until the child was
+reaped (`fuser -k` cleared it). codescout's own lock fd is `O_CLOEXEC` (Rust `std::fs::File`
+default), so its spawned LSP never inherits it.
+
+All four states pass → Resume step 1 (live failure-path repro) is **done**. Defects #1/#2/#3 are
+now fixed **and** verified; the only remaining step is the master ship (Standard Ship Sequence).
 ## Tests added
 
 Implemented on `experiments` (`src/lsp/manager.rs`, in `mod tests`):
