@@ -35,6 +35,7 @@ tests/fixtures/*/.codescout/
 /.codescout/call_edges.db
 # Runtime / session files
 .codescout/cc_session_id
+.codescout/guide_hints/
 .codescout/tantivy/
 .codescout/peer-audit.jsonl
 .codescout/usage.db.bak-*
