@@ -307,7 +307,12 @@ pub(crate) async fn reindex_cli(repo: Option<&str>, force: bool) -> Result<()> {
     // Whole-workspace reindex: drop rows for repos no longer in workspace.toml.
     if repo.is_none() {
         let active: Vec<&std::path::Path> = ws.roots.iter().map(|r| r.path.as_path()).collect();
-        let orphans = catalog::artifact::delete_orphan_repos(&cat, &active)?;
+        // Scope == active (this workspace's own roots): the catalog is a single
+        // machine-global DB, so the orphan sweep must never reach other
+        // workspaces' rows (3ea49090). Per-file deletions are handled by the
+        // indexer walk; de-registered-root cleanup is an explicit scoped prune
+        // (7ca71bf7).
+        let orphans = catalog::artifact::delete_orphan_repos(&cat, &active, &active)?;
         if orphans > 0 {
             eprintln!("dropped {orphans} orphan rows from inactive repos");
         }

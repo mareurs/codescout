@@ -92,28 +92,55 @@ pub fn delete(cat: &Catalog, id: &str) -> Result<bool> {
         > 0)
 }
 
-/// Delete all rows whose `abs_path` is not under any path in `active_roots`. Returns number removed.
-pub fn delete_orphan_repos(cat: &Catalog, active_roots: &[&std::path::Path]) -> Result<usize> {
-    if active_roots.is_empty() {
-        let n = cat.conn.execute("DELETE FROM artifact", [])?;
-        return Ok(n);
+/// Delete rows whose `abs_path` is under one of `scope_roots` but **not** under
+/// any path in `active_roots`. Returns the number removed.
+///
+/// `scope_roots` bounds the blast radius — a row outside every scope root is
+/// never touched, even if it is also outside every active root. This guards the
+/// single machine-global catalog against the cross-workspace wipe (`3ea49090`):
+/// callers pass the active workspace's own roots as `scope_roots`, so the sweep
+/// can only prune within that workspace's territory. Empty `active_roots` or
+/// empty `scope_roots` is a no-op (returns 0) — never a `DELETE FROM artifact`.
+pub fn delete_orphan_repos(
+    cat: &Catalog,
+    active_roots: &[&std::path::Path],
+    scope_roots: &[&std::path::Path],
+) -> Result<usize> {
+    // Never an unbounded wipe: with no active roots (nothing to keep) or no scope
+    // (no bounded territory to prune within), do nothing. The catalog is a single
+    // machine-global DB, so `DELETE FROM artifact` here would erase every other
+    // workspace's rows (bug 3ea49090).
+    if active_roots.is_empty() || scope_roots.is_empty() {
+        return Ok(0);
     }
-    // Keep rows where abs_path starts with any active root (prefix match with trailing /).
-    let keep_clauses: Vec<String> = (1..=active_roots.len())
-        .map(|i| format!("abs_path LIKE ?{i}"))
-        .collect();
-    let sql = format!(
-        "DELETE FROM artifact WHERE NOT ({})",
-        keep_clauses.join(" OR ")
-    );
     // Forward-slash normalize to match the form abs_paths are stored in
-    // (artifact::upsert writes forward-slash via to_forward_slash). Without
-    // this, on Windows the LIKE pattern uses backslash and matches NOTHING,
-    // so the DELETE wipes every row.
-    let params: Vec<String> = active_roots
+    // (artifact::upsert writes forward-slash via RepoPath). Without this, on
+    // Windows a LIKE pattern would use backslash and match NOTHING.
+    let scope_likes: Vec<String> = scope_roots
         .iter()
         .map(|p| format!("{}/%", crate::util::fs::RepoPath::from_path(p)))
         .collect();
+    let active_likes: Vec<String> = active_roots
+        .iter()
+        .map(|p| format!("{}/%", crate::util::fs::RepoPath::from_path(p)))
+        .collect();
+
+    // Delete rows that are UNDER some scope root but NOT under any active root.
+    // The scope clause is the blast-radius guard: a row outside every scope root
+    // is never matched, even when it is also outside every active root.
+    let in_scope: Vec<String> = (1..=scope_likes.len())
+        .map(|i| format!("abs_path LIKE ?{i}"))
+        .collect();
+    let under_active: Vec<String> = (scope_likes.len() + 1
+        ..=scope_likes.len() + active_likes.len())
+        .map(|i| format!("abs_path LIKE ?{i}"))
+        .collect();
+    let sql = format!(
+        "DELETE FROM artifact WHERE ({}) AND NOT ({})",
+        in_scope.join(" OR "),
+        under_active.join(" OR "),
+    );
+    let params: Vec<String> = scope_likes.into_iter().chain(active_likes).collect();
     let param_refs: Vec<&dyn rusqlite::ToSql> =
         params.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
     let n = cat
@@ -245,22 +272,51 @@ mod tests {
         b.abs_path = std::path::PathBuf::from("/roots/alive/b.md");
         let mut c = sample("c1");
         c.abs_path = std::path::PathBuf::from("/roots/ghost/c.md");
-        for r in [&a, &b, &c] {
+        // A row belonging to ANOTHER workspace tree, outside the prune scope.
+        let mut d = sample("d1");
+        d.abs_path = std::path::PathBuf::from("/other-workspace/d.md");
+        for r in [&a, &b, &c, &d] {
             upsert(&cat, r).unwrap();
         }
         let alive = std::path::Path::new("/roots/alive");
-        let removed = delete_orphan_repos(&cat, &[alive]).unwrap();
+        let scope = std::path::Path::new("/roots");
+        // Prune within /roots, keeping only /roots/alive: ghost (c) is removed.
+        let removed = delete_orphan_repos(&cat, &[alive], &[scope]).unwrap();
         assert_eq!(removed, 1);
-        assert!(get(&cat, "c1").unwrap().is_none());
-        assert!(get(&cat, "a1").unwrap().is_some());
+        assert!(
+            get(&cat, "c1").unwrap().is_none(),
+            "ghost is under scope but not active → removed"
+        );
+        assert!(get(&cat, "a1").unwrap().is_some(), "alive kept");
+        assert!(
+            get(&cat, "d1").unwrap().is_some(),
+            "row outside the scope root is NEVER touched (cross-workspace safety)"
+        );
     }
 
     #[test]
-    fn delete_orphan_repos_empty_active_wipes_all() {
+    fn delete_orphan_repos_empty_active_is_noop() {
+        // Empty active_roots must NOT wipe the catalog (the 3ea49090 foot-gun:
+        // this used to run `DELETE FROM artifact`).
         let cat = Catalog::open_in_memory().unwrap();
         upsert(&cat, &sample("x")).unwrap();
-        let n = delete_orphan_repos(&cat, &[]).unwrap();
-        assert_eq!(n, 1);
+        let scope = std::path::Path::new("/roots");
+        let n = delete_orphan_repos(&cat, &[], &[scope]).unwrap();
+        assert_eq!(n, 0, "empty active is a no-op, never DELETE FROM artifact");
+        assert!(get(&cat, "x").unwrap().is_some());
+    }
+
+    #[test]
+    fn delete_orphan_repos_empty_scope_is_noop() {
+        // Empty scope_roots means no bounded territory → prune nothing.
+        let cat = Catalog::open_in_memory().unwrap();
+        let mut a = sample("a1");
+        a.abs_path = std::path::PathBuf::from("/roots/ghost/a.md");
+        upsert(&cat, &a).unwrap();
+        let alive = std::path::Path::new("/roots/alive");
+        let n = delete_orphan_repos(&cat, &[alive], &[]).unwrap();
+        assert_eq!(n, 0, "empty scope is a no-op");
+        assert!(get(&cat, "a1").unwrap().is_some());
     }
 
     #[test]

@@ -155,7 +155,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .iter()
             .map(|r| r.path.as_path())
             .collect();
-        orphan_removed = crate::librarian::catalog::artifact::delete_orphan_repos(&cat, &active)?;
+        // Bound the orphan sweep to THIS workspace's own roots (scope == the
+        // walked roots): the catalog is a single machine-global DB, so an
+        // unbounded "delete rows not under the active roots" would wipe other
+        // workspaces' rows (3ea49090). Within-workspace file deletions are
+        // already handled by the per-file walk above; pruning a de-registered
+        // root or a renamed repo is the job of an explicit scoped prune
+        // (7ca71bf7), not this reindex side-effect.
+        orphan_removed =
+            crate::librarian::catalog::artifact::delete_orphan_repos(&cat, &active, &active)?;
     }
 
     let ignore = crate::librarian::workspace::compile_ignore(&ctx.workspace.ignore)?;
