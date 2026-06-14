@@ -1095,3 +1095,28 @@ post_process surface). Bug file:
 **Status:** fixed (this session, experiments-side; uncommitted at time of writing). Pika note: whistled late (after slip #3, not slip #1) — a watch-miss to do better on.
 
 **Related:** surfaced jointly by the Prompt Hamsa + Pika. Touches three surfaces — schema description, `get_guide("librarian")` body, and the shared error message.
+
+
+### U-27 — "Never read_file source" whistle is a false positive for imports & lossy-extractor reads; criterion narrowed
+
+**When:** 2026-06-14 Pika session (summon-scope). I whistled this session's two `read_file`-on-`.rs` calls (`ids.rs`, `indexer.rs`) as Iron Law 1 violations. User pushed back: `symbols` cannot surface imports. Researched `usage.db` across 4 projects (codescout, backend-kotlin, eduplanner-ui, MRV-poc) + read the `read_file.rs` / `symbols` mechanism.
+
+**Iron Law / pattern:** Iron Law 1 ("NEVER read_file source code → symbols") is **too absolute**. `symbols` is a *definition projection* — it cannot return imports / `package` / `use`, module glue (`mod.rs`, barrel `index.ts`), macro output, annotations/decorators, exact bytes, or any construct the extractor drops.
+
+**Evidence:**
+- `symbols` returns **0 import lines** on `ids.rs` (Rust), `PreSolveDataValidation.kt` (Kotlin), `config.py` (Python — first symbol L14, imports L1–13 invisible). No `symbols` query surfaces imports in any language tested.
+- Source `read_file` is **82–94% sliced** (line-range), not full reads: Rust 403/427, Kotlin 628/701, Python 1136/1306, TS 149/181.
+- `read_file` already self-governs (`read_full_file`, `exceeds_inline_limit`): large source full-read → symbol outline (≈`symbols`, still importless); small → content + a "prefer symbols" hint; sliced → raw bytes. It never blocks source (backend-kotlin: 611 kotlin reads success vs 82 error).
+- Six open `2026-06-04` extractor-gap bugs (rust macros, kotlin nested classes, TS arrow-consts/namespace, Go generics) prove `symbols` is *silently* lossy — `read_file` is the ground truth there.
+
+**Tool called:** `read_file` on `.rs` source (the whistled calls).
+**Should have called:** intent-dependent — `symbols(name=…, include_body=true)` for a named body; `read_file` (sliced) is **correct** for imports / glue / macros / exact-bytes / lossy-language. Only a full, no-range read of a *large indexed* source file is mild waste (and the tool redirects it anyway).
+
+**Whistle delivered:** yes — and partly wrong; withdrawn for the import case.
+**Recurrence:** 1st (criterion correction, not a repeat slip).
+**Severity:** med — a false-positive whistle *criterion* erodes Pika signal; unchecked it would whistle ~85% of legitimate source reads.
+**Status:** open — narrowed criterion recorded here; the durable fix is the prompt-surface rewording of Iron Law 1 (drafted this session, not yet shipped). See H-7.
+
+**Refined whistle criterion:** whistle `read_file`-on-source ONLY when it is a **full, no-range read of a large indexed source file** (low severity — tool auto-redirects). NEVER whistle: sliced reads, import/glue/header reads, or reads in languages with known extractor gaps.
+
+**Related:** R-32 (recon-patterns, this session). Kin F-22 (sibling session) — `read_file` offset/limit now normalizes to a line slice, which *reinforces* sliced-source-read legitimacy.

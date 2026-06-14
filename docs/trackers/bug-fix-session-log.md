@@ -66,6 +66,8 @@ time_scope: open-ended
 | F-18 | 2026-06-11 | med | codescout-tool | open | Kotlin-lsp cold-start failed under 3× concurrent (6-JVM) load; tree-sitter masked it on `symbols` |
 | F-19 | 2026-06-12 | med | plan-prose | fixed-verified | Explore-subagent report claimed `OutputForm::Text` bypasses the output buffer; `call_content` buffers unconditionally before the form branch |
 | F-20 | 2026-06-12 | med | self-friction | fixed-verified | Targeted `cargo test --lib guide::` missed `server::tests::tool_descriptions_stay_under_budget`; shipped a 329-char get_guide description (cap 300) in `c799e887` |
+| F-22 | 2026-06-14 | med | plan-prose | fixed-verified | Bug-file's "offset/limit never parsed anywhere" claim missed `OutputGuard::from_input` (`output.rs:96`); telemetry (191 calls) then resolved the fix to dispatch-layer option (a) |
+| F-21 | 2026-06-14 | low | self-friction | fixed-verified | Off-the-cuff root-cause unification of the open-bug clusters over-generalized; code scout split it (catalog 2+3 share a global-abspath-catalog root; bug 1 + the 06-11 cluster don't) |
 
 ## Wins Index
 
@@ -1304,6 +1306,53 @@ bug class."
 **Promote-when:** A 2nd prompt-surface session citing the full-gate-set scout → promote a "prompt-surface gate checklist" to CLAUDE.md § Prompt Surface Consistency (partial overlap with R-1/R-7 already).
 
 **Status:** validated.
+
+---
+## F-21 — Off-the-cuff root-cause unification of the open-bug clusters over-generalized; code scout split it
+
+**Observed:** 2026-06-14, during an "existing issues" review. After listing the 6 open bugs, I wrote an Insight asserting *"both clusters (catalog integrity + path-pinning) trace to one root theme: the catalog assumes one canonical filesystem identity per project,"* and offered to *"look at whether the three 2026-06-13 catalog bugs share a single fix."*
+
+**When:** Read-only triage report, no edit pending — but the claim was a checkable root-cause assertion presented as analysis (R-19 territory: a recommendation, not Q&A). Reconnaissance invoked before the claim hardened into a scoping decision.
+
+**Expected (my insight):** The three 2026-06-13 catalog bugs share a single root cause / single fix; the 2026-06-11 path-pinning cluster traces to the same "one canonical filesystem identity" theme.
+
+**Got (scouted reality):**
+- `32b58e13` (worktree): root cause is `index_repo_sync`'s `WalkBuilder::new(abs_root).standard_filters(true)` + root-anchored `.gitignore` + no linked-worktree detection (`src/librarian/indexer.rs:56`).
+- `7ca71bf7` (repo rename): root cause is path-derived identity `artifact_id_from_abs` = `sha256(forward-slash abs_path)` (`src/librarian/ids.rs:17`) with no rename migration.
+- `3ea49090` (orphan wipe): root cause is `reindex::call` building `active` from `ctx.workspace.roots` over a *global* catalog, then `delete_orphan_repos` deleting any row not under those roots — empty-active = `DELETE FROM artifact` (`src/librarian/catalog/artifact.rs:96`), and the test `delete_orphan_repos_empty_active_wipes_all` (`:259`) encodes the wipe *as intended behavior*.
+- → **No single fix.** Three files, three mechanisms. Bugs **2+3** share a *narrower* genuine root: one machine-global DB keyed by absolute path, but reindex/orphan ops reason about it as per-workspace. Bug **1** shares only the *consequence* (duplicate rows), not the mechanism. The **2026-06-11 cluster** (artifact-move path-join, kotlin/RocksDB LSP, LSP workspace-pin) does not touch the catalog-identity model at all.
+
+**Probable cause:** Pattern-matched the bug *titles* (all "catalog"/"path"-flavored, two adjacent dates) into one root cause without reading any implicated code this session. Adjacency + shared vocabulary read as shared mechanism — the "sounds right" trap.
+
+**Correction:** Re-scoped to: 2+3 = one root theme (global-abspath-keyed catalog reasoned-about-as-per-workspace) needing two fixes; bug 1 = sibling consequence, separate fix (linked-worktree detection in the indexer); 06-11 cluster = unrelated (request/LSP path resolution).
+
+**Severity:** low — framed as a hypothesis to investigate, caught before any planning. Counterfactual: had I acted on "single fix," I'd have scoped one fix and discovered mid-plan it needs ≥3, churning the plan and possibly mis-merging unrelated concerns.
+
+**Status:** fixed-verified — corrected decomposition established from code this session, before any fix was scoped.
+
+**Fix idea / Pointer:** R-32 (reconnaissance-patterns). Bugs `32b58e13` / `7ca71bf7` / `3ea49090`. Code: `src/librarian/indexer.rs:56`, `src/librarian/ids.rs:17`, `src/librarian/catalog/artifact.rs:96`, `src/librarian/tools/reindex.rs:148`.
+
+## F-22 — Bug-file's "offset/limit never parsed" claim missed `OutputGuard::from_input`; telemetry then resolved the fix to dispatch-layer option (a)
+
+**Observed:** 2026-06-14, pre-fix reconnaissance for `docs/issues/2026-06-14-read-file-offset-limit-silently-ignored-on-buffers.md`. Scouting the seam before implementing the documented fix.
+
+**When:** Verifying the bug file's Defect 1 / E-1 evidence ("`offset` and `limit` are not schema parameters and are never parsed") in order to choose between Fix A option (a) (schema + line-semantics mapping) and option (b) (path-local `RecoverableError`).
+
+**Expected (bug file):** `offset`/`limit` are never parsed anywhere; the E-1/E-2 grep audit covered `read_file.rs` + `output_buffer.rs` and found no parse call, so the params are pure phantoms.
+
+**Got (scouted reality):** `OutputGuard::from_input` at `src/tools/output.rs:96-97` DOES parse both — `optional_u64_param(input, "offset")` and `…"limit"`. `read_full_file` (the real-file path) builds the guard via `OutputGuard::from_input(input)`, so on real files `limit` caps the exploring-mode line window (via `guard.max_results`) while `offset` is parsed-then-unused (the overflow branch does `extract_lines(text, 1, max_lines)` — always from line 1). The buffer path (`read_from_buffer`) never builds a guard and only reads `start_line`/`end_line`, so there the params are genuinely dead — but the bug's *generalized* "never parsed anywhere" is false. E-1/E-2 scoped the grep to two files and missed `src/tools/output.rs`. The schema claim itself (L29-43 declares only `start_line`/`end_line`) is correct; the live repro E-3 confirms the MCP client forwards the non-schema params into `input` anyway, which is exactly why `OutputGuard` sees them on the real-file path.
+
+**Probable cause:** R-3 — evidence grep scoped to the file(s) being modified, not the workspace root; the cross-module guard parser one call-hop away slipped.
+
+**Workaround / corrected plan:** (1) Ship **Fix B** (hint strings → `start_line`/`end_line`) as-is — still correct. (2) Prefer Fix A **option (b)** (path-local `RecoverableError` inside `read_from_buffer`) over option (a): adding `offset`/`limit` to `read_file`'s `input_schema` would collide with `OutputGuard`'s existing page-offset/page-size semantics on the real-file path (same names, two meanings). (3) Word the option-(b) error path-locally ("on buffer reads, use start_line/end_line"), NOT "offset/limit are invalid" — they are valid for guard-paginated tools.
+
+**Severity:** med — at face value the bug file would have steered the implementer to either a schema change that silently re-interprets real-file `offset`/`limit`, or a globally-worded error that contradicts `OutputGuard`'s documented Focused-mode pagination. Caught + corrected pre-implementation by the controller.
+
+**Status:** fixed-verified — telemetry resolved the option choice (below); fix implemented + verified on `experiments` 2026-06-14.
+
+**Resolution (telemetry, 2026-06-14):** usage.db across the 4 projects showed **191** offset/limit calls, **100% native-Read line-nav intent** (30 buffer silent-`success` + 161 real-file). This *inverted* the tentative option-(b) lean above: making offset/limit WORK as line aliases serves all 191; rejecting serves only 30 and leaves the 161 real-file cases. Implemented as dispatch-layer normalization in `ReadFile::call` (`normalize_line_nav_aliases` before the buffer fork) — covers both paths and structurally avoids the OutputGuard collision (range params route to `read_with_line_range`, never `read_full_file`'s guard). `cargo fmt`/`clippy`/`test` green (2733 lib tests); bug file updated; prompt surfaces reviewed (no change, no ONBOARDING_VERSION bump). Side-finding: `pika_observations` had 0 entries for this 30-occurrence bug because it keys on errors not silent-`success` — follow-up task filed.
+
+**Fix idea / Pointer:** `docs/issues/2026-06-14-read-file-offset-limit-silently-ignored-on-buffers.md`; recon R-31.
 
 ---
 ## Template for new entries

@@ -7,28 +7,40 @@ that don't fit in the slice itself.
 
 ## Iron Law 1: source reads → `symbols`
 
-**Rule:** never `read_file` on source code (`.rs`, `.py`, `.ts`,
-`.go`, `.java`, `.kt`, `.cpp`, `.c`, `.h`, etc.). Use
-`symbols(path=...)` for a file overview, `symbols(name=...,
-include_body=true)` for a single body, `symbols(query="...")` to
-search across the project.
+**Rule:** `symbols` is the default for source — `symbols(path=...)` for a
+file overview, `symbols(name=..., include_body=true)` for one body,
+`symbols(query="...")` to search across the project. But `symbols` is a
+*definition projection*: it does NOT return imports / `use` / `package`,
+module re-exports (`mod.rs`, barrel `index.ts`), macro-generated code,
+annotations, or constructs the AST-extractor drops (see the `2026-06-04`
+extractor-gap bugs). For those, a **line-range `read_file` is the correct
+tool, not a fallback** — and they are common, not rare.
 
-**Gate fires when** `read_file` is called on a path matching a
-source-language extension. Error message includes:
+**Gate is overlap-based, not absolute.** The gate fires when a `read_file`
+range *overlaps a named symbol* and redirects you to that symbol's body. A
+range that hits no symbol (e.g. the import block at the top of a file)
+returns raw bytes. Error on overlap:
 
 > source range overlaps named symbol(s): '<Symbol>'
 > Use symbols(name='<Symbol>', include_body=true) to read the body
 > directly. Pass force=true to read the raw line range anyway.
 
-**Exceptions:** `force=true` on `read_file` bypasses the gate when
-you genuinely need the raw text (rare — e.g. reading a build-time
-generated `.rs` that has no LSP entries).
+**`force=true`** returns raw bytes for any range, including symbol-overlapping
+ones (e.g. macro-generated impls the extractor dropped, or exact
+byte/whitespace layout before an `edit_file` match).
 
-**Why this matters:** `symbols` returns structured navigation
-(declaration lines, doc comments, kind metadata) using LSP +
-tree-sitter. `read_file` returns text; for code, you'd then have to
-parse it yourself. `symbols` also caches; `read_file` doesn't.
+**The one anti-pattern:** a full, no-range `read_file` of a large indexed
+source file — it just returns the `symbols` outline anyway. Call
+`symbols(path)` directly for that.
 
+**Why this matters:** `symbols` returns structured navigation (declaration
+lines, doc comments, kind metadata) via LSP + tree-sitter, and caches;
+`read_file` returns text. For *definitions*, prefer `symbols`. For *what the
+AST does not model* — imports, glue, macro output, exact bytes — a line-range
+`read_file` is the only tool that returns the answer. Empirical basis: across
+4 projects, 82–94% of source reads are line-slices (Pika `U-27`); a slice-only
+A/B measured routing accuracy on import/glue/macro/exact-byte intents at 90%
+under this rule vs 30% under "never read_file source" (audit-log `A-1`).
 ## Iron Law 2: structural code edits → `edit_code`
 
 **Rule:** never `edit_file` for changes that touch a symbol

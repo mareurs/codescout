@@ -53,7 +53,9 @@ skill).
 | R-27 | 2026-06-12 | hit | A subagent's prose control-flow claim is a hypothesis, not a finding — read the fn body before a fix rests on its mechanism (Explore report: "`OutputForm::Text` forces inline always" + recommended it as the fix; `call_content` gates the buffer on `exceeds_inline_limit` UNCONDITIONALLY before the form branch) | bug-fix F-19 + W-14; kin R-26/R-19/R-9 |
 | R-28 | 2026-06-12 | hit + miss | Enumerate a prompt surface's full gate set before editing (byte-for-byte slice, snapshot fixture, cap, ONBOARDING_VERSION pin, content tests); targeted `cargo test --lib <module>` filters miss cross-cutting gates in `server::tests` (over-budget get_guide description shipped via a narrow filter) | bug-fix F-20 + W-15; kin R-1/R-7/R-27 |
 | R-29 | 2026-06-13 | hit | Verify a flight-recorder-harvested target exists in the active repo before ranking/acting on it — `.codescout/usage.db` is keyed by commit-SHA and mixes every project the process served (40 project_shas; a mirela `CalendarService` phantom surfaced in a codescout survey) | dzo-legibility F-1 + W-1; kin R-23 |
+| R-31 | 2026-06-14 | hit (validates R-3 + R-26) | A bug-file's "param never parsed anywhere" claim, evidenced by a grep scoped to the modified file(s), missed a parser one call-hop away — `read_file`'s "offset/limit never parsed" missed `OutputGuard::from_input` (`output.rs:96`), which `read_full_file` calls. Follow the param into callees; don't trust the file-scoped audit. | bug-fix F-22; issues/2026-06-14-read-file-offset-limit; kin R-3/R-26 |
 | R-30 | 2026-06-13 | miss → proposal | When a structural feature appears to *block* a tool, test the tool's documented alternate addressing form before refactoring code around it — read `find_unique_symbol_by_name_path`/`symbol_name_matches` but never tried the qualified `impl Trait for Type/method` form the not-found hint itself *documents*, so concluded `edit_code` was blocked and relocated 11 trait impls for a non-block. Reading the resolver ≠ testing the escape hatch. | dzo-legibility F-9; ADR docs/adrs/2026-06-13-drop-name-collision-defect.md; kin R-26/R-27 (read ≠ verified) |
+| R-32 | 2026-06-14 | hit | An off-the-cuff root-cause unification across a bug cluster is a hypothesis, not a finding — read each bug's implicated code before presenting "they share one root cause / one fix" (3 open "catalog/path" bugs by title → 3 distinct files/mechanisms; only 2 shared a narrower root: global-abspath catalog reasoned-about-as-per-workspace) | bug-fix F-21; issues 2026-06-13 catalog trio; kin R-12/R-19/R-27 |
 
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
@@ -770,6 +772,21 @@ SKILL.md Phase-1 bullet to name bug-file line lists explicitly.
 
 **Evidence:** `docs/trackers/dzo-legibility-session-log.md` F-1 + W-1.
 
+## R-31 — A bug-file's "never parsed" claim, evidenced by a file-scoped grep, missed a parser one call-hop away
+
+**Verdict:** hit (validates R-3 + R-26)
+
+**Observed:** 2026-06-14, pre-fix recon for the read_file `offset`/`limit` bug (`issues/2026-06-14-read-file-offset-limit-silently-ignored-on-buffers.md`).
+
+**Pattern:** When a bug file asserts a parameter is "never parsed anywhere" and backs it with a grep scoped to the file(s) being modified, that audit cannot see a parser reached one call-hop away in another module. Follow the param into the helpers the modified function *calls*, not just the file's own text.
+
+**What happened:** The bug's E-1/E-2 grepped `read_file.rs` + `output_buffer.rs` and concluded `offset`/`limit` "are never parsed." But `read_full_file` calls `OutputGuard::from_input(input)` (`src/tools/output.rs:89`), which DOES parse both (`optional_u64_param(input, "offset")`, `…"limit"`, L96-97). The scout caught it by reading the body of the *called* helper, not by re-grepping — R-26 ("read the body, don't trust the line-match") applied to a callee rather than to the symbol under edit.
+
+**Counterfactual:** Taking "never parsed" at face value, Fix A option (a) (add `offset`/`limit` to `read_file`'s schema + map to line semantics in the buffer path) would have shipped a schema that silently collides with `OutputGuard`'s page-offset/page-size semantics on the real-file path — two meanings for one param name, and a schema that advertises an `offset` the real-file path never honors for navigation. The scout redirected the fix to option (b) (path-local error) before any code changed.
+
+**Proposal:** none new — reinforces R-3 (grep workspace root, not the file) and R-26 (read callee bodies before narrating "confirmed"). Datapoint toward making "follow the param into callees" an explicit Phase-1 step whenever a claim is about whether a param is *read* (vs. *used*).
+
+**Evidence:** bug-fix F-22; `docs/issues/2026-06-14-read-file-offset-limit-silently-ignored-on-buffers.md`; `src/tools/output.rs:89-112`; `src/tools/read_file.rs:555-664` (`read_full_file` builds the guard).
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:

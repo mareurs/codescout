@@ -3,8 +3,9 @@ Subagents inherit these rules. Pass them along.
 
 ## Iron Laws (never X, do Y)
 
-1. NEVER read_file source code → symbols(path) for overview,
-   symbols(name=..., include_body=true) for bodies.
+1. NEVER full-read source → symbols(path) overview,
+   symbols(name=..., include_body=true) bodies. Line-range
+   read_file is fine for imports/glue.
 2. NEVER edit_file structural code → edit_code (LSP-aware).
 3. NEVER pipe unbounded run_command → run bare, query @cmd_* buffer
    (grep "ERROR" @cmd_abc). Bounded LHS (ls, cat, awk, sed,

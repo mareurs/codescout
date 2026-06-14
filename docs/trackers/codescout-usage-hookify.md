@@ -270,3 +270,23 @@ That makes the companion compression-reminder load-bearing as the **post-compact
 **Notes:**
 - This is the third FP class identified in the audit. First two (U-15: Rust `::` separator + git refs) shipped 61bc678b. Pattern is clear: classifier needs an extensible reject mechanism. Could justify a refactor into a single `REJECT_PREFIXES: &[&str]` constant + iter check; not done now to minimize blast radius.
 - The classifier-can't-model-intent diagnosis is the **persistent** root cause. Each FP class is a symptom; the deeper question is whether `audit_doc_refs` should ever resolve paths it didn't explicitly recognize as local-intent. An "allowlist" approach (only resolve paths matching `^(src|docs|tests|scripts|target|Cargo)/`) would invert the current default — would need its own design call.
+
+
+### H-7 — Do NOT deny `read_file` on source extensions (rejected); at most warn on full no-range large-source reads
+
+**Pattern:** A transient proposal this session was to deny `read_file` on source extensions (`.rs/.kt/.ts/.go/…`), mirroring H-2's `.md` deny. Investigation **rejects** it.
+
+**Confirming data:**
+- **U-27** — `usage.db` across 4 projects: source `read_file` is 82–94% sliced line-range reads; imports / glue / macros / lossy-language reads have **no `symbols` equivalent**. A blanket deny would block the legitimate majority.
+- Mechanism: `read_full_file` already redirects large full-reads to a symbol outline and emits a "prefer symbols" hint on small ones — the only waste case is *already* self-governed. A deny is redundant where it would be safe and harmful where it would bite.
+
+**Proposed hookify rule:** **none (rejected).** If anything, a *warn* (never deny), scoped to the narrow predicate below — and even that is low-value given the tool's self-governance:
+- **Predicate:** `read_file` with a source extension AND no `start_line`/`end_line`/`offset`/`limit` AND the file is indexed & large.
+- **Decision:** warn only.
+- **Reason text:** "Full read of a large source file returns the symbols outline anyway — use symbols(path) for structure, symbols(name=…, include_body=true) for a body, or a line range for imports/glue."
+
+**Promote-when:** do NOT promote. Revisit only if `usage.db` shows a *recurring, costly* full-no-range large-source read pattern the tool's own redirect fails to curb.
+
+**Status:** **deferred — rejected by design (tool self-governs).** Contrast H-2: the `.md` deny is correct because `read_markdown` *fully supersedes* `read_file` for markdown. No analogous superseding tool exists for source — `symbols` is a lossy projection, not a replacement.
+
+**Adjacent (sibling F-22):** `pika_observations` keys on errors, not silent-`success`, so silent-success misuse is invisible to a Pika scan (F-22 filed a follow-up). Relevant here: a future warn-hook would be the *only* way to observe the full-no-range pattern, since the DB scan structurally cannot.
