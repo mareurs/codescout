@@ -154,6 +154,32 @@ fn first_named_child_text(node: Node, source: &str, kind: &str) -> Option<String
 // Rust
 // ---------------------------------------------------------------------------
 
+/// Build a `SymbolInfo` from a tree-sitter node plus its resolved
+/// name/kind/children. Factors the position-field boilerplate that every
+/// `extract_rust_symbols` match arm repeated verbatim, keeping the dispatch body
+/// within the `symbols` inline budget (legibility-backlog Tier 1).
+fn rust_symbol(
+    child: Node,
+    file: &std::path::Path,
+    name_path: String,
+    name: String,
+    kind: SymbolKind,
+    children: Vec<SymbolInfo>,
+) -> SymbolInfo {
+    SymbolInfo {
+        name_path,
+        name,
+        kind,
+        file: file.to_path_buf(),
+        start_line: child.start_position().row as u32,
+        end_line: child.end_position().row as u32,
+        start_col: child.start_position().column as u32,
+        children,
+        range_start_line: None,
+        detail: None,
+    }
+}
+
 fn extract_rust_symbols(node: Node, source: &str, file: &PathBuf, prefix: &str) -> Vec<SymbolInfo> {
     let mut symbols = Vec::new();
     let mut cursor = node.walk();
@@ -162,54 +188,43 @@ fn extract_rust_symbols(node: Node, source: &str, file: &PathBuf, prefix: &str) 
         match child.kind() {
             "function_item" => {
                 if let Some(name) = child_name(child, source, "name") {
-                    symbols.push(SymbolInfo {
-                        name_path: make_name_path(prefix, &name),
+                    let np = make_name_path(prefix, &name);
+                    symbols.push(rust_symbol(
+                        child,
+                        file,
+                        np,
                         name,
-                        kind: SymbolKind::Function,
-                        file: file.clone(),
-                        start_line: child.start_position().row as u32,
-                        end_line: child.end_position().row as u32,
-                        start_col: child.start_position().column as u32,
-                        children: vec![],
-                        range_start_line: None,
-                        detail: None,
-                    });
+                        SymbolKind::Function,
+                        vec![],
+                    ));
                 }
             }
             "struct_item" => {
                 if let Some(name) = child_name(child, source, "name") {
                     let np = make_name_path(prefix, &name);
-                    symbols.push(SymbolInfo {
-                        name_path: np,
+                    symbols.push(rust_symbol(
+                        child,
+                        file,
+                        np,
                         name,
-                        kind: SymbolKind::Struct,
-                        file: file.clone(),
-                        start_line: child.start_position().row as u32,
-                        end_line: child.end_position().row as u32,
-                        start_col: child.start_position().column as u32,
-                        children: vec![],
-                        range_start_line: None,
-                        detail: None,
-                    });
+                        SymbolKind::Struct,
+                        vec![],
+                    ));
                 }
             }
             "enum_item" => {
                 if let Some(name) = child_name(child, source, "name") {
                     let np = make_name_path(prefix, &name);
-                    // Extract enum variants as children
+                    // Extract enum variants as children.
                     let children = extract_enum_variants(child, source, file, &np);
-                    symbols.push(SymbolInfo {
-                        name_path: np,
+                    symbols.push(rust_symbol(
+                        child,
+                        file,
+                        np,
                         name,
-                        kind: SymbolKind::Enum,
-                        file: file.clone(),
-                        start_line: child.start_position().row as u32,
-                        end_line: child.end_position().row as u32,
-                        start_col: child.start_position().column as u32,
+                        SymbolKind::Enum,
                         children,
-                        range_start_line: None,
-                        detail: None,
-                    });
+                    ));
                 }
             }
             "trait_item" => {
@@ -219,18 +234,14 @@ fn extract_rust_symbols(node: Node, source: &str, file: &PathBuf, prefix: &str) 
                     let children = body
                         .map(|b| extract_rust_symbols(b, source, file, &np))
                         .unwrap_or_default();
-                    symbols.push(SymbolInfo {
-                        name_path: np,
+                    symbols.push(rust_symbol(
+                        child,
+                        file,
+                        np,
                         name,
-                        kind: SymbolKind::Interface,
-                        file: file.clone(),
-                        start_line: child.start_position().row as u32,
-                        end_line: child.end_position().row as u32,
-                        start_col: child.start_position().column as u32,
+                        SymbolKind::Interface,
                         children,
-                        range_start_line: None,
-                        detail: None,
-                    });
+                    ));
                 }
             }
             "impl_item" => {
@@ -263,83 +274,67 @@ fn extract_rust_symbols(node: Node, source: &str, file: &PathBuf, prefix: &str) 
                     let children = body
                         .map(|b| extract_rust_symbols(b, source, file, &np))
                         .unwrap_or_default();
-                    symbols.push(SymbolInfo {
-                        name_path: np,
+                    symbols.push(rust_symbol(
+                        child,
+                        file,
+                        np,
                         name,
-                        kind: SymbolKind::Module,
-                        file: file.clone(),
-                        start_line: child.start_position().row as u32,
-                        end_line: child.end_position().row as u32,
-                        start_col: child.start_position().column as u32,
+                        SymbolKind::Module,
                         children,
-                        range_start_line: None,
-                        detail: None,
-                    });
+                    ));
                 }
             }
             "const_item" => {
                 if let Some(name) = child_name(child, source, "name") {
-                    symbols.push(SymbolInfo {
-                        name_path: make_name_path(prefix, &name),
+                    let np = make_name_path(prefix, &name);
+                    symbols.push(rust_symbol(
+                        child,
+                        file,
+                        np,
                         name,
-                        kind: SymbolKind::Constant,
-                        file: file.clone(),
-                        start_line: child.start_position().row as u32,
-                        end_line: child.end_position().row as u32,
-                        start_col: child.start_position().column as u32,
-                        children: vec![],
-                        range_start_line: None,
-                        detail: None,
-                    });
+                        SymbolKind::Constant,
+                        vec![],
+                    ));
                 }
             }
             "static_item" => {
                 if let Some(name) = child_name(child, source, "name") {
-                    symbols.push(SymbolInfo {
-                        name_path: make_name_path(prefix, &name),
+                    let np = make_name_path(prefix, &name);
+                    symbols.push(rust_symbol(
+                        child,
+                        file,
+                        np,
                         name,
-                        kind: SymbolKind::Variable,
-                        file: file.clone(),
-                        start_line: child.start_position().row as u32,
-                        end_line: child.end_position().row as u32,
-                        start_col: child.start_position().column as u32,
-                        children: vec![],
-                        range_start_line: None,
-                        detail: None,
-                    });
+                        SymbolKind::Variable,
+                        vec![],
+                    ));
                 }
             }
             "type_item" => {
                 if let Some(name) = child_name(child, source, "name") {
-                    symbols.push(SymbolInfo {
-                        name_path: make_name_path(prefix, &name),
+                    let np = make_name_path(prefix, &name);
+                    symbols.push(rust_symbol(
+                        child,
+                        file,
+                        np,
                         name,
-                        kind: SymbolKind::TypeParameter,
-                        file: file.clone(),
-                        start_line: child.start_position().row as u32,
-                        end_line: child.end_position().row as u32,
-                        start_col: child.start_position().column as u32,
-                        children: vec![],
-                        range_start_line: None,
-                        detail: None,
-                    });
+                        SymbolKind::TypeParameter,
+                        vec![],
+                    ));
                 }
             }
             // function_signature_item inside trait declarations
             "function_signature_item" => {
                 if let Some(name) = child_name(child, source, "name") {
-                    symbols.push(SymbolInfo {
-                        name_path: make_name_path(prefix, &name),
+                    let np = make_name_path(prefix, &name);
+                    symbols.push(rust_symbol(
+                        child,
+                        file,
+                        np,
                         name,
-                        kind: SymbolKind::Method,
-                        file: file.clone(),
-                        start_line: child.start_position().row as u32,
-                        end_line: child.end_position().row as u32,
-                        start_col: child.start_position().column as u32,
-                        children: vec![],
-                        range_start_line: None,
-                        detail: None,
-                    });
+                        SymbolKind::Method,
+                        vec![],
+                    ));
                 }
             }
             // Trait associated type: `type Item;` parses as associated_type (the
@@ -348,18 +343,15 @@ fn extract_rust_symbols(node: Node, source: &str, file: &PathBuf, prefix: &str) 
                 if let Some(name) = child_name(child, source, "name")
                     .or_else(|| first_named_child_text(child, source, "type_identifier"))
                 {
-                    symbols.push(SymbolInfo {
-                        name_path: make_name_path(prefix, &name),
+                    let np = make_name_path(prefix, &name);
+                    symbols.push(rust_symbol(
+                        child,
+                        file,
+                        np,
                         name,
-                        kind: SymbolKind::TypeParameter,
-                        file: file.clone(),
-                        start_line: child.start_position().row as u32,
-                        end_line: child.end_position().row as u32,
-                        start_col: child.start_position().column as u32,
-                        children: vec![],
-                        range_start_line: None,
-                        detail: None,
-                    });
+                        SymbolKind::TypeParameter,
+                        vec![],
+                    ));
                 }
             }
             // `macro_rules! name { ... }` — name is the first identifier child, not
@@ -368,36 +360,30 @@ fn extract_rust_symbols(node: Node, source: &str, file: &PathBuf, prefix: &str) 
                 if let Some(name) = child_name(child, source, "name")
                     .or_else(|| first_named_child_text(child, source, "identifier"))
                 {
-                    symbols.push(SymbolInfo {
-                        name_path: make_name_path(prefix, &name),
+                    let np = make_name_path(prefix, &name);
+                    symbols.push(rust_symbol(
+                        child,
+                        file,
+                        np,
                         name,
-                        kind: SymbolKind::Function,
-                        file: file.clone(),
-                        start_line: child.start_position().row as u32,
-                        end_line: child.end_position().row as u32,
-                        start_col: child.start_position().column as u32,
-                        children: vec![],
-                        range_start_line: None,
-                        detail: None,
-                    });
+                        SymbolKind::Function,
+                        vec![],
+                    ));
                 }
             }
             "union_item" => {
                 if let Some(name) = child_name(child, source, "name")
                     .or_else(|| first_named_child_text(child, source, "type_identifier"))
                 {
-                    symbols.push(SymbolInfo {
-                        name_path: make_name_path(prefix, &name),
+                    let np = make_name_path(prefix, &name);
+                    symbols.push(rust_symbol(
+                        child,
+                        file,
+                        np,
                         name,
-                        kind: SymbolKind::Struct,
-                        file: file.clone(),
-                        start_line: child.start_position().row as u32,
-                        end_line: child.end_position().row as u32,
-                        start_col: child.start_position().column as u32,
-                        children: vec![],
-                        range_start_line: None,
-                        detail: None,
-                    });
+                        SymbolKind::Struct,
+                        vec![],
+                    ));
                 }
             }
             _ => {}
