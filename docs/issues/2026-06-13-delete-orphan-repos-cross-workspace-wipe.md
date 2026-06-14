@@ -1,12 +1,16 @@
 ---
-status: open
-opened: 2026-06-13
-closed:
-severity: high
-owner: marius
-related: []
-tags: [librarian, catalog, data-loss]
+id: null
 kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- librarian
+- catalog
+- data-loss
+topic: null
+time_scope: null
+closed: 2026-06-14
 ---
 
 # BUG: `delete_orphan_repos` deletes other workspaces' rows from the shared global catalog (reindex scope=all is a cross-workspace wipe)
@@ -74,21 +78,23 @@ pub fn delete_orphan_repos(cat: &Catalog, active_roots: &[&std::path::Path]) -> 
 N/A — root cause read directly from source; not a mystery.
 
 ## Fix
-Plan (not yet implemented). Options, roughly in order of preference:
-1. **Scope the orphan delete to the workspace subtree.** Only delete rows whose
-   `abs_path` is under the workspace's own root(s) but not under any *active*
-   sub-root — never touch rows belonging to other workspace trees.
-2. **Refuse the empty-active wipe.** Make `delete_orphan_repos` with empty
-   `active_roots` a no-op (or hard error), not `DELETE FROM artifact`.
-3. **Require confirmation / dry-run** for any orphan deletion that would remove
-   rows outside the active workspace root.
 
+**Shipped on `experiments` in `ccbfa8b4`** (`fix(librarian): bound delete_orphan_repos to a scope; never wipe the global catalog`). Not yet on `master` — archive after cherry-pick and cite the master-side SHA then.
+
+Implemented **option 1 + option 2 combined**. `delete_orphan_repos` now takes a `scope_roots` boundary and deletes only rows that are *under a scope root* **AND** *not under any active root*; empty `active_roots` **or** empty `scope_roots` is a no-op (returns 0) — never `DELETE FROM artifact`. Both reindex call sites pass the active workspace's own roots as `scope_roots`, so a row in another workspace's tree is outside every scope root and can never be matched:
+- `src/librarian/catalog/artifact.rs` — the bounded function + doc.
+- `src/librarian/tools/reindex.rs` — MCP reindex path (`delete_orphan_repos(&cat, &active, &active)`).
+- `src/librarian/mod.rs:310` — CLI reindex path; **this second caller was missed by the initial `grep`/`references` scan and caught by the compiler** (the call_graph-before-signature-change lesson — `references` had warned its caller set was incomplete).
+
+Within-workspace file deletions remain handled by the per-file indexer walk; pruning a de-registered root or a renamed repo is deferred to an explicit scoped prune ([[2026-06-13-catalog-orphans-survive-repo-rename]]).
 ## Tests added
-None yet. When fixed: add a regression test with a 2-workspace in-memory
-catalog asserting a `scope=all` reindex of workspace A leaves workspace B rows
-intact; and flip `delete_orphan_repos_empty_active_wipes_all` to assert a
-no-op (the wipe is the bug, not the contract).
 
+`src/librarian/catalog/artifact.rs` tests:
+- `delete_orphan_repos_drops_inactive` — rewritten: prunes a ghost row under the scope root, keeps the active row, AND asserts a row in `/other-workspace` (outside the scope root) **survives** (cross-workspace safety).
+- `delete_orphan_repos_empty_active_is_noop` — empty `active_roots` returns 0 and the row survives (the old `delete_orphan_repos_empty_active_wipes_all`, which asserted the wipe *as intended*, is removed).
+- `delete_orphan_repos_empty_scope_is_noop` — empty `scope_roots` returns 0.
+
+Full lib suite: 2735 pass; clippy `-D warnings` clean.
 ## Workarounds
 Never run `librarian(action="reindex", scope="all")` against the shared global
 catalog. Use `scope="project"` or `scope="repo"` (which do **not** reach the
