@@ -88,9 +88,18 @@ fn row_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<AugmentationRow> {
     })
 }
 
-pub fn merge_params(cat: &Catalog, artifact_id: &str, patch: &Value) -> Result<bool> {
+/// Merge `patch` into the artifact's stored params and validate the result
+/// against `params_schema` (if any) WITHOUT writing. Returns the serialized
+/// merged params on success, or `None` when the artifact has no augmentation.
+///
+/// Split out of [`merge_params`] so a params patch can be validated *before*
+/// other mutations (notably the body write in artifact `update`). A schema
+/// violation must abort before anything is persisted — otherwise the body is
+/// written but the params are not, leaving the artifact half-updated. See
+/// docs/issues/2026-06-13-artifact-update-body-applies-before-params-validation.md.
+fn merge_params_dry(cat: &Catalog, artifact_id: &str, patch: &Value) -> Result<Option<String>> {
     let Some(existing) = get(cat, artifact_id)? else {
-        return Ok(false);
+        return Ok(None);
     };
     let mut current: Value = serde_json::from_str(&existing.params).unwrap_or_else(|_| json!({}));
     apply_merge_patch(&mut current, patch);
@@ -99,7 +108,21 @@ pub fn merge_params(cat: &Catalog, artifact_id: &str, patch: &Value) -> Result<b
             RecoverableError::new(format!("merge_params: patch violates params_schema: {e}"))
         })?;
     }
-    let new_params = serde_json::to_string(&current)?;
+    Ok(Some(serde_json::to_string(&current)?))
+}
+
+/// Validate a params patch against the stored schema without persisting it.
+/// `Ok(())` guarantees a subsequent [`merge_params`] with the same patch will
+/// not fail schema validation. Artifacts without an augmentation validate
+/// trivially (nothing to check).
+pub fn validate_params_patch(cat: &Catalog, artifact_id: &str, patch: &Value) -> Result<()> {
+    merge_params_dry(cat, artifact_id, patch).map(|_| ())
+}
+
+pub fn merge_params(cat: &Catalog, artifact_id: &str, patch: &Value) -> Result<bool> {
+    let Some(new_params) = merge_params_dry(cat, artifact_id, patch)? else {
+        return Ok(false);
+    };
     cat.conn.execute(
         "UPDATE artifact_augmentation SET params = ?1,
          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')

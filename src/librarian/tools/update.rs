@@ -257,6 +257,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
     }
 
+    // Validate the params patch against the stored schema BEFORE writing the
+    // file or upserting the row. merge_params (below) re-validates and persists;
+    // pre-checking here keeps the update atomic — a schema violation must abort
+    // before any mutation, never after the body has already been written.
+    // docs/issues/2026-06-13-artifact-update-body-applies-before-params-validation.md
+    if let Some(params_patch) = &patch.params {
+        crate::librarian::catalog::augmentation::validate_params_patch(&cat, &a.id, params_patch)?;
+    }
+
     std::fs::write(&full, &new_content)?;
 
     let now = chrono::Utc::now().timestamp_millis();
@@ -845,6 +854,79 @@ mod tests {
         let params: serde_json::Value = serde_json::from_str(&aug.params).unwrap();
         assert_eq!(params["count"], 3);
         assert_eq!(aug.refresh_count, 1);
+    }
+    #[tokio::test]
+    async fn params_schema_violation_leaves_body_unchanged() {
+        // Regression: docs/issues/2026-06-13-artifact-update-body-applies-before-params-validation.md
+        // A schema-violating params patch must abort BEFORE the body write, so a
+        // combined {body, params} update is atomic — never body-written-but-params-stale.
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = seed_with_augment(&ctx, "p1.md", false, None).await;
+
+        // Attach a params_schema requiring `count: integer`, no extra keys.
+        {
+            let cat = ctx.catalog.lock();
+            let schema = serde_json::json!({
+                "type": "object",
+                "properties": {"count": {"type": "integer"}},
+                "additionalProperties": false
+            });
+            augmentation::upsert(
+                &cat,
+                &augmentation::AugmentationRow {
+                    artifact_id: id.clone(),
+                    prompt: "test".to_string(),
+                    params: "{}".to_string(),
+                    last_refreshed_at: None,
+                    refresh_count: 0,
+                    created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                    updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+                    render_template: None,
+                    params_schema: Some(serde_json::to_string(&schema).unwrap()),
+                    append_mode: false,
+                    history_cap: None,
+                    entry_collection: None,
+                },
+            )
+            .unwrap();
+        }
+
+        let path = {
+            let cat = ctx.catalog.lock();
+            artifact::get(&cat, &id).unwrap().unwrap().abs_path
+        };
+        let before = std::fs::read_to_string(&path).unwrap();
+
+        // Valid body overwrite + schema-violating params in the SAME update.
+        let result = call(
+            &ctx,
+            serde_json::json!({
+                "id": id,
+                "patch": {
+                    "body": "REPLACEMENT BODY that must never reach disk on a failed params validation",
+                    "params": {"count": "not-a-number"}
+                }
+            }),
+        )
+        .await;
+
+        assert!(result.is_err(), "schema violation must error");
+        assert!(
+            result.unwrap_err().to_string().contains("params_schema"),
+            "error should name the schema violation"
+        );
+
+        // Atomicity: the body write must NOT have happened.
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            before, after,
+            "body changed despite a failed params validation"
+        );
+        assert!(
+            !after.contains("REPLACEMENT BODY"),
+            "body overwrite leaked to disk"
+        );
     }
 
     #[tokio::test]
