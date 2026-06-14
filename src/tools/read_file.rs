@@ -35,6 +35,8 @@ impl Tool for ReadFile {
                 "file_path": { "type": "string", "description": "Alias for path" },
                 "start_line": { "type": "integer", "description": "First line (1-indexed). Pair with end_line." },
                 "end_line": { "type": "integer", "description": "Last line (1-indexed, inclusive). Pair with start_line." },
+                "offset": { "type": "integer", "description": "Native-Read-style alias: 1-indexed start line (= start_line). Ignored when start_line/end_line are set." },
+                "limit": { "type": "integer", "description": "Native-Read-style alias: line count from offset (end_line = offset + limit - 1). offset defaults to line 1 if omitted." },
                 "json_path": { "type": "string", "description": "JSON subtree by path (e.g. \"$.dependencies\")." },
                 "toml_key": { "type": "string", "description": "TOML table or YAML section by key (e.g. \"dependencies\")." },
                 "force": { "type": "boolean", "description": "Skip source-symbol hint and read the raw line range." }
@@ -43,6 +45,14 @@ impl Tool for ReadFile {
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> Result<Value> {
+        // Native-`Read` compatibility: callers habitually pass offset/limit (a 1-indexed
+        // start line + a line count, the built-in Read signature). Normalize to
+        // start_line/end_line up front — before the buffer fork — so both the buffer and
+        // real-file paths honor them through the same line-range logic instead of
+        // silently returning the file head.
+        let mut input = input;
+        normalize_line_nav_aliases(&mut input);
+
         let raw_path = input["path"]
             .as_str()
             .or_else(|| input["file_path"].as_str())
@@ -300,6 +310,40 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
         return Ok(result);
     }
     Ok(json!({ "content": text, "total_lines": total_lines }))
+}
+
+/// Normalize native-`Read`-style `offset`/`limit` into `start_line`/`end_line`.
+///
+/// Claude Code's built-in `Read` takes `(offset, limit)` as a 1-indexed start line
+/// plus a line count, and models reach for that signature out of habit. Mapping it
+/// here — before the buffer fork in [`ReadFile::call`] — lets both the buffer and
+/// real-file paths serve those calls through the normal line-range logic instead of
+/// silently returning the file head (the offset/limit-silently-ignored bug).
+///
+/// `start_line`/`end_line` are authoritative: if either is present the aliases are
+/// left untouched. `offset` maps to `start_line` (1-indexed); `limit` maps to a line
+/// count so `end_line = offset + limit - 1`. With only `limit`, `offset` defaults to
+/// line 1, preserving the prior "first N lines" behavior.
+fn normalize_line_nav_aliases(input: &mut Value) {
+    if optional_u64_param(input, "start_line").is_some()
+        || optional_u64_param(input, "end_line").is_some()
+    {
+        return;
+    }
+    let offset = optional_u64_param(input, "offset");
+    let limit = optional_u64_param(input, "limit");
+    if offset.is_none() && limit.is_none() {
+        return;
+    }
+    let Some(obj) = input.as_object_mut() else {
+        return;
+    };
+    let start = offset.unwrap_or(1);
+    obj.insert("start_line".to_string(), json!(start));
+    if let Some(lim) = limit {
+        let end = start.saturating_add(lim).saturating_sub(1);
+        obj.insert("end_line".to_string(), json!(end));
+    }
 }
 
 /// Validate navigation parameter combinations for real-file reads.
@@ -621,12 +665,12 @@ fn read_full_file(
                 format!(
                     "File has {} lines. For source code, prefer symbols(path) \
                      + symbols(query=..., include_body=true) to read specific functions. \
-                     Or use offset/limit to read a line range.",
+                     Or use start_line/end_line to read a specific line range.",
                     total_lines
                 )
             } else {
                 format!(
-                    "File has {} lines. Use offset/limit to read specific ranges.",
+                    "File has {} lines. Use start_line=N, end_line=M to read a specific range.",
                     total_lines
                 )
             },
@@ -1233,6 +1277,104 @@ mod tests {
         assert!(
             !body.contains("line 99"),
             "window should start at start_line (line 100), got: {body:?}"
+        );
+    }
+    #[test]
+    fn normalize_line_nav_aliases_maps_offset_and_limit() {
+        let mut input = json!({ "path": "x", "offset": 100, "limit": 50 });
+        normalize_line_nav_aliases(&mut input);
+        assert_eq!(input["start_line"], json!(100));
+        assert_eq!(input["end_line"], json!(149));
+    }
+
+    #[test]
+    fn normalize_line_nav_aliases_limit_only_defaults_offset_to_one() {
+        let mut input = json!({ "path": "x", "limit": 30 });
+        normalize_line_nav_aliases(&mut input);
+        assert_eq!(input["start_line"], json!(1));
+        assert_eq!(input["end_line"], json!(30));
+    }
+
+    #[test]
+    fn normalize_line_nav_aliases_offset_only_leaves_end_line_unset() {
+        let mut input = json!({ "path": "x", "offset": 42 });
+        normalize_line_nav_aliases(&mut input);
+        assert_eq!(input["start_line"], json!(42));
+        assert!(input.get("end_line").is_none());
+    }
+
+    #[test]
+    fn normalize_line_nav_aliases_explicit_start_line_wins() {
+        let mut input = json!({ "path": "x", "start_line": 10, "offset": 100, "limit": 5 });
+        normalize_line_nav_aliases(&mut input);
+        assert_eq!(input["start_line"], json!(10));
+        // The aliases must not overwrite an explicit start_line or inject an end_line.
+        assert!(input.get("end_line").is_none());
+    }
+
+    #[test]
+    fn normalize_line_nav_aliases_noop_without_aliases() {
+        let mut input = json!({ "path": "x" });
+        normalize_line_nav_aliases(&mut input);
+        assert!(input.get("start_line").is_none());
+        assert!(input.get("end_line").is_none());
+    }
+
+    #[tokio::test]
+    async fn read_file_buffer_offset_limit_returns_slice_not_head() {
+        // Regression: read_file(@buf, offset=N, limit=M) is native-Read line nav and must
+        // return lines N..=N+M-1, NOT silently return the buffer head.
+        let lines: Vec<String> = (1..=300).map(|i| format!("line {i}")).collect();
+        let content = lines.join("\n");
+        let ctx = test_ctx().await;
+        let buf_id = ctx.output_buffer.store_tool("cmd", content);
+
+        let tool = ReadFile;
+        let result = tool
+            .call(json!({ "path": buf_id, "offset": 100, "limit": 50 }), &ctx)
+            .await
+            .unwrap();
+
+        let body = result.get("content").and_then(|v| v.as_str()).unwrap_or("");
+        assert!(
+            body.contains("line 100") && body.contains("line 149"),
+            "offset=100 limit=50 should yield lines 100..=149, got: {body:?}"
+        );
+        assert!(
+            !body.contains("line 99"),
+            "window should start at offset (line 100), not the head, got: {body:?}"
+        );
+        assert!(
+            !body.contains("line 150"),
+            "window should stop at offset+limit-1 (line 149), got: {body:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_file_buffer_offset_string_typed_maps_to_range() {
+        // MCP clients pass offset/limit as strings ("128"); optional_u64_param coerces them.
+        let lines: Vec<String> = (1..=300).map(|i| format!("line {i}")).collect();
+        let content = lines.join("\n");
+        let ctx = test_ctx().await;
+        let buf_id = ctx.output_buffer.store_tool("cmd", content);
+
+        let tool = ReadFile;
+        let result = tool
+            .call(
+                json!({ "path": buf_id, "offset": "200", "limit": "10" }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let body = result.get("content").and_then(|v| v.as_str()).unwrap_or("");
+        assert!(
+            body.contains("line 200") && body.contains("line 209"),
+            "offset=\"200\" limit=\"10\" should yield lines 200..=209, got: {body:?}"
+        );
+        assert!(
+            !body.contains("line 199") && !body.contains("line 210"),
+            "string-typed offset/limit must map to the exact window, got: {body:?}"
         );
     }
 }
