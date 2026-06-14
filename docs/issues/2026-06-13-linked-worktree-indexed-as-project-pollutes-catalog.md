@@ -1,12 +1,17 @@
 ---
-status: open
-opened: 2026-06-13
-closed:
-severity: medium
-owner: marius
-related: []
-tags: [librarian, catalog, worktree, indexing]
+id: null
 kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- librarian
+- catalog
+- worktree
+- indexing
+topic: null
+time_scope: null
+closed: 2026-06-14
 ---
 
 # BUG: Activating a linked git worktree as a project indexes its files into the global catalog (duplicate + stale-on-merge); the librarian has no worktree awareness
@@ -68,19 +73,18 @@ like any other project root.
 N/A — mechanism read from `indexer.rs` + `.gitignore` + `git worktree list`.
 
 ## Fix
-Plan (not implemented). Detect a linked worktree before indexing and skip it
-(index only the main worktree). Detection: a linked worktree's `.git` is a
-*file* (`gitdir: …/.git/worktrees/<name>`), or equivalently
-`git rev-parse --git-dir` != `git rev-parse --git-common-dir`. On a linked
-worktree, either refuse to index (return a clear message) or redirect indexing
-to the main worktree root. Principle: the catalog tracks one canonical
-(main-worktree) copy; worktree checkouts are duplicate + stale-on-merge.
 
+**Shipped on `experiments` in `9d84f347`** (`fix(indexer): skip indexing linked git worktrees into the catalog`). Not yet on `master` — archive after cherry-pick, cite the master-side SHA then.
+
+`src/librarian/current_project.rs::is_linked_worktree(root)` — filesystem-only detection (no `git` subprocess): a linked worktree's `.git` is a *file* whose `gitdir:` points through a `worktrees/` path component. A submodule's `.git` file points through `modules/`, so submodule roots are **not** skipped. `src/librarian/indexer.rs::index_repo_sync` guards on it at the top and returns an empty report (no walk, no rows) for a linked-worktree root — the single chokepoint all index paths (MCP reindex, CLI reindex, activate-time indexing) funnel through.
+
+The guard stops NEW pollution; existing worktree rows are cleaned by a main-tree `reindex(scope=project)` (gitignore excludes `.worktrees/` relative to the main root) or the new `doctor(fix=prune_missing, root=<worktree-path>)` ([[2026-06-13-catalog-orphans-survive-repo-rename]]).
 ## Tests added
-None yet. When fixed: a test that creating + activating a linked worktree as a
-project does not add `…/.worktrees/…` rows (indexing is a no-op / refused), and
-that main-tree indexing is unaffected.
 
+- `src/librarian/current_project.rs::is_linked_worktree_detects_worktree_not_submodule_or_main` — true for a `.git`-file worktree; false for a submodule (`modules/`), a main checkout (`.git` dir), and a non-git dir.
+- `src/librarian/indexer.rs::index_repo_sync_skips_linked_worktree` — a worktree fixture containing a `.md` yields `report.added == 0` and zero artifact rows.
+
+Full lib suite 2739 pass; clippy `-D warnings` clean.
 ## Workarounds
 Do not activate/index a linked worktree as a project. A `reindex(scope="project")`
 of the main tree prunes any worktree rows that slipped in (gitignore excludes
