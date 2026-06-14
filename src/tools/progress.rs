@@ -57,10 +57,12 @@ impl ProgressSink for PeerSink {
 /// call `ctx.progress.as_ref()` — it is a no-op when `None`.
 ///
 /// # Progress token
-/// `CallToolRequestParams._meta.progressToken` is the canonical source, but
-/// not all clients send it. We fall back to `_ctx.id` (the request ID) as a
-/// stand-in progress token. This works if the client correlates progress
-/// tokens with request IDs (common in practice).
+/// `CallToolRequestParams._meta.progressToken` is the canonical (and only)
+/// source. `server.rs::call_tool` constructs a reporter *only* when the client
+/// sent one — otherwise `ctx.progress` is `None` and every `report()` is a
+/// no-op. We deliberately do NOT synthesize a token from the request id:
+/// emitting progress the client never requested is an unsolicited notification
+/// that crashes Claude Code 2.x (BUG-038).
 ///
 /// # Throttling
 /// `report()` is throttled to at most one emission per 500 ms (2 Hz).

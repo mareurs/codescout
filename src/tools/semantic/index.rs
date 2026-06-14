@@ -257,15 +257,14 @@ impl Tool for IndexProject {
 
         let state_arc = ctx.agent.indexing.clone();
         let progress = ctx.progress.clone();
-        // Progress notifications from background tasks crash Claude Code 2.x
-        // (it closes the stdin pipe on receiving unsolicited notifications/progress).
-        // Disable until Claude Code supports MCP progress properly.
-        // See BUG-038 in docs/TODO-tool-misbehaviors.md.
-        //
-        // if let Some(p) = &progress {
-        //     p.report(0, None).await;
-        //     p.report_text("indexing project").await;
-        // }
+        // Progress is opt-in: `ctx.progress` is `Some` only when the client sent
+        // `_meta.progressToken` (see server.rs::call_tool), so emitting here is
+        // safe — never an unsolicited notification. BUG-038 was the old
+        // unconditional case that crashed Claude Code 2.x.
+        if let Some(p) = &progress {
+            p.report(0, None).await;
+            p.report_text("indexing project").await;
+        }
 
         // Resolve project_id up front — sync_project needs it as the
         // multi-tenant namespace inside the shared Qdrant collection.
@@ -286,10 +285,10 @@ impl Tool for IndexProject {
         let sync_abort_for_task = ctx.agent.active_sync_abort.clone();
         let sync_abort_for_store = ctx.agent.active_sync_abort.clone();
         let task = tokio::spawn(async move {
-            // Progress notifications are intentionally not wired through
-            // sync_project yet (BUG-038 — Claude Code 2.x crashes on
-            // unsolicited progress; tracked separately). IndexingState stays
-            // at Running{done:0, total:0} until completion sets Done/Failed.
+            // sync_project does not yet stream incremental progress; that deeper
+            // wiring is tracked separately. `progress` (opt-in via progressToken)
+            // is moved in so future increments can report safely. IndexingState
+            // stays at Running{done:0, total:0} until completion sets Done/Failed.
             let _progress = progress;
 
             tracing::info!("sync task entered");

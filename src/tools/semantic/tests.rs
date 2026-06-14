@@ -621,15 +621,21 @@ async fn semantic_search_emits_progress_text() {
 
 #[tokio::test]
 async fn index_project_emits_progress_on_start() {
-    // Progress notifications are disabled (BUG-038: crashes Claude Code 2.x).
-    // Verify that index_project still returns "started" without crashing.
+    // Progress is opt-in: a ctx with `progress: Some(_)` models a client that
+    // sent `_meta.progressToken`, so index_project emits an initial progress +
+    // status-text report. BUG-038 was the OLD unconditional emit (token
+    // synthesized from the request id) that fired even without opt-in and
+    // crashed Claude Code 2.x; see server.rs::call_tool.
     let (_dir, ctx, sink) = project_ctx_with_progress().await;
     let result = IndexProject.call(json!({}), &ctx).await;
     assert!(result.is_ok());
-    assert_eq!(
-        sink.progress_calls.load(Ordering::Relaxed),
-        0,
-        "progress should be disabled (BUG-038)"
+    assert!(
+        sink.progress_calls.load(Ordering::Relaxed) >= 1,
+        "index_project should emit an initial progress report when the client opted in"
+    );
+    assert!(
+        sink.text_calls.load(Ordering::Relaxed) >= 1,
+        "index_project should emit an initial status text when the client opted in"
     );
 }
 

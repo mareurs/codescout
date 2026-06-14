@@ -873,10 +873,17 @@ impl ServerHandler for CodeScoutServer {
                 .and_then(|m| m.get("action"))
                 .and_then(|v| v.as_str())
                 == Some("activate");
-        let progress = Some(progress::ProgressReporter::new(
-            req_ctx.peer.clone(),
-            req_ctx.id.clone(),
-        ));
+        // Emit progress ONLY when the client opted in via `_meta.progressToken`.
+        // The old behavior synthesized a token from `req_ctx.id`, producing
+        // UNSOLICITED `notifications/progress` — which crash Claude Code 2.x (it
+        // closes stdin on a progress notification it never requested; BUG-038).
+        // `None` makes `ctx.progress.report()` a documented no-op, the correct
+        // MCP behavior for a request that carried no progress token. This mirrors
+        // rmcp's own server transport (`get_meta().get_progress_token()`).
+        let progress = req_ctx
+            .meta
+            .get_progress_token()
+            .map(|token| progress::ProgressReporter::new(req_ctx.peer.clone(), token.0));
         let peer = Some(req_ctx.peer.clone());
         // `req_ctx.ct` is rmcp's per-request CancellationToken. It is cancelled
         // when the client sends a CancelledNotification (Escape in Claude Code).
