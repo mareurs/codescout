@@ -20,6 +20,26 @@ full deletion of `src/embed/index.rs` / `src/embed/bm25.rs` / `src/embed/fusion.
 
 Treat this as the punch-list before `cargo rm src/embed/index.rs` becomes safe.
 
+## 2026-06-14 audit — reconciled status
+
+A code audit (run cross-repo from claude-plugins) found this tracker **stale**:
+the 2026-05-13 memory-port design landed and closed most items below.
+
+**Done in code (still listed "open" in the table):**
+- **L-01** ✅ — `SemanticMemoryStore` trait + `QdrantSemanticMemoryStore` (`src/memory/semantic_store.rs`); `memory_upsert/search/delete/list` on `RetrievalClient` (`src/retrieval/memory.rs`); `migrate-memories` CLI + tests (`src/main.rs`, `src/migrate/memories.rs`).
+- **L-03** ✅ — `src/prompts/builders.rs` no longer calls `index::open_db`.
+- **L-04 / L-13** ✅ — memory queries route through `RetrievalClient::search_memories` (`src/retrieval/search.rs:126`, `memories` collection).
+- **L-05 / L-06 / L-07** ✅ — `embed/{index,bm25,local,drift}.rs` deleted; `tantivy` dropped from `Cargo.toml`.
+- **L-09 / L-10** ✅ — `index` tool re-routed to `sync_project`; `ONBOARDING_VERSION=29`.
+- Legacy-db detect hint lives at activation (`src/tools/config/mod.rs:552`).
+
+**Superseded:**
+- **L-08** — `embed/fusion.rs` + `embed/schema.rs` are NOT deletable: `fusion::rrf_fuse` and `schema::SearchResult` graduated into live consumers (`src/tools/semantic/semantic_search.rs`, `tests.rs`). Keep them; drop them from the diet list.
+
+**The real residual (NEW — never in the original L-list):**
+- **L-16** — **librarian artifact vector index still on sqlite-vec.** `src/librarian/catalog/schema.sql:36` defines `CREATE VIRTUAL TABLE artifact_vec USING vec0(...)`; `src/librarian/indexer.rs` embeds artifacts into it (lines 241, 572). A *third* vector index, independent of memory + code. It is the **sole remaining `sqlite-vec` consumer** (`init_sqlite_vec` at `src/librarian/catalog/mod.rs:35`), hence the **blocker for L-11**. Porting it is L-01-scale: new Qdrant collection for artifacts, `RetrievalClient` methods (reuse the `memory_*` pattern), rewire `indexer.rs` + librarian search, one-shot migration of existing `artifact_vec` rows, then delete the vec0 table + `init_sqlite_vec` + the dep.
+
+**L-11 now depends on L-16, not L-01.**
 ## Open items
 
 | ID | Surface | What still uses legacy | What replacing it requires |
@@ -41,6 +61,8 @@ Treat this as the punch-list before `cargo rm src/embed/index.rs` becomes safe.
 | L-15 | `src/tools/semantic/semantic_search.rs::apply_file_diversity_cap` | Helper kept `#[allow(dead_code)]` — stack search returns chunks ranked by Qdrant + reranker without a per-file diversity cap. Can over-represent one file in top-K | Apply the cap on `Vec<Hit>` after `client.search_code(...)` returns, before formatting. Carry MAX_CHUNKS_PER_FILE = 3 default. |
 
 ## Decision log
+
+- **2026-06-14** — Reconciliation audit (see "## 2026-06-14 audit" above): L-01/03/04/05-07/09/10/13 confirmed done in code; L-08 superseded (fusion/schema graduated to live consumers); the real residual is the librarian `artifact_vec` index (new item **L-16**), which blocks the L-11 sqlite-vec drop.
 
 - **2026-05-07** — Phase 7 narrowed to "remove backend knob + legacy code-search else
   branch only" (L-04 partially closed; the memory query path inside that else branch
