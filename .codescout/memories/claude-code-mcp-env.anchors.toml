@@ -3,4 +3,12 @@
 
 [[anchors]]
 path = "docs/issues/2026-06-14-get-guide-reinjects-on-mcp-restart.md"
-hash = "897fd71f0e9f193d2e21c51d254c4b290ac43eb79ea1c31d2a6946ceda752127"
+hash = "d54a729e4da84d441bbedb021acb1587e0c05a017910ea24c1d225d5a9a7a648"
+
+[[anchors]]
+path = "src/tools/onboarding.rs"
+hash = "2d57ebbb507a24a206bf1ee18931a1083a28d6b4d3c79f01ef05b24680f39ad9"
+
+[[anchors]]
+path = "Cargo.toml"
+hash = "bf3e90b0dbc389617b6776820670219b76c48c31b0dff35b2569e4ab7a0b8c89"
