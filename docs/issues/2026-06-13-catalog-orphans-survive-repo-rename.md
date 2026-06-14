@@ -1,12 +1,16 @@
 ---
-status: open
-opened: 2026-06-13
-closed:
-severity: medium
-owner: marius
-related: []
-tags: [librarian, catalog, doctor]
+id: null
 kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- librarian
+- catalog
+- doctor
+topic: null
+time_scope: null
+closed: 2026-06-14
 ---
 
 # BUG: Catalog rows orphaned by a repo rename/move are not migrated, and `doctor` detects but cannot safely prune them
@@ -76,21 +80,20 @@ built **without** the `vec0` module.
 N/A — diagnosed directly from schema + catalog state.
 
 ## Fix
-Plan (not implemented). Either or both:
-1. **Migration on rename/move.** A `librarian(action="move_repo"/"rename_repo")`
-   (or `reindex` detecting a moved root) that rewrites `abs_path` / `git_root`
-   for the old root to the new one, preserving ids/events where possible.
-2. **vec0-aware scoped prune.** Extend `doctor` with an opt-in fix
-   (e.g. `doctor(fix="prune_missing", root=<path>)`) or an `artifact` bulk
-   delete-by-path-prefix, executed through codescout's own (vec0-linked,
-   trusted-schema) connection so the cascade trigger works — removing the need
-   for hand-compiled-extension surgery.
 
+**Shipped on `experiments` in `4d3f32cd`** (`feat(doctor): add fix=prune_missing to safely prune a dead repo root from the catalog`). Not yet on `master` — archive after cherry-pick, cite the master-side SHA then.
+
+Implemented **option 2 (vec0-aware scoped prune)**. New opt-in repair on the doctor tool:
+`librarian(action="doctor", fix="prune_missing", root="<absolute dead-root path>")` deletes every `artifact` row whose `abs_path` is `root` or under `root/`, and every `commits` row whose `git_root` is `root` or under `root/`, through codescout's own (vec0-linked, trusted-schema) connection — so the `artifact_vec` cascade trigger and the FK `ON DELETE CASCADE`s (augmentation / links / events) all fire. This retires the hand-compiled-`vec0`-extension sqlite3 surgery in Workarounds. Gated for safety: `root` must be absolute and must **not** exist on disk (a live root's rows are not orphans; per-file deletion is reindex's job). Default `doctor` stays read-only. `src/librarian/tools/doctor.rs` (`run_fix` / `validate_prune_request` / `prune_dead_root`), `src/librarian/tools/librarian.rs` (schema + description).
+
+**Deferred (option 1):** auto-migration on rename (rewrite `abs_path` / `git_root` for a moved root, preserving ids/events) — a rename still orphans rows; the prune is the sanctioned cleanup. Also deferred: a `missing_git_root` *detection* check so dead commits rows are auto-reported, not just prunable-once-known.
 ## Tests added
-None yet. When fixed: regression test that a moved/renamed root's rows are
-migrated (option 1) or prunable via a scoped, vec0-aware path (option 2),
-asserting cascade to `artifact_augmentation`/`events`/`artifact_vec`.
 
+`src/librarian/tools/doctor.rs` tests:
+- `prune_dead_root_removes_rows_under_root_only` — deletes exact-root + nested artifact rows + the matching commits row; asserts a path-PREFIX sibling (`/gone/repo-other`) and an unrelated live row are NOT matched.
+- `validate_prune_request_gates` — unknown fix, missing root, relative root, and a still-existing root (`/tmp`) are all refused; a dead absolute root is accepted.
+
+Full lib suite 2737 pass; clippy `-D warnings` clean. Cascade-to-augmentation is covered by `delete.rs`'s existing cascade tests over the same connection.
 ## Workarounds
 Manual surgical cleanup with a backup (used this session):
 ```bash
