@@ -36,15 +36,18 @@
 //! deletion, but a defensive check would catch FK-constraint disabled
 //! corruption).
 //!
-//! The scanner is read-only — no mutation, no `--fix` mode. Output is a
-//! JSON report with `violations` (flat list) and `summary` (per-check
-//! counts).
+//! The default scan is read-only. An opt-in `fix=prune_missing` mode (with a
+//! required `root=` argument) prunes every `artifact` + `commits` row anchored
+//! under a dead/renamed repo root — cascade-safe through codescout's own
+//! (vec0-linked) connection, which a bare `sqlite3` CLI cannot do (7ca71bf7).
+//! Output is a JSON report with `violations` + `summary` (per-check counts); a
+//! fix run returns `pruned` counts instead.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::ToolContext;
+use super::{RecoverableError, ToolContext};
 
 /// One violation of a doctor invariant.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -82,7 +85,13 @@ impl Violation {
 
 /// MCP entry point. Runs every invariant check and returns a structured
 /// report. Reads-only; safe to invoke against a live catalog.
-pub async fn call(ctx: &ToolContext, _args: Value) -> Result<Value> {
+pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    // Opt-in mutation: prune catalog rows under a dead/renamed repo root.
+    // Default (no `fix`) stays read-only.
+    if let Some(fix) = args.get("fix").and_then(Value::as_str) {
+        return run_fix(ctx, fix, args.get("root").and_then(Value::as_str)).await;
+    }
+
     let cat = ctx.catalog.lock();
     let mut all_violations: Vec<Violation> = Vec::new();
 
@@ -104,6 +113,70 @@ pub async fn call(ctx: &ToolContext, _args: Value) -> Result<Value> {
             "by_check": by_check,
         },
     }))
+}
+
+/// Validate a `prune_missing` request without touching the catalog. Returns the
+/// validated dead-root path, or a `RecoverableError` for an unsupported fix, a
+/// missing/relative root, or a root that still exists (a live root's rows are
+/// not orphans — per-file deletions belong to reindex's walk, not a bulk prune).
+fn validate_prune_request<'a>(fix: &str, root: Option<&'a str>) -> Result<&'a std::path::Path> {
+    if fix != "prune_missing" {
+        return Err(RecoverableError::new(format!(
+            "unknown fix '{fix}' — supported: prune_missing (requires root=<absolute path of the dead/renamed repo root>)"
+        )));
+    }
+    let root = root.ok_or_else(|| {
+        RecoverableError::new(
+            "fix=prune_missing requires root=<absolute path of the dead/renamed repo root to prune>",
+        )
+    })?;
+    let root_path = std::path::Path::new(root);
+    if !root_path.is_absolute() {
+        return Err(RecoverableError::new(format!(
+            "root must be an absolute path, got '{root}'"
+        )));
+    }
+    if root_path.exists() {
+        return Err(RecoverableError::new(format!(
+            "root '{root}' still exists on disk — prune_missing only removes rows under a dead/renamed root; nothing pruned"
+        )));
+    }
+    Ok(root_path)
+}
+
+/// Opt-in catalog repair. Currently one fix: `prune_missing` — remove every row
+/// anchored under a dead/renamed repo `root`.
+async fn run_fix(ctx: &ToolContext, fix: &str, root: Option<&str>) -> Result<Value> {
+    let root_path = validate_prune_request(fix, root)?;
+    let cat = ctx.catalog.lock();
+    let (artifact_rows, commit_rows) = prune_dead_root(&cat.conn, root_path)?;
+    drop(cat);
+    Ok(json!({
+        "fix": "prune_missing",
+        "root": root_path.to_string_lossy(),
+        "pruned": { "artifact_rows": artifact_rows, "commit_rows": commit_rows },
+    }))
+}
+
+/// Delete every catalog row anchored under a dead repo `root`: `artifact` rows
+/// whose `abs_path` is `root` or under `root/`, and `commits` rows whose
+/// `git_root` is `root` or under `root/`. Runs through codescout's own
+/// (vec0-linked, trusted-schema) connection, so the `artifact_vec` cascade
+/// trigger and the FK `ON DELETE CASCADE`s (augmentation / links / events) all
+/// fire — a bare `sqlite3` CLI cannot (7ca71bf7). Returns (artifact_rows,
+/// commit_rows) removed.
+fn prune_dead_root(conn: &rusqlite::Connection, root: &std::path::Path) -> Result<(usize, usize)> {
+    let root_fwd = format!("{}", crate::util::fs::RepoPath::from_path(root));
+    let under = format!("{root_fwd}/%");
+    let artifact_rows = conn.execute(
+        "DELETE FROM artifact WHERE abs_path = ?1 OR abs_path LIKE ?2",
+        rusqlite::params![root_fwd, under],
+    )?;
+    let commit_rows = conn.execute(
+        "DELETE FROM commits WHERE git_root = ?1 OR git_root LIKE ?2",
+        rusqlite::params![root_fwd, under],
+    )?;
+    Ok((artifact_rows, commit_rows))
 }
 
 /// Pulls every `(id, abs_path)` row once and runs five per-row checks
@@ -384,5 +457,63 @@ mod tests {
         let r = scan_commits_git_root(&cat.conn).unwrap();
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].check, "backslash_in_git_root");
+    }
+
+    #[test]
+    fn validate_prune_request_gates() {
+        // unknown fix → refused
+        assert!(validate_prune_request("zap", Some("/gone")).is_err());
+        // missing root → refused
+        assert!(validate_prune_request("prune_missing", None).is_err());
+        // relative root → refused
+        assert!(validate_prune_request("prune_missing", Some("relative/path")).is_err());
+        // live root refused (/tmp exists on the test host) — not an orphan
+        assert!(validate_prune_request("prune_missing", Some("/tmp")).is_err());
+        // dead absolute root → accepted
+        assert!(
+            validate_prune_request("prune_missing", Some("/definitely/not/a/real/root/xyz"))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn prune_dead_root_removes_rows_under_root_only() {
+        let cat = Catalog::open_in_memory().unwrap();
+        // Rows under a dead root /gone/repo (exact + nested).
+        seed_artifact(&cat, "g1", "/gone/repo");
+        seed_artifact(&cat, "g2", "/gone/repo/a.md");
+        seed_artifact(&cat, "g3", "/gone/repo/docs/b.md");
+        // A sibling row that merely shares a path PREFIX string but is a
+        // different repo — must NOT be pruned (no false LIKE match).
+        seed_artifact(&cat, "sib", "/gone/repo-other/c.md");
+        // An unrelated live row.
+        seed_artifact(&cat, "keep", "/tmp/keep.md");
+        seed_commit(&cat, "deadc0de", "/gone/repo");
+        seed_commit(&cat, "livecdef", "/tmp");
+
+        let (arts, commits) =
+            prune_dead_root(&cat.conn, std::path::Path::new("/gone/repo")).unwrap();
+        assert_eq!(arts, 3, "the 3 rows at/under /gone/repo are removed");
+        assert_eq!(commits, 1, "the /gone/repo commit is removed");
+
+        // Survivors: the prefix-sibling and the unrelated row remain.
+        let exists = |id: &str| -> i64 {
+            cat.conn
+                .query_row("SELECT COUNT(*) FROM artifact WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })
+                .unwrap()
+        };
+        assert_eq!(
+            exists("sib"),
+            1,
+            "/gone/repo-other not matched by the prefix"
+        );
+        assert_eq!(exists("keep"), 1);
+        let n_com: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM commits", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n_com, 1, "only the /tmp commit remains");
     }
 }

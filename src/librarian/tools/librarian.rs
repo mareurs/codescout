@@ -29,12 +29,14 @@ impl Tool for Librarian {
          tracker — open targets ranked by observed cost (tier 1 biting-now, tier 2 \
          latent), auto-closing refactored ones with a before/after delta. \
          write=false for a dry-run JSON. \
-         doctor: read-only catalog drift scanner. Checks abs_path columns for \
+         doctor: catalog drift scanner (read-only by default). Checks abs_path columns for \
          absolute-form, forward-slash form, NTFS ADS colons, '..' segments, \
          and missing files on disk; checks commits.git_root for forward-slash \
          form. Returns a JSON report with per-check violation counts. Manual \
          cadence — run after large refactors or when downstream LIKE queries \
-         return empty."
+         return empty. Opt-in repair: fix=prune_missing + root=<absolute path of \
+         a dead/renamed repo root> prunes (cascade-safe) every artifact + commits \
+         row anchored under a root that no longer exists on disk."
     }
 
     fn input_schema(&self) -> Value {
@@ -82,7 +84,9 @@ impl Tool for Librarian {
                 "fail_on": { "type": "string", "default": "never", "description": "audit_doc_refs: exit_code 1 when findings reach this severity (high | med | low | never)" },
                 "write": { "type": "boolean", "default": true, "description": "legibility_scan: reconcile the backlog tracker (false = dry-run JSON only)" },
                 "project": { "type": "string", "description": "legibility_scan: project root path; defaults to active project. Scopes the recorder lane." },
-                "limit": { "type": "integer", "description": "legibility_scan: cap candidates returned/written" }
+                "limit": { "type": "integer", "description": "legibility_scan: cap candidates returned/written" },
+                "fix": { "type": "string", "enum": ["prune_missing"], "description": "doctor: opt-in repair. prune_missing removes every artifact + commits row under a dead/renamed root (requires root=). Omit for a read-only scan." },
+                "root": { "type": "string", "description": "doctor fix=prune_missing: absolute path of the dead/renamed repo root to prune. Refused if the path still exists on disk." }
             }
         })
     }
