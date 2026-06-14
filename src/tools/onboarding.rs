@@ -625,17 +625,10 @@ async fn handle_already_onboarded(ctx: &ToolContext) -> anyhow::Result<Option<Va
     Ok(Some(response))
 }
 
-async fn perform_full_onboarding(
-    root: std::path::PathBuf,
-    ctx: &ToolContext,
-) -> anyhow::Result<Value> {
-    // Hardware detection runs after the file walk (Rust futures are lazy — this
-    // just creates the future; it starts executing only when .await'd below).
-    let hw_future = detect_hardware_context();
-
-    // Detect languages by walking files
+/// Walk the project tree and collect the set of detected languages.
+fn detect_languages(root: &std::path::Path) -> std::collections::BTreeSet<String> {
     let mut languages = std::collections::BTreeSet::new();
-    let walker = ignore::WalkBuilder::new(&root)
+    let walker = ignore::WalkBuilder::new(root)
         .hidden(true)
         .git_ignore(true)
         .build();
@@ -646,10 +639,13 @@ async fn perform_full_onboarding(
             }
         }
     }
+    languages
+}
 
-    // List top-level entries
+/// List the project's top-level entries (directories suffixed with `/`), sorted.
+fn list_top_level_entries(root: &std::path::Path) -> Vec<String> {
     let mut top_level = vec![];
-    if let Ok(entries) = std::fs::read_dir(&root) {
+    if let Ok(entries) = std::fs::read_dir(root) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
             let suffix = if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
@@ -661,6 +657,198 @@ async fn perform_full_onboarding(
         }
     }
     top_level.sort();
+    top_level
+}
+
+/// Build the key-files manifest for the onboarding prompt (paths only, no content).
+fn build_key_files(gathered: &GatheredContext) -> Vec<String> {
+    let mut key_files: Vec<String> = Vec::new();
+    if let Some(ref p) = gathered.readme_path {
+        key_files.push(p.clone());
+    }
+    if gathered.claude_md_exists {
+        key_files.push("CLAUDE.md".to_string());
+    }
+    if let Some(ref p) = gathered.build_file_name {
+        key_files.push(p.clone());
+    }
+    key_files
+}
+
+/// Write `.codescout/workspace.toml` for multi-project repos when it does not yet exist.
+fn write_workspace_config_if_needed(
+    root: &std::path::Path,
+    gathered: &GatheredContext,
+) -> anyhow::Result<()> {
+    let workspace_config_path = crate::config::workspace::workspace_config_path(root);
+    if gathered.projects.len() > 1 && !workspace_config_path.exists() {
+        let ws_config = crate::config::workspace::WorkspaceConfig {
+            workspace: crate::config::workspace::WorkspaceSection {
+                name: root
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unnamed")
+                    .to_string(),
+                discovery_max_depth: 3,
+            },
+            resources: Default::default(),
+            exclude_projects: vec![],
+            projects: gathered
+                .projects
+                .iter()
+                .map(|p| {
+                    let project_abs = root.join(&p.relative_root);
+                    let depends_on =
+                        crate::workspace::infer_depends_on(&project_abs, root, &gathered.projects);
+                    crate::config::workspace::ProjectEntry {
+                        id: p.id.clone(),
+                        root: p.relative_root.to_string_lossy().to_string(),
+                        languages: p.languages.clone(),
+                        depends_on,
+                    }
+                })
+                .collect(),
+        };
+        let toml_str = toml::to_string_pretty(&ws_config)?;
+        std::fs::write(&workspace_config_path, &toml_str)?;
+    }
+    Ok(())
+}
+
+/// Probe the semantic index (Qdrant) for readiness. Best-effort: returns a
+/// `{ ready, files, chunks }` envelope, with `ready: false` when the retrieval
+/// stack is offline.
+async fn probe_index_status(ctx: &ToolContext) -> Value {
+    let project_id = ctx
+        .agent
+        .with_project(|p| Ok(p.project_id().to_string()))
+        .await
+        .unwrap_or_else(|_| String::new());
+    if project_id.is_empty() {
+        return json!({ "ready": false, "files": 0, "chunks": 0 });
+    }
+    match crate::retrieval::client::RetrievalClient::from_env().await {
+        Ok(client) => {
+            let coll = client.config.collection("code_chunks");
+            match client.qdrant.project_index_stats(&coll, &project_id).await {
+                Ok((chunks, files)) => json!({
+                    "ready": chunks > 0,
+                    "files": files,
+                    "chunks": chunks,
+                }),
+                Err(_) => json!({ "ready": false, "files": 0, "chunks": 0 }),
+            }
+        }
+        Err(_) => json!({ "ready": false, "files": 0, "chunks": 0 }),
+    }
+}
+
+/// Write the `onboarding` and `language-patterns` programmatic memories for the
+/// root project, and — in workspace mode — for each discovered sub-project.
+async fn write_onboarding_memories(
+    ctx: &ToolContext,
+    root: &std::path::Path,
+    lang_list: &[String],
+    gathered: &GatheredContext,
+) -> anyhow::Result<()> {
+    ctx.agent
+        .with_project(|p| {
+            let summary = format!(
+                "Languages: {}\nHas README: {}\nHas CLAUDE.md: {}\nBuild file: {}\nEntry points: {}\nTest dirs: {}",
+                lang_list.join(", "),
+                gathered.readme_path.is_some(),
+                gathered.claude_md_exists,
+                gathered.build_file_name.as_deref().unwrap_or("none"),
+                if gathered.entry_points.is_empty() {
+                    "none".to_string()
+                } else {
+                    gathered.entry_points.join(", ")
+                },
+                if gathered.test_dirs.is_empty() {
+                    "none".to_string()
+                } else {
+                    gathered.test_dirs.join(", ")
+                },
+            );
+            p.memory.write("onboarding", &summary)?;
+            if let Some(patterns) = build_language_patterns_memory(lang_list) {
+                p.memory.write("language-patterns", &patterns)?;
+            }
+            Ok(())
+        })
+        .await?;
+
+    if gathered.projects.len() > 1 {
+        for project in &gathered.projects {
+            let mem_dir = if project.relative_root == std::path::Path::new(".") {
+                root.join(".codescout").join("memories")
+            } else {
+                root.join(".codescout")
+                    .join("projects")
+                    .join(&project.id)
+                    .join("memories")
+            };
+            if let Ok(store) = crate::memory::MemoryStore::from_dir(mem_dir) {
+                let proj_summary = format!(
+                    "Languages: {}\nRoot: {}\nManifest: {}",
+                    project.languages.join(", "),
+                    project.relative_root.display(),
+                    project.manifest.as_deref().unwrap_or("none"),
+                );
+                let _ = store.write("onboarding", &proj_summary);
+                if let Some(patterns) = build_language_patterns_memory(&project.languages) {
+                    let _ = store.write("language-patterns", &patterns);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Gather per-sub-project protected-memory state for workspace mode.
+/// Returns `(workspace_mode, per_project_protected)`.
+async fn gather_per_project_protected(
+    ctx: &ToolContext,
+    root: &std::path::Path,
+    gathered: &GatheredContext,
+) -> (bool, Option<Value>) {
+    if gathered.projects.len() <= 1 {
+        return (false, None);
+    }
+    let protected = ctx
+        .agent
+        .with_project(|p| Ok(p.config.memory.protected.clone()))
+        .await
+        .unwrap_or_default();
+    let mut map = serde_json::Map::new();
+    for project in &gathered.projects {
+        let mem_dir = if project.relative_root == std::path::Path::new(".") {
+            root.join(".codescout").join("memories")
+        } else {
+            root.join(".codescout")
+                .join("projects")
+                .join(&project.id)
+                .join("memories")
+        };
+        let project_root = root.join(&project.relative_root);
+        if let Ok(store) = crate::memory::MemoryStore::from_dir(mem_dir.clone()) {
+            let state = gather_protected_memory_state(&store, &mem_dir, &project_root, &protected);
+            map.insert(project.id.clone(), state);
+        }
+    }
+    (true, Some(Value::Object(map)))
+}
+
+async fn perform_full_onboarding(
+    root: std::path::PathBuf,
+    ctx: &ToolContext,
+) -> anyhow::Result<Value> {
+    // Hardware detection runs after the file walk (Rust futures are lazy — this
+    // just creates the future; it starts executing only when .await'd below).
+    let hw_future = detect_hardware_context();
+
+    let languages = detect_languages(&root);
+    let top_level = list_top_level_entries(&root);
 
     // Resolve hardware detection and derive model options
     let hw = hw_future.await;
@@ -717,125 +905,14 @@ async fn perform_full_onboarding(
     let gathered = gather_project_context(&root, discovered);
 
     // Create workspace.toml for multi-project repos
-    let workspace_config_path = crate::config::workspace::workspace_config_path(&root);
-    if gathered.projects.len() > 1 && !workspace_config_path.exists() {
-        let ws_config = crate::config::workspace::WorkspaceConfig {
-            workspace: crate::config::workspace::WorkspaceSection {
-                name: root
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unnamed")
-                    .to_string(),
-                discovery_max_depth: 3,
-            },
-            resources: Default::default(),
-            exclude_projects: vec![],
-            projects: gathered
-                .projects
-                .iter()
-                .map(|p| {
-                    let project_abs = root.join(&p.relative_root);
-                    let depends_on =
-                        crate::workspace::infer_depends_on(&project_abs, &root, &gathered.projects);
-                    crate::config::workspace::ProjectEntry {
-                        id: p.id.clone(),
-                        root: p.relative_root.to_string_lossy().to_string(),
-                        languages: p.languages.clone(),
-                        depends_on,
-                    }
-                })
-                .collect(),
-        };
-        let toml_str = toml::to_string_pretty(&ws_config)?;
-        std::fs::write(&workspace_config_path, &toml_str)?;
-    }
+    write_workspace_config_if_needed(&root, &gathered)?;
 
-    // Probe semantic index status. Best-effort Qdrant scroll; on failure
-    // (retrieval stack offline) report a `ready: false` envelope. The
-    // sqlite-based legacy path was removed in L-01 step 8.
-    let index_status = {
-        let project_id = ctx
-            .agent
-            .with_project(|p| Ok(p.project_id().to_string()))
-            .await
-            .unwrap_or_else(|_| String::new());
-        if project_id.is_empty() {
-            json!({ "ready": false, "files": 0, "chunks": 0 })
-        } else {
-            match crate::retrieval::client::RetrievalClient::from_env().await {
-                Ok(client) => {
-                    let coll = client.config.collection("code_chunks");
-                    match client.qdrant.project_index_stats(&coll, &project_id).await {
-                        Ok((chunks, files)) => json!({
-                            "ready": chunks > 0,
-                            "files": files,
-                            "chunks": chunks,
-                        }),
-                        Err(_) => json!({ "ready": false, "files": 0, "chunks": 0 }),
-                    }
-                }
-                Err(_) => json!({ "ready": false, "files": 0, "chunks": 0 }),
-            }
-        }
-    };
+    // Probe semantic index status (best-effort Qdrant scroll).
+    let index_status = probe_index_status(ctx).await;
 
-    // Store onboarding result in memory
+    // Store onboarding result in memory (root + each sub-project in workspace mode)
     let lang_list: Vec<String> = languages.iter().cloned().collect();
-    ctx.agent
-        .with_project(|p| {
-            let summary = format!(
-                "Languages: {}\nHas README: {}\nHas CLAUDE.md: {}\nBuild file: {}\nEntry points: {}\nTest dirs: {}",
-                lang_list.join(", "),
-                gathered.readme_path.is_some(),
-                gathered.claude_md_exists,
-                gathered.build_file_name.as_deref().unwrap_or("none"),
-                if gathered.entry_points.is_empty() {
-                    "none".to_string()
-                } else {
-                    gathered.entry_points.join(", ")
-                },
-                if gathered.test_dirs.is_empty() {
-                    "none".to_string()
-                } else {
-                    gathered.test_dirs.join(", ")
-                },
-            );
-            p.memory.write("onboarding", &summary)?;
-
-            // Write language-patterns memory (deterministic, from hardcoded content)
-            if let Some(patterns) = build_language_patterns_memory(&lang_list) {
-                p.memory.write("language-patterns", &patterns)?;
-            }
-
-            Ok(())
-        })
-        .await?;
-
-    // Write programmatic memories for each sub-project in workspace mode.
-    if gathered.projects.len() > 1 {
-        for project in &gathered.projects {
-            let mem_dir = if project.relative_root == std::path::Path::new(".") {
-                root.join(".codescout").join("memories")
-            } else {
-                root.join(".codescout")
-                    .join("projects")
-                    .join(&project.id)
-                    .join("memories")
-            };
-            if let Ok(store) = crate::memory::MemoryStore::from_dir(mem_dir) {
-                let proj_summary = format!(
-                    "Languages: {}\nRoot: {}\nManifest: {}",
-                    project.languages.join(", "),
-                    project.relative_root.display(),
-                    project.manifest.as_deref().unwrap_or("none"),
-                );
-                let _ = store.write("onboarding", &proj_summary);
-                if let Some(patterns) = build_language_patterns_memory(&project.languages) {
-                    let _ = store.write("language-patterns", &patterns);
-                }
-            }
-        }
-    }
+    write_onboarding_memories(ctx, &root, &lang_list, &gathered).await?;
 
     // Gather protected memory state for the LLM merge flow
     let protected_memories = ctx
@@ -853,16 +930,7 @@ async fn perform_full_onboarding(
         .await?;
 
     // Build the key-files manifest for the prompt (paths only, no content)
-    let mut key_files: Vec<String> = Vec::new();
-    if let Some(ref p) = gathered.readme_path {
-        key_files.push(p.clone());
-    }
-    if gathered.claude_md_exists {
-        key_files.push("CLAUDE.md".to_string());
-    }
-    if let Some(ref p) = gathered.build_file_name {
-        key_files.push(p.clone());
-    }
+    let key_files = build_key_files(&gathered);
 
     // Build the onboarding instruction prompt
     let is_workspace = gathered.projects.len() > 1;
@@ -917,33 +985,8 @@ async fn perform_full_onboarding(
     );
 
     // Per-project protected memory state for workspace mode.
-    let (workspace_mode, per_project_protected) = if gathered.projects.len() > 1 {
-        let protected = ctx
-            .agent
-            .with_project(|p| Ok(p.config.memory.protected.clone()))
-            .await
-            .unwrap_or_default();
-        let mut map = serde_json::Map::new();
-        for project in &gathered.projects {
-            let mem_dir = if project.relative_root == std::path::Path::new(".") {
-                root.join(".codescout").join("memories")
-            } else {
-                root.join(".codescout")
-                    .join("projects")
-                    .join(&project.id)
-                    .join("memories")
-            };
-            let project_root = root.join(&project.relative_root);
-            if let Ok(store) = crate::memory::MemoryStore::from_dir(mem_dir.clone()) {
-                let state =
-                    gather_protected_memory_state(&store, &mem_dir, &project_root, &protected);
-                map.insert(project.id.clone(), state);
-            }
-        }
-        (true, Some(Value::Object(map)))
-    } else {
-        (false, None)
-    };
+    let (workspace_mode, per_project_protected) =
+        gather_per_project_protected(ctx, &root, &gathered).await;
 
     // Build the subagent prompt by concatenating preamble + onboarding prompt +
     // system prompt draft + gathered data + epilogue
