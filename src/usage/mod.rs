@@ -67,7 +67,7 @@ impl UsageRecorder {
         } else {
             None
         };
-        let err_family = error_msg.as_deref().and_then(normalize_err_family);
+        let err_family = error_msg.as_deref().and_then(db::normalize_err_family);
         let project_root_str = project_root.to_string_lossy().to_string();
 
         let input_json = if self.debug {
@@ -147,38 +147,6 @@ fn extract_overflow_tokens(result: &Result<Vec<Content>>) -> Option<i64> {
     let v: Value = serde_json::from_str(text).ok()?;
     let bytes = v.get("buffered_bytes").and_then(Value::as_i64)?;
     Some(bytes / 4)
-}
-
-/// Map an error message to a stable, low-cardinality family tag for the probe.
-/// Order matters: more specific patterns first. `None` for unrecognized messages.
-fn normalize_err_family(msg: &str) -> Option<&'static str> {
-    // infra / tool-class (excluded from the probe's code-class score)
-    if msg.contains("index is locked") {
-        return Some("lsp_index_locked");
-    }
-    if msg.contains("Failed to spawn mux") || msg.contains("mux startup failed") {
-        return Some("mux_startup_fail");
-    }
-    if msg.contains("LSP server is not running") {
-        return Some("lsp_not_running");
-    }
-    if msg.contains("LSP server disconnected") {
-        return Some("lsp_disconnect");
-    }
-    // code / extractor-shape class
-    if msg.contains("AST parse failed") || msg.contains("cannot determine end of") {
-        return Some("ast_extent_fail");
-    }
-    if msg.contains("ambiguous name_path") {
-        return Some("ambiguous_name_path");
-    }
-    if msg.contains("dropped sibling") || msg.contains("dropped the symbol") {
-        return Some("replace_dropped_sibling");
-    }
-    if msg.contains("symbol not found") {
-        return Some("symbol_not_found");
-    }
-    None
 }
 
 /// The symbol/path a call addressed, for friction attribution. Priority order:
@@ -274,42 +242,6 @@ mod content_tests {
 
         let err: Result<Vec<Content>> = Err(anyhow::anyhow!("boom"));
         assert_eq!(extract_overflow_tokens(&err), None);
-    }
-
-    #[test]
-    fn normalize_err_family_maps_known_messages() {
-        let cases = [
-            (
-                "cannot determine end of 'Inner' for insert-after — AST parse failed",
-                Some("ast_extent_fail"),
-            ),
-            (
-                "ambiguous name_path \"LspManager/get_or_start\" matches 2 symbols",
-                Some("ambiguous_name_path"),
-            ),
-            (
-                "edit_code replace('X') would have dropped sibling",
-                Some("replace_dropped_sibling"),
-            ),
-            ("LSP server disconnected", Some("lsp_disconnect")),
-            (
-                "kotlin LSP index is locked by another process",
-                Some("lsp_index_locked"),
-            ),
-            (
-                "mux startup failed for kotlin: Failed to spawn mux process",
-                Some("mux_startup_fail"),
-            ),
-            ("LSP server is not running", Some("lsp_not_running")),
-            (
-                "symbol not found: ActionContribution/toDTO",
-                Some("symbol_not_found"),
-            ),
-            ("some unrecognized failure", None),
-        ];
-        for (msg, want) in cases {
-            assert_eq!(normalize_err_family(msg), want, "msg: {msg}");
-        }
     }
 
     #[test]

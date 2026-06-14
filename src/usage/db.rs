@@ -98,6 +98,8 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
         )?;
     }
 
+    backfill_legacy_rows(&conn, &project_root.to_string_lossy())?;
+
     Ok(conn)
 }
 
@@ -145,6 +147,130 @@ pub fn write_record(
         "DELETE FROM tool_calls WHERE called_at < datetime('now', '-30 days')",
         [],
     )?;
+    Ok(())
+}
+
+/// Map an error message to a stable, low-cardinality family tag for the probe.
+/// Order matters: more specific patterns first. `None` for unrecognized messages.
+///
+/// Lives here (not in the parent module) so the one-time backfill in `open_db`
+/// can re-classify historical `error_msg` values with the same logic
+/// `write_content` applies to new rows.
+pub(crate) fn normalize_err_family(msg: &str) -> Option<&'static str> {
+    // infra / tool-class (excluded from the probe's code-class score)
+    if msg.contains("index is locked") {
+        return Some("lsp_index_locked");
+    }
+    if msg.contains("Failed to spawn mux") || msg.contains("mux startup failed") {
+        return Some("mux_startup_fail");
+    }
+    if msg.contains("LSP server is not running") {
+        return Some("lsp_not_running");
+    }
+    if msg.contains("LSP server disconnected") {
+        return Some("lsp_disconnect");
+    }
+    // iron-law routing / wrong-tool class — the agent reached for the wrong tool
+    // and the server gate rejected + re-routed it. These dominate the real error
+    // population; the original taxonomy missed them all, leaving err_family NULL
+    // on ~90% of errors even on fresh rows.
+    if msg.contains("overlaps named symbol") {
+        return Some("il1_read_overlaps_symbol");
+    }
+    if msg.contains("Use read_markdown") {
+        return Some("il4_read_markdown_routing");
+    }
+    if msg.contains("Use edit_markdown") {
+        return Some("il5_edit_markdown_routing");
+    }
+    if msg.contains("contains a symbol definition")
+        || msg.contains("is blocked for structural edits")
+    {
+        return Some("il2_structural_edit");
+    }
+    if msg.contains("shell access to source files is blocked") {
+        return Some("il3_shell_on_source");
+    }
+    if msg.contains("IL3 violation") {
+        return Some("il3_pipe_to_trimmer");
+    }
+    // security / scope class
+    if msg.contains("write denied") {
+        return Some("write_scope_denied");
+    }
+    // input-shape / extractor class
+    if msg.contains("unsupported json_path") {
+        return Some("json_path_unsupported");
+    }
+    if msg.contains("old_string not found") {
+        return Some("edit_stale_match");
+    }
+    // code / extractor-shape class
+    if msg.contains("AST parse failed") || msg.contains("cannot determine end of") {
+        return Some("ast_extent_fail");
+    }
+    if msg.contains("ambiguous name_path") {
+        return Some("ambiguous_name_path");
+    }
+    if msg.contains("dropped sibling") || msg.contains("dropped the symbol") {
+        return Some("replace_dropped_sibling");
+    }
+    if msg.contains("symbol not found") {
+        return Some("symbol_not_found");
+    }
+    None
+}
+
+/// Bump to force a one-time re-run of [`backfill_legacy_rows`] on the next open
+/// (e.g. after the [`normalize_err_family`] taxonomy is extended). Tracked via
+/// SQLite's `PRAGMA user_version`.
+const BACKFILL_VERSION: i64 = 1;
+
+/// One-time, idempotent repair of rows written before the friction columns were
+/// populated. Gated on `PRAGMA user_version` so it runs once per DB and is a
+/// cheap no-op (one pragma read) on every subsequent open.
+///
+/// Two columns are reconstructable from data still on the row:
+/// - `project_root`: every row in a given `usage.db` belongs to that file's
+///   project (the DB lives at `<root>/.codescout/usage.db`), so a blanket fill
+///   of the NULLs is correct.
+/// - `err_family`: `error_msg` is retained on every error row, so re-running the
+///   classifier recovers the family. Only NULL families are touched — to re-map
+///   an already-classified family after a taxonomy change, clear it first.
+///
+/// `friction_target` and `overflow_tokens` are NOT backfillable: their source
+/// (the call's input / buffered output) is only persisted in debug mode, so old
+/// rows can't be reconstructed. They self-heal as pre-migration rows age out
+/// under the 30-day retention sweep in `write_record`.
+fn backfill_legacy_rows(conn: &Connection, project_root: &str) -> Result<()> {
+    let current: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if current >= BACKFILL_VERSION {
+        return Ok(());
+    }
+
+    conn.execute(
+        "UPDATE tool_calls SET project_root = ?1 WHERE project_root IS NULL",
+        params![project_root],
+    )?;
+
+    let unclassified: Vec<(i64, String)> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, error_msg FROM tool_calls \
+             WHERE err_family IS NULL AND error_msg IS NOT NULL",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<std::result::Result<_, _>>()?
+    };
+    for (id, msg) in unclassified {
+        if let Some(family) = normalize_err_family(&msg) {
+            conn.execute(
+                "UPDATE tool_calls SET err_family = ?1 WHERE id = ?2",
+                params![family, id],
+            )?;
+        }
+    }
+
+    conn.execute_batch(&format!("PRAGMA user_version = {BACKFILL_VERSION};"))?;
     Ok(())
 }
 
@@ -1208,5 +1334,117 @@ mod tests {
         assert_eq!(tok, Some(1045));
         assert_eq!(ef, None);
         assert_eq!(pr.as_deref(), Some("/repo"));
+    }
+
+    #[test]
+    fn normalize_err_family_maps_iron_law_routing_errors() {
+        // The families that dominate the real error population — previously all NULL.
+        let cases = [
+            (
+                "source range overlaps named symbol(s): 'open_db'",
+                Some("il1_read_overlaps_symbol"),
+            ),
+            (
+                "Use read_markdown for markdown files",
+                Some("il4_read_markdown_routing"),
+            ),
+            (
+                "Use edit_markdown for markdown files",
+                Some("il5_edit_markdown_routing"),
+            ),
+            (
+                "edit contains a symbol definition (\"def \") — use symbol tools",
+                Some("il2_structural_edit"),
+            ),
+            (
+                "edit_file is blocked for structural edits on source code files",
+                Some("il2_structural_edit"),
+            ),
+            (
+                "shell access to source files is blocked",
+                Some("il3_shell_on_source"),
+            ),
+            (
+                "IL3 violation — piped `cargo test` to a log-trimmer. BLOCKED.",
+                Some("il3_pipe_to_trimmer"),
+            ),
+            (
+                "write denied: '/x/INDEX.md' is outside the project root",
+                Some("write_scope_denied"),
+            ),
+            (
+                "unsupported json_path segment '[*]'",
+                Some("json_path_unsupported"),
+            ),
+            ("old_string not found in src/x.rs", Some("edit_stale_match")),
+            // Pre-existing families still resolve.
+            ("LSP server disconnected", Some("lsp_disconnect")),
+            ("symbol not found: Foo/bar", Some("symbol_not_found")),
+            ("some unrecognized failure", None),
+        ];
+        for (msg, want) in cases {
+            assert_eq!(normalize_err_family(msg), want, "msg: {msg}");
+        }
+    }
+
+    #[test]
+    fn backfill_fills_project_root_and_err_family_once() {
+        let dir = TempDir::new().unwrap();
+        // First open runs the backfill on an empty DB and stamps user_version.
+        let conn = open_db(dir.path()).unwrap();
+
+        // Simulate legacy rows: friction columns NULL, but error_msg retained.
+        conn.execute(
+            "INSERT INTO tool_calls (tool_name, latency_ms, outcome, error_msg, project_root, err_family) VALUES \
+             ('read_file', 5, 'recoverable_error', 'source range overlaps named symbol(s): foo', NULL, NULL), \
+             ('edit_file', 5, 'recoverable_error', 'Use edit_markdown for markdown files', NULL, NULL), \
+             ('symbols',   5, 'success', NULL, NULL, NULL)",
+            [],
+        )
+        .unwrap();
+        // Roll the marker back to simulate a pre-backfill DB, then re-open.
+        conn.execute_batch("PRAGMA user_version = 0;").unwrap();
+        drop(conn);
+
+        let conn = open_db(dir.path()).unwrap();
+
+        let pr_nulls: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tool_calls WHERE project_root IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(pr_nulls, 0, "project_root backfilled for every row");
+
+        let fam = |tool: &str| -> Option<String> {
+            conn.query_row(
+                "SELECT err_family FROM tool_calls WHERE tool_name = ?1",
+                [tool],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            fam("read_file").as_deref(),
+            Some("il1_read_overlaps_symbol")
+        );
+        assert_eq!(
+            fam("edit_file").as_deref(),
+            Some("il5_edit_markdown_routing")
+        );
+        assert_eq!(fam("symbols"), None, "no error_msg → family stays NULL");
+
+        // Idempotent: a third open is a no-op and does not error.
+        drop(conn);
+        let conn = open_db(dir.path()).unwrap();
+        let still_null: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tool_calls WHERE project_root IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(still_null, 0);
     }
 }
