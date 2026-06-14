@@ -175,22 +175,6 @@ pub(crate) fn gather_project_context(
     ctx
 }
 
-// ── Client detection ──────────────────────────────────────────────────────────
-
-/// Extract the MCP client name from the peer info (set during initialize handshake).
-fn client_name(ctx: &ToolContext) -> Option<String> {
-    ctx.peer
-        .as_ref()
-        .and_then(|p| p.peer_info())
-        .map(|info| info.client_info.name.clone())
-}
-
-/// Returns true if the client is known to support subagent spawning.
-/// Conservative: only Claude Code for now. Add others as they gain support.
-pub(crate) fn is_subagent_capable(name: Option<&str>) -> bool {
-    name.is_some_and(|n| n.to_lowercase().contains("claude"))
-}
-
 /// Gather staleness state for protected memory topics.
 /// Returns a JSON object keyed by topic name, suitable for inclusion
 /// in the onboarding result.
@@ -324,8 +308,7 @@ impl Tool for Onboarding {
             let rel_path = ".codescout/tmp/onboarding-prompt.md";
             let sections = build_heading_map(prompt);
 
-            let name = client_name(ctx);
-            let subagent = is_subagent_capable(name.as_deref());
+            let subagent = ctx.is_subagent_capable();
 
             // Determine which instruction builder based on whether this is a
             // version refresh (has stored_version) or full onboarding.

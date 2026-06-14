@@ -791,7 +791,7 @@ impl Agent {
                  active-project slot, so reads may resolve against the wrong \
                  workspace. Fix: pass workspace=<absolute path> on each tool call \
                  to pin resolution per-request instead of activating. For fully \
-                 independent parallel work, separate Claude Code windows also \
+                 independent parallel work, separate client windows also \
                  isolate (separate processes = separate slots).",
                 prev_root.display(),
                 new_root.display(),
@@ -1830,7 +1830,7 @@ mod tests {
         // separate windows as the fallback — both are guidance contracts.
         let w = Agent::concurrent_switch_warning(Some((a, Duration::from_millis(200))), b, window);
         assert!(w.as_deref().is_some_and(|s| {
-            s.contains("workspace=<absolute path>") && s.contains("separate Claude Code windows")
+            s.contains("workspace=<absolute path>") && s.contains("separate client windows")
         }));
 
         // Same-root re-activation → silent (normal return-home / re-activate).

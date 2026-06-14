@@ -79,6 +79,54 @@ pub struct ToolContext {
     pub workspace_override: Option<std::path::PathBuf>,
 }
 
+/// MCP client identity resolved from the `initialize` handshake's `clientInfo`.
+/// This is the protocol-proper, agent-agnostic source — every MCP client sends
+/// it. Verified live for Claude Code: name="claude-code", version="2.1.177"
+/// (see codescout memory `claude-code-mcp-env`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientIdentity {
+    pub name: String,
+    pub version: Option<String>,
+}
+
+/// Policy: does a client `name` indicate Claude-Code-style subagent-spawning
+/// capability? Conservative — only the Claude family today. Pure + testable.
+pub(crate) fn is_subagent_capable_name(name: Option<&str>) -> bool {
+    name.is_some_and(|n| n.to_lowercase().contains("claude"))
+}
+
+impl ToolContext {
+    /// The connected MCP client's identity, from the `initialize` handshake's
+    /// `clientInfo`. `None` when no peer is attached (e.g. tests). The
+    /// `AI_AGENT` env fallback is deliberately NOT consulted here: on a real
+    /// tool call the handshake has completed so `clientInfo` is always present,
+    /// and reading the env would poison tests (the test runner itself runs
+    /// under Claude Code). The pre-handshake `AI_AGENT` path belongs to the
+    /// instructions-cap work, which is deferred.
+    pub fn client_identity(&self) -> Option<ClientIdentity> {
+        self.peer
+            .as_ref()
+            .and_then(|p| p.peer_info())
+            .map(|info| ClientIdentity {
+                name: info.client_info.name.clone(),
+                version: {
+                    let v = info.client_info.version.clone();
+                    (!v.is_empty()).then_some(v)
+                },
+            })
+    }
+
+    /// Convenience: the connected client's name, if known.
+    pub fn client_name(&self) -> Option<String> {
+        self.client_identity().map(|c| c.name)
+    }
+
+    /// Whether the connected client supports subagent spawning (Claude family).
+    pub fn is_subagent_capable(&self) -> bool {
+        is_subagent_capable_name(self.client_name().as_deref())
+    }
+}
+
 impl ToolContext {
     /// Request structured input from the user via MCP elicitation.
     ///

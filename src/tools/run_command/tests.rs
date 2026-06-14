@@ -8,9 +8,9 @@ use crate::prompts::builders::{
     build_system_prompt_draft, build_workspace_instructions, language_patterns,
 };
 use crate::tools::command_summary::BUFFER_QUERY_INLINE_CAP;
+use crate::tools::core::types::is_subagent_capable_name;
 use crate::tools::onboarding::{
-    gather_project_context, is_subagent_capable, onboarding_version_stale, Onboarding,
-    ONBOARDING_VERSION,
+    gather_project_context, onboarding_version_stale, Onboarding, ONBOARDING_VERSION,
 };
 #[test]
 fn system_prompt_draft_includes_per_project_memory_refs() {
@@ -111,13 +111,13 @@ fn prompt_refresh_subagent_prompt_contains_memory_reads() {
 
 #[test]
 fn is_subagent_capable_detects_claude() {
-    assert!(is_subagent_capable(Some("claude-code")));
-    assert!(is_subagent_capable(Some("Claude Code")));
-    assert!(is_subagent_capable(Some("claude-code-ide")));
-    assert!(!is_subagent_capable(Some("cursor")));
-    assert!(!is_subagent_capable(Some("copilot")));
-    assert!(!is_subagent_capable(Some("windsurf")));
-    assert!(!is_subagent_capable(None));
+    assert!(is_subagent_capable_name(Some("claude-code")));
+    assert!(is_subagent_capable_name(Some("Claude Code")));
+    assert!(is_subagent_capable_name(Some("claude-code-ide")));
+    assert!(!is_subagent_capable_name(Some("cursor")));
+    assert!(!is_subagent_capable_name(Some("copilot")));
+    assert!(!is_subagent_capable_name(Some("windsurf")));
+    assert!(!is_subagent_capable_name(None));
 }
 
 #[test]
