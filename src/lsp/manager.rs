@@ -382,6 +382,63 @@ pub(super) fn build_mux_args(
     args
 }
 
+/// Strip the Linux `/proc/self/exe` `"<path> (deleted)"` marker. Returns the
+/// underlying path when the suffix is present, else `None`.
+fn strip_deleted_suffix(exe: &Path) -> Option<PathBuf> {
+    exe.to_string_lossy()
+        .strip_suffix(" (deleted)")
+        .map(PathBuf::from)
+}
+
+/// A stable, on-disk codescout binary to spawn the mux from when `current_exe()`
+/// is no longer usable. Checks `$CARGO_HOME/bin/codescout` then
+/// `$HOME/.cargo/bin/codescout` (the documented install symlink).
+fn stable_codescout_binary() -> Option<PathBuf> {
+    let candidates = [
+        std::env::var_os("CARGO_HOME").map(|c| PathBuf::from(c).join("bin").join("codescout")),
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cargo/bin/codescout")),
+    ];
+    candidates.into_iter().flatten().find(|p| p.exists())
+}
+
+/// Resolve the codescout binary to spawn the mux with.
+///
+/// Prefers `current_exe()`. But after a mid-session `cargo build` rename-replaces
+/// the running binary, `/proc/self/exe` resolves to a *deleted inode*: spawning
+/// it fails with `ENOENT`, surfaced as the opaque "Failed to spawn mux process"
+/// (the rust-lsp-mux-spawn-fail / 3fc22ad2 family). When `current_exe()` is gone
+/// we (1) strip the `" (deleted)"` marker — the same path now holds the rebuilt
+/// binary — then (2) fall back to a stable install path, and only then (3) error
+/// with an actionable message.
+fn resolve_mux_binary() -> Result<PathBuf> {
+    let exe = std::env::current_exe()
+        .map_err(|e| anyhow::anyhow!("failed to determine codescout binary path: {e}"))?;
+    if exe.exists() {
+        return Ok(exe);
+    }
+    if let Some(live) = strip_deleted_suffix(&exe) {
+        if live.exists() {
+            tracing::warn!(
+                "codescout binary was replaced since this server started; spawning mux from rebuilt {}",
+                live.display()
+            );
+            return Ok(live);
+        }
+    }
+    if let Some(fallback) = stable_codescout_binary() {
+        tracing::warn!(
+            "current_exe() ({}) is gone (binary rebuilt mid-session?); spawning mux from {}",
+            exe.display(),
+            fallback.display()
+        );
+        return Ok(fallback);
+    }
+    anyhow::bail!(
+        "codescout binary at {} is gone (rebuilt mid-session?) and no stable fallback was found — reconnect the MCP server (/mcp) to load the rebuilt binary",
+        exe.display()
+    )
+}
+
 /// Resolve the effective `mux` flag. `override_` (from project config) wins; else fall back to `default`.
 pub(super) fn resolve_mux_flag(default: bool, override_: Option<bool>) -> bool {
     override_.unwrap_or(default)
@@ -746,8 +803,7 @@ impl LspManager {
         };
 
         if need_spawn {
-            let exe =
-                std::env::current_exe().context("Failed to determine codescout binary path")?;
+            let exe = resolve_mux_binary()?;
 
             // We observed the ownership flock was free (no live mux). The
             // analyzer home is codescout-private, so any process still holding
@@ -2196,6 +2252,22 @@ mod tests {
         );
         let idle_idx = args.iter().position(|a| a == "--idle-timeout").unwrap();
         assert_eq!(args[idle_idx + 1], "300");
+    }
+
+    #[test]
+    fn strip_deleted_suffix_recovers_rebuilt_path() {
+        // /proc/self/exe after a mid-session `cargo build` rename-replace.
+        assert_eq!(
+            strip_deleted_suffix(std::path::Path::new(
+                "/abs/target/release/codescout (deleted)"
+            )),
+            Some(std::path::PathBuf::from("/abs/target/release/codescout"))
+        );
+        // A live binary path has no marker.
+        assert_eq!(
+            strip_deleted_suffix(std::path::Path::new("/abs/target/release/codescout")),
+            None
+        );
     }
 
     #[test]
