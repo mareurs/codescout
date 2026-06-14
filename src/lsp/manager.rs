@@ -461,6 +461,58 @@ fn is_test_runner_exe(exe: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Try to claim the mux ownership flock at `lock_path`.
+///
+/// `Ok(Some(file))` — the BSD `flock` was free (no live mux owns this workspace);
+/// the caller drops the handle to release it so the mux child can re-acquire.
+/// `Ok(None)` — the flock is held (a live process owns it). `Err` only when the
+/// lock file itself cannot be opened.
+///
+/// This is the liveness *arbiter*: the flock says whether a live process claims
+/// ownership, but NOT whether its socket is reachable. The caller pairs this with
+/// an actual socket connect to tell a healthy mux from a wedged one
+/// (issues/2026-06-11-mux-failure-masks-rocksdb-lock-collision, defect #1).
+#[cfg(unix)]
+fn claim_mux_lock(lock_path: &std::path::Path) -> std::io::Result<Option<std::fs::File>> {
+    use fs4::fs_std::FileExt;
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(lock_path)?;
+    match file.try_lock_exclusive() {
+        Ok(()) => Ok(Some(file)),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Actionable error for defect #1: a live process holds the mux flock but its
+/// socket never accepted across the connect retries — a wedged or mid-restart
+/// mux. A respawn is impossible (the held lock blocks it), so name the situation
+/// and route the human to the holder instead of returning a bare connect error.
+#[cfg(unix)]
+fn mux_socket_unreachable_error(
+    language: &str,
+    socket_path: &std::path::Path,
+    lock_path: &std::path::Path,
+) -> anyhow::Error {
+    crate::tools::RecoverableError::with_hint(
+        format!(
+            "mux for {language} holds its lock ({}) but its socket ({}) is \
+             unreachable — the mux process is wedged or mid-restart",
+            lock_path.display(),
+            socket_path.display(),
+        ),
+        "A live process holds this workspace's mux lock yet isn't accepting \
+         connections. Wait a few seconds and retry (it may be restarting); if it \
+         persists, locate the holder with `fuser` on the lock file and stop it, \
+         then retry.",
+    )
+    .into()
+}
+
 impl LspManager {
     /// Maximum consecutive startup failures before the circuit-breaker trips.
     const CIRCUIT_BREAKER_MAX_FAILURES: usize = 5;
@@ -768,163 +820,192 @@ impl LspManager {
         config: LspServerConfig,
     ) -> Result<Arc<LspClient>> {
         use anyhow::Context;
-        use fs4::fs_std::FileExt;
 
         let socket_path = crate::lsp::mux::socket_path_for_workspace(language, workspace_root);
         let lock_path = crate::lsp::mux::lock_path_for_workspace(language, workspace_root);
 
-        let lock_file = {
-            let mut opts = std::fs::OpenOptions::new();
-            opts.create(true).write(true).truncate(false);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                opts.mode(0o600);
-            }
-            opts.open(&lock_path)
-                .context("Failed to open mux lock file")?
-        };
+        // Liveness is the flock AND socket reachability, not the flock alone
+        // (defect #1, issues/2026-06-11-mux-failure-masks-rocksdb-lock-collision).
+        // Round 0 may connect to an existing mux (flock held). If that mux's socket
+        // is unreachable through the connect retries, round 1 re-arbitrates the
+        // flock: a now-free lock means the holder died and left a stale `.sock` →
+        // respawn; a still-held lock means a live but wedged mux → actionable error.
+        let mut last_err: Option<anyhow::Error> = None;
+        for round in 0..2u32 {
+            let need_spawn =
+                match claim_mux_lock(&lock_path).context("Failed to open mux lock file")? {
+                    Some(guard) => {
+                        // Got the lock — no live mux. Drop releases it so the mux child
+                        // can acquire.
+                        drop(guard);
+                        true
+                    }
+                    None => {
+                        if round > 0 {
+                            // Round 1 and the flock is STILL held while the socket stayed
+                            // unreachable through round 0's retries → a wedged mux we
+                            // cannot replace (the held lock blocks a respawn). Surface it.
+                            return Err(mux_socket_unreachable_error(
+                                language,
+                                &socket_path,
+                                &lock_path,
+                            ));
+                        }
+                        tracing::info!(
+                            "mux already running for {}, connecting to {:?}",
+                            language,
+                            socket_path
+                        );
+                        false
+                    }
+                };
 
-        let need_spawn = match lock_file.try_lock_exclusive() {
-            Ok(()) => {
-                // Got the lock — no mux running. Drop releases it so the
-                // mux child can acquire.
-                drop(lock_file);
-                true
-            }
-            Err(_) => {
-                tracing::info!(
-                    "mux already running for {}, connecting to {:?}",
-                    language,
-                    socket_path
-                );
-                false
-            }
-        };
+            if need_spawn {
+                let exe = resolve_mux_binary()?;
 
-        if need_spawn {
-            let exe = resolve_mux_binary()?;
-
-            // We observed the ownership flock was free (no live mux). The
-            // analyzer home is codescout-private, so any process still holding
-            // this workspace's RocksDB index LOCK is an orphaned dead-mux JVM.
-            // Reap it before spawning, or the new mux's LSP child can't open the
-            // index. (S1/S2 net.) Non-fatal: log and continue.
-            match reap_orphan_index_holder(language, workspace_root).await {
-                Ok(true) => {
-                    tracing::info!("reaped orphan index holder for {language} before mux spawn")
+                // We observed the ownership flock was free (no live mux). The
+                // analyzer home is codescout-private, so any process still holding
+                // this workspace's RocksDB index LOCK is an orphaned dead-mux JVM.
+                // Reap it before spawning, or the new mux's LSP child can't open the
+                // index. (S1/S2 net.) Non-fatal: log and continue.
+                match reap_orphan_index_holder(language, workspace_root).await {
+                    Ok(true) => {
+                        tracing::info!("reaped orphan index holder for {language} before mux spawn")
+                    }
+                    Ok(false) => {}
+                    Err(e) => tracing::warn!("orphan reap probe failed (continuing): {e}"),
                 }
-                Ok(false) => {}
-                Err(e) => tracing::warn!("orphan reap probe failed (continuing): {e}"),
-            }
 
-            let mux_args = build_mux_args(workspace_root, &socket_path, &lock_path, &config);
+                let mux_args = build_mux_args(workspace_root, &socket_path, &lock_path, &config);
 
-            // Spawn mux as a detached process — do NOT set kill_on_drop.
-            // Capture stderr: a startup failure's real cause (e.g. a held RocksDB
-            // index lock) is written there, not to stdout. Without this the caller
-            // only saw a blank "mux process failed to start:".
-            let mut child = tokio::process::Command::new(&exe)
-                .args(&mux_args)
-                .stdout(std::process::Stdio::piped())
-                .stdin(std::process::Stdio::null())
-                .stderr(std::process::Stdio::piped())
-                .spawn()
-                .context("Failed to spawn mux process")?;
+                // Spawn mux as a detached process — do NOT set kill_on_drop.
+                // Capture stderr: a startup failure's real cause (e.g. a held RocksDB
+                // index lock) is written there, not to stdout. Without this the caller
+                // only saw a blank "mux process failed to start:".
+                let mut child = tokio::process::Command::new(&exe)
+                    .args(&mux_args)
+                    .stdout(std::process::Stdio::piped())
+                    .stdin(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .context("Failed to spawn mux process")?;
 
-            // Drain the mux child's stderr into a bounded ring buffer. On success
-            // the mux lives for its idle-timeout and keeps logging, so the drain
-            // also prevents a full-pipe write stall; on failure it holds the cause.
-            let stderr_tail = std::sync::Arc::new(std::sync::Mutex::new(
-                std::collections::VecDeque::<String>::with_capacity(MUX_STDERR_TAIL_LINES),
-            ));
-            let stderr_drain = child.stderr.take().map(|stderr| {
-                let tail = stderr_tail.clone();
-                tokio::spawn(async move {
-                    use tokio::io::AsyncBufReadExt;
-                    let mut reader = tokio::io::BufReader::new(stderr);
-                    let mut line = String::new();
-                    loop {
-                        line.clear();
-                        match reader.read_line(&mut line).await {
-                            Ok(0) | Err(_) => break,
-                            Ok(_) => {
-                                let mut tail = tail.lock().unwrap_or_else(|e| e.into_inner());
-                                if tail.len() == MUX_STDERR_TAIL_LINES {
-                                    tail.pop_front();
+                // Drain the mux child's stderr into a bounded ring buffer. On success
+                // the mux lives for its idle-timeout and keeps logging, so the drain
+                // also prevents a full-pipe write stall; on failure it holds the cause.
+                let stderr_tail = std::sync::Arc::new(std::sync::Mutex::new(
+                    std::collections::VecDeque::<String>::with_capacity(MUX_STDERR_TAIL_LINES),
+                ));
+                let stderr_drain = child.stderr.take().map(|stderr| {
+                    let tail = stderr_tail.clone();
+                    tokio::spawn(async move {
+                        use tokio::io::AsyncBufReadExt;
+                        let mut reader = tokio::io::BufReader::new(stderr);
+                        let mut line = String::new();
+                        loop {
+                            line.clear();
+                            match reader.read_line(&mut line).await {
+                                Ok(0) | Err(_) => break,
+                                Ok(_) => {
+                                    let mut tail = tail.lock().unwrap_or_else(|e| e.into_inner());
+                                    if tail.len() == MUX_STDERR_TAIL_LINES {
+                                        tail.pop_front();
+                                    }
+                                    tail.push_back(line.trim_end().to_string());
                                 }
-                                tail.push_back(line.trim_end().to_string());
                             }
                         }
-                    }
-                })
-            });
-
-            // Wait for the "ready" signal on stdout.
-            let stdout = child.stdout.take().expect("stdout piped");
-            let mut reader = tokio::io::BufReader::new(stdout);
-            let mut line = String::new();
-            let read_result = tokio::time::timeout(
-                std::time::Duration::from_secs(120),
-                tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line),
-            )
-            .await;
-
-            let is_ready =
-                matches!(read_result, Ok(Ok(n)) if n > 0) && line.trim().starts_with("ready");
-            if is_ready {
-                tracing::info!("mux process ready for {} at {:?}", language, socket_path);
-            } else {
-                // Let the stderr drain settle so we capture the mux's own cause.
-                if let Some(handle) = stderr_drain {
-                    let _ =
-                        tokio::time::timeout(std::time::Duration::from_millis(500), handle).await;
-                }
-                let tail: Vec<String> = stderr_tail
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .iter()
-                    .cloned()
-                    .collect();
-                return Err(match read_result {
-                    Err(_) => {
-                        let extra = if tail.is_empty() {
-                            String::new()
-                        } else {
-                            format!(" — mux stderr: {}", tail.join(" | "))
-                        };
-                        crate::tools::RecoverableError::with_hint(
-                            format!("mux process timed out waiting for ready (120s){extra}"),
-                            "The LSP server is slow to initialize (Gradle/Cargo index?). \
-                             Retry in a moment; if the problem persists, check server logs.",
-                        )
-                        .into()
-                    }
-                    Ok(read) => {
-                        let stdout_line = match read {
-                            Ok(_) => line.trim().to_string(),
-                            Err(e) => format!("(stdout read error: {e})"),
-                        };
-                        let (message, hint) = mux_failure_report(&stdout_line, &tail);
-                        crate::tools::RecoverableError::with_hint(message, hint).into()
-                    }
+                    })
                 });
+
+                // Wait for the "ready" signal on stdout.
+                let stdout = child.stdout.take().expect("stdout piped");
+                let mut reader = tokio::io::BufReader::new(stdout);
+                let mut line = String::new();
+                let read_result = tokio::time::timeout(
+                    std::time::Duration::from_secs(120),
+                    tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line),
+                )
+                .await;
+
+                let is_ready =
+                    matches!(read_result, Ok(Ok(n)) if n > 0) && line.trim().starts_with("ready");
+                if is_ready {
+                    tracing::info!("mux process ready for {} at {:?}", language, socket_path);
+                } else {
+                    // Let the stderr drain settle so we capture the mux's own cause.
+                    if let Some(handle) = stderr_drain {
+                        let _ = tokio::time::timeout(std::time::Duration::from_millis(500), handle)
+                            .await;
+                    }
+                    let tail: Vec<String> = stderr_tail
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .iter()
+                        .cloned()
+                        .collect();
+                    return Err(match read_result {
+                        Err(_) => {
+                            let extra = if tail.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" — mux stderr: {}", tail.join(" | "))
+                            };
+                            crate::tools::RecoverableError::with_hint(
+                                format!("mux process timed out waiting for ready (120s){extra}"),
+                                "The LSP server is slow to initialize (Gradle/Cargo index?). \
+                                 Retry in a moment; if the problem persists, check server logs.",
+                            )
+                            .into()
+                        }
+                        Ok(read) => {
+                            let stdout_line = match read {
+                                Ok(_) => line.trim().to_string(),
+                                Err(e) => format!("(stdout read error: {e})"),
+                            };
+                            let (message, hint) = mux_failure_report(&stdout_line, &tail);
+                            crate::tools::RecoverableError::with_hint(message, hint).into()
+                        }
+                    });
+                }
+                // Detach child — mux runs independently
             }
-            // Detach child — mux runs independently
+
+            // Connect as client, with retries. The socket — not the flock — is the
+            // real liveness signal.
+            let mut connect_err = None;
+            let mut connected = None;
+            for attempt in 0..5u32 {
+                if attempt > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                }
+                match LspClient::connect(&socket_path, workspace_root.to_path_buf()).await {
+                    Ok(client) => {
+                        connected = Some(client);
+                        break;
+                    }
+                    Err(e) => connect_err = Some(e),
+                }
+            }
+            match connected {
+                Some(client) => return Ok(Arc::new(client)),
+                None => {
+                    let e = connect_err.expect("connect loop ran at least once");
+                    if need_spawn {
+                        // We spawned the mux and saw its "ready", yet cannot connect
+                        // — a genuine startup/connect failure, not a stale-lock case.
+                        return Err(e);
+                    }
+                    // Round 0: flock held but socket unreachable. Loop to round 1 to
+                    // re-arbitrate (respawn if the holder is gone, else error).
+                    last_err = Some(e);
+                }
+            }
         }
 
-        // Connect as client, with retries
-        let mut last_err = None;
-        for attempt in 0..5u32 {
-            if attempt > 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            }
-            match LspClient::connect(&socket_path, workspace_root.to_path_buf()).await {
-                Ok(client) => return Ok(Arc::new(client)),
-                Err(e) => last_err = Some(e),
-            }
-        }
-        Err(last_err.unwrap())
+        // Unreachable in practice: round 1 always returns (a spawn→connect result
+        // or the wedged-mux error). Kept as a defensive terminal.
+        Err(last_err.expect("connect failed at least once before exhausting rounds"))
     }
 
     /// Internal: actually start the LSP, update cache, and signal waiters.
@@ -2092,6 +2173,71 @@ mod tests {
         assert!(!super::posix_write_lock_is_held(&lock));
         // Missing file → not-held (don't block the fallback).
         assert!(!super::posix_write_lock_is_held(&dir.path().join("nope")));
+    }
+
+    /// Defect #1 liveness arbiter: a free flock is claimable (→ spawn), a held one
+    /// reads as `None` (→ assume a live mux, connect). flock(2) conflicts across
+    /// separate open file descriptions even within one process, so a held lock is
+    /// observable without a subprocess — unlike the fcntl locks the
+    /// `posix_write_lock_is_held` tests probe (which need an external holder).
+    #[cfg(unix)]
+    #[test]
+    fn claim_mux_lock_some_when_free_none_when_held() {
+        use fs4::fs_std::FileExt;
+        let dir = tempfile::tempdir().unwrap();
+        let lock = dir.path().join("mux.lock");
+
+        // Free → claimable.
+        let guard = super::claim_mux_lock(&lock).unwrap();
+        assert!(guard.is_some(), "a free flock should be claimable");
+        drop(guard);
+
+        // Hold the flock on an independent fd; claim_mux_lock opens its own fd and
+        // must see it as held.
+        let holder = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock)
+            .unwrap();
+        holder.try_lock_exclusive().unwrap();
+        assert!(
+            super::claim_mux_lock(&lock).unwrap().is_none(),
+            "a held flock must read as None — no live-mux assumption"
+        );
+
+        // Released → claimable again.
+        drop(holder);
+        assert!(
+            super::claim_mux_lock(&lock).unwrap().is_some(),
+            "lock should be reclaimable after the holder releases"
+        );
+    }
+
+    /// Defect #1 actionable error: when a live process holds the flock but the
+    /// socket is unreachable, the error names the wedged-mux situation and routes
+    /// the human to the holder — not a bare `ECONNREFUSED`.
+    #[cfg(unix)]
+    #[test]
+    fn mux_socket_unreachable_error_names_situation_and_routes_to_holder() {
+        let rendered = super::mux_socket_unreachable_error(
+            "kotlin",
+            std::path::Path::new("/run/user/1000/codescout-kotlin-mux-abc.sock"),
+            std::path::Path::new("/run/user/1000/codescout-kotlin-mux-abc.lock"),
+        )
+        .to_string();
+        assert!(
+            rendered.contains("wedged or mid-restart"),
+            "should name the wedged-mux situation: {rendered}"
+        );
+        assert!(
+            rendered.contains(".lock") && rendered.contains(".sock"),
+            "should cite both the lock and the socket: {rendered}"
+        );
+        assert!(
+            rendered.contains("fuser"),
+            "should route the human to the holder: {rendered}"
+        );
     }
 
     #[cfg(unix)]

@@ -300,6 +300,56 @@ This does **not** address this bug's Kotlin-specific core. **Still open:**
 - **Defect #3** — the direct-LSP fallback collides on the held RocksDB index lock and reports a generic `LSP server disconnected` instead of naming the lock holder.
 
 Both deferred — verification requires a live multi-instance Kotlin workspace (not reproducible from this session). Already shipped earlier: stderr capture (defect #2) + the lock-probe orphan reap (2026-06-11). Status stays `open` to keep defects #1/#3 visible as actionable work.
+
+### Update 2026-06-14 (later) — defect #1 fixed in code; defect #3 confirmed already-fixed
+
+Picked the two residual defects back up with a **live multi-instance Kotlin setup actually
+present** (backend-kotlin + its `solver-db-logs` worktree — two live muxes, the substrate the
+earlier deferral was waiting on).
+
+**Defect #1 — flock-only liveness — FIXED in code (`src/lsp/manager.rs`).**
+`get_or_start_via_mux` no longer infers liveness from the flock alone. Liveness is now
+**flock AND socket reachability**, in a bounded 2-round loop:
+- Round 0 is unchanged on the happy path — flock held + healthy socket connects on the first
+  attempt and returns (zero added latency to the hot path).
+- When the flock is held but the socket is unreachable across the 5 connect retries, round 1
+  **re-arbitrates the flock**: a now-free lock ⇒ the holder died and left a stale `.sock`
+  (which `process::run` unlinks before re-binding, `src/lsp/mux/process.rs:222`) ⇒ respawn; a
+  still-held lock ⇒ a live but **wedged** mux ⇒ `mux_socket_unreachable_error` — an actionable
+  `RecoverableError` naming the lock + socket and routing to `fuser`, instead of the bare
+  `ECONNREFUSED`/`ENOENT` the old code returned via `last_err.unwrap()`.
+- New free helper `claim_mux_lock(lock_path) -> io::Result<Option<File>>` is the testable
+  liveness arbiter (`Some` = flock free, `None` = held). The flock stays the *spawn arbiter*
+  (only one process may spawn); the socket becomes the *liveness signal* — the actual fix.
+
+**Defect #3 — direct-LSP fallback collides + generic error — was ALREADY fixed in code;
+"still open" only ever meant *unverified*, not *unfixed*.** Current `get_or_start` gates the
+fallback behind three guards before it can run: `mux_failure_is_index_contention`, the
+`kotlin_index_lock_held` lock-probe (Fix 4 / `c5fb3979`), and the single-owner invariant
+(ADR `2026-06-11-mux-single-owner-invariant`) which **refuses the direct fallback outright in
+production** (`!exe_is_test`; the silent `config.mux=false` fallback runs only inside a test
+runner). The generic-`LSP server disconnected`-from-a-colliding-fallback path can no longer
+execute outside a test binary — no code change needed for #3.
+
+**Tests added** (`src/lsp/manager.rs`, `mod tests`):
+- `claim_mux_lock_some_when_free_none_when_held` — the flock arbiter (free⇒Some, held⇒None).
+  Holds the flock on a second in-process fd; `flock(2)` conflicts across open file descriptions
+  even within one process, so this needs **no subprocess and no `#[ignore]`** — distinct from
+  the fcntl-lock `posix_write_lock_*` tests, which DO need an external holder (fcntl locks are
+  per-process and don't self-conflict).
+- `mux_socket_unreachable_error_names_situation_and_routes_to_holder` — the wedged-mux error
+  names the situation, cites both paths, and routes to `fuser`.
+
+Full lib suite green (**2744 passed, 9 ignored**); `clippy --all-targets -- -D warnings` clean;
+`cargo fmt` applied.
+
+**Verification status (honest):** the liveness *logic* is unit-covered. The full live
+end-to-end (construct a held-flock + dead-`.sock`, fire a pinned kotlin op, observe the
+actionable error) is **still pending a deliberate `cargo build --release` + `/mcp` reconnect** —
+not run this session to avoid disrupting the user's live backend-kotlin mux (R-23), and because
+the fix is not yet in the running binary. **Status stays `open`** until that live e2e lands
+(Resume step 1). Both #1 (code) and #3 (pre-existing) now have fixes; the only residue is live
+verification.
 ## Tests added
 
 Implemented on `experiments` (`src/lsp/manager.rs`, in `mod tests`):
