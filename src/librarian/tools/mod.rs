@@ -100,17 +100,29 @@ pub struct ToolContext {
 /// every delete/move performed in such a project — see
 /// `docs/issues/2026-06-03-artifact-delete-refuses-in-workspace-artifact.md`.
 ///
-/// `git_root` is listed before `abs_path` so a caller that joins a
-/// repo-root-relative path (e.g. `mv`) resolves against the repo root rather
-/// than a project subdirectory.
+/// The active `current_project` (its `git_root`, then `abs_path`) is listed
+/// FIRST — ahead of the legacy `workspace.roots` — so `containing_root`'s
+/// first-match prefers the active project over an ancestor `[[roots]]` entry
+/// that also contains the artifact (1a5acfc0). `git_root` precedes `abs_path`
+/// so a repo-root-relative path (e.g. `mv`) resolves against the repo root,
+/// not a project subdirectory.
 pub(crate) fn managed_roots(ctx: &ToolContext) -> Vec<std::path::PathBuf> {
-    let mut roots: Vec<std::path::PathBuf> =
-        ctx.workspace.roots.iter().map(|r| r.path.clone()).collect();
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    // Active project FIRST (git_root before abs_path), ahead of the legacy
+    // `workspace.roots`: when a project is nested under an ancestor `[[roots]]`
+    // entry, `containing_root`'s first-match must prefer the active project, not
+    // the ancestor — else mv/delete join a repo-root-relative path onto the
+    // ancestor and silently escape the project (1a5acfc0).
     if let Some(cp) = ctx.current_project.as_deref() {
         for candidate in [&cp.git_root, &cp.abs_path] {
             if !roots.iter().any(|r| r == candidate) {
                 roots.push(candidate.clone());
             }
+        }
+    }
+    for r in &ctx.workspace.roots {
+        if !roots.iter().any(|x| x == &r.path) {
+            roots.push(r.path.clone());
         }
     }
     roots

@@ -16,6 +16,23 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         super::RecoverableError::new(format!("move requires 'id' and 'new_rel_path': {e}"))
     })?;
 
+    // Defense-in-depth: new_rel_path must stay within the resolved root. Reject
+    // absolute paths and `..` segments so a move can never escape the project
+    // even if root resolution is wrong (1a5acfc0).
+    if a.new_rel_path.is_empty()
+        || std::path::Path::new(&a.new_rel_path).components().any(|c| {
+            !matches!(
+                c,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        })
+    {
+        return Err(super::RecoverableError::new(format!(
+            "new_rel_path '{}' must be a non-empty relative path with no '..' or absolute segments",
+            a.new_rel_path
+        )));
+    }
+
     let cat = ctx.catalog.lock();
     let row = artifact::get(&cat, &a.id)?
         .ok_or_else(|| super::RecoverableError::new(format!("unknown id `{}`", a.id)))?;
@@ -246,5 +263,76 @@ mod tests {
         let cat = ctx.catalog.lock();
         let row = artifact::get(&cat, "aabbccdd11223344").unwrap().unwrap();
         assert!(row.abs_path.ends_with("docs/archive/foo.md"));
+    }
+
+    #[tokio::test]
+    async fn move_resolves_under_nested_project_not_ancestor_root() {
+        // 1a5acfc0: active project nested under an ancestor [[roots]] entry.
+        // The move must resolve against the nested project, not the ancestor.
+        let tmp = tempfile::tempdir().unwrap();
+        let ancestor = tmp.path().to_path_buf();
+        let child = ancestor.join("child");
+        std::fs::create_dir_all(&child).unwrap();
+        let mut ctx = mk_ctx(&child); // seeds artifact at child/docs/trackers/foo.md
+
+        // Workspace registers the ANCESTOR as a legacy [[roots]] entry; the
+        // active project is the nested child (its own repo), absent from roots.
+        ctx.workspace = Arc::new(WorkspaceConfig {
+            roots: vec![Root {
+                name: "ancestor".into(),
+                path: ancestor.clone(),
+            }],
+            ignore: vec![],
+            rules: vec![],
+            umbrellas: vec![],
+        });
+        ctx.current_project = Some(Arc::new(
+            crate::librarian::current_project::CurrentProject {
+                abs_path: child.clone(),
+                git_root: child.clone(),
+                umbrella: None,
+            },
+        ));
+
+        let result = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223344",
+                "new_rel_path": "docs/archive/foo.md"
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result["moved"], true);
+        assert!(
+            child.join("docs/archive/foo.md").exists(),
+            "move resolved under the nested active project"
+        );
+        assert!(
+            !ancestor.join("docs/archive/foo.md").exists(),
+            "move did NOT escape to the ancestor [[roots]] entry"
+        );
+    }
+
+    #[tokio::test]
+    async fn move_rejects_new_rel_path_escape() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(tmp.path());
+        let err = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223344",
+                "new_rel_path": "../escape/foo.md"
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("..") || err.to_string().contains("relative"),
+            "got: {err}"
+        );
     }
 }
