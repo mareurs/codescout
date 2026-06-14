@@ -33,6 +33,172 @@ struct Args {
     entry_collection: Option<String>,
 }
 
+/// Validate merged params against the effective schema — the new schema if this
+/// call provides one, otherwise the stored schema. No-op when neither is present.
+fn validate_merged_against_schema(
+    current: &Value,
+    new_schema: Option<&Value>,
+    stored_schema: Option<&str>,
+) -> Result<()> {
+    if let Some(new_schema) = new_schema {
+        crate::librarian::tools::schema_validate::validate(new_schema, current).map_err(|e| {
+            RecoverableError::new(format!("merged params violate params_schema: {e}"))
+        })?;
+    } else if let Some(schema_text) = stored_schema {
+        crate::librarian::tools::schema_validate::validate_against_stored(schema_text, current)
+            .map_err(|e| {
+                RecoverableError::new(format!("merged params violate params_schema: {e}"))
+            })?;
+    }
+    Ok(())
+}
+
+/// Goal-tracker merge processing: enforce the scope-growth guard and, when the
+/// status flips to `done`, evaluate the auto-close gate. Returns the `gate_check`
+/// evidence to emit (Some) when the gate auto-closes; None otherwise. Errors on a
+/// scope-growth violation or a blocked gate. Pure value-logic — no catalog/lock/await.
+fn process_goal_tracker_merge(
+    current: &Value,
+    existing_params: &str,
+    pre_status: Option<&str>,
+) -> Result<Option<Value>> {
+    let is_goal_tracker =
+        current.get("acceptance_signals").is_some() && current.get("children").is_some();
+    if !is_goal_tracker {
+        return Ok(None);
+    }
+
+    use crate::librarian::tools::goal_aggregation::{
+        evaluate_gate, validate_scope_growth, GateOutcome,
+    };
+
+    let pre_existing: Value =
+        serde_json::from_str(existing_params).unwrap_or(Value::Object(Default::default()));
+    let empty_vec: Vec<Value> = Vec::new();
+    let prior_children: &[Value] = pre_existing
+        .get("children")
+        .and_then(|c| c.as_array())
+        .map(Vec::as_slice)
+        .unwrap_or(&empty_vec);
+    let submitted_children: &[Value] = current
+        .get("children")
+        .and_then(|c| c.as_array())
+        .map(Vec::as_slice)
+        .unwrap_or(&empty_vec);
+    if let Err(e) = validate_scope_growth(prior_children, submitted_children) {
+        return Err(RecoverableError::new(format!("{e}")));
+    }
+
+    let post_status = current.get("status").and_then(|s| s.as_str());
+    if pre_status != Some("done") && post_status == Some("done") {
+        match evaluate_gate(current) {
+            GateOutcome::AutoClose => {
+                let children = current
+                    .get("children")
+                    .and_then(|c| c.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                let signals = current
+                    .get("acceptance_signals")
+                    .and_then(|s| s.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                let children_done = children
+                    .iter()
+                    .filter(|c| c.get("status").and_then(|s| s.as_str()) == Some("done"))
+                    .count();
+                let signals_met = signals
+                    .iter()
+                    .filter(|s| s.get("met").and_then(|m| m.as_bool()) == Some(true))
+                    .count();
+                Ok(Some(json!({
+                    "tag": "gate_check",
+                    "gate_passed": true,
+                    "text": format!(
+                        "auto-close gate passed: {}/{} children done, {}/{} signals met",
+                        children_done, children.len(),
+                        signals_met, signals.len()
+                    ),
+                    "evidence": {
+                        "children_count": children.len(),
+                        "children_done": children_done,
+                        "signal_count_total": signals.len(),
+                        "signal_count_met": signals_met,
+                    },
+                    "refresh_at": chrono::Utc::now().to_rfc3339(),
+                })))
+            }
+            GateOutcome::Block(reason) => Err(RecoverableError::new(format!(
+                "goal auto-close gate blocked: {reason}"
+            ))),
+        }
+    } else {
+        Ok(None)
+    }
+}
+
+/// Create/replace path (merge=false): prompt required, artifact must exist,
+/// optional initial-schema validation, then upsert. Locks the catalog internally —
+/// the body has no await, so the guard never crosses a suspension point.
+fn create_or_replace_augmentation(ctx: &ToolContext, a: Args) -> Result<Value> {
+    let cat = ctx.catalog.lock();
+
+    // Create/replace path — prompt is required
+    let prompt = a.prompt.ok_or_else(|| {
+        RecoverableError::new("prompt is required (set merge=true to patch params only)")
+    })?;
+
+    if artifact::get(&cat, &a.id)?.is_none() {
+        return Err(RecoverableError::new(format!(
+            "artifact '{}' not found",
+            a.id
+        )));
+    }
+
+    let params_str = a
+        .params
+        .map(|p| serde_json::to_string(&p))
+        .transpose()?
+        .unwrap_or_else(|| "{}".to_string());
+
+    let params_schema_str = a
+        .params_schema
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()?;
+
+    if let Some(schema) = &a.params_schema {
+        let parsed_params: Value = serde_json::from_str(&params_str)?;
+        crate::librarian::tools::schema_validate::validate(schema, &parsed_params).map_err(
+            |e| RecoverableError::new(format!("initial params violate params_schema: {e}")),
+        )?;
+    }
+
+    let now = chrono::Utc::now()
+        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        .to_string();
+
+    augmentation::upsert(
+        &cat,
+        &augmentation::AugmentationRow {
+            artifact_id: a.id.clone(),
+            prompt,
+            params: params_str,
+            last_refreshed_at: None,
+            refresh_count: 0,
+            created_at: now.clone(),
+            updated_at: now,
+            render_template: a.render_template,
+            params_schema: params_schema_str,
+            append_mode: a.append_mode.unwrap_or(false),
+            history_cap: a.history_cap.map(|v| v as i64),
+            entry_collection: a.entry_collection,
+        },
+    )?;
+
+    Ok(json!("ok"))
+}
+
 #[async_trait]
 impl Tool for ArtifactAugment {
     fn name(&self) -> &'static str {
@@ -154,104 +320,20 @@ impl Tool for ArtifactAugment {
 
                     // F-5: validate merged params against the EFFECTIVE schema —
                     // the new one if this call provides it, otherwise the stored one.
-                    if let Some(new_schema) = a.params_schema.as_ref() {
-                        crate::librarian::tools::schema_validate::validate(new_schema, &current)
-                            .map_err(|e| {
-                                RecoverableError::new(format!(
-                                    "merged params violate params_schema: {e}"
-                                ))
-                            })?;
-                    } else if let Some(schema_text) = existing.params_schema.as_deref() {
-                        crate::librarian::tools::schema_validate::validate_against_stored(
-                            schema_text,
-                            &current,
-                        )
-                        .map_err(|e| {
-                            RecoverableError::new(format!(
-                                "merged params violate params_schema: {e}"
-                            ))
-                        })?;
-                    }
+                    validate_merged_against_schema(
+                        &current,
+                        a.params_schema.as_ref(),
+                        existing.params_schema.as_deref(),
+                    )?;
 
-                    let post_status = current.get("status").and_then(|s| s.as_str());
-                    let is_goal_tracker = current.get("acceptance_signals").is_some()
-                        && current.get("children").is_some();
+                    // Goal-tracker merge: scope-growth guard + auto-close gate.
+                    // Evidence (if any) is emitted as a note event after the lock drops.
+                    gate_check_evidence = process_goal_tracker_merge(
+                        &current,
+                        &existing.params,
+                        pre_status.as_deref(),
+                    )?;
 
-                    if is_goal_tracker {
-                        use crate::librarian::tools::goal_aggregation::validate_scope_growth;
-                        let pre_existing: Value = serde_json::from_str(&existing.params)
-                            .unwrap_or(Value::Object(Default::default()));
-                        let empty_vec: Vec<Value> = Vec::new();
-                        let prior_children: &[Value] = pre_existing
-                            .get("children")
-                            .and_then(|c| c.as_array())
-                            .map(Vec::as_slice)
-                            .unwrap_or(&empty_vec);
-                        let submitted_children: &[Value] = current
-                            .get("children")
-                            .and_then(|c| c.as_array())
-                            .map(Vec::as_slice)
-                            .unwrap_or(&empty_vec);
-                        if let Err(e) = validate_scope_growth(prior_children, submitted_children) {
-                            return Err(RecoverableError::new(format!("{e}")));
-                        }
-                    }
-
-                    if is_goal_tracker
-                        && pre_status.as_deref() != Some("done")
-                        && post_status == Some("done")
-                    {
-                        use crate::librarian::tools::goal_aggregation::{
-                            evaluate_gate, GateOutcome,
-                        };
-                        match evaluate_gate(&current) {
-                            GateOutcome::AutoClose => {
-                                let children = current
-                                    .get("children")
-                                    .and_then(|c| c.as_array())
-                                    .cloned()
-                                    .unwrap_or_default();
-                                let signals = current
-                                    .get("acceptance_signals")
-                                    .and_then(|s| s.as_array())
-                                    .cloned()
-                                    .unwrap_or_default();
-                                let children_done = children
-                                    .iter()
-                                    .filter(|c| {
-                                        c.get("status").and_then(|s| s.as_str()) == Some("done")
-                                    })
-                                    .count();
-                                let signals_met = signals
-                                    .iter()
-                                    .filter(|s| {
-                                        s.get("met").and_then(|m| m.as_bool()) == Some(true)
-                                    })
-                                    .count();
-                                gate_check_evidence = Some(json!({
-                                    "tag": "gate_check",
-                                    "gate_passed": true,
-                                    "text": format!(
-                                        "auto-close gate passed: {}/{} children done, {}/{} signals met",
-                                        children_done, children.len(),
-                                        signals_met, signals.len()
-                                    ),
-                                    "evidence": {
-                                        "children_count": children.len(),
-                                        "children_done": children_done,
-                                        "signal_count_total": signals.len(),
-                                        "signal_count_met": signals_met,
-                                    },
-                                    "refresh_at": chrono::Utc::now().to_rfc3339(),
-                                }));
-                            }
-                            GateOutcome::Block(reason) => {
-                                return Err(RecoverableError::new(format!(
-                                    "goal auto-close gate blocked: {reason}"
-                                )));
-                            }
-                        }
-                    }
                     // F-5: when this call also provides sibling fields (prompt /
                     // params_schema / render_template / entry_collection / flags),
                     // patch them onto the existing row here via a full upsert that
@@ -330,62 +412,7 @@ impl Tool for ArtifactAugment {
             return Ok(json!("ok"));
         }
 
-        let cat = ctx.catalog.lock();
-
-        // Create/replace path — prompt is required
-        let prompt = a.prompt.ok_or_else(|| {
-            RecoverableError::new("prompt is required (set merge=true to patch params only)")
-        })?;
-
-        if artifact::get(&cat, &a.id)?.is_none() {
-            return Err(RecoverableError::new(format!(
-                "artifact '{}' not found",
-                a.id
-            )));
-        }
-
-        let params_str = a
-            .params
-            .map(|p| serde_json::to_string(&p))
-            .transpose()?
-            .unwrap_or_else(|| "{}".to_string());
-
-        let params_schema_str = a
-            .params_schema
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()?;
-
-        if let Some(schema) = &a.params_schema {
-            let parsed_params: Value = serde_json::from_str(&params_str)?;
-            crate::librarian::tools::schema_validate::validate(schema, &parsed_params).map_err(
-                |e| RecoverableError::new(format!("initial params violate params_schema: {e}")),
-            )?;
-        }
-
-        let now = chrono::Utc::now()
-            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-            .to_string();
-
-        augmentation::upsert(
-            &cat,
-            &augmentation::AugmentationRow {
-                artifact_id: a.id.clone(),
-                prompt,
-                params: params_str,
-                last_refreshed_at: None,
-                refresh_count: 0,
-                created_at: now.clone(),
-                updated_at: now,
-                render_template: a.render_template,
-                params_schema: params_schema_str,
-                append_mode: a.append_mode.unwrap_or(false),
-                history_cap: a.history_cap.map(|v| v as i64),
-                entry_collection: a.entry_collection,
-            },
-        )?;
-
-        Ok(json!("ok"))
+        create_or_replace_augmentation(ctx, a)
     }
 }
 
