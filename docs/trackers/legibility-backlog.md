@@ -86,3 +86,12 @@ _Per-key triage goes here — classify code-class vs tool-class, name the move, 
 **Was:** code-class (real `edit_code` ambiguity). Ten `LspClient` methods resolved to TWO symbols each — an inherent `impl LspClient` plus a trait `impl crate::lsp::ops::LspClientOps for LspClient` exposing the same names (verified: `LspClient/hover` at `client.rs:1155` and `:1498`). Any `edit_code(symbol="LspClient/<m>")` hard-failed "matches 2 symbols".
 **Move (`2b35f2a1`, behavior-preserving, 22 lsp::client tests green):** applied the `get_or_start` template verbatim — confirmed pure-forwarder + all 10 inherent methods `pub`, then relocated `impl LspClientOps for LspClient` → new `src/lsp/client_ops.rs`. One move cleared all ten collisions and unblocked `edit_code` on every `LspClient` method; public API unchanged.
 **Human-cost:** low — the template amortized the `get_or_start` reconnaissance to near-zero. The legibility win is navigational: every `LspClient` method is now uniquely `edit_code`-addressable by name.
+
+### src/ast/parser.rs — extract_rust_symbols ✅ CLOSED 2026-06-14
+**Was:** Tier 1 — over_budget_body, ~2948 tok / 252 ln (1 observed search friction). 13 `match child.kind()` arms each repeated the same ~10-line `SymbolInfo` position-field literal; `symbols(include_body)` truncated/buffered on every fetch.
+**Fresh read (2026-06-14):** confirmed live — body buffered (~3100 tok), not stale (Self-Trap 4 cleared).
+**Move (1 transformation, behavior-preserving, full lib suite 2742 identical to baseline):** extracted a shared `rust_symbol(child, file, name_path, name, kind, children)` constructor (`4f1f88cb`); each arm collapses to one `symbols.push(rust_symbol(...))`. Match dispatch + per-kind name/children logic unchanged; `impl_item` (method-merge) left as-is.
+**Instrument delta:** `symbols(name=extract_rust_symbols, include_body=true)` → **truncated/buffered → returns WHOLE**. Token mass fell below the inline budget; formatted line count barely moved (252→211) — the budget was the trigger, not LoC (Heuristic 1).
+**Human-cost:** negligible — the constructor reads naturally and the match is now pure dispatch.
+**Ledger:** `legibility_scan` will auto-close the row on next reconcile; verdict recorded now.
+**Confidence:** high.
