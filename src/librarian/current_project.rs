@@ -46,6 +46,35 @@ pub fn lookup_git_root(start: &Path) -> Option<PathBuf> {
     }
 }
 
+/// True iff `root` is a *linked* git worktree (created by `git worktree add`),
+/// as opposed to a main checkout, a submodule, or a non-git directory.
+///
+/// Filesystem-only (no `git` subprocess): a linked worktree's `.git` is a
+/// *file* containing `gitdir: <main>/.git/worktrees/<name>`. A submodule's
+/// `.git` file points into `.git/modules/<name>` instead, so we require a
+/// `worktrees` path component — skipping a submodule root would be wrong.
+pub(crate) fn is_linked_worktree(root: &Path) -> bool {
+    let dot_git = root.join(".git");
+    let Ok(meta) = std::fs::symlink_metadata(&dot_git) else {
+        return false;
+    };
+    if !meta.file_type().is_file() {
+        return false;
+    }
+    let Ok(pointer) = std::fs::read_to_string(&dot_git) else {
+        return false;
+    };
+    pointer
+        .lines()
+        .find_map(|l| l.strip_prefix("gitdir:").map(str::trim))
+        .map(|gitdir| {
+            Path::new(gitdir)
+                .components()
+                .any(|c| c.as_os_str() == "worktrees")
+        })
+        .unwrap_or(false)
+}
+
 pub fn lookup_umbrella(abs_path: &Path, ws: &WorkspaceConfig) -> Option<String> {
     ws.umbrellas.iter().find_map(|u| {
         u.members
@@ -92,6 +121,52 @@ mod tests {
     fn resolve_returns_none_for_non_existent_path() {
         let p = std::path::Path::new("/nonexistent/zzz/qqq");
         assert!(resolve(p, &WorkspaceConfig::default()).is_none());
+    }
+
+    #[test]
+    fn is_linked_worktree_detects_worktree_not_submodule_or_main() {
+        let tmp = TempDir::new().unwrap();
+        // Linked worktree: .git is a FILE → gitdir: .../worktrees/<name>
+        let wt = tmp.path().join("wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(
+            wt.join(".git"),
+            format!(
+                "gitdir: {}/main/.git/worktrees/feat\n",
+                tmp.path().display()
+            ),
+        )
+        .unwrap();
+        assert!(is_linked_worktree(&wt), "linked worktree detected");
+
+        // Submodule: .git file → gitdir: .../modules/<name> (NOT a worktree)
+        let sub = tmp.path().join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(
+            sub.join(".git"),
+            format!(
+                "gitdir: {}/super/.git/modules/libfoo\n",
+                tmp.path().display()
+            ),
+        )
+        .unwrap();
+        assert!(
+            !is_linked_worktree(&sub),
+            "submodule root is not a worktree"
+        );
+
+        // Main checkout: .git is a DIRECTORY
+        let main = tmp.path().join("main");
+        std::fs::create_dir_all(main.join(".git")).unwrap();
+        assert!(
+            !is_linked_worktree(&main),
+            "main checkout is not a worktree"
+        );
+
+        // No .git at all
+        let plain = tmp.path().join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        assert!(!is_linked_worktree(&plain), "non-git dir is not a worktree");
     }
 
     #[test]

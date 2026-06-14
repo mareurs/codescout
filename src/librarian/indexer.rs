@@ -62,6 +62,20 @@ pub fn index_repo_sync(
     force_rewalk: bool,
 ) -> Result<(IndexReport, Vec<EmbedQueueItem>)> {
     let mut report = IndexReport::default();
+
+    // A linked git worktree is a duplicate, stale-on-merge checkout of its main
+    // tree — never index it into the (machine-global) catalog. The root-anchored
+    // `/.worktrees/` gitignore that excludes it from the MAIN tree does not match
+    // when the worktree is itself the walk root, so without this guard every
+    // worktree file is indexed as a separate artifact (32b58e13).
+    if crate::librarian::current_project::is_linked_worktree(abs_root) {
+        tracing::warn!(
+            "skipping index of linked git worktree {} — index its main worktree instead",
+            abs_root.display()
+        );
+        return Ok((report, Vec::new()));
+    }
+
     let mut seen_ids: Vec<String> = Vec::new();
     let mut embed_queue: Vec<EmbedQueueItem> = Vec::new();
 
@@ -392,6 +406,35 @@ kind = "memory"
         let (r2, _) = index_repo_sync(&cat, &rules, &fixture, &ignore, false, false).unwrap();
         assert_eq!(r2.unchanged, 3);
         assert_eq!(r2.added, 0);
+    }
+
+    #[test]
+    fn index_repo_sync_skips_linked_worktree() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let wt = tmp.path().join("wt");
+        std::fs::create_dir_all(wt.join("docs")).unwrap();
+        // .git as a FILE pointing into .../worktrees/<name> → linked worktree.
+        std::fs::write(
+            wt.join(".git"),
+            format!(
+                "gitdir: {}/main/.git/worktrees/feat\n",
+                tmp.path().display()
+            ),
+        )
+        .unwrap();
+        std::fs::write(wt.join("docs/a.md"), "# a\n").unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let rules: Vec<CompiledRule> = Vec::new();
+        let ignore = globset::GlobSet::empty();
+        let (report, queue) = index_repo_sync(&cat, &rules, &wt, &ignore, false, false).unwrap();
+        assert_eq!(report.added, 0, "a linked worktree must not be indexed");
+        assert!(queue.is_empty());
+        let n: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "no artifact rows created for the worktree");
     }
 
     #[test]
