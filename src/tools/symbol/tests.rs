@@ -1356,7 +1356,6 @@ fn replace_symbol_with_ambiguous_name_path_returns_error() {
     );
 }
 
-
 #[test]
 fn find_unique_resolves_trait_impl_method_by_qualified_name_path() {
     // Two trait-impl methods on the same type share the bare name_path
@@ -1402,9 +1401,13 @@ fn find_unique_resolves_trait_impl_method_by_qualified_name_path() {
     let display =
         find_unique_symbol_by_name_path(&symbols, "impl fmt::Display for SensitiveString/fmt")
             .expect("qualified name_path resolves uniquely");
-    assert_eq!(display.start_line, 50, "resolved the Display impl, not Debug");
-    let debug = find_unique_symbol_by_name_path(&symbols, "impl fmt::Debug for SensitiveString/fmt")
-        .expect("qualified name_path resolves uniquely");
+    assert_eq!(
+        display.start_line, 50,
+        "resolved the Display impl, not Debug"
+    );
+    let debug =
+        find_unique_symbol_by_name_path(&symbols, "impl fmt::Debug for SensitiveString/fmt")
+            .expect("qualified name_path resolves uniquely");
     assert_eq!(debug.start_line, 40, "resolved the Debug impl");
 }
 

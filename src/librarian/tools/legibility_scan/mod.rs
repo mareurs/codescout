@@ -402,20 +402,22 @@ async fn write_backlog(ctx: &ToolContext, id: &str, params: &BacklogParams) -> R
 /// attached `render_template`, preserving everything from `VERDICTS_HEADING`
 /// onward. Fixes F-8: previously `params` updated but the body stayed stale,
 /// forcing a manual re-render after every scan.
-async fn render_managed_body(ctx: &ToolContext, id: &str, params: &serde_json::Value) -> Result<()> {
+async fn render_managed_body(
+    ctx: &ToolContext,
+    id: &str,
+    params: &serde_json::Value,
+) -> Result<()> {
     let managed = crate::librarian::tools::render::render_params(
         include_str!("./render_template.j2"),
         params,
     )?;
 
-    let current_body = crate::librarian::tools::get::call(
-        ctx,
-        json!({ "action": "get", "id": id, "full": true }),
-    )
-    .await
-    .ok()
-    .and_then(|v| v.get("body").and_then(|b| b.as_str()).map(str::to_string))
-    .unwrap_or_default();
+    let current_body =
+        crate::librarian::tools::get::call(ctx, json!({ "action": "get", "id": id, "full": true }))
+            .await
+            .ok()
+            .and_then(|v| v.get("body").and_then(|b| b.as_str()).map(str::to_string))
+            .unwrap_or_default();
 
     let verdicts = match current_body.find(VERDICTS_HEADING) {
         Some(i) => current_body[i..].trim_end().to_string(),
@@ -810,7 +812,6 @@ mod tests {
         );
     }
 
-
     #[tokio::test]
     async fn scan_write_renders_body_and_preserves_verdicts() {
         let tmp = TempDir::new().unwrap();
@@ -850,7 +851,10 @@ mod tests {
         let body = got.get("body").and_then(|b| b.as_str()).unwrap();
 
         // managed region re-rendered from params: stale text gone, fresh row in
-        assert!(body.contains("## Backlog (auto-managed)"), "managed header: {body}");
+        assert!(
+            body.contains("## Backlog (auto-managed)"),
+            "managed header: {body}"
+        );
         assert!(
             body.contains("huge") && body.contains("over_budget_body"),
             "rendered open row for huge: {body}"
@@ -869,5 +873,4 @@ mod tests {
             "verdict body preserved: {body}"
         );
     }
-
 }

@@ -117,7 +117,10 @@ mod tests {
         let mut l = GuideLedger::load("sess-A", Some(hints_dir.clone()));
         assert!(!l.contains("librarian"));
         assert!(l.insert("librarian".to_string()), "first insert is new");
-        assert!(!l.insert("librarian".to_string()), "second insert is a no-op");
+        assert!(
+            !l.insert("librarian".to_string()),
+            "second insert is a no-op"
+        );
         drop(l);
 
         // Second "process" (simulated /mcp restart): same session reloads from disk.

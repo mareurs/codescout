@@ -155,7 +155,6 @@ fn collect_all<'a>(syms: &'a [SymbolInfo], out: &mut Vec<&'a SymbolInfo>) {
     }
 }
 
-
 /// Estimated byte size of a `symbols(path)` overview: ~one line per symbol,
 /// dominated by the name_path + the optional detail (signature), plus a fixed
 /// per-line overhead (kind label, line range, indentation).
@@ -439,7 +438,6 @@ mod tests {
         assert!(over_budget_bodies(&files).is_empty());
     }
 
-
     #[test]
     fn un_mappable_files_flags_overview_over_budget_not_line_count() {
         // Many symbols → estimated overview exceeds the budget.
@@ -492,7 +490,6 @@ mod tests {
             "expected an over-budget-body defect for `huge`, got: {defects:?}"
         );
     }
-
 
     #[test]
     fn index_lane_does_not_flag_name_collisions() {

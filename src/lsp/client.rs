@@ -1461,7 +1461,6 @@ impl Drop for LspClient {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1224,7 +1224,6 @@ impl LspManager {
     }
 }
 
-
 impl LspManager {
     /// Shared construction: builds Arc<LspManager> with the given TTL and optional project root,
     /// spawning the idle eviction loop.
