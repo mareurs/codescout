@@ -14,6 +14,11 @@ struct Args {
     prompt: Option<String>,
     #[serde(default)]
     params: Option<Value>,
+    /// Filesystem path to a JSON file holding the params payload, read
+    /// server-side. Use when params are too large to pass inline (~9 KB cap).
+    /// Mutually exclusive with `params`.
+    #[serde(default)]
+    params_path: Option<String>,
     #[serde(default)]
     render_template: Option<String>,
     #[serde(default)]
@@ -44,6 +49,9 @@ impl Tool for ArtifactAugment {
          you provide (prompt, render_template, params_schema, append_mode, history_cap, \
          entry_collection), preserving every field you omit. \
          Idempotent — safe to call on already-augmented artifacts. \
+         Params too large to pass inline (≳9 KB)? Write the JSON to a file and pass \
+         params_path (read server-side) instead of params; CLI equivalent is \
+         `codescout artifact-augment <id> --params @<file> [--merge]`. \
          Replaces artifact_update_params."
     }
 
@@ -60,6 +68,10 @@ impl Tool for ArtifactAugment {
                 "params": {
                     "type": "object",
                     "description": "The data params payload on the augmentation row. On merge=false (default — create/replace), fully replaces existing params. On merge=true, RFC 7396 merge-patched into existing params. NOT gather config — gather behavior is controlled by gather_from/format/max_tokens fields written into the params payload itself by callers that need them."
+                },
+                "params_path": {
+                    "type": "string",
+                    "description": "Filesystem path to a JSON file holding the params payload, read server-side. Use when params are too large to pass inline: the MCP result buffer caps inline reads at ~9 KB, so a large array cannot be round-tripped through the model to rebuild the params argument. Write the JSON to a file via run_command, then pass its path here (absolute path recommended). Mutually exclusive with params. CLI equivalent: codescout artifact-augment <id> --params @<file> [--merge]."
                 },
                 "render_template": {
                     "type": "string",
@@ -92,7 +104,28 @@ impl Tool for ArtifactAugment {
     }
 
     async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
-        let a: Args = serde_json::from_value(args)?;
+        let mut a: Args = serde_json::from_value(args)?;
+
+        // params_path: read the params JSON from a filesystem path server-side.
+        // A large params array (≳9 KB) can't be round-tripped through the model
+        // to rebuild the inline `params` argument — the MCP result buffer caps
+        // inline reads, so every read-back of the file buffers. Writing the JSON
+        // to a file and pointing here sidesteps that. Filesystem path only (the
+        // librarian ToolContext has no output_buffer, so @ref buffers are not
+        // resolvable here). See get_guide("progressive-disclosure").
+        if let Some(path) = a.params_path.take() {
+            if a.params.is_some() {
+                return Err(RecoverableError::new(
+                    "pass at most one of `params` or `params_path`",
+                ));
+            }
+            let raw = std::fs::read_to_string(&path)
+                .map_err(|e| RecoverableError::new(format!("params_path: reading {path}: {e}")))?;
+            let parsed: Value = serde_json::from_str(&raw).map_err(|e| {
+                RecoverableError::new(format!("params_path content is not valid JSON: {e}"))
+            })?;
+            a.params = Some(parsed);
+        }
 
         // D11: when the gate ran and passed, capture evidence to emit a
         // `note` event after the catalog lock is released (event_create is
@@ -850,5 +883,117 @@ mod tests {
             augmentation::get(&cat, "ec-tool").unwrap().unwrap()
         };
         assert_eq!(row.entry_collection.as_deref(), Some("failures"));
+    }
+    #[tokio::test]
+    async fn params_path_reads_params_from_file() {
+        let ctx = mk_ctx();
+        seed_artifact(&ctx, "pp-art");
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let payload =
+            serde_json::to_string(&json!({"findings": [{"uf": "UF-1"}, {"uf": "UF-2"}]})).unwrap();
+        std::fs::write(tmp.path(), &payload).unwrap();
+        let result = ArtifactAugment
+            .call(
+                &ctx,
+                json!({
+                    "id": "pp-art",
+                    "prompt": "keep findings",
+                    "params_path": tmp.path().to_str().unwrap()
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result, json!("ok"));
+        let cat = ctx.catalog.lock();
+        let row = augmentation::get(&cat, "pp-art").unwrap().unwrap();
+        let params: Value = serde_json::from_str(&row.params).unwrap();
+        assert_eq!(params["findings"].as_array().unwrap().len(), 2);
+        assert_eq!(params["findings"][0]["uf"], "UF-1");
+    }
+
+    // Mirrors the MRV-poc scenario: a large array patched via merge + params_path.
+    #[tokio::test]
+    async fn params_path_works_with_merge() {
+        let ctx = mk_ctx();
+        seed_artifact(&ctx, "pp-merge");
+        ArtifactAugment
+            .call(
+                &ctx,
+                json!({
+                    "id": "pp-merge",
+                    "prompt": "p",
+                    "params": {"findings": [{"uf": "UF-1", "dev_status": "open"}]}
+                }),
+            )
+            .await
+            .unwrap();
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let payload = serde_json::to_string(
+            &json!({"findings": [{"uf": "UF-1", "dev_status": "fixed-verified"}]}),
+        )
+        .unwrap();
+        std::fs::write(tmp.path(), &payload).unwrap();
+        ArtifactAugment
+            .call(
+                &ctx,
+                json!({
+                    "id": "pp-merge",
+                    "merge": true,
+                    "params_path": tmp.path().to_str().unwrap()
+                }),
+            )
+            .await
+            .unwrap();
+        let cat = ctx.catalog.lock();
+        let row = augmentation::get(&cat, "pp-merge").unwrap().unwrap();
+        let params: Value = serde_json::from_str(&row.params).unwrap();
+        assert_eq!(params["findings"][0]["dev_status"], "fixed-verified");
+    }
+
+    #[tokio::test]
+    async fn params_and_params_path_conflict_errors() {
+        let ctx = mk_ctx();
+        seed_artifact(&ctx, "pp-conflict");
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), "{}").unwrap();
+        let err = ArtifactAugment
+            .call(
+                &ctx,
+                json!({
+                    "id": "pp-conflict",
+                    "prompt": "x",
+                    "params": {"a": 1},
+                    "params_path": tmp.path().to_str().unwrap()
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("at most one of"),
+            "expected mutual-exclusion error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn params_path_invalid_json_errors() {
+        let ctx = mk_ctx();
+        seed_artifact(&ctx, "pp-bad");
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), "{not json").unwrap();
+        let err = ArtifactAugment
+            .call(
+                &ctx,
+                json!({
+                    "id": "pp-bad",
+                    "prompt": "p",
+                    "params_path": tmp.path().to_str().unwrap()
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("not valid JSON"),
+            "expected JSON parse error, got: {err}"
+        );
     }
 }

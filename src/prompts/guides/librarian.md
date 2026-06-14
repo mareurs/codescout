@@ -159,6 +159,16 @@ artifact_augment(id="...", merge=true, params={key: value})
 field you omit. Use it to change one field (e.g. widen a `params_schema` enum) without
 re-sending the rest; `merge=false` replaces all seven (omitted fields reset to None).
 
+**Oversized params (≳9 KB)** — when `params` is too large to pass inline (a big
+findings/rows array), don't try to read it back into context to re-emit it: the result
+buffer caps inline reads, so it can't round-trip. Two server-side paths read it directly:
+- MCP: `artifact_augment(id="...", params_path="/abs/path.json", merge=true)` — reads the
+  file server-side; mutually exclusive with `params`.
+- CLI: `codescout artifact-augment <id> --params @<file> [--merge]` (also `--params -` for
+  stdin) — same catalog, same validation.
+`apply_merge_patch` replaces arrays wholesale (no entry-grain write), so the file must hold
+the full array under its key — a bare-array patch under `merge` is a silent no-op.
+
 **Refresh cycle** (run by the agent, not automatic):
 1. `artifact_refresh(action="gather", id="...")` — collects context; does NOT write
 2. Synthesize the new body from the gathered context

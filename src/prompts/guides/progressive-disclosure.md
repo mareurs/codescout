@@ -74,6 +74,11 @@ output against catalog state, prefer reading the buffer directly
   Run bare, then `grep FAILED @cmd_id` against the buffer.
 - **Treating the summary as authoritative.** It's a preview, not the
   whole result. Pull from the buffer before drawing conclusions.
+- **Trying to round-trip oversized data back into a tool argument.** A
+  result ≳9 KB (e.g. a big `artifact_augment` params array) can't be read
+  back inline to re-emit as an argument — every read buffers. Write it to
+  a file server-side and use a file-reading param instead: `artifact_augment`
+  `params_path`, or the `codescout` CLI's `--params @<file>` / `--params -`.
 
 ## Related
 
