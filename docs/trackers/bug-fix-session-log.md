@@ -89,6 +89,7 @@ time_scope: open-ended
 | W-13 | 2026-06-11 | high | Test shared-LSP behavior via isolated worktree hashes, not contention on the live hash | Only alternative was N clients on the live hash = the R-23 move that SIGKILLed the user's working mux last session | validated |
 | W-14 | 2026-06-12 | med | Verify a subagent's control-flow *mechanism* claim against the actual fn body before building a fix | Report's "Option A: set `output_form=Text`" compiles but leaves the 14 KB guide buffered → behavioral test fails → wrong-impl + re-debug cycle; reading `call_content` showed `exceeds_inline_limit` gates the branch unconditionally | validated |
 | W-15 | 2026-06-12 | med | Enumerate a prompt surface's full gate set (byte-for-byte slice, snapshot, cap, version-pin, content tests) before editing | Blind edit hits ONBOARDING_VERSION==28 pin + snapshot + "6 memories" surprises as sequential red tests; pre-scout bundled all gate updates into one commit | validated |
+| W-16 | 2026-06-14 | med | Scout each bug's actual body before standing behind a title-derived severity/priority triage of a bug set | Would have carried two wrong facts into a fix-priority recommendation: labeled `7ca71bf7` (catalog staleness) "data-loss" and missed that `3fc22ad2` is already partially fixed (lock-probe shipped 2026-06-11); 2nd same-day recurrence of F-21 | validated |
 
 ## Category conventions
 
@@ -1355,6 +1356,29 @@ bug class."
 **Fix idea / Pointer:** `docs/issues/2026-06-14-read-file-offset-limit-silently-ignored-on-buffers.md`; recon R-31.
 
 ---
+## W-16 — Recon caught title-derived triage imprecisions before they became a fix-priority recommendation
+
+**Observed:** 2026-06-14, "check remaining open issues" review. After `artifact(find, kind=bug, status=open)` returned 6 bugs, I wrote a triage from the **titles alone** — clustered them (catalog ×4 / LSP / workspace-pin), ranked `3ea49090` "highest blast-radius," labeled three as "data-loss/data-corruption class," and called the set 6 flat `open` bugs — then offered to act on that ranking. Reconnaissance invoked before the ranking hardened into a fix-priority decision.
+
+**Pattern:** Before standing behind a severity/priority triage of a bug *set*, read each bug's actual body (`artifact(get, id=…, full=true)` — never `read_markdown` on `docs/issues/`; the catalog holds status/tags), not just the `find` titles. Title vocabulary ("catalog", "orphan", "wipe") under-specifies severity class and hides partial-fix state.
+
+**Counterfactual:** The scout confirmed the headline (`3ea49090` IS the top risk — empty-active runs `DELETE FROM artifact`, wiping the whole global catalog across workspaces, with a test *encoding the wipe as intended*), but corrected two checkable facts I'd already committed:
+1. `7ca71bf7` is catalog **staleness** (dead/orphan rows after rename; tags `librarian/catalog/doctor`, NOT `data-loss`) — its data-loss risk exists only *via* the unsafe `3ea49090` prune path. I'd mislabeled it "data-loss class."
+2. `3fc22ad2` (Kotlin mux/RocksDB) is **partially fixed** — its body has a "lock-probe … implemented 2026-06-11" subsection; not the flat-`open` I implied.
+Had I acted on the uncorrected triage, a "fix the 3 data-loss bugs first" plan would have over-prioritized a staleness bug and re-done work already shipped for `3fc22ad2`.
+
+**Confirming data points:**
+1. F-21 (same day, this work stream) — a controller's title-derived *root-cause unification* of the same 6 bugs over-generalized; scout split it. **This is the 2nd same-day recurrence of the title-pattern-match trap** — the friction is intra-day recurrent, not a one-off.
+2. R-19 (reconnaissance-patterns) — "assert a checkable fact only after reading it this session"; R-32 — the open-bug-cluster decomposition. Both held again here.
+
+**Impact:** med — prevented two wrong facts from entering a fix-priority recommendation; no code/plan churn because the scout preceded any scoping.
+
+**Promote-when:** if a 3rd title-derived cluster-triage slip lands, escalate the R-32/R-19 promote-when (the recurrence count, not the individual catches, is the case for a standing "scout bug bodies before triaging a set" rule).
+
+**Status:** validated — drift caught + corrected before any fix-priority decision.
+
+**Fix idea / Pointer:** This session's open-issues triage. Bugs scouted: `3ea49090`, `32b58e13`, `7ca71bf7`, `1a5acfc0`, `3fc22ad2`, `3fb29bc6`. Recon kin: F-21, F-22, R-19, R-32.
+
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

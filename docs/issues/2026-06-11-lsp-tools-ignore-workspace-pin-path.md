@@ -1,18 +1,18 @@
 ---
-status: open
-opened: 2026-06-11
-closed:
-severity: high
-owner: marius
-related:
-  - docs/issues/2026-06-11-symbols-search-include-docs-and-focus.md
-tags:
-  - lsp
-  - workspace-pinning
-  - references
-  - symbol_at
-  - call_graph
+id: null
 kind: bug
+status: fixed
+title: null
+owners: []
+tags:
+- lsp
+- workspace-pinning
+- references
+- symbol_at
+- call_graph
+topic: null
+time_scope: null
+closed: 2026-06-14
 ---
 
 # BUG: references / symbol_at / call_graph ignore the workspace= pin for relative path resolution
@@ -156,7 +156,7 @@ its root via `require_project_root_for(workspace_override)` and is unaffected.)
 
 ## Fix
 
-**Implemented on `experiments` (uncommitted as of 2026-06-11).**
+**Shipped on `experiments` in `85dc92f9`** (`fix(symbols): honor workspace= pin in references/symbol_at/call_graph/edit_code`). **Verified fixed 2026-06-14** (verify-open scout for the "solve all open bugs" pass): both call-site swaps to `resolve_read_path_for` and the `get_lsp_client` LSP-root pin are present in current code; all 7 `honors_workspace_override` tests green. Not yet on `master` — archive to `docs/issues/archive/` after cherry-pick and cite the master-side SHA then.
 
 **Defect #1 (path resolution):** swapped the 4 call sites to
 `resolve_read_path_for(&ctx.agent, ctx.workspace_override.as_deref(), …)` —
