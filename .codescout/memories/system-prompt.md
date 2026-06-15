@@ -4,7 +4,7 @@
 
 | Project | Entry point | Key abstraction |
 |---|---|---|
-| code-explorer | `src/server.rs::CodeScoutServer` | `tool.call_content()` dispatches all MCP calls |
+| codescout | `src/server.rs::CodeScoutServer` | `tool.call_content()` dispatches all MCP calls |
 | codescout-embed | `crates/codescout-embed/src/lib.rs::create_embedder_with_config` | `Embedder` trait; `split()` / `chunk_markdown()` |
 | edit-eval-rust | `tests/e2e/edit_eval/cases.rs::all()` (harness) | `EditCase` + `EditEvalCtx` |
 | nav-eval-rust | `tests/fixtures/nav-eval-rust/src/lib.rs` (12 modules) | each `.rs` file is a self-contained nav trap |
@@ -14,7 +14,7 @@
 | rust-library | `tests/fixtures/rust-library/src/lib.rs` | `Catalog<T: Searchable>`, `Searchable` trait |
 | typescript-library | `tests/fixtures/typescript-library/src/index.ts` | `Catalog<T>`, `SearchResult` discriminated union |
 
-## Key Abstractions (code-explorer)
+## Key Abstractions (codescout)
 
 - `CodeScoutServer` — MCP `ServerHandler`; routes all `CallToolRequest`s
 - `Tool` trait + `ToolContext` (`src/tools/core/types.rs`) — extension point every tool implements; `call_content()` is the MCP entry point
@@ -24,7 +24,7 @@
 
 ## Search Tips by Project
 
-- **code-explorer:** `semantic_search(query)` works; `symbols(path="src/tools/")` for tool internals
+- **codescout:** `semantic_search(query)` works; `symbols(path="src/tools/")` for tool internals
 - **codescout-embed:** no semantic index → `grep(pattern, path="crates/codescout-embed/src/")`
 - **All fixture libraries:** no semantic index → `grep(pattern, path="tests/fixtures/<name>/src")` or `symbols(path="tests/fixtures/<name>/")`
 - **nav-eval-rust traps:** navigate by module — `symbols(path="tests/fixtures/nav-eval-rust/src/<trap>.rs")`

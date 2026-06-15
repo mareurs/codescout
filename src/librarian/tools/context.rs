@@ -557,15 +557,15 @@ mod tests {
         let root = tmp.path().to_path_buf();
         let cat = Catalog::open_in_memory().unwrap();
 
-        // Active project lives at root/code-explorer with file inside.
-        let proj_dir = root.join("code-explorer");
+        // Active project lives at root/codescout with file inside.
+        let proj_dir = root.join("codescout");
         std::fs::create_dir_all(&proj_dir).unwrap();
         std::fs::write(proj_dir.join("auth.md"), "# auth\nbody").unwrap();
 
         let mut in_proj = sample_row(
             "in",
             "claude",
-            "code-explorer/auth.md",
+            "codescout/auth.md",
             "auth notes",
             Some("auth"),
         );

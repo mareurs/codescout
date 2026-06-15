@@ -62,7 +62,7 @@ Running log of rough edges found while using project skills. Feed into refactor 
 **Fix idea:** Proxy should log tool_use block names (not inputs) into observation metadata, e.g. `tools_called: ["mcp__codescout__symbols", "TaskCreate"]`
 
 ### F-007 — Session belongs to different project; cc.py stats/trace fails silently
-**When:** `cc.py stats 64618681-...` from code-explorer project  
+**When:** `cc.py stats 64618681-...` from codescout project  
 **Got:** `ERROR: session not found`  
 **Root cause:** cc.py scans only the current project's JSONL by default; session was in `/home/marius/work/mirela/backend/kotlin`  
 **No guidance** in skill on how to locate session → user must either know the project or run `--all`  
@@ -77,7 +77,7 @@ Running log of rough edges found while using project skills. Feed into refactor 
 **Fix idea:** cc.py should verify the reconstructed path exists; if not, try heuristics (longest existing prefix). Also document the ambiguity in skill docs so users know to verify before using a `--project` path from `--all` output.  
 **Status: FIXED 2026-05-03** — `project_key_to_path` now uses filesystem-guided bitmask decode: tries all `-`-vs-`/` splits ordered by most separators first, picks first path that exists on disk
 
-### F-010 — artifact(update, rel_path) updates metadata but doesn't rename file on disk (FIXED 2026-05-23, code-explorer:1cb123d1)
+### F-010 — artifact(update, rel_path) updates metadata but doesn't rename file on disk (FIXED 2026-05-23, codescout:1cb123d1)
 **When:** `artifact(action="update", patch={rel_path: "new/path.md"})` after manually moving a file  
 **Got:** Artifact metadata updated (confirmed `"updated": true`), but file stays at old path  
 **Impact:** Subsequent `edit_markdown(path="new/path.md")` fails with "No such file or directory"  

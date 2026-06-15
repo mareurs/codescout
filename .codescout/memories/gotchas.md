@@ -2,7 +2,7 @@
 
 ## Semantic Index — Fixture Projects Not Indexed
 
-The semantic index is populated for `code-explorer` only. All fixture projects
+The semantic index is populated for `codescout` only. All fixture projects
 (java-library, kotlin-library, python-library, rust-library, typescript-library,
 nav-eval-rust, edit-eval-rust) have no separate semantic index.
 **When searching within fixture projects:** skip `semantic_search`; use
@@ -18,7 +18,7 @@ See `docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md`.
 ## eval Fixture Workspace Isolation
 
 `edit-eval-rust` and `nav-eval-rust` declare their own `[workspace]` tables and must
-**never** be added as workspace members of code-explorer. Their `Cargo.lock` must stay separate.
+**never** be added as workspace members of codescout. Their `Cargo.lock` must stay separate.
 `git restore tests/fixtures/edit-eval-rust/src` resets mutations — all `src/` files must be
 git-tracked or restore silently no-ops and mutations leak between eval cases.
 
@@ -49,8 +49,8 @@ A bare SHA implies the current repo. Unenforced by tooling — readers must noti
 ## Onboarding Subagent Project-Scope Collision
 
 During parallel force-onboarding, subagents may overwrite each other's memories in the
-`code-explorer` project slot (last writer wins when multiple subagents share the focused project).
-Verify `memory(action="read", project_id="code-explorer", topic="project-overview")` after onboarding
+`codescout` project slot (last writer wins when multiple subagents share the focused project).
+Verify `memory(action="read", project_id="codescout", topic="project-overview")` after onboarding
 to confirm the content is actually about codescout and not a fixture crate.
 
 ## `symbols(path)` Routes to LSP When Available — Not Always Tree-Sitter

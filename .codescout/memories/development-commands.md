@@ -1,6 +1,6 @@
 # Workspace Development Commands
 
-## code-explorer (main MCP server)
+## codescout (main MCP server)
 
 ```bash
 cargo build --release        # release binary — required for live MCP testing

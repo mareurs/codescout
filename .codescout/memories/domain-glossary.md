@@ -12,7 +12,7 @@
 | `CatalogStats` | Value object returned by `Catalog.stats()` — totalItems + name |
 | `AudioBook` | Appears in Python fixture only — extends Book + Playable mixin; the only concrete `Searchable` in that fixture |
 
-## codescout (code-explorer) specific
+## codescout specific
 
 | Term | Definition |
 |---|---|

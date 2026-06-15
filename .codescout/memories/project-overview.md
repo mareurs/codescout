@@ -1,4 +1,4 @@
-# codescout (code-explorer) — Project Overview
+# codescout — Project Overview
 
 ## Purpose
 
@@ -20,7 +20,7 @@ embedded workspace artifact registry ("librarian") that indexes markdown docs in
 
 - Binary + lib crate: `codescout`
 - Version: 0.14.0
-- Workspace member: code-explorer (also includes codescout-embed)
+- Workspace member: codescout (also includes codescout-embed)
 
 ## Key MCP Tool Categories
 

@@ -172,7 +172,7 @@ a row in `tool_calls`. Hookify catches it pre-call.
 
 **Promote-when:** lint extension is drafted and ready to land; OR a second instance of companion-side stale-tool-name drift surfaces (whichever comes first). Current threshold: 1 confirmed (U-6); a second instance would force the issue.
 
-**Status:** **shipped (deny) — 2026-05-23.** Test landed at `src/server.rs::tests::companion_surfaces_reference_only_real_tools` (code-explorer:257d1236) with three layers: positive `mcp__codescout__<name>` matcher check, `*__<name>` case-statement filter check, and known-stale-name sentinel. Walks `../claude-plugins/codescout-companion/hooks/*.sh` + `hooks.json`; skips gracefully when the sibling repo is missing.
+**Status:** **shipped (deny) — 2026-05-23.** Test landed at `src/server.rs::tests::companion_surfaces_reference_only_real_tools` (codescout:257d1236) with three layers: positive `mcp__codescout__<name>` matcher check, `*__<name>` case-statement filter check, and known-stale-name sentinel. Walks `../claude-plugins/codescout-companion/hooks/*.sh` + `hooks.json`; skips gracefully when the sibling repo is missing.
 
 **Architectural decision (Snow Lion):** lint lives in codescout, reads companion via stable `../claude-plugins/` relative path. Chosen over alternatives (lint-in-companion, shared tool-list artifact) because the read is opt-in with graceful skip, the runtime dependency direction stays clean (companion → codescout), and a single CI run catches both surfaces.
 
@@ -206,7 +206,7 @@ Per `docs/architecture/mcp-channel-caps.md`, the canonical `server_instructions`
 
 That makes the companion compression-reminder load-bearing as the **post-compact safety net** — the SessionStart hook re-fires on resume, restoring the Iron Laws in a compact-friendly bullet form. Dropping it would leave the post-compact model without a tool-rules anchor.
 
-**Revised verdict:** keep the companion compression-reminder. The triplication identified in U-4 is correctly layered defense, not redundancy. To prevent drift between the three copies, **H-3 now provides the lint** (companion-surface tool-name check, shipped code-explorer:257d1236) — drift in the companion copy surfaces as a CI failure rather than silent inconsistency.
+**Revised verdict:** keep the companion compression-reminder. The triplication identified in U-4 is correctly layered defense, not redundancy. To prevent drift between the three copies, **H-3 now provides the lint** (companion-surface tool-name check, shipped codescout:257d1236) — drift in the companion copy surfaces as a CI failure rather than silent inconsistency.
 ### H-5 — Wire `audit_doc_refs` into CI for CLAUDE.md and docs/**/*.md
 
 **Pattern:** doc surfaces (CLAUDE.md, trackers, READMEs) cite code paths that have since been renamed, moved, or removed. The project already has a tool — `librarian(action="audit_doc_refs")` — built specifically to detect this; it's just not wired into automated enforcement.
@@ -245,7 +245,7 @@ That makes the companion compression-reminder load-bearing as the **post-compact
 
 **Proposed hookify rule:** layered fix, ship cheapest first.
 
-- **(A) Placeholder prefix reject** — extend `looks_like_path` to reject `path/to/` prefix (catches ~6 of 39 FPs in agent docs). One-line addition in `src/librarian/tools/audit_doc_refs/parser.rs`, next to the existing `origin/` / `upstream/` rejections. **Shipped** with this entry — code-explorer:faa77dd7.
+- **(A) Placeholder prefix reject** — extend `looks_like_path` to reject `path/to/` prefix (catches ~6 of 39 FPs in agent docs). One-line addition in `src/librarian/tools/audit_doc_refs/parser.rs`, next to the existing `origin/` / `upstream/` rejections. **Shipped** with this entry — codescout:faa77dd7.
 - **(B) Per-doc opt-out via frontmatter** — recognize `audit_file_paths: false` in markdown frontmatter to skip path resolution for that file. Cleanest long-term: lets each doc owner declare reader-side intent. Requires parser to read frontmatter, schema docs, and a per-finding suppression mechanism.
 - **(C) Default scope exclusion** — exclude `docs/agents/**` from `DEFAULT_AUDIT_GLOBS` (currently `["docs/**/*.md", "CLAUDE.md", "**/CLAUDE.md", "**/README.md"]`). Cheapest catch-the-rest fix but loses coverage for any *real* drift inside agent docs.
 
@@ -259,13 +259,13 @@ That makes the companion compression-reminder load-bearing as the **post-compact
 
 **Status:** **shipped — 2026-05-24.**
 
-- **(A) Placeholder prefix reject** — **shipped** code-explorer:faa77dd7. Catches `path/to/X` placeholders in `looks_like_path`. Dropped ~5 placeholder FPs.
-- **(C) Default scope exclusion** — **shipped** code-explorer:9fa04f0b. New constant `DEFAULT_AUDIT_EXCLUDES = ["docs/agents/**"]` applied only when `args.paths` is None. Explicit `paths` argument bypasses the exclusion so callers can audit the subtree on demand. Tests: `default_scan_excludes_docs_agents` + `explicit_paths_override_default_exclude`. Dropped ~29 hi-sev refs.
+- **(A) Placeholder prefix reject** — **shipped** codescout:faa77dd7. Catches `path/to/X` placeholders in `looks_like_path`. Dropped ~5 placeholder FPs.
+- **(C) Default scope exclusion** — **shipped** codescout:9fa04f0b. New constant `DEFAULT_AUDIT_EXCLUDES = ["docs/agents/**"]` applied only when `args.paths` is None. Explicit `paths` argument bypasses the exclusion so callers can audit the subtree on demand. Tests: `default_scan_excludes_docs_agents` + `explicit_paths_override_default_exclude`. Dropped ~29 hi-sev refs.
 - **(B) Per-doc frontmatter opt-out** — **not shipped, deferred indefinitely.** Cleaner per-doc design but (C) was sufficient: with `docs/agents/**` excluded by default, the only place the reader-side FP class would resurface is a new sibling directory of agent docs (e.g. `docs/integrations/`). At that point either extend the exclude constant or reconsider (B).
 
 **Adjacent discoveries during the U-17 triage that landed in their own commits:**
-- **Class B resolver fix** (code-explorer:68840b4b) — was NOT in the original H-6 scope. Surfaced during the docs/agents FP categorization: 8 of the 40 hi-sev refs were `../manual/...` cross-doc links that the resolver was joining to repo_root instead of `md_file.parent()`. Real audit bug; benefits the whole project. Tests: `resolver_link_with_dot_dot_resolves_relative_to_md_file_parent` + 2 siblings.
-- **docs/agents/*.md content refresh** (code-explorer:01ec2890) — stale tool-name references (`list_symbols` × 5, `find_symbol` × 3, `search_pattern`, `find_file`) and an incorrect multi-project workspace.toml example. These would have been silent drift if the audit FPs had stayed in the way.
+- **Class B resolver fix** (codescout:68840b4b) — was NOT in the original H-6 scope. Surfaced during the docs/agents FP categorization: 8 of the 40 hi-sev refs were `../manual/...` cross-doc links that the resolver was joining to repo_root instead of `md_file.parent()`. Real audit bug; benefits the whole project. Tests: `resolver_link_with_dot_dot_resolves_relative_to_md_file_parent` + 2 siblings.
+- **docs/agents/*.md content refresh** (codescout:01ec2890) — stale tool-name references (`list_symbols` × 5, `find_symbol` × 3, `search_pattern`, `find_file`) and an incorrect multi-project workspace.toml example. These would have been silent drift if the audit FPs had stayed in the way.
 
 **Notes:**
 - This is the third FP class identified in the audit. First two (U-15: Rust `::` separator + git refs) shipped 61bc678b. Pattern is clear: classifier needs an extensible reject mechanism. Could justify a refactor into a single `REJECT_PREFIXES: &[&str]` constant + iter check; not done now to minimize blast radius.

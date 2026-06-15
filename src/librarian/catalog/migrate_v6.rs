@@ -299,15 +299,15 @@ mod tests {
 
     #[test]
     fn migration_v6_translates_repo_to_abs_path() {
-        let conn = new_db_with_legacy_row("code-explorer", "docs/trackers/foo.md");
-        let ws = ws_with("code-explorer", "/home/u/work/code-explorer");
+        let conn = new_db_with_legacy_row("codescout", "docs/trackers/foo.md");
+        let ws = ws_with("codescout", "/home/u/work/codescout");
         backfill(&conn, &ws, false).unwrap();
         let abs: String = conn
             .query_row("SELECT abs_path FROM artifact WHERE id = 'a1'", [], |r| {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(abs, "/home/u/work/code-explorer/docs/trackers/foo.md");
+        assert_eq!(abs, "/home/u/work/codescout/docs/trackers/foo.md");
     }
 
     #[test]
@@ -339,8 +339,8 @@ mod tests {
 
     #[test]
     fn migration_v6_backfill_is_idempotent() {
-        let conn = new_db_with_legacy_row("code-explorer", "docs/x.md");
-        let ws = ws_with("code-explorer", "/abs/c");
+        let conn = new_db_with_legacy_row("codescout", "docs/x.md");
+        let ws = ws_with("codescout", "/abs/c");
         backfill(&conn, &ws, false).unwrap();
         let first: String = conn
             .query_row("SELECT abs_path FROM artifact WHERE id = 'a1'", [], |r| {
@@ -358,13 +358,13 @@ mod tests {
 
     #[test]
     fn migration_v6_handles_commits_table() {
-        let conn = new_db_with_legacy_row("code-explorer", "x.md");
+        let conn = new_db_with_legacy_row("codescout", "x.md");
         conn.execute(
-            "INSERT INTO commits(hash, repo, topo_order) VALUES ('abc', 'code-explorer', 1)",
+            "INSERT INTO commits(hash, repo, topo_order) VALUES ('abc', 'codescout', 1)",
             [],
         )
         .unwrap();
-        let ws = ws_with("code-explorer", "/abs/c");
+        let ws = ws_with("codescout", "/abs/c");
         backfill(&conn, &ws, false).unwrap();
         let git_root: String = conn
             .query_row("SELECT git_root FROM commits WHERE hash = 'abc'", [], |r| {

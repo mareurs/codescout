@@ -60,7 +60,7 @@ CODESCOUT_EMBEDDER_URL=http://127.0.0.1:48081 \
 CODESCOUT_SPARSE_EMBEDDER_URL=http://127.0.0.1:48084 \
 CODESCOUT_RERANKER_URL=http://127.0.0.1:48083 \
 CODESCOUT_RETRIEVAL_PROFILE=gpu CODESCOUT_MODEL_DIM=768 \
-./target/release/sync_project .worktrees/bench code-explorer
+./target/release/sync_project .worktrees/bench codescout
 
 # Then bench (no re-sync needed for boost sweeps on same model)
 CODESCOUT_QDRANT_URL=http://127.0.0.1:6334 \
@@ -99,7 +99,7 @@ CODESCOUT_QDRANT_URL=http://127.0.0.1:6334 \
 CODESCOUT_SPARSE_EMBEDDER_URL=http://127.0.0.1:48084 \
 CODESCOUT_RERANKER_URL=http://127.0.0.1:48083 \
 CODESCOUT_RETRIEVAL_PROFILE=gpu CODESCOUT_MODEL_DIM=768 \
-./target/release/sync_project .worktrees/bench code-explorer
+./target/release/sync_project .worktrees/bench codescout
 
 # Bench
 CODESCOUT_EMBEDDER_URL=http://127.0.0.1:43300 \
@@ -539,7 +539,7 @@ recall on code identifiers.
 **Caveats**
 
 - Project-id mismatch caused a 0/60 first run (sync used `bench_nomic` as id,
-  search uses `p.config.project.name` from project.toml = `code-explorer`).
+  search uses `p.config.project.name` from project.toml = `codescout`).
   Fixed by temporarily renaming project.toml; restored after the run.
 - Discovered that `src/retrieval/embedder.rs::EmbedderHttp::embed` did not
   apply the asymmetric query prefix in older builds — main since fixed via
