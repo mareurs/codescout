@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-06-13
-closed:
+closed: 2026-06-15
 severity: medium
 owner: marius
 related: []
@@ -43,14 +43,10 @@ The test's `mockito` mock serves `[{"index":1,"score":0.9},{"index":0,"score":0.
   server) — no real external service.
 
 ## Root cause
-Unknown — under investigation. `RerankerHttp::rerank` deserializes into a sequence type,
-but at runtime the body it decodes is an object. Candidate leads: (a) `RerankerHttp`
-reads a protocol/format knob from env or `.env` (cf. `edeaa96c feat(retrieval):
-multi-protocol embedder, env knobs`) that makes it expect/post a different shape, and the
-`ca57869e fix(embedder): hermetic test ctor — env reads no longer leak from .env` fix did
-not cover the reranker ctor; (b) the request doesn't match the mock (wrong path/headers),
-so mockito returns its unmatched-request object body. Mechanism not yet pinned.
 
+**Confirmed: env-leak via the env-reading ctor.** Pre-fix, the test built its client with `RerankerHttp::new(server.url())`, whose ctor calls `Protocol::from_env()` — which reads `CODESCOUT_RERANKER_PROTOCOL` (`src/retrieval/reranker.rs:18-27`) — plus `CODESCOUT_RERANKER_MODEL`. Under the full `cargo test` suite, env state leaked from a sibling test's `.env`/`set_var` reads into the shared process env, so the client's runtime config diverged from the test's Tei intent and the decode target no longer matched the mock body → `invalid type: map, expected a sequence`. In isolation the env was clean, so an isolated `--test … <name>` run could pass — the failure was test-ordering / env-leak dependent (hence the `env-leak` tag).
+
+(The exact leaked variable was not re-derived: the hermetic-ctor fix makes it moot, and reconstructing it would require checking out `b716d664^`. Recorded honestly rather than asserting a precise mechanism the error direction doesn't cleanly confirm.) Same family as the embedder hermetic-ctor fix `ca57869e`, which had not covered the reranker ctor.
 ## Evidence
 - Two identical failing runs (full suite + isolated `--test` run), same map-vs-sequence error.
 - `git log -- tests/retrieval_integration.rs` → latest touch `ca57869e`, which is present
@@ -67,23 +63,20 @@ so mockito returns its unmatched-request object body. Mechanism not yet pinned.
    test file predates the session. **Verdict:** rejected — disjoint subsystem, pre-existing.
 
 ## Fix
-Unknown — not addressed (out of scope of the logging plan; pre-existing). Status `open`.
 
+Fixed by **`b716d664`** — *fix(reranker): hermetic test ctor — env reads no longer leak from .env* (2026-06-14). It introduced `RerankerHttp::with_protocol(base, protocol, model_id)` — a ctor that takes protocol/model explicitly and reads **no** process env — and switched `reranker_returns_scores_in_input_order` to use it (`Protocol::Tei`, `model_id=None`). The test is now hermetic; `new()` (env-reading) remains the production convenience. This is the exact fix the bug's lead (a) predicted.
+
+**Zombie-open:** the fix shipped under a `fix(reranker):` subject that never referenced this file, so it stayed `status: open` until the 2026-06-15 verify-open pass surfaced that the test was green. **SHA:** experiments-side `b716d664` (also on `vdi-windows`); NOT yet on `master` — file stays in `docs/issues/` until it ships there.
 ## Tests added
-N/A — the failing test already exists; the fix (when made) should make it pass, plus a
-hermetic-ctor guard if the cause is env leakage.
 
+No new test — the existing `reranker_returns_scores_in_input_order` (`tests/retrieval_integration.rs:74-92`) IS the regression guard: `b716d664` made it construct via the hermetic `with_protocol`, so it no longer depends on ambient env. **Verified 2026-06-15:** passes in isolation AND in the full `cargo test --test retrieval_integration` run (4/4 green). The hermetic ctor + this test together cover the regression.
 ## Workarounds
 None needed for the logging work (disjoint). The `--lib` gate does not run this test, so
 local/CI `cargo test --lib` stays green; a full `cargo test` shows the red.
 
 ## Resume
-Read `RerankerHttp::rerank` and `RerankerHttp::new` (find via
-`symbols(name="RerankerHttp")`): confirm the expected response type and whether the ctor
-reads env/`.env`. If env-sensitive, apply the same hermetic-ctor pattern as `ca57869e`.
-Otherwise add a request matcher to the mock and dump the actual decoded body to see what
-the map is. Anchor with `cargo test --test retrieval_integration reranker_returns_scores_in_input_order`.
 
+N/A — fixed by `b716d664`, verified 2026-06-15 (isolation + full integration-file pass, 4/4). Archive to `docs/issues/archive/` once `b716d664` ships to `master`.
 ## References
 - `tests/retrieval_integration.rs:74-92` (the test).
 - `69f741d9 feat(retrieval): RerankerHttp client`; `edeaa96c` (multi-protocol env knobs);

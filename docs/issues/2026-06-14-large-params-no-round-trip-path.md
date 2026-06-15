@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-06-14
-closed:
+closed: 2026-06-15
 severity: medium
 owner: marius
 related: []
@@ -127,36 +127,16 @@ Use the CLI `--project` (cannot be silently ignored) for cross-project reads.
 
 ## Fix
 
-**A + B implemented** on the `experiments` working tree (uncommitted as of 2026-06-14;
-status flips to `fixed` with the master-side SHA after cherry-pick — see CLAUDE.md
-§ "After cherry-pick"). C deferred.
+**A + B shipped** in **`d43fb24c`** — *feat(librarian): add params_path to artifact_augment for oversized params* (2026-06-14) — which committed `augment.rs` (params_path + the oversized-params description hint), `src/prompts/guides/librarian.md`, `src/prompts/guides/progressive-disclosure.md`, AND this bug file in one commit. (The Fix text previously read "NOT yet committed" — that described the pre-commit working tree; the commit shipped it and the file was never updated, hence the zombie-open status until the 2026-06-15 verify-open pass.)
 
-- **A (discoverability) — done.** Added the oversized-params / CLI hint to
-  `ArtifactAugment::description()` (`src/librarian/tools/augment.rs`), the
-  Augmentation Lifecycle section of `src/prompts/guides/librarian.md`, and the
-  Anti-patterns section of `src/prompts/guides/progressive-disclosure.md`. Tool
-  descriptions and get_guide topics are not gated prompt surfaces → no
-  ONBOARDING_VERSION bump; live on next session.
-- **B (params_path) — done.** Added `params_path: Option<String>` to `Args` +
-  `input_schema`, resolved at the top of `call()` via `std::fs::read_to_string`
-  (filesystem path only — the librarian `ToolContext` has no `output_buffer`, so
-  `@buffer` refs are not resolvable from the artifact side; documented inline).
-  Mutually exclusive with `params`; invalid JSON and the conflict both return
-  `RecoverableError`.
-- **C (entry-grain array writes) — deferred.** Belongs in `docs/plans/`. Only fix
-  that eliminates whole-array resends; not needed now that params_path + the CLI
-  close the round-trip gap.
+- **A (discoverability) — done.** Oversized-params / CLI hint in `ArtifactAugment::description()` + the librarian and progressive-disclosure guides. Not gated surfaces → live on next session.
+- **B (params_path) — done.** `params_path: Option<String>` on `Args` + `input_schema`, resolved server-side via `std::fs::read_to_string` at the top of `call()`; filesystem-path only (the librarian `ToolContext` has no `output_buffer`, so `@buffer` refs aren't resolvable artifact-side). Mutually exclusive with `params`; invalid JSON and the `params`/`params_path` conflict both return `RecoverableError`.
+- **C (entry-grain array writes) — deferred** to `docs/plans/` as a separate enhancement; not required for updatability now that params_path + the CLI close the round-trip gap.
 
-Verified: 18/18 augment tests, 87/87 prompt tests, clippy clean, release build
-compiles. NOT yet committed.
+The round-trip gap (the bug's core complaint) is closed: read current params via the CLI / a file, edit, write back via `params_path`. **SHA:** experiments-side `d43fb24c` (also on `vdi-windows`); NOT yet on `master` — file stays in `docs/issues/` until it ships there.
 ## Tests added
 
-`src/librarian/tools/augment.rs` tests module:
-- `params_path_reads_params_from_file` — create/replace path reads params from a file.
-- `params_path_works_with_merge` — the MRV-poc scenario: merge replaces the array from a
-  file-resident payload.
-- `params_and_params_path_conflict_errors` — both `params` and `params_path` set → error.
-- `params_path_invalid_json_errors` — malformed file content → error.
+Four tests in `src/librarian/tools/augment.rs` (shipped in `d43fb24c`): `params_path_reads_params_from_file`, `params_path_works_with_merge` (mirrors the MRV-poc large-array-via-merge scenario), `params_and_params_path_conflict_errors`, `params_path_invalid_json_errors`. **Verified 2026-06-15:** `cargo test --lib params_path` → 4/4 pass on current HEAD.
 ## Workarounds
 **Use the codescout CLI via `run_command` — it reads params server-side, no
 round-trip:**
@@ -174,14 +154,7 @@ codescout artifact-augment <ID> --merge --params @/path/to/params.json \
 
 ## Resume
 
-Commit ONLY the isolated files for this fix — `src/librarian/tools/augment.rs`,
-`src/prompts/guides/librarian.md`, `src/prompts/guides/progressive-disclosure.md`, and
-this bug file — with a targeted `git add <those paths>`, NOT `git add -A`: the working
-tree is shared with a concurrent refactor session (≈20 unrelated files modified:
-`onboarding.rs`, `tools/core/types.rs`, `server.rs`, `lsp/*`, `semantic/*`, …). After
-cherry-pick to master, capture the master-side SHA, update this Fix section, and flip
-status to `fixed`. Live-dogfood after `/mcp` restart: `artifact_augment(id=..., 
-params_path="/abs/file.json", merge=true)` against a >9 KB params file.
+N/A — A+B fixed + verified (4/4 tests). C (entry-grain array writes) is a separate deferred enhancement for `docs/plans/`, not a reopen of this bug. Archive to `docs/issues/archive/` once `d43fb24c` ships to `master`.
 ## References
 - `src/librarian/tools/augment.rs`, `src/librarian/catalog/augmentation.rs:140`
 - `src/tools/core/types.rs:18-27`, `src/tools/output_buffer.rs:222`
