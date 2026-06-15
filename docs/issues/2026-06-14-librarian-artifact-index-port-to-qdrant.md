@@ -1,11 +1,12 @@
 ---
-status: open
+status: fixed
 opened: 2026-06-14
 severity: medium
 owner: marius
 related: []
 tags: [retrieval, librarian, qdrant, sqlite-vec, binary-diet, L-16]
 kind: task
+closed: 2026-06-15
 ---
 
 # TASK: Port the librarian artifact vector index (`artifact_vec`) from sqlite-vec to Qdrant
@@ -59,6 +60,47 @@ The 2026-05-13 memory port is the template — reuse, don't reinvent:
 - `init_sqlite_vec` no longer called for `artifact_vec`; the `artifact_vec` table is gone from `schema.sql`; build + full suite green.
 - `sqlite-vec` **stays** in `Cargo.toml` (local backend) — do NOT assert it is removed.
 - Existing on-disk `artifact_vec` data migrates without re-indexing-from-scratch being mandatory.
+## Fix
+
+Shipped on `experiments` in **3fbfbe2a** (`feat(librarian): port artifact vector
+index to Qdrant + sqlite-vec escape hatch`). **Update this SHA to the master-side
+SHA after cherry-pick** (Standard Ship Sequence).
+
+**Approach** (per the 2026-06-15 plan `groovy-floating-flamingo`):
+- New `ArtifactVectorStore` trait (`src/librarian/artifact_store.rs`) with two
+  impls — `QdrantArtifactStore` (default) and `SqliteVecArtifactStore` (the
+  retained escape hatch, delegating to `write_embeddings` to inherit its dim
+  validation + BUG-045 idempotency). QdrantWrap artifact ops
+  (`src/retrieval/artifact.rs`) mirror the memory port.
+- Backend selection via `ArtifactBackend::resolve` — env
+  `CODESCOUT_ARTIFACT_BACKEND` → `[librarian] vector_backend` → default qdrant.
+  Qdrant unreachable degrades to `None` (artifact semantic search unavailable),
+  not a crash.
+- `find_semantic` split into a sync `find_by_ids_filtered` (hydrate + filter,
+  backend-agnostic) and an async `semantic_find` coordinator (iterative-K
+  backfill). MCP `reindex`, CLI `reindex_cli`/`index_repo`, and the
+  `find`/`context` tools all route through the store. Project-scoped via the
+  containing workspace root (stable at index, superset-safe at query; the
+  catalog `scoped_filter` is the authoritative backstop).
+
+**Scope vs. the original bug:** `sqlite-vec` is **retained** — the dep is NOT
+dropped (**L-11 wontfix**). This is a consistency port + escape hatch, not the
+binary-diet removal originally described.
+
+**Tests:** 5 new (backend parse; in-memory KNN project filter; idempotent
+delete; coordinator KNN-order + catalog-filter). The 3 existing contract tests
+cover the sqlite-vec write path via the `write_embeddings` delegation. Full
+suite **2874 passed**; clippy `-D warnings` clean.
+
+**Deferred (non-blocking):** Qdrant delete-propagation — stale ids don't hydrate
+(the catalog `IN` filter drops them), so it's a storage-hygiene follow-up (a
+reindex-reconciliation pass), not a correctness gap. Live `QdrantArtifactStore`
+calls are `retrieval-e2e`-gated (mirrors the memory port); covered by manual
+`/mcp` verification.
+
+**Manual verify:** `/mcp` restart → `reindex` → `artifact(find, semantic=…)`
+ranks results (Qdrant default); then `[librarian] vector_backend = "sqlite-vec"`,
+restart, reindex → search works with **no Qdrant running** (the vdi-windows path).
 ## Out of scope (related, separate)
 - **Consumer-facing drift signal.** The codescout-companion's `session-start.sh` drift-warnings
   block reads the now-frozen legacy `embeddings.db::drift_report` and is silently inert. There is
