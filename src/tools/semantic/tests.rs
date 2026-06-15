@@ -224,6 +224,22 @@ async fn index_status_running_zero_zero_carries_liveness_note() {
     );
 }
 
+#[test]
+fn resolve_done_total_prefers_qdrant_count_over_placeholder() {
+    use super::index::resolve_done_total;
+
+    // Qdrant supplied the totals (top-level file_count/chunk_count present):
+    // prefer them over the producer's 0 placeholder (see IndexProject::call).
+    let with_qdrant = json!({ "file_count": 1185, "chunk_count": 31286 });
+    assert_eq!(resolve_done_total(&with_qdrant, "file_count", 0), 1185);
+    assert_eq!(resolve_done_total(&with_qdrant, "chunk_count", 0), 31286);
+
+    // Qdrant unavailable (key absent): fall back to the variant value.
+    let no_qdrant = json!({ "indexed": false });
+    assert_eq!(resolve_done_total(&no_qdrant, "file_count", 0), 0);
+    assert_eq!(resolve_done_total(&no_qdrant, "chunk_count", 7), 7);
+}
+
 #[tokio::test]
 async fn tools_error_without_project() {
     let ctx = ToolContext {

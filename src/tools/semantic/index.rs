@@ -474,6 +474,11 @@ impl Tool for IndexStatus {
                     total_files,
                     total_chunks,
                 } => {
+                    // The producer leaves total_files/total_chunks at 0 (see
+                    // IndexProject::call, task #91) — the authoritative totals
+                    // are the top-level Qdrant file_count/chunk_count above.
+                    let total_files = resolve_done_total(&result, "file_count", *total_files);
+                    let total_chunks = resolve_done_total(&result, "chunk_count", *total_chunks);
                     result["indexing"] = json!({
                         "status": "done",
                         "files_indexed": files_indexed,
@@ -648,4 +653,19 @@ pub(crate) fn format_index_status(result: &Value) -> String {
         }
     }
     out
+}
+
+/// Resolve a `done`-state total for `IndexStatus` output.
+///
+/// The sync-task completion path leaves `IndexingState::Done.total_files` /
+/// `.total_chunks` at 0 (see `IndexProject::call`, task #91) — the authoritative
+/// totals live in Qdrant and are already surfaced as the top-level `file_count`
+/// / `chunk_count`. Prefer those so the `done` summary matches reality; fall
+/// back to the placeholder variant value only when Qdrant didn't supply a count
+/// (offline / not yet indexed).
+pub(crate) fn resolve_done_total(result: &Value, key: &str, fallback: usize) -> u64 {
+    result
+        .get(key)
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(fallback as u64)
 }
