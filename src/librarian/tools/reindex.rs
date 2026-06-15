@@ -168,6 +168,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let ignore = crate::librarian::workspace::compile_ignore(&ctx.workspace.ignore)?;
 
+    // Workspace root paths for stable, batch-uniform project_id derivation at
+    // index time (see artifact_store docs).
+    let root_paths: Vec<std::path::PathBuf> =
+        ctx.workspace.roots.iter().map(|r| r.path.clone()).collect();
+
     let mut total_added = 0usize;
     let mut total_updated = 0usize;
     let mut total_removed = 0usize;
@@ -196,14 +201,18 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         total_unchanged += report.unchanged;
         all_unknown_ids.extend(report.unknown_ids);
 
-        if let Some(ref svc) = ctx.embedding {
-            let mut computed: Vec<(String, Vec<f32>)> = Vec::with_capacity(embed_queue.len());
+        if let (Some(svc), Some(store)) = (ctx.embedding.as_ref(), ctx.artifact_store.as_ref()) {
+            // project_id = the workspace root containing this target — stable
+            // and batch-uniform (every file under the target shares it). Empty
+            // when outside every registered root → unscoped KNN (the catalog
+            // scoped filter still narrows results).
+            let project_id = crate::librarian::tools::containing_root(&root_paths, abs_root)
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default();
             for (id, title, chunk_text) in &embed_queue {
                 let vec = svc.embed_artifact(title.as_deref(), chunk_text).await?;
-                computed.push((id.clone(), vec));
+                store.upsert(&project_id, id, &vec).await?;
             }
-            let cat = ctx.catalog.lock();
-            indexer::write_embeddings(&cat, &computed)?;
         }
 
         {
@@ -273,6 +282,7 @@ mod tests {
             }),
             rules: Arc::new(rules),
             embedding: None,
+            artifact_store: None,
             current_project: None,
         }
     }
@@ -367,6 +377,7 @@ mod tests {
                 .unwrap(),
             ),
             embedding: None,
+            artifact_store: None,
             current_project: Some(Arc::new(
                 crate::librarian::current_project::CurrentProject {
                     abs_path: tmp_root.join(project_subdir),
@@ -430,6 +441,7 @@ mod tests {
             workspace: ctx_all.workspace.clone(),
             rules: ctx_all.rules.clone(),
             embedding: None,
+            artifact_store: None,
             current_project: Some(Arc::new(
                 crate::librarian::current_project::CurrentProject {
                     abs_path: root.join("p1"),
@@ -530,6 +542,7 @@ mod tests {
             }),
             rules: Arc::new(rules),
             embedding: None,
+            artifact_store: None,
             current_project: None,
         };
 

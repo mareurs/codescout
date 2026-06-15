@@ -84,6 +84,10 @@ pub struct ToolContext {
     pub workspace: Arc<WorkspaceConfig>,
     pub rules: Arc<Vec<CompiledRule>>,
     pub embedding: Option<Arc<crate::librarian::embedding::EmbeddingService>>,
+    /// Artifact vector backend — Qdrant (default) or the sqlite-vec escape
+    /// hatch. `None` when no backend could be constructed (e.g. the configured
+    /// Qdrant is unreachable); artifact semantic search is then unavailable.
+    pub artifact_store: Option<Arc<dyn crate::librarian::artifact_store::ArtifactVectorStore>>,
     /// Resolved at server startup from the process cwd. `None` when the cwd
     /// lies outside every configured workspace root; tools then fall back to
     /// workspace-wide scope and surface a hint in their response.

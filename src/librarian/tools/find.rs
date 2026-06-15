@@ -401,6 +401,44 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let (scoped_filter, applied) =
         apply_scope(base.clone(), effective_scope, &ctx.workspace, current)?;
 
+    // Semantic path runs the async store-backed coordinator (it manages its own
+    // catalog locking); the sync `find` below handles the non-semantic case.
+    let semantic_rows = if let Some(vec) = semantic_vec {
+        let store = ctx.artifact_store.as_ref().ok_or_else(|| {
+            RecoverableError::new(
+                "artifact semantic search backend unavailable — the configured Qdrant is \
+                 unreachable. Set `[librarian] vector_backend = \"sqlite-vec\"` (or \
+                 CODESCOUT_ARTIFACT_BACKEND=sqlite-vec) for the offline backend.",
+            )
+        })?;
+        // Project scope → stamp the parent workspace root (superset-safe for the
+        // catalog scoped filter); other scopes search all projects.
+        let project_id = if effective_scope == Scope::Project {
+            current.and_then(|cp| {
+                let roots: Vec<std::path::PathBuf> =
+                    ctx.workspace.roots.iter().map(|r| r.path.clone()).collect();
+                crate::librarian::tools::containing_root(&roots, &cp.abs_path)
+                    .map(|p| p.to_string_lossy().into_owned())
+            })
+        } else {
+            None
+        };
+        Some(
+            crate::librarian::catalog::find::semantic_find(
+                store.as_ref(),
+                &ctx.catalog,
+                project_id.as_deref(),
+                &vec,
+                scoped_filter.as_ref(),
+                limit,
+                offset,
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
+
     let (items, hints, catalog_value) = {
         let cat = ctx.catalog.lock();
 
@@ -415,15 +453,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             None
         };
 
-        let rows = find(
-            &cat,
-            &FindOpts {
-                filter: scoped_filter,
-                limit,
-                offset,
-                semantic: semantic_vec,
-            },
-        )?;
+        let rows = match semantic_rows {
+            Some(r) => r,
+            None => find(
+                &cat,
+                &FindOpts {
+                    filter: scoped_filter,
+                    limit,
+                    offset,
+                },
+            )?,
+        };
         let items: Vec<Value> = rows
             .into_iter()
             .map(|r| {
@@ -519,6 +559,7 @@ mod tests {
             }),
             rules: Arc::new(vec![]),
             embedding: None,
+            artifact_store: None,
             current_project: Some(Arc::new(CurrentProject {
                 abs_path: std::path::PathBuf::from("/test/code-explorer"),
                 git_root: std::path::PathBuf::from("/test/code-explorer"),
@@ -528,8 +569,9 @@ mod tests {
     }
 
     fn mk_ctx_with_embedder(cat: Catalog, svc: Arc<EmbeddingService>) -> ToolContext {
+        let catalog = Arc::new(parking_lot::Mutex::new(cat));
         ToolContext {
-            catalog: Arc::new(parking_lot::Mutex::new(cat)),
+            catalog: Arc::clone(&catalog),
             workspace: Arc::new(WorkspaceConfig {
                 roots: vec![],
                 ignore: vec![],
@@ -538,6 +580,11 @@ mod tests {
             }),
             rules: Arc::new(vec![]),
             embedding: Some(svc),
+            // Exercise the semantic path against the in-memory artifact_vec via
+            // the sqlite-vec backend (no Qdrant daemon in tests).
+            artifact_store: Some(Arc::new(
+                crate::librarian::artifact_store::SqliteVecArtifactStore::new(Arc::clone(&catalog)),
+            )),
             current_project: None,
         }
     }
@@ -649,6 +696,7 @@ mod tests {
             }),
             rules: Arc::new(vec![]),
             embedding: None,
+            artifact_store: None,
             current_project: Some(Arc::new(
                 crate::librarian::current_project::CurrentProject {
                     abs_path: std::path::PathBuf::from("/test/code-explorer"),
@@ -1031,6 +1079,7 @@ mod tests {
             }),
             rules: Arc::new(vec![]),
             embedding: None,
+            artifact_store: None,
             current_project: Some(Arc::new(
                 crate::librarian::current_project::CurrentProject {
                     abs_path: std::path::PathBuf::from("/test/code-explorer"),

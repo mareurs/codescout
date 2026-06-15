@@ -12,6 +12,7 @@ pub mod frontmatter;
 pub mod ids;
 pub mod util;
 
+pub mod artifact_store;
 pub mod embedding;
 pub mod freshness;
 pub mod indexer;
@@ -100,11 +101,46 @@ pub async fn build_tool_context() -> Result<tools::ToolContext> {
     rules.extend(classify::compile_rules(&ws_arc.rules)?);
     rules.extend(classify::default_rules()?);
 
+    let catalog = std::sync::Arc::new(parking_lot::Mutex::new(catalog));
+
+    // Artifact vector backend: Qdrant (default) or the sqlite-vec escape hatch.
+    // Resolved per the layered config; Qdrant unreachable → degrade to None
+    // (artifact semantic search unavailable) rather than crash the librarian.
+    let project_path = current_project
+        .as_deref()
+        .map(|cp| cp.abs_path.to_string_lossy().into_owned());
+    let artifact_store: Option<std::sync::Arc<dyn artifact_store::ArtifactVectorStore>> =
+        match artifact_store::ArtifactBackend::resolve(project_path.as_deref()) {
+            artifact_store::ArtifactBackend::SqliteVec => Some(std::sync::Arc::new(
+                artifact_store::SqliteVecArtifactStore::new(std::sync::Arc::clone(&catalog)),
+            )),
+            artifact_store::ArtifactBackend::Qdrant => {
+                match crate::retrieval::client::RetrievalClient::from_env().await {
+                    Ok(client) => {
+                        let collection = client.config.collection("artifacts");
+                        Some(std::sync::Arc::new(
+                            artifact_store::QdrantArtifactStore::new(client.qdrant, collection),
+                        ))
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            "artifact vector backend (qdrant) unavailable: {err:#}; artifact \
+                             semantic search disabled. Set `[librarian] vector_backend = \
+                             \"sqlite-vec\"` (or CODESCOUT_ARTIFACT_BACKEND=sqlite-vec) for the \
+                             offline backend."
+                        );
+                        None
+                    }
+                }
+            }
+        };
+
     Ok(tools::ToolContext {
-        catalog: std::sync::Arc::new(parking_lot::Mutex::new(catalog)),
+        catalog,
         workspace: ws_arc,
         rules: std::sync::Arc::new(rules),
         embedding,
+        artifact_store,
         current_project,
     })
 }
@@ -318,9 +354,43 @@ pub(crate) async fn reindex_cli(repo: Option<&str>, force: bool) -> Result<()> {
         }
     }
 
+    // Artifact vector backend for the CLI reindex. sqlite-vec → None (legacy
+    // write_embeddings on the owned catalog); Qdrant → the store.
+    let root_paths: Vec<PathBuf> = ws.roots.iter().map(|r| r.path.clone()).collect();
+    let artifact_store: Option<std::sync::Arc<dyn artifact_store::ArtifactVectorStore>> =
+        match artifact_store::ArtifactBackend::resolve(None) {
+            artifact_store::ArtifactBackend::SqliteVec => None,
+            artifact_store::ArtifactBackend::Qdrant => {
+                let client = match crate::retrieval::client::RetrievalClient::from_env().await {
+                    Ok(c) => c,
+                    Err(e) => anyhow::bail!(
+                        "connect to Qdrant for artifact reindex failed: {e:#} — set \
+                         `[librarian] vector_backend = \"sqlite-vec\"` (or \
+                         CODESCOUT_ARTIFACT_BACKEND=sqlite-vec) for the offline backend"
+                    ),
+                };
+                let collection = client.config.collection("artifacts");
+                Some(std::sync::Arc::new(
+                    artifact_store::QdrantArtifactStore::new(client.qdrant, collection),
+                ))
+            }
+        };
+
     let mut total = indexer::IndexReport::default();
     for root in roots {
-        let r = indexer::index_repo(&cat, &rules, &root.path, &ignore, embedding.as_ref()).await?;
+        let project_id = crate::librarian::tools::containing_root(&root_paths, &root.path)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let r = indexer::index_repo(
+            &cat,
+            &rules,
+            &root.path,
+            &ignore,
+            embedding.as_ref(),
+            artifact_store.as_deref(),
+            &project_id,
+        )
+        .await?;
         total.added += r.added;
         total.updated += r.updated;
         total.removed += r.removed;

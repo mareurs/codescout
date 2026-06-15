@@ -144,6 +144,7 @@ mod tests {
             }),
             rules: Arc::new(vec![]),
             embedding: None,
+            artifact_store: None,
             current_project: None,
         }
     }

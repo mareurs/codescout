@@ -67,7 +67,59 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             None
         };
 
-    let candidate_ids: Vec<String> = {
+    // Semantic topic path: the async store-backed coordinator (manages its own
+    // catalog locking), hoisted out of the sync candidate_ids block below.
+    let semantic_candidate_ids: Option<Vec<String>> = if a.anchor_id.is_none() {
+        if let Some(vec) = topic_vec {
+            let store = ctx.artifact_store.as_ref().ok_or_else(|| {
+                crate::librarian::tools::RecoverableError::new(
+                    "artifact semantic search backend unavailable — set `[librarian] \
+                     vector_backend = \"sqlite-vec\"` (or CODESCOUT_ARTIFACT_BACKEND=sqlite-vec) \
+                     for the offline backend.",
+                )
+            })?;
+            let archived_clause = if a.include_archived {
+                None
+            } else {
+                Some(FilterNode::Leaf(
+                    [("status".to_string(), json!({"nin": HIDDEN_STATUSES}))]
+                        .into_iter()
+                        .collect(),
+                ))
+            };
+            let (scoped_filter, _) =
+                apply_scope(archived_clause, effective_scope, &ctx.workspace, current)?;
+            let project_id = if effective_scope == Scope::Project {
+                current.and_then(|cp| {
+                    let roots: Vec<std::path::PathBuf> =
+                        ctx.workspace.roots.iter().map(|r| r.path.clone()).collect();
+                    crate::librarian::tools::containing_root(&roots, &cp.abs_path)
+                        .map(|p| p.to_string_lossy().into_owned())
+                })
+            } else {
+                None
+            };
+            let rows = crate::librarian::catalog::find::semantic_find(
+                store.as_ref(),
+                &ctx.catalog,
+                project_id.as_deref(),
+                &vec,
+                scoped_filter.as_ref(),
+                50,
+                0,
+            )
+            .await?;
+            Some(rows.into_iter().map(|r| r.id).collect())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let candidate_ids: Vec<String> = if let Some(ids) = semantic_candidate_ids {
+        ids
+    } else {
         let cat = ctx.catalog.lock();
         if let Some(ref anchor_id) = a.anchor_id {
             let mut ids: Vec<String> = vec![anchor_id.clone()];
@@ -97,50 +149,38 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             let (scoped_filter, _) =
                 apply_scope(archived_clause, effective_scope, &ctx.workspace, current)?;
 
-            if let Some(vec) = topic_vec {
-                let rows = find(
-                    &cat,
-                    &FindOpts {
-                        filter: scoped_filter,
-                        limit: 50,
-                        offset: 0,
-                        semantic: Some(vec),
-                    },
-                )?;
-                rows.into_iter().map(|r| r.id).collect()
-            } else {
-                let topic = a.topic.as_deref().unwrap_or("");
-                let topic_clause = FilterNode::Or {
-                    or: vec![
-                        FilterNode::Leaf(
-                            [("title".to_string(), json!({"contains": topic}))]
-                                .into_iter()
-                                .collect(),
-                        ),
-                        FilterNode::Leaf(
-                            [("topic".to_string(), json!({"contains": topic}))]
-                                .into_iter()
-                                .collect(),
-                        ),
-                    ],
-                };
-                let combined = match scoped_filter {
-                    Some(s) => FilterNode::And {
-                        and: vec![s, topic_clause],
-                    },
-                    None => topic_clause,
-                };
-                let rows = find(
-                    &cat,
-                    &FindOpts {
-                        filter: Some(combined),
-                        limit: 50,
-                        offset: 0,
-                        semantic: None,
-                    },
-                )?;
-                rows.into_iter().map(|r| r.id).collect()
-            }
+            // topic_vec was None here (the semantic path is hoisted above) —
+            // fall back to a title/topic substring filter.
+            let topic = a.topic.as_deref().unwrap_or("");
+            let topic_clause = FilterNode::Or {
+                or: vec![
+                    FilterNode::Leaf(
+                        [("title".to_string(), json!({"contains": topic}))]
+                            .into_iter()
+                            .collect(),
+                    ),
+                    FilterNode::Leaf(
+                        [("topic".to_string(), json!({"contains": topic}))]
+                            .into_iter()
+                            .collect(),
+                    ),
+                ],
+            };
+            let combined = match scoped_filter {
+                Some(s) => FilterNode::And {
+                    and: vec![s, topic_clause],
+                },
+                None => topic_clause,
+            };
+            let rows = find(
+                &cat,
+                &FindOpts {
+                    filter: Some(combined),
+                    limit: 50,
+                    offset: 0,
+                },
+            )?;
+            rows.into_iter().map(|r| r.id).collect()
         } else {
             // No anchor, no topic: surface active goal-trackers.
             let mut clauses: Vec<FilterNode> = vec![
@@ -176,7 +216,6 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     filter: scoped_filter,
                     limit: 10,
                     offset: 0,
-                    semantic: None,
                 },
             )?;
             rows.into_iter().map(|r| r.id).collect()
@@ -359,6 +398,7 @@ mod tests {
             }),
             rules: Arc::new(vec![]),
             embedding: None,
+            artifact_store: None,
             current_project: None,
         }
     }
@@ -590,6 +630,7 @@ mod tests {
             }),
             rules: Arc::new(vec![]),
             embedding: None,
+            artifact_store: None,
             current_project: Some(Arc::new(
                 crate::librarian::current_project::CurrentProject {
                     abs_path: proj_dir.clone(),

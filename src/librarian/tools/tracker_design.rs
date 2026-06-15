@@ -541,6 +541,7 @@ mod tests {
             }),
             rules: Arc::new(vec![]),
             embedding: None,
+            artifact_store: None,
             current_project: Some(Arc::new(CurrentProject {
                 abs_path: std::path::PathBuf::from("/test/x/y"),
                 git_root: std::path::PathBuf::from("/test/x"),

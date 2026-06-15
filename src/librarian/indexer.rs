@@ -344,6 +344,10 @@ pub async fn index_repo(
     abs_root: &Path,
     ignore: &globset::GlobSet,
     embedding: Option<&crate::librarian::embedding::EmbeddingService>,
+    // Vector backend + the artifact's project_id. `None` store → legacy
+    // sqlite-vec write via `write_embeddings` (the offline default).
+    store: Option<&dyn crate::librarian::artifact_store::ArtifactVectorStore>,
+    project_id: &str,
 ) -> Result<IndexReport> {
     let want = embedding.is_some();
     let (mut report, embed_queue) = index_repo_sync(cat, rules, abs_root, ignore, want, false)?;
@@ -360,14 +364,26 @@ pub async fn index_repo(
         while let Some(res) = stream.next().await {
             batch.push(res?);
             if batch.len() >= 100 {
-                write_embeddings(cat, &batch)?;
+                if let Some(s) = store {
+                    for (id, vec) in &batch {
+                        s.upsert(project_id, id, vec).await?;
+                    }
+                } else {
+                    write_embeddings(cat, &batch)?;
+                }
                 report.embedded += batch.len();
                 batch.clear();
             }
         }
         if !batch.is_empty() {
             report.embedded += batch.len();
-            write_embeddings(cat, &batch)?;
+            if let Some(s) = store {
+                for (id, vec) in &batch {
+                    s.upsert(project_id, id, vec).await?;
+                }
+            } else {
+                write_embeddings(cat, &batch)?;
+            }
         }
     }
 
@@ -828,7 +844,7 @@ kind = "memory"
         let ignore = globset::GlobSet::empty();
         let svc = EmbeddingService::new(Arc::new(MockEmbedder));
 
-        let report = index_repo(&cat, &rules, root, &ignore, Some(&svc))
+        let report = index_repo(&cat, &rules, root, &ignore, Some(&svc), None, "")
             .await
             .unwrap();
 

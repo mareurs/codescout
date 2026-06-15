@@ -137,6 +137,7 @@ impl LibrarianAdapter {
             workspace: Arc::clone(&self.ctx.workspace),
             rules: Arc::clone(&self.ctx.rules),
             embedding: self.ctx.embedding.clone(),
+            artifact_store: self.ctx.artifact_store.clone(),
             current_project,
         })
     }

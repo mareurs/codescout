@@ -43,6 +43,7 @@ fn mk_ctx(root: std::path::PathBuf) -> ToolContext {
         }),
         rules: Arc::new(vec![]),
         embedding: None,
+        artifact_store: None,
         current_project: Some(Arc::new(CurrentProject {
             abs_path: root.clone(),
             git_root: root,

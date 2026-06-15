@@ -8,18 +8,9 @@ pub struct FindOpts {
     pub filter: Option<FilterNode>,
     pub limit: usize,
     pub offset: usize,
-    /// Pre-computed embedding vector for semantic KNN search.
-    /// When Some, results are sorted by cosine distance (closest first)
-    /// rather than updated_at. Filter AST is still applied as a post-filter
-    /// on the top-K candidates.
-    pub semantic: Option<Vec<f32>>,
 }
 
 pub fn find(cat: &Catalog, opts: &FindOpts) -> Result<Vec<ArtifactRow>> {
-    if let Some(ref vec) = opts.semantic {
-        return find_semantic(cat, opts, vec);
-    }
-
     let mut sql = String::from(
         "SELECT id, abs_path, kind, status, title, owners, tags,\
          topic, time_scope, source, created_at, updated_at, file_mtime,\
@@ -117,93 +108,6 @@ pub fn catalog_summary(
     })
 }
 
-/// Two-phase semantic search with iterative K backfill:
-///
-/// 1. KNN query against artifact_vec to get top-K candidate ids by cosine distance.
-/// 2. Fetch full artifact rows for those ids, applying the filter AST.
-/// 3. If the post-filter result set is smaller than requested and K < K_CAP,
-///    double K and retry (ensures selective filters still return results).
-///
-/// Results are returned in KNN distance order (closest first).
-fn find_semantic(cat: &Catalog, opts: &FindOpts, query_vec: &[f32]) -> Result<Vec<ArtifactRow>> {
-    // Encode as little-endian f32 bytes — the format vec_f32() expects.
-    let blob: Vec<u8> = query_vec.iter().flat_map(|f| f.to_le_bytes()).collect();
-
-    let target = opts.limit + opts.offset;
-    let mut k = (target * 5).max(100) as i64;
-    const K_CAP: i64 = 2000;
-
-    loop {
-        let knn_sql = "SELECT id FROM artifact_vec \
-                       WHERE embedding MATCH vec_f32(?1) ORDER BY distance LIMIT ?2";
-        let mut knn_stmt = cat.conn.prepare(knn_sql)?;
-        let candidate_ids: Vec<String> = knn_stmt
-            .query_map(rusqlite::params![blob, k], |row| row.get(0))?
-            .collect::<Result<_, _>>()?;
-
-        if candidate_ids.is_empty() {
-            return Ok(vec![]);
-        }
-
-        // Params list: [candidate_id_0, candidate_id_1, ..., <filter params>]
-        // Candidate ids occupy positions ?1..?N.
-        let n = candidate_ids.len();
-        let placeholders: String = (1..=n)
-            .map(|i| format!("?{i}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        // CASE WHEN id = ?1 THEN 0 WHEN id = ?2 THEN 1 ... preserves KNN order.
-        let order_case: String = (0..n)
-            .map(|i| format!("WHEN id = ?{} THEN {}", i + 1, i))
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        let mut sql = format!(
-            "SELECT id, abs_path, kind, status, title, owners, tags, \
-             topic, time_scope, source, created_at, updated_at, file_mtime, \
-             file_sha256, confidence FROM artifact \
-             WHERE id IN ({placeholders})",
-        );
-
-        let mut params: Vec<rusqlite::types::Value> = candidate_ids
-            .iter()
-            .map(|id| rusqlite::types::Value::Text(id.clone()))
-            .collect();
-
-        if let Some(f) = &opts.filter {
-            let frag = compile(f)?;
-            // Filter fragment uses ?1, ?2, ... but those are already taken by candidate ids.
-            // Shift all ?N in the filter SQL by n so they start at ?(n+1).
-            let shifted = shift_param_indices(&frag.sql, n);
-            sql.push_str(" AND ");
-            sql.push_str(&shifted);
-            params.extend(frag.params);
-        }
-
-        // No LIMIT/OFFSET yet — collect all matching rows to check count before deciding
-        // whether to retry with a larger K.
-        sql.push_str(&format!(" ORDER BY CASE {order_case} ELSE {n} END"));
-
-        let mut stmt = cat.conn.prepare(&sql)?;
-        let all_rows: Vec<ArtifactRow> = stmt
-            .query_map(rusqlite::params_from_iter(params.iter()), row_from_sql)?
-            .collect::<Result<_, _>>()?;
-
-        // If we have enough rows, or we've hit K_CAP, return the page.
-        if all_rows.len() >= target || k >= K_CAP {
-            return Ok(all_rows
-                .into_iter()
-                .skip(opts.offset)
-                .take(opts.limit)
-                .collect());
-        }
-
-        // Not enough results yet and we can still expand — double K and retry.
-        k = (k * 2).min(K_CAP);
-    }
-}
-
 /// Shift all `?N` parameter placeholders in a SQL fragment by `offset`.
 /// e.g. shift_param_indices("x = ?1 AND y = ?2", 3) → "x = ?4 AND y = ?5"
 fn shift_param_indices(sql: &str, offset: usize) -> String {
@@ -229,6 +133,103 @@ fn shift_param_indices(sql: &str, offset: usize) -> String {
         }
     }
     out
+}
+/// Hydrate + filter a set of KNN candidate ids into artifact rows, preserving
+/// the candidate (KNN-distance) order. Applies the caller's filter AST as a
+/// post-filter and returns ALL matching rows (no pagination) — the caller
+/// decides retry/pagination. Empty `candidate_ids` → empty. Shared by both
+/// vector backends (sqlite-vec + Qdrant) so semantic results are identical
+/// regardless of where the KNN ran.
+pub fn find_by_ids_filtered(
+    cat: &Catalog,
+    candidate_ids: &[String],
+    filter: Option<&FilterNode>,
+) -> Result<Vec<ArtifactRow>> {
+    if candidate_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Candidate ids occupy ?1..?N; the filter fragment's ?M are shifted past N.
+    let n = candidate_ids.len();
+    let placeholders: String = (1..=n)
+        .map(|i| format!("?{i}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    // CASE WHEN id = ?1 THEN 0 ... preserves the candidate (KNN) order.
+    let order_case: String = (0..n)
+        .map(|i| format!("WHEN id = ?{} THEN {}", i + 1, i))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let mut sql = format!(
+        "SELECT id, abs_path, kind, status, title, owners, tags, \
+         topic, time_scope, source, created_at, updated_at, file_mtime, \
+         file_sha256, confidence FROM artifact \
+         WHERE id IN ({placeholders})",
+    );
+
+    let mut params: Vec<rusqlite::types::Value> = candidate_ids
+        .iter()
+        .map(|id| rusqlite::types::Value::Text(id.clone()))
+        .collect();
+
+    if let Some(f) = filter {
+        let frag = compile(f)?;
+        let shifted = shift_param_indices(&frag.sql, n);
+        sql.push_str(" AND ");
+        sql.push_str(&shifted);
+        params.extend(frag.params);
+    }
+
+    sql.push_str(&format!(" ORDER BY CASE {order_case} ELSE {n} END"));
+
+    let mut stmt = cat.conn.prepare(&sql)?;
+    let rows: Vec<ArtifactRow> = stmt
+        .query_map(rusqlite::params_from_iter(params.iter()), row_from_sql)?
+        .collect::<rusqlite::Result<Vec<ArtifactRow>>>()?;
+    Ok(rows)
+}
+
+/// Project-scoped semantic artifact search: iterative-K backfill over a vector
+/// store, hydrated + filtered through the catalog. `project_id = Some` narrows
+/// the KNN to one project (the Qdrant backend filters on it; sqlite-vec ignores
+/// it and relies on the catalog filter); `None` searches all. Results come back
+/// in KNN-distance order, paginated by `limit`/`offset`.
+///
+/// The catalog lock is held only for the synchronous hydrate/filter step and
+/// released before each `store.knn` await — never across an await.
+pub async fn semantic_find(
+    store: &dyn crate::librarian::artifact_store::ArtifactVectorStore,
+    catalog: &parking_lot::Mutex<Catalog>,
+    project_id: Option<&str>,
+    query: &[f32],
+    filter: Option<&FilterNode>,
+    limit: usize,
+    offset: usize,
+) -> Result<Vec<ArtifactRow>> {
+    let target = limit + offset;
+    let mut k = (target * 5).max(100);
+    const K_CAP: usize = 2000;
+
+    loop {
+        let candidate_ids = store.knn(project_id, query, k).await?;
+        if candidate_ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let all_rows = {
+            let cat = catalog.lock();
+            find_by_ids_filtered(&cat, &candidate_ids, filter)?
+        };
+
+        // Enough results, or KNN exhausted → return the requested page.
+        if all_rows.len() >= target || k >= K_CAP {
+            return Ok(all_rows.into_iter().skip(offset).take(limit).collect());
+        }
+
+        // Selective filter starved the page — widen K and retry.
+        k = (k * 2).min(K_CAP);
+    }
 }
 
 #[cfg(test)]
@@ -268,7 +269,6 @@ mod tests {
                 filter: Some(serde_json::from_value(json!({"kind": {"eq": "spec"}})).unwrap()),
                 limit: 10,
                 offset: 0,
-                semantic: None,
             },
         )
         .unwrap();
@@ -293,12 +293,55 @@ mod tests {
                 ),
                 limit: 10,
                 offset: 0,
-                semantic: None,
             },
         )
         .unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id, "a");
+    }
+    #[tokio::test]
+    async fn semantic_find_orders_by_knn_and_hydrates() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        use crate::librarian::artifact_store::ArtifactVectorStore;
+
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &art("a", "spec", "active")).unwrap();
+        artifact::upsert(&cat, &art("b", "spec", "active")).unwrap();
+        artifact::upsert(&cat, &art("c", "plan", "active")).unwrap();
+
+        let store = InMemoryArtifactStore::default();
+        store.upsert("proj", "a", &[1.0, 0.0]).await.unwrap();
+        store.upsert("proj", "b", &[0.8, 0.2]).await.unwrap();
+        store.upsert("proj", "c", &[0.0, 1.0]).await.unwrap();
+
+        let cat = parking_lot::Mutex::new(cat);
+        let rows = semantic_find(&store, &cat, Some("proj"), &[1.0, 0.0], None, 10, 0)
+            .await
+            .unwrap();
+        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "b", "c"], "KNN distance order");
+    }
+
+    #[tokio::test]
+    async fn semantic_find_applies_catalog_filter() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        use crate::librarian::artifact_store::ArtifactVectorStore;
+
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &art("a", "spec", "active")).unwrap();
+        artifact::upsert(&cat, &art("b", "plan", "active")).unwrap();
+
+        let store = InMemoryArtifactStore::default();
+        store.upsert("proj", "a", &[1.0, 0.0]).await.unwrap();
+        store.upsert("proj", "b", &[0.9, 0.1]).await.unwrap();
+
+        let cat = parking_lot::Mutex::new(cat);
+        let filter: FilterNode = serde_json::from_value(json!({"kind": {"eq": "spec"}})).unwrap();
+        let rows = semantic_find(&store, &cat, None, &[1.0, 0.0], Some(&filter), 10, 0)
+            .await
+            .unwrap();
+        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, vec!["a"], "the plan artifact is filtered out");
     }
 
     #[test]

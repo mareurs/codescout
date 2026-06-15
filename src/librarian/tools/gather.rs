@@ -335,7 +335,6 @@ fn gather_artifacts(
             filter: filter_node,
             limit: limit.unwrap_or(20),
             offset: 0,
-            semantic: None,
         },
     )?;
     let items: Vec<Value> = rows
@@ -547,6 +546,7 @@ mod tests {
             }),
             rules: Arc::new(vec![]),
             embedding: None,
+            artifact_store: None,
             current_project: None,
         }
     }

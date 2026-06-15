@@ -139,7 +139,6 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 filter: scoped_filter,
                 limit: MAX_ROWS,
                 offset: 0,
-                semantic: None,
             },
         )?;
         (total, rows)

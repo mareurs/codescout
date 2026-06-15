@@ -130,6 +130,7 @@ mod tests {
             }),
             rules: Arc::new(vec![]),
             embedding: None,
+            artifact_store: None,
             current_project: None,
         }
     }
@@ -175,6 +176,7 @@ mod tests {
             }),
             rules: Arc::new(vec![]),
             embedding: None,
+            artifact_store: None,
             current_project: Some(Arc::new(CurrentProject {
                 abs_path: root.clone(),
                 git_root: root,
