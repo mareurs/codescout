@@ -37,6 +37,10 @@ tags:
 | F-7 | 2026-06-13 | low | process | mitigated | Interrupted dispatch may have run; verify state before re-dispatch |
 | F-8 | 2026-06-13 | low-med | ux/render | fixed-verified | `render_template` attached but not auto-applied; backlog body stays a placeholder after write |
 | F-9 | 2026-06-13 | med | phantom-limitation | fixed-verified | Relocated 11 trait impls to clear a "collision" `edit_code` already resolved via the qualified name_path |
+| F-10 | 2026-06-14 | low-med | tool-shape | mitigated | `legibility_scan(project=)` scopes only the recorder lane; the symbol lane follows the ACTIVE project |
+| F-11 | 2026-06-15 | low | tool-shape | fixed-verified | `edit_code insert position=before` for an attribute leaves a blank line before the doc comment; fmt won't remove it |
+| F-12 | 2026-06-15 | med | environment | mitigated | After an MCP reconnect/restart the active project resets to home; run_command cwd silently follows — a git query reads the WRONG repo |
+| F-13 | 2026-06-15 | low-med | tool-shape | mitigated | `edit_code insert position=after` on a file's LAST top-level symbol fails ("cannot determine end … AST parse failed") |
 
 ## Wins Index
 
@@ -47,6 +51,11 @@ tags:
 | W-3 | 2026-06-13 | high | Whole-module review after verbatim-spec execution caught a Critical per-task tests missed (W-2 promote-when MET) | `limit`/reconcile data-corruption bug would have silently corrupted the backlog on first real limit+write scan | validated |
 | W-4 | 2026-06-13 | high | First full legibility loop closed; trait-forwarder collision cleared by relocating the impl ~~before the body refactor it blocks~~ | ~~un-refactorable until the forwarder moved out~~ | **CORRECTED by F-9** — the move was *sufficient but unnecessary*; `edit_code` resolves the qualified `impl Trait for Type/method` form, so the body was editable in place |
 | W-5 | 2026-06-13 | high | name_collision removed: language-agnostic by subtraction (a per-language signal cannot live in a language-agnostic AST scanner) | 19+ collision rows kept tempting idiomatic-code relocations; two such moves were already done before the council's audit caught the phantom | promoted-to-docs |
+| W-6 | 2026-06-14 | med | Close an over_budget_body by extracting cohesive phases into named helpers; the instrument (not LoC) sets the stopping point | onboarding.rs stays a 393-line truncating body — every `symbols(include_body)` fetch buffers, no clean retrieval path | validated |
+| W-7 | 2026-06-14 | med | Pre-edit scout of the NEXT target before reusing a refactor template — check for lock/`!Send`/await invariants that constrain the seam | Naive reuse of the onboarding async-phase template on ArtifactAugment/call wraps a `!Send` lock-held region in an `async fn` → compile failure / broken lock-drop ordering; a subagent would flail | validated |
+| W-8 | 2026-06-15 | med | Apply W-7: extract SYNC value-logic helpers from a lock-held `!Send` body, leaving the lock skeleton + async tail in place | ArtifactAugment/call stays a 284-line truncating body; or a naive async-phase extraction breaks `!Send`/lock-drop ordering | validated |
+| W-9 | 2026-06-15 | med | Scout decides async-vs-sync: a lock-free async body keeps async helpers (complement of W-8); a predicate closure borrowed across `.await` needs `Box<dyn Fn + Send + Sync>` | Reusing W-8's sync-only template wraps genuinely-async LSP calls in sync fns (won't compile); a bare `+ Send` closure yields an inscrutable "future is not Send" error | validated |
+| W-10 | 2026-06-15 | med | Third seam shape: ReadMarkdown's read branches are fully sync (no lock, no await) → sync helpers; only path-resolution is async. Scout decides a 3-way shape, not a binary | Reusing either prior template misclassifies the seam — forcing pointless `.await`-less async fns or assuming a lock that isn't there | validated |
 
 ---
 
@@ -330,6 +339,153 @@ tags:
 **Impact:** high — removed a false-priority signal at the source (`919dbe5c`), shipped the real remediation (the qualified-form hint `c21ad73b`), added a guard test (`index_lane_does_not_flag_name_collisions`).
 
 **Status:** promoted-to-permanent-docs — ADR `docs/adrs/2026-06-13-drop-name-collision-defect.md` (Decision + Alternatives carry the reusable rule).
+
+## W-6 — Second full legibility loop: perform_full_onboarding closed (over_budget_body, ~3839→<2500 tok) via 7-phase extraction
+
+**What:** Tier-1 `over_budget_body` target `src/tools/onboarding.rs::perform_full_onboarding` (393 ln / ~3839 tok, 1 observed truncation) refactored by extracting 7 cohesive phases into private module-level helpers (`detect_languages`, `list_top_level_entries`, `build_key_files`, `write_workspace_config_if_needed`, `probe_index_status`, `write_onboarding_memories`, `gather_per_project_protected`) — pure phase extraction, no signature/API change, matched the file's existing free-fn idiom.
+
+**Outcome:** Behavior-preserving — `cargo test` **2864 passed / 0 failed**, identical to the pre-move baseline; clippy `--all-targets -D warnings` + fmt clean. Commit `333d6281`. `symbols(include_body)` went buffered → **returns whole**; `legibility_scan` auto-closed the row (open 22→20). The instrument set the stopping point: the first 6-helper cut measured **2568 tok (still over 2500)**, so a 7th extraction (`gather_per_project_protected`) was added to cross — budget is the trigger, not line count (Heuristic 1). First loop driven by the summoned `legibility-dzo` buddy end-to-end.
+
+**Status:** validated — full loop closed (logs → scan → refactor → green → auto-close). Detailed per-key verdict in the `legibility-backlog` tracker.
+
+## F-10 — `legibility_scan(project=…)` scopes only the recorder lane; the symbol-index lane follows the ACTIVE project
+
+**Observed:** 2026-06-14, opening the Dzo campaign. Ran `librarian(action="legibility_scan", write=false, project="/home/marius/work/claude/codescout")` while the active project was `claude-plugins`.
+
+**Expected:** `project=` targets codescout → ranked codescout candidates.
+
+**Got (scouted reality):** `candidates: [], n: 0`. The `project=` param scopes the usage.db *recorder* lane only (its own doc: "Scopes the recorder lane"); the symbol-index lane — what actually gets ranked for `over_budget_body` — follows the **active** project. With `claude-plugins` (bash/markdown, no large code bodies) active, there was nothing to rank, so the scan returned empty despite the codescout recorder path. Re-running after `workspace(activate, path=codescout)` returned 15 candidates.
+
+**Probable cause:** Two-lane design — only the recorder lane is parameterized; the symbol lane is implicit on the active project, undocumented beyond "Scopes the recorder lane."
+
+**Workaround / rule:** To scan project X, **activate X first** (read-only is fine); do not rely on `project=` alone.
+
+**Severity:** low-med — one wasted scan, self-corrected; but a false-empty result could mislead a less careful run into concluding a project has no legibility debt.
+
+**Status:** mitigated — lesson promoted to the `legibility-dzo` SKILL.md Phase 1 ("Run it with the target project active … or the lanes misalign and the scan returns empty"). Candidate codescout-side fix: honor `project=` for BOTH lanes, or warn when `project=` ≠ active project.
+
+## W-7 — Pre-edit scout: the onboarding async-phase template does NOT transfer to ArtifactAugment/call (lock-held `!Send` region)
+
+**Observed:** 2026-06-14, reconnaissance on the next tier-1 `over_budget_body` target `src/librarian/tools/augment.rs::ArtifactAugment/call` (L106-389, ~3484 tok / 284 ln) BEFORE proposing any refactor move.
+
+**Pattern:** Before reusing a refactor template that worked on target A (perform_full_onboarding: lift cohesive phases, several into `async fn`s), scout target B for **concurrency/lock invariants** that constrain where phases can be cut — read the body for `lock()` scoping, `!Send` guards, and "drop before await" comments.
+
+**Counterfactual:** ArtifactAugment/call's bulk is a single `ctx.catalog.lock()` region deliberately scoped in a bare `{ }` block so the `parking_lot` MutexGuard (`!Send`) drops before the async `event_create` below. Naively lifting "the merge block" into an `async fn` would fail to compile (`!Send` guard held across `.await`) or, if forced, break the lock-drop ordering the comment protects. A subagent handed "apply the onboarding pattern" would have flailed on the borrow/Send errors. The correct seam is **sync** value-logic helpers — the ~80-line goal-tracker auto-close gate operates on parsed `Value`s with no lock/await; extract those, leave the lock-scope skeleton intact.
+
+**Confirming data points:**
+1. W-7 (this scout) — onboarding template's async-phase shape blocked by ArtifactAugment's `!Send` lock scope; correct seam is sync helpers.
+2. Pending: any future target where a refactor template is constrained by a concurrency/lock/await invariant.
+
+**Impact:** med — saves a failed compile loop (or a flailing subagent) and reframes the next move toward the sync-helper seam. Also confirmed the safety net: 22 inline unit tests in `augment.rs` (incl. `gate_check_note_event_emitted_on_autoclose`, scope-growth, sibling-field preservation) pin the behavior, so the eventual refactor has a green baseline.
+
+**Promote-when:** A second target where a refactor template is constrained by a lock/`!Send`/await invariant the source's comments flag. At 2 datapoints, promote to the Dzo SKILL.md as a Phase-2 scout rule: "before reusing a refactor template, scout the new target for lock-scope/`!Send`/await invariants — they decide which seams are cuttable and whether helpers must be sync."
+
+**Status:** validated — single datapoint; scout completed pre-edit, no move made. Awaiting promotion criterion.
+
+## W-8 — Third legibility loop: ArtifactAugment/call closed (over_budget_body, ~3484→<2500 tok) via SYNC-helper extraction (W-7 applied)
+
+**What:** Tier-1 `over_budget_body` target `src/librarian/tools/augment.rs::ArtifactAugment/call` (284 ln / ~3484 tok). W-7 had established the onboarding async-phase template does NOT transfer here — the body is a lock-held `!Send` region. Applied the corrected approach: extract three **sync** helpers (`validate_merged_against_schema`, `process_goal_tracker_merge`, `create_or_replace_augmentation`) operating on parsed `Value`s or locking internally, leaving `ctx.catalog.lock()`'s bare-block scope and the post-lock async `event_create` exactly in place.
+
+**Outcome:** Behavior-preserving — `cargo test` 2864 passed / 0 failed = baseline, incl. the 22 inline `augment.rs` tests (gate events, scope-growth, schema, sibling preservation); clippy `--all-targets -D warnings` + fmt clean. Commit `ede1c07d`. `symbols(include_body)` buffered → returns whole (284→144 ln); `legibility_scan` auto-closed the row (open 20→19).
+
+**Confirming data points (W-7's promote-when):**
+1. W-7 — pre-edit scout identified the lock/`!Send` constraint and the sync-helper seam.
+2. W-8 (this) — the prescription executed cleanly: sync helpers crossed the budget with no concurrency regression, first try, no compile thrash.
+
+**Impact:** med — second datapoint for the W-7 pattern. **Promote-when now MET** → promoted to the `legibility-dzo` SKILL.md as a Phase-2 scout rule ("before reusing a refactor template, scout the new target for lock-scope/`!Send`/await invariants — they decide which seams are cuttable and whether helpers must be sync").
+
+**Status:** validated — loop closed end-to-end; W-7 promotion criterion met and actioned.
+
+## W-9 — Scout decided async-vs-sync correctly: `Symbols::call` is a lock-free async region → helpers stay async; predicate widened to `Send + Sync`
+
+**Observed:** 2026-06-15, loop #4 on `Symbols/call` (`src/tools/symbol/symbols.rs`), applying the W-7 pre-edit scout before reusing a phase-extraction template.
+
+**Pattern:** The W-7/W-8 rule is *"scout the seam's async/lock/Send invariants before reusing a refactor template"* — NOT *"always extract sync."* This loop is the **complement** of W-8: `Symbols::call` holds NO lock across its awaits, so its extracted search helpers must stay `async fn` (the ArtifactAugment sync-only constraint would be wrong here). The scout decided the axis correctly in the opposite direction.
+
+**Fresh sub-lesson (craft, reusable):** when a predicate closure `Box<dyn Fn(..) -> bool + Send>` is *borrowed* across `.await` points inside an extracted async helper, the trait object must be `+ Send + Sync` (not just `+ Send`): `&(dyn Fn + Send)` is `Send` only if the referent is `Sync`, and `Tool: Send + Sync` (`src/tools/core/types.rs:388`) requires `call`'s future to be `Send`. The closures capture only `String` (Sync), so widening compiles; and `&(dyn Fn + Send + Sync)` still coerces to `&dyn Fn` at the `collect_matching` call sites (the same auto-trait-drop the code already relied on). Verified by `cargo check` — clean.
+
+**Counterfactual:** Without the scout, reusing W-8's "extract sync helpers" verbatim would have forced sync helpers around genuinely-async LSP calls (`get_or_start`/`workspace_symbols`/`document_symbols` are all `.await`) — immediate compile failure. And without the Send+Sync insight, the first naive `&(dyn Fn + Send)` async-helper signature produces a "future cannot be sent between threads safely" error that reads as inscrutable trait-bound noise — a subagent would flail re-trying signatures.
+
+**Move (`247be16f`, behavior-preserving; `cargo test` 2864 passed / 0 failed = baseline; clippy `--all-targets -D warnings` + fmt clean):** extracted `search_files_restricted` (A), `search_project_symbols` (B), `search_library_symbols` (C — all `async`), and sync `finalize_search_results`. `Symbols::call` 469→164 ln; `symbols(include_body)` buffered → returns WHOLE. Backlog row auto-closed (open 19→18).
+
+**Impact:** med — third datapoint for the W-7 scout rule (already in the Dzo SKILL Phase 2). The Send+Sync-closure-across-await rule is a new, distinct craft rule.
+
+**Promote-when:** the Send+Sync-closure-across-await rule recurs on a 2nd async extraction → promote to the Dzo SKILL as a named async-extraction heuristic (sibling to the lock/`!Send` rule), and/or to codescout `reconnaissance` memory as a Rust-async craft rule.
+
+**Status:** validated — scout fired correctly; move landed first-try-clean (no compile thrash).
+
+## F-11 — `edit_code insert position=before` for an attribute leaves a blank line before the doc comment; fmt won't remove it
+
+**Observed:** 2026-06-15, loop #4 — adding `#[allow(clippy::too_many_arguments)]` to the three new wide-param search helpers (clippy `-D warnings` flagged 8–10 params each; `collect_matching` in the same file already carries the same allow, so it is the local convention).
+
+**When:** After extraction, used `edit_code(action="insert", position="before", body="#[allow(...)]")` to prepend the attribute to each helper.
+
+**Expected:** the attribute lands immediately above the fn's doc comment.
+
+**Got:** the insert placed the attribute, then a BLANK line, then the existing doc comment: `#[allow(...)]\n\n/// doc\nasync fn`. Valid Rust (the attribute applies through the blank line) and lint-suppressing, but `cargo fmt` does NOT collapse the blank line — a persistent blemish, and the attribute sits above the doc comment (non-idiomatic order).
+
+**Workaround (clean, deterministic):** `edit_code(action="replace", attributes=[], body=<doc + #[allow] + full fn>)`. The lead-region capture reaches UP past the blank line and absorbs the orphan attribute (`replaced_lines` started at the orphan's line, not the fn's), so the orphan is removed and the doc→attr→fn order is restored in one call. Re-send the full body — read it fresh with `symbols(include_body)` first to copy verbatim (zero transcription risk).
+
+**Severity:** low — cosmetic; no behavior impact, lint was already suppressed. Costs one extra `replace` per helper.
+
+**Status:** fixed-verified — all three helpers now read doc → `#[allow]` → fn; fmt + clippy clean.
+
+**Fix idea / pointer:** edit_code could offer an `attributes`-append mode (add one attribute without re-sending the body), or `insert position=before` of a lone `#[...]` line could place it adjacent with no blank-line separator.
+
+## W-10 — Scout found a THIRD seam shape: `ReadMarkdown::call`'s read branches are fully sync (no lock, no await) → sync helpers; only path-resolution is async
+
+**Observed:** 2026-06-15, loop #5 on `ReadMarkdown/call` (`src/tools/markdown/read_markdown.rs`), W-7-style pre-edit scout of the async/lock/await shape.
+
+**Pattern:** Three loops, three distinct seam shapes — the scout is what tells them apart, not a template:
+- **W-8 ArtifactAugment:** lock-held `!Send` region → **sync** helpers (guard can't cross an await).
+- **W-9 Symbols:** lock-free but genuinely **async** (LSP awaits) → **async** helpers + a `Send + Sync` predicate.
+- **W-10 ReadMarkdown:** only the path-resolution prelude awaits; the four read branches (multi/single-heading, line-range, default-tiers) hold no lock and contain ZERO `.await` (the `section_coverage.lock()` scopes never cross an await) → **4 of 5 helpers are plain sync `fn`**, one async (`resolve_markdown_source`).
+
+**Counterfactual:** Reusing either prior template blindly would misclassify the seam — forcing `async` on `.await`-less branches (pointless async boundary, noisier borrows) or assuming a lock constraint that isn't there. The scout read the awaits directly and split 4-sync / 1-async correctly; the move compiled after only a `&Path`→`&PathBuf` param-type fix.
+
+**Move (`4d601b5d`, behavior-preserving; `cargo test` 2864 passed / 0 failed = baseline; clippy `--all-targets -D warnings` + fmt clean):** 5 helpers extracted; `call` 446→55 ln; `symbols(include_body)` buffered → WHOLE; backlog row auto-closed (open 18→17).
+
+**Recon sub-miss (craft lesson):** chose `&Path` for the threaded `resolved` param before checking consumers; `mark_seen`/`status`/`markdown_coverage` take `&PathBuf` → 5× E0308 on first `cargo check`, fixed in one cycle by threading `&PathBuf` (forwarded straight to those consumers, so `clippy::ptr_arg` stays quiet). Lesson: **scout the *consumer* param types before fixing an extracted helper's signature** — the threaded type must match what the body forwards to.
+
+**Impact:** med — confirms the scout rule is a 3-way shape decision (sync-lock / async / sync-pure), not a binary. The "match the consumer's param type" sub-lesson is a citable recon rule.
+
+**Promote-when:** the 3-way "scout decides seam shape" framing recurs once more → fold an explicit async-vs-sync decision table into the Dzo SKILL Phase 2.
+
+**Status:** validated — loop closed end-to-end.
+
+## F-12 — After an MCP reconnect/restart, the active project resets to home and `run_command`'s cwd silently follows — a git query then reads the WRONG repo
+
+**Observed:** 2026-06-15, resuming loop #5 after the user ran `/mcp` (reconnect) + `/reload-plugins`. I had activated codescout before the interrupt; expected HEAD to be my loop-#4 commit `247be16f`.
+
+**When:** First action on resume was `git log` / `git merge-base --is-ancestor` to confirm my campaign commits survived an externally-added rename commit.
+
+**Expected:** `run_command` runs in the codescout project root (where I'd activated).
+
+**Got:** HEAD was `9a745d9 feat(hamsa)…` and the log was full of buddy / codescout-companion version bumps — **claude-plugins** history, not codescout. All four campaign commits reported "NOT in history." The `/mcp` reconnect had reset the active project to the home default (claude-plugins), and `run_command`'s cwd followed it. My commits were fine — I was querying the wrong repo. Re-activating codescout and re-running confirmed all four IN history.
+
+**Probable cause:** an MCP server restart re-initializes active-project state to the session's home project; `run_command` resolves cwd from the active project, so a pre-restart `workspace(activate)` does not survive the reconnect.
+
+**Workaround / rule:** After ANY MCP reconnect/restart (`/mcp`, server rebuild), re-`workspace(activate, path=…)` the target project BEFORE trusting `run_command`'s cwd — especially for git/state queries. Treat a surprising HEAD as "wrong repo" before "lost commits."
+
+**Severity:** med — nearly produced a false "my commits were rebased away" conclusion that could have triggered needless recovery. Caught by scouting (the `merge-base` cross-check + noticing the log was the wrong project) before any action.
+
+**Status:** mitigated — re-activate-after-reconnect rule; candidate for the Dzo SKILL Phase 1 / codescout `reconnaissance` memory.
+
+## F-13 — `edit_code insert position="after"` on a file's LAST top-level symbol fails ("cannot determine end … AST parse failed")
+
+**Observed:** 2026-06-15, loop #5 — inserting 5 module-level helper fns into `read_markdown.rs`, whose only items are the `ReadMarkdown` struct and the `impl Tool for ReadMarkdown` block (the impl is the final item in the file).
+
+**When:** `edit_code(symbol="impl Tool for ReadMarkdown", action="insert", position="after", body=<5 helpers>)`.
+
+**Expected:** helpers inserted after the impl block, at module level.
+
+**Got:** `cannot determine end of 'impl Tool for ReadMarkdown' for insert-after — AST parse failed`. The file parsed fine for `symbols()` immediately before; the failure is specific to resolving the END of the file's last top-level symbol for insert-after.
+
+**Workaround:** `position="before"` on the same impl (module order is irrelevant in Rust) — placed the helpers between the struct and the impl, compiled clean. (In loop #4 symbols.rs had a trailing free fn to anchor `insert before` on; here the impl was last, so insert-before-the-impl is the anchor.)
+
+**Severity:** low-med — one failed tool call, immediate clean workaround. Recurs whenever the Dzo adds module-level helpers to a file whose last item is the symbol being split.
+
+**Status:** mitigated — use `insert position=before` an existing symbol when the target is the file's last item. Candidate edit_code fix: treat EOF as a valid insert-after boundary.
 
 ## Template for new entries
 
