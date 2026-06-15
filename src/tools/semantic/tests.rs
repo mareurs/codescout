@@ -173,6 +173,58 @@ async fn index_status_shows_running_progress() {
 }
 
 #[tokio::test]
+async fn index_status_running_zero_zero_carries_liveness_note() {
+    use crate::agent::IndexingState;
+    let (_dir, ctx) = project_ctx().await;
+
+    // Project-scope builds (sync_project) never advance done/total — they
+    // sit at 0/0 for the whole build. Status must NOT let that read as a
+    // stall: it annotates the 0/0 case with a liveness note + chunks_so_far.
+    {
+        let mut state = ctx.agent.indexing.lock().unwrap();
+        *state = IndexingState::Running {
+            done: 0,
+            total: 0,
+            eta_secs: None,
+        };
+    }
+
+    let result = IndexStatus.call(json!({}), &ctx).await.unwrap();
+    let indexing = &result["indexing"];
+    assert_eq!(indexing["status"], "running");
+    assert_eq!(indexing["done"], 0);
+    assert_eq!(indexing["total"], 0);
+
+    let note = indexing["note"]
+        .as_str()
+        .expect("0/0 running state must carry a liveness note");
+    assert!(
+        note.contains("0/0") && note.contains("liveness"),
+        "note must explain 0/0 is healthy and point at chunk_count liveness, got: {note}"
+    );
+    assert!(
+        indexing["chunks_so_far"].is_u64(),
+        "chunks_so_far must be present as the adjacent liveness number, got: {}",
+        indexing["chunks_so_far"]
+    );
+
+    // The non-zero path must NOT carry the note — it is specific to 0/0.
+    {
+        let mut state = ctx.agent.indexing.lock().unwrap();
+        *state = IndexingState::Running {
+            done: 5,
+            total: 20,
+            eta_secs: Some(10),
+        };
+    }
+    let result2 = IndexStatus.call(json!({}), &ctx).await.unwrap();
+    assert!(
+        result2["indexing"]["note"].is_null(),
+        "non-zero progress must not carry the 0/0 liveness note"
+    );
+}
+
+#[tokio::test]
 async fn tools_error_without_project() {
     let ctx = ToolContext {
         agent: Agent::new(None).await.unwrap(),

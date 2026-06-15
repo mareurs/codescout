@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-06-15
-closed:
+closed: 2026-06-15
 severity: medium
 owner: marius
 related: []
@@ -102,31 +102,20 @@ field said "stuck"; the point count said "working." Only the point count was tru
    search worked; only the semantic index was affected by the project-id change.
 
 ## Fix
-Not yet implemented (status `open`). Options, smallest first:
 
-- **(a) Annotate, don't stream (cheap, recommended now):** in `IndexStatus/call`,
-  when `IndexingState::Running { done: 0, total: 0, .. }`, add a
-  `note:"per-file progress not streamed for project-scope builds — watch chunk_count
-  for liveness"` and/or surface the live Qdrant `chunk_count` inside the `indexing`
-  block so a climbing number is visible at a glance. Kills the misdiagnosis without
-  the streaming rewrite.
-- **(b) Stream real progress (correct, larger):** wire `sync_project` to increment
-  `IndexingState` per file/batch via the already-moved `progress` token, so
-  `done`/`total` reflect reality. This is the "tracked separately" deeper wiring the
-  comment refers to.
-- **(c) Doc-only fallback:** document in `get_guide` / server instructions that
-  `0/0` during a build is healthy and `chunk_count` growth is the liveness signal.
+Implemented **option (a) — annotate, don't stream** on `experiments` (not yet on `master`; held for further testing per the 2026-06-15 decision). In `IndexStatus/call` (`src/tools/semantic/index.rs`, the `IndexingState::Running` arm, ~line 439): when `done == 0 && total == 0`, the `indexing` block now carries:
 
-Recommendation: (a) now, (b) when the streaming wiring lands.
+- a `note`: *"per-file progress is not streamed for project-scope builds — 0/0 is the healthy in-progress shape, not a stall; watch chunk_count for liveness"*, and
+- a `chunks_so_far` field surfacing the live Qdrant `chunk_count` (0 when none have landed yet) right next to the misleading counter.
 
+Non-zero progress states are unchanged. Deeper **option (b)** — real per-file streaming from `sync_project` — is intentionally NOT implemented; it remains a separate future enhancement (the producer comment at `index.rs:288-291` still holds) rather than a bug. The misleading-output *symptom* this file tracks is fully addressed by (a).
+
+**SHA:** experiments-side, committed alongside this bug-file update (master-side SHA pending — not cherry-picked until testing completes). Live-MCP verification (rebuild + `/mcp` restart, observe the annotation in a real `index(status)` during a build) is pending the next restart; logic is verified by the regression test below.
 ## Tests added
-N/A — not yet fixed. **Caution for whoever fixes it:** the existing test
-`index_status_shows_running_progress()` (`src/tools/semantic/tests.rs:140-173`)
-hand-sets a *non-zero* `Running` state and asserts it surfaces — so it stays green
-while the real project-scope path emits `0/0`. A regression test for THIS bug must
-drive the actual `sync_project` path (or assert the new `0/0` annotation from fix
-(a)), not a hand-set state — otherwise it's false coverage.
 
+`index_status_running_zero_zero_carries_liveness_note` in `src/tools/semantic/tests.rs` (inserted after `index_status_shows_running_progress`, ~line 174). It drives the real `0/0` project-scope path and asserts `indexing.note` contains `"0/0"` + `"liveness"` and `chunks_so_far` is present; it ALSO asserts the non-zero path does **not** carry the note — guarding against the annotation leaking to the wrong branch.
+
+`cargo test --lib index_status` → 9 passed, 0 failed. `cargo clippy --lib --tests -- -D warnings` → clean. The pre-existing `index_status_shows_running_progress` (which hand-sets a *non-zero* state) is unaffected — confirming the false-coverage caution: that test never exercised the `0/0` path, which is why this bug slipped.
 ## Workarounds
 During a build, ignore `indexing.done`/`indexing.total`. Verify liveness by watching
 the Qdrant `code_chunks` point count for the project grow (the top-level
@@ -135,13 +124,8 @@ to `done`. **Do NOT cancel a build because `done/total` reads `0/0`** — that i
 healthy in-progress shape, not a stall.
 
 ## Resume
-Implement fix (a): edit the `IndexingState::Running` match arm in `IndexStatus/call`
-(`src/tools/semantic/index.rs`, within 380-495) to add the liveness `note` and inline
-`chunk_count` when `done==0 && total==0`. Add a regression test that drives the
-project-scope status path and asserts the annotation is present — the existing
-`index_status_shows_running_progress` does NOT cover this (it hand-sets a non-zero
-state). Run `cargo test --lib semantic`.
 
+N/A — fixed via annotation (option a), regression test added and passing. If real per-file streaming is later wanted, that is a separate enhancement on the producer side (`IndexProject::call` / `sync_project` per `index.rs:288-291`), not this bug. Archive to `docs/issues/archive/` only after the fix ships to `master` (currently held).
 ## References
 - `src/tools/semantic/index.rs:288-291` — producer comment ("stays at Running{done:0,total:0}").
 - `src/tools/semantic/index.rs:380-495` — `IndexStatus/call` reporter.

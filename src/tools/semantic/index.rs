@@ -441,12 +441,29 @@ impl Tool for IndexStatus {
                     total,
                     eta_secs,
                 } => {
-                    result["indexing"] = json!({
+                    let mut indexing = json!({
                         "status": "running",
                         "done": done,
                         "total": total,
                         "eta_secs": eta_secs,
                     });
+                    // Project-scope builds (sync_project) don't stream per-file
+                    // progress, so done/total stay at 0/0 for the whole build —
+                    // see IndexProject::call. Without a note this reads as a
+                    // stall; the climbing Qdrant chunk_count is the real liveness
+                    // signal, so surface it (and the explanation) right here.
+                    if *done == 0 && *total == 0 {
+                        indexing["note"] = json!(
+                            "per-file progress is not streamed for project-scope \
+                             builds — 0/0 is the healthy in-progress shape, not a \
+                             stall; watch chunk_count for liveness"
+                        );
+                        indexing["chunks_so_far"] = result
+                            .get("chunk_count")
+                            .and_then(|v| v.as_u64())
+                            .map_or_else(|| json!(0), |cc| json!(cc));
+                    }
+                    result["indexing"] = indexing;
                 }
                 IndexingState::Done {
                     files_indexed,
