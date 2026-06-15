@@ -230,7 +230,9 @@ impl Tool for Symbols {
         // Build the name predicate once: exact matching for name_path lookups,
         // case-insensitive substring matching for pattern searches.
         // Box<dyn Fn>: two different closure types must be held under one variable across a conditional; generics cannot express this at runtime.
-        let name_ok: Box<dyn Fn(&SymbolInfo) -> bool + Send> = if is_name_path {
+        // Send + Sync: the predicate is borrowed across the search helpers' .await
+        // points, so the referent must be Sync to keep their futures Send (Tool: Send + Sync).
+        let name_ok: Box<dyn Fn(&SymbolInfo) -> bool + Send + Sync> = if is_name_path {
             let p = pattern.to_owned();
             Box::new(move |sym: &SymbolInfo| symbol_name_matches(sym, &p))
         } else {
@@ -245,367 +247,61 @@ impl Tool for Symbols {
                     || (consult_name_path && sym.name_path.to_lowercase().contains(&p))
             })
         };
+
+        // Fill `matches` via the applicable search strategy: a path/glob restricts
+        // to per-file document_symbols (A); otherwise project-scope workspace/symbol
+        // (B) and any in-scope library roots (C).
         let mut matches = vec![];
-
         if let Some(rel) = get_path_param(&input, false)? {
-            // Restricted search: per-file textDocument/documentSymbol
-            let files: Vec<PathBuf> = if is_glob(rel) {
-                resolve_glob(&ctx.agent, rel).await?
-            } else {
-                let full = root.join(rel);
-                if full.is_dir() {
-                    // Walk directory to find source files
-                    let walker = ignore::WalkBuilder::new(&full)
-                        .hidden(true)
-                        .git_ignore(true)
-                        .build();
-                    walker
-                        .flatten()
-                        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
-                        .map(|e| e.path().to_path_buf())
-                        .collect()
-                } else {
-                    vec![full]
-                }
-            };
-
-            for file_path in &files {
-                let Some(lang) = ast::detect_language(file_path) else {
-                    continue;
-                };
-                let language_id = crate::lsp::servers::lsp_language_id(lang);
-                let mux_override = ctx.agent.lsp_mux_override(lang).await;
-                let Ok(client) = ctx.lsp.get_or_start(lang, &root, mux_override).await else {
-                    continue;
-                };
-                let timer = LspTimer::start();
-                let Ok(symbols) = client.document_symbols(file_path, language_id).await else {
-                    continue;
-                };
-                timer.record(&*ctx.lsp, lang, &root).await;
-                let source = if include_body {
-                    std::fs::read_to_string(file_path).ok()
-                } else {
-                    None
-                };
-                collect_matching(
-                    &symbols,
-                    name_ok.as_ref(),
-                    include_body,
-                    source.as_deref(),
-                    depth,
-                    true,
-                    &mut matches,
-                    kind_filter,
-                );
-            }
+            search_files_restricted(
+                rel,
+                ctx,
+                &root,
+                name_ok.as_ref(),
+                include_body,
+                depth,
+                kind_filter,
+                &mut matches,
+            )
+            .await?;
         } else {
             if scope.includes_project() {
-                // Fast path: workspace/symbol — one LSP request per language instead of
-                // one textDocument/documentSymbol request per file.
-                let mut languages = std::collections::HashSet::new();
-                let mut accepted_files = std::collections::HashSet::<PathBuf>::new();
-                let walker = ignore::WalkBuilder::new(&root)
-                    .hidden(true)
-                    .git_ignore(true)
-                    .build();
-                for entry in walker.flatten() {
-                    if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                        let path = entry.path().to_path_buf();
-                        if let Some(lang) = ast::detect_language(&path) {
-                            languages.insert(lang);
-                            accepted_files.insert(path);
-                        }
-                    }
-                }
-
-                // Concurrently start/query all LSP servers so different languages
-                // (e.g. Kotlin JVM startup) don't block each other.
-                //
-                // Per-language hard timeout: a pathological LSP state (silent
-                // workspace/symbol on a still-indexing server, init retry loop
-                // on a server that keeps crashing) must not hang the whole
-                // tool call past the MCP 60 s ceiling. On timeout we yield an
-                // empty result for that language; the tree-sitter fallback
-                // below still runs if every language produces nothing.
-                const PER_LANG_BUDGET: std::time::Duration = std::time::Duration::from_secs(8);
-                let languages: Vec<&str> = languages.into_iter().collect();
-                let mut join_set = tokio::task::JoinSet::new();
-                for lang in languages {
-                    let lsp = ctx.lsp.clone();
-                    let root = root.clone();
-                    let pattern = pattern_lower.clone();
-                    let mux_override = ctx.agent.lsp_mux_override(lang).await;
-                    join_set.spawn(async move {
-                        match tokio::time::timeout(PER_LANG_BUDGET, async {
-                            let client = lsp.get_or_start(lang, &root, mux_override).await?;
-                            client.workspace_symbols(&pattern).await
-                        })
-                        .await
-                        {
-                            Ok(r) => r,
-                            Err(_) => {
-                                tracing::warn!(
-                                    language = lang,
-                                    budget_ms = PER_LANG_BUDGET.as_millis() as u64,
-                                    "workspace/symbol per-language budget exceeded; \
-                                     falling back to tree-sitter for this language"
-                                );
-                                Ok(Vec::new())
-                            }
-                        }
-                    });
-                }
-                while let Some(task_result) = join_set.join_next().await {
-                    let Ok(Ok(symbols)) = task_result else {
-                        continue;
-                    };
-                    for sym in symbols {
-                        // LSP servers may use fuzzy/prefix matching — enforce substring.
-                        // Mirror the predicate above: only consult name_path for '/' patterns.
-                        let n = sym.name.to_lowercase();
-                        let name_ok = n.contains(&pattern_lower)
-                            || (pattern_lower.contains('/')
-                                && sym.name_path.to_lowercase().contains(&pattern_lower));
-                        let kind_ok = kind_filter.is_none_or(|f| matches_kind_filter(&sym.kind, f));
-                        // When scope is strictly Project (not All), filter out matches
-                        // from stdlib/dependency crates whose path lies outside the root.
-                        let in_root = scope != crate::library::scope::Scope::Project
-                            || sym.file.starts_with(&root);
-                        // LSP workspace_symbol doesn't honour .gitignore (e.g. pyright
-                        // indexes target/build/ Python files); reuse the walker's
-                        // accepted-files set as the source of truth for what's
-                        // visible to the agent under Project scope.
-                        let in_walk = scope != crate::library::scope::Scope::Project
-                            || accepted_files.contains(&sym.file);
-                        if name_ok && kind_ok && in_root && in_walk {
-                            // When include_body is requested, validate the range. If
-                            // workspace/symbol returned a degenerate range, fall back to
-                            // document_symbols for the file to get the correct range.
-                            let sym = if include_body {
-                                match validate_symbol_range(&sym) {
-                                    Ok(()) => sym,
-                                    Err(validation_err) => {
-                                        match resolve_range_via_document_symbols(&sym, ctx).await {
-                                            Some(resolved) => resolved,
-                                            None => {
-                                                // document_symbols fallback failed too — propagate
-                                                // the original validation error captured above.
-                                                return Err(validation_err);
-                                            }
-                                        }
-                                    }
-                                }
-                            } else {
-                                sym
-                            };
-                            let source = if include_body {
-                                std::fs::read_to_string(&sym.file).ok()
-                            } else {
-                                None
-                            };
-                            matches.push(symbol_to_json(
-                                &sym,
-                                include_body,
-                                source.as_deref(),
-                                depth,
-                                true,
-                            ));
-                        }
-                    }
-                }
-
-                // Tree-sitter fallback: if workspace/symbol returned nothing (LSP
-                // not running, still indexing, or doesn't support workspace/symbol),
-                // walk source files and extract symbols with tree-sitter.
-                if matches.is_empty() {
-                    let walker = ignore::WalkBuilder::new(&root)
-                        .hidden(true)
-                        .git_ignore(true)
-                        .build();
-                    for entry in walker.flatten() {
-                        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                            continue;
-                        }
-                        let path = entry.path();
-                        if ast::detect_language(path).is_none() {
-                            continue;
-                        }
-                        if let Ok(symbols) = crate::ast::extract_symbols(path) {
-                            let source = if include_body {
-                                std::fs::read_to_string(path).ok()
-                            } else {
-                                None
-                            };
-                            collect_matching(
-                                &symbols,
-                                name_ok.as_ref(),
-                                include_body,
-                                source.as_deref(),
-                                depth,
-                                true,
-                                &mut matches,
-                                kind_filter,
-                            );
-                        }
-                        // Early cap to avoid scanning entire huge projects.
-                        // Uses the decoupled search-pool ceiling, not guard.max_results,
-                        // so a small user-supplied limit doesn't shrink the pool.
-                        if matches.len() > search_pool_cap {
-                            break;
-                        }
-                    }
-                }
+                search_project_symbols(
+                    ctx,
+                    &root,
+                    &pattern_lower,
+                    name_ok.as_ref(),
+                    kind_filter,
+                    &scope,
+                    include_body,
+                    depth,
+                    search_pool_cap,
+                    &mut matches,
+                )
+                .await?;
             }
-
-            // Search library directories when scope includes them
-            let lib_roots = resolve_library_roots(&scope, &ctx.agent).await?;
-            for (lib_name, lib_root) in &lib_roots {
-                if !lib_root.exists() {
-                    continue;
-                }
-                // Library directories are external — don't apply the project's
-                // .gitignore (e.g. .venv/ would hide pip-installed packages).
-                let walker = ignore::WalkBuilder::new(lib_root)
-                    .hidden(true)
-                    .git_ignore(false)
-                    .build();
-                for entry in walker.flatten() {
-                    if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                        continue;
-                    }
-                    let path = entry.path();
-                    let Some(lang) = ast::detect_language(path) else {
-                        continue;
-                    };
-
-                    // Tree-sitter first for library files: it's fast and avoids blocking
-                    // on slow LSP startup (e.g. JVM-based Kotlin LSP). Only fall back to
-                    // LSP document_symbols if tree-sitter returns nothing.
-                    let mut symbols = crate::ast::extract_symbols(path).unwrap_or_default();
-                    if symbols.is_empty() {
-                        // INVARIANT: Always use project root as workspace_root, not the
-                        // library root. LspManager caches one client per language; passing
-                        // a different root kills and restarts the server.
-                        let mux_override = ctx.agent.lsp_mux_override(lang).await;
-                        if let Ok(client) = ctx.lsp.get_or_start(lang, &root, mux_override).await {
-                            let language_id = crate::lsp::servers::lsp_language_id(lang);
-                            symbols = client
-                                .document_symbols(path, language_id)
-                                .await
-                                .unwrap_or_default();
-                        }
-                    }
-
-                    let source = if include_body {
-                        std::fs::read_to_string(path).ok()
-                    } else {
-                        None
-                    };
-
-                    // Collect matching symbols, rewriting file paths to lib: prefix
-                    for sym in &symbols {
-                        if name_ok(sym)
-                            && kind_filter.is_none_or(|f| matches_kind_filter(&sym.kind, f))
-                        {
-                            let mut json_val =
-                                symbol_to_json(sym, include_body, source.as_deref(), depth, true);
-                            if let Some(obj) = json_val.as_object_mut() {
-                                obj.insert(
-                                    "file".to_string(),
-                                    json!(format_library_path(lib_name, lib_root, path)),
-                                );
-                            }
-                            matches.push(json_val);
-                        }
-                    }
-
-                    if matches.len() > search_pool_cap * 2 {
-                        break;
-                    }
-                }
-            }
+            search_library_symbols(
+                ctx,
+                &root,
+                name_ok.as_ref(),
+                kind_filter,
+                &scope,
+                include_body,
+                depth,
+                search_pool_cap,
+                &mut matches,
+            )
+            .await?;
         }
 
-        // Build by_file distribution from the full result set BEFORE truncation.
-        let (by_file_entries, by_file_overflow_count) = build_by_file(&matches);
-        let hint = if matches.len() > guard.max_results {
-            make_search_symbols_hint(guard.max_results, &by_file_entries)
-        } else {
-            String::from("Restrict with a file path or glob pattern")
-        };
-        let (mut matches, mut overflow) = guard.cap_items(matches, &hint);
-        // Patch by_file into the overflow object (RF6 resolution: mutate after cap_items).
-        if let Some(ref mut ov) = overflow {
-            if !by_file_entries.is_empty() {
-                ov.by_file = Some(by_file_entries);
-                ov.by_file_overflow = by_file_overflow_count;
-                // Rewrite hint with the real `shown` value now we know it.
-                ov.hint = make_search_symbols_hint(ov.shown, ov.by_file.as_deref().unwrap_or(&[]));
-            }
-        }
-
-        // When include_body is on and there are many results, strip bodies
-        // beyond a threshold to avoid blowing the context window.
-        const BODY_CAP: usize = 5;
-        if include_body && matches.len() > BODY_CAP {
-            for item in &mut matches[BODY_CAP..] {
-                if let Some(obj) = item.as_object_mut() {
-                    obj.remove("body");
-                    obj.insert(
-                        "body_omitted".to_string(),
-                        json!("use symbols with symbol for full body"),
-                    );
-                }
-            }
-        }
-
-        let include_docs = optional_bool_param(&input, "include_docs").unwrap_or(false);
-        if include_body_explicit.is_none() && !include_body {
-            // A search that resolves to exactly one symbol is a "focus" request:
-            // show that symbol's code (leaf body, or a large container's member
-            // shape) rather than a bare locator. Multi-match keeps the
-            // conservative small-bodies inlining.
-            if matches.len() == 1 {
-                focus_single_symbol(&mut matches, &root);
-            } else {
-                auto_inline_small_bodies(&mut matches, &root);
-            }
-        }
-        // Honor include_docs in search mode too (previously consumed only by the
-        // overview path). Attaches each symbol's own docstring as a `docs` field.
-        if include_docs {
-            attach_docstrings(&mut matches, &root);
-        }
-
-        // Per-file presentation: when every match shares the same `file`,
-        // hoist it to the top level and strip the per-symbol field. Cuts
-        // redundant repetition when the caller scoped to one file.
-        let shared_file: Option<String> = matches
-            .first()
-            .and_then(|m| m.get("file").and_then(|v| v.as_str()).map(str::to_string))
-            .filter(|first| {
-                matches
-                    .iter()
-                    .all(|m| m.get("file").and_then(|v| v.as_str()) == Some(first.as_str()))
-            });
-        if shared_file.is_some() {
-            for item in matches.iter_mut() {
-                if let Some(obj) = item.as_object_mut() {
-                    obj.remove("file");
-                }
-            }
-        }
-
-        let total = overflow.as_ref().map_or(matches.len(), |o| o.total);
-        let mut result = json!({ "symbols": matches, "total": total });
-        if let Some(file) = shared_file {
-            result["file"] = json!(file);
-        }
-        if let Some(ov) = overflow {
-            result["overflow"] = OutputGuard::overflow_json(&ov);
-        }
-        Ok(result)
+        Ok(finalize_search_results(
+            matches,
+            &guard,
+            &root,
+            include_body,
+            include_body_explicit,
+            &input,
+        ))
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
@@ -645,6 +341,423 @@ impl Tool for Symbols {
         }
         "$".to_string()
     }
+}
+
+/// Restricted search (branch A of `Symbols::call`): a `path`/glob was supplied,
+/// so run `textDocument/documentSymbol` per file and collect the matches.
+#[allow(clippy::too_many_arguments)]
+async fn search_files_restricted(
+    rel: &str,
+    ctx: &ToolContext,
+    root: &std::path::Path,
+    name_ok: &(dyn Fn(&SymbolInfo) -> bool + Send + Sync),
+    include_body: bool,
+    depth: usize,
+    kind_filter: Option<&str>,
+    matches: &mut Vec<Value>,
+) -> anyhow::Result<()> {
+    // Restricted search: per-file textDocument/documentSymbol
+    let files: Vec<PathBuf> = if is_glob(rel) {
+        resolve_glob(&ctx.agent, rel).await?
+    } else {
+        let full = root.join(rel);
+        if full.is_dir() {
+            // Walk directory to find source files
+            let walker = ignore::WalkBuilder::new(&full)
+                .hidden(true)
+                .git_ignore(true)
+                .build();
+            walker
+                .flatten()
+                .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+                .map(|e| e.path().to_path_buf())
+                .collect()
+        } else {
+            vec![full]
+        }
+    };
+
+    for file_path in &files {
+        let Some(lang) = ast::detect_language(file_path) else {
+            continue;
+        };
+        let language_id = crate::lsp::servers::lsp_language_id(lang);
+        let mux_override = ctx.agent.lsp_mux_override(lang).await;
+        let Ok(client) = ctx.lsp.get_or_start(lang, root, mux_override).await else {
+            continue;
+        };
+        let timer = LspTimer::start();
+        let Ok(symbols) = client.document_symbols(file_path, language_id).await else {
+            continue;
+        };
+        timer.record(&*ctx.lsp, lang, root).await;
+        let source = if include_body {
+            std::fs::read_to_string(file_path).ok()
+        } else {
+            None
+        };
+        collect_matching(
+            &symbols,
+            name_ok,
+            include_body,
+            source.as_deref(),
+            depth,
+            true,
+            matches,
+            kind_filter,
+        );
+    }
+    Ok(())
+}
+
+/// Project-scope search (branch B of `Symbols::call`): one `workspace/symbol`
+/// request per language (per-language timeout), falling back to a tree-sitter
+/// walk when LSP yields nothing. Body is the old `scope.includes_project()` block.
+#[allow(clippy::too_many_arguments)]
+async fn search_project_symbols(
+    ctx: &ToolContext,
+    root: &std::path::Path,
+    pattern_lower: &str,
+    name_ok: &(dyn Fn(&SymbolInfo) -> bool + Send + Sync),
+    kind_filter: Option<&str>,
+    scope: &crate::library::scope::Scope,
+    include_body: bool,
+    depth: usize,
+    search_pool_cap: usize,
+    matches: &mut Vec<Value>,
+) -> anyhow::Result<()> {
+    // Fast path: workspace/symbol — one LSP request per language instead of
+    // one textDocument/documentSymbol request per file.
+    let mut languages = std::collections::HashSet::new();
+    let mut accepted_files = std::collections::HashSet::<PathBuf>::new();
+    let walker = ignore::WalkBuilder::new(root)
+        .hidden(true)
+        .git_ignore(true)
+        .build();
+    for entry in walker.flatten() {
+        if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            let path = entry.path().to_path_buf();
+            if let Some(lang) = ast::detect_language(&path) {
+                languages.insert(lang);
+                accepted_files.insert(path);
+            }
+        }
+    }
+
+    // Concurrently start/query all LSP servers so different languages
+    // (e.g. Kotlin JVM startup) don't block each other.
+    //
+    // Per-language hard timeout: a pathological LSP state (silent
+    // workspace/symbol on a still-indexing server, init retry loop
+    // on a server that keeps crashing) must not hang the whole
+    // tool call past the MCP 60 s ceiling. On timeout we yield an
+    // empty result for that language; the tree-sitter fallback
+    // below still runs if every language produces nothing.
+    const PER_LANG_BUDGET: std::time::Duration = std::time::Duration::from_secs(8);
+    let languages: Vec<&str> = languages.into_iter().collect();
+    let mut join_set = tokio::task::JoinSet::new();
+    for lang in languages {
+        let lsp = ctx.lsp.clone();
+        let root = root.to_path_buf();
+        let pattern = pattern_lower.to_owned();
+        let mux_override = ctx.agent.lsp_mux_override(lang).await;
+        join_set.spawn(async move {
+            match tokio::time::timeout(PER_LANG_BUDGET, async {
+                let client = lsp.get_or_start(lang, &root, mux_override).await?;
+                client.workspace_symbols(&pattern).await
+            })
+            .await
+            {
+                Ok(r) => r,
+                Err(_) => {
+                    tracing::warn!(
+                        language = lang,
+                        budget_ms = PER_LANG_BUDGET.as_millis() as u64,
+                        "workspace/symbol per-language budget exceeded; \
+                         falling back to tree-sitter for this language"
+                    );
+                    Ok(Vec::new())
+                }
+            }
+        });
+    }
+    while let Some(task_result) = join_set.join_next().await {
+        let Ok(Ok(symbols)) = task_result else {
+            continue;
+        };
+        for sym in symbols {
+            // LSP servers may use fuzzy/prefix matching — enforce substring.
+            // Mirror the predicate above: only consult name_path for '/' patterns.
+            let n = sym.name.to_lowercase();
+            let name_ok = n.contains(pattern_lower)
+                || (pattern_lower.contains('/')
+                    && sym.name_path.to_lowercase().contains(pattern_lower));
+            let kind_ok = kind_filter.is_none_or(|f| matches_kind_filter(&sym.kind, f));
+            // When scope is strictly Project (not All), filter out matches
+            // from stdlib/dependency crates whose path lies outside the root.
+            let in_root =
+                *scope != crate::library::scope::Scope::Project || sym.file.starts_with(root);
+            // LSP workspace_symbol doesn't honour .gitignore (e.g. pyright
+            // indexes target/build/ Python files); reuse the walker's
+            // accepted-files set as the source of truth for what's
+            // visible to the agent under Project scope.
+            let in_walk = *scope != crate::library::scope::Scope::Project
+                || accepted_files.contains(&sym.file);
+            if name_ok && kind_ok && in_root && in_walk {
+                // When include_body is requested, validate the range. If
+                // workspace/symbol returned a degenerate range, fall back to
+                // document_symbols for the file to get the correct range.
+                let sym = if include_body {
+                    match validate_symbol_range(&sym) {
+                        Ok(()) => sym,
+                        Err(validation_err) => {
+                            match resolve_range_via_document_symbols(&sym, ctx).await {
+                                Some(resolved) => resolved,
+                                None => {
+                                    // document_symbols fallback failed too — propagate
+                                    // the original validation error captured above.
+                                    return Err(validation_err);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    sym
+                };
+                let source = if include_body {
+                    std::fs::read_to_string(&sym.file).ok()
+                } else {
+                    None
+                };
+                matches.push(symbol_to_json(
+                    &sym,
+                    include_body,
+                    source.as_deref(),
+                    depth,
+                    true,
+                ));
+            }
+        }
+    }
+
+    // Tree-sitter fallback: if workspace/symbol returned nothing (LSP
+    // not running, still indexing, or doesn't support workspace/symbol),
+    // walk source files and extract symbols with tree-sitter.
+    if matches.is_empty() {
+        let walker = ignore::WalkBuilder::new(root)
+            .hidden(true)
+            .git_ignore(true)
+            .build();
+        for entry in walker.flatten() {
+            if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                continue;
+            }
+            let path = entry.path();
+            if ast::detect_language(path).is_none() {
+                continue;
+            }
+            if let Ok(symbols) = crate::ast::extract_symbols(path) {
+                let source = if include_body {
+                    std::fs::read_to_string(path).ok()
+                } else {
+                    None
+                };
+                collect_matching(
+                    &symbols,
+                    name_ok,
+                    include_body,
+                    source.as_deref(),
+                    depth,
+                    true,
+                    matches,
+                    kind_filter,
+                );
+            }
+            // Early cap to avoid scanning entire huge projects.
+            // Uses the decoupled search-pool ceiling, not guard.max_results,
+            // so a small user-supplied limit doesn't shrink the pool.
+            if matches.len() > search_pool_cap {
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Library-scope search (branch C of `Symbols::call`): walk each resolved
+/// library root (tree-sitter first, LSP `document_symbols` fallback),
+/// rewriting matched paths to the `lib:` prefix.
+#[allow(clippy::too_many_arguments)]
+async fn search_library_symbols(
+    ctx: &ToolContext,
+    root: &std::path::Path,
+    name_ok: &(dyn Fn(&SymbolInfo) -> bool + Send + Sync),
+    kind_filter: Option<&str>,
+    scope: &crate::library::scope::Scope,
+    include_body: bool,
+    depth: usize,
+    search_pool_cap: usize,
+    matches: &mut Vec<Value>,
+) -> anyhow::Result<()> {
+    // Search library directories when scope includes them
+    let lib_roots = resolve_library_roots(scope, &ctx.agent).await?;
+    for (lib_name, lib_root) in &lib_roots {
+        if !lib_root.exists() {
+            continue;
+        }
+        // Library directories are external — don't apply the project's
+        // .gitignore (e.g. .venv/ would hide pip-installed packages).
+        let walker = ignore::WalkBuilder::new(lib_root)
+            .hidden(true)
+            .git_ignore(false)
+            .build();
+        for entry in walker.flatten() {
+            if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                continue;
+            }
+            let path = entry.path();
+            let Some(lang) = ast::detect_language(path) else {
+                continue;
+            };
+
+            // Tree-sitter first for library files: it's fast and avoids blocking
+            // on slow LSP startup (e.g. JVM-based Kotlin LSP). Only fall back to
+            // LSP document_symbols if tree-sitter returns nothing.
+            let mut symbols = crate::ast::extract_symbols(path).unwrap_or_default();
+            if symbols.is_empty() {
+                // INVARIANT: Always use project root as workspace_root, not the
+                // library root. LspManager caches one client per language; passing
+                // a different root kills and restarts the server.
+                let mux_override = ctx.agent.lsp_mux_override(lang).await;
+                if let Ok(client) = ctx.lsp.get_or_start(lang, root, mux_override).await {
+                    let language_id = crate::lsp::servers::lsp_language_id(lang);
+                    symbols = client
+                        .document_symbols(path, language_id)
+                        .await
+                        .unwrap_or_default();
+                }
+            }
+
+            let source = if include_body {
+                std::fs::read_to_string(path).ok()
+            } else {
+                None
+            };
+
+            // Collect matching symbols, rewriting file paths to lib: prefix
+            for sym in &symbols {
+                if name_ok(sym) && kind_filter.is_none_or(|f| matches_kind_filter(&sym.kind, f)) {
+                    let mut json_val =
+                        symbol_to_json(sym, include_body, source.as_deref(), depth, true);
+                    if let Some(obj) = json_val.as_object_mut() {
+                        obj.insert(
+                            "file".to_string(),
+                            json!(format_library_path(lib_name, lib_root, path)),
+                        );
+                    }
+                    matches.push(json_val);
+                }
+            }
+
+            if matches.len() > search_pool_cap * 2 {
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Post-process the collected matches into the final result JSON: build the
+/// `by_file` distribution before truncation, apply the output-guard cap, strip
+/// bodies past `BODY_CAP`, focus/auto-inline small bodies, attach docstrings,
+/// and hoist a shared file when every match shares one.
+fn finalize_search_results(
+    matches: Vec<Value>,
+    guard: &OutputGuard,
+    root: &std::path::Path,
+    include_body: bool,
+    include_body_explicit: Option<bool>,
+    input: &Value,
+) -> Value {
+    // Build by_file distribution from the full result set BEFORE truncation.
+    let (by_file_entries, by_file_overflow_count) = build_by_file(&matches);
+    let hint = if matches.len() > guard.max_results {
+        make_search_symbols_hint(guard.max_results, &by_file_entries)
+    } else {
+        String::from("Restrict with a file path or glob pattern")
+    };
+    let (mut matches, mut overflow) = guard.cap_items(matches, &hint);
+    // Patch by_file into the overflow object (RF6 resolution: mutate after cap_items).
+    if let Some(ref mut ov) = overflow {
+        if !by_file_entries.is_empty() {
+            ov.by_file = Some(by_file_entries);
+            ov.by_file_overflow = by_file_overflow_count;
+            // Rewrite hint with the real `shown` value now we know it.
+            ov.hint = make_search_symbols_hint(ov.shown, ov.by_file.as_deref().unwrap_or(&[]));
+        }
+    }
+
+    // When include_body is on and there are many results, strip bodies
+    // beyond a threshold to avoid blowing the context window.
+    const BODY_CAP: usize = 5;
+    if include_body && matches.len() > BODY_CAP {
+        for item in &mut matches[BODY_CAP..] {
+            if let Some(obj) = item.as_object_mut() {
+                obj.remove("body");
+                obj.insert(
+                    "body_omitted".to_string(),
+                    json!("use symbols with symbol for full body"),
+                );
+            }
+        }
+    }
+
+    let include_docs = optional_bool_param(input, "include_docs").unwrap_or(false);
+    if include_body_explicit.is_none() && !include_body {
+        // A search that resolves to exactly one symbol is a "focus" request:
+        // show that symbol's code (leaf body, or a large container's member
+        // shape) rather than a bare locator. Multi-match keeps the
+        // conservative small-bodies inlining.
+        if matches.len() == 1 {
+            focus_single_symbol(&mut matches, root);
+        } else {
+            auto_inline_small_bodies(&mut matches, root);
+        }
+    }
+    // Honor include_docs in search mode too (previously consumed only by the
+    // overview path). Attaches each symbol's own docstring as a `docs` field.
+    if include_docs {
+        attach_docstrings(&mut matches, root);
+    }
+
+    // Per-file presentation: when every match shares the same `file`,
+    // hoist it to the top level and strip the per-symbol field. Cuts
+    // redundant repetition when the caller scoped to one file.
+    let shared_file: Option<String> = matches
+        .first()
+        .and_then(|m| m.get("file").and_then(|v| v.as_str()).map(str::to_string))
+        .filter(|first| {
+            matches
+                .iter()
+                .all(|m| m.get("file").and_then(|v| v.as_str()) == Some(first.as_str()))
+        });
+    if shared_file.is_some() {
+        for item in matches.iter_mut() {
+            if let Some(obj) = item.as_object_mut() {
+                obj.remove("file");
+            }
+        }
+    }
+
+    let total = overflow.as_ref().map_or(matches.len(), |o| o.total);
+    let mut result = json!({ "symbols": matches, "total": total });
+    if let Some(file) = shared_file {
+        result["file"] = json!(file);
+    }
+    if let Some(ov) = overflow {
+        result["overflow"] = OutputGuard::overflow_json(&ov);
+    }
+    result
 }
 
 /// Hydrate bodies for small result sets when the caller didn't pass `include_body`.
