@@ -450,13 +450,15 @@ impl Tool for IndexStatus {
                     // Project-scope builds (sync_project) don't stream per-file
                     // progress, so done/total stay at 0/0 for the whole build —
                     // see IndexProject::call. Without a note this reads as a
-                    // stall; the climbing Qdrant chunk_count is the real liveness
-                    // signal, so surface it (and the explanation) right here.
+                    // stall. chunk_count climbs from 0 on an initial build; on a
+                    // force re-embed it stays ~stable (chunks upserted in place),
+                    // so the note is scenario-honest rather than promising movement.
                     if *done == 0 && *total == 0 {
                         indexing["note"] = json!(
-                            "per-file progress is not streamed for project-scope \
-                             builds — 0/0 is the healthy in-progress shape, not a \
-                             stall; watch chunk_count for liveness"
+                            "0/0 is the healthy in-progress shape for project-scope \
+                             builds (per-file progress isn't streamed), not a stall. \
+                             chunk_count climbs from 0 on an initial build; on a \
+                             force re-embed it stays ~stable (chunks upserted in place)."
                         );
                         indexing["chunks_so_far"] = result
                             .get("chunk_count")

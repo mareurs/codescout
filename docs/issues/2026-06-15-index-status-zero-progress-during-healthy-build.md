@@ -105,15 +105,19 @@ field said "stuck"; the point count said "working." Only the point count was tru
 
 Implemented **option (a) — annotate, don't stream** on `experiments` (not yet on `master`; held for further testing per the 2026-06-15 decision). In `IndexStatus/call` (`src/tools/semantic/index.rs`, the `IndexingState::Running` arm, ~line 439): when `done == 0 && total == 0`, the `indexing` block now carries:
 
-- a `note`: *"per-file progress is not streamed for project-scope builds — 0/0 is the healthy in-progress shape, not a stall; watch chunk_count for liveness"*, and
+- a `note`: *"0/0 is the healthy in-progress shape for project-scope builds (per-file progress isn't streamed), not a stall. chunk_count climbs from 0 on an initial build; on a force re-embed it stays ~stable (chunks upserted in place)."*, and
 - a `chunks_so_far` field surfacing the live Qdrant `chunk_count` (0 when none have landed yet) right next to the misleading counter.
 
-Non-zero progress states are unchanged. Deeper **option (b)** — real per-file streaming from `sync_project` — is intentionally NOT implemented; it remains a separate future enhancement (the producer comment at `index.rs:288-291` still holds) rather than a bug. The misleading-output *symptom* this file tracks is fully addressed by (a).
+Non-zero progress states are unchanged. Deeper **option (b)** — real per-file streaming from `sync_project` — is intentionally NOT implemented; it remains a separate future enhancement (the producer comment at `index.rs:288-291` still holds) rather than a bug. The misleading-output *symptom* this file tracks is addressed by (a).
 
-**SHA:** experiments-side, committed alongside this bug-file update (master-side SHA pending — not cherry-picked until testing completes). Live-MCP verification (rebuild + `/mcp` restart, observe the annotation in a real `index(status)` during a build) is pending the next restart; logic is verified by the regression test below.
+**Live-verified 2026-06-15.** A forced full reindex confirmed the annotation renders in a live `index(status)` — `note` + `chunks_so_far` both present in the `Running{0,0}` state. The same check surfaced a refinement: during a **force re-embed of an already-populated index**, `chunk_count` is ~stable (chunks upserted by stable ID — no net change) rather than climbing, so the original *"watch chunk_count for liveness"* wording over-promised. The note was reworded to be scenario-honest (climbs from 0 on an initial build; ~stable on a force re-embed).
+
+**Deferred enhancement (not a bug):** a signal that proves liveness in *every* scenario — including a force re-embed, where neither `done/total` nor `chunk_count` moves — would require a heartbeat, e.g. a `started_at`/elapsed field on `IndexingState::Running`. Not implemented; recorded here as a future enhancement.
+
+**SHA:** experiments-side `679ba8df` (initial fix) + a wording-refinement follow-up commit (master-side SHA pending — not cherry-picked until testing completes).
 ## Tests added
 
-`index_status_running_zero_zero_carries_liveness_note` in `src/tools/semantic/tests.rs` (inserted after `index_status_shows_running_progress`, ~line 174). It drives the real `0/0` project-scope path and asserts `indexing.note` contains `"0/0"` + `"liveness"` and `chunks_so_far` is present; it ALSO asserts the non-zero path does **not** carry the note — guarding against the annotation leaking to the wrong branch.
+`index_status_running_zero_zero_carries_liveness_note` in `src/tools/semantic/tests.rs` (inserted after `index_status_shows_running_progress`, ~line 174). It drives the real `0/0` project-scope path and asserts `indexing.note` contains `"0/0"` + `"not a stall"` and `chunks_so_far` is present; it ALSO asserts the non-zero path does **not** carry the note — guarding against the annotation leaking to the wrong branch.
 
 `cargo test --lib index_status` → 9 passed, 0 failed. `cargo clippy --lib --tests -- -D warnings` → clean. The pre-existing `index_status_shows_running_progress` (which hand-sets a *non-zero* state) is unaffected — confirming the false-coverage caution: that test never exercised the `0/0` path, which is why this bug slipped.
 ## Workarounds

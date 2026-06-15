@@ -197,10 +197,10 @@ async fn index_status_running_zero_zero_carries_liveness_note() {
 
     let note = indexing["note"]
         .as_str()
-        .expect("0/0 running state must carry a liveness note");
+        .expect("0/0 running state must carry an explanatory note");
     assert!(
-        note.contains("0/0") && note.contains("liveness"),
-        "note must explain 0/0 is healthy and point at chunk_count liveness, got: {note}"
+        note.contains("0/0") && note.contains("not a stall"),
+        "note must explain 0/0 is the healthy in-progress shape, not a stall, got: {note}"
     );
     assert!(
         indexing["chunks_so_far"].is_u64(),
