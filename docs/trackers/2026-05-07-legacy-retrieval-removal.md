@@ -34,12 +34,12 @@ the 2026-05-13 memory-port design landed and closed most items below.
 - Legacy-db detect hint lives at activation (`src/tools/config/mod.rs:552`).
 
 **Superseded:**
-- **L-08** — `embed/fusion.rs` + `embed/schema.rs` are NOT deletable: `fusion::rrf_fuse` and `schema::SearchResult` graduated into live consumers (`src/tools/semantic/semantic_search.rs`, `tests.rs`). Keep them; drop them from the diet list.
+- **L-08** — ✅ **corrected 2026-06-15.** The 2026-06-14 reconciliation conflated two adjacent symbols. `schema::SearchResult` **did** graduate to a live consumer (`apply_file_diversity_cap`, `src/tools/semantic/semantic_search.rs`) — **kept**. But `fusion::rrf_fuse` + `BM25Result` (`src/embed/fusion.rs`) had **zero production callers** — test-only (verified via `references`, not file proximity). `fusion.rs` **deleted 2026-06-15**: `pub mod fusion;` dropped from `embed/mod.rs`, the dead `rrf_fuse_integration_*` test removed from `semantic/tests.rs`, full suite green (2869 passed, clippy `-D warnings` clean). `schema.rs` stays. Recon: R-33.
 
 **The real residual (NEW — never in the original L-list):**
-- **L-16** — **librarian artifact vector index still on sqlite-vec.** `src/librarian/catalog/schema.sql:36` defines `CREATE VIRTUAL TABLE artifact_vec USING vec0(...)`; `src/librarian/indexer.rs` embeds artifacts into it (lines 241, 572). A *third* vector index, independent of memory + code. It is the **sole remaining `sqlite-vec` consumer** (`init_sqlite_vec` at `src/librarian/catalog/mod.rs:35`), hence the **blocker for L-11**. Porting it is L-01-scale: new Qdrant collection for artifacts, `RetrievalClient` methods (reuse the `memory_*` pattern), rewire `indexer.rs` + librarian search, one-shot migration of existing `artifact_vec` rows, then delete the vec0 table + `init_sqlite_vec` + the dep.
+- **L-16** — **librarian artifact vector index still on sqlite-vec.** `src/librarian/catalog/schema.sql:36` defines `CREATE VIRTUAL TABLE artifact_vec USING vec0(...)`; `src/librarian/indexer.rs` embeds artifacts into it (lines 241, 572). A *third* vector index, independent of memory + code. It is the **sole remaining `sqlite-vec` consumer** (`init_sqlite_vec` at `src/librarian/catalog/mod.rs:35`), hence the **blocker for L-11**. Porting it is L-01-scale: new Qdrant collection for artifacts, `RetrievalClient` methods (reuse the `memory_*` pattern), rewire `indexer.rs` + librarian search, one-shot migration of existing `artifact_vec` rows, then delete the vec0 table + `init_sqlite_vec`. **Per the 2026-06-15 decision the `sqlite-vec` dep itself is RETAINED** (daemon-free local-backend seam — see decision log), so L-16 no longer ends in a dep drop; it ends at one-vector-model consistency.
 
-**L-11 now depends on L-16, not L-01.**
+**L-11 (drop `sqlite-vec`) is wontfix as of 2026-06-15** — `sqlite-vec` is retained as the daemon-free local-vector-search backend for low-end / locked-down systems (see decision log). L-16 still proceeds (artifacts → Qdrant for uniformity) but keeps the dep + the `SemanticMemoryStore` trait seam.
 ## Open items
 
 | ID | Surface | What still uses legacy | What replacing it requires |
@@ -61,6 +61,8 @@ the 2026-05-13 memory-port design landed and closed most items below.
 | L-15 | `src/tools/semantic/semantic_search.rs::apply_file_diversity_cap` | Helper kept `#[allow(dead_code)]` — stack search returns chunks ranked by Qdrant + reranker without a per-file diversity cap. Can over-represent one file in top-K | Apply the cap on `Vec<Hit>` after `client.search_code(...)` returns, before formatting. Carry MAX_CHUNKS_PER_FILE = 3 default. |
 
 ## Decision log
+
+- **2026-06-15** — **L-08 corrected · L-11 wontfix · L-16 reframed** (user decision). (1) L-08: the 2026-06-14 "fusion/schema graduated" call was half-wrong — `schema::SearchResult` is live (kept); `fusion::rrf_fuse`/`BM25Result` were **test-only** and are now **deleted** (`src/embed/fusion.rs` removed; suite green). Caught by a `references` call-graph scout the proximity-based audit missed (recon **R-33**). (2) **L-11 → wontfix:** `sqlite-vec` is **retained** as the daemon-free local-vector-search backend for low-end / locked-down systems (e.g. the `vdi-windows` worktree — no Qdrant daemon). The dep-drop "binary diet" goal is abandoned. (3) **L-16 reframed:** still port `artifact_vec` → Qdrant, but for one-vector-model *consistency*, not a dep drop; keep `sqlite-vec` + the `SemanticMemoryStore` trait as the local-backend seam.
 
 - **2026-06-14** — Reconciliation audit (see "## 2026-06-14 audit" above): L-01/03/04/05-07/09/10/13 confirmed done in code; L-08 superseded (fusion/schema graduated to live consumers); the real residual is the librarian `artifact_vec` index (new item **L-16**), which blocks the L-11 sqlite-vec drop.
 

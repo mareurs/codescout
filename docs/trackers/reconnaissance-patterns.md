@@ -56,6 +56,7 @@ skill).
 | R-31 | 2026-06-14 | hit (validates R-3 + R-26) | A bug-file's "param never parsed anywhere" claim, evidenced by a grep scoped to the modified file(s), missed a parser one call-hop away — `read_file`'s "offset/limit never parsed" missed `OutputGuard::from_input` (`output.rs:96`), which `read_full_file` calls. Follow the param into callees; don't trust the file-scoped audit. | bug-fix F-22; issues/2026-06-14-read-file-offset-limit; kin R-3/R-26 |
 | R-30 | 2026-06-13 | miss → proposal | When a structural feature appears to *block* a tool, test the tool's documented alternate addressing form before refactoring code around it — read `find_unique_symbol_by_name_path`/`symbol_name_matches` but never tried the qualified `impl Trait for Type/method` form the not-found hint itself *documents*, so concluded `edit_code` was blocked and relocated 11 trait impls for a non-block. Reading the resolver ≠ testing the escape hatch. | dzo-legibility F-9; ADR docs/adrs/2026-06-13-drop-name-collision-defect.md; kin R-26/R-27 (read ≠ verified) |
 | R-32 | 2026-06-14 | hit | An off-the-cuff root-cause unification across a bug cluster is a hypothesis, not a finding — read each bug's implicated code before presenting "they share one root cause / one fix" (3 open "catalog/path" bugs by title → 3 distinct files/mechanisms; only 2 shared a narrower root: global-abspath catalog reasoned-about-as-per-workspace) | bug-fix F-21; issues 2026-06-13 catalog trio; kin R-12/R-19/R-27 |
+| R-33 | 2026-06-15 | hit | A reconciliation audit marked two adjacent legacy-era symbols (`fusion::rrf_fuse`, `schema::SearchResult`) both "graduated to live — keep"; `references()` showed OPPOSITE liveness (rrf_fuse test-only → deleted; SearchResult live → kept). Dead-vs-live is per-symbol call-graph, not file-proximity. | legacy-retrieval-removal L-08; this session; kin R-26/R-27/R-21 |
 
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
@@ -787,6 +788,19 @@ SKILL.md Phase-1 bullet to name bug-file line lists explicitly.
 **Proposal:** none new — reinforces R-3 (grep workspace root, not the file) and R-26 (read callee bodies before narrating "confirmed"). Datapoint toward making "follow the param into callees" an explicit Phase-1 step whenever a claim is about whether a param is *read* (vs. *used*).
 
 **Evidence:** bug-fix F-22; `docs/issues/2026-06-14-read-file-offset-limit-silently-ignored-on-buffers.md`; `src/tools/output.rs:89-112`; `src/tools/read_file.rs:555-664` (`read_full_file` builds the guard).
+## R-33 — Dead-vs-live is a per-symbol call-graph fact, not a file-proximity fact
+
+**Date:** 2026-06-15 · **Verdict:** hit
+
+**Seam:** `src/embed/fusion.rs::rrf_fuse` + `BM25Result` vs `src/embed/schema.rs::SearchResult`. The legacy-retrieval-removal tracker's 2026-06-14 reconciliation marked **both** "graduated into live consumers — NOT deletable" because they are adjacent symbols from the same legacy-fusion era.
+
+**Scout:** `references(rrf_fuse)` → 1 def + 5 test-only call sites, **zero production callers**. `references(SearchResult)` → a live consumer (`apply_file_diversity_cap` in `semantic_search.rs`). The two symbols had **opposite** liveness; file proximity hid it.
+
+**Disproof:** deleted `fusion.rs` (+ its `pub mod` decl + the dead `rrf_fuse_integration_*` test); `cargo test` 2869 passed, clippy `-D warnings` clean. The "not deletable" claim was false for `rrf_fuse`.
+
+**Lesson:** an audit that reasons about dead-vs-live from imports / co-location / "same era" will mis-classify. Liveness is a per-symbol call-graph fact — confirm each symbol with `references()` / `call_graph()`, never by its neighborhood.
+
+**Promote-when:** a 2nd proximity-misclassification caught by a call-graph scout → promote to the reconnaissance SKILL ("dead-code claims are per-symbol call-graph facts, not file-level facts"). Kin: R-26 (grep line-match ≠ mechanism), R-27 (prose claim is a hypothesis), R-21 (`references()` before acting).
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
