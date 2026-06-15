@@ -528,17 +528,28 @@ pub fn is_dangerous_command(command: &str, config: &PathSecurityConfig) -> Optio
 }
 
 /// Detect Iron Law 3 violation: piping a **live, potentially-unbounded**
-/// command's output to a log-trimmer
-/// (`tail`/`head`/`grep`/`wc`/`sed`/`awk`/`cut`/`sort`/`uniq`/`tr`/`fmt`/`less`).
+/// command's output to a **trimmer** that hides a subset of it
+/// (`tail`/`head`/`grep`/`less`/`sed`/`awk`/`cut`/`sort`/`uniq`/`tr`/`fmt`).
 ///
-/// IL3 exists because piping destroys the `@cmd_*` buffer: filtered text reaches
-/// the agent, but the full output is gone. Re-running just to grep wastes a tool
-/// call. Server-side enforcement covers all MCP clients (Claude Code, Copilot,
-/// Gemini, …) — companion-plugin hooks are Claude-Code-specific and miss
-/// subagent contexts (see `docs/issues/2026-05-18-il3-pipe-violation-subagent.md`).
+/// IL3 exists because piping destroys the `@cmd_*` buffer: a filtered/truncated
+/// slice reaches the agent, but the full output is gone. Re-running just to grep
+/// wastes a tool call. Server-side enforcement covers all MCP clients (Claude
+/// Code, Copilot, Gemini, …) — companion-plugin hooks are Claude-Code-specific
+/// and miss subagent contexts (see
+/// `docs/issues/2026-05-18-il3-pipe-violation-subagent.md`).
+///
+/// **Pure aggregators on the RHS are allowed** — they collapse output to a
+/// bounded summary you cannot reconstruct from a partial view, so piping to them
+/// SAVES context rather than hiding it (the opposite of what IL3 guards against):
+///
+///   - `wc` (any flags) — emits only counts.
+///   - counting `grep -c` / `--count` — emits a match count, not the matches.
+///
+/// `git status --porcelain | wc -l` and `git log | grep -c fix` are therefore
+/// fine. A *filtering* `grep` (no `-c`), `head`, `tail`, `sort`, … still trims.
 ///
 /// **Bounded LHS is allowed.** The original rule blocked any allowlisted LHS
-/// piped to a log-trimmer; this over-triggered on ad-hoc finite probes
+/// piped to a trimmer; this over-triggered on ad-hoc finite probes
 /// (`ls <dir> | head`, `grep <pat> <one-file> | wc`, `cat <file> | grep`) —
 /// see `docs/issues/2026-05-18-il3-overtriggers-bounded-lhs.md`. Only LHS
 /// shapes known to produce arbitrarily large output are blocked now:
@@ -558,25 +569,21 @@ pub fn is_dangerous_command(command: &str, config: &PathSecurityConfig) -> Optio
 /// Returns `Some(hint)` when the command violates IL3; `None` otherwise.
 /// Mirrors the regex in `codescout-companion/hooks/il3-deny-hook.sh`.
 pub fn detect_il3_violation(command: &str) -> Option<String> {
-    static IL3_RHS: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     static IL3_BUFFER_REF: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-
-    let rhs_re = IL3_RHS.get_or_init(|| {
-        Regex::new(r"\|\s*(tail|head|grep|less|wc|sed|awk|cut|sort|uniq|tr|fmt)\b")
-            .expect("IL3_RHS regex compiles")
-    });
     let buf_re = IL3_BUFFER_REF.get_or_init(|| {
         Regex::new(r"@(cmd|bg|file|tool|ack)_[A-Za-z0-9_]+").expect("IL3_BUFFER_REF regex compiles")
     });
 
-    // Cheap reject: no log-trimmer on the RHS of any pipe → never IL3.
-    if !rhs_re.is_match(command) {
+    let mut stages = command.split('|');
+    let pre_pipe = stages.next().unwrap_or("");
+
+    // Cheap reject: nothing downstream TRIMS output → never IL3. Pure aggregators
+    // (`wc`, counting `grep -c`) collapse output to a summary and do not count.
+    if !stages.any(stage_trims) {
         return None;
     }
 
-    let pre_pipe = command.split('|').next().unwrap_or("");
-
-    // Allow buffer-ops: pre-pipe segment references a buffer handle.
+    // Allow buffer-ops: pre-pipe segment references an already-captured handle.
     if buf_re.is_match(pre_pipe) {
         return None;
     }
@@ -592,10 +599,47 @@ pub fn detect_il3_violation(command: &str) -> Option<String> {
          1. run_command(\"{lead}\")               — full output stored as @cmd_xxx\n  \
          2. grep PATTERN @cmd_xxx                 — query the buffer at any granularity\n  \
                                                     (also: tail -20 @cmd_xxx, head -50 @cmd_xxx)\n\n\
-         Bounded LHS (ls, cat, stat, du, diff, awk, sed, non-recursive grep, find -maxdepth) is allowed —\n\
-         only unbounded LHS (cargo, npm, pytest, git, rg, fd, grep -r, bare find, ...) is blocked.\n\n\
+         Bounded LHS (ls, cat, stat, du, diff, awk, sed, non-recursive grep, find -maxdepth) is allowed,\n\
+         as are pure aggregators on the RHS (wc, grep -c) — they collapse output to a summary.\n\
+         Only unbounded LHS (cargo, npm, pytest, git, rg, fd, grep -r, bare find, ...) piped to a\n\
+         trimmer (head, tail, grep, sort, ...) is blocked.\n\n\
          Rerun the command bare and query the returned @cmd_* buffer."
     ))
+}
+
+/// Does this single pipe stage TRIM output (truncate / filter / transform), as
+/// opposed to collapsing it to a bounded summary?
+///
+/// Pure aggregators are NOT trimmers: `wc` (emits only counts) and a counting
+/// `grep -c` / `--count` (emits a match count) reduce output to a summary you
+/// cannot reconstruct from a partial view — piping to them SAVES context, the
+/// opposite of the trim IL3 guards against. Everything that shows a *subset*
+/// (`head`, `tail`, plain `grep`, `less`) or reshapes line-by-line (`sed`,
+/// `awk`, `cut`, `sort`, `uniq`, `tr`, `fmt`) is a trimmer.
+fn stage_trims(stage: &str) -> bool {
+    // `split_whitespace` already skips leading whitespace, so no pre-trim needed.
+    let head = match stage.split_whitespace().next() {
+        Some(h) => h,
+        None => return false,
+    };
+    match head {
+        // Aggregators — collapse to a bounded summary. Allowed.
+        "wc" => false,
+        // grep filters (hides non-matches) UNLESS counting, which aggregates.
+        "grep" => !grep_is_counting(stage),
+        // Truncators / filters / line transforms — hide or reshape a subset.
+        "tail" | "head" | "less" | "sed" | "awk" | "cut" | "sort" | "uniq" | "tr" | "fmt" => true,
+        // Anything else (jq, a custom tool, …) is not a known trimmer.
+        _ => false,
+    }
+}
+
+/// True when a `grep` stage carries a count flag (`-c` / `--count`, including
+/// bundled short flags like `-ic`), making it an aggregator rather than a filter.
+fn grep_is_counting(stage: &str) -> bool {
+    stage.split_whitespace().any(|tok| {
+        tok == "--count" || (tok.starts_with('-') && !tok.starts_with("--") && tok.contains('c'))
+    })
 }
 
 /// Classify an LHS shell command as unbounded (arbitrarily-large output) for
@@ -2010,11 +2054,6 @@ mod tests {
     }
 
     #[test]
-    fn il3_blocks_grep_capital_recursive() {
-        assert!(detect_il3_violation("grep -R pat src/ | wc -l").is_some());
-    }
-
-    #[test]
     fn il3_blocks_grep_long_recursive() {
         assert!(detect_il3_violation("grep --recursive pat src/ | sort").is_some());
     }
@@ -2058,11 +2097,6 @@ mod tests {
     }
 
     #[test]
-    fn il3_blocks_fd_pipe_wc() {
-        assert!(detect_il3_violation("fd .rs | wc -l").is_some());
-    }
-
-    #[test]
     fn il3_friction_repro_allowed() {
         let cmd = r#"grep -oE "\"cwd\":\"[^\"]*\"" @cmd_3b8e6cc5 | sort -u"#;
         assert!(detect_il3_violation(cmd).is_none());
@@ -2072,5 +2106,68 @@ mod tests {
     fn il3_allows_unknown_lhs_command() {
         // awk is not in LHS_COMMANDS; conservative list keeps false positives low.
         assert!(detect_il3_violation("awk '{print $1}' file.txt | head").is_none());
+    }
+
+    // ── RHS aggregators (wc, grep -c) collapse to a summary → allowed even from
+    //    an unbounded LHS. Truncators/filters (head, tail, plain grep) still block.
+
+    #[test]
+    fn il3_allows_git_status_pipe_wc() {
+        // Reported friction (2026-06-15): counting changed files. wc aggregates.
+        assert!(detect_il3_violation("git status --porcelain | wc -l").is_none());
+    }
+
+    #[test]
+    fn il3_allows_cargo_pipe_wc() {
+        // Unbounded LHS, but wc collapses to a count — context-saving, allowed.
+        assert!(detect_il3_violation("cargo test | wc -l").is_none());
+    }
+
+    #[test]
+    fn il3_allows_grep_recursive_pipe_wc() {
+        // Even a recursive (unbounded) grep piped to wc yields a count, not a trim.
+        assert!(detect_il3_violation("grep -R pat src/ | wc -l").is_none());
+    }
+
+    #[test]
+    fn il3_allows_fd_pipe_wc() {
+        // Counting files: `fd .rs | wc -l` aggregates, not trims.
+        assert!(detect_il3_violation("fd .rs | wc -l").is_none());
+    }
+
+    #[test]
+    fn il3_allows_counting_grep() {
+        // grep -c emits a match COUNT, not the matches — an aggregator.
+        assert!(detect_il3_violation("git log --oneline | grep -c fix").is_none());
+    }
+
+    #[test]
+    fn il3_allows_counting_grep_long_flag() {
+        assert!(detect_il3_violation("cargo test | grep --count PASS").is_none());
+    }
+
+    #[test]
+    fn il3_allows_counting_grep_bundled_flag() {
+        // Bundled short flags (-ic = ignore-case + count) still read as counting.
+        assert!(detect_il3_violation("cargo test | grep -ic warning").is_none());
+    }
+
+    #[test]
+    fn il3_blocks_filtering_grep_still() {
+        // Plain grep (no -c) hides non-matching lines — still a trim.
+        let hint = detect_il3_violation("git log --oneline | grep fix").expect("should block");
+        assert!(hint.contains("IL3 violation"));
+    }
+
+    #[test]
+    fn il3_blocks_context_grep_still() {
+        // -C (context, capital) shows lines around matches — a filter, not a count.
+        assert!(detect_il3_violation("cargo test | grep -C 2 warning").is_some());
+    }
+
+    #[test]
+    fn il3_blocks_git_pipe_head_still() {
+        // U-16 case: head truncates — still blocked from an unbounded LHS.
+        assert!(detect_il3_violation("git log --oneline master..experiments | head -20").is_some());
     }
 }
