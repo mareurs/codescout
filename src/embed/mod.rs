@@ -1,15 +1,15 @@
 //! Embedding utilities used by the retrieval stack pipeline.
 //!
-//! The legacy sqlite-vec index (`embed::index`) along with its drift +
-//! BM25 helpers were removed in L-01 step 8. What remains is the
-//! language-aware AST chunker (`ast_chunker`), payload schemas
-//! (`schema`), search-result fusion (`fusion`), and the preflight
+//! The legacy sqlite-vec index (`embed::index`) with its drift + BM25
+//! helpers were removed in L-01 step 8; the in-process RRF fusion
+//! (`fusion`) was removed once Qdrant-native RRF (`retrieval::qdrant`)
+//! replaced it. What remains is the language-aware AST chunker
+//! (`ast_chunker`), payload schemas (`schema`), and the preflight
 //! scope-check used by `index(action='build')` (`preflight`). All
 //! embedding/HTTP work now lives in the sibling `codescout-embed` crate
 //! and the `retrieval::*` modules.
 
 pub mod ast_chunker;
-pub mod fusion;
 pub mod preflight;
 pub mod schema;
 
