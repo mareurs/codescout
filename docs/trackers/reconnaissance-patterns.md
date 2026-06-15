@@ -57,6 +57,7 @@ skill).
 | R-30 | 2026-06-13 | miss → proposal | When a structural feature appears to *block* a tool, test the tool's documented alternate addressing form before refactoring code around it — read `find_unique_symbol_by_name_path`/`symbol_name_matches` but never tried the qualified `impl Trait for Type/method` form the not-found hint itself *documents*, so concluded `edit_code` was blocked and relocated 11 trait impls for a non-block. Reading the resolver ≠ testing the escape hatch. | dzo-legibility F-9; ADR docs/adrs/2026-06-13-drop-name-collision-defect.md; kin R-26/R-27 (read ≠ verified) |
 | R-32 | 2026-06-14 | hit | An off-the-cuff root-cause unification across a bug cluster is a hypothesis, not a finding — read each bug's implicated code before presenting "they share one root cause / one fix" (3 open "catalog/path" bugs by title → 3 distinct files/mechanisms; only 2 shared a narrower root: global-abspath catalog reasoned-about-as-per-workspace) | bug-fix F-21; issues 2026-06-13 catalog trio; kin R-12/R-19/R-27 |
 | R-33 | 2026-06-15 | hit | A reconciliation audit marked two adjacent legacy-era symbols (`fusion::rrf_fuse`, `schema::SearchResult`) both "graduated to live — keep"; `references()` showed OPPOSITE liveness (rrf_fuse test-only → deleted; SearchResult live → kept). Dead-vs-live is per-symbol call-graph, not file-proximity. | legacy-retrieval-removal L-08; this session; kin R-26/R-27/R-21 |
+| R-34 | 2026-06-15 | hit | On a cross-platform branch, the host `cargo check` is necessary-not-sufficient for a rebase — it never compiles the gated target. After rebasing `vdi-windows` onto `experiments` (conflict in the `#[cfg(unix)]` peer gate itself), cross-compiled `--target x86_64-pc-windows-gnu` to confirm the incoming commits added no ungated unix-only code (EXIT=0). Compile the target the branch exists for, not just the host. | `vdi-windows` rebase this session; `src/tools/mod.rs` peer-gate; WIN-23; kin R-5 |
 
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
@@ -801,6 +802,16 @@ SKILL.md Phase-1 bullet to name bug-file line lists explicitly.
 **Lesson:** an audit that reasons about dead-vs-live from imports / co-location / "same era" will mis-classify. Liveness is a per-symbol call-graph fact — confirm each symbol with `references()` / `call_graph()`, never by its neighborhood.
 
 **Promote-when:** a 2nd proximity-misclassification caught by a call-graph scout → promote to the reconnaissance SKILL ("dead-code claims are per-symbol call-graph facts, not file-level facts"). Kin: R-26 (grep line-match ≠ mechanism), R-27 (prose claim is a hypothesis), R-21 (`references()` before acting).
+
+## R-34 — On a cross-platform branch, the host `cargo check` is not the rebase gate; cross-compile to the target the branch exists to support
+
+(hit) Rebased `vdi-windows` onto `experiments` — 41 ours / 89 theirs. The sole conflict was in `src/tools/mod.rs`, in the very `#[cfg(unix)]` gating the branch exists to maintain: `experiments` added `pub mod guide_ledger;` and our `d07d7b18` added `#[cfg(unix)]` to `pub mod peer;` at the same line; both kept. The seam I scouted was not the conflict (that resolution is trivially correct — two independent edits) but the **completeness of the platform gating after absorbing 89 incoming commits**. A host `cargo check` (Linux/unix) only re-compiles the path that already built; it never exercises the Windows side, so it cannot answer "is the rebase correct?" for the dimension this branch is *about*. Scouted the real target: `cargo check --target x86_64-pc-windows-gnu` (MinGW + windows-gnu target both present from the branch's existing local loop) — EXIT=0, clean but for 3 pre-existing dead-code warnings (unix-only LSP-mux helpers in `src/lsp/manager.rs`, already tracked as WIN-23). 
+
+**Counterfactual:** had any of the 89 `experiments` commits introduced an ungated `peer::` use, `std::os::unix::*` import, or other unix-only call, a Linux-only "looks good" would have shipped a broken Windows build that surfaces only on the user's next VDI compile — maximally far from the rebase, hard to attribute back to it. The cross-compile makes the gate fire at the seam, not in the field.
+
+**Generalization:** when rebasing/merging a branch whose purpose is a non-host target (platform gating, no_std, a different arch/ABI, a feature-flag matrix), the host build is necessary-not-sufficient. Compile the target the branch exists for before claiming the integration is correct. Mirrors R-5 ("compiler as scout") but on the *target* axis rather than the call-site axis.
+
+**Evidence:** `vdi-windows` rebase this session (master-side conflict resolve commit on the rebased tip); `src/tools/mod.rs` peer-gate; `cargo check --target x86_64-pc-windows-gnu` EXIT=0; WIN-23 dead-code warning cluster (`windows-platform-support.md`).
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:
