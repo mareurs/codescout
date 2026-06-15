@@ -2289,6 +2289,75 @@ mod tests {
         );
     }
 
+    /// Defect #1 end-to-end: a live process holds the mux ownership flock but no
+    /// socket is reachable → `get_or_start_via_mux` must surface the actionable
+    /// wedged-mux error (not a bare connect error) AND must not respawn (the held
+    /// flock blocks it). Mirrors the live e2e verified by hand on 2026-06-14
+    /// (see issues/2026-06-11-mux-failure-masks-rocksdb-lock-collision § Verified
+    /// live). Holds a BSD `flock` from a separate python3 — the SAME lock family
+    /// `fs4::try_lock_exclusive` uses (distinct from the fcntl locks the
+    /// `posix_write_lock` tests hold); blocking `LOCK_EX` guarantees acquisition
+    /// before "held" is printed, so the barrier read can never race the lock.
+    #[cfg(unix)]
+    #[tokio::test]
+    #[ignore = "spawns a python3 flock holder + drives the mux connect path; gated like the posix_write_lock tests"]
+    async fn get_or_start_via_mux_surfaces_wedged_error_when_flock_held_socket_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        // The wedged state: lock file present + held, NO reachable socket.
+        std::fs::write(&lock_path, b"").unwrap();
+        let _ = std::fs::remove_file(&sock_path);
+
+        // Hold the BSD flock from a separate process (blocking acquire → prints
+        // "held" only once it owns the lock; then sleeps to keep holding it).
+        let mut holder = std::process::Command::new("python3")
+            .arg("-c")
+            .arg(format!(
+                "import fcntl,time; f=open(r'{}', 'r+'); \
+                 fcntl.flock(f, fcntl.LOCK_EX); \
+                 print('held', flush=True); time.sleep(10)",
+                lock_path.display()
+            ))
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn python3 flock holder");
+        {
+            use std::io::Read;
+            let mut buf = [0u8; 4];
+            let _ = holder.stdout.as_mut().unwrap().read(&mut buf); // barrier: wait for "held"
+        }
+
+        let mgr = LspManager::new();
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+        let result = mgr.get_or_start_via_mux("rust", ws, config).await;
+
+        let _ = holder.kill();
+        let _ = holder.wait();
+
+        let msg = match result {
+            Ok(_) => panic!("held flock + absent socket must error, not connect or spawn"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            msg.contains("wedged or mid-restart"),
+            "must surface the wedged-mux situation, got: {msg}"
+        );
+        assert!(
+            msg.contains("fuser"),
+            "must route the human to the lock holder, got: {msg}"
+        );
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     #[ignore = "spawns a python3 fcntl holder; gated like posix_write_lock tests"]

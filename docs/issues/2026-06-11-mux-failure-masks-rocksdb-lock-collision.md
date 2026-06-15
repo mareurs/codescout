@@ -383,6 +383,20 @@ default), so its spawned LSP never inherits it.
 
 All four states pass → Resume step 1 (live failure-path repro) is **done**. Defects #1/#2/#3 are
 now fixed **and** verified; the only remaining step is the master ship (Standard Ship Sequence).
+
+### Update 2026-06-15 — wedged-path e2e is now an automated regression test
+
+The manual live verification above is now encoded so the failure path can't silently regress:
+`lsp::manager::tests::get_or_start_via_mux_surfaces_wedged_error_when_flock_held_socket_absent`
+(`#[ignore]`-gated, like the sibling python-holder tests). It holds the mux ownership **BSD
+`flock`** from a separate `python3` (`fcntl.flock`, blocking acquire — the same lock family
+`fs4::try_lock_exclusive` uses, distinct from the `fcntl.lockf` POSIX locks the
+`posix_write_lock` tests hold), removes any socket, then drives the real
+`get_or_start_via_mux("rust", …)` and asserts the actionable `wedged or mid-restart` + `fuser`
+error — **no Kotlin, no Gradle, no multi-instance needed.** Runs green under
+`cargo test --lib lsp::manager -- --include-ignored` (45/45). This **retires the
+"verification-limited" caveat** the bug carried across prior sessions — the failure mode
+reproduces deterministically from a single external flock holder.
 ## Tests added
 
 Implemented on `experiments` (`src/lsp/manager.rs`, in `mod tests`):
