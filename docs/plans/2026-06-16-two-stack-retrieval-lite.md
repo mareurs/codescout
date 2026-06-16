@@ -92,10 +92,14 @@ Shared non-gated `vec0` registration in `src/sqlite_vec_ext.rs` (librarian deleg
 to it). `VectorBackend{Qdrant,SqliteVec}` resolved from `CODESCOUT_VECTOR_BACKEND`;
 `RetrievalClient::from_env` picks the backend (sqlite-vec never connects to Qdrant).
 
-**Phase 2b — TODO.** Production `SqliteVecSemanticMemoryStore` + wire
-`Agent::semantic_memory_store` to the backend selector. (Folding the librarian's
-`CODESCOUT_ARTIFACT_BACKEND` into the unified `CODESCOUT_VECTOR_BACKEND` is deferred —
-keep the artifact selector as-is for back-compat for now.)
+**Phase 2b — DONE (`93ef0d43`).** `SqliteVecSemanticMemoryStore`
+(`src/memory/sqlite_semantic_store.rs`): one SQLite file per project, full
+`SemanticMemory` as JSON + dense vector in a `vec0` `memory_vec` table, dense-only
+KNN, bucket/project filtering in SQL + anchor_path/order in Rust (mirrors the Qdrant
++ in-memory stores), 3 real-`vec0` tests. `Agent::semantic_memory_store` selects the
+backend via `CODESCOUT_VECTOR_BACKEND`. Shared `sanitize_db_name` + `dense_blob`
+lifted into `sqlite_vec_ext`. (Folding the librarian's `CODESCOUT_ARTIFACT_BACKEND`
+into the unified selector is still deferred — kept as-is for back-compat.)
 
 **Phase 3 — DONE (`9d40d36b`).** `sqlite-vec` backend ⟹ dense-only embedding
 (`EmbedderHttp::dense_only`: `embed()`/`embed_batch()` skip the sparse leg) + `lite`
