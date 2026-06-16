@@ -23,6 +23,7 @@ use crate::retrieval::drift::ChunkRef;
 use crate::retrieval::embedder::{EmbedOutput, SparseVector};
 use crate::retrieval::payload::CodePayload;
 use crate::retrieval::search::Hit;
+use crate::sqlite_vec_ext::{dense_blob, sanitize_db_name};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -36,29 +37,6 @@ pub struct SqliteVecCodeStore {
     /// One cached connection per project id. `vec0` connections are `!Sync`, so
     /// each is wrapped in its own mutex; the outer mutex guards the cache map.
     conns: Mutex<HashMap<String, Arc<Mutex<Connection>>>>,
-}
-
-/// Map a project id to a filesystem-safe DB file stem.
-fn sanitize(project_id: &str) -> String {
-    let s: String = project_id
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    if s.is_empty() {
-        "default".into()
-    } else {
-        s
-    }
-}
-
-fn dense_blob(v: &[f32]) -> Vec<u8> {
-    v.iter().flat_map(|f| f.to_le_bytes()).collect()
 }
 
 impl SqliteVecCodeStore {
@@ -97,7 +75,9 @@ impl SqliteVecCodeStore {
         crate::sqlite_vec_ext::register();
         std::fs::create_dir_all(&self.dir)
             .with_context(|| format!("create sqlite-vec dir {}", self.dir.display()))?;
-        let path = self.dir.join(format!("{}.db", sanitize(project_id)));
+        let path = self
+            .dir
+            .join(format!("{}.db", sanitize_db_name(project_id)));
         let conn = Connection::open(&path)
             .with_context(|| format!("open sqlite-vec db {}", path.display()))?;
         conn.execute_batch(

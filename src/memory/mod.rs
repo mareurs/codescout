@@ -9,6 +9,7 @@ pub mod classify;
 pub mod filter;
 pub mod hash;
 pub mod semantic_store;
+pub mod sqlite_semantic_store;
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};

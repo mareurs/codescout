@@ -41,3 +41,27 @@ pub fn register() {
         }
     });
 }
+/// Map a project id to a filesystem-safe DB file stem (shared by the sqlite-vec
+/// code + memory stores so a project always resolves to the same file).
+pub fn sanitize_db_name(project_id: &str) -> String {
+    let s: String = project_id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if s.is_empty() {
+        "default".into()
+    } else {
+        s
+    }
+}
+
+/// Little-endian f32 blob for a `vec0` embedding column / `vec_f32()` argument.
+pub fn dense_blob(v: &[f32]) -> Vec<u8> {
+    v.iter().flat_map(|f| f.to_le_bytes()).collect()
+}

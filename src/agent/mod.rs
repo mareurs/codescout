@@ -1561,27 +1561,38 @@ impl Agent {
 // Semantic memory store (Qdrant)
 // ---------------------------------------------------------------------------
 impl Agent {
-    /// Lazily construct (or return cached) the Qdrant-backed semantic memory store.
+    /// Lazily construct (or return cached) the semantic memory store.
     ///
-    /// First call connects to Qdrant (one network probe) and bootstraps the
-    /// `memories` collection. Subsequent calls return the cached `Arc` without
-    /// further I/O.
+    /// Backend is selected by `CODESCOUT_VECTOR_BACKEND`: Qdrant (server stack,
+    /// one network probe + `memories` collection bootstrap) or in-process
+    /// sqlite-vec (lite stack, no daemon). Subsequent calls return the cached
+    /// `Arc` without further I/O.
     ///
     /// In tests, pre-populate via `set_semantic_memory_store_for_test` to bypass
     /// the env-driven construction path.
     pub async fn semantic_memory_store(&self) -> anyhow::Result<Arc<dyn SemanticMemoryStore>> {
+        use crate::retrieval::code_store::VectorBackend;
         self.semantic_memory
             .get_or_try_init(|| async {
-                let config = crate::retrieval::config::RetrievalConfig::from_env()?;
-                let qdrant =
-                    crate::retrieval::qdrant::QdrantWrap::connect(&config.qdrant_url).await?;
-                let collection = config.collection("memories");
-                let dim = config.model_dim as u64;
-                let store = crate::memory::semantic_store::QdrantSemanticMemoryStore::new(
-                    qdrant, collection, dim,
-                )
-                .await?;
-                anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
+                match VectorBackend::resolve() {
+                    VectorBackend::SqliteVec => {
+                        let store =
+                            crate::memory::sqlite_semantic_store::SqliteVecSemanticMemoryStore::from_env()?;
+                        anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
+                    }
+                    VectorBackend::Qdrant => {
+                        let config = crate::retrieval::config::RetrievalConfig::from_env()?;
+                        let qdrant =
+                            crate::retrieval::qdrant::QdrantWrap::connect(&config.qdrant_url).await?;
+                        let collection = config.collection("memories");
+                        let dim = config.model_dim as u64;
+                        let store = crate::memory::semantic_store::QdrantSemanticMemoryStore::new(
+                            qdrant, collection, dim,
+                        )
+                        .await?;
+                        anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
+                    }
+                }
             })
             .await
             .cloned()
