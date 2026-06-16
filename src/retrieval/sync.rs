@@ -174,7 +174,11 @@ impl crate::retrieval::client::RetrievalClient {
         let deleted = action.to_delete.len();
         if !action.to_delete.is_empty() {
             self.code_store
-                .delete_chunks(&self.config.collection("code_chunks"), &action.to_delete)
+                .delete_chunks(
+                    &self.config.collection("code_chunks"),
+                    project_id,
+                    &action.to_delete,
+                )
                 .await?;
         }
 

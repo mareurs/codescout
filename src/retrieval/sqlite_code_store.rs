@@ -103,23 +103,41 @@ impl SqliteVecCodeStore {
     /// against the existing dim (reindex required on a mismatch).
     fn ensure_vec_table(conn: &Connection, dim: usize) -> Result<()> {
         use rusqlite::OptionalExtension;
-        let existing: Option<i64> = conn
-            .query_row("SELECT length(embedding) FROM code_vec LIMIT 1", [], |r| {
-                r.get(0)
-            })
+        // Probe table existence via sqlite_master first so a genuine read error
+        // (corruption, lock) propagates instead of being swallowed as "no table
+        // yet" — only a missing or empty table yields None below.
+        let present: bool = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='code_vec'",
+                [],
+                |_| Ok(true),
+            )
             .optional()
-            .unwrap_or(None);
-        if let Some(blob_len) = existing {
-            let existing_dim = (blob_len / 4) as usize;
-            if existing_dim != dim {
-                anyhow::bail!(
-                    "sqlite-vec code index dim mismatch: existing={existing_dim}, batch={dim}. \
-                     The embedding model/dim changed — reindex with force=true to rebuild."
-                );
+            .context("probe code_vec existence")?
+            .unwrap_or(false);
+        if present {
+            let blob_len: Option<i64> = conn
+                .query_row("SELECT length(embedding) FROM code_vec LIMIT 1", [], |r| {
+                    r.get(0)
+                })
+                .optional()
+                .context("read existing code_vec dim")?;
+            if let Some(blob_len) = blob_len {
+                let existing_dim = (blob_len / 4) as usize;
+                if existing_dim != dim {
+                    anyhow::bail!(
+                        "sqlite-vec code index dim mismatch: existing={existing_dim}, batch={dim}. \
+                         The embedding model/dim changed — reindex with force=true to rebuild."
+                    );
+                }
             }
             return Ok(());
         }
-        // FLOAT[N] requires the dim as a literal at CREATE time.
+        // FLOAT[N] requires the dim as a literal at CREATE time. vec0 defaults to
+        // L2 distance (not cosine); `query` maps it to a score via 1/(1+dist).
+        // Ranking matches the server stack's cosine distance only for L2-normalized
+        // embeddings (what OpenAI-compatible code embedders emit), which the lite
+        // stack assumes. See the two-stack plan's quality tradeoff.
         conn.execute_batch(&format!(
             "CREATE VIRTUAL TABLE IF NOT EXISTS code_vec USING vec0(
                  chunk_id TEXT PRIMARY KEY,
@@ -214,18 +232,21 @@ impl CodeVectorStore for SqliteVecCodeStore {
         Ok(())
     }
 
-    async fn delete_chunks(&self, _collection: &str, ids: &[String]) -> Result<()> {
+    async fn delete_chunks(
+        &self,
+        _collection: &str,
+        project_id: &str,
+        ids: &[String],
+    ) -> Result<()> {
         if ids.is_empty() {
             return Ok(());
         }
-        // The DB is keyed per project; ids carry their project prefix, so deleting
-        // by id across the project's DB is safe. Open via the first id's project.
-        let project_id = ids
-            .iter()
-            .find_map(|id| id.split(':').next())
-            .unwrap_or("default")
-            .to_string();
-        let conn = self.conn_for(&project_id)?;
+        // Locate the per-project DB by the caller's `project_id`, NOT by parsing
+        // the chunk_id prefix: chunk_id is `{project_id}:{rel}:{hash}` and a
+        // project_id can itself contain a colon (libraries are `lib:{name}`), so
+        // splitting on ':' would open the wrong DB (`lib.db` instead of
+        // `lib_<name>.db`) and silently delete nothing.
+        let conn = self.conn_for(project_id)?;
         let mut conn = conn.lock();
         let tx = conn.transaction()?;
         for id in ids {
@@ -266,9 +287,19 @@ impl CodeVectorStore for SqliteVecCodeStore {
         if !has_vec {
             return Ok(Vec::new());
         }
-        // KNN on the dense leg, then hydrate payload + filter language. We fetch
-        // `limit` (the caller's overfetch) and let exclude_languages trim — the
-        // caller applies the final top-k.
+        // KNN on the dense leg, then hydrate payload + filter language in Rust.
+        // `language` lives in the JOINed code_chunk, not the vec0 table, so the
+        // exclusion can't be pushed into the KNN (the server stack pre-filters it
+        // inside the search). vec0 returns exactly `k` nearest by distance, so when
+        // languages are excluded we widen `k` to give the post-filter headroom and
+        // avoid under-returning when excluded languages dominate the neighborhood.
+        // The caller (`SearchOpts`) already overfetches; this is extra cushion.
+        // Exact parity would require storing language as a vec0 metadata column.
+        let k = if exclude_languages.is_empty() {
+            limit
+        } else {
+            limit.saturating_mul(4)
+        };
         let mut stmt = conn.prepare(
             "SELECT v.distance, c.chunk_id, c.file_path, c.language, c.start_line, c.end_line, c.content
                FROM code_vec v JOIN code_chunk c ON c.chunk_id = v.chunk_id
@@ -277,7 +308,7 @@ impl CodeVectorStore for SqliteVecCodeStore {
         )?;
         let rows = stmt
             .query_map(
-                rusqlite::params![dense_blob(dense), project_id, limit as i64],
+                rusqlite::params![dense_blob(dense), project_id, k as i64],
                 |row| {
                     let distance: f64 = row.get(0)?;
                     Ok((
@@ -450,12 +481,39 @@ mod tests {
         assert_eq!(hits[0].file_path, "a.rs");
 
         store
-            .delete_chunks("c", &["proj:a.rs:h1".to_string()])
+            .delete_chunks("c", "proj", &["proj:a.rs:h1".to_string()])
             .await
             .unwrap();
         assert_eq!(
             store.project_index_stats("c", "proj").await.unwrap(),
             (1, 1)
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_resolves_db_by_project_id_not_chunk_prefix() {
+        // Regression: libraries use a colon-bearing project_id (`lib:foo`) and
+        // chunk_id is `{project_id}:{rel}:{hash}`. delete_chunks must open the DB
+        // for the FULL project_id (`lib_foo.db`), not the chunk_id's first
+        // colon-delimited segment (`lib.db`), or it silently deletes nothing.
+        let tmp = tempfile::tempdir().unwrap();
+        let store = SqliteVecCodeStore::at(tmp.path().to_path_buf());
+        let p = payload("lib:foo:a.rs:h1", "lib:foo", "a.rs", "rust", "h1");
+        store
+            .upsert_chunks("c", &[(p, embed(vec![1.0, 0.0]))])
+            .await
+            .unwrap();
+        assert_eq!(
+            store.project_index_stats("c", "lib:foo").await.unwrap(),
+            (1, 1)
+        );
+        store
+            .delete_chunks("c", "lib:foo", &["lib:foo:a.rs:h1".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(
+            store.project_index_stats("c", "lib:foo").await.unwrap(),
+            (0, 0)
         );
     }
 

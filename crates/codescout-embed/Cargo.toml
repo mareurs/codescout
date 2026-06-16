@@ -48,3 +48,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring"], opti
 # off so the ONNX backend (download-binaries vs load-dynamic) is selected by the
 # local-embed / local-embed-dynamic features above.
 fastembed = { version = "5", optional = true, default-features = false }
+
+[dev-dependencies]
+# Serialize tests that mutate the process-global EMBED_API_KEY env var
+# (test-env-isolation convention — see docs/conventions/test-env-isolation.md).
+serial_test = "3"

@@ -81,24 +81,32 @@ impl SqliteVecSemanticMemoryStore {
 
     fn ensure_vec_table(conn: &Connection, dim: usize) -> Result<()> {
         use rusqlite::OptionalExtension;
-        let existing: Option<i64> = conn
-            .query_row(
-                "SELECT length(embedding) FROM memory_vec LIMIT 1",
-                [],
-                |r| r.get(0),
-            )
-            .optional()
-            .unwrap_or(None);
-        if let Some(blob_len) = existing {
-            let existing_dim = (blob_len / 4) as usize;
-            if existing_dim != dim {
-                anyhow::bail!(
-                    "sqlite-vec memory index dim mismatch: existing={existing_dim}, batch={dim}. \
-                     The embedding model/dim changed — clear the memory index to rebuild."
-                );
+        // Probe existence first so a genuine read error (corruption, lock)
+        // propagates instead of being swallowed as "no table yet".
+        if Self::vec_table_present(conn) {
+            let blob_len: Option<i64> = conn
+                .query_row(
+                    "SELECT length(embedding) FROM memory_vec LIMIT 1",
+                    [],
+                    |r| r.get(0),
+                )
+                .optional()
+                .context("read existing memory_vec dim")?;
+            if let Some(blob_len) = blob_len {
+                let existing_dim = (blob_len / 4) as usize;
+                if existing_dim != dim {
+                    anyhow::bail!(
+                        "sqlite-vec memory index dim mismatch: existing={existing_dim}, batch={dim}. \
+                         The embedding model/dim changed — clear the memory index to rebuild."
+                    );
+                }
             }
             return Ok(());
         }
+        // vec0 defaults to L2 distance (not cosine); search maps it to a score via
+        // 1/(1+dist). Ranking matches the Qdrant store's cosine distance only for
+        // L2-normalized embeddings (what the remote embedders emit), which the lite
+        // stack assumes. See the two-stack plan's quality tradeoff.
         conn.execute_batch(&format!(
             "CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec USING vec0(
                  point_id TEXT PRIMARY KEY,

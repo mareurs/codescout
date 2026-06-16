@@ -24,7 +24,27 @@ fn is_https_or_loopback(url: &str) -> bool {
         Some(r) => r,
         None => return false,
     };
-    rest.starts_with("localhost") || rest.starts_with("127.") || rest.starts_with("[::1]")
+    // Parse the HOST out of `[userinfo@]host[:port][/path…]` and match it exactly.
+    // An unanchored prefix check (`starts_with("127.")`/`starts_with("localhost")`)
+    // would treat http://127.evil.com or http://localhost.evil.com as loopback and
+    // leak EMBED_API_KEY over cleartext HTTP.
+    let host_port = rest
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or(rest)
+        .rsplit('@')
+        .next()
+        .unwrap_or(rest);
+    let host = if let Some(v6) = host_port.strip_prefix('[') {
+        v6.split(']').next().unwrap_or(v6) // IPv6 literal: [::1]:port
+    } else {
+        host_port.split(':').next().unwrap_or(host_port)
+    };
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .map(|ip| ip.is_loopback())
+            .unwrap_or(false)
 }
 
 pub struct EmbedderHttp {

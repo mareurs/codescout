@@ -42,7 +42,8 @@ pub trait CodeVectorStore: Send + Sync {
     ) -> Result<()>;
 
     /// Delete chunks by id.
-    async fn delete_chunks(&self, collection: &str, ids: &[String]) -> Result<()>;
+    async fn delete_chunks(&self, collection: &str, project_id: &str, ids: &[String])
+        -> Result<()>;
 
     /// Query: hybrid dense+sparse RRF, or pure-dense ANN when `disable_sparse`.
     /// `exclude_languages` drops hits whose payload `language` is in the list.
@@ -142,7 +143,12 @@ impl CodeVectorStore for crate::retrieval::qdrant::QdrantWrap {
         self.upsert_points(collection, &points).await
     }
 
-    async fn delete_chunks(&self, collection: &str, ids: &[String]) -> Result<()> {
+    async fn delete_chunks(
+        &self,
+        collection: &str,
+        _project_id: &str,
+        ids: &[String],
+    ) -> Result<()> {
         self.delete_points(collection, ids).await
     }
 
@@ -240,7 +246,12 @@ mod tests {
             Ok(())
         }
 
-        async fn delete_chunks(&self, _collection: &str, ids: &[String]) -> Result<()> {
+        async fn delete_chunks(
+            &self,
+            _collection: &str,
+            _project_id: &str,
+            ids: &[String],
+        ) -> Result<()> {
             let drop: std::collections::HashSet<&String> = ids.iter().collect();
             self.chunks
                 .lock()
@@ -406,7 +417,10 @@ mod tests {
         assert_eq!(refs[0].content_hash, "h1");
 
         // delete removes only the named id
-        store.delete_chunks("c", &["a".to_string()]).await.unwrap();
+        store
+            .delete_chunks("c", "proj", &["a".to_string()])
+            .await
+            .unwrap();
         assert_eq!(
             store.project_index_stats("c", "proj").await.unwrap(),
             (1, 1)
