@@ -1,5 +1,6 @@
 pub mod artifact;
 pub mod client;
+pub mod code_store;
 pub mod config;
 pub mod drift;
 pub mod embedder;

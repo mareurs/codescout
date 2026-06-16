@@ -1563,22 +1563,22 @@ impl Agent {
 impl Agent {
     /// Lazily construct (or return cached) the Qdrant-backed semantic memory store.
     ///
-    /// First call performs `RetrievalClient::from_env()` (one network probe to the
-    /// embedder) and bootstraps the `memories` collection. Subsequent calls return
-    /// the cached `Arc` without further I/O.
+    /// First call connects to Qdrant (one network probe) and bootstraps the
+    /// `memories` collection. Subsequent calls return the cached `Arc` without
+    /// further I/O.
     ///
     /// In tests, pre-populate via `set_semantic_memory_store_for_test` to bypass
     /// the env-driven construction path.
     pub async fn semantic_memory_store(&self) -> anyhow::Result<Arc<dyn SemanticMemoryStore>> {
         self.semantic_memory
             .get_or_try_init(|| async {
-                let client = crate::retrieval::client::RetrievalClient::from_env().await?;
-                let collection = client.config.collection("memories");
-                let dim = client.config.model_dim as u64;
+                let config = crate::retrieval::config::RetrievalConfig::from_env()?;
+                let qdrant =
+                    crate::retrieval::qdrant::QdrantWrap::connect(&config.qdrant_url).await?;
+                let collection = config.collection("memories");
+                let dim = config.model_dim as u64;
                 let store = crate::memory::semantic_store::QdrantSemanticMemoryStore::new(
-                    client.qdrant,
-                    collection,
-                    dim,
+                    qdrant, collection, dim,
                 )
                 .await?;
                 anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)

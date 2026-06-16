@@ -161,7 +161,6 @@ impl Tool for IndexProject {
             // type so the same shape works for force / non-force reruns.
             let collection = client.config.collection("code_chunks");
             let (chunk_count, file_count) = client
-                .qdrant
                 .project_index_stats(&collection, &lib_project_id)
                 .await
                 .unwrap_or((0, 0));
@@ -392,11 +391,7 @@ impl Tool for IndexStatus {
         let mut result = match crate::retrieval::client::RetrievalClient::from_env().await {
             Ok(client) => {
                 let collection = client.config.collection("code_chunks");
-                match client
-                    .qdrant
-                    .project_index_stats(&collection, &project_id)
-                    .await
-                {
+                match client.project_index_stats(&collection, &project_id).await {
                     Ok((0, 0)) => json!({
                         "indexed": false,
                         "project_id": project_id,

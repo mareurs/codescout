@@ -315,11 +315,7 @@ impl Tool for ProjectStatus {
             let qdrant_stats = match crate::retrieval::client::RetrievalClient::from_env().await {
                 Ok(client) => {
                     let coll = client.config.collection("code_chunks");
-                    client
-                        .qdrant
-                        .project_index_stats(&coll, &project_id)
-                        .await
-                        .ok()
+                    client.project_index_stats(&coll, &project_id).await.ok()
                 }
                 Err(_) => None,
             };
@@ -415,7 +411,6 @@ async fn check_has_index(project_id: &str, _project_root: &std::path::Path) -> b
         Ok(client) => {
             let coll = client.config.collection("code_chunks");
             client
-                .qdrant
                 .project_index_stats(&coll, project_id)
                 .await
                 .map(|(chunks, _files)| chunks > 0)
