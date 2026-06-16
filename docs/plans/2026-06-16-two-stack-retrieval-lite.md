@@ -72,10 +72,17 @@ scale: ~100k chunks × 768-d brute-force KNN is sub-100ms on the VDI's CPU).
 to skip the wasted sparse call (`dense_query`); deleted `docker-compose.matrix.yml` +
 `scripts/chunk-model-matrix.py`.
 
-**Phase 1 — Code-search store trait.** Extract a `CodeVectorStore` trait (mirror
-`ArtifactVectorStore`) from `RetrievalClient`; wrap today's Qdrant path as the
-`Qdrant` impl. Route `semantic_search` + `sync_project`/`index` through the trait.
-Pure seam insertion, no behavior change. Lock it in with a Qdrant-vs-trait parity test.
+**Phase 1 — DONE (`0ff972f7`).** Extracted the `CodeVectorStore` trait
+(`src/retrieval/code_store.rs`: `ensure_collection` / `chunk_refs` /
+`upsert_chunks` / `delete_chunks` / `query` / `project_index_stats`); `QdrantWrap`
+is the first impl (thin adapter; `payload_to_map` moved into it). `RetrievalClient.qdrant`
+→ `code_store: Arc<dyn CodeVectorStore>`; `semantic_search` + `sync_project` route
+through the trait; added `RetrievalClient::project_index_stats`. Decoupled the
+`client.qdrant` consumers (memory store, artifact store ×2, index-stats callers) so
+they build their own `QdrantWrap` — the same decoupling the lite stack needs. An
+`InMemoryCodeStore` (brute-force cosine) pins the contract; the sqlite-vec impl must
+satisfy the same tests. (A live Qdrant-vs-trait parity test isn't runnable in CI — no
+Qdrant daemon — so the contract test stands in; the sqlite-vec impl reruns it.)
 
 **Phase 2 — sqlite-vec impls for code + memory.** Add `SqliteVec` impls for the code
 store and a production `SqliteVecSemanticMemoryStore`, reusing the librarian
