@@ -108,11 +108,18 @@ flag that skips the reranker in `search_in`; never connects Qdrant. Added
 Shipped `.env.lite` + a "daemon-free lite stack" section in the EDR runbook.
 windows-gnu verified.
 
-**Phase 4 — Feature-gate the server stack; default lean (tracker task 6).** Put Stack A
-(qdrant-client + sparse + reranker, incl. AMD/Infinity) behind a `server-stack` cargo
-feature; default the build to the lite stack. The real dep-weight lever is
-**`qdrant-client` (gRPC/tonic/prost)** — gating it shrinks the default binary. NOTE:
-AMD support alone has **no** Rust deps to gate (HTTP JSON + docker images only).
+**Phase 4 — DONE (`5c1ecfa8`).** `qdrant-client` is now optional behind a
+`server-stack` cargo feature, and the **default build is lean** (no qdrant-client).
+Every Qdrant touchpoint is `#[cfg(feature = "server-stack")]`-gated — the
+qdrant/artifact modules, the three Qdrant store impls, the payload↔Qdrant-Value
+converters (shared structs stay ungated), and the from_env/agent/librarian
+construction branches (which return a clear "rebuild with --features server-stack
+or use sqlite-vec" error/warning in a lean build). `VectorBackend::resolve` +
+`ArtifactBackend::resolve` default to sqlite-vec on the lean build. Verified BOTH
+configs (lean + `--features server-stack`): clippy -D warnings, full test suite
+(lean 2889 / server 2893, 0 failed), and windows-gnu. The lean windows-gnu build
+no longer compiles qdrant-client. (The dep-weight lever was qdrant-client; AMD
+support alone never had Rust deps to gate.)
 
 ## Quality tradeoff
 
