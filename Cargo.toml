@@ -61,7 +61,7 @@ thiserror = "2"
 async-trait = "0.1"
 
 # Sibling crates
-codescout-embed = { path = "crates/codescout-embed", version = "0.1.0" }
+codescout-embed = { path = "crates/codescout-embed", version = "0.2.0" }
 
 # Logging / tracing
 tracing = "0.1"
