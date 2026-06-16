@@ -49,6 +49,14 @@ fn find_def_keyword(s: &str, lang: &str) -> Option<&'static str> {
         .find_map(|line| keywords.iter().find(|kw| line.contains(**kw)).copied())
 }
 
+/// Lines present in `from` but not (byte-identical) in `to`. Restricts the
+/// structural-keyword check to the lines an edit actually adds or removes — a
+/// keyword on an unchanged context line is an anchor, not a rewrite.
+fn lines_only_in<'a>(from: &'a str, to: &str) -> Vec<&'a str> {
+    let to_lines: std::collections::HashSet<&str> = to.lines().collect();
+    from.lines().filter(|l| !to_lines.contains(l)).collect()
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct NormWindow {
     start_line: usize,
@@ -211,13 +219,20 @@ fn guard_structural_rewrite(
         return Ok(());
     };
 
+    // Diff-aware: scan only the lines the edit adds/removes, not the whole string.
+    // A definition keyword on a line that is byte-identical in old and new is
+    // unchanged context (an anchor), not a structural rewrite — ignore it. A newly
+    // introduced symbol line (BUG-050) is by construction absent from old_string,
+    // so route 2 still fires.
+    let old_changed = lines_only_in(old_string, new_string).join("\n");
+    let new_changed = lines_only_in(new_string, old_string).join("\n");
     let old_kw = old_string
         .contains('\n')
-        .then(|| find_def_keyword(old_string, lang))
+        .then(|| find_def_keyword(&old_changed, lang))
         .flatten();
     let new_kw = new_string
         .contains('\n')
-        .then(|| find_def_keyword(new_string, lang))
+        .then(|| find_def_keyword(&new_changed, lang))
         .flatten();
 
     let Some(keyword) = old_kw.or(new_kw) else {

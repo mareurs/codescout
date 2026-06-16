@@ -3209,6 +3209,56 @@ fn find_def_keyword_ignores_class_in_comment() {
 }
 
 #[test]
+fn guard_allows_blank_line_before_unchanged_fn() {
+    // spec 2026-06-16: inserting a blank line before an existing fn (ktlint).
+    // The `fn` line is byte-identical in old and new — unchanged context.
+    let old = "    let flat = HashMap::new();\n    fn covered() {}";
+    let new = "    let flat = HashMap::new();\n\n    fn covered() {}";
+    assert!(guard_structural_rewrite("x.rs", old, new).is_ok());
+}
+
+#[test]
+fn guard_allows_kotlin_blank_line_before_unchanged_fun() {
+    // Exact backend-kotlin 2026-06-16 repro shape.
+    let old = "    val m = HashMap<String, Int>()\n    fun covered(): Int = 0";
+    let new = "    val m = HashMap<String, Int>()\n\n    fun covered(): Int = 0";
+    assert!(guard_structural_rewrite("x.kt", old, new).is_ok());
+}
+
+#[test]
+fn guard_allows_comment_added_before_unchanged_fn() {
+    let old = "let x = 1;\nfn foo() {}";
+    let new = "let x = 1;\n// helper\nfn foo() {}";
+    assert!(guard_structural_rewrite("x.rs", old, new).is_ok());
+}
+
+#[test]
+fn guard_blocks_fn_rename() {
+    let old = "fn foo() {\n    body();\n}";
+    let new = "fn bar() {\n    body();\n}";
+    let err = guard_structural_rewrite("x.rs", old, new).unwrap_err();
+    assert!(err.message.contains("fn "), "got: {}", err.message);
+}
+
+#[test]
+fn guard_blocks_new_fn_introduced_in_new_string() {
+    // BUG-050: a new symbol spliced into new_string is an *added* line absent
+    // from old_string -> still blocked.
+    let old = "let a = 1;\nlet b = 2;";
+    let new = "let a = 1;\nfn helper() {}\nlet b = 2;";
+    assert!(guard_structural_rewrite("x.rs", old, new).is_err());
+}
+
+#[test]
+fn guard_blocks_changed_keyword_line_despite_unchanged_keyword_context() {
+    // Unchanged `fn keep` context must not mask the changed `fn foo` -> `fn bar`.
+    let old = "fn keep() {}\nfn foo() {}";
+    let new = "fn keep() {}\nfn bar() {}";
+    let err = guard_structural_rewrite("x.rs", old, new).unwrap_err();
+    assert!(err.message.contains("fn "), "got: {}", err.message);
+}
+
+#[test]
 fn infer_edit_hint_insert_code_when_new_is_longer() {
     let hint = infer_edit_hint("placeholder", "fn extra() {\n    todo!();\n}\nplaceholder");
     assert!(hint.contains("edit_code"), "got: {hint}");
@@ -3257,20 +3307,21 @@ async fn edit_file_allows_multiline_on_non_source() {
 
 #[tokio::test]
 async fn edit_file_warns_multiline_python() {
+    // Diff-aware guard: a def rename is a structural rewrite — still blocked on Python.
     let (dir, ctx) = project_ctx().await;
     let path = dir.path().join("app.py");
     std::fs::write(&path, "def greet():\n    print('hello')\n").unwrap();
 
     let result = EditFile
             .call(
-                json!({"path": "app.py", "old_string": "def greet():\n    print('hello')", "new_string": "def greet():\n    print('hi')"}),
+                json!({"path": "app.py", "old_string": "def greet():\n    print('hello')", "new_string": "def hello():\n    print('hello')"}),
                 &ctx,
             )
             .await;
 
     assert!(
         result.is_err(),
-        "should hard-block structural edit on Python"
+        "should hard-block structural rename on Python"
     );
     let err = result.unwrap_err().to_string();
     assert!(
@@ -3728,6 +3779,42 @@ async fn edit_file_insert_without_old_string_ok() {
 
 #[tokio::test]
 async fn edit_file_blocks_def_keyword_on_lsp_language() {
+    // Diff-aware guard (spec 2026-06-16): a genuine signature change (rename) is a
+    // structural rewrite — still hard-blocked and routed to edit_code. (A body edit
+    // with an unchanged signature is now allowed: see
+    // edit_file_allows_body_edit_on_lsp_language.)
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("src/lib.rs");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "fn foo() {\n    old();\n}\n").unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "old_string": "fn foo() {\n    old();\n}",
+                "new_string": "fn bar() {\n    old();\n}"
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(
+        result.is_err(),
+        "should hard-block structural rename on LSP language"
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("symbol definition"),
+        "error should mention symbol definition, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn edit_file_allows_body_edit_on_lsp_language() {
+    // Diff-aware guard (spec 2026-06-16): a multi-line edit whose definition line
+    // (`fn foo() {`) is byte-identical in old/new is a body edit, not a structural
+    // rewrite — it is applied, not blocked.
     let (dir, ctx) = project_ctx().await;
     let path = dir.path().join("src/lib.rs");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -3745,13 +3832,13 @@ async fn edit_file_blocks_def_keyword_on_lsp_language() {
         .await;
 
     assert!(
-        result.is_err(),
-        "should hard-block structural edit on LSP language"
+        result.is_ok(),
+        "body edit with unchanged signature should apply: {result:?}"
     );
-    let err = result.unwrap_err().to_string();
+    let after = std::fs::read_to_string(&path).unwrap();
     assert!(
-        err.contains("symbol definition"),
-        "error should mention symbol definition, got: {err}"
+        after.contains("new()"),
+        "edit should have applied, got: {after}"
     );
 }
 
@@ -4082,9 +4169,9 @@ async fn batch_edit_line_shift() {
 
 #[tokio::test]
 async fn batch_edit_blocks_structural_rewrite() {
-    // Multi-line edit that replaces a Rust function body must be blocked in
-    // batch mode — same semantic as single-edit mode. Caller should be
-    // pushed toward edit_code.
+    // A signature change (rename) in batch mode is structural — still blocked,
+    // same semantic as single-edit mode. Caller pushed toward edit_code. (A body
+    // edit with an unchanged signature is now allowed.)
     let (dir, ctx) = project_ctx().await;
     let path = dir.path().join("src").join("lib.rs");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -4101,7 +4188,7 @@ async fn batch_edit_blocks_structural_rewrite() {
                 "edits": [
                     {
                         "old_string": "pub fn foo() {\n    println!(\"old\");\n}",
-                        "new_string": "pub fn foo() {\n    println!(\"new\");\n}"
+                        "new_string": "pub fn renamed() {\n    println!(\"old\");\n}"
                     }
                 ]
             }),
@@ -4109,7 +4196,7 @@ async fn batch_edit_blocks_structural_rewrite() {
         )
         .await;
 
-    assert!(result.is_err(), "batch must reject structural rewrite");
+    assert!(result.is_err(), "batch must reject structural rename");
     let err = result.unwrap_err();
     let recoverable = err
         .downcast_ref::<RecoverableError>()
@@ -5185,8 +5272,9 @@ async fn edit_file_batch_mixed_structural_lists_safe_indices_in_hint() {
                 "edits": [
                     { "old_string": "MARKER = 'old'", "new_string": "MARKER = 'new'" },
                     {
+                        // Rename = changed def line = structural under the diff-aware guard.
                         "old_string": "def greet():\n    print('hello')",
-                        "new_string": "def greet():\n    print('hi')",
+                        "new_string": "def hello():\n    print('hello')",
                     },
                 ]
             }),

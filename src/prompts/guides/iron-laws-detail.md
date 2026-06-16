@@ -62,6 +62,12 @@ includes:
 - `replace_all: true` for file-wide find/replace (no symbol overlap)
 - Imports, literals, comments — content the gate's keyword filter
   doesn't catch
+- Multi-line edits where a definition keyword sits only on an
+  **unchanged context line** — e.g. inserting a blank line or comment
+  before an existing `fn`, or changing a function body without
+  touching its signature. The gate is diff-aware: only keywords on
+  added / removed / changed lines trip it (renames and new symbols
+  still block)
 
 **Rename specifically:** use `edit_code(action="rename",
 new_name="...")` — LSP-aware, updates all callers and references
