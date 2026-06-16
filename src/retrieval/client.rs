@@ -15,6 +15,9 @@ pub struct RetrievalClient {
     pub embedder: EmbedderHttp,
     pub reranker: RerankerHttp,
     pub config: RetrievalConfig,
+    /// True for the daemon-free lite stack (sqlite-vec backend): dense-only, no
+    /// reranker server. Gates the rerank step in `search_in`.
+    pub(crate) lite: bool,
 }
 
 impl RetrievalClient {
@@ -22,27 +25,36 @@ impl RetrievalClient {
         let config = RetrievalConfig::from_env()?;
         // Backend selection (server Qdrant vs daemon-free sqlite-vec lite stack).
         // sqlite-vec never touches the network — no Qdrant connect probe.
-        let code_store: Arc<dyn CodeVectorStore> = match VectorBackend::resolve() {
+        let backend = VectorBackend::resolve();
+        let lite = matches!(backend, VectorBackend::SqliteVec);
+        let code_store: Arc<dyn CodeVectorStore> = match backend {
             VectorBackend::SqliteVec => {
                 Arc::new(crate::retrieval::sqlite_code_store::SqliteVecCodeStore::from_env()?)
             }
             VectorBackend::Qdrant => Arc::new(QdrantWrap::connect(&config.qdrant_url).await?),
         };
+        // The lite stack has no sparse server; also skip the sparse leg whenever
+        // sparse is disabled (the vector isn't used → don't pay for it).
+        let dense_only = lite || config.disable_sparse;
         let embedder = EmbedderHttp::new(
             &config.embedder_url,
             &config.sparse_embedder_url,
             config.model_dim,
-        );
+        )
+        .dense_only(dense_only);
         let reranker = RerankerHttp::new(&config.reranker_url);
         Ok(Self {
             code_store,
             embedder,
             reranker,
             config,
+            lite,
         })
     }
 
     /// Constructs without connecting to Qdrant — for tests and config validation.
+    /// Always the Qdrant (hybrid) shape; the lite stack is constructed via
+    /// `from_env` with `CODESCOUT_VECTOR_BACKEND=sqlite-vec`.
     pub fn from_config_only(config: RetrievalConfig) -> Self {
         let embedder = EmbedderHttp::new(
             &config.embedder_url,
@@ -60,6 +72,7 @@ impl RetrievalClient {
             embedder,
             reranker,
             config,
+            lite: false,
         }
     }
 

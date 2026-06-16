@@ -13,6 +13,20 @@ pub struct EmbedOutput {
     pub sparse: SparseVector,
 }
 
+/// `true` when `url` is `https://…` or targets a loopback host. Mirrors the
+/// codescout-embed `RemoteEmbedder` guard: keep local Ollama / llama.cpp working
+/// while never sending `EMBED_API_KEY` over plaintext HTTP on the network.
+fn is_https_or_loopback(url: &str) -> bool {
+    if url.starts_with("https://") {
+        return true;
+    }
+    let rest = match url.strip_prefix("http://") {
+        Some(r) => r,
+        None => return false,
+    };
+    rest.starts_with("localhost") || rest.starts_with("127.") || rest.starts_with("[::1]")
+}
+
 pub struct EmbedderHttp {
     dense_base: String,
     sparse_base: String,
@@ -22,6 +36,15 @@ pub struct EmbedderHttp {
     /// Doc-side `embed_batch()` is unaffected. Configure via `CODESCOUT_QUERY_PREFIX` —
     /// e.g. `Represent this query for searching relevant code: ` for CodeRankEmbed.
     query_prefix: String,
+    /// Dense-only mode: skip the sparse HTTP leg entirely in `embed()` /
+    /// `embed_batch()` and return an empty sparse vector. Set by the lite stack
+    /// (sqlite-vec backend) and whenever sparse is disabled — no sparse server is
+    /// required, and the wasted round-trip is avoided.
+    dense_only: bool,
+    /// Optional bearer token for the dense endpoint (`EMBED_API_KEY`). Needed for
+    /// authenticated corporate / OpenAI gateways — the lite stack's typical
+    /// remote embedder. Sent only on the dense (`/v1/embeddings`) leg.
+    api_key: Option<String>,
     client: reqwest::Client,
 }
 
@@ -59,8 +82,25 @@ impl EmbedderHttp {
         sparse_base: impl Into<String>,
         expected_dim: usize,
     ) -> Self {
+        let dense_base = dense_base.into();
         let dense_model_name = std::env::var("CODESCOUT_EMBEDDER_MODEL_NAME").unwrap_or_default();
         let query_prefix = std::env::var("CODESCOUT_QUERY_PREFIX").unwrap_or_default();
+        // Never transmit EMBED_API_KEY over plaintext HTTP (loopback exempt for
+        // local llama.cpp / Ollama) — mirrors RemoteEmbedder's HTTPS guard.
+        let api_key = std::env::var("EMBED_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .and_then(|key| {
+                if is_https_or_loopback(&dense_base) {
+                    Some(key)
+                } else {
+                    tracing::warn!(
+                        "EMBED_API_KEY is set but CODESCOUT_EMBEDDER_URL is not HTTPS or loopback; \
+                         dropping the key so it is not sent in cleartext. Use an https:// endpoint."
+                    );
+                    None
+                }
+            });
         Self::with_config(
             dense_base,
             sparse_base,
@@ -68,6 +108,7 @@ impl EmbedderHttp {
             dense_model_name,
             query_prefix,
         )
+        .api_key(api_key)
     }
 
     /// Construct without reading process env vars.
@@ -75,7 +116,8 @@ impl EmbedderHttp {
     /// Use this from tests and any caller that wants explicit control over the
     /// dense model name and query prefix. `new()` is the env-reading convenience
     /// for production callers. Dense embedding is always OpenAI-compatible
-    /// (`POST {base}/v1/embeddings`).
+    /// (`POST {base}/v1/embeddings`). Sparse is enabled by default — chain
+    /// [`Self::dense_only`] to disable it.
     pub fn with_config(
         dense_base: impl Into<String>,
         sparse_base: impl Into<String>,
@@ -90,24 +132,42 @@ impl EmbedderHttp {
             expected_dim,
             dense_model_name: dense_model_name.into(),
             query_prefix: query_prefix.into(),
+            dense_only: false,
+            api_key: None,
             client: reqwest::Client::new(),
         }
+    }
+    /// Set the bearer token for the dense endpoint. Builder-style; `new()` reads
+    /// it from `EMBED_API_KEY`. `None` sends no Authorization header.
+    pub fn api_key(mut self, api_key: Option<String>) -> Self {
+        self.api_key = api_key;
+        self
+    }
+
+    /// Enable/disable dense-only mode (no sparse leg). Builder-style; the lite
+    /// stack sets this true so `embed()` / `embed_batch()` never call a sparse
+    /// server. Default is false (hybrid).
+    pub fn dense_only(mut self, dense_only: bool) -> Self {
+        self.dense_only = dense_only;
+        self
     }
 
     /// Send a dense-embedding batch to the OpenAI-compatible endpoint
     /// (`POST {base}/v1/embeddings`). Returns one vector per input, in input
     /// order. Works against any OpenAI-shape server — llama-server, vLLM, Ollama,
-    /// OpenAI proper, or a corporate embedding gateway.
+    /// OpenAI proper, or a corporate embedding gateway. Sends `Authorization:
+    /// Bearer <key>` when an `api_key` is configured.
     async fn dense_batch(&self, inputs: &[&str]) -> Result<Vec<Vec<f32>>> {
         let url = format!("{}/v1/embeddings", self.dense_base);
         let body = OpenAiEmbedReq {
             input: inputs.to_vec(),
             model: &self.dense_model_name,
         };
-        let resp: OpenAiEmbedResp = self
-            .client
-            .post(&url)
-            .json(&body)
+        let mut req = self.client.post(&url).json(&body);
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+        let resp: OpenAiEmbedResp = req
             .send()
             .await
             .context("dense openai send")?
@@ -148,6 +208,16 @@ impl EmbedderHttp {
     }
 
     pub async fn embed(&self, text: &str) -> Result<EmbedOutput> {
+        if self.dense_only {
+            // Lite stack: dense vector only — no sparse server contacted.
+            return Ok(EmbedOutput {
+                dense: self.dense_query(text).await?,
+                sparse: SparseVector {
+                    indices: vec![],
+                    values: vec![],
+                },
+            });
+        }
         let sparse_url = format!("{}/embed_sparse", self.sparse_base);
         let sparse_body = EmbedReq { inputs: vec![text] };
         // Dense side may carry an asymmetric query prefix (e.g. CodeRankEmbed's
@@ -201,6 +271,31 @@ impl EmbedderHttp {
     }
 
     pub async fn embed_batch(&self, texts: &[String]) -> Result<Vec<EmbedOutput>> {
+        if self.dense_only {
+            // Lite stack: dense vectors only — no sparse server contacted.
+            const DENSE_BATCH: usize = 8;
+            let mut out = Vec::with_capacity(texts.len());
+            for chunk in texts.chunks(DENSE_BATCH) {
+                let inputs: Vec<&str> = chunk.iter().map(String::as_str).collect();
+                for dense in self.dense_batch(&inputs).await? {
+                    if dense.len() != self.expected_dim {
+                        return Err(anyhow!(
+                            "embed dim mismatch: got {}, expected {}",
+                            dense.len(),
+                            self.expected_dim
+                        ));
+                    }
+                    out.push(EmbedOutput {
+                        dense,
+                        sparse: SparseVector {
+                            indices: vec![],
+                            values: vec![],
+                        },
+                    });
+                }
+            }
+            return Ok(out);
+        }
         // The sparse (SPLADE/TEI) server caps client batches at 8
         // (HTTP 422 "batch size N > maximum allowed batch size 8"), so keep
         // both the dense and sparse legs at or below that limit.

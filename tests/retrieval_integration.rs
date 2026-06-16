@@ -58,6 +58,37 @@ async fn embedder_dim_mismatch_errors() {
     let err = eb.embed("hi").await.unwrap_err();
     assert!(err.to_string().contains("dim"), "got: {err}");
 }
+#[tokio::test]
+async fn dense_only_embedder_skips_sparse() {
+    // Lite stack: dense_only(true) must NOT contact any sparse server. The sparse
+    // base points at an unreachable port; if embed() tried it, this would error.
+    let mut dense_server = mockito::Server::new_async().await;
+    let dense_mock = dense_server
+        .mock("POST", "/v1/embeddings")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"data":[{"embedding":[0.1,0.2,0.3],"index":0}]}"#)
+        .create_async()
+        .await;
+
+    let eb = EmbedderHttp::with_config(
+        dense_server.url(),
+        "http://127.0.0.1:1",
+        3,
+        "test-model",
+        "",
+    )
+    .dense_only(true);
+    let out = eb.embed("hello").await.expect("dense-only embed");
+
+    assert_eq!(out.dense, vec![0.1_f32, 0.2, 0.3]);
+    assert!(
+        out.sparse.indices.is_empty(),
+        "dense-only must yield empty sparse"
+    );
+    assert!(out.sparse.values.is_empty());
+    dense_mock.assert_async().await;
+}
 
 use codescout::retrieval::reranker::{Protocol, RerankerHttp};
 

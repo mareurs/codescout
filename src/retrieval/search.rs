@@ -77,7 +77,8 @@ impl RetrievalClient {
             )
             .await?;
 
-        if !opts.rerank || candidates.is_empty() {
+        // Lite stack has no reranker server — skip the rerank step entirely.
+        if !opts.rerank || self.lite || candidates.is_empty() {
             return Ok(candidates.into_iter().take(opts.limit).collect());
         }
 

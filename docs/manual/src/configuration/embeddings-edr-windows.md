@@ -66,6 +66,30 @@ second.
 - No `onnxruntime.dll` exists under `target/`.
 - The EDR quarantines nothing during build or run.
 
+## Daemon-free: the lite stack (no Qdrant, no sparse, no reranker)
+
+If the VDI cannot run Docker or Qdrant at all — the common locked-down case —
+use the **lite stack**. Code search and memory run entirely in-process on
+`sqlite-vec` (a statically-linked `vec0` table — no foreign DLL for the EDR to
+quarantine, unlike `onnxruntime.dll`), with dense embeddings from your remote
+endpoint. No Qdrant, no sparse SPLADE server, no cross-encoder reranker.
+
+```bash
+# or copy .env.lite from the repo root and `source` it
+export CODESCOUT_VECTOR_BACKEND=sqlite-vec
+export CODESCOUT_EMBEDDER_URL=https://embed.corp.example/v1
+export CODESCOUT_EMBEDDER_MODEL_NAME=your-model-name
+export CODESCOUT_MODEL_DIM=768
+export EMBED_API_KEY=...   # sent only over HTTPS (loopback exempt)
+```
+
+Per-project indexes live under `CODESCOUT_SQLITE_DIR` (default
+`<home>/.codescout/embeddings`). Then run `index(action='build')` once per
+project. The trade-off versus the full server stack is dense-only ranking — no
+sparse exact-token leg, no rerank — so exact-identifier recall is weaker; pair
+it with a strong code-embedding model on the endpoint. Design + rationale:
+`docs/plans/2026-06-16-two-stack-retrieval-lite.md`.
+
 ## Why not just sign the DLL?
 
 Authenticode-signing the ONNX runtime would beat the *quarantine-on-write* of the
