@@ -90,6 +90,7 @@ to master — the tracker outlives them.
 | WIN-23 | test-portability | fixed | 7 unix-only test helpers (uri_to_path / BUFFER_QUERY_INLINE_CAP / CountingSink / Ordering imports, project_ctx_with_progress, 2 symlink-test tempdir+link vars, agent_security_config) were live on unix but unused when test code compiles for windows-gnu (their consumers are all #[cfg(unix)] tests); gated #[cfg(unix)] / cfg(all(test,unix)) so the gnu `cargo test` compile is warning-clean — unblocks a -D-warnings gnu CI gate. Surfaced by scripts/build-windows.sh; Linux gate unchanged | vdi-windows 8632093b | 2026-06-12 |
 | WIN-24 | process-spawn | fixed | legibility_scan `git_head` shelled out to `git -C <root> rev-parse HEAD` (unbounded `.output()`, no timeout → same EDR CreateProcessW hang class as WIN-14); the git-spawn-elimination law reached `resolve_head_sha` (WIN-14) but not this sibling. Now libgit2 `revparse_single("HEAD").id().to_string()`, mirroring `resolve_head_sha` + `probe_has_git_remote`. Found by an architecture review's whole-tree spawn-grep (Snow Lion). Host + windows-gnu check, clippy -D warnings, 19 legibility tests clean | vdi-windows f22ed192 | 2026-06-15 |
 | WIN-25 | process-spawn | fixed | `collect_go_deps` shelled out to `go env GOMODCACHE` (blocking `.output()`, no timeout → EDR CreateProcessW hang, same class as WIN-14/WIN-24). `go` has no library binding, so GOMODCACHE is re-derived from the environment via a pure `go_mod_cache_from()` (GOMODCACHE → GOPATH/pkg/mod → `<home>/go/pkg/mod`, home via platform::home_dir()); a `go env -w`-only override degrades to source-not-found, never hangs. 5-case pure unit test on the Linux gate. Same Snow Lion review pass as WIN-24 | vdi-windows 13534cbd | 2026-06-15 |
+| WIN-26 | retrieval-stack | open | VDI can't run Docker/Qdrant, so the WIN-22 remote-embeddings fix is necessary but NOT sufficient: code `semantic_search` is hard-wired to Qdrant (the in-process path was removed 2026-05-07). Needs a daemon-free "lite" stack = remote OpenAI dense + in-process sqlite-vec (statically-linked `vec0`, EDR-safe — already proven for librarian via `ArtifactBackend::SqliteVec`, see `migrate_v6.rs`). Plan: generalize that escape hatch to code search + memory. Phase 0 (dense always OpenAI-compatible + drop TEI + dense-only-leak fix) shipped 825c0c52; Phases 1-3 designed in the plan. | docs/plans/2026-06-16-two-stack-retrieval-lite.md | 2026-06-16 |
 ## Currently stable on Windows
 
 What works now (post the VDI reliability stream, on `experiments`):
@@ -210,3 +211,19 @@ textbook EDR false positive on tiny unsigned PEs; large cargo outputs survive.
 Lesson: do not produce throwaway standalone binaries on this VDI, and there is a
 latent risk of spurious build/test failures if a real artifact is ever flagged.
 AV exclusions are out of our control here.
+
+### 2026-06-16 — WIN-26 opened (two-stack retrieval: daemon-free lite stack)
+The VDI constraint sharpened: it can't run Docker or Qdrant, and needs remote
+OpenAI embeddings only. WIN-22's "remote dense" is necessary but not
+sufficient — code `semantic_search` is hard-wired to Qdrant (the in-process
+sqlite-vec path was removed 2026-05-07). The fix is a daemon-free **lite**
+stack: remote OpenAI dense + in-process sqlite-vec. The decisive find is that
+the sqlite-vec escape hatch already ships for librarian artifacts
+(`ArtifactBackend::SqliteVec`, statically-linked `vec0` → EDR-safe, no foreign
+DLL — unlike the WIN-22 onnxruntime.dll), so this is generalizing one proven
+pattern to code search + memory, not inventing a store. Phase 0 (dense always
+OpenAI-compatible, drop `DenseProtocol::Tei`, fix the memory dense-only sparse
+leak, delete the benchmark matrix scaffolding) shipped in `825c0c52`. Phases
+1-3 (store trait for code, sqlite-vec impls, lite wiring) + a follow-on
+server-stack feature gate are laid out in
+`docs/plans/2026-06-16-two-stack-retrieval-lite.md`.
