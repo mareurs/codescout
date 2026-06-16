@@ -454,6 +454,10 @@ pub(super) fn resolve_mux_flag(default: bool, override_: Option<bool>) -> bool {
 /// "codescout")` check would misclassify the test runner as production. The
 /// installed binary (`~/.cargo/bin/codescout`) and `cargo run` binary
 /// (`target/<profile>/codescout`) are never under `deps/`.
+// Live on unix and in tests; the sole non-test caller is unix-only, so the
+// windows non-test lib build sees it as dead. Surfaced by the windows-gnu
+// cross-compile (scripts/build-windows.sh), invisible to the Linux gate.
+#[cfg_attr(windows, allow(dead_code))]
 fn is_test_runner_exe(exe: &std::path::Path) -> bool {
     exe.parent()
         .and_then(|p| p.file_name())
@@ -1529,6 +1533,10 @@ mod tests {
     ///
     /// Uses `sleep 99999` as a fake LSP: it starts immediately but never writes
     /// to stdout, so `initialize()` blocks until the external timeout fires.
+    #[cfg_attr(
+        windows,
+        ignore = "`sleep` is not available in Windows cmd.exe; fake-LSP needs a platform-native infinite-blocker"
+    )]
     #[tokio::test]
     async fn cancelled_get_or_start_cleans_up_starting_map() {
         let dir = tempfile::tempdir().unwrap();

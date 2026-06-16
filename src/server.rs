@@ -132,7 +132,8 @@ impl CodeScoutServer {
             Arc::new(Library),
             // Deep-guidance tool — see docs/architecture/mcp-channel-caps.md
             Arc::new(crate::tools::guide::GetGuide::new()),
-            // Peer delegation tool
+            // Peer delegation tool (Unix-only — uses Unix domain sockets)
+            #[cfg(unix)]
             Arc::new(crate::tools::peer::PeerTool),
         ];
         if std::env::var("CODESCOUT_PROBE")
@@ -235,15 +236,20 @@ impl CodeScoutServer {
             .unwrap_or(false)
     }
 
+    // Peer-serve helper; the only non-test caller is the cfg(unix) peer module,
+    // so it reads as dead in non-test Windows builds. Keep compiled (tests use it).
+    #[cfg_attr(not(unix), allow(dead_code))]
     pub(crate) fn tool_names(&self) -> Vec<String> {
         self.tools.iter().map(|t| t.name().to_string()).collect()
     }
+    #[cfg_attr(not(unix), allow(dead_code))] // peer-serve helper (cfg(unix) caller)
     pub(crate) fn output_buffer_ref(
         &self,
     ) -> std::sync::Arc<crate::tools::output_buffer::OutputBuffer> {
         self.output_buffer.clone()
     }
 
+    #[cfg_attr(not(unix), allow(dead_code))] // peer-serve helper (cfg(unix) caller)
     pub(crate) async fn project_root_string(&self) -> String {
         self.agent
             .project_root()
@@ -252,6 +258,7 @@ impl CodeScoutServer {
             .unwrap_or_default()
     }
 
+    #[cfg_attr(not(unix), allow(dead_code))] // peer-serve helper (cfg(unix) caller)
     pub(crate) async fn project_name(&self) -> String {
         self.agent
             .project_root()
@@ -260,7 +267,7 @@ impl CodeScoutServer {
             .unwrap_or_default()
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) async fn agent_security_config(
         &self,
     ) -> crate::util::path_security::PathSecurityConfig {
@@ -532,7 +539,11 @@ impl CodeScoutServer {
         // is compiled in. Both local-embed and remote-embed are in the default feature set.
         // No runtime "model loaded?" check exists without actually attempting a connection,
         // so we rely on the feature flags alone.
-        let has_embeddings = cfg!(any(feature = "local-embed", feature = "remote-embed"));
+        let has_embeddings = cfg!(any(
+            feature = "local-embed",
+            feature = "local-embed-dynamic",
+            feature = "remote-embed"
+        ));
 
         // has_git_remote: read the value cached at activation time. The original
         // implementation called `git2::Repository::open(&root)` here, which ran
@@ -560,6 +571,7 @@ impl CodeScoutServer {
         }
     }
 
+    #[cfg_attr(not(unix), allow(dead_code))] // peer-serve dispatch entry (cfg(unix) caller)
     /// Dispatch a tool by name with raw JSON args, returning the full
     /// `CallToolResult`. Routes through `call_tool_inner`, so access checks, the
     /// write-guard, usage recording, and error routing all apply. Used by the
@@ -1549,7 +1561,10 @@ mod tests {
     #[tokio::test]
     async fn server_registers_all_tools() {
         let (_dir, server) = make_server().await;
-        let expected_tools = [
+        // `peer` is Unix-only (cfg(unix); Unix-domain-socket); it is not
+        // registered on Windows, so only assert it on Unix.
+        #[allow(unused_mut)]
+        let mut expected_tools = vec![
             "read_file",
             "tree",
             "grep",
@@ -1571,8 +1586,9 @@ mod tests {
             "workspace",
             "library",
             "get_guide",
-            "peer",
         ];
+        #[cfg(unix)]
+        expected_tools.push("peer");
         let core_count = server
             .tools
             .iter()
@@ -1603,10 +1619,16 @@ mod tests {
             .iter()
             .filter(|t| !is_librarian_tool(t.name()))
             .count();
+        // `peer` is Unix-only (cfg(unix); Unix-domain-socket), so the L3 target
+        // is 22 core tools on Unix and 21 on Windows where peer is not registered.
+        #[cfg(unix)]
+        let expected = 22;
+        #[cfg(not(unix))]
+        let expected = 21;
         assert_eq!(
             core_count,
-            22,
-            "L3 target is 22 core tools; got {}: {:?}",
+            expected,
+            "L3 target is {expected} core tools; got {}: {:?}",
             core_count,
             server.tools.iter().map(|t| t.name()).collect::<Vec<_>>()
         );
@@ -2413,8 +2435,19 @@ mod tests {
         // annotation — the agent already carries the signal via the
         // `Active project` line in `build_server_instructions`, which
         // compaction preserves in the system-prompt slot.
-        let (dir, server) = make_server().await;
-        let root = dir.path().to_string_lossy().to_string();
+        let (_dir, server) = make_server().await;
+        // Build the payload from the server's *own* project-root form — the exact
+        // string post_process strips against. On Windows the agent canonicalizes to
+        // an extended-length path that differs from dir.path()'s plain/8.3 form, so
+        // using dir.path() here would never match the strip prefix and the
+        // annotation would never fire.
+        let root = server
+            .agent
+            .project_root()
+            .await
+            .expect("server has an active project root")
+            .display()
+            .to_string();
         let trimmed_root = root.trim_end_matches('/');
 
         let make_payload = || {
@@ -2753,7 +2786,11 @@ mod tests {
         }
     }
 
-    #[cfg(any(feature = "local-embed", feature = "remote-embed"))]
+    #[cfg(any(
+        feature = "local-embed",
+        feature = "local-embed-dynamic",
+        feature = "remote-embed"
+    ))]
     #[tokio::test]
     async fn current_capabilities_returns_without_panic() {
         // Smoke test: current_capabilities must not panic even for a fresh project.

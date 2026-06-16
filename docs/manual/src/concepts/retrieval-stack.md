@@ -103,11 +103,10 @@ No NVIDIA-style runtime extension needed; AMD exposes the GPU via standard
 Linux character devices.
 
 **Wire codescout:** copy `.env.amd` (in the repo root) to `.env`. It sets the
-ports above plus the protocol selectors required to talk to llama-server's
-`/v1/embeddings` and `/v1/rerank`:
+ports above plus the reranker protocol selector for llama-server's
+Cohere-shape `/rerank` (dense is OpenAI-compatible by default):
 
 ```bash
-CODESCOUT_EMBEDDER_PROTOCOL=llama-server  # /v1/embeddings, not TEI's /embed
 CODESCOUT_RERANKER_PROTOCOL=llama-server  # Cohere-shape /rerank
 ```
 
@@ -133,7 +132,6 @@ defaults above:
 | `CODESCOUT_EMBEDDER_URL` | `http://127.0.0.1:48081` | Dense embedder base URL |
 | `CODESCOUT_RERANKER_URL` | `http://127.0.0.1:48083` | Reranker base URL |
 | `CODESCOUT_SPARSE_URL` | `http://127.0.0.1:48084` | Sparse SPLADE base URL |
-| `CODESCOUT_EMBEDDER_PROTOCOL` | `tei` | `tei` (TEI/llama-server native) or `openai`/`llama-server` (Ollama, OpenAI, Anthropic-compatible) |
 | `CODESCOUT_EMBEDDER_MODEL_NAME` | (empty) | Model id sent in OpenAI-protocol JSON payloads |
 | `CODESCOUT_QUERY_PREFIX` | (empty) | Prepended to query text only. Required by some asymmetric models (e.g. Nomic, BGE-large). |
 | `CODESCOUT_RERANKER_PROTOCOL` | `tei` | `tei` (HuggingFace TEI) or `llama-server`/`infinity`/`cohere` (Cohere-shape `/rerank`, used by llama-server `--reranking`) |
@@ -143,7 +141,7 @@ defaults above:
 
 The shipped stack uses `llama.cpp:server` for the dense leg, but the dense
 service is just an HTTP endpoint behind `CODESCOUT_EMBEDDER_URL`. Any
-TEI-compatible or OpenAI-compatible server will work.
+OpenAI-compatible server will work.
 
 ### Ollama
 
@@ -153,7 +151,6 @@ Ollama exposes an OpenAI-compatible embeddings endpoint at
 ```bash
 ollama pull nomic-embed-text         # or any model with /api/embeddings
 export CODESCOUT_EMBEDDER_URL=http://127.0.0.1:11434
-export CODESCOUT_EMBEDDER_PROTOCOL=openai
 export CODESCOUT_EMBEDDER_MODEL_NAME=nomic-embed-text
 
 # Optional — Nomic needs a query prefix for asymmetric search:
@@ -177,15 +174,13 @@ llama-server -m ~/models/CodeRankEmbed-Q4_K_M.gguf \
     --port 48081 --embedding --pooling mean --ctx-size 8192
 ```
 
-…then leave `CODESCOUT_EMBEDDER_URL` and `CODESCOUT_EMBEDDER_PROTOCOL` at
-their defaults. The compose `dense-*` service is just a packaged version of
+…then leave `CODESCOUT_EMBEDDER_URL` at its default. The compose `dense-*` service is just a packaged version of
 this command — see `docker-compose.yml` for the full flag list.
 
 ### OpenAI / Anthropic-compatible APIs
 
 ```bash
 export CODESCOUT_EMBEDDER_URL=https://api.openai.com/v1
-export CODESCOUT_EMBEDDER_PROTOCOL=openai
 export CODESCOUT_EMBEDDER_MODEL_NAME=text-embedding-3-small
 # (codescout reads OPENAI_API_KEY from the environment automatically)
 ```

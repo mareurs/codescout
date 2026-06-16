@@ -507,6 +507,31 @@ pub fn find_go_source(mod_cache: &Path, module_path: &str) -> Option<PathBuf> {
     }
 }
 
+/// Re-derive Go's module cache dir the way `go env GOMODCACHE` would, WITHOUT
+/// spawning `go`. Every `CreateProcessW` on the locked-down Windows VDI is
+/// EDR-taxed, and a raw `go env` with no timeout can hang dep discovery (same
+/// hazard class as WIN-14/WIN-24). Unlike git there is no library binding, so
+/// the value is computed from the environment instead. (WIN-25)
+///
+/// Order mirrors Go's own: `$GOMODCACHE` if set, else `$GOPATH/pkg/mod` if
+/// `$GOPATH` is set, else the `<home>/go/pkg/mod` default. A value persisted
+/// only via `go env -w` (never exported) is not honored — Go source-linking
+/// then degrades to source-not-found for those deps; it never hangs or crashes.
+/// Pure over its `lookup` + `home` inputs so it tests on the Linux gate.
+fn go_mod_cache_from(
+    lookup: impl Fn(&str) -> Option<String>,
+    home: Option<PathBuf>,
+) -> Option<PathBuf> {
+    if let Some(v) = lookup("GOMODCACHE").filter(|s| !s.is_empty()) {
+        return Some(PathBuf::from(v));
+    }
+    let gopath = match lookup("GOPATH").filter(|s| !s.is_empty()) {
+        Some(p) => PathBuf::from(p),
+        None => home?.join("go"),
+    };
+    Some(gopath.join("pkg").join("mod"))
+}
+
 fn collect_go_deps(project_root: &Path, out: &mut Vec<(DiscoveredDep, String, Option<PathBuf>)>) {
     let go_mod = project_root.join("go.mod");
     let content = match std::fs::read_to_string(&go_mod) {
@@ -518,19 +543,12 @@ fn collect_go_deps(project_root: &Path, out: &mut Vec<(DiscoveredDep, String, Op
         return;
     }
 
-    // Locate GOMODCACHE via `go env GOMODCACHE`
-    let mod_cache = match std::process::Command::new("go")
-        .args(["env", "GOMODCACHE"])
-        .output()
+    // Locate GOMODCACHE without spawning `go env` (sync CreateProcessW hangs
+    // under EDR on the Windows VDI — WIN-25); re-derive what `go` would print.
+    let mod_cache = match go_mod_cache_from(|k| std::env::var(k).ok(), crate::platform::home_dir())
     {
-        Ok(out) if out.status.success() => {
-            let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if p.is_empty() {
-                return;
-            }
-            PathBuf::from(p)
-        }
-        _ => return,
+        Some(p) => p,
+        None => return,
     };
 
     for dep in deps {
@@ -821,6 +839,43 @@ require (
         std::fs::create_dir_all(&mod_dir).unwrap();
         std::fs::write(mod_dir.join("go.mod"), "module gin").unwrap();
         assert!(find_go_source(dir.path(), "github.com/gin-gonic/gin").is_some());
+    }
+    #[test]
+    fn go_mod_cache_from_resolves_in_order() {
+        use super::go_mod_cache_from;
+        let home = Some(PathBuf::from("/home/u"));
+
+        // 1. GOMODCACHE wins outright, even when GOPATH is also set.
+        let v = go_mod_cache_from(
+            |k| match k {
+                "GOMODCACHE" => Some("/explicit/modcache".to_string()),
+                "GOPATH" => Some("/some/gopath".to_string()),
+                _ => None,
+            },
+            home.clone(),
+        );
+        assert_eq!(v, Some(PathBuf::from("/explicit/modcache")));
+
+        // 2. No GOMODCACHE → GOPATH/pkg/mod.
+        let v = go_mod_cache_from(
+            |k| (k == "GOPATH").then(|| "/my/gopath".to_string()),
+            home.clone(),
+        );
+        assert_eq!(v, Some(PathBuf::from("/my/gopath/pkg/mod")));
+
+        // 3. Neither set → <home>/go/pkg/mod default.
+        let v = go_mod_cache_from(|_| None, home);
+        assert_eq!(v, Some(PathBuf::from("/home/u/go/pkg/mod")));
+
+        // 4. Empty env values are treated as unset.
+        let v = go_mod_cache_from(
+            |k| matches!(k, "GOMODCACHE" | "GOPATH").then(String::new),
+            Some(PathBuf::from("/h")),
+        );
+        assert_eq!(v, Some(PathBuf::from("/h/go/pkg/mod")));
+
+        // 5. Nothing set and no home → None (cannot derive, caller skips Go).
+        assert_eq!(go_mod_cache_from(|_| None, None), None);
     }
 
     // ── Java/Kotlin tests ───────────────────────────────────────────────

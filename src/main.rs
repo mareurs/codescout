@@ -6,7 +6,11 @@ use clap::{Parser, Subcommand};
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[derive(Parser)]
-#[command(name = "codescout", about = "High-performance coding agent MCP server")]
+#[command(
+    name = "codescout",
+    version,
+    about = "High-performance coding agent MCP server"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -191,6 +195,8 @@ enum Commands {
     Doctor(codescout::cli::doctor::DoctorArgs),
 }
 
+// `--env` is only parsed by the cfg(unix) `Mux` subcommand; dead on Windows.
+#[cfg_attr(not(unix), allow(dead_code))]
 fn parse_env_kv(s: &str) -> Result<(String, String), String> {
     let (k, v) = s
         .split_once('=')

@@ -54,7 +54,7 @@ pub struct Hit {
 }
 
 impl RetrievalClient {
-    /// Core helper: embed → hybrid_query → optional rerank.
+    /// Core helper: embed → query (hybrid or dense-only) → optional rerank.
     async fn search_in(
         &self,
         collection: &str,
@@ -64,8 +64,8 @@ impl RetrievalClient {
     ) -> Result<Vec<Hit>> {
         let q = self.embedder.embed(query).await?;
         let candidates = self
-            .qdrant
-            .hybrid_query(
+            .code_store
+            .query(
                 collection,
                 project_id,
                 &q.dense,
@@ -77,7 +77,8 @@ impl RetrievalClient {
             )
             .await?;
 
-        if !opts.rerank || candidates.is_empty() {
+        // Lite stack has no reranker server — skip the rerank step entirely.
+        if !opts.rerank || self.lite || candidates.is_empty() {
             return Ok(candidates.into_iter().take(opts.limit).collect());
         }
 

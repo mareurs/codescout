@@ -83,8 +83,14 @@ unbounded pipe (`cargo`, `npm`, `pytest`, `git`, `rg`, `fd`,
 > Rerun the command bare and query the returned @cmd_* buffer.
 
 **Bounded LHS is allowed.** `ls`, `cat`, `stat`, `du`, `diff`,
-`awk`, `sed`, non-recursive `grep`, `find -maxdepth N` — the
-output is naturally bounded, so a downstream pipe is fine.
+`awk`, `sed`, non-recursive `grep` — the output is naturally
+bounded, so a downstream pipe is fine.
+
+**Windows note:** prefer codescout-native discovery
+(`tree(glob=...)`, `grep(pattern=...)`) over shell `find`. On
+Windows `find` is ambiguous — cmd.exe ships its own `find` (a
+string filter) that shadows the Unix `find`, and `find "x"` with
+no file argument reads stdin and hangs the command.
 
 **Read-mode for source code is blocked.** `cat src/foo.rs` is
 allowed on bounded files but the broader "shell on source" pattern

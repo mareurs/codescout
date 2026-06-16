@@ -317,17 +317,19 @@ fn load_discover_settings(root: &std::path::Path) -> (usize, Vec<String>) {
     (3, vec![])
 }
 
-/// Resolve the short git HEAD SHA for a directory. Returns None if not a git repo.
+/// Resolve the short git HEAD SHA for a directory. Returns None if not a git
+/// repo or if HEAD is unborn (no commits yet).
+///
+/// Uses libgit2 (no subprocess): on this project's locked-down Windows VDI,
+/// every `CreateProcessW` is taxed by EDR injection, and a raw `git rev-parse`
+/// with no timeout could hang activation outright. `short_id()` respects
+/// `core.abbrev`, matching `git rev-parse --short HEAD` semantics. Mirrors the
+/// sibling `probe_has_git_remote`, which already opens a libgit2 repo.
 fn resolve_head_sha(root: &Path) -> Option<String> {
-    std::process::Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
-        .current_dir(root)
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+    let repo = git2::Repository::open(root).ok()?;
+    let head = repo.revparse_single("HEAD").ok()?;
+    let short = head.short_id().ok()?;
+    short.as_str().map(str::to_string).filter(|s| !s.is_empty())
 }
 
 /// Does `root` contain a git repository with at least one configured remote?
@@ -1559,27 +1561,45 @@ impl Agent {
 // Semantic memory store (Qdrant)
 // ---------------------------------------------------------------------------
 impl Agent {
-    /// Lazily construct (or return cached) the Qdrant-backed semantic memory store.
+    /// Lazily construct (or return cached) the semantic memory store.
     ///
-    /// First call performs `RetrievalClient::from_env()` (one network probe to the
-    /// embedder) and bootstraps the `memories` collection. Subsequent calls return
-    /// the cached `Arc` without further I/O.
+    /// Backend is selected by `CODESCOUT_VECTOR_BACKEND`: Qdrant (server stack,
+    /// one network probe + `memories` collection bootstrap) or in-process
+    /// sqlite-vec (lite stack, no daemon). Subsequent calls return the cached
+    /// `Arc` without further I/O.
     ///
     /// In tests, pre-populate via `set_semantic_memory_store_for_test` to bypass
     /// the env-driven construction path.
     pub async fn semantic_memory_store(&self) -> anyhow::Result<Arc<dyn SemanticMemoryStore>> {
+        use crate::retrieval::code_store::VectorBackend;
         self.semantic_memory
             .get_or_try_init(|| async {
-                let client = crate::retrieval::client::RetrievalClient::from_env().await?;
-                let collection = client.config.collection("memories");
-                let dim = client.config.model_dim as u64;
-                let store = crate::memory::semantic_store::QdrantSemanticMemoryStore::new(
-                    client.qdrant,
-                    collection,
-                    dim,
-                )
-                .await?;
-                anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
+                match VectorBackend::resolve() {
+                    VectorBackend::SqliteVec => {
+                        let store =
+                            crate::memory::sqlite_semantic_store::SqliteVecSemanticMemoryStore::from_env()?;
+                        anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
+                    }
+                    #[cfg(feature = "server-stack")]
+                    VectorBackend::Qdrant => {
+                        let config = crate::retrieval::config::RetrievalConfig::from_env()?;
+                        let qdrant =
+                            crate::retrieval::qdrant::QdrantWrap::connect(&config.qdrant_url).await?;
+                        let collection = config.collection("memories");
+                        let dim = config.model_dim as u64;
+                        let store = crate::memory::semantic_store::QdrantSemanticMemoryStore::new(
+                            qdrant, collection, dim,
+                        )
+                        .await?;
+                        anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
+                    }
+                    #[cfg(not(feature = "server-stack"))]
+                    VectorBackend::Qdrant => anyhow::bail!(
+                        "CODESCOUT_VECTOR_BACKEND=qdrant requires the `server-stack` build \
+                         feature. Rebuild with `--features server-stack`, or use the lean lite \
+                         stack with CODESCOUT_VECTOR_BACKEND=sqlite-vec."
+                    ),
+                }
             })
             .await
             .cloned()

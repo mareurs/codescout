@@ -155,7 +155,7 @@ even without `local-embed`, the binary always speaks HTTP to the stack via
 
 | Feature | What it does | When to use it |
 |---|---|---|
-| `remote-embed` (default) | HTTP client for the dense embedder service (TEI or OpenAI protocol) | Always — required for the retrieval stack and for Ollama / OpenAI / llama.cpp endpoints |
+| `remote-embed` (default) | HTTP client for the dense embedder service (OpenAI-compatible protocol) | Always — required for the retrieval stack and for Ollama / OpenAI / llama.cpp endpoints |
 | `local-embed` | In-process CPU embeddings via fastembed-rs + ONNX Runtime | Air-gapped machines; **requires building from source** and skips the network rerank/sparse pipeline |
 | `http` (default) | HTTP/SSE MCP transport (vs stdio-only) | Always — used by `codescout dashboard` and remote MCP clients |
 | `librarian` (default) | Embeds the librarian doc/spec/plan indexer (formerly librarian-mcp, now dissolved into `src/librarian/`) | Always — runtime-enabled by default; opt out via `LIBRARIAN_ENABLED=0` |
@@ -164,8 +164,7 @@ even without `local-embed`, the binary always speaks HTTP to the stack via
 >
 > 1. **Ollama as the dense embedder.** Install Ollama, pull a model
 >    (`ollama pull nomic-embed-text`), and set
->    `CODESCOUT_EMBEDDER_URL=http://127.0.0.1:11434`,
->    `CODESCOUT_EMBEDDER_PROTOCOL=openai`. You still need Qdrant + the
+>    `CODESCOUT_EMBEDDER_URL=http://127.0.0.1:11434`. You still need Qdrant + the
 >    reranker + the sparse service running from the docker stack — Ollama
 >    only replaces the dense leg. See [Retrieval Stack > Using Ollama / llama.cpp / OpenAI](../concepts/retrieval-stack.md#using-ollama--llamacpp--openai-as-the-dense-embedder).
 > 2. **Build with `local-embed`** for the pure in-process path. Accept the

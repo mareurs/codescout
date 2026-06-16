@@ -46,7 +46,7 @@ impl crate::retrieval::client::RetrievalClient {
     ) -> Result<SyncReport> {
         use crate::embed::ast_chunker::split_file;
         use crate::retrieval::drift::{diff_chunks, ChunkRef};
-        use crate::retrieval::payload::{payload_to_map, CodePayload};
+        use crate::retrieval::payload::CodePayload;
 
         // chunk=1200 was the universal sweet spot in the Phase 5.5 chunk×model matrix
         // (see docs/research/2026-05-06-retrieval-stack-benchmark.md). Override with
@@ -63,7 +63,7 @@ impl crate::retrieval::client::RetrievalClient {
         );
 
         let started = std::time::Instant::now();
-        self.qdrant
+        self.code_store
             .ensure_collection(
                 &self.config.collection("code_chunks"),
                 self.config.model_dim as u64,
@@ -119,10 +119,10 @@ impl crate::retrieval::client::RetrievalClient {
             }
         }
 
-        // 2. Fetch existing chunk refs from Qdrant for this project
+        // 2. Fetch existing chunk refs from the store for this project
         let server: Vec<ChunkRef> = self
-            .qdrant
-            .scroll_chunk_refs(&self.config.collection("code_chunks"), project_id)
+            .code_store
+            .chunk_refs(&self.config.collection("code_chunks"), project_id)
             .await
             .unwrap_or_default();
         let local_refs: Vec<ChunkRef> = local
@@ -160,25 +160,25 @@ impl crate::retrieval::client::RetrievalClient {
         };
         let added = to_upsert.len();
         if !to_upsert.is_empty() {
-            let points: Vec<(
-                String,
-                std::collections::HashMap<String, qdrant_client::qdrant::Value>,
-                crate::retrieval::embedder::EmbedOutput,
-            )> = to_upsert
+            let chunks: Vec<(CodePayload, crate::retrieval::embedder::EmbedOutput)> = to_upsert
                 .iter()
                 .zip(embeds)
-                .map(|((p, _), e)| (p.chunk_id.clone(), payload_to_map(p), e))
+                .map(|((p, _), e)| (p.clone(), e))
                 .collect();
-            self.qdrant
-                .upsert_points(&self.config.collection("code_chunks"), &points)
+            self.code_store
+                .upsert_chunks(&self.config.collection("code_chunks"), &chunks)
                 .await?;
         }
 
         // 4. Delete obsolete chunks
         let deleted = action.to_delete.len();
         if !action.to_delete.is_empty() {
-            self.qdrant
-                .delete_points(&self.config.collection("code_chunks"), &action.to_delete)
+            self.code_store
+                .delete_chunks(
+                    &self.config.collection("code_chunks"),
+                    project_id,
+                    &action.to_delete,
+                )
                 .await?;
         }
 

@@ -53,10 +53,27 @@ fn is_https_or_loopback(url: &str) -> bool {
         Some(r) => r,
         None => return false,
     };
-    rest.starts_with("localhost")
-        || rest.starts_with("127.0.0.1")
-        || rest.starts_with("127.")
-        || rest.starts_with("[::1]")
+    // Parse the HOST out of `[userinfo@]host[:port][/path…]` and match it exactly.
+    // An unanchored prefix check (`starts_with("127.")`/`starts_with("localhost")`)
+    // would treat http://127.evil.com or http://localhost.evil.com as loopback and
+    // leak the API key over cleartext HTTP.
+    let host_port = rest
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or(rest)
+        .rsplit('@')
+        .next()
+        .unwrap_or(rest);
+    let host = if let Some(v6) = host_port.strip_prefix('[') {
+        v6.split(']').next().unwrap_or(v6) // IPv6 literal: [::1]:port
+    } else {
+        host_port.split(':').next().unwrap_or(host_port)
+    };
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .map(|ip| ip.is_loopback())
+            .unwrap_or(false)
 }
 
 impl RemoteEmbedder {
@@ -463,6 +480,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn custom_rejects_http_with_api_key() {
         unsafe { std::env::set_var("EMBED_API_KEY", "sk-test-key") };
         let result = RemoteEmbedder::custom("http://example.com", "model");
@@ -472,6 +490,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn custom_allows_http_without_api_key() {
         unsafe { std::env::remove_var("EMBED_API_KEY") };
         let result = RemoteEmbedder::custom("http://localhost:11434", "model");
@@ -479,6 +498,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn custom_allows_https_with_api_key() {
         unsafe { std::env::set_var("EMBED_API_KEY", "sk-test-key") };
         let result = RemoteEmbedder::custom("https://api.example.com", "model");
@@ -487,6 +507,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn from_url_normalizes_bare_host() {
         let e = RemoteEmbedder::from_url("http://127.0.0.1:43300", "nomic", None).unwrap();
         assert_eq!(e.endpoint, "http://127.0.0.1:43300/v1/embeddings");
@@ -521,6 +542,24 @@ mod tests {
     }
 
     #[test]
+    fn is_https_or_loopback_matches_host_exactly() {
+        // Genuine https / loopback — allowed (no key leak).
+        assert!(is_https_or_loopback("https://embed.corp.example/v1"));
+        assert!(is_https_or_loopback("http://localhost:48081/v1"));
+        assert!(is_https_or_loopback("http://127.0.0.1:48081"));
+        assert!(is_https_or_loopback("http://127.0.0.5/v1")); // 127.0.0.0/8
+        assert!(is_https_or_loopback("http://[::1]:48081/v1"));
+        assert!(is_https_or_loopback("http://user:pass@localhost:8080"));
+        // Spoofed hosts an unanchored prefix check would wrongly accept — these
+        // must NOT count as loopback, or the API key leaks over cleartext HTTP.
+        assert!(!is_https_or_loopback("http://127.evil.com/v1"));
+        assert!(!is_https_or_loopback("http://localhost.evil.com/v1"));
+        assert!(!is_https_or_loopback("http://127.0.0.1.evil.com/v1"));
+        assert!(!is_https_or_loopback("http://example.com/127.0.0.1"));
+    }
+
+    #[test]
+    #[serial_test::serial]
     fn from_url_falls_back_to_env_api_key() {
         // When api_key param is None, from_url checks EMBED_API_KEY env var.
         // We don't set it here, so it should be None.

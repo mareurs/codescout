@@ -438,17 +438,18 @@ fn now_date() -> String {
     chrono::Utc::now().format("%Y-%m-%d").to_string()
 }
 
+/// Resolve the full git HEAD SHA for a directory. Returns None if `root` is not
+/// a git repo or HEAD is unborn (no commits yet).
+///
+/// Uses libgit2 (no subprocess): on the locked-down Windows VDI every
+/// `CreateProcessW` is taxed by EDR injection, and a raw `git rev-parse HEAD`
+/// with no timeout could hang. Mirrors the siblings `agent::resolve_head_sha`
+/// (WIN-14) and `probe_has_git_remote`, which already open a libgit2 repo.
+/// `Oid::to_string()` is the full 40-char hex, matching `git rev-parse HEAD`.
 fn git_head(root: &std::path::Path) -> Option<String> {
-    let out = std::process::Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    let repo = git2::Repository::open(root).ok()?;
+    let head = repo.revparse_single("HEAD").ok()?;
+    Some(head.id().to_string())
 }
 
 fn build_dry_run(grouped: &[GroupedCandidate]) -> Value {

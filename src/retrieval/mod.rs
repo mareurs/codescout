@@ -1,5 +1,7 @@
+#[cfg(feature = "server-stack")]
 pub mod artifact;
 pub mod client;
+pub mod code_store;
 pub mod config;
 pub mod drift;
 pub mod embedder;
@@ -7,7 +9,9 @@ pub mod index_state;
 pub mod memory;
 pub mod memory_payload;
 pub mod payload;
+#[cfg(feature = "server-stack")]
 pub mod qdrant;
 pub mod reranker;
 pub mod search;
+pub mod sqlite_code_store;
 pub mod sync;

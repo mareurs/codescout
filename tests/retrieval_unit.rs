@@ -51,6 +51,7 @@ fn config_from_env_reads_overrides() {
     );
 }
 
+#[cfg(feature = "server-stack")]
 #[test]
 
 fn client_from_env_constructs_when_urls_present() {
@@ -116,8 +117,10 @@ fn diff_modified_chunk_yields_upsert_for_new_id() {
     assert_eq!(d.to_delete, vec!["a-old".to_string()]);
 }
 
+#[cfg(feature = "server-stack")]
 use codescout::retrieval::payload::{map_to_payload, payload_to_map, CodePayload};
 
+#[cfg(feature = "server-stack")]
 #[test]
 fn payload_roundtrip_preserves_fields() {
     let p = CodePayload {

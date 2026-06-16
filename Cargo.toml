@@ -82,7 +82,7 @@ sqlite-vec = "0.1"
 # Retrieval stack client (Qdrant gRPC). Default features drop:
 #  - download_snapshots (pulls reqwest, snapshot API unused)
 #  - generate-snippets  (codegen helper, unused)
-qdrant-client = { version = "1.13", default-features = false, features = ["serde"] }
+qdrant-client = { version = "1.13", default-features = false, features = ["serde"], optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["json", "http2", "charset", "rustls-no-provider"] }
 # rustls with ring provider (smaller than default aws-lc-rs ~1.3 MiB). Provider
 # is installed once at process start via rustls::crypto::ring::default_provider().
@@ -154,6 +154,16 @@ jsonschema     = { version = "0.30", default-features = false, optional = true }
 [target.'cfg(unix)'.dependencies]
 tikv-jemallocator = "0.6"
 
+# Windows: direct Win32 process control (OpenProcess/TerminateProcess/
+# GetExitCodeProcess) so terminate_process/process_alive never spawn
+# taskkill/tasklist — process creation is the operation EDR/AV injects into
+# and stalls on this VDI. windows-sys 0.61 is already resolved transitively.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+] }
+
 [features]
 default = ["remote-embed", "http", "librarian"]
 # Embedded librarian (workspace doc/spec/plan index). Compiled in by
@@ -173,9 +183,18 @@ dashboard = ["dep:axum", "dep:tower-http", "dep:open"]
 http = ["dep:axum", "dep:tower-http", "rmcp/transport-streamable-http-server"]
 # Remote embedding via OpenAI-compatible HTTP API (Ollama, OpenAI, etc.)
 remote-embed = ["codescout-embed/remote-embed"]
+# Server retrieval stack: the Qdrant gRPC client (the heavy dep — tonic/prost/
+# gRPC) plus the hybrid sparse + reranker query path. With this OFF, the lean
+# lite stack (in-process sqlite-vec + remote OpenAI dense) is the only code/memory
+# backend and the binary drops qdrant-client entirely. See
+# docs/plans/2026-06-16-two-stack-retrieval-lite.md.
+server-stack = ["dep:qdrant-client"]
 # Local CPU embedding via fastembed-rs (ONNX Runtime + HuggingFace model hub).
 # First use downloads the chosen model (~20-300MB) to ~/.cache/huggingface/hub/.
 local-embed = ["codescout-embed/local-embed"]
+# Same, but via runtime-loaded onnxruntime.dll (windows-gnu / custom ONNX). The
+# caller supplies the DLL at runtime (ORT_DYLIB_PATH); see codescout-embed.
+local-embed-dynamic = ["codescout-embed/local-embed-dynamic"]
 # Local embedding via candle (HuggingFace Rust ML — adds significant compile time)
 # candle-embed = ["dep:candle-core", "dep:candle-transformers", "dep:candle-nn", "dep:hf-hub", "dep:tokenizers"]
 

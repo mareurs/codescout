@@ -730,7 +730,7 @@ async fn probe_index_status(ctx: &ToolContext) -> Value {
     match crate::retrieval::client::RetrievalClient::from_env().await {
         Ok(client) => {
             let coll = client.config.collection("code_chunks");
-            match client.qdrant.project_index_stats(&coll, &project_id).await {
+            match client.project_index_stats(&coll, &project_id).await {
                 Ok((chunks, files)) => json!({
                     "ready": chunks > 0,
                     "files": files,

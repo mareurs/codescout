@@ -435,9 +435,16 @@ mod tests {
         // Wrong-shape row — relative string stored where abs is required.
         // Found in the wild during the post-#69 live-catalog smoke test.
         seed_artifact(&cat, "bad-relative", "docs/issues/foo.md");
-        // Clean path that exists on Linux hosts. (cargo test runs on Linux/CI;
-        // /tmp is universally present.)
-        seed_artifact(&cat, "clean", "/tmp");
+        // Clean path: absolute, exists, forward-slash form, no backslash / ADS
+        // colon / `..` — so it trips none of the checks (notably not missing_file).
+        // Must exist on the host running the suite, so it is platform-specific:
+        // `/tmp` on unix, `C:/Windows` on Windows (the drive colon is not an ADS
+        // colon — same reason the `C:/` seeds above fire only their other checks).
+        #[cfg(unix)]
+        let clean_path = "/tmp";
+        #[cfg(windows)]
+        let clean_path = "C:/Windows";
+        seed_artifact(&cat, "clean", clean_path);
         seed_commit(&cat, "abc123", "C:/users\\marius");
 
         let v = scan_artifact_paths(&cat.conn).unwrap();
@@ -451,7 +458,8 @@ mod tests {
         assert_eq!(by_check.get("abs_path_must_be_absolute").copied(), Some(1));
         // 5 missing-file hits: bad-backslash, bad-ads, bad-dotdot, bad-missing,
         // and bad-relative (Path::exists on "docs/issues/foo.md" resolves
-        // against the test runner's cwd and finds nothing). /tmp does not fire.
+        // against the test runner's cwd and finds nothing). clean_path exists, so
+        // it does not fire.
         assert_eq!(by_check.get("missing_file").copied(), Some(5));
 
         let r = scan_commits_git_root(&cat.conn).unwrap();

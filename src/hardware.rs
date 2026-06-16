@@ -110,8 +110,25 @@ async fn probe_ollama(tcp_addr: &str) -> bool {
     .unwrap_or(false)
 }
 
+/// Whether to run the subprocess GPU probes (`nvidia-smi` / `rocm-smi`).
+///
+/// On Windows — especially locked-down VDIs — spawning these is taxed by EDR
+/// injection, and `CreateProcessW` is synchronous: a hung spawn blocks the tokio
+/// worker and the 2s `timeout` cannot preempt it. So the subprocess probe is
+/// skipped on Windows by default; set `CODESCOUT_GPU_PROBE=1` to opt back in on a
+/// real Windows GPU host. Non-Windows always probes. Pure for Linux-CI testing.
+fn gpu_probe_enabled(is_windows: bool, opt_in: bool) -> bool {
+    !is_windows || opt_in
+}
+
 /// Probe NVIDIA GPU via nvidia-smi. Returns None if not available.
 async fn probe_nvidia() -> Option<GpuInfo> {
+    if !gpu_probe_enabled(
+        cfg!(windows),
+        std::env::var_os("CODESCOUT_GPU_PROBE").is_some(),
+    ) {
+        return None;
+    }
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(2),
         tokio::process::Command::new("nvidia-smi")
@@ -138,6 +155,12 @@ async fn probe_nvidia() -> Option<GpuInfo> {
 
 /// Probe AMD GPU via rocm-smi. Returns None if not available.
 async fn probe_amd() -> Option<GpuInfo> {
+    if !gpu_probe_enabled(
+        cfg!(windows),
+        std::env::var_os("CODESCOUT_GPU_PROBE").is_some(),
+    ) {
+        return None;
+    }
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(2),
         tokio::process::Command::new("rocm-smi")
@@ -342,5 +365,17 @@ mod tests {
         assert_eq!(ollama_tcp_addr("https://remote:11434"), "remote:11434");
         assert_eq!(ollama_tcp_addr("localhost:11434"), "localhost:11434");
         assert_eq!(ollama_tcp_addr("myhost"), "myhost:11434");
+    }
+
+    #[test]
+    fn gpu_probe_skips_on_windows_without_optin() {
+        use super::gpu_probe_enabled;
+        // Windows + no opt-in → skip the subprocess probe (EDR/CreateProcessW hazard).
+        assert!(!gpu_probe_enabled(true, false));
+        // Windows + CODESCOUT_GPU_PROBE set → probe.
+        assert!(gpu_probe_enabled(true, true));
+        // Non-Windows → always probe, regardless of the opt-in flag.
+        assert!(gpu_probe_enabled(false, false));
+        assert!(gpu_probe_enabled(false, true));
     }
 }

@@ -29,11 +29,7 @@ pub async fn get_index(State(state): State<DashboardState>) -> Json<Value> {
         .unwrap_or("root")
         .to_string();
     let collection = client.config.collection("code_chunks");
-    match client
-        .qdrant
-        .project_index_stats(&collection, &project_id)
-        .await
-    {
+    match client.project_index_stats(&collection, &project_id).await {
         Ok((chunks, files)) => Json(json!({
             "available": chunks > 0,
             "file_count": files,

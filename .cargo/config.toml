@@ -1,7 +1,19 @@
 [build]
 rustc-wrapper = "sccache"
-jobs = 64
+# jobs intentionally unset — cargo defaults to the logical-CPU count, which is
+# correct per machine (4 on the Windows VDI, more on CI). A hardcoded high value
+# oversubscribed low-core machines (16x on the 4-core VDI) and, under EDR, spawns
+# that many taxed rustc processes fighting for the cores. See WIN-16.
 
 [target.x86_64-unknown-linux-gnu]
 linker = "cc"
 rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+[alias]
+# AMD / experiments dev loop: build the live MCP release binary WITH the Qdrant
+# server stack compiled in. With `server-stack` on, VectorBackend::resolve()
+# defaults to Qdrant, so `cargo rb` + the running llm-infra stack (.env.amd)
+# gives the full hybrid retrieval path. Plain `cargo build --release` stays lean
+# (sqlite-vec lite default) — which is what repo cloners get. Harmless on master:
+# it only adds a command; nothing invokes it unless you type `cargo rb`.
+rb = "build --release --features server-stack"

@@ -7,6 +7,7 @@ use crate::prompts::builders::{
     build_subagent_epilogue, build_subagent_preamble, build_synthesis_prompt,
     build_system_prompt_draft, build_workspace_instructions, language_patterns,
 };
+#[cfg(unix)]
 use crate::tools::command_summary::BUFFER_QUERY_INLINE_CAP;
 use crate::tools::core::types::is_subagent_capable_name;
 use crate::tools::onboarding::{
@@ -1024,9 +1025,12 @@ async fn execute_shell_command_timeout_is_enforced() {
 
 // --- run_command progress test (T11) ---
 
+#[cfg(unix)]
 use crate::tools::progress::test_support::CountingSink;
+#[cfg(unix)]
 use std::sync::atomic::Ordering;
 
+#[cfg(unix)]
 async fn project_ctx_with_progress(
 ) -> (tempfile::TempDir, ToolContext, std::sync::Arc<CountingSink>) {
     let dir = tempdir().unwrap();
@@ -2449,6 +2453,9 @@ async fn buffer_query_returns_up_to_200_lines_inline() {
     let output_id = ctx.output_buffer.store("cmd".into(), content, "".into(), 0);
 
     // Query the buffer — 100 lines is within the BUFFER_QUERY_INLINE_CAP
+    #[cfg(windows)]
+    let query = format!("type {output_id}");
+    #[cfg(not(windows))]
     let query = format!("cat {output_id}");
     let result2 = RunCommand
         .call(json!({ "command": query, "timeout_secs": 5 }), &ctx)
@@ -2477,6 +2484,9 @@ async fn buffer_query_truncation_hint_shows_next_page() {
     let output_id = ctx.output_buffer.store("cmd".into(), content, "".into(), 0);
 
     // Query it — output exceeds 100-line cap, so hint should show next-page command
+    #[cfg(windows)]
+    let query = format!("type {output_id}");
+    #[cfg(not(windows))]
     let query = format!("cat {output_id}");
     let result2 = RunCommand
         .call(json!({ "command": query, "timeout_secs": 5 }), &ctx)
@@ -3653,6 +3663,43 @@ async fn onboarding_triggers_refresh_when_version_stale() {
         prompt.contains("Do NOT re-explore"),
         "must be lightweight refresh"
     );
+}
+#[cfg(windows)]
+#[tokio::test]
+async fn background_command_with_quotes_captures_output() {
+    // Regression: the background path used .args() → MSVC-CRT quote mangling →
+    // a quoted -c argument dropped Python into its stdin-blocked REPL. Requires
+    // `py` on PATH (present on this VDI).
+    let (_dir, ctx) = project_ctx().await;
+    let res = RunCommand
+        .call(
+            json!({
+                "command": r#"py -c "print('bg-ok', 2+2)""#,
+                "run_in_background": true
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let ref_id = res["output_id"].as_str().unwrap().to_string();
+    // Poll the bg log buffer (same ctx → same OutputBuffer) until the line appears.
+    let mut found = false;
+    for _ in 0..50 {
+        let out = RunCommand
+            .call(
+                json!({ "command": format!("type {ref_id}"), "timeout_secs": 10 }),
+                &ctx,
+            )
+            .await;
+        if let Ok(v) = out {
+            if v["stdout"].as_str().unwrap_or("").contains("bg-ok 4") {
+                found = true;
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(found, "background command output not captured");
 }
 
 #[tokio::test]

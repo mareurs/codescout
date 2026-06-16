@@ -189,9 +189,9 @@ local-database backend. Four stages, each running in a separate process:
 
 2. **Dense embedding** (`src/retrieval/embedder.rs::EmbedderHttp`) — Each chunk
    is POSTed to a dense embedding service over HTTP. The default stack ships
-   a TEI-compatible embedder on `localhost:48081`; the same client also speaks
-   the OpenAI-compatible protocol when `CODESCOUT_EMBEDDER_PROTOCOL=openai`
-   is set, so Ollama, OpenAI, and Anthropic-compatible endpoints all work.
+   a llama.cpp embedder on `localhost:48081`; dense embedding is always
+   OpenAI-compatible (`POST {url}/v1/embeddings`), so Ollama, OpenAI, vLLM, or
+   a corporate gateway all work as drop-in dense backends.
 
 3. **Sparse embedding** (`src/retrieval/embedder.rs`, SPLADE) — In parallel,
    chunks are sent to a sparse SPLADE service on `localhost:48084`. The sparse

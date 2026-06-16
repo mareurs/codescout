@@ -48,9 +48,11 @@ impl Drop for BackgroundKillGuard {
             }
             #[cfg(windows)]
             {
-                let _ = std::process::Command::new("taskkill")
-                    .args(["/F", "/PID", &pid.to_string()])
-                    .status();
+                // Win32 TerminateProcess (forced, ≈ `taskkill /F`) with no child
+                // spawn. Spawning taskkill here would stall under EDR at the worst
+                // possible moment — a cancellation Drop — defeating the guard's
+                // cancel-fast intent. Mirrors the no-spawn unix SIGKILL arm above.
+                let _ = crate::platform::terminate_process(pid);
             }
         }
     }
@@ -97,11 +99,10 @@ async fn spawn_background_command(
     let (log_file, _) = log_tmp.keep()?;
     let log_stderr = log_file.try_clone()?;
 
-    let (shell, shell_args) = crate::platform::shell_command(resolved_command);
-    let child = tokio::process::Command::new(shell)
-        .args(&shell_args)
+    let mut cmd = crate::platform::shell_command_configured(resolved_command);
+    let child = cmd
         .current_dir(work_dir)
-        .env("GIT_PAGER", "cat")
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::from(log_file))
         .stderr(std::process::Stdio::from(log_stderr))
         .spawn()?;
@@ -355,23 +356,14 @@ pub(crate) async fn run_command_inner(
     // keeps draining curl's output into the tmpfile until the download completes.
     #[cfg(unix)]
     let (child_output_fut, child_pgid) = {
-        let mut cmd = tokio::process::Command::new("sh");
-        cmd.arg("-c")
-            .arg(&effective_command)
-            .current_dir(&work_dir)
-            .env("GIT_PAGER", "cat")
+        // Base config (sh -c, GIT_PAGER, process_group(0), SIGPIPE reset,
+        // stdin=null) comes from the shared platform builder; foreground only
+        // adds piped stdio + kill_on_drop.
+        let mut cmd = crate::platform::shell_command_configured(&effective_command);
+        cmd.current_dir(&work_dir)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .process_group(0) // new process group; PGID = child PID
             .kill_on_drop(true); // SIGKILL on Drop — reaps shell on cancel
-                                 // SAFETY: pre_exec runs in the child after fork(), before exec().
-                                 // signal() is async-signal-safe (POSIX).  No locks are held at this point.
-        unsafe {
-            cmd.pre_exec(|| {
-                libc::signal(libc::SIGPIPE, libc::SIG_DFL);
-                Ok(())
-            });
-        }
         let child = cmd.spawn()?;
         let pgid: Option<i32> = child.id().map(|id| id as i32);
         // Drop guard: if the future is cancelled, we want the *entire pipeline*
@@ -402,19 +394,65 @@ pub(crate) async fn run_command_inner(
         (fut, pgid)
     };
 
+    // `_child_pgid` is unused on Windows — the process-group kill in the timeout
+    // arm is `#[cfg(unix)]` only. The Unix branch above binds it as `child_pgid`.
     #[cfg(windows)]
-    let (child_output_fut, child_pgid) = {
+    let (child_output_fut, _child_pgid) = {
+        // Capture stdout/stderr via temp files instead of pipes, and wait on the
+        // *process* rather than on pipe EOF.
+        //
+        // On Windows a grandchild — git's helper exe, a Python subprocess, or an
+        // EDR/AV DLL injected into the child — inherits the write end of a
+        // captured pipe and can hold it open after our direct child has exited.
+        // `.output()` waits for pipe EOF, so it never returns even though the
+        // command finished. (The timeout hint below — "output() never gets EOF" —
+        // is exactly this failure.) Redirecting to files and waiting on the
+        // process means a lingering grandchild keeping a file handle open does
+        // not block our read.
+        //
+        // The cmd /C invocation, verbatim raw_arg cmdline (no MSVC-CRT quote
+        // mangling — see the `cmd /?` outer-quote rule), GIT_PAGER, and stdin=NUL
+        // all come from the shared platform builder
+        // (`platform::shell_command_configured` / `build_windows_cmdline`).
+        // Foreground only adds the file-capture stdio + kill_on_drop.
+        let out_tmp = tempfile::Builder::new()
+            .prefix("codescout-cmd-out-")
+            .tempfile()?;
+        let err_tmp = tempfile::Builder::new()
+            .prefix("codescout-cmd-err-")
+            .tempfile()?;
+        let (out_file, out_path) = out_tmp.keep()?;
+        let (err_file, err_path) = err_tmp.keep()?;
+        // Establish cleanup guards BEFORE spawn so an early `?` (spawn failure)
+        // still deletes the just-`keep()`d temp files. They are moved into the
+        // future below, where they also drop on normal completion and on
+        // future-drop (timeout / cancellation).
+        let out_guard = TmpfileGuard(out_path.to_string_lossy().into_owned());
+        let err_guard = TmpfileGuard(err_path.to_string_lossy().into_owned());
+
+        let mut cmd = crate::platform::shell_command_configured(&effective_command);
+        cmd.current_dir(&work_dir)
+            .stdout(std::process::Stdio::from(out_file))
+            .stderr(std::process::Stdio::from(err_file))
+            .kill_on_drop(true); // SIGKILLs cmd on cancel/timeout (future drop)
+        let mut child = cmd.spawn()?;
+
         let fut: std::pin::Pin<
             Box<dyn std::future::Future<Output = std::io::Result<std::process::Output>> + Send>,
-        > = Box::pin(
-            tokio::process::Command::new("cmd")
-                .arg("/C")
-                .arg(&effective_command)
-                .current_dir(&work_dir)
-                .env("GIT_PAGER", "cat")
-                .kill_on_drop(true)
-                .output(),
-        );
+        > = Box::pin(async move {
+            // Guards (created before spawn) move in here; they drop on normal
+            // completion *and* on future-drop (timeout / cancellation).
+            let _out_guard = out_guard;
+            let _err_guard = err_guard;
+            let status = child.wait().await?;
+            let stdout = std::fs::read(&out_path).unwrap_or_default();
+            let stderr = std::fs::read(&err_path).unwrap_or_default();
+            Ok(std::process::Output {
+                status,
+                stdout,
+                stderr,
+            })
+        });
         (fut, None::<i32>)
     };
 

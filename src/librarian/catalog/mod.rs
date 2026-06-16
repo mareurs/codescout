@@ -31,30 +31,12 @@ pub struct Catalog {
 
 const SCHEMA_SQL: &str = include_str!("schema.sql");
 
-/// Register sqlite-vec as a global auto-extension (idempotent, Once-guarded).
+/// Register sqlite-vec as a global auto-extension. Delegates to the shared,
+/// non-feature-gated registration in `crate::sqlite_vec_ext` so there is exactly
+/// one `Once` across the librarian catalog and the retrieval stores (registering
+/// the same auto-extension twice would run the `vec0` init twice per connection).
 fn init_sqlite_vec() {
-    use std::sync::Once;
-
-    // Compile-time pin on the upstream signature — see the matching check in
-    // `src/embed/index.rs::init_sqlite_vec` for the rationale.
-    const _UPSTREAM_SQLITE_VEC_INIT_SIG: unsafe extern "C" fn() = sqlite_vec::sqlite3_vec_init;
-
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        // SAFETY: sqlite3_vec_init is a valid SQLite extension entry point.
-        unsafe {
-            rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute::<
-                *const (),
-                unsafe extern "C" fn(
-                    *mut rusqlite::ffi::sqlite3,
-                    *mut *mut i8,
-                    *const rusqlite::ffi::sqlite3_api_routines,
-                ) -> i32,
-            >(
-                sqlite_vec::sqlite3_vec_init as *const (),
-            )));
-        }
-    });
+    crate::sqlite_vec_ext::register();
 }
 
 /// Idempotent post-baseline migrations. SCHEMA_SQL covers v1-v3 (CREATE TABLE

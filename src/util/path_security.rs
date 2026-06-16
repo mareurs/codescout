@@ -158,9 +158,31 @@ fn denied_read_paths(_config: &PathSecurityConfig) -> Vec<PathBuf> {
 
 /// Check if `resolved` falls under any denied path.
 fn is_denied(resolved: &Path, denied: &[PathBuf]) -> bool {
-    denied
-        .iter()
-        .any(|d| resolved.starts_with(d) || resolved == d.as_path())
+    // On Windows, `fs::canonicalize` yields extended-length (`\\?\C:\...`) paths
+    // while a not-yet-existing input stays plain. `Path::starts_with` is
+    // component-wise and treats `\\?\` as a distinct leading component, so a plain
+    // input never `starts_with` a verbatim deny prefix even when they denote the
+    // same location — a silent deny-list bypass. Normalise both sides to the same
+    // form before comparing. No-op off Windows and on already-plain paths.
+    fn normalize(p: &Path) -> PathBuf {
+        #[cfg(windows)]
+        {
+            if let Some(s) = p.to_str() {
+                if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+                    return PathBuf::from(format!(r"\\{rest}"));
+                }
+                if let Some(rest) = s.strip_prefix(r"\\?\") {
+                    return PathBuf::from(rest);
+                }
+            }
+        }
+        p.to_path_buf()
+    }
+    let resolved = normalize(resolved);
+    denied.iter().any(|d| {
+        let d = normalize(d);
+        resolved.starts_with(&d) || resolved == d
+    })
 }
 
 /// Best-effort canonicalization: use `fs::canonicalize` when the path exists
@@ -599,7 +621,7 @@ pub fn detect_il3_violation(command: &str) -> Option<String> {
          1. run_command(\"{lead}\")               — full output stored as @cmd_xxx\n  \
          2. grep PATTERN @cmd_xxx                 — query the buffer at any granularity\n  \
                                                     (also: tail -20 @cmd_xxx, head -50 @cmd_xxx)\n\n\
-         Bounded LHS (ls, cat, stat, du, diff, awk, sed, non-recursive grep, find -maxdepth) is allowed,\n\
+         Bounded LHS (ls, cat, stat, du, diff, awk, sed, non-recursive grep) is allowed,\n\
          as are pure aggregators on the RHS (wc, grep -c) — they collapse output to a summary.\n\
          Only unbounded LHS (cargo, npm, pytest, git, rg, fd, grep -r, bare find, ...) piped to a\n\
          trimmer (head, tail, grep, sort, ...) is blocked.\n\n\
@@ -1222,7 +1244,9 @@ mod tests {
                 return; // skip if no .ssh directory
             }
 
+            #[cfg(unix)]
             let dir = tempdir().unwrap();
+            #[cfg(unix)]
             let link = dir.path().join("sneaky_link");
             #[cfg(unix)]
             {
@@ -1256,11 +1280,13 @@ mod tests {
 
     #[test]
     fn symlink_write_escape_caught() {
+        #[cfg(unix)]
         let project = tempdir().unwrap();
 
         // Create symlink inside the project pointing to /var/tmp — a real
         // directory that is outside both the project root and /tmp, so the
         // path-security check should still block the write.
+        #[cfg(unix)]
         let link = project.path().join("sneaky");
         #[cfg(unix)]
         {

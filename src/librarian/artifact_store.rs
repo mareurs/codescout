@@ -16,6 +16,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use crate::librarian::catalog::Catalog;
+#[cfg(feature = "server-stack")]
 use crate::retrieval::qdrant::QdrantWrap;
 
 /// Which vector backend the librarian artifact index uses.
@@ -34,7 +35,8 @@ impl ArtifactBackend {
     /// 1. `CODESCOUT_ARTIFACT_BACKEND=qdrant|sqlite-vec` env var.
     /// 2. `[librarian] vector_backend = "qdrant"|"sqlite-vec"` in
     ///    `<project>/.codescout/project.toml`.
-    /// 3. Default: Qdrant.
+    /// 3. Default: Qdrant on the server build; the daemon-free sqlite-vec store
+    ///    on a lean build (no `server-stack` feature — Qdrant isn't compiled in).
     ///
     /// Mirrors `crate::server::librarian_enabled_at_runtime`.
     pub fn resolve(project_path: Option<&str>) -> Self {
@@ -61,7 +63,14 @@ impl ArtifactBackend {
                 }
             }
         }
-        ArtifactBackend::Qdrant
+        #[cfg(feature = "server-stack")]
+        {
+            ArtifactBackend::Qdrant
+        }
+        #[cfg(not(feature = "server-stack"))]
+        {
+            ArtifactBackend::SqliteVec
+        }
     }
 
     fn parse(s: &str) -> Option<Self> {
@@ -96,12 +105,14 @@ pub trait ArtifactVectorStore: Send + Sync {
 // Qdrant backend (default)
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "server-stack")]
 pub struct QdrantArtifactStore {
     qdrant: QdrantWrap,
     collection: String,
     ensured: tokio::sync::OnceCell<()>,
 }
 
+#[cfg(feature = "server-stack")]
 impl QdrantArtifactStore {
     /// Construct over a connected Qdrant. The collection is bootstrapped
     /// lazily on the first upsert (dim taken from the first vector), so a
@@ -126,6 +137,7 @@ impl QdrantArtifactStore {
     }
 }
 
+#[cfg(feature = "server-stack")]
 #[async_trait]
 impl ArtifactVectorStore for QdrantArtifactStore {
     async fn upsert(&self, project_id: &str, id: &str, vector: &[f32]) -> Result<()> {

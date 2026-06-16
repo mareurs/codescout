@@ -77,6 +77,7 @@
 - [Project Configuration](configuration/project-toml.md)
   - [Global Config](configuration/global-config.md)
   - [Embedding Backends](configuration/embedding-backends.md)
+  - [EDR-Constrained Windows](configuration/embeddings-edr-windows.md)
   - [Embeddings](configuration/embeddings.md)
     - [Model Comparison](configuration/embedding-model-comparison.md)
 

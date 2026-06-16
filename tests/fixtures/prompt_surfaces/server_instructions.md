@@ -8,8 +8,8 @@ Subagents inherit these rules. Pass them along.
    read_file is fine for imports/glue.
 2. NEVER edit_file structural code → edit_code (LSP-aware).
 3. NEVER pipe unbounded run_command → run bare, query @cmd_* buffer
-   (grep "ERROR" @cmd_abc). Bounded LHS (ls, cat, awk, sed,
-   find -maxdepth N) is OK. Shell on source files is blocked.
+   (grep "ERROR" @cmd_abc). Bounded LHS (ls, cat, awk,
+   sed) is OK. Shell on source files is blocked.
 4. NEVER read_file markdown → read_markdown (heading-addressed).
 5. NEVER edit_file markdown → edit_markdown (heading-addressed).
 6. Subagents see only what you brief them with. Pass: which

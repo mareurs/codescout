@@ -204,9 +204,21 @@ impl Tool for SemanticSearch {
         let client = crate::retrieval::client::RetrievalClient::from_env()
             .await
             .map_err(|e| {
+                // Tailor the hint to the active backend — the lite stack has no
+                // local daemon to start; its failure mode is an unreachable remote
+                // embedding endpoint, not a down Qdrant/sparse/reranker service.
+                let hint = match crate::retrieval::code_store::VectorBackend::resolve() {
+                    crate::retrieval::code_store::VectorBackend::SqliteVec => {
+                        "Lite stack: verify CODESCOUT_EMBEDDER_URL and EMBED_API_KEY — \
+                         the remote embedding endpoint is unreachable (no local daemon to start)."
+                    }
+                    crate::retrieval::code_store::VectorBackend::Qdrant => {
+                        "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack."
+                    }
+                };
                 crate::tools::RecoverableError::with_hint(
                     format!("retrieval stack offline: {e}"),
-                    "Run `./scripts/retrieval-stack.sh up` to start the retrieval stack.",
+                    hint,
                 )
             })?;
         let opts = crate::retrieval::search::SearchOpts {
