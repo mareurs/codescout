@@ -6,7 +6,11 @@ use clap::{Parser, Subcommand};
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[derive(Parser)]
-#[command(name = "codescout", about = "High-performance coding agent MCP server")]
+#[command(
+    name = "codescout",
+    version,
+    about = "High-performance coding agent MCP server"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
