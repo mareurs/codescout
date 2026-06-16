@@ -82,7 +82,7 @@ sqlite-vec = "0.1"
 # Retrieval stack client (Qdrant gRPC). Default features drop:
 #  - download_snapshots (pulls reqwest, snapshot API unused)
 #  - generate-snippets  (codegen helper, unused)
-qdrant-client = { version = "1.13", default-features = false, features = ["serde"] }
+qdrant-client = { version = "1.13", default-features = false, features = ["serde"], optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["json", "http2", "charset", "rustls-no-provider"] }
 # rustls with ring provider (smaller than default aws-lc-rs ~1.3 MiB). Provider
 # is installed once at process start via rustls::crypto::ring::default_provider().
@@ -183,6 +183,12 @@ dashboard = ["dep:axum", "dep:tower-http", "dep:open"]
 http = ["dep:axum", "dep:tower-http", "rmcp/transport-streamable-http-server"]
 # Remote embedding via OpenAI-compatible HTTP API (Ollama, OpenAI, etc.)
 remote-embed = ["codescout-embed/remote-embed"]
+# Server retrieval stack: the Qdrant gRPC client (the heavy dep — tonic/prost/
+# gRPC) plus the hybrid sparse + reranker query path. With this OFF, the lean
+# lite stack (in-process sqlite-vec + remote OpenAI dense) is the only code/memory
+# backend and the binary drops qdrant-client entirely. See
+# docs/plans/2026-06-16-two-stack-retrieval-lite.md.
+server-stack = ["dep:qdrant-client"]
 # Local CPU embedding via fastembed-rs (ONNX Runtime + HuggingFace model hub).
 # First use downloads the chosen model (~20-300MB) to ~/.cache/huggingface/hub/.
 local-embed = ["codescout-embed/local-embed"]

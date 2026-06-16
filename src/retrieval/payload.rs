@@ -1,6 +1,9 @@
+#[cfg(feature = "server-stack")]
 use anyhow::{anyhow, Result};
+#[cfg(feature = "server-stack")]
 use std::collections::HashMap;
 
+#[cfg(feature = "server-stack")]
 use qdrant_client::qdrant::Value;
 
 #[derive(Debug, Clone)]
@@ -18,6 +21,7 @@ pub struct CodePayload {
     pub chunk_id: String,
 }
 
+#[cfg(feature = "server-stack")]
 pub fn payload_to_map(p: &CodePayload) -> HashMap<String, Value> {
     let mut m = HashMap::new();
     m.insert("project_id".into(), Value::from(p.project_id.clone()));
@@ -37,6 +41,7 @@ pub fn payload_to_map(p: &CodePayload) -> HashMap<String, Value> {
     m
 }
 
+#[cfg(feature = "server-stack")]
 fn get_str<'a>(m: &'a HashMap<String, Value>, key: &str) -> Result<&'a str> {
     m.get(key)
         .ok_or_else(|| anyhow!("missing field: {key}"))?
@@ -45,6 +50,7 @@ fn get_str<'a>(m: &'a HashMap<String, Value>, key: &str) -> Result<&'a str> {
         .ok_or_else(|| anyhow!("field {key} is not a string"))
 }
 
+#[cfg(feature = "server-stack")]
 fn get_int(m: &HashMap<String, Value>, key: &str) -> Result<i64> {
     m.get(key)
         .ok_or_else(|| anyhow!("missing field: {key}"))?
@@ -52,6 +58,7 @@ fn get_int(m: &HashMap<String, Value>, key: &str) -> Result<i64> {
         .ok_or_else(|| anyhow!("field {key} is not an integer"))
 }
 
+#[cfg(feature = "server-stack")]
 pub fn map_to_payload(m: &HashMap<String, Value>) -> Result<CodePayload> {
     Ok(CodePayload {
         project_id: get_str(m, "project_id")?.to_owned(),

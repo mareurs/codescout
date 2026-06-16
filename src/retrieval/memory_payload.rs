@@ -6,10 +6,14 @@
 //! `(project_id, bucket, title)` so upsert is idempotent without a
 //! lookup round-trip.
 
+#[cfg(feature = "server-stack")]
 use anyhow::{anyhow, Context, Result};
+#[cfg(feature = "server-stack")]
 use qdrant_client::qdrant::Value;
+#[cfg(feature = "server-stack")]
 use qdrant_client::Payload;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "server-stack")]
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -52,6 +56,7 @@ pub fn point_id_for(project_id: &str, bucket: &str, title: &str) -> Uuid {
     Uuid::new_v5(&MEMORY_NS, key.as_bytes())
 }
 
+#[cfg(feature = "server-stack")]
 /// Serialize a memory into the Qdrant payload map. The `anchors` array
 /// becomes a list of nested string maps so payload field indexes on
 /// `anchors[].path` work as expected.
@@ -77,6 +82,7 @@ pub fn memory_to_payload(m: &SemanticMemory) -> HashMap<String, Value> {
     map
 }
 
+#[cfg(feature = "server-stack")]
 /// Parse a Qdrant payload map back into a `SemanticMemory`.
 pub fn payload_to_memory(m: &HashMap<String, Value>) -> Result<SemanticMemory> {
     Ok(SemanticMemory {
@@ -90,6 +96,7 @@ pub fn payload_to_memory(m: &HashMap<String, Value>) -> Result<SemanticMemory> {
     })
 }
 
+#[cfg(feature = "server-stack")]
 fn get_str(m: &HashMap<String, Value>, key: &str) -> Result<String> {
     m.get(key)
         .ok_or_else(|| anyhow!("missing field: {key}"))?
@@ -98,6 +105,7 @@ fn get_str(m: &HashMap<String, Value>, key: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("field {key} is not a string"))
 }
 
+#[cfg(feature = "server-stack")]
 fn get_anchors(m: &HashMap<String, Value>) -> Result<Vec<MemoryAnchor>> {
     let Some(v) = m.get("anchors") else {
         return Ok(vec![]);
@@ -160,6 +168,7 @@ mod tests {
         assert_ne!(m1.point_id(), m2.point_id());
     }
 
+    #[cfg(feature = "server-stack")]
     #[test]
     fn payload_roundtrip() {
         let m = sample();
@@ -174,6 +183,7 @@ mod tests {
         assert_eq!(back.updated_at, m.updated_at);
     }
 
+    #[cfg(feature = "server-stack")]
     #[test]
     fn payload_roundtrip_no_anchors() {
         let mut m = sample();

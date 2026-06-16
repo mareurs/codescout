@@ -87,10 +87,25 @@ impl VectorBackend {
             .as_str()
         {
             "sqlite-vec" | "sqlite_vec" | "sqlite" | "local" | "lite" => Self::SqliteVec,
-            _ => Self::Qdrant,
+            "qdrant" | "server" => Self::Qdrant,
+            // Default depends on what's compiled in: the server build prefers the
+            // Qdrant hybrid stack; a lean build has only the in-process sqlite-vec
+            // backend, so default to it (never bail by surprise on a fresh setup).
+            _ => {
+                #[cfg(feature = "server-stack")]
+                {
+                    Self::Qdrant
+                }
+                #[cfg(not(feature = "server-stack"))]
+                {
+                    Self::SqliteVec
+                }
+            }
         }
     }
 }
+
+#[cfg(feature = "server-stack")]
 
 /// The Qdrant (server / hybrid stack) implementation — a thin adapter over the
 /// existing inherent `QdrantWrap` methods. UFCS (`QdrantWrap::method`) is used

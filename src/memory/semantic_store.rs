@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 use crate::retrieval::memory::MemoryHit;
 use crate::retrieval::memory_payload::SemanticMemory;
+#[cfg(feature = "server-stack")]
 use crate::retrieval::qdrant::QdrantWrap;
 
 /// Sort order for list results.
@@ -73,6 +74,7 @@ pub trait SemanticMemoryStore: Send + Sync {
     async fn list(&self, project_id: &str, filter: MemoryFilter) -> Result<Vec<MemoryHit>>;
 }
 
+#[cfg(feature = "server-stack")]
 /// Qdrant-backed implementation. Owns a [`QdrantWrap`] and the collection
 /// name (configurable so a deployment can isolate test/prod or run multiple
 /// memory namespaces side by side).
@@ -81,6 +83,7 @@ pub struct QdrantSemanticMemoryStore {
     collection: String,
 }
 
+#[cfg(feature = "server-stack")]
 impl QdrantSemanticMemoryStore {
     /// Build the store and bootstrap the collection if missing. `dim` must
     /// match the active embedder's output dimension.
@@ -101,6 +104,7 @@ impl QdrantSemanticMemoryStore {
     }
 }
 
+#[cfg(feature = "server-stack")]
 #[async_trait]
 impl SemanticMemoryStore for QdrantSemanticMemoryStore {
     async fn upsert(&self, m: &SemanticMemory, dense: &[f32]) -> Result<()> {
@@ -291,6 +295,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "server-stack")]
     /// E2E test exercising the full trait surface against a running Qdrant.
     /// Run with: cargo test -- --ignored semantic_memory_store_trait_roundtrip
     #[tokio::test]

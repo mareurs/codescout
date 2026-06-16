@@ -1580,6 +1580,7 @@ impl Agent {
                             crate::memory::sqlite_semantic_store::SqliteVecSemanticMemoryStore::from_env()?;
                         anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
                     }
+                    #[cfg(feature = "server-stack")]
                     VectorBackend::Qdrant => {
                         let config = crate::retrieval::config::RetrievalConfig::from_env()?;
                         let qdrant =
@@ -1592,6 +1593,12 @@ impl Agent {
                         .await?;
                         anyhow::Ok(Arc::new(store) as Arc<dyn SemanticMemoryStore>)
                     }
+                    #[cfg(not(feature = "server-stack"))]
+                    VectorBackend::Qdrant => anyhow::bail!(
+                        "CODESCOUT_VECTOR_BACKEND=qdrant requires the `server-stack` build \
+                         feature. Rebuild with `--features server-stack`, or use the lean lite \
+                         stack with CODESCOUT_VECTOR_BACKEND=sqlite-vec."
+                    ),
                 }
             })
             .await

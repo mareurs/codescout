@@ -114,6 +114,7 @@ pub async fn build_tool_context() -> Result<tools::ToolContext> {
             artifact_store::ArtifactBackend::SqliteVec => Some(std::sync::Arc::new(
                 artifact_store::SqliteVecArtifactStore::new(std::sync::Arc::clone(&catalog)),
             )),
+            #[cfg(feature = "server-stack")]
             artifact_store::ArtifactBackend::Qdrant => {
                 let connected = async {
                     let config = crate::retrieval::config::RetrievalConfig::from_env()?;
@@ -136,6 +137,15 @@ pub async fn build_tool_context() -> Result<tools::ToolContext> {
                         None
                     }
                 }
+            }
+            #[cfg(not(feature = "server-stack"))]
+            artifact_store::ArtifactBackend::Qdrant => {
+                tracing::warn!(
+                    "artifact vector backend is `qdrant` but this build lacks the `server-stack` \
+                     feature; artifact semantic search disabled. Use `[librarian] vector_backend \
+                     = \"sqlite-vec\"` (or CODESCOUT_ARTIFACT_BACKEND=sqlite-vec)."
+                );
+                None
             }
         };
 
@@ -364,6 +374,7 @@ pub(crate) async fn reindex_cli(repo: Option<&str>, force: bool) -> Result<()> {
     let artifact_store: Option<std::sync::Arc<dyn artifact_store::ArtifactVectorStore>> =
         match artifact_store::ArtifactBackend::resolve(None) {
             artifact_store::ArtifactBackend::SqliteVec => None,
+            #[cfg(feature = "server-stack")]
             artifact_store::ArtifactBackend::Qdrant => {
                 let config = crate::retrieval::config::RetrievalConfig::from_env()?;
                 let qdrant =
@@ -380,6 +391,13 @@ pub(crate) async fn reindex_cli(repo: Option<&str>, force: bool) -> Result<()> {
                     artifact_store::QdrantArtifactStore::new(qdrant, collection),
                 ))
             }
+            #[cfg(not(feature = "server-stack"))]
+            artifact_store::ArtifactBackend::Qdrant => anyhow::bail!(
+                "artifact reindex requested the `qdrant` backend but this build lacks the \
+                 `server-stack` feature; rebuild with `--features server-stack` or set \
+                 `[librarian] vector_backend = \"sqlite-vec\"` \
+                 (CODESCOUT_ARTIFACT_BACKEND=sqlite-vec)."
+            ),
         };
 
     let mut total = indexer::IndexReport::default();

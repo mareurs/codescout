@@ -1,6 +1,7 @@
 use crate::retrieval::code_store::{CodeVectorStore, VectorBackend};
 use crate::retrieval::config::RetrievalConfig;
 use crate::retrieval::embedder::EmbedderHttp;
+#[cfg(feature = "server-stack")]
 use crate::retrieval::qdrant::QdrantWrap;
 use crate::retrieval::reranker::RerankerHttp;
 use anyhow::Result;
@@ -31,7 +32,7 @@ impl RetrievalClient {
             VectorBackend::SqliteVec => {
                 Arc::new(crate::retrieval::sqlite_code_store::SqliteVecCodeStore::from_env()?)
             }
-            VectorBackend::Qdrant => Arc::new(QdrantWrap::connect(&config.qdrant_url).await?),
+            VectorBackend::Qdrant => Self::qdrant_code_store(&config).await?,
         };
         // The lite stack has no sparse server; also skip the sparse leg whenever
         // sparse is disabled (the vector isn't used → don't pay for it).
@@ -52,6 +53,24 @@ impl RetrievalClient {
         })
     }
 
+    /// Build the Qdrant-backed code store (server stack).
+    #[cfg(feature = "server-stack")]
+    async fn qdrant_code_store(config: &RetrievalConfig) -> Result<Arc<dyn CodeVectorStore>> {
+        Ok(Arc::new(QdrantWrap::connect(&config.qdrant_url).await?))
+    }
+
+    /// Lean build: Qdrant isn't compiled in, so a `qdrant` backend request is a
+    /// configuration error pointing at the fix.
+    #[cfg(not(feature = "server-stack"))]
+    async fn qdrant_code_store(_config: &RetrievalConfig) -> Result<Arc<dyn CodeVectorStore>> {
+        anyhow::bail!(
+            "CODESCOUT_VECTOR_BACKEND=qdrant requires the `server-stack` build feature. \
+             Rebuild with `--features server-stack`, or run the lean lite stack with \
+             CODESCOUT_VECTOR_BACKEND=sqlite-vec."
+        )
+    }
+
+    #[cfg(feature = "server-stack")]
     /// Constructs without connecting to Qdrant — for tests and config validation.
     /// Always the Qdrant (hybrid) shape; the lite stack is constructed via
     /// `from_env` with `CODESCOUT_VECTOR_BACKEND=sqlite-vec`.

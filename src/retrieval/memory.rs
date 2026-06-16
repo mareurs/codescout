@@ -5,17 +5,23 @@
 //! is defined in [`crate::retrieval::memory_payload`]; this module supplies
 //! the collection bootstrap and CRUD operations against Qdrant.
 
+#[cfg(feature = "server-stack")]
 use anyhow::{Context, Result};
+#[cfg(feature = "server-stack")]
 use qdrant_client::qdrant::{
     Condition, CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, DeletePointsBuilder,
     Distance, FieldType, Filter, PointId, PointStruct, PointsIdsList, Query, QueryPointsBuilder,
     ScrollPointsBuilder, UpsertPointsBuilder, VectorInput, VectorParamsBuilder,
     VectorsConfigBuilder,
 };
+#[cfg(feature = "server-stack")]
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::retrieval::memory_payload::{memory_to_payload, payload_to_memory, SemanticMemory};
+use crate::retrieval::memory_payload::SemanticMemory;
+#[cfg(feature = "server-stack")]
+use crate::retrieval::memory_payload::{memory_to_payload, payload_to_memory};
+#[cfg(feature = "server-stack")]
 use crate::retrieval::qdrant::QdrantWrap;
 
 /// One memory result from a search or scroll — payload decoded, point id
@@ -28,11 +34,13 @@ pub struct MemoryHit {
     pub score: Option<f32>,
 }
 
+#[cfg(feature = "server-stack")]
 /// Qdrant point ID for a memory — UUIDv5 over (project_id, bucket, title).
 fn memory_point_id(uuid: Uuid) -> PointId {
     PointId::from(uuid.to_string())
 }
 
+#[cfg(feature = "server-stack")]
 fn parse_uuid(id: &PointId) -> Option<Uuid> {
     let kind = id.point_id_options.as_ref()?;
     use qdrant_client::qdrant::point_id::PointIdOptions;
@@ -42,6 +50,7 @@ fn parse_uuid(id: &PointId) -> Option<Uuid> {
     }
 }
 
+#[cfg(feature = "server-stack")]
 impl QdrantWrap {
     /// Ensure the memories collection exists with a single dense vector and
     /// payload indexes on the filter fields we use most often. Idempotent —
@@ -225,6 +234,7 @@ impl QdrantWrap {
     }
 }
 
+#[cfg(feature = "server-stack")]
 #[cfg(test)]
 mod tests {
     use super::*;
