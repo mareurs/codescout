@@ -11,4 +11,5 @@ pub mod payload;
 pub mod qdrant;
 pub mod reranker;
 pub mod search;
+pub mod sqlite_code_store;
 pub mod sync;

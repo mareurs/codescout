@@ -66,6 +66,31 @@ pub trait CodeVectorStore: Send + Sync {
         project_id: &str,
     ) -> Result<(usize, usize)>;
 }
+/// Which code-vector backend the retrieval client uses.
+///
+/// - `Qdrant` (default) — the server / hybrid stack.
+/// - `SqliteVec` — the daemon-free lite stack (in-process `vec0`, dense-only).
+///
+/// Resolved from `CODESCOUT_VECTOR_BACKEND` (`qdrant` | `sqlite-vec` | `lite`).
+/// Mirrors the librarian's `ArtifactBackend` selector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VectorBackend {
+    Qdrant,
+    SqliteVec,
+}
+
+impl VectorBackend {
+    pub fn resolve() -> Self {
+        match std::env::var("CODESCOUT_VECTOR_BACKEND")
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "sqlite-vec" | "sqlite_vec" | "sqlite" | "local" | "lite" => Self::SqliteVec,
+            _ => Self::Qdrant,
+        }
+    }
+}
 
 /// The Qdrant (server / hybrid stack) implementation — a thin adapter over the
 /// existing inherent `QdrantWrap` methods. UFCS (`QdrantWrap::method`) is used

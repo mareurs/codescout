@@ -1,4 +1,4 @@
-use crate::retrieval::code_store::CodeVectorStore;
+use crate::retrieval::code_store::{CodeVectorStore, VectorBackend};
 use crate::retrieval::config::RetrievalConfig;
 use crate::retrieval::embedder::EmbedderHttp;
 use crate::retrieval::qdrant::QdrantWrap;
@@ -20,8 +20,14 @@ pub struct RetrievalClient {
 impl RetrievalClient {
     pub async fn from_env() -> Result<Self> {
         let config = RetrievalConfig::from_env()?;
-        let qdrant = QdrantWrap::connect(&config.qdrant_url).await?;
-        let code_store: Arc<dyn CodeVectorStore> = Arc::new(qdrant);
+        // Backend selection (server Qdrant vs daemon-free sqlite-vec lite stack).
+        // sqlite-vec never touches the network — no Qdrant connect probe.
+        let code_store: Arc<dyn CodeVectorStore> = match VectorBackend::resolve() {
+            VectorBackend::SqliteVec => {
+                Arc::new(crate::retrieval::sqlite_code_store::SqliteVecCodeStore::from_env()?)
+            }
+            VectorBackend::Qdrant => Arc::new(QdrantWrap::connect(&config.qdrant_url).await?),
+        };
         let embedder = EmbedderHttp::new(
             &config.embedder_url,
             &config.sparse_embedder_url,

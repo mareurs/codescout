@@ -43,6 +43,7 @@ pub mod prompts;
 pub mod retrieval;
 pub mod server;
 pub mod socket_discovery;
+pub mod sqlite_vec_ext;
 pub mod symbol;
 pub mod tools;
 pub mod usage;
