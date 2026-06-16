@@ -250,8 +250,16 @@ git commit -m "chore: bump version to X.Y.Z"
 # 4. Tag the release
 git tag vX.Y.Z
 
-# 5. Publish to crates.io
-CARGO_REGISTRY_TOKEN=$(grep CARGO_REGISTRY_TOKEN .env | cut -d= -f2) cargo publish
+# 5. Publish to crates.io — WORKSPACE PUBLISH ORDER MATTERS
+#    codescout has a path-dep on codescout-embed WITH a version requirement, so
+#    crates.io must already host a matching codescout-embed. If crates/codescout-embed
+#    changed since its last publish, bump + publish it FIRST (crates.io refuses to
+#    re-publish an existing version with changed content), then publish codescout.
+#    A non-compatible embed bump (e.g. 0.1.x -> 0.2.0; ^0.1.0 does NOT allow 0.2.0)
+#    also requires updating codescout's `codescout-embed = { ..., version = "..." }`.
+TOKEN=$(grep CARGO_REGISTRY_TOKEN .env | cut -d= -f2-)   # -f2- keeps '=' in the token
+CARGO_REGISTRY_TOKEN=$TOKEN cargo publish -p codescout-embed   # FIRST, only if it changed
+CARGO_REGISTRY_TOKEN=$TOKEN cargo publish                      # codescout SECOND
 
 # 6. Push commit + tag
 git push
@@ -265,7 +273,8 @@ git checkout experiments && git rebase master
 ```
 
 **Notes:**
-- Token is stored in `.env` (gitignored): `CARGO_REGISTRY_TOKEN=...`
+- Token is stored in `.env` (gitignored): `CARGO_REGISTRY_TOKEN=...` (use `cut -d= -f2-`, not `-f2` — the token can contain `=`)
+- **Workspace publish order:** publish `codescout-embed` before `codescout` whenever the embed crate changed; crates.io cannot re-publish an existing version with new content. Precedent: v0.15.0 bumped embed 0.1.0 -> 0.2.0.
 - Use semver: patch for bug fixes, minor for new features, major for breaking changes
 - Release notes should list features, dep upgrades, and doc changes
 - Always rebase `experiments` after the release push
