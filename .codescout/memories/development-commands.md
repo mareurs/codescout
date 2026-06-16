@@ -3,12 +3,18 @@
 ## codescout (main MCP server)
 
 ```bash
-cargo build --release        # release binary — required for live MCP testing
+cargo rb                     # ALIAS (.cargo/config.toml) = build --release --features server-stack
+                             # OUR STACK's live-MCP release build: with server-stack on, VectorBackend::resolve()
+                             # defaults to Qdrant — the full hybrid retrieval path against the running
+                             # llm-infra stack (.env.amd). This is what we run locally for live MCP testing.
+cargo build --release        # lean release (sqlite-vec lite, no Qdrant) — the daemon-free default repo
+                             # cloners get; NOT what we run locally. Used as the crates.io publish-verification build.
 cargo test                   # unit + integration tests (excludes #[ignore])
 cargo clippy -- -D warnings  # lint (must be clean before commit)
 cargo fmt                    # format (run before commit)
-# After release build, run /mcp to reconnect — symlink auto-updates
-# ~/.cargo/bin/codescout → target/release/codescout
+# After `cargo rb`, run /mcp to reconnect. Both `rb` and `build --release` emit the same
+# target/release/codescout (the feature flag doesn't change the output path), and the symlink
+# auto-updates: ~/.cargo/bin/codescout → target/release/codescout
 
 # Edit eval harness (ignored by default):
 cargo test --test e2e -- edit_eval_harness --ignored
