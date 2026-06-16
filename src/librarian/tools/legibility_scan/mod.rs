@@ -341,7 +341,7 @@ async fn ensure_tracker(ctx: &ToolContext) -> Result<(String, String)> {
         "kind": "tracker",
         "title": "Legibility Backlog",
         "rel_path": TRACKER_REL_PATH,
-        "tags": ["legibility", "dzo"],
+        "tags": ["codescout", "legibility", "dzo"],
         "body": "## Backlog (auto-managed)\n\n_Pending first scan._\n\n---\n\n## Verdicts (Dzo-owned)\n\n_Per-key triage goes here — classify code-class vs tool-class, name the move, note human-cost. One `### <key>` section per target the Dzo picks up._\n",
         "augment": { "prompt": include_str!("./render_prompt.md"), "params": empty }
     });

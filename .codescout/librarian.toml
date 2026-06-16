@@ -47,3 +47,18 @@ kind = "memory"
 [[rule]]
 glob = "crates/*/CREDITS.md"
 kind = "doc"
+
+# codescout-owned markdown shipped inside the source tree: prompt guides
+# (get_guide content), embedded render-prompt templates, src READMEs. These
+# are produced/owned by codescout itself — tag them "codescout" so they are
+# distinguishable from authored project docs, and rescue the template files
+# under src/**/tools/** that otherwise fall through to kind=unknown.
+[[rule]]
+glob = "src/**/*.md"
+kind = "doc"
+tags = ["codescout"]
+
+[[rule]]
+glob = "crates/*/src/**/*.md"
+kind = "doc"
+tags = ["codescout"]

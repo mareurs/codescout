@@ -381,7 +381,7 @@ async fn ensure_default_tracker(ctx: &ToolContext) -> Result<(String, String)> {
         "kind": "tracker",
         "title": "Doc Ref Audit",
         "rel_path": tracker_rel_path,
-        "tags": ["doc-ref-audit"],
+        "tags": ["codescout", "doc-ref-audit"],
         "body": "Auto-managed by `librarian(audit_doc_refs)`.\n",
         "augment": {
             "prompt": include_str!("./render_prompt.md"),

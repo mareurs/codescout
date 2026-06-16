@@ -143,7 +143,17 @@ pub fn index_repo_sync(
             .and_then(|f| f.title.clone())
             .or_else(|| first_h1(body));
         let owners = fm.as_ref().map(|f| f.owners.clone()).unwrap_or_default();
-        let tags = fm.as_ref().map(|f| f.tags.clone()).unwrap_or_default();
+        // Tags are the union of frontmatter tags and any tags the matching
+        // classifier rule contributes. Rule tags never overwrite — they add,
+        // so a hand-authored `tags:` list is preserved and augmented.
+        let mut tags = fm.as_ref().map(|f| f.tags.clone()).unwrap_or_default();
+        if let Some(rm) = rule_match.as_ref() {
+            for t in &rm.tags {
+                if !tags.contains(t) {
+                    tags.push(t.clone());
+                }
+            }
+        }
         let topic = fm.as_ref().and_then(|f| f.topic.clone());
 
         // Decide whether anything needs writing.
@@ -740,6 +750,54 @@ kind = "memory"
             .unwrap()
             .unwrap();
         assert_eq!(row.title.as_deref(), Some("Title X"));
+    }
+    #[test]
+    fn index_unions_rule_tags_with_frontmatter_tags() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("src/tools")).unwrap();
+        // No frontmatter — the tag comes solely from the matching rule, and
+        // the file is rescued from kind=unknown. Mirrors the embedded
+        // render_prompt.md templates under src/**/tools/**.
+        std::fs::write(
+            root.join("src/tools/render_prompt.md"),
+            "# Render Prompt\n\nbody\n",
+        )
+        .unwrap();
+        // Hand-authored frontmatter tag must be preserved AND augmented with
+        // the rule tag — union, not overwrite.
+        std::fs::write(
+            root.join("src/tools/with_fm.md"),
+            "---\nkind: doc\ntags:\n  - manual\n---\n\n# With FM\n",
+        )
+        .unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let rules = crate::librarian::classify::load_rules(
+            "[[rule]]\nglob = \"src/**/*.md\"\nkind = \"doc\"\ntags = [\"codescout\"]\n",
+        )
+        .unwrap();
+        let ignore = globset::GlobSet::empty();
+        let (report, _) = index_repo_sync(&cat, &rules, root, &ignore, false, false).unwrap();
+        assert_eq!(report.added, 2);
+
+        let id_no_fm =
+            crate::librarian::ids::artifact_id_from_abs(&root.join("src/tools/render_prompt.md"));
+        let row = crate::librarian::catalog::artifact::get(&cat, &id_no_fm)
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.kind, "doc", "rule rescues the file from kind=unknown");
+        assert_eq!(row.tags, vec!["codescout".to_string()]);
+
+        let id_fm = crate::librarian::ids::artifact_id_from_abs(&root.join("src/tools/with_fm.md"));
+        let row = crate::librarian::catalog::artifact::get(&cat, &id_fm)
+            .unwrap()
+            .unwrap();
+        // Frontmatter tag first (preserved), rule tag appended, no dupes.
+        assert_eq!(
+            row.tags,
+            vec!["manual".to_string(), "codescout".to_string()]
+        );
     }
 
     #[test]

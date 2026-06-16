@@ -18,6 +18,10 @@ pub struct Rule {
     pub status: Option<String>,
     #[serde(default)]
     pub time_scope: Option<String>,
+    /// Tags applied to every artifact matching this rule. Merged (union) with
+    /// any frontmatter `tags` at index time — rule tags never overwrite, only add.
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -26,6 +30,7 @@ pub struct CompiledRule {
     pub kind: String,
     pub status: Option<String>,
     pub time_scope: Option<String>,
+    pub tags: Vec<String>,
 }
 
 pub fn compile_rules(rules: &[Rule]) -> Result<Vec<CompiledRule>> {
@@ -40,6 +45,7 @@ pub fn compile_rules(rules: &[Rule]) -> Result<Vec<CompiledRule>> {
                 kind: r.kind.clone(),
                 status: r.status.clone(),
                 time_scope: r.time_scope.clone(),
+                tags: r.tags.clone(),
             })
         })
         .collect()
@@ -155,6 +161,7 @@ pub struct Classification {
     pub kind: String,
     pub status: Option<String>,
     pub time_scope: Option<String>,
+    pub tags: Vec<String>,
 }
 
 pub fn classify(rules: &[CompiledRule], rel_path: &str) -> Option<Classification> {
@@ -164,6 +171,7 @@ pub fn classify(rules: &[CompiledRule], rel_path: &str) -> Option<Classification
                 kind: r.kind.clone(),
                 status: r.status.clone(),
                 time_scope: r.time_scope.clone(),
+                tags: r.tags.clone(),
             });
         }
     }
@@ -205,6 +213,33 @@ kind = "roadmap"
         let c = classify(&rules, "docs/superpowers/specs/foo.md").unwrap();
         assert_eq!(c.kind, "spec");
         assert_eq!(c.status.as_deref(), Some("active"));
+    }
+    #[test]
+    fn classify_propagates_rule_tags() {
+        let toml = r#"
+    [[rule]]
+    glob = "src/**/*.md"
+    kind = "doc"
+    tags = ["codescout"]
+    "#;
+        let rules = load_rules(toml).unwrap();
+        // A src-tree template that has no `prompts/` segment — the case that
+        // previously fell through to kind=unknown.
+        let c = classify(
+            &rules,
+            "src/librarian/tools/legibility_scan/render_prompt.md",
+        )
+        .unwrap();
+        assert_eq!(c.kind, "doc");
+        assert_eq!(c.tags, vec!["codescout".to_string()]);
+    }
+
+    #[test]
+    fn classify_tags_default_empty_when_rule_omits_them() {
+        // Rules that don't declare `tags` yield an empty tag set, not a panic.
+        let rules = load_rules(sample()).unwrap();
+        let c = classify(&rules, "docs/superpowers/specs/foo.md").unwrap();
+        assert!(c.tags.is_empty());
     }
 
     #[test]

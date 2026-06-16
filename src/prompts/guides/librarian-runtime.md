@@ -116,8 +116,41 @@ filterable `params`):
 A project may ship `<project>/.codescout/librarian.toml` with
 `[[rule]]` entries declaring kinds for its own paths. Precedence:
 project rules > workspace rules (`workspace.toml`) > built-in
-defaults.
+defaults. Within a tier, **first match wins**, so order rules
+most-specific-first.
 
+Each `[[rule]]` accepts:
+
+| Field | Required | Effect |
+|---|---|---|
+| `glob` | yes | Path glob (repo-relative); `**` spans directories, `*` does not cross `/`. |
+| `kind` | yes | Artifact kind assigned on match (`doc`, `tracker`, `memory`, …). |
+| `status` | no | Initial status for matched files. |
+| `time_scope` | no | e.g. `dated_snapshot` for review/research memos. |
+| `tags` | no | Tags **unioned** into every matched artifact. Additive — never overwrites a file's own frontmatter `tags:`. |
+
+`kind`/`status` from a rule are only a *fallback*: an artifact's own
+frontmatter `kind:`/`status:` wins. `tags`, by contrast, **merge** — a
+rule tag is appended to (not replaced by) any frontmatter tags, deduped.
+This makes `tags` the right tool for flagging a *family* of files by
+path without disturbing per-file metadata.
+
+Example — flag everything codescout produces under its source tree, and
+rescue embedded template files that would otherwise classify as
+`unknown`:
+
+```toml
+[[rule]]
+glob = "src/**/*.md"
+kind = "doc"
+tags = ["codescout"]
+```
+
+Query the family back with array-membership (`contains`, not `in`):
+
+```
+artifact(action="find", filter={"tags": {"contains": "codescout"}})
+```
 ## Event authorship discipline
 
 - Before non-trivial artifact work (revising a spec/plan/ADR,
