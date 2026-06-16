@@ -84,16 +84,25 @@ they build their own `QdrantWrap` — the same decoupling the lite stack needs. 
 satisfy the same tests. (A live Qdrant-vs-trait parity test isn't runnable in CI — no
 Qdrant daemon — so the contract test stands in; the sqlite-vec impl reruns it.)
 
-**Phase 2 — sqlite-vec impls for code + memory.** Add `SqliteVec` impls for the code
-store and a production `SqliteVecSemanticMemoryStore`, reusing the librarian
-`vec0`/catalog plumbing. Unify backend selection into one
-`CODESCOUT_VECTOR_BACKEND=qdrant|sqlite-vec` (default `qdrant`) consulted by all three
-consumers (fold in the librarian's existing `CODESCOUT_ARTIFACT_BACKEND`).
+**Phase 2a — DONE (`b96c8ae4`).** `SqliteVecCodeStore` (`src/retrieval/sqlite_code_store.rs`):
+one DB per project id under `$CODESCOUT_SQLITE_DIR` (else `<home>/.codescout/embeddings`),
+lazy table creation with the `vec0` dim inferred from embeddings, dense-only KNN
+(`vec0 k = ?`), idempotent upsert, language/project filtering, 4 real-`vec0` tests.
+Shared non-gated `vec0` registration in `src/sqlite_vec_ext.rs` (librarian delegates
+to it). `VectorBackend{Qdrant,SqliteVec}` resolved from `CODESCOUT_VECTOR_BACKEND`;
+`RetrievalClient::from_env` picks the backend (sqlite-vec never connects to Qdrant).
 
-**Phase 3 — Lite wiring + build.** `sqlite-vec` backend ⟹ dense-only (skip sparse +
-reranker, never connect Qdrant), remote OpenAI dense. Ship `.env.lite` and a VDI
-install section extending `docs/manual/src/configuration/embeddings-edr-windows.md`.
-Verify with `cargo check --target x86_64-pc-windows-gnu`.
+**Phase 2b — TODO.** Production `SqliteVecSemanticMemoryStore` + wire
+`Agent::semantic_memory_store` to the backend selector. (Folding the librarian's
+`CODESCOUT_ARTIFACT_BACKEND` into the unified `CODESCOUT_VECTOR_BACKEND` is deferred —
+keep the artifact selector as-is for back-compat for now.)
+
+**Phase 3 — DONE (`9d40d36b`).** `sqlite-vec` backend ⟹ dense-only embedding
+(`EmbedderHttp::dense_only`: `embed()`/`embed_batch()` skip the sparse leg) + `lite`
+flag that skips the reranker in `search_in`; never connects Qdrant. Added
+`EmbedderHttp` `EMBED_API_KEY` Bearer auth with the HTTPS-or-loopback guard.
+Shipped `.env.lite` + a "daemon-free lite stack" section in the EDR runbook.
+windows-gnu verified.
 
 **Phase 4 — Feature-gate the server stack; default lean (tracker task 6).** Put Stack A
 (qdrant-client + sparse + reranker, incl. AMD/Infinity) behind a `server-stack` cargo
