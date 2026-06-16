@@ -2,6 +2,32 @@
 
 All notable changes to codescout are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- **Dense embeddings are now always OpenAI-compatible.** Removed the
+  `DenseProtocol::Tei` path and the `CODESCOUT_EMBEDDER_PROTOCOL` env var —
+  every shipped profile (cpu/gpu/amd) already used the OpenAI-compatible
+  `/v1/embeddings` endpoint (llama-server, vLLM, Ollama, OpenAI, or a
+  corporate gateway). The dense leg is one code path now; nothing to
+  configure. The reranker protocol toggle
+  (`CODESCOUT_RERANKER_PROTOCOL=tei|infinity`) is unchanged.
+
+### Fixed
+
+- **Memory recall no longer makes a wasted sparse-embedding HTTP call.**
+  `HttpDenseEmbedder` (memory / dense-only retrieval) now hits only the
+  dense endpoint via `EmbedderHttp::dense_query`, instead of computing a
+  sparse vector it immediately discarded.
+
+### Removed
+
+- **Benchmark matrix scaffolding** — `docker-compose.matrix.yml` and
+  `scripts/chunk-model-matrix.py`. The tuned defaults they produced (chunk
+  size, `CODESCOUT_BM25_BOOST`) remain baked in; the orchestration harness
+  is recoverable from git history.
+
 ## [0.14.0] — 2026-05-25
 
 ### Added

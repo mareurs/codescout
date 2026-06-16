@@ -1,15 +1,14 @@
-use codescout::retrieval::embedder::{DenseProtocol, EmbedderHttp};
+use codescout::retrieval::embedder::EmbedderHttp;
 
 #[tokio::test]
-
 async fn embedder_returns_dense_and_sparse() {
     let mut dense_server = mockito::Server::new_async().await;
     let mut sparse_server = mockito::Server::new_async().await;
     let dense_mock = dense_server
-        .mock("POST", "/embed")
+        .mock("POST", "/v1/embeddings")
         .with_status(200)
         .with_header("content-type", "application/json")
-        .with_body(r#"[[0.1, 0.2, 0.3]]"#)
+        .with_body(r#"{"data":[{"embedding":[0.1,0.2,0.3],"index":0}]}"#)
         .create_async()
         .await;
     let sparse_mock = sparse_server
@@ -20,14 +19,8 @@ async fn embedder_returns_dense_and_sparse() {
         .create_async()
         .await;
 
-    let eb = EmbedderHttp::with_protocol(
-        dense_server.url(),
-        sparse_server.url(),
-        3,
-        DenseProtocol::Tei,
-        "",
-        "",
-    );
+    let eb =
+        EmbedderHttp::with_config(dense_server.url(), sparse_server.url(), 3, "test-model", "");
     let out = eb.embed("hello").await.expect("embed");
 
     assert_eq!(out.dense, vec![0.1_f32, 0.2, 0.3]);
@@ -39,14 +32,13 @@ async fn embedder_returns_dense_and_sparse() {
 }
 
 #[tokio::test]
-
 async fn embedder_dim_mismatch_errors() {
     let mut dense_server = mockito::Server::new_async().await;
     let mut sparse_server = mockito::Server::new_async().await;
     dense_server
-        .mock("POST", "/embed")
+        .mock("POST", "/v1/embeddings")
         .with_status(200)
-        .with_body(r#"[[0.1, 0.2]]"#)
+        .with_body(r#"{"data":[{"embedding":[0.1,0.2],"index":0}]}"#)
         .create_async()
         .await;
     sparse_server
@@ -56,12 +48,11 @@ async fn embedder_dim_mismatch_errors() {
         .create_async()
         .await;
 
-    let eb = EmbedderHttp::with_protocol(
+    let eb = EmbedderHttp::with_config(
         dense_server.url(),
         sparse_server.url(),
         1024,
-        DenseProtocol::Tei,
-        "",
+        "test-model",
         "",
     );
     let err = eb.embed("hi").await.unwrap_err();

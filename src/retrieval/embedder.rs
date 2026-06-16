@@ -13,26 +13,10 @@ pub struct EmbedOutput {
     pub sparse: SparseVector,
 }
 
-/// Wire format for the dense leg.
-///
-/// * `Tei` — Hugging Face TEI native: `POST {base}/embed` with `{"inputs":[...]}`,
-///   response `[[f32], ...]`.
-/// * `OpenAi` — OpenAI-compatible (llama-server, vLLM, OpenAI proper):
-///   `POST {base}/v1/embeddings` with `{"input":[...],"model":"..."}`,
-///   response `{"data":[{"embedding":[...],"index":N},...]}`.
-///
-/// Selected via `CODESCOUT_EMBEDDER_PROTOCOL` env var (default `tei`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DenseProtocol {
-    Tei,
-    OpenAi,
-}
-
 pub struct EmbedderHttp {
     dense_base: String,
     sparse_base: String,
     expected_dim: usize,
-    dense_protocol: DenseProtocol,
     dense_model_name: String,
     /// Optional prefix prepended to the dense query text in `embed()` (search side).
     /// Doc-side `embed_batch()` is unaffected. Configure via `CODESCOUT_QUERY_PREFIX` —
@@ -75,21 +59,12 @@ impl EmbedderHttp {
         sparse_base: impl Into<String>,
         expected_dim: usize,
     ) -> Self {
-        let dense_protocol = match std::env::var("CODESCOUT_EMBEDDER_PROTOCOL")
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .as_str()
-        {
-            "openai" | "llama-server" | "llama_server" | "llamacpp" => DenseProtocol::OpenAi,
-            _ => DenseProtocol::Tei,
-        };
         let dense_model_name = std::env::var("CODESCOUT_EMBEDDER_MODEL_NAME").unwrap_or_default();
         let query_prefix = std::env::var("CODESCOUT_QUERY_PREFIX").unwrap_or_default();
-        Self::with_protocol(
+        Self::with_config(
             dense_base,
             sparse_base,
             expected_dim,
-            dense_protocol,
             dense_model_name,
             query_prefix,
         )
@@ -97,14 +72,14 @@ impl EmbedderHttp {
 
     /// Construct without reading process env vars.
     ///
-    /// Use this from tests and any caller that wants explicit control over
-    /// the dense protocol, model name, and query prefix. `new()` is the env-
-    /// reading convenience for production callers.
-    pub fn with_protocol(
+    /// Use this from tests and any caller that wants explicit control over the
+    /// dense model name and query prefix. `new()` is the env-reading convenience
+    /// for production callers. Dense embedding is always OpenAI-compatible
+    /// (`POST {base}/v1/embeddings`).
+    pub fn with_config(
         dense_base: impl Into<String>,
         sparse_base: impl Into<String>,
         expected_dim: usize,
-        dense_protocol: DenseProtocol,
         dense_model_name: impl Into<String>,
         query_prefix: impl Into<String>,
     ) -> Self {
@@ -113,57 +88,63 @@ impl EmbedderHttp {
             dense_base: dense_base.into(),
             sparse_base: sparse_base.into(),
             expected_dim,
-            dense_protocol,
             dense_model_name: dense_model_name.into(),
             query_prefix: query_prefix.into(),
             client: reqwest::Client::new(),
         }
     }
 
-    /// Send a dense-embedding batch using the configured protocol.
-    /// Returns one vector per input, in the same order.
+    /// Send a dense-embedding batch to the OpenAI-compatible endpoint
+    /// (`POST {base}/v1/embeddings`). Returns one vector per input, in input
+    /// order. Works against any OpenAI-shape server — llama-server, vLLM, Ollama,
+    /// OpenAI proper, or a corporate embedding gateway.
     async fn dense_batch(&self, inputs: &[&str]) -> Result<Vec<Vec<f32>>> {
-        match self.dense_protocol {
-            DenseProtocol::Tei => {
-                let url = format!("{}/embed", self.dense_base);
-                let body = serde_json::json!({ "inputs": inputs });
-                let resp: Vec<Vec<f32>> = self
-                    .client
-                    .post(&url)
-                    .json(&body)
-                    .send()
-                    .await
-                    .context("dense tei send")?
-                    .error_for_status()
-                    .context("dense tei status")?
-                    .json()
-                    .await
-                    .context("dense tei json")?;
-                Ok(resp)
-            }
-            DenseProtocol::OpenAi => {
-                let url = format!("{}/v1/embeddings", self.dense_base);
-                let body = OpenAiEmbedReq {
-                    input: inputs.to_vec(),
-                    model: &self.dense_model_name,
-                };
-                let resp: OpenAiEmbedResp = self
-                    .client
-                    .post(&url)
-                    .json(&body)
-                    .send()
-                    .await
-                    .context("dense openai send")?
-                    .error_for_status()
-                    .context("dense openai status")?
-                    .json()
-                    .await
-                    .context("dense openai json")?;
-                let mut items = resp.data;
-                items.sort_by_key(|i| i.index);
-                Ok(items.into_iter().map(|i| i.embedding).collect())
-            }
+        let url = format!("{}/v1/embeddings", self.dense_base);
+        let body = OpenAiEmbedReq {
+            input: inputs.to_vec(),
+            model: &self.dense_model_name,
+        };
+        let resp: OpenAiEmbedResp = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .context("dense openai send")?
+            .error_for_status()
+            .context("dense openai status")?
+            .json()
+            .await
+            .context("dense openai json")?;
+        let mut items = resp.data;
+        items.sort_by_key(|i| i.index);
+        Ok(items.into_iter().map(|i| i.embedding).collect())
+    }
+    /// Dense-only query embedding: applies the configured `query_prefix` (if any)
+    /// and hits ONLY the dense endpoint — no sparse leg. This is the path for
+    /// dense-only retrieval (memory recall today; the sqlite-vec "lite" stack
+    /// tomorrow), which never needs sparse terms. Distinct from [`Self::embed`],
+    /// which also fetches the sparse vector for hybrid code search.
+    pub async fn dense_query(&self, text: &str) -> Result<Vec<f32>> {
+        let dense_text = if self.query_prefix.is_empty() {
+            text.to_string()
+        } else {
+            format!("{}{}", self.query_prefix, text)
+        };
+        let dense = self
+            .dense_batch(&[dense_text.as_str()])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("empty dense response"))?;
+        if dense.len() != self.expected_dim {
+            return Err(anyhow!(
+                "embed dim mismatch: got {}, expected {}",
+                dense.len(),
+                self.expected_dim
+            ));
         }
+        Ok(dense)
     }
 
     pub async fn embed(&self, text: &str) -> Result<EmbedOutput> {
@@ -342,6 +323,8 @@ impl HttpDenseEmbedder {
 #[async_trait::async_trait]
 impl DenseEmbedder for HttpDenseEmbedder {
     async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
-        Ok(self.inner.embed(text).await?.dense)
+        // Dense-only: no sparse leg. Memory recall (and the lite stack) rank on
+        // the dense vector alone, so skip the sparse HTTP round-trip entirely.
+        self.inner.dense_query(text).await
     }
 }

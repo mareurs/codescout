@@ -38,7 +38,6 @@ search with sparse SPLADE keyword search, fused via Reciprocal Rank Fusion
 
 | Env | Default | Effect |
 |---|---|---|
-| `CODESCOUT_EMBEDDER_PROTOCOL` | `tei` | `tei` or `openai` (e.g. for Ollama) |
 | `CODESCOUT_EMBEDDER_MODEL_NAME` | (empty) | Model id sent in OpenAI-protocol payloads |
 | `CODESCOUT_QUERY_PREFIX` | (empty) | Prepended to query text only — for asymmetric models like Nomic |
 | `CODESCOUT_RERANKER_PROTOCOL` | `tei` | `tei` or `infinity` |
