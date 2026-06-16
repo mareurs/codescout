@@ -5,7 +5,8 @@ use serde_json::{json, Value};
 
 use super::{parse_bool_param, Tool, ToolContext};
 use crate::tools::edit_repair::{
-    decode_literal_escapes, finalize_edit_content, RepairResult, REPAIR_NOTE,
+    decode_literal_escapes, decode_literal_escapes_incl_quotes, finalize_edit_content,
+    RepairResult, REPAIR_NOTE,
 };
 use crate::util::text::{leading_ws, reindent_block};
 
@@ -33,11 +34,19 @@ fn def_keywords_for_lang(lang: &str) -> &'static [&'static str] {
 }
 
 /// Returns the matched definition keyword for error reporting, if any.
+/// Comment lines (// /* * #) are skipped so a keyword inside a comment
+/// does not falsely trip the structural-rewrite guard.
 fn find_def_keyword(s: &str, lang: &str) -> Option<&'static str> {
-    def_keywords_for_lang(lang)
-        .iter()
-        .find(|kw| s.contains(**kw))
-        .copied()
+    let keywords = def_keywords_for_lang(lang);
+    s.lines()
+        .filter(|line| {
+            let t = line.trim_start();
+            !t.starts_with("//")
+                && !t.starts_with("/*")
+                && !t.starts_with('*')
+                && !t.starts_with('#')
+        })
+        .find_map(|line| keywords.iter().find(|kw| line.contains(**kw)).copied())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -622,6 +631,35 @@ async fn perform_edit(
                     "status": "ok",
                     "applied_via": "escape-decoded match",
                     "note": "old_string matched after decoding literal newline/tab escapes; verify the result"
+                }));
+            }
+        }
+        // Second-tier recovery: over-escaped quotes (backslash-quote). A common MCP-client
+        // failure (5/13 edit_file stale-matches, 2026-06-09) where the client over-escapes
+        // interior quotes that the file holds plain. Runs only after the conservative decode
+        // above produced no unique match. Same unique-match gate keeps it safe; quote decoding
+        // is whitespace-neutral, so it is sound to run before the indentation-significant bail.
+        // Decodes both old and new (an over-escaping client over-escapes both); the
+        // "verify the result" note flags the rare asymmetric case.
+        if let Some(decoded_old) = decode_literal_escapes_incl_quotes(old_string) {
+            let dcount = content.matches(decoded_old.as_str()).count();
+            if dcount == 1 || (replace_all && dcount >= 1) {
+                let decoded_new = decode_literal_escapes_incl_quotes(new_string)
+                    .unwrap_or_else(|| new_string.to_string());
+                let candidate = content.replace(decoded_old.as_str(), &decoded_new);
+                let new_content = finalize_edit_content(
+                    std::path::Path::new(path),
+                    &content,
+                    candidate,
+                    &decoded_new,
+                    |d| content.replace(decoded_old.as_str(), d),
+                )
+                .into_content();
+                commit_edit(ctx, &resolved, &new_content).await?;
+                return Ok(json!({
+                    "status": "ok",
+                    "applied_via": "escape-decoded match (quotes)",
+                    "note": "old_string matched after decoding escaped quotes; verify the result"
                 }));
             }
         }

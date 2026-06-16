@@ -3173,6 +3173,40 @@ fn infer_edit_hint_replace_symbol_for_class() {
     let hint = infer_edit_hint("class Foo {\n    x: i32\n}", "class Foo {\n    y: i32\n}");
     assert!(hint.contains("edit_code"), "got: {hint}");
 }
+#[test]
+fn find_def_keyword_ignores_class_in_comment() {
+    // Regression: "class" inside a comment line must not trip the structural guard.
+    // Reported friction: editing Java/Kotlin code with "slot-intersection class" in a comment
+    // caused the guard to fire even though no real class definition was being rewritten.
+    use super::{find_def_keyword, guard_structural_rewrite};
+
+    // "class " appears only in a comment — must not be detected
+    let s = "// handles the slot-intersection class cases\nfoo = bar;\n";
+    assert!(
+        find_def_keyword(s, "java").is_none(),
+        "comment-only 'class' must not be a def keyword"
+    );
+    assert!(
+        find_def_keyword(s, "kotlin").is_none(),
+        "comment-only 'class' must not be a def keyword (kotlin)"
+    );
+
+    // Real class definition must still be detected
+    let real = "class Foo {\n    x: i32\n}";
+    assert!(find_def_keyword(real, "java").is_some());
+    assert!(find_def_keyword(real, "kotlin").is_some());
+
+    // guard_structural_rewrite must pass for the comment case
+    let result = guard_structural_rewrite(
+        "Foo.java",
+        "// slot-intersection class cases\nfoo = bar;\n",
+        "// slot-intersection class cases\nbaz = bar;\n",
+    );
+    assert!(
+        result.is_ok(),
+        "guard must not fire for comment-only keyword: {result:?}"
+    );
+}
 
 #[test]
 fn infer_edit_hint_insert_code_when_new_is_longer() {
@@ -3462,6 +3496,148 @@ async fn edit_file_matches_old_string_with_literal_newline_escapes() {
         result.get("applied_via").and_then(|v| v.as_str()),
         Some("escape-decoded match"),
         "should report the decode-fallback path: {result:?}"
+    );
+}
+#[tokio::test]
+async fn edit_file_recovers_over_escaped_quotes_single_line() {
+    // Regression for the 5x cluster (docs/.../2026-06-16-edit-file-escaped-quote-recovery-design.md):
+    // file holds plain quotes; old_string over-escapes them (no newline). The conservative
+    // decode tier has nothing to decode, so the quote tier must recover the match.
+    let dir = tempdir().unwrap();
+    let ctx = repair_ctx(dir.path()).await;
+    let src_file = dir.path().join("src/lib.rs");
+    std::fs::create_dir_all(src_file.parent().unwrap()).unwrap();
+    std::fs::write(&src_file, "fn a() {\n    assert!(x, \"msg\");\n}\n").unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "old_string": "assert!(x, \\\"msg\\\");",
+                "new_string": "assert!(y, \\\"msg\\\");"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let content = std::fs::read_to_string(&src_file).unwrap();
+    assert!(
+        content.contains("assert!(y, \"msg\");"),
+        "quote-decode recovery should apply the edit with plain quotes: {content}"
+    );
+    assert_eq!(
+        result.get("applied_via").and_then(|v| v.as_str()),
+        Some("escape-decoded match (quotes)"),
+        "should report the quote-decode recovery path: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn edit_file_recovers_over_escaped_quotes_with_newline() {
+    // The literal tests.rs shape from the data: newline AND quotes both over-escaped.
+    let dir = tempdir().unwrap();
+    let ctx = repair_ctx(dir.path()).await;
+    let src_file = dir.path().join("src/lib.rs");
+    std::fs::create_dir_all(src_file.parent().unwrap()).unwrap();
+    std::fs::write(&src_file, "fn a() {\n    assert!(x, \"msg\");\n}\n").unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "old_string": "    assert!(x, \\\"msg\\\");\\n}",
+                "new_string": "    assert!(y, \\\"msg\\\");\\n}"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let content = std::fs::read_to_string(&src_file).unwrap();
+    assert!(
+        content.contains("assert!(y, \"msg\");"),
+        "newline+quote recovery should apply the edit: {content}"
+    );
+    assert_eq!(
+        result.get("applied_via").and_then(|v| v.as_str()),
+        Some("escape-decoded match (quotes)"),
+        "should report the quote-decode recovery path: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn edit_file_leaves_genuine_escaped_quote_in_file_to_exact_path() {
+    // Safety: a file that genuinely contains an escaped quote (a Rust string literal
+    // `"a\"b"`) is matched by an exact old_string carrying the same `\"`. The exact path
+    // must fire — the quote-recovery tier is never entered (no applied_via).
+    let dir = tempdir().unwrap();
+    let ctx = repair_ctx(dir.path()).await;
+    let src_file = dir.path().join("src/lib.rs");
+    std::fs::create_dir_all(src_file.parent().unwrap()).unwrap();
+    std::fs::write(&src_file, "fn a() {\n    let s = \"a\\\"b\";\n}\n").unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "old_string": "    let s = \"a\\\"b\";",
+                "new_string": "    let s = \"a\\\"b\"; // edited"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let content = std::fs::read_to_string(&src_file).unwrap();
+    assert!(
+        content.contains("// edited"),
+        "exact match should apply the edit: {content}"
+    );
+    assert!(
+        result.get("applied_via").is_none(),
+        "exact path must not route through any recovery tier: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn edit_file_ambiguous_quote_decode_does_not_apply() {
+    // Safety: a quote-decoded old_string that matches >1 region with replace_all=false
+    // must NOT be written by the recovery tier — it falls through to not-found.
+    let dir = tempdir().unwrap();
+    let ctx = repair_ctx(dir.path()).await;
+    let src_file = dir.path().join("src/lib.rs");
+    std::fs::create_dir_all(src_file.parent().unwrap()).unwrap();
+    std::fs::write(
+        &src_file,
+        "fn a() {\n    let s = \"x\";\n    let t = \"x\";\n}\n",
+    )
+    .unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "old_string": "\\\"x\\\"",
+                "new_string": "\\\"REPLACED\\\""
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(
+        result.is_err(),
+        "ambiguous quote-decode must not silently apply: {result:?}"
+    );
+    let content = std::fs::read_to_string(&src_file).unwrap();
+    assert!(
+        !content.contains("REPLACED"),
+        "no write should occur on an ambiguous decode: {content}"
+    );
+    assert_eq!(
+        content.matches("\"x\"").count(),
+        2,
+        "both original occurrences must be untouched: {content}"
     );
 }
 

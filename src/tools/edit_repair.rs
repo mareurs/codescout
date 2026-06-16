@@ -19,13 +19,13 @@ use std::path::Path;
 pub(crate) const REPAIR_NOTE: &str =
     "auto-corrected literal newline/tab escapes in the payload to real characters";
 
-/// Decode the literal escape sequences an MCP client may deliver un-decoded
-/// (newline, tab, carriage-return as backslash-n / backslash-t / backslash-r).
-/// Returns `None` when the input contains none of them, so callers can cheaply
-/// skip the repair path. Single left-to-right pass; a backslash before any other
-/// character is left intact, so escaped quotes, doubled backslashes, and regex
-/// escapes survive untouched.
-pub(crate) fn decode_literal_escapes(s: &str) -> Option<String> {
+/// Shared escape-decoding scan. When `decode_quotes` is false this is the
+/// conservative decoder (newline/tab/carriage-return only); when true it also
+/// decodes escaped quotes (`\"` and `\'`). A doubled backslash (`\\`) is never
+/// decoded under either mode — that is genuinely dangerous (regex literals,
+/// Windows paths). Returns `None` when nothing was decoded so callers can
+/// cheaply skip the repair path.
+fn decode_literal_escapes_inner(s: &str, decode_quotes: bool) -> Option<String> {
     if !s.contains('\\') {
         return None;
     }
@@ -50,6 +50,16 @@ pub(crate) fn decode_literal_escapes(s: &str) -> Option<String> {
                     chars.next();
                     changed = true;
                 }
+                Some('"') if decode_quotes => {
+                    out.push('"');
+                    chars.next();
+                    changed = true;
+                }
+                Some('\'') if decode_quotes => {
+                    out.push('\'');
+                    chars.next();
+                    changed = true;
+                }
                 _ => out.push('\\'),
             }
         } else {
@@ -57,6 +67,26 @@ pub(crate) fn decode_literal_escapes(s: &str) -> Option<String> {
         }
     }
     changed.then_some(out)
+}
+
+/// Decode the literal escape sequences an MCP client may deliver un-decoded
+/// (newline, tab, carriage-return as backslash-n / backslash-t / backslash-r).
+/// Returns `None` when the input contains none of them, so callers can cheaply
+/// skip the repair path. Single left-to-right pass; a backslash before any other
+/// character is left intact, so escaped quotes, doubled backslashes, and regex
+/// escapes survive untouched.
+pub(crate) fn decode_literal_escapes(s: &str) -> Option<String> {
+    decode_literal_escapes_inner(s, false)
+}
+
+/// Aggressive recovery variant: decodes `\"` and `\'` in addition to the
+/// conservative `\n`/`\t`/`\r`. Used only as a second-tier recovery in
+/// `perform_edit` after the conservative decode fails to produce a unique
+/// match — a common MCP-client failure where the client over-escapes interior
+/// quotes. Still never decodes `\\`. The unique-match gate at the call site
+/// keeps it as safe as the conservative tier.
+pub(crate) fn decode_literal_escapes_incl_quotes(s: &str) -> Option<String> {
+    decode_literal_escapes_inner(s, true)
 }
 
 /// Outcome of [`finalize_edit_content`].
@@ -145,6 +175,34 @@ mod tests {
     #[test]
     fn decode_literal_escapes_none_when_nothing_to_decode() {
         assert_eq!(decode_literal_escapes("plain text"), None);
+    }
+    #[test]
+    fn decode_incl_quotes_decodes_escaped_quotes() {
+        // The quote-inclusive variant decodes \" and \' ...
+        assert_eq!(
+            decode_literal_escapes_incl_quotes("a\\\"b").as_deref(),
+            Some("a\"b")
+        );
+        assert_eq!(
+            decode_literal_escapes_incl_quotes("a\\'b").as_deref(),
+            Some("a'b")
+        );
+        // ... while the conservative one leaves them intact (contract unchanged).
+        assert_eq!(decode_literal_escapes("a\\\"b"), None);
+    }
+
+    #[test]
+    fn decode_incl_quotes_decodes_newline_and_quotes_together() {
+        assert_eq!(
+            decode_literal_escapes_incl_quotes("x\\nassert(\\\"m\\\")").as_deref(),
+            Some("x\nassert(\"m\")")
+        );
+    }
+
+    #[test]
+    fn decode_incl_quotes_leaves_doubled_backslash_intact() {
+        // \\ must never decode, even in the aggressive variant.
+        assert_eq!(decode_literal_escapes_incl_quotes("a\\\\b"), None);
     }
 
     #[test]
