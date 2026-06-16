@@ -1,5 +1,10 @@
 # The Retrieval Stack
 
+> **This page documents the opt-in server stack** (Qdrant + sparse SPLADE +
+> cross-encoder reranker), compiled with `--features server-stack`. The default
+> `codescout` build runs the daemon-free [lite stack](lite-stack.md) instead —
+> no Docker, no Qdrant. Read on only if you are running the server stack.
+
 > **As of v0.12 codescout's default retrieval substrate is a network-attached stack
 > (Qdrant + three embedding services), not the in-process local-embed
 > path.** The `local-embed` Cargo feature still exists for air-gapped use, but it

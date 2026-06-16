@@ -139,14 +139,17 @@ Re-run with `force: true` to rebuild from scratch: ask your agent `"Run codescou
 
 ## Feature Flags
 
-> **As of v0.12 the default substrate is the [Retrieval Stack](../concepts/retrieval-stack.md)**
-> (Qdrant + dense embedder + sparse SPLADE + cross-encoder reranker, all
-> running as docker containers). The `local-embed` Cargo feature still exists
-> for air-gapped use but is no longer the default and is no longer the path
-> the team benchmarks against — `local-embed` skips sparse fusion and rerank,
-> which the benchmark shows costs ~9 points out of 75 (28 vs 37 on the
-> champion config). See [Migration from local-embed](../concepts/retrieval-stack.md#migration-from-local-embed)
-> if you are upgrading from <0.12.
+> **As of v0.15 the default build is the daemon-free [lite stack](../concepts/lite-stack.md)** —
+> in-process `sqlite-vec` plus one remote OpenAI-compatible embedding endpoint.
+> `cargo install codescout` and `cargo build --release` give you this: no Docker,
+> no Qdrant. The full **[server stack](../concepts/retrieval-stack.md)** (Qdrant +
+> sparse SPLADE + cross-encoder reranker) is opt-in — build with
+> `--features server-stack`. The vector store is picked at runtime via
+> `CODESCOUT_VECTOR_BACKEND` (`sqlite-vec` default | `qdrant`). Lite ranks
+> dense-only, which trails the hybrid server config on exact-identifier recall —
+> see [the tradeoff](../concepts/lite-stack.md#the-tradeoff). The `local-embed`
+> Cargo feature (in-process ONNX) still exists for air-gapped use but is not the
+> default and is not the path the team benchmarks against.
 
 The Cargo features below control the codescout binary's compile-time
 capabilities. They are independent of whether you run the retrieval stack —
@@ -155,18 +158,21 @@ even without `local-embed`, the binary always speaks HTTP to the stack via
 
 | Feature | What it does | When to use it |
 |---|---|---|
-| `remote-embed` (default) | HTTP client for the dense embedder service (OpenAI-compatible protocol) | Always — required for the retrieval stack and for Ollama / OpenAI / llama.cpp endpoints |
+| `remote-embed` (default) | HTTP client for the dense embedder service (OpenAI-compatible protocol) | Always — required for both stacks and for Ollama / OpenAI / llama.cpp endpoints |
+| `server-stack` | Compiles in the Qdrant client + hybrid sparse/rerank query path (the [server stack](../concepts/retrieval-stack.md)) | Only if you run Qdrant; omit for the default daemon-free [lite stack](../concepts/lite-stack.md) |
 | `local-embed` | In-process CPU embeddings via fastembed-rs + ONNX Runtime | Air-gapped machines; **requires building from source** and skips the network rerank/sparse pipeline |
 | `http` (default) | HTTP/SSE MCP transport (vs stdio-only) | Always — used by `codescout dashboard` and remote MCP clients |
 | `librarian` (default) | Embeds the librarian doc/spec/plan indexer (formerly librarian-mcp, now dissolved into `src/librarian/`) | Always — runtime-enabled by default; opt out via `LIBRARIAN_ENABLED=0` |
 
 > **Want free, local embeddings without running docker?** Two options:
 >
-> 1. **Ollama as the dense embedder.** Install Ollama, pull a model
->    (`ollama pull nomic-embed-text`), and set
->    `CODESCOUT_EMBEDDER_URL=http://127.0.0.1:11434`. You still need Qdrant + the
->    reranker + the sparse service running from the docker stack — Ollama
->    only replaces the dense leg. See [Retrieval Stack > Using Ollama / llama.cpp / OpenAI](../concepts/retrieval-stack.md#using-ollama--llamacpp--openai-as-the-dense-embedder).
+> 1. **Ollama as the dense endpoint on the default lite stack.** The default
+>    build needs no Docker — point it at Ollama: `ollama pull nomic-embed-text`,
+>    set `CODESCOUT_EMBEDDER_URL=http://127.0.0.1:11434` and keep
+>    `CODESCOUT_VECTOR_BACKEND=sqlite-vec` (the default). No Qdrant, no sparse,
+>    no reranker. See [The Lite Stack](../concepts/lite-stack.md). (On the opt-in
+>    server stack, Ollama replaces only the dense leg — you still run Qdrant +
+>    sparse + reranker.)
 > 2. **Build with `local-embed`** for the pure in-process path. Accept the
 >    benchmark penalty (no rerank, no sparse fusion) in exchange for zero
 >    network dependencies.

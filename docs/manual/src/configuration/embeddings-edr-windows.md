@@ -68,6 +68,10 @@ second.
 
 ## Daemon-free: the lite stack (no Qdrant, no sparse, no reranker)
 
+> Canonical setup and the two-stack overview now live in
+> [The Lite Stack](../concepts/lite-stack.md) — it is the default build, not just
+> the EDR case. This section keeps the EDR-specific framing.
+
 If the VDI cannot run Docker or Qdrant at all — the common locked-down case —
 use the **lite stack**. Code search and memory run entirely in-process on
 `sqlite-vec` (a statically-linked `vec0` table — no foreign DLL for the EDR to
