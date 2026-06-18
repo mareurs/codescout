@@ -9,6 +9,7 @@
 - [cross-cutting-side-effects-at-the-chokepoint](architecture-snow-lion/cross-cutting-side-effects-at-the-chokepoint.md) — side-effects live at the operation's chokepoint, gated; audit entry points with references(), not the call site in front of you
 - [platform-law-leaks-at-call-sites](architecture-snow-lion/platform-law-leaks-at-call-sites.md) — any "eliminate subprocess X" law (replace with a library binding OR env-derivation; platform builders, libgit2, go-env) leaks at out-of-file sibling call sites (Drop impls, hot + cold paths); grep the whole tree, convert all siblings in one pass
 
+- [codescout-observability-three-layers](architecture-snow-lion/codescout-observability-three-layers.md) — three composable observability layers (usage.db→analyze-usage, llm-proxy/Langfuse+JSONL→claude-traces, Arize→arize-logs); route to the owner, don't build a fourth; claude-traces is the Headroom trial's analysis surface
 ## docs-lotus-frog
 
 - [experimental-docs-lifecycle](docs-lotus-frog/experimental-docs-lifecycle.md) — experimental doc creation, removal, and graduation checklist for this repo
