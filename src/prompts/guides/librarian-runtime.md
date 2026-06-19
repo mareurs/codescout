@@ -165,3 +165,46 @@ artifact(action="find", filter={"tags": {"contains": "codescout"}})
   `external_signal`.
 - Skip `intent` for trivial mechanical edits. Threshold: *would a
   future reader want to know why this changed?*
+
+
+## Trackers as cross-session behavior
+
+A skill tells an agent how to *act*. An augmented tracker — a standing
+`prompt` + `params` that travel with the artifact — tells an agent how to
+*maintain durable state*. The two are complementary: a skill shapes a
+single session's behavior; an augmented tracker shapes every session's
+behavior toward one artifact.
+
+A **reflective tracker** takes this further: its body *is* a behavioral
+script. The body is not prose about what to do — it is the executable
+specification the next session reads and follows. The tracker carries
+cross-session behavior the way a skill carries per-session behavior.
+
+### Session-passover tracker
+
+The session-passover tracker is the canonical worked example. It is a
+reflective tracker tagged `passover` whose body encodes the handoff
+protocol: what state was in flight, what the next session must verify,
+and what to do first.
+
+**Discovery** — at the start of a new session, find any active passover
+tracker with:
+
+```
+artifact(action="find", kind="tracker", filter={"and":[
+  {"tags": {"in": ["passover"]}},
+  {"status": {"eq": "active"}}
+]})
+```
+
+**Resume protocol** — read the full body
+(`artifact(action="get", id="<id>", full=true)`), work through its
+`## Next actions` checklist, verify the state claims, and resume the
+prior thread. The tracker *is* the cross-session behavior: following it
+is what continuity means.
+
+**Maintenance** — update the body at session end to reflect the current
+state and the next handoff. The `passover` tag + `active` status keeps
+it discoverable; archive it when the work-stream completes.
+
+See `get_guide("tracker-conventions")` for frontmatter shape and status vocabulary.

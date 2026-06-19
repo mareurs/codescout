@@ -138,4 +138,6 @@ can be queried at entry grain via `entry_filter`. Call `artifact_augment` with
 `docs/conventions/retrofitting-trackers-for-filtering.md`.
 
 For deeper artifact / augmentation / event mechanics see
-`get_guide("librarian")`.
+`get_guide("librarian")`. For how augmented trackers carry cross-session
+behavior — including the session-passover pattern — see
+`get_guide("librarian-runtime")` § *Trackers as cross-session behavior*.
