@@ -42,6 +42,7 @@ pub struct Args {
     #[serde(default)]
     pub tags: Vec<String>,
     pub status: Option<String>,
+    pub time_scope: Option<String>,
     pub augment: Option<AugmentSpec>,
 }
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
@@ -102,7 +103,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         owners: a.owners.clone(),
         tags: a.tags.clone(),
         topic: None,
-        time_scope: None,
+        time_scope: a.time_scope.clone(),
     };
     let content = crate::librarian::frontmatter::write(&fm, &format!("\n{}\n", a.body));
     let now = chrono::Utc::now().timestamp_millis();
@@ -115,7 +116,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         owners: a.owners,
         tags: a.tags,
         topic: None,
-        time_scope: None,
+        time_scope: a.time_scope,
         source: Some("generated".into()),
         created_at: now,
         updated_at: now,
@@ -367,6 +368,40 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(row.status, "active");
+    }
+
+    #[tokio::test]
+    async fn create_with_time_scope_persists_to_row_and_frontmatter() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        call(
+            &ctx,
+            json!({
+                "repo": "r",
+                "rel_path": "trackers/scoped.md",
+                "kind": "tracker",
+                "title": "Scoped",
+                "body": "",
+                "time_scope": "2026-W25"
+            }),
+        )
+        .await
+        .unwrap();
+
+        let abs = tmp.path().join("trackers/scoped.md");
+        let row = crate::librarian::catalog::artifact::get(
+            &ctx.catalog.lock(),
+            &crate::librarian::ids::artifact_id_from_abs(&abs),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(row.time_scope.as_deref(), Some("2026-W25"));
+
+        // The value must also land in the YAML frontmatter, not just the catalog.
+        let on_disk = std::fs::read_to_string(&abs).unwrap();
+        let (fm, _) = crate::librarian::frontmatter::parse(&on_disk).unwrap();
+        assert_eq!(fm.unwrap().time_scope.as_deref(), Some("2026-W25"));
     }
 
     #[tokio::test]

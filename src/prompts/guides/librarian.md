@@ -227,7 +227,7 @@ edits_count, mode, forced}`. Query forensic history with
 
 **`patch` accepts only declared keys.** Unknown keys (e.g.
 `body_prepend_section`) return `RecoverableError` listing the valid fields.
-Accepted keys: `status, title, owners, tags, topic, body, body_edits, params`.
+Accepted keys: `status, title, owners, tags, topic, time_scope, body, body_edits, params`.
 ## librarian(action=...) — Reference
 
 | Action | What it does |

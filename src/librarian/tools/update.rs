@@ -18,6 +18,10 @@ struct UpdatePatch {
     tags: Option<Vec<String>>,
     #[serde(default)]
     topic: Option<String>,
+    /// Temporal scope tag (e.g. "2026-W25", a date, or "dated_snapshot").
+    /// Recognized first-class frontmatter + catalog field.
+    #[serde(default)]
+    time_scope: Option<String>,
     /// Full body replacement. Total-overwrite — destroys existing body content.
     /// Gated by a 50% shrink guard unless `force=true` is passed on the call.
     /// Mutually exclusive with `body_edits`.
@@ -137,7 +141,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if args.get("patch").and_then(|p| p.get("rel_path")).is_some() {
         return Err(super::RecoverableError::with_hint(
             "artifact(action=\"update\") cannot change `rel_path` — the file location is owned by the `move` action",
-            "Use artifact(action=\"move\", id=..., new_rel_path=...) to rename the backing file and update the catalog atomically. `update` only modifies frontmatter fields (status, title, owners, tags, topic, body, body_edits, params).",
+            "Use artifact(action=\"move\", id=..., new_rel_path=...) to rename the backing file and update the catalog atomically. `update` only modifies frontmatter fields (status, title, owners, tags, topic, time_scope, body, body_edits, params).",
         ));
     }
 
@@ -177,6 +181,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         if let Some(v) = &patch.topic {
             fm.topic = Some(v.clone());
         }
+        if let Some(v) = &patch.time_scope {
+            fm.time_scope = Some(v.clone());
+        }
         let actual_body = match crate::librarian::catalog::augmentation::get(&cat, &a.id)? {
             Some(aug) if aug.append_mode => {
                 let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
@@ -195,7 +202,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             || patch.title.is_some()
             || patch.owners.is_some()
             || patch.tags.is_some()
-            || patch.topic.is_some();
+            || patch.topic.is_some()
+            || patch.time_scope.is_some();
         if fm_changing {
             working = crate::librarian::frontmatter::update_in_place(&working, |fm| {
                 if let Some(v) = &patch.status {
@@ -212,6 +220,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 }
                 if let Some(v) = &patch.topic {
                     fm.topic = Some(v.clone());
+                }
+                if let Some(v) = &patch.time_scope {
+                    fm.time_scope = Some(v.clone());
                 }
             })?;
         }
@@ -232,6 +243,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             }
             if let Some(v) = &patch.topic {
                 fm.topic = Some(v.clone());
+            }
+            if let Some(v) = &patch.time_scope {
+                fm.time_scope = Some(v.clone());
             }
         })?
     };
@@ -289,7 +303,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         owners: patch.owners.clone().unwrap_or(row.owners),
         tags: patch.tags.clone().unwrap_or(row.tags),
         topic: patch.topic.clone().or(row.topic),
-        time_scope: row.time_scope,
+        time_scope: patch.time_scope.clone().or(row.time_scope),
         source: row.source,
         created_at: row.created_at,
         updated_at: now,
@@ -538,6 +552,36 @@ mod tests {
 
         let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
         assert_eq!(row.status, "archived");
+    }
+
+    #[tokio::test]
+    async fn update_time_scope_persists_to_row_and_frontmatter() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "scoped.md",
+                "kind": "spec", "title": "T", "body": "b"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"time_scope": "2026-Q3"}}),
+        )
+        .await
+        .unwrap();
+
+        let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
+        assert_eq!(row.time_scope.as_deref(), Some("2026-Q3"));
+
+        let on_disk = std::fs::read_to_string(&row.abs_path).unwrap();
+        let (fm, _) = crate::librarian::frontmatter::parse(&on_disk).unwrap();
+        assert_eq!(fm.unwrap().time_scope.as_deref(), Some("2026-Q3"));
     }
 
     #[tokio::test]

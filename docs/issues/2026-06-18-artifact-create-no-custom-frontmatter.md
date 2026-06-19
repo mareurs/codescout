@@ -124,3 +124,37 @@ not filterable). Option (a) is simplest and covers the passover use-case —
 body consumers can parse the YAML; `artifact(find)` filters on standard fields.
 The tradeoff (no SQL filtering on custom keys) should be documented.
 
+
+## Part 1 — Shipped & Verified (2026-06-19)
+
+`time_scope` is now a first-class param on both `artifact(action="create")` and
+`artifact(action="update", patch={...})`.
+
+**Code:**
+- `src/librarian/tools/create.rs` — `Args.time_scope: Option<String>`; threaded into
+  both `Frontmatter` and `ArtifactRow` (replacing the hardcoded `None`s).
+- `src/librarian/tools/update.rs` — `UpdatePatch.time_scope`; mirrored `topic` across
+  **all five** mutation sites (the body-overwrite fm path, the `fm_changing` guard, the
+  `body_edits` `update_in_place` closure, the no-body `update_in_place` closure, and
+  `updated_row`). The `fm_changing` guard was the non-obvious one — without it, a
+  `body_edits`-path `time_scope` patch would silently no-op.
+- `src/librarian/tools/artifact.rs` — added the `time_scope` schema property + updated
+  the `patch` Accepted-keys list and the rel_path-rejection hint.
+- `src/prompts/guides/librarian.md` — Accepted-keys line.
+
+**Tests:** `create_with_time_scope_persists_to_row_and_frontmatter` (create.rs),
+`update_time_scope_persists_to_row_and_frontmatter` (update.rs). Both assert the catalog
+row **and** the on-disk YAML frontmatter. Full `cargo test --lib` 2792 pass, clippy clean.
+
+**Live-verified** through the restarted MCP server: `artifact(create, …, time_scope="2026-W25")`
+→ catalog `time_scope: "2026-W25"`; `artifact(update, patch={time_scope:"2026-Q3"})`
+→ `time_scope: "2026-Q3"`, body preserved. Probe artifact deleted.
+
+Commit (experiments-side): *recorded post-commit; master-side SHA pending cherry-pick.*
+
+**Part 2 (custom-frontmatter passthrough) remains** — it is an enhancement, not a bug
+(arbitrary keys aren't modeled in `Frontmatter`). Per the project convention that
+enhancements live in `docs/trackers/` / `docs/plans/` rather than `docs/issues/`, it
+should be split into its own enhancement tracker rather than keeping this bug file open.
+Pending that decision; this file's `status` stays `open` until Part 2 is split out or
+declared wontfix.
