@@ -43,6 +43,8 @@ pub struct Args {
     pub tags: Vec<String>,
     pub status: Option<String>,
     pub time_scope: Option<String>,
+    #[serde(default)]
+    pub extra: std::collections::BTreeMap<String, serde_json::Value>,
     pub augment: Option<AugmentSpec>,
 }
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
@@ -104,6 +106,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         tags: a.tags.clone(),
         topic: None,
         time_scope: a.time_scope.clone(),
+        extra: a.extra.clone(),
     };
     let content = crate::librarian::frontmatter::write(&fm, &format!("\n{}\n", a.body));
     let now = chrono::Utc::now().timestamp_millis();
@@ -402,6 +405,39 @@ mod tests {
         let on_disk = std::fs::read_to_string(&abs).unwrap();
         let (fm, _) = crate::librarian::frontmatter::parse(&on_disk).unwrap();
         assert_eq!(fm.unwrap().time_scope.as_deref(), Some("2026-W25"));
+    }
+
+    #[tokio::test]
+    async fn create_with_extra_writes_custom_frontmatter() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        call(
+            &ctx,
+            json!({
+                "repo": "r",
+                "rel_path": "trackers/custom.md",
+                "kind": "tracker",
+                "title": "Custom",
+                "body": "",
+                "extra": {"origin_session_id": "abc123", "branch": "feature/x"}
+            }),
+        )
+        .await
+        .unwrap();
+
+        let abs = tmp.path().join("trackers/custom.md");
+        let on_disk = std::fs::read_to_string(&abs).unwrap();
+        let (fm, _) = crate::librarian::frontmatter::parse(&on_disk).unwrap();
+        let fm = fm.unwrap();
+        assert_eq!(
+            fm.extra.get("origin_session_id"),
+            Some(&serde_json::json!("abc123"))
+        );
+        assert_eq!(
+            fm.extra.get("branch"),
+            Some(&serde_json::json!("feature/x"))
+        );
     }
 
     #[tokio::test]

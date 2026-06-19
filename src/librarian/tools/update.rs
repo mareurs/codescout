@@ -22,6 +22,12 @@ struct UpdatePatch {
     /// Recognized first-class frontmatter + catalog field.
     #[serde(default)]
     time_scope: Option<String>,
+    /// Custom frontmatter keys to merge. Each entry is upserted into the
+    /// artifact's frontmatter; a `null` value deletes the key. Not
+    /// catalog-indexed (YAML-only, not filterable via find). Keys not present
+    /// here are preserved (round-trip-safe).
+    #[serde(default)]
+    extra: Option<std::collections::BTreeMap<String, serde_json::Value>>,
     /// Full body replacement. Total-overwrite — destroys existing body content.
     /// Gated by a 50% shrink guard unless `force=true` is passed on the call.
     /// Mutually exclusive with `body_edits`.
@@ -56,6 +62,24 @@ struct Args {
 /// small are typically just-created frontmatter shells where a shrink ratio
 /// would be misleading. A real tracker with content is always many KB.
 const SHRINK_GUARD_MIN_BYTES: usize = 200;
+
+/// Merge a custom-frontmatter patch into `fm.extra`: each provided key is
+/// upserted, a `null` value deletes the key, omitted keys are preserved
+/// (round-trip-safe). No-op when the patch carries no `extra`.
+fn merge_extra(
+    fm: &mut crate::librarian::frontmatter::Frontmatter,
+    extra: &Option<std::collections::BTreeMap<String, serde_json::Value>>,
+) {
+    if let Some(map) = extra {
+        for (k, v) in map {
+            if v.is_null() {
+                fm.extra.remove(k);
+            } else {
+                fm.extra.insert(k.clone(), v.clone());
+            }
+        }
+    }
+}
 
 /// Apply a batch of edit-markdown-shaped body edits to `working` in sequence.
 /// Mirrors the batch semantics of `edit_markdown`'s `edits=[...]`. Used by
@@ -141,7 +165,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if args.get("patch").and_then(|p| p.get("rel_path")).is_some() {
         return Err(super::RecoverableError::with_hint(
             "artifact(action=\"update\") cannot change `rel_path` — the file location is owned by the `move` action",
-            "Use artifact(action=\"move\", id=..., new_rel_path=...) to rename the backing file and update the catalog atomically. `update` only modifies frontmatter fields (status, title, owners, tags, topic, time_scope, body, body_edits, params).",
+            "Use artifact(action=\"move\", id=..., new_rel_path=...) to rename the backing file and update the catalog atomically. `update` only modifies frontmatter fields (status, title, owners, tags, topic, time_scope, extra, body, body_edits, params).",
         ));
     }
 
@@ -184,6 +208,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         if let Some(v) = &patch.time_scope {
             fm.time_scope = Some(v.clone());
         }
+        merge_extra(&mut fm, &patch.extra);
         let actual_body = match crate::librarian::catalog::augmentation::get(&cat, &a.id)? {
             Some(aug) if aug.append_mode => {
                 let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
@@ -203,7 +228,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             || patch.owners.is_some()
             || patch.tags.is_some()
             || patch.topic.is_some()
-            || patch.time_scope.is_some();
+            || patch.time_scope.is_some()
+            || patch.extra.is_some();
         if fm_changing {
             working = crate::librarian::frontmatter::update_in_place(&working, |fm| {
                 if let Some(v) = &patch.status {
@@ -224,6 +250,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 if let Some(v) = &patch.time_scope {
                     fm.time_scope = Some(v.clone());
                 }
+                merge_extra(fm, &patch.extra);
             })?;
         }
         apply_body_edits(&working, edits)?
@@ -247,6 +274,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             if let Some(v) = &patch.time_scope {
                 fm.time_scope = Some(v.clone());
             }
+            merge_extra(fm, &patch.extra);
         })?
     };
 
@@ -582,6 +610,73 @@ mod tests {
         let on_disk = std::fs::read_to_string(&row.abs_path).unwrap();
         let (fm, _) = crate::librarian::frontmatter::parse(&on_disk).unwrap();
         assert_eq!(fm.unwrap().time_scope.as_deref(), Some("2026-Q3"));
+    }
+
+    #[tokio::test]
+    async fn update_extra_merges_preserves_and_deletes() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "custom.md",
+                "kind": "spec", "title": "T", "body": "b",
+                "extra": {"origin_session_id": "abc", "branch": "x"}
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+        let abs = artifact::get(&ctx.catalog.lock(), &id)
+            .unwrap()
+            .unwrap()
+            .abs_path;
+
+        let read_extra = |path: &std::path::Path| {
+            let s = std::fs::read_to_string(path).unwrap();
+            crate::librarian::frontmatter::parse(&s)
+                .unwrap()
+                .0
+                .unwrap()
+                .extra
+        };
+
+        // 1. Round-trip safety: changing an UNRELATED field must NOT wipe extra.
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"status": "active"}}),
+        )
+        .await
+        .unwrap();
+        let after_status = read_extra(&abs);
+        assert_eq!(
+            after_status.get("origin_session_id"),
+            Some(&serde_json::json!("abc"))
+        );
+        assert_eq!(after_status.get("branch"), Some(&serde_json::json!("x")));
+
+        // 2. Merge: upsert a new key + overwrite one + delete one via null.
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"extra": {
+                "branch": "y",
+                "pr": 42,
+                "origin_session_id": null
+            }}}),
+        )
+        .await
+        .unwrap();
+        let after_merge = read_extra(&abs);
+        assert_eq!(
+            after_merge.get("branch"),
+            Some(&serde_json::json!("y")),
+            "overwritten"
+        );
+        assert_eq!(after_merge.get("pr"), Some(&serde_json::json!(42)), "added");
+        assert!(
+            !after_merge.contains_key("origin_session_id"),
+            "null deletes the key"
+        );
     }
 
     #[tokio::test]

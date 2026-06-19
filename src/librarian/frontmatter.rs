@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Frontmatter {
     #[serde(default)]
     pub id: Option<String>,
@@ -19,6 +19,13 @@ pub struct Frontmatter {
     pub topic: Option<String>,
     #[serde(default)]
     pub time_scope: Option<String>,
+    /// Custom / unrecognized frontmatter keys, captured verbatim so they
+    /// survive a parse→edit→write round-trip (otherwise an update would
+    /// silently drop them). Not catalog-indexed — not filterable via
+    /// artifact(find); readable on disk and surfaced by artifact(get) as
+    /// `extra`.
+    #[serde(flatten)]
+    pub extra: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 pub fn parse(doc: &str) -> Result<(Option<Frontmatter>, &str)> {
@@ -102,15 +109,6 @@ mod tests {
     }
 
     #[test]
-    fn ignores_unknown_fields() {
-        let doc = "---\nkind: spec\nbogus: nope\n---\nbody\n";
-        let result = parse(doc);
-        assert!(result.is_ok());
-        let (fm, _) = result.unwrap();
-        assert_eq!(fm.unwrap().kind.as_deref(), Some("spec"));
-    }
-
-    #[test]
     fn round_trip_preserves_body() {
         let fm = Frontmatter {
             kind: Some("spec".into()),
@@ -123,6 +121,46 @@ mod tests {
         let (parsed, parsed_body) = parse(&doc).unwrap();
         assert_eq!(parsed.unwrap(), fm);
         assert_eq!(parsed_body, body);
+    }
+
+    #[test]
+    fn captures_unknown_fields_into_extra() {
+        // Custom keys must be captured (not dropped) so updates can't silently
+        // wipe them; first-class fields still deserialize normally.
+        let doc = "---\nkind: spec\norigin_session_id: abc123\nbranch: feature/x\n---\nbody\n";
+        let (fm, _) = parse(doc).unwrap();
+        let fm = fm.unwrap();
+        assert_eq!(fm.kind.as_deref(), Some("spec"));
+        assert_eq!(
+            fm.extra.get("origin_session_id"),
+            Some(&serde_json::json!("abc123"))
+        );
+        assert_eq!(
+            fm.extra.get("branch"),
+            Some(&serde_json::json!("feature/x"))
+        );
+    }
+
+    #[test]
+    fn round_trip_preserves_extra() {
+        let mut extra = std::collections::BTreeMap::new();
+        extra.insert("origin_session_id".to_string(), serde_json::json!("abc123"));
+        extra.insert("branch".to_string(), serde_json::json!("feature/x"));
+        let fm = Frontmatter {
+            kind: Some("tracker".into()),
+            extra,
+            ..Default::default()
+        };
+        let doc = write(&fm, "\nbody\n");
+        let (parsed, _) = parse(&doc).unwrap();
+        let parsed = parsed.unwrap();
+        assert_eq!(
+            parsed.extra.get("origin_session_id"),
+            fm.extra.get("origin_session_id")
+        );
+        assert_eq!(parsed.extra.get("branch"), fm.extra.get("branch"));
+        // And the first-class fields survive alongside the flattened map.
+        assert_eq!(parsed.kind.as_deref(), Some("tracker"));
     }
 
     #[test]

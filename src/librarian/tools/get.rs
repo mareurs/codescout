@@ -346,6 +346,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 Err(_) => content.clone(),
             });
 
+    // Surface custom (non-first-class) frontmatter keys. These are YAML-only —
+    // not in the catalog and not filterable via find — so the file is the only
+    // source; parse it here (the content is already read for the preview).
+    if let Some(content) = file_content.as_ref() {
+        if let Ok((Some(fm), _)) = frontmatter::parse(content) {
+            if !fm.extra.is_empty() {
+                out["extra"] = serde_json::to_value(&fm.extra).unwrap_or(Value::Null);
+            }
+        }
+    }
+
     if let Some(body) = parsed_body.as_deref() {
         out["preview"] = crate::librarian::preview::extract(&row.kind, &row, body, ctx);
 

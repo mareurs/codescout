@@ -152,9 +152,32 @@ row **and** the on-disk YAML frontmatter. Full `cargo test --lib` 2792 pass, cli
 
 Commit (experiments-side): *recorded post-commit; master-side SHA pending cherry-pick.*
 
-**Part 2 (custom-frontmatter passthrough) remains** — it is an enhancement, not a bug
-(arbitrary keys aren't modeled in `Frontmatter`). Per the project convention that
-enhancements live in `docs/trackers/` / `docs/plans/` rather than `docs/issues/`, it
-should be split into its own enhancement tracker rather than keeping this bug file open.
-Pending that decision; this file's `status` stays `open` until Part 2 is split out or
-declared wontfix.
+## Part 2 — Custom-frontmatter passthrough (implemented 2026-06-19)
+
+Scope chosen: **passthrough only, not filterable** (no schema migration). `ALLOWED_FIELDS`
+in `src/librarian/filter.rs` is a strict allowlist (with `rejects_non_allowlisted_column`
+guard), so arbitrary keys can't be `find`-filtered without a real catalog column — that was
+the deferred-as-too-heavy option. Custom keys are YAML-only: round-trip-safe, surfaced by
+`get`, not catalog-indexed.
+
+**Code:**
+- `src/librarian/frontmatter.rs` — `Frontmatter.extra: BTreeMap<String, serde_json::Value>`
+  via `#[serde(flatten)]` (dropped the `Eq` derive — `serde_json::Value` isn't `Eq`).
+  This **also fixes a latent round-trip bug**: previously `update_in_place` dropped unknown
+  keys, so any `artifact(update)` on a file with custom frontmatter (e.g. these bug files'
+  `opened`/`closed`/`severity`/`owner`/`related`) silently wiped them.
+- `src/librarian/tools/create.rs` — `Args.extra` → `Frontmatter.extra`.
+- `src/librarian/tools/update.rs` — `UpdatePatch.extra` + `merge_extra` helper (upsert key,
+  `null` deletes, omitted preserved), threaded across all four fm-mutation sites.
+- `src/librarian/tools/get.rs` — surfaces non-empty `extra` from the parsed frontmatter.
+- `src/librarian/tools/artifact.rs` — `extra` schema property + Accepted-keys list.
+- `src/prompts/guides/librarian.md` — Accepted-keys + tradeoff note.
+
+**Tests:** `captures_unknown_fields_into_extra`, `round_trip_preserves_extra` (frontmatter.rs);
+`create_with_extra_writes_custom_frontmatter` (create.rs);
+`update_extra_merges_preserves_and_deletes` — incl. the round-trip-safety assertion that
+changing an unrelated field does NOT wipe `extra` (update.rs). Full `cargo test --lib` 2795
+pass, clippy clean.
+
+Both parts now implemented. `status` stays `open` pending live MCP verification of Part 2
+(create/get/update with `extra` through the restarted server); flips to `fixed` after.

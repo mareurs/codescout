@@ -47,6 +47,10 @@ impl Tool for Artifact {
                     "type": "string",
                     "description": "create/update: temporal scope tag written to frontmatter + catalog (e.g. '2026-W25', a date, or 'dated_snapshot'). Filterable via find."
                 },
+                "extra": {
+                    "type": "object",
+                    "description": "create/update: custom frontmatter keys (e.g. {\"origin_session_id\":\"abc\",\"branch\":\"x\"}). Written verbatim to YAML and round-trip-safe across updates; surfaced by get as `extra`. NOT catalog-indexed — NOT filterable via find. On update, each key is upserted; a null value deletes it; omitted keys are preserved."
+                },
                 "semantic": {
                     "type": "string",
                     "description": "find: natural-language query for semantic search (requires embedder)"
@@ -115,7 +119,7 @@ impl Tool for Artifact {
                 },
                 "patch": {
                     "type": "object",
-                    "description": "update: fields to change. Accepted keys: status, title, owners, tags, topic, time_scope, body, body_edits, params (any other key returns RecoverableError). Body editing — three modes: (1) `body_edits: [{heading, action, content?|old_string+new_string?, at?, replace_all?, include_subsections?}]` for surgical per-section edits (mirrors edit_markdown's batch shape, applied atomically, RECOMMENDED for tracker maintenance) — action is one of replace|insert_before|insert_after|remove|edit: use action='edit' for a scoped text swap (heading + old_string + new_string), action='replace' to overwrite an entire section body (heading + content); (2) `body` for total overwrite, gated by the 50% shrink guard unless `force=true` is passed at top level; (3) frontmatter-only changes via status/title/owners/tags/topic/time_scope. `body` and `body_edits` are mutually exclusive. `params` is RFC 7396 merge-patched into the augmentation params — use null values to delete keys. Body mutations emit `field_patch` events (kind=field_patch, payload.field=body)."
+                    "description": "update: fields to change. Accepted keys: status, title, owners, tags, topic, time_scope, extra, body, body_edits, params (any other key returns RecoverableError). Body editing — three modes: (1) `body_edits: [{heading, action, content?|old_string+new_string?, at?, replace_all?, include_subsections?}]` for surgical per-section edits (mirrors edit_markdown's batch shape, applied atomically, RECOMMENDED for tracker maintenance) — action is one of replace|insert_before|insert_after|remove|edit: use action='edit' for a scoped text swap (heading + old_string + new_string), action='replace' to overwrite an entire section body (heading + content); (2) `body` for total overwrite, gated by the 50% shrink guard unless `force=true` is passed at top level; (3) frontmatter-only changes via status/title/owners/tags/topic/time_scope. `body` and `body_edits` are mutually exclusive. `params` is RFC 7396 merge-patched into the augmentation params — use null values to delete keys. Body mutations emit `field_patch` events (kind=field_patch, payload.field=body)."
                 },
                 "force": {
                     "type": "boolean",
