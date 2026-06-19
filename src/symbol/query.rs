@@ -350,47 +350,86 @@ pub fn is_lead_in_line(line: &str) -> bool {
         .all(|c| matches!(c, '}' | ')' | ']' | ';' | ',' | '?' | '>' | ' ' | '\t'))
 }
 
-/// Recursively search `symbols` for a symbol with the given name whose
-/// `start_line` is within 1 of `lsp_start`. Returns its `end_line`.
+/// Resolve the AST `end_line` for a symbol the LSP reported, keyed primarily on
+/// its unique `name_path` and only secondarily on line proximity.
 ///
-/// Ambiguity guard: if more than one AST symbol matches (e.g. two `fn foo`
-/// on nearby lines in separate `impl` blocks), returns `None` rather than
-/// picking the first — the caller should fall back to the LSP end line.
-/// When `name_path` is provided, candidates whose AST `name_path` equals
-/// it are preferred (exact match wins immediately). This handles Rust
-/// impl methods where LSP reports `impl Type/m` and AST reports `Type/m`:
-/// the name/line heuristic still fires, but name_path disambiguates when
-/// available.
+/// `name_path` first (no line gate): AST and LSP frequently disagree on a
+/// symbol's *start* line. Kotlin is the sharp case — the AST function node spans
+/// from its first annotation (`@Test`), while kotlin-lsp points at the `fun`
+/// keyword, so a method with N annotation lines shows an N-line start-line gap.
+/// That routinely exceeds any small proximity window, so gating candidate
+/// collection on line proximity *before* consulting `name_path` drops the real
+/// match and makes the caller surface a misleading "AST parse failed". Because
+/// `name_path` encodes the full parent chain it is unique, so when the caller
+/// supplies it and exactly one AST symbol matches (backtick- and suffix-tolerant,
+/// to bridge Kotlin backticks and Rust `impl Type/m` vs `Type/m`), that symbol
+/// wins regardless of line distance.
+///
+/// Line proximity is the *fallback* disambiguator, used only when `name_path` is
+/// absent or matches more than one symbol (e.g. two same-name `fn foo` in
+/// separate `impl` blocks). If proximity can't single out one symbol, returns
+/// `None` rather than guessing.
+///
+/// Regression: docs/issues/2026-06-16-kotlin-edit-code-annotation-line-gap.md
+/// (annotation gap) and docs/issues/2026-05-29-edit-code-kotlin-stale-lsp-range.md
+/// (backtick normalization).
 pub fn find_ast_end_line_in(
     symbols: &[SymbolInfo],
     name: &str,
     lsp_start: u32,
     name_path: Option<&str>,
 ) -> Option<u32> {
-    let mut matches: Vec<&SymbolInfo> = Vec::new();
-    collect_ast_candidates(symbols, name, lsp_start, &mut matches);
+    // All symbols sharing this leaf name, anywhere in the tree — NO line gate.
+    let mut by_name: Vec<&SymbolInfo> = Vec::new();
+    collect_by_name(symbols, name, &mut by_name);
 
-    if matches.is_empty() {
+    if by_name.is_empty() {
         return None;
     }
+
     if let Some(np) = name_path {
-        // Prefer exact name_path equality; if LSP and AST name_paths diverge
-        // (impl blocks) the suffix match handles it. Backtick-tolerant so a
-        // Kotlin LSP name_path (no backticks) matches the AST's (with backticks).
-        if let Some(exact) = matches.iter().find(|s| {
-            names_match_ignoring_backticks(&s.name_path, np)
-                || np
-                    .replace('`', "")
-                    .ends_with(&format!("/{}", s.name_path.replace('`', "")))
-        }) {
-            return Some(exact.end_line);
+        // Exact name_path equality, backtick-tolerant; the suffix branch handles
+        // Rust impl methods where LSP reports `impl Type/m` and AST reports
+        // `Type/m`. Unique match wins immediately, ignoring line proximity.
+        let np_hits: Vec<&&SymbolInfo> = by_name
+            .iter()
+            .filter(|s| {
+                names_match_ignoring_backticks(&s.name_path, np)
+                    || np
+                        .replace('`', "")
+                        .ends_with(&format!("/{}", s.name_path.replace('`', "")))
+            })
+            .collect();
+        if np_hits.len() == 1 {
+            return Some(np_hits[0].end_line);
         }
+        // 0 hits or ambiguous (>1) → fall through to line-proximity disambiguation.
     }
-    if matches.len() > 1 {
-        // Ambiguous — refuse to guess.
-        return None;
+
+    // Fallback: disambiguate same-name siblings by line proximity. Returns the
+    // unique near match, or `None` when proximity can't single one out.
+    let near: Vec<&&SymbolInfo> = by_name
+        .iter()
+        .filter(|s| s.start_line.abs_diff(lsp_start) <= 1)
+        .collect();
+    if near.len() == 1 {
+        Some(near[0].end_line)
+    } else {
+        None
     }
-    Some(matches[0].end_line)
+}
+
+/// Recursively collect every symbol in the tree whose leaf `name` matches
+/// (backtick-tolerant). No line gate — callers disambiguate via `name_path` or
+/// line proximity. See [`find_ast_end_line_in`] for why the line gate moved out
+/// of collection.
+fn collect_by_name<'a>(symbols: &'a [SymbolInfo], name: &str, out: &mut Vec<&'a SymbolInfo>) {
+    for sym in symbols {
+        if names_match_ignoring_backticks(&sym.name, name) {
+            out.push(sym);
+        }
+        collect_by_name(&sym.children, name, out);
+    }
 }
 
 /// Compare two symbol names, tolerating Kotlin backtick delimiters.
@@ -404,22 +443,6 @@ pub fn find_ast_end_line_in(
 /// Regression: docs/issues/2026-05-29-edit-code-kotlin-stale-lsp-range.md.
 pub(crate) fn names_match_ignoring_backticks(a: &str, b: &str) -> bool {
     a == b || ((a.contains('`') || b.contains('`')) && a.replace('`', "") == b.replace('`', ""))
-}
-
-fn collect_ast_candidates<'a>(
-    symbols: &'a [SymbolInfo],
-    name: &str,
-    lsp_start: u32,
-    out: &mut Vec<&'a SymbolInfo>,
-) {
-    for sym in symbols {
-        if names_match_ignoring_backticks(&sym.name, name)
-            && sym.start_line.abs_diff(lsp_start) <= 1
-        {
-            out.push(sym);
-        }
-        collect_ast_candidates(&sym.children, name, lsp_start, out);
-    }
 }
 
 /// Fetch a symbol by `name_path` with automatic retry on stale LSP positions.
@@ -717,6 +740,58 @@ mod backtick_match_tests {
             end,
             Some(3),
             "LSP name (no backticks) must resolve to AST symbol (backticks); got {end:?}"
+        );
+    }
+
+    /// Regression for docs/issues/2026-06-16-kotlin-edit-code-annotation-line-gap.md:
+    /// a Kotlin test method carrying 2+ annotation lines (`@Test` + `@DisplayName`)
+    /// has an AST start line that points at the FIRST annotation, while kotlin-lsp
+    /// reports the `fun` keyword line. The gap equals the annotation count (here 2),
+    /// which exceeds the ±1 line-proximity tolerance. `find_ast_end_line_in` must
+    /// still resolve the symbol via its unique `name_path`, NOT drop it and surface
+    /// the misleading "AST parse failed".
+    #[test]
+    fn find_ast_end_line_in_bridges_annotation_line_gap() {
+        // fun is 0-based line 3; @Test=1, @DisplayName=2. AST start = 1 (annotation),
+        // kotlin-lsp start = 3 (the `fun` keyword) → gap of 2, beyond ±1.
+        let source = "class MyTest {\n    @Test\n    @DisplayName(\"x\")\n    fun `room conflict fires`() {\n        val a = 1\n    }\n}\n";
+        let ast_syms = crate::ast::parser::extract_symbols_from_source(
+            source,
+            Some("kotlin"),
+            Path::new("Test.kt"),
+        )
+        .unwrap();
+
+        // Sanity: confirm the AST start really is the annotation line (1), not the
+        // `fun` line (3) — i.e. the gap this test exists to bridge is present.
+        fn find<'a>(syms: &'a [SymbolInfo], leaf: &str) -> Option<&'a SymbolInfo> {
+            for s in syms {
+                if s.name.replace('`', "") == leaf {
+                    return Some(s);
+                }
+                if let Some(hit) = find(&s.children, leaf) {
+                    return Some(hit);
+                }
+            }
+            None
+        }
+        let method = find(&ast_syms, "room conflict fires").expect("method in AST");
+        assert_eq!(
+            method.start_line, 1,
+            "AST start should be the first annotation line"
+        );
+
+        // LSP reports start=3 (the `fun` line). Pre-fix this returned None.
+        let end = find_ast_end_line_in(
+            &ast_syms,
+            "room conflict fires",
+            3,
+            Some("MyTest/room conflict fires"),
+        );
+        assert_eq!(
+            end,
+            Some(5),
+            "unique name_path must resolve the symbol despite a 2-line annotation gap; got {end:?}"
         );
     }
 

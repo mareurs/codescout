@@ -58,6 +58,7 @@ skill).
 | R-32 | 2026-06-14 | hit | An off-the-cuff root-cause unification across a bug cluster is a hypothesis, not a finding — read each bug's implicated code before presenting "they share one root cause / one fix" (3 open "catalog/path" bugs by title → 3 distinct files/mechanisms; only 2 shared a narrower root: global-abspath catalog reasoned-about-as-per-workspace) | bug-fix F-21; issues 2026-06-13 catalog trio; kin R-12/R-19/R-27 |
 | R-33 | 2026-06-15 | hit | A reconciliation audit marked two adjacent legacy-era symbols (`fusion::rrf_fuse`, `schema::SearchResult`) both "graduated to live — keep"; `references()` showed OPPOSITE liveness (rrf_fuse test-only → deleted; SearchResult live → kept). Dead-vs-live is per-symbol call-graph, not file-proximity. | legacy-retrieval-removal L-08; this session; kin R-26/R-27/R-21 |
 | R-34 | 2026-06-15 | hit | On a cross-platform branch, the host `cargo check` is necessary-not-sufficient for a rebase — it never compiles the gated target. After rebasing `vdi-windows` onto `experiments` (conflict in the `#[cfg(unix)]` peer gate itself), cross-compiled `--target x86_64-pc-windows-gnu` to confirm the incoming commits added no ungated unix-only code (EXIT=0). Compile the target the branch exists for, not just the host. | `vdi-windows` rebase this session; `src/tools/mod.rs` peer-gate; WIN-23; kin R-5 |
+| R-35 | 2026-06-16 | hit | A tool's own error diagnostic is a hypothesis, not ground truth. `edit_code`'s "AST parse failed — likely syntax errors or duplicate siblings" was falsified by `symbols()` (clean parse, unique name_path); the archived backtick bug was already fixed. A throwaway dump of `extract_symbols_from_source`→`find_ast_end_line_in` on the real file pinned the real cause in one run: AST start 214 (annotation line) vs LSP 216 (`fun` line), matcher flips Some→None at the ±1 gate. Reproduce the failing internal call when a cheaper read disagrees with the error text. | bug-fix W-17/F-23; issues/2026-06-16-kotlin-edit-code-annotation-line-gap; kin R-5/R-32 (diagnostic/claim ≠ ground truth) |
 
 
 ## R-1 — Pre-dispatch grep for asserts on `include_str!`'d constants
@@ -812,6 +813,51 @@ SKILL.md Phase-1 bullet to name bug-file line lists explicitly.
 **Generalization:** when rebasing/merging a branch whose purpose is a non-host target (platform gating, no_std, a different arch/ABI, a feature-flag matrix), the host build is necessary-not-sufficient. Compile the target the branch exists for before claiming the integration is correct. Mirrors R-5 ("compiler as scout") but on the *target* axis rather than the call-site axis.
 
 **Evidence:** `vdi-windows` rebase this session (master-side conflict resolve commit on the rebased tip); `src/tools/mod.rs` peer-gate; `cargo check --target x86_64-pc-windows-gnu` EXIT=0; WIN-23 dead-code warning cluster (`windows-platform-support.md`).
+## R-35 — A tool's own error diagnostic is a hypothesis, not ground truth; reproduce the failing internal call on the real file
+
+(hit) Debugging a live `edit_code(insert, position="after")` refusal on
+`backend-kotlin/.../RoomConstraintsTest.kt`. The refusal text — *"cannot determine
+end of '…' — AST parse failed"* with hint *"the file likely has syntax errors … or
+duplicate-name siblings"* — named two causes, both falsified by a higher-level read:
+`symbols()` listed all 14 methods (clean parse), and the `name_path` was unique. A
+second plausible lead, the archived 2026-05-29 "Kotlin backtick mismatch" bug, was
+already fixed and present in the code. Two visible leads, both dead ends.
+
+The seam was the matcher (`find_ast_end_line_in` / `collect_ast_candidates`,
+`src/symbol/query.rs`) and the **coordinate systems its two inputs live in**. I
+resolved it by reproducing the exact internal call on the real substrate: a throwaway
+unit test `include_str!`-ing the real file, running
+`extract_symbols_from_source → find_ast_end_line_in`, and printing each symbol's
+`name` / `name_path` / `start_line` / `end_line`, then replaying the matcher across
+candidate line values. One run pinned it: AST `start_line=214` (the `@Test`
+annotation line — tree-sitter's function node spans its annotations) vs kotlin-lsp
+`216` (the `fun` line); `find_ast_end_line_in(215)->Some(266)`, `(216)->None`. The
+±1 line gate was the cause — never named by the diagnostic.
+
+**Counterfactual:** acting on either visible lead yields a no-op ("fix" syntax that
+isn't broken) or a wrong fix (re-do shipped backtick normalization). The empirical
+dump converted guess-and-check (≥1 wrong edit+build+re-reproduce cycle, ~4
+round-trips) plus the temptation to widen the ±1 tolerance (a sibling-mismatch
+band-aid) into a single ground-truth measurement that pointed at the real fix
+(`name_path`-first matching, no line gate).
+
+**Generalization:** when a tool refuses with a diagnostic that names a cause, and a
+higher-level read of the same artifact contradicts that cause, the two are using
+different internal representations. Don't pick among the named causes — reproduce the
+failing internal call on the real file and print its actual inputs. Extends R-5
+("compiler as scout") and the W-14/W-1 "verify the mechanism against the real body"
+line to a tool's *self-diagnosis*: the error string is the least-trustworthy witness
+when a cheaper read already disagrees with it.
+
+**Verdict:** hit. Cited as W-17 / F-23 in `docs/trackers/bug-fix-session-log.md`; root
+cause + fix in `docs/issues/2026-06-16-kotlin-edit-code-annotation-line-gap.md`.
+Promote-when: a 3rd instance where a tool diagnostic misdirects and an empirical dump
+of the internal call corrects it → distill into codescout memory `reconnaissance`.
+
+**Evidence:** `src/symbol/query.rs` `find_ast_end_line_in`/`collect_by_name`; throwaway
+dump output (AST 214 / LSP 216, matcher flips Some→None at 216); regression test
+`find_ast_end_line_in_bridges_annotation_line_gap`; `cargo test --lib` 2790 passed.
+
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line via:

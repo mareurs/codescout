@@ -68,6 +68,7 @@ time_scope: open-ended
 | F-20 | 2026-06-12 | med | self-friction | fixed-verified | Targeted `cargo test --lib guide::` missed `server::tests::tool_descriptions_stay_under_budget`; shipped a 329-char get_guide description (cap 300) in `c799e887` |
 | F-22 | 2026-06-14 | med | plan-prose | fixed-verified | Bug-file's "offset/limit never parsed anywhere" claim missed `OutputGuard::from_input` (`output.rs:96`); telemetry (191 calls) then resolved the fix to dispatch-layer option (a) |
 | F-21 | 2026-06-14 | low | self-friction | fixed-verified | Off-the-cuff root-cause unification of the open-bug clusters over-generalized; code scout split it (catalog 2+3 share a global-abspath-catalog root; bug 1 + the 06-11 cluster don't) |
+| F-23 | 2026-06-16 | high | codescout-tool | fixed-verified | `edit_code` "AST parse failed" hint named two wrong causes; real cause was AST(annotation-line)/LSP(`fun`-line) start-line gap exceeding the ±1 matcher tolerance on Kotlin methods with 2+ annotations |
 
 ## Wins Index
 
@@ -90,6 +91,7 @@ time_scope: open-ended
 | W-14 | 2026-06-12 | med | Verify a subagent's control-flow *mechanism* claim against the actual fn body before building a fix | Report's "Option A: set `output_form=Text`" compiles but leaves the 14 KB guide buffered → behavioral test fails → wrong-impl + re-debug cycle; reading `call_content` showed `exceeds_inline_limit` gates the branch unconditionally | validated |
 | W-15 | 2026-06-12 | med | Enumerate a prompt surface's full gate set (byte-for-byte slice, snapshot, cap, version-pin, content tests) before editing | Blind edit hits ONBOARDING_VERSION==28 pin + snapshot + "6 memories" surprises as sequential red tests; pre-scout bundled all gate updates into one commit | validated |
 | W-16 | 2026-06-14 | med | Scout each bug's actual body before standing behind a title-derived severity/priority triage of a bug set | Would have carried two wrong facts into a fix-priority recommendation: labeled `7ca71bf7` (catalog staleness) "data-loss" and missed that `3fc22ad2` is already partially fixed (lock-probe shipped 2026-06-11); 2nd same-day recurrence of F-21 | validated |
+| W-17 | 2026-06-16 | med | When a tool's error text names a cause but a higher-level read contradicts it, reproduce the failing internal call on the real file and print its inputs before fixing | Two visible-but-wrong leads (hint said "syntax errors"; archived bug said "backtick mismatch", already shipped) would each have produced a no-op or wrong fix; a throwaway dump of `extract_symbols_from_source`→`find_ast_end_line_in` on the real file pinned AST 214 vs LSP 216 in one run, saving ≥1 wrong fix cycle (~4 round-trips) and a tolerance-widening band-aid | validated |
 
 ## Category conventions
 
@@ -1378,6 +1380,90 @@ Had I acted on the uncorrected triage, a "fix the 3 data-loss bugs first" plan w
 **Status:** validated — drift caught + corrected before any fix-priority decision.
 
 **Fix idea / Pointer:** This session's open-issues triage. Bugs scouted: `3ea49090`, `32b58e13`, `7ca71bf7`, `1a5acfc0`, `3fc22ad2`, `3fb29bc6`. Recon kin: F-21, F-22, R-19, R-32.
+
+## F-23 — `edit_code` "AST parse failed" hint named two wrong causes; real cause was AST/LSP start-line gap
+
+**Observed:** 2026-06-16, debugging a live `edit_code(insert, position="after")`
+refusal on `backend-kotlin/.../RoomConstraintsTest.kt`.
+
+**When:** Reproducing the user's failing insert before proposing a fix.
+
+**Expected (error hint):** `"cannot determine end of '…' for insert-after — AST
+parse failed"` with hint *"The file likely has syntax errors that broke
+tree-sitter's parse, or the symbol has duplicate-name siblings without a clear
+name_path."* — i.e. two suggested causes: broken parse, or ambiguous siblings.
+
+**Got (scouted reality):** Neither. `symbols()` listed all 14 methods (clean
+parse); the method had a unique `name_path` (no duplicate siblings). A throwaway
+unit test dumping the *real* file's AST showed the method at AST `start_line=214`
+(the `@Test` annotation line — tree-sitter's function node spans its annotations)
+while kotlin-lsp reports `216` (the `fun` keyword line). The 2-line gap = annotation
+count, and `collect_ast_candidates`' `abs_diff(start, lsp_start) <= 1` gate dropped
+the only candidate → `find_ast_end_line_in` returned `None` *before* the
+backtick-tolerant `name_path` matcher ran.
+
+**Probable cause:** The refuse path (`editing_end_line_strict` → `ast_confirmed_end_line`
+→ `find_ast_end_line_in`, `src/symbol/query.rs`) collapses all `None` returns into one
+generic message. Three distinct conditions (broken parse, ambiguous siblings,
+coordinate-system start-line gap) share the message; the third — the actual cause —
+isn't even named in the hint.
+
+**Workaround (user's, pre-fix):** created a separate test file
+(`RoomConflictSpanOverlapTest.kt`) rather than inserting the sibling.
+
+**Severity:** high — masked the real defect behind a hint pointing at non-existent
+syntax errors; a reader trusting the hint would "fix" syntax that isn't broken or
+re-do backtick normalization (already shipped 2026-05-29), never touching the line gate.
+
+**Status:** fixed-verified — root cause fixed in `find_ast_end_line_in`
+(`name_path`-first, no line gate); regression test
+`find_ast_end_line_in_bridges_annotation_line_gap`; full bug file at
+`docs/issues/2026-06-16-kotlin-edit-code-annotation-line-gap.md`.
+
+**Fix idea / Pointer:** `src/symbol/query.rs` `find_ast_end_line_in` / `collect_by_name`,
+this session. Follow-up candidate: differentiate the three `None` causes in the
+refuse message so the hint stops naming wrong causes.
+
+## W-17 — Dump the actual matcher inputs on the real file; don't trust the tool's own diagnostic or the `symbols()` listing
+
+**Observed:** 2026-06-16, root-causing the F-23 `edit_code` refusal.
+
+**Pattern:** When an edit/navigation tool refuses with a diagnostic that names a
+cause, and a higher-level read (`symbols()`) shows the file is *fine*, the two views
+are using different coordinate systems. Resolve it by reproducing the failing
+internal call on the real substrate: write a throwaway unit test that runs the exact
+extractor + matcher (`extract_symbols_from_source` → `find_ast_end_line_in`) against
+the real file via `include_str!`, and print the actual `name` / `name_path` /
+`start_line` / `end_line` for the symbol — then replay the matcher at the candidate
+line values to find the exact boundary where it flips `Some`→`None`.
+
+**Counterfactual:** Without the dump I had two plausible-and-wrong hypotheses, both
+endorsed by visible evidence: (1) the error hint said "syntax errors" — but `symbols()`
+proved the parse was clean; (2) the related archived bug (2026-05-29) said "Kotlin
+backtick name mismatch" — but that fix had already shipped and was present in the code.
+Acting on either would have produced a no-op or wrong fix. The dump showed AST
+`start=214` vs LSP `216` and `find_ast_end_line_in(215)->Some, (216)->None`, isolating
+the ±1 line gate in one run — cause pinned, not inferred. Estimated cost avoided:
+≥1 wrong fix cycle (edit + build + re-test + re-reproduce ≈ 4 round-trips) plus the
+risk of shipping a tolerance-widening band-aid that mis-matches siblings.
+
+**Confirming data points:**
+1. F-23 (this session) — AST/LSP start-line gap, found by dumping real-file extractor
+   output; both the error hint and the prior-bug analogy pointed elsewhere.
+2. W-14 (this log) — verify a subagent's mechanism claim against the actual fn body.
+3. W-1 (this log) — scout helper-fn bodies before "fixing" reported bugs.
+
+**Impact:** med→high — converts a guess-and-check debug loop into a single
+ground-truth measurement; scales with how misleading the tool's own diagnostic is.
+
+**Promote-when:** A third instance where a tool's diagnostic text (not just a plan or
+a subagent report) misdirects and an empirical dump of the internal call corrects it.
+At that point promote to codescout memory `reconnaissance` as: *"When a tool's error
+text names a cause but a higher-level read contradicts it, reproduce the failing
+internal call on the real file and print its inputs before fixing (R-35, W-17)."*
+
+**Status:** validated — single strong datapoint, cause confirmed by the passing
+regression test built from the dumped values.
 
 ## Template for new entries
 
