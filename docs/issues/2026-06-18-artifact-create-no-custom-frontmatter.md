@@ -1,7 +1,7 @@
 ---
 id: '13164fb35d6f71ed'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: artifact(action="create") cannot set time_scope or custom frontmatter — recognized field hardcoded to None, no passthrough param'
 owners: []
 tags:
@@ -12,6 +12,7 @@ tags:
 - tracker
 topic: null
 time_scope: null
+closed: '2026-06-19'
 ---
 
 
