@@ -12,6 +12,7 @@
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-06-20 | med | plan-prose | fixed-verified | codescout `grep` directTool collides with Pi built-in `grep`; setActiveTools rejects on bad input |
+| F-2 | 2026-06-20 | high | release-pipeline | fixed-verified | Pi mcp.json `command` must be an absolute path — codescout not on PATH |
 
 ## Wins Index
 
@@ -47,6 +48,27 @@
 
 ---
 
+## F-2 — Pi mcp.json `command` must be an absolute path; `codescout` is not on PATH
+
+**Observed:** 2026-06-20, executing-plans Task 1 (preflight) of the codescout<->Pi integration.
+
+**When:** Verifying `codescout` resolves before installing Pi.
+
+**Expected (plan):** `mcp.json` uses `"command": "codescout"`, resolved via PATH for the Pi-spawned adapter.
+
+**Got (reality):** `command -v codescout` is empty and `codescout --help` -> "command not found" in both the sandbox shell and `bash -lc`. The symlink `~/.cargo/bin/codescout` EXISTS (-> `target/release/codescout`, a fresh 39MB binary) but `~/.cargo/bin` is NOT on PATH (PATH carries `/usr/lib/rustup/bin`, not `~/.cargo/bin`). Claude Code works only because `~/.claude.json` launches codescout by absolute path. Invoked absolutely (`/home/marius/.cargo/bin/codescout --help`) the binary runs and shows `start`.
+
+**Probable cause:** Plan assumed `~/.cargo/bin` on PATH; this machine uses rustup shims and the codescout symlink dir is not on PATH.
+
+**Workaround / fix (landed this session):** `mcp.json` uses the absolute path `"command": "/home/marius/.cargo/bin/codescout"` (rebuild-safe symlink). README notes the path is machine-specific.
+
+**Severity:** high — bare `"command": "codescout"` fails at adapter-spawn time; codescout never connects and (lazy spawn) the integration is silently dead until the first tool call errors. Caught at preflight, before any install.
+
+**Status:** fixed-verified — plan + `contrib/pi/mcp.json` use the absolute path this session. Connection itself confirmed at the Task 7 dogfood.
+
+**Fix idea / Pointer:** plan Task 4 (mcp.json) + Global Constraints, this session. Preflight/recon hit.
+
+---
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via

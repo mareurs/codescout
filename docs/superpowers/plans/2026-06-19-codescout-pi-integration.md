@@ -15,7 +15,7 @@
 - Pin `pi-mcp-adapter` to an exact version after install (record it in `contrib/pi/README.md`).
 - `mcp.json` top-level key is **`"mcpServers"`** (verified — `"servers"` is wrong and silently fails).
 - codescout is invoked as bare **`codescout start`** — it auto-detects + canonicalizes the cwd (`src/server.rs:1248`). Do **NOT** pass `--project .` (the code comment warns this causes path-form drift).
-- codescout binary resolves via `~/.cargo/bin/codescout` → `target/release/codescout` (symlink); it must exist and be on `PATH` for the Pi-spawned adapter.
+- codescout binary resolves via `~/.cargo/bin/codescout` → `target/release/codescout` (symlink); it is NOT on `PATH` in this environment (`~/.cargo/bin` absent from PATH), so `mcp.json` uses the absolute path `/home/marius/.cargo/bin/codescout` (the rebuild-safe symlink). See F-2.
 - All `~/.pi/agent/` artifacts are symlinks to versioned files in `contrib/pi/`; never hand-edit the copies under `~/.pi/agent/`.
 - Work stays on the `experiments` branch (codescout `master` is protected).
 
@@ -109,7 +109,7 @@ Create `contrib/pi/mcp.json`:
 {
   "mcpServers": {
     "codescout": {
-      "command": "codescout",
+      "command": "/home/marius/.cargo/bin/codescout",
       "args": ["start"],
       "lifecycle": "lazy",
       "directTools": [
