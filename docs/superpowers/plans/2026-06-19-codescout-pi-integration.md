@@ -99,7 +99,7 @@ Expected: a version string — note it for `contrib/pi/README.md` (Task 7) so th
 - Symlink target: `~/.pi/agent/mcp.json`
 
 **Interfaces:**
-- Produces: a registered MCP server named `codescout` whose hot-set tool names (`symbols`, `symbol_at`, `tree`, `grep`, `semantic_search`, `references`, `read_file`, `read_markdown`, `edit_code`, `edit_file`, `edit_markdown`) become first-class Pi tools. Task 5's extension consumes these exact names.
+- Produces: a registered MCP server named `codescout` whose hot-set tool names (`symbols`, `symbol_at`, `tree`, `semantic_search`, `references`, `read_file`, `read_markdown`, `edit_code`, `edit_file`, `edit_markdown`) become first-class Pi tools. Task 5's extension consumes these exact names.
 
 - [ ] **Step 1: Create the repo source-of-truth config**
 
@@ -116,7 +116,6 @@ Create `contrib/pi/mcp.json`:
         "symbols",
         "symbol_at",
         "tree",
-        "grep",
         "semantic_search",
         "references",
         "read_file",
@@ -145,7 +144,7 @@ Expected: resolves to `<repo>/contrib/pi/mcp.json`.
 Launch `pi` in the codescout repo, then run `/mcp reconnect codescout`, then `/mcp tools`.
 Expected: codescout connects; the hot-set tools are listed as direct tools. (On the very first session the cache is cold and tools fall back to proxy-only — `/mcp reconnect codescout` populates `~/.pi/agent/mcp-cache.json`.) Quit pi.
 
-> Contingency (name collision): if `/mcp tools` reports a clash on `grep` (Pi has an optional built-in `grep`), either remove `"grep"` from `directTools` (use it via the proxy) or add `"settings": { "toolPrefix": "cs" }` to `mcp.json` and update the hot-set names in Task 5 to the prefixed form. Verify which, then proceed.
+> Name collision (confirmed — see F-1 in `docs/trackers/pi-integration-session-log.md`): Pi's tool registry includes a built-in `grep` (coding-agent CHANGELOG), so codescout's `grep` is **dropped from `directTools` by default** to avoid the clash — reach it via the `mcp` proxy. To keep `grep` first-class instead, add `"settings": { "toolPrefix": "cs" }` to `mcp.json` and prefix the hot-set names in Task 5 (`cs_symbols`, …). Also: `pi.setActiveTools` rejects on unknown/duplicate names (F-1) — the extension wraps it in `await` + try/catch so a stale name degrades to "native tools kept".
 
 - [ ] **Step 5: Commit**
 
@@ -193,7 +192,6 @@ const CODESCOUT_HOT_SET = [
 	"symbols",
 	"symbol_at",
 	"tree",
-	"grep",
 	"semantic_search",
 	"references",
 	"read_file",
@@ -223,7 +221,7 @@ export default function (pi: ExtensionAPI) {
 		const active = new Set(pi.getActiveTools());
 		for (const name of DROP_BUILTINS) active.delete(name);
 		for (const name of CODESCOUT_HOT_SET) if (has(name)) active.add(name);
-		pi.setActiveTools([...active]);
+		try { await pi.setActiveTools([...active]); } catch (e) { if (ctx.hasUI) ctx.ui.notify(`codescout-mode: setActiveTools failed (${String(e)})`, "warn"); return; }
 
 		if (ctx.hasUI) {
 			ctx.ui.notify("codescout-mode: codescout tools active; native `edit` dropped", "info");
@@ -300,7 +298,7 @@ Use them instead of bash equivalents.
 - Do NOT `cat`/`sed`/`head` source files via bash.
 
 ## Searching
-- `grep` — exact string / regex across files.
+- exact-regex search: codescout `grep` via the `mcp` proxy (dropped from first-class tools — its bare name clashes with Pi's built-in `grep`).
 - `semantic_search` — concept-level / natural-language search.
 - `references` — who calls / uses a symbol (NOT bash grep).
 - Do NOT `rg`/`grep -r`/`find -name` source via bash.
