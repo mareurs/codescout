@@ -138,9 +138,20 @@ now harder — a silent fallback can mask "Headroom is down" and quietly end the
 window; therefore the fallback **must log** a distinguishable event (see §8) so a fallback
 isn't mistaken for a compressed request.
 **Change scenarios absorbed:** Headroom outage during a multi-week trial.
-**Confidence:** medium — exact placement confirmed against `handle`, but the retry/timeout
-semantics need a smoke test.
+**Confidence:** high — shipped (commit `2906647`) and covered by hermetic smoke tests in
+`tests/failopen.rs` (refused / hung / fail-loud-by-default, all asserted end-to-end). See the
+revision below for the default change.
 
+**Revision (2026-06-20) — fail-open is now opt-in; the default is fail-LOUD.** The original
+decision (fall back to direct Anthropic *by default*) was inverted during implementation: with
+no `ANTHROPIC_FALLBACK_URL` configured, the fallback is empty and a downed or hung upstream
+returns a loud 504 rather than silently rerouting. Rationale: the very risk this ADR named — a
+silent fallback masking "Headroom is down" and quietly ending the treatment window — is better
+*eliminated* than merely logged. Operators opt into the safety net by setting
+`ANTHROPIC_FALLBACK_URL=https://api.anthropic.com`. The timeout half of the decision shipped as
+`tokio::time::timeout` around `send()` (bounds the response-header wait only; body streaming is
+unaffected) plus a client `connect_timeout`. Fail-open stays connection-level: a 5xx from a
+reachable upstream is passed through and marked `upstream_5xx`, never failed over.
 ## 5. llm-proxy changes (build-to-keep)
 
 These serve the trial **and** survive as the permanent gateway's spine. Keep them production-grade.
@@ -158,6 +169,32 @@ These serve the trial **and** survive as the permanent gateway's spine. Keep the
    `GenerationLog` (`src/passthrough.rs`, `into_generation_log` / `build_langfuse_input` /
    `build_buffered_gen_log`).
 
+**Implementation status (2026-06-20): SHIPPED + verified.** Commit `2906647` (`llm-proxy`,
+master; verified `cargo test` green — 18 unit + hermetic fail-open suite). Per item:
+
+1. **Configurable upstream — done.** `resolve_upstream_url` reads `ANTHROPIC_UPSTREAM_URL`
+   (empty → direct Anthropic; bare base → `/v1/messages` appended; trailing slash trimmed;
+   an already-messages URL used as-is). Pinned by `resolve_upstream_url_cases`. Line numbers
+   drifted from this spec; the `ANTHROPIC_MESSAGES_URL` const is retained as the hard default.
+2. **Fail-open fallback — done, with a deliberate default flip (see ADR-4 revision).** The
+   fallback target is an injectable `AppState.anthropic_fallback_url` (env
+   `ANTHROPIC_FALLBACK_URL`). **Default empty = NO fallback: failures are LOUD (504), not
+   silently bypassed** — fail-open is opt-in. The send is wrapped in
+   `tokio::time::timeout` (`UPSTREAM_SEND_TIMEOUT_MS`, default 15s) plus a client
+   `connect_timeout` (5s), so an up-but-hung upstream fails over (or fails loud) instead of
+   hanging forever — the gap the original "needs a smoke test" flagged. `upstream_fallback`
+   marker emitted on each fallback hop.
+3. **Cache-key passthrough — verified.** `transforms_preserve_cache_control` proves
+   `cache_control` survives llm-proxy's own transforms untouched (ADR-2 holds).
+4. **Instrumentation — confirmed sufficient**, and `langfuse_input` is now built *before*
+   `apply_request_transforms`, so the logged prompt is always the original regardless of
+   llm-proxy transform config (keeps savings attribution clean).
+
+**New env knobs:** `ANTHROPIC_FALLBACK_URL`, `UPSTREAM_SEND_TIMEOUT_MS` (+ fixed
+`connect_timeout` 5s). **Residual:** failover guards only the pre-headers phase — once
+streaming starts, a mid-stream upstream stall cannot fail over (inherent; the response is
+already committed). A 5xx from a *reachable* upstream is passed through, not failed over, and
+marked `upstream_5xx`.
 ## 6. Headroom configuration
 
 - Run the **Python** proxy (`headroom proxy`), **not** the Rust binary — the Rust compressors
