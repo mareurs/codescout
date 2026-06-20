@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "codescout": {
+      "command": "/home/marius/.cargo/bin/codescout",
+      "args": ["start"],
+      "lifecycle": "lazy",
+      "directTools": [
+        "symbols",
+        "symbol_at",
+        "tree",
+        "semantic_search",
+        "references",
+        "read_file",
+        "read_markdown",
+        "edit_code",
+        "edit_file",
+        "edit_markdown"
+      ]
+    }
+  }
+}
