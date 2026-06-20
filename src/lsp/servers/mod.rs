@@ -82,11 +82,18 @@ pub fn default_config(language: &str, workspace_root: &Path) -> Option<LspServer
             // Best-effort: the analyzer's PathManager creates the tree, but make
             // sure user.home itself exists before the JVM starts.
             let _ = std::fs::create_dir_all(&analyzer_home);
+            // Cap the JVM heap explicitly. With no -Xmx the JVM defaults
+            // MaxHeapSize to 25% of physical RAM (~31 GiB on a 125 GiB host) and
+            // kotlin-lsp grows to fill it — a host-OOM hazard that scales with RAM,
+            // not workload. -Xmx is appended LAST so codescout's cap wins over any
+            // -Xmx inherited from the ambient JAVA_TOOL_OPTIONS (the JVM honors the
+            // final -Xmx). watch_memory's 4/8 GiB thresholds assume this 2 GiB cap.
+            // See docs/issues/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md.
             let java_tool_options = match std::env::var("JAVA_TOOL_OPTIONS") {
                 Ok(prev) if !prev.trim().is_empty() => {
-                    format!("{prev} -Duser.home={}", analyzer_home.display())
+                    format!("{prev} -Duser.home={} -Xmx2g", analyzer_home.display())
                 }
-                _ => format!("-Duser.home={}", analyzer_home.display()),
+                _ => format!("-Duser.home={} -Xmx2g", analyzer_home.display()),
             };
             Some(LspServerConfig {
                 command: crate::platform::lsp_binary_name("kotlin-lsp"),
@@ -385,6 +392,21 @@ mod tests {
         assert!(
             is_codescout_kotlin_home(&expected),
             "redirected HOME must pass the codescout-home guard so the mux reclaims it"
+        );
+    }
+
+    #[test]
+    fn kotlin_caps_jvm_heap() {
+        // With no -Xmx the JVM defaults its max heap to 25% of physical RAM
+        // (~31 GiB on a 125 GiB host) and kotlin-lsp grows to fill it — a
+        // host-OOM hazard that scales with RAM, not workload. The launch config
+        // must pin an explicit -Xmx so the cap is absolute and RAM-independent.
+        // See docs/issues/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md.
+        let cfg = default_config("kotlin", Path::new("/tmp/codescout-test-kt-heap")).unwrap();
+        let jto = kotlin_java_tool_options(&cfg);
+        assert!(
+            jto.contains("-Xmx"),
+            "JAVA_TOOL_OPTIONS must pin an explicit JVM heap cap (-Xmx); got {jto}"
         );
     }
 
