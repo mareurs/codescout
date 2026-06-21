@@ -2,6 +2,11 @@
 
 Cross-repo. Canonical spec: codescout `docs/superpowers/specs/2026-06-18-headroom-proxy-measurement-design.md`.
 
+**Discoverable hub:** codescout tracker *Headroom + llm-proxy integration & trial*
+(id `3366f6ae253097bd`, `docs/trackers/headroom-llm-proxy-integration.md`) — phase, §9 gates,
+pointers, history. Read it with `artifact(action="get", id="3366f6ae253097bd")`. This memory holds
+the live ops detail; the tracker is the catalog-indexed hub.
+
 ## Topology
 All Claude Code → `llm-proxy` :8082 (systemd USER service `llm-proxy`, runs `~/agents/llm-proxy/target/release/llm-proxy`,
 symlinked binary) → Anthropic (baseline) OR Headroom :8787 (treatment). llm-proxy logs every request to local Langfuse.
