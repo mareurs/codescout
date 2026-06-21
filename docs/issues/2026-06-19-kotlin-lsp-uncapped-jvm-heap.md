@@ -99,6 +99,7 @@ never passed to a real JVM. Compounding it, `watch_memory` is **log-only**: at
 the JVM runs from the 8 GiB "CRITICAL" line up to ~31 GiB unbounded, and (per the
 sibling OOM bug) the SIGKILL'd log tail never flushes anyway.
 
+**Correction (2026-06-21, live-verify).** The claim "No `-Xmx` … anywhere on the launch path" / "the cap is fictional" is imprecise about the *distribution*. The kotlin-lsp launcher ships `/usr/share/kotlin/kotlin-lsp/bin/intellij-server.vmoptions` containing **`-Xmx2048m`** (2 GiB). What's true is that **codescout's own launch path** sets no `-Xmx`, *and* — critically — the distribution's vmoptions cap is **not reliably applied to codescout-spawned instances**: the §Evidence "Live growth curve" shows a **20+ GiB GC sawtooth** (23→27→23 GB) reaching ~35.7 GiB on 2026-06-20, and a multi-GB GC sawtooth can only be reclaimable *Java heap* — so that JVM genuinely ran a ~31 GiB heap *despite* the `-Xmx2048m` vmoptions being installed (since Jun 12). The likely mechanism: codescout's `--system-path` / `-Duser.home` redirect changes how the JetBrains launcher resolves its vmoptions file. **Net:** the explicit `-Xmx2g` we inject via `JAVA_TOOL_OPTIONS` (which the JVM *always* honors) is **load-bearing**, not redundant — it is the only reliable heap cap. Tracked in `docs/trackers/bug-fix-session-log.md` F-25.
 ## Evidence
 
 ### Source: no `-Xmx` on launch path
@@ -184,6 +185,7 @@ JVM-driven).
    *true* (the 2 GiB cap exists), so no edit is strictly required; revisit only if
    the cap value changes.
 4. Cross-ref the cgroup blast-radius cap from the sibling OOM bug (Fix 4 there).
+**Update (2026-06-21).** Fix 1 is **committed** as `3adb66e7` `fix(lsp): cap kotlin-lsp JVM heap with -Xmx2g` on `experiments` (code + the `kotlin_caps_jvm_heap` regression test), and **live-verified**: after `cargo rb` + `/mcp`, the codescout-repo kotlin-lsp JVM (PID 4100626, carrying our `-Xmx2g`) reports `jcmd … VM.flags` → `-XX:MaxHeapSize=2147483648` (exactly 2 GiB). Per the §Root cause correction, this is the *reliable* cap (the distribution's vmoptions `-Xmx2048m` is not dependably applied to our instances). **Still TODO:** Fix 2 (`watch_memory` actuation) remains the real defense for *native* (off-heap) growth, which `-Xmx` does not bound — the capped JVM's RSS is 4.16 GiB = 2 GiB heap + ~2 GiB native.
 ## Tests added
 
 `kotlin_caps_jvm_heap` in `src/lsp/servers/mod.rs` (tests module, inserted after
@@ -202,16 +204,11 @@ existing `kotlin_redirects_user_home_off_real_config` style. Full lib suite gree
 
 ## Resume
 
-Fix 1 is implemented on `experiments` (release binary rebuilt via `cargo rb`,
-symlink intact). Remaining:
-1. **Live-verify**: restart the MCP server (`/mcp`), trigger a Kotlin LSP call on a
-   `.kt` (e.g. `symbols` on `tests/fixtures/kotlin-library/.../Book.kt`), and
-   confirm via `ps -eo pid,rss,cmd | grep 'kotlin-lsp --stdio'` that the spawned
-   JVM tops out near 2 GiB instead of ~31 GiB. The passive `Monitor` armed this
-   session (alerts on any kotlin-lsp crossing 1 GiB) provides a backstop.
-2. **Ship**: cherry-pick to master, rebase experiments, then flip status to
-   `fixed` and set `closed:` (per template, only after live-verify + master).
-3. Optionally implement Fix 2 (actuating kill in `watch_memory`).
+Fix 1 **committed** (`3adb66e7`, `experiments`) and **live-verified** (`jcmd` MaxHeapSize = 2 GiB on the codescout-repo JVM). Remaining:
+
+1. **Ship to master** — cherry-pick `3adb66e7` (+ this doc's 2026-06-21 corrections) to `master`, rebase `experiments`, then flip status to `fixed` / set `closed:`. **Gated:** the full `cargo test` on `experiments` currently has one *orthogonal* failure (`replace_symbol_surfaces_stale_error_after_max_retries`, an F-18/F-23-class kotlin-lsp range issue unrelated to this fix — see session-log F-26); resolve or explicitly accept that before the protected-branch cherry-pick.
+2. **Fix 2** — make `watch_memory` actuate (kill the LSP process group at the ERROR threshold) to bound *native* growth, the residual host-OOM path `-Xmx` does not cover.
+3. Cross-ref the cgroup blast-radius cap from the sibling 68 GiB OOM bug (Fix 4 there).
 ## References
 - Launch env builder: `src/lsp/servers/mod.rs:85-106`
 - Memory watcher (log-only) + fictional-cap comment: `src/lsp/mux/process.rs:751-786`, comment at `:752`
