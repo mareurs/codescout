@@ -254,23 +254,26 @@ Same instrument, two windows, so the comparison is apples-to-apples on one pipel
 
 ## 9. Decision rubric
 
-Proposed thresholds — **confirm/adjust with Marius before the trial starts** (these are
-proposals, not measured facts):
+**Thresholds CONFIRMED with Marius 2026-06-21.** Adopt Headroom permanently **only if all
+hold** over the treatment window:
 
-Adopt Headroom permanently **only if all hold** over the treatment window:
-- **Net input-token saving ≥ 25%** on real traffic (Headroom `perf`), *after* netting out any
-  prompt-cache loss.
-- **Prompt-cache preserved** — treatment `cache_read_input_tokens` within ~10% of baseline (no
-  systematic collapse).
-- **No material quality regression** — CCR retrieval rate below an agreed ceiling (propose
-  < 5% of requests triggering a full retrieval), no adverse shift in `stop_reason`
-  distribution, and spot-checked answers unaffected.
-- **TTFT overhead acceptable** — median added latency under an agreed bound (propose < 150 ms).
+1. **Net input-token saving ≥ 25%** on real traffic (Headroom `perf`), *after* netting out any
+   prompt-cache loss. Below this, the three-hop complexity is not worth it.
+2. **Prompt-cache preserved** — treatment `cache_read_input_tokens` within **~10%** of baseline.
+   **This is the primary hypothesis under test — treat it as an effective hard gate, not a soft
+   threshold.** CC traffic is unusually prompt-cache-heavy (cached system prompt + tools +
+   history, billed at ~10% of input); if Headroom's compression mutates the cached prefix the
+   cache breaks, and net savings can go **negative** even as raw token count drops. ADR-2's
+   live-zone freeze is meant to prevent this but is unproven on our traffic — the trial is
+   really testing whether the freeze holds.
+3. **No material quality regression** — CCR retrieval rate **< 5%** of requests triggering a
+   full retrieval, no adverse shift in `stop_reason` distribution, spot-checked answers
+   unaffected.
+4. **TTFT overhead acceptable** — median added latency **< 150 ms**.
 
 If economics pass but quality fails → do not adopt globally; revisit the narrower
 codescout-specific integration (compress only safe surfaces). If both pass → adopt, then open
 the follow-on (Appendix A).
-
 ## 10. Privacy posture
 
 - Headroom: `--no-telemetry` (no external beacon) and **no** `--log-messages` (no prompt
