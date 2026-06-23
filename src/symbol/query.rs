@@ -471,10 +471,20 @@ pub async fn fetch_validated_symbol(
         let attempt_result = async {
             let symbols = client.document_symbols(path, lang).await?;
             let sym = find_unique_symbol_by_name_path(&symbols, name_path)?.clone();
-            validate_symbol_range(&sym)?;
             let content = std::fs::read_to_string(path)?;
             let lines: Vec<&str> = content.lines().collect();
+            // Staleness/position check BEFORE the suspicious-range heuristic.
+            // A stale LSP range puts `start_line` on an unrelated line, which
+            // validate_symbol_position correctly diagnoses as staleness and the
+            // retry loop can recover from. Since 758801d5 removed the line-gate
+            // from find_ast_end_line_in, validate_symbol_range now resolves the
+            // real AST end even for a stale range, so running it first would
+            // surface a misleading "suspicious range" before the staleness path.
+            // Ordering position first keeps BUG-041's diagnosis intact; the
+            // suspicious-range guard still fires below for a correctly-positioned
+            // but truncated range. See docs/trackers/bug-fix-session-log.md F-26.
             validate_symbol_position(&sym, &lines)?;
+            validate_symbol_range(&sym)?;
             anyhow::Ok((sym, symbols))
         }
         .await;
